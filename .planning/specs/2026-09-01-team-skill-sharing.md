@@ -3,7 +3,7 @@
 **Status:** Decision ledger, synced 2026-09-02 to the completed decision walk (`.planning/decisions/2026-09-01-team-skill-sharing-decision-walk.md`). Phase-1 build spec still to be written.
 **Date:** 2026-09-01 (synced 2026-09-02)
 **Author:** Ryan Liu, drafted with Claude in a design session
-**Inputs:** Teddy and Ajay's verbal suggestion of a self-hosted Docker image over a per-person monorepo (not in Terum's record; taken from Ryan's summary). Terum records cited in section 8.
+**Inputs:** Teddy and Ajay's verbal suggestion of a self-hosted Docker image over a per-person monorepo (not in Terum's record; taken from Ryan's summary). Team whiteboard session 2026-09-02 (photos: skill object schema, scoped repo layout, marketplace UI, skill detail page) — its scoping, categories, and usage-signal ideas ratified into D14/D17/D19/D37/D38 and section 3.3 the same day. Terum records cited in section 8.
 **Names:** Locked by walk Decision 1: CLI binary and npm package `terum-skills`, state under `~/.terum/skills/`. `acme` stands in for a team, `ryan` and `teddy` for members.
 
 ## 0. How to read the status tags
@@ -47,34 +47,39 @@ Why no container: a skill is a folder with a SKILL.md that Claude Code reads fro
 | D6 | The CLI creates the repo. `terum-skills team create acme` calls the git host's API to make a private repo under the org (or personal account if no org), scaffolds the layout, pushes, clones into the CLI cache, and installs a session-start pull hook. | DECIDED |
 | D7 | Team create is GitHub-first using `gh` when logged in, else a fine-grained token scoped to repo creation and collaborator management, stored in `~/.terum/skills/config.json` after a scope check (walk Decision 4). Device-flow login DEFERRED behind a gate. Other hosts: admin creates the repo by hand and runs `terum-skills team create --remote <url>`. | DECIDED |
 | D8 | Only the person who creates teams or invites needs GitHub auth. Joiners never do; join uses whatever git credentials they already have. | DECIDED |
-| D9 | `terum-skills invite <handle>...` adds each handle as a repo collaborator and prints the join command to paste into Slack. The invitee's profile folder is created on their first publish. | PROPOSED |
+| D9 | `terum-skills invite <handle>...` adds each handle as a repo collaborator and prints the join command to paste into Slack. The invitee's profile folder is created on their first publish. | DECIDED |
 | D10 | `terum-skills team join acme/team-skills` never logs in: with `gh` present it auto-accepts the pending invite via API; otherwise it attempts the clone and on permission failure prints the invite URL and says to rerun after accepting. Then it clones, auto-installs the `team/` folder's skills, and prints the roster. | DECIDED |
-| D11 | `terum-skills team remove <handle>` revokes repo access. The folder stays in history and is marked archived in `team.json`. | PROPOSED |
-| D12 | Git hosts cannot scope write access to a folder. For small teams: a CODEOWNERS file plus a CLI warning when you touch someone else's folder. Review happens at promotion into `team/`. | PROPOSED |
+| D11 | `terum-skills team remove <handle>` revokes repo access. The folder stays in history and is marked archived in `team.json`. | DECIDED |
+| D12 | Git hosts cannot scope write access to a folder. The CLI hard-refuses any operation that would write outside the user's own folder (not just a warning); a CODEOWNERS file flags cross-folder diffs; real review happens at promotion into `team/`. Raw `git push` bypass remains possible but attributed. Host-side path rulesets DEFERRED as a paid-plan add-on (unavailable on private repos under GitHub Free). | DECIDED |
 
 ### 3.3 Repo layout
 
-Status: PROPOSED. Schemas for `team.json` and `profile.json` are OPEN.
+Status: DECIDED (whiteboard session 2026-09-02, ratified same day). Skills are organized by scope — `global/` plus one folder per registered project — at both team and member level. Schemas for `team.json` and `profile.json` are OPEN (phase-1 build spec).
 
 ```
 team-skills/
-  team.json                  team name, members (with archived flag), layout version
+  team.json                  team name, members (with archived flag), category list,
+                             project registry (project name → repo remote), layout version
   team/
-    skills/<name>/SKILL.md   promoted skills the team owns together
+    global/<name>/SKILL.md       promoted skills useful everywhere
+    <project>/<name>/SKILL.md    promoted skills for one product repo
   <handle>/
     profile.json             display name, one-line bio, and the member's own `use` selections
-    skills/<name>/SKILL.md   the member's published skills
+    global/<name>/SKILL.md
+    <project>/<name>/SKILL.md
   evals/
     <handle>/<skill>/<content-hash>.json   committed eval results (see 3.7)
 ```
 
 Notes:
+- A skill's scope is derived from its position in the tree (no duplicate scope field in frontmatter — one source of truth, per the D20 principle). `<project>` names are registered in `team.json` mapped to repo remotes, so `sync` can match the repo it runs in.
+- Skill metadata (whiteboard "Skill Object"): `name`, `author`, `category` (from the `team.json` list), `description` in SKILL.md frontmatter; scope and repo path derived from location. `author` doubles as SkillEvaluator's required `metadata.author` (3.7).
 - `profile.json` carries the member's installed-skill selections so "who uses this skill" is visible from the repo alone (see D20).
-- Whether a profile may also hold `commands/`, `agents/`, or `hooks/` is OPEN. Hooks, if allowed, are governed by D19.
+- Profiles carry `skills/` content only in v1 (ratified 2026-09-02). Commands, agents, and hooks are out of v1; if hooks ever return, D19's flag-and-show rule governs them.
 
 ### 3.4 CLI surface
 
-Status: PROPOSED. Names are placeholders; verbs and their behavior are the proposal.
+Status: DECIDED (ratified 2026-09-02). Phase 1 builds every verb below except the gated `eval` and `ui`.
 
 ```
 terum-skills login                          admins only: uses gh when present, else fine-grained token
@@ -97,18 +102,19 @@ terum-skills ui                             local web UI on localhost (see 3.6)
 Rules for `use` (PROPOSED, load-bearing for the share flow in 3.8):
 - A fully qualified ref (`acme/ryan/single-fix`) works for someone who has never run the tool: it installs the CLI if missing (via `npx`), joins the team if the person has repo access but has not joined, then installs.
 - `@<hash>` pins to the exact content that was evaluated. No hash means latest.
+- Scope follows the skill's folder (D17): a global skill installs to `~/.claude/skills`; a project skill installs into the matching repo's `.claude/skills` (using the `team.json` project registry), and `use` outside that repo says so and offers `--global` to override.
 
 ### 3.5 Materialization on disk
 
 | # | Decision | Status |
 |---|---|---|
 | D13 | Where things live: `~/.terum/skills/config.json` (teams, selections, token), `~/.terum/skills/teams/<team>/` (the clone), `~/.terum/skills/cache/` (pinned checkouts by git tree hash). Placement into agent skill folders is delegated to the borrowed Vercel `skills` CLI (walk Decision 3), with a native Claude-Code-only fallback. | DECIDED |
-| D14 | The team folder is installed automatically on join. Individual profiles are opt-in via `use`. | DECIDED |
+| D14 | `team/global/` is installed automatically on join. `team/<project>/` skills auto-install when `sync` runs inside a clone of the matching repo (per the `team.json` project registry). Individual profiles are opt-in via `use`. | DECIDED |
 | D15 | Symlink on macOS and Linux, managed copy on Windows (Teddy works on Windows) — both handled by the borrowed Vercel `skills` CLI; `sync` refreshes through it. | DECIDED |
 | D16 | Name collisions get a handle prefix (`teddy-single-fix`, fixed by walk Decision 1) and the CLI tells the user. The rename is applied to the local pinned checkout before it is handed to the Vercel tool; directory rename vs frontmatter `name` rewrite still to be verified against how Claude Code resolves skill names. | DECIDED |
-| D17 | Default scope is global (`~/.claude/skills`), enforced via the Vercel tool's `-g`. Project-scoped installs are OPEN. | OPEN |
+| D17 | Scope is a first-class property of the skill, derived from its folder (3.3). Global skills install to `~/.claude/skills` via the Vercel tool's `-g`; project skills install into the matching repo's `.claude/skills`. (Whiteboard 2026-09-02, ratified same day; supersedes the earlier global-only proposal.) | DECIDED |
 | D18 | Cross-agent materialization (Codex, Cursor, ~75 others) comes free via the borrowed Vercel `skills` CLI (walk Decision 3). | DECIDED |
-| D19 | `use` installs skills (and commands, if profiles carry them) only. Hooks run code on the recipient's machine, so they require an explicit flag and the CLI shows the files first. | PROPOSED |
+| D19 | Profiles carry skills only in v1; commands, agents, and hooks are out entirely (ratified 2026-09-02). Standing principle for whenever hooks return: hooks run code on the recipient's machine, so they require an explicit flag and the CLI shows the files first. | DECIDED |
 
 ### 3.6 UI
 
@@ -116,9 +122,11 @@ Rules for `use` (PROPOSED, load-bearing for the share flow in 3.8):
 |---|---|---|
 | D20 | Everything the UI shows lives in the repo: roster, profiles, skills, eval results, and usage selections. The UI is a renderer with no second source of truth. | DECIDED |
 | D21 | Primary UI is a local web UI served by the CLI (`terum-skills ui`). It reads the clone and calls the same functions as the CLI, so an Install button is the same code path as `terum-skills use`. Works offline, no auth, no hosting. | DECIDED |
-| D22 | The CLI regenerates the repo README on publish: roster table, each member's skills, latest eval score per skill. Profile folders get their own README. Free baseline UI on GitHub. | PROPOSED |
+| D22 | The CLI regenerates the repo README on publish: roster table, each member's skills, latest eval score per skill (column shows "—" until phase 3 ships). Profile folders get their own README. Free baseline UI on GitHub. | DECIDED |
 | D23 | The frontend is built against a small data interface, not the filesystem, so a later hosted dashboard is the same frontend pointed at an API. | PROPOSED |
-| D24 | Pages: Team (roster, per-member skill count, activity feed from git log), Profile (person, skills, who uses each), Skill (rendered SKILL.md, version history from git, latest evals, Install button), Evals (recent runs, filterable by person and skill). | PROPOSED |
+| D24 | Pages, enriched by the 2026-09-02 whiteboard marketplace mockup: Browse (search + filters; "new / most-used" card row; team skills bucketed by project and global; category card rows; people ranked by adoption), Profile (person, skills, who uses each), Skill (stats, rendered SKILL.md description, @author link, version history from git, latest evals, Install button), Evals (recent runs, filterable by person and skill). | PROPOSED |
+| D37 | Skill metadata schema (whiteboard "Skill Object"): `name`, `author`, `category`, `description` in SKILL.md frontmatter; scope and repo path derived from tree position (3.3). Categories come from a small fixed list in `team.json`, extendable by admins. | DECIDED |
+| D38 | "Rated" throughout the UI means usage counts — how many teammates `use` a skill, computed from committed `profile.json` selections. No separate rating machinery, no human votes; eval scores remain a distinct signal shown alongside. | DECIDED |
 | D25 | Known limit: the local UI shows the repo as of last pull and cannot give a teammate a link to your view. If that bites early, it is the signal that the hosted tier (section 4, deferred) is due. | DECIDED |
 
 ### 3.7 Evaluations
@@ -175,6 +183,9 @@ Sub-questions delegated to the eval-integration spec (trigger: phase 3 is a week
 | Hosted dashboard / registry server, self-hostable via compose | DEFERRED | Adds shareable links, live state, non-git contributors, and a product surface for a paid tier. Cost 4. Reuses the D23 frontend. |
 | Custom URL scheme (`terum-skills://install/...`) for click-to-install from Slack | DEFERRED | The only path to "click in Slack, skill installs." Needs OS protocol registration, a confirmation dialog, and a refusal for repos the user is not a member of. Pays off once most recipients have the CLI. |
 | Direct "post to Slack" from Share | DEFERRED | Needs a Slack app token stored locally. After copy-paste sharing proves people use it. |
+| Human star/vote ratings | NOT CHOSEN | Usage counts (D38) serve the browse UI with zero new machinery; votes would need a `rate` verb and committed rating files. Revisit if usage counts prove a poor quality signal. |
+| Commands, agents, and hooks in profiles | DEFERRED | Skills only in v1 (D19). Commands are cheap to add when asked; hooks return only with D19's flag-and-show safety rule. |
+| Host-side path rulesets for folder ownership | DEFERRED | Real enforcement for bigger teams on paid GitHub plans; the CLI hard-guard (D12) covers normal use. |
 | Evals in CI on promotion PRs | OPEN | Needs an API key in repo secrets; cost model unclear. Delegated to the eval-integration spec (3.7). |
 
 ---
@@ -183,11 +194,12 @@ Sub-questions delegated to the eval-integration spec (trigger: phase 3 is a week
 
 Resolved by the decision walk (closed 2026-09-02): names (walk D1), the install layer and cross-agent support (walk D3), GitHub auth and device-flow ownership (walk D4), the eval engine (walk D5), repo and license (walk D6).
 
+Further resolved 2026-09-02 (spec walk + whiteboard ratification): D9, D11, D12, D14, D17, D19, D22, the 3.4 verb set, the scoped repo layout (3.3), skill metadata schema (D37), and the meaning of "rated" (D38).
+
 Still open:
 
-- `team.json` and `profile.json` schemas.
-- Whether profiles carry `commands/`, `agents/`, `hooks/` in addition to `skills/`.
-- Project-scoped installs (D17).
+- `team.json` and `profile.json` schemas (including the project-registry format and the repo-matching rule for scoped `sync`).
+- The starter category list.
 - How D16 collision handling interacts with Claude Code's skill name resolution.
 - `promote` policy: when a PR is required vs direct push.
 - Versioning semantics beyond content hash (tags? semver?).
