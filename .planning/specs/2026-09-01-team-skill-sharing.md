@@ -90,8 +90,8 @@ terum-skills team remove <handle>
 terum-skills invite <handle>...
 terum-skills publish <path-to-skill>        copy into own profile, commit "<handle>: publish <name>", push; rerun to update
 terum-skills ls                             roster, each member's skills, what you have installed
-terum-skills use <handle> | <handle>/<skill> | <team>/<handle>/<skill>[@<hash>]
-terum-skills unuse <ref>
+terum-skills use <handle> | <handle>/<skill> | <team>/<handle>/<skill>[@<hash>] | --project <name>
+terum-skills unuse <ref> | <handle> | --project <name>
 terum-skills sync                           git pull + relink; the session-start hook runs this too
 terum-skills promote <handle>/<skill>       copy into team/, as a PR if team policy requires review
 terum-skills eval <handle>/<skill> [--share]
