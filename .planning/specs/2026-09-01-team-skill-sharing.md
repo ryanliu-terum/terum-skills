@@ -64,7 +64,7 @@ team-skills/
     global/<name>/SKILL.md       promoted skills useful everywhere
     <project>/<name>/SKILL.md    promoted skills for one product repo
   <handle>/
-    profile.json             display name, one-line bio, and the member's own `use` selections
+    profile.json             display name, one-line bio, and the member's own `installs` records
     global/<name>/SKILL.md
     <project>/<name>/SKILL.md
   evals/
@@ -90,26 +90,27 @@ terum-skills team remove <handle>
 terum-skills invite <handle>...
 terum-skills publish <path-to-skill>        copy into own profile, commit "<handle>: publish <name>", push; rerun to update
 terum-skills ls                             roster, each member's skills, what you have installed
-terum-skills use <handle> | <handle>/<skill> | <team>/<handle>/<skill>[@<hash>] | --project <name>
-terum-skills unuse <ref> | <handle> | --project <name>
+terum-skills install <ref>[@<version>] | member <handle> | project <name>
+terum-skills uninstall <ref> | member <handle> | project <name>
 terum-skills sync                           git pull + relink; the session-start hook runs this too
 terum-skills promote <handle>/<skill>       copy into team/, as a PR if team policy requires review
 terum-skills eval <handle>/<skill> [--share]
-terum-skills eval show <handle>/<skill>@<hash>
+terum-skills eval show <handle>/<skill>@<version>
 terum-skills ui                             local web UI on localhost (see 3.6)
 ```
 
-Rules for `use` (PROPOSED, load-bearing for the share flow in 3.8):
+Rules for `install` (load-bearing for the share flow in 3.8):
 - A fully qualified ref (`acme/ryan/single-fix`) works for someone who has never run the tool: it installs the CLI if missing (via `npx`), joins the team if the person has repo access but has not joined, then installs.
-- `@<hash>` pins to the exact content that was evaluated. No hash means latest.
-- Scope follows the skill's folder (D17): a global skill installs to `~/.claude/skills`; a project skill installs into the matching repo's `.claude/skills` (using the `team.json` project registry), and `use` outside that repo says so and offers `--global` to override.
+- `@<version>` (the skill's content hash) pins to the exact content that was evaluated. No version means latest.
+- Scope follows the skill's folder (D17): a global skill installs to `~/.claude/skills`; a project skill installs into the matching repo's `.claude/skills` (using the `team.json` project registry), and `install` outside that repo says so and offers `--global` to override.
+- `member <handle>` and `project <name>` are bulk selectors (keyword-marked because handles and project names can collide); details in the phase-1 build spec §6.
 
 ### 3.5 Materialization on disk
 
 | # | Decision | Status |
 |---|---|---|
 | D13 | Where things live: `~/.terum/skills/config.json` (teams, selections, token), `~/.terum/skills/teams/<team>/` (the clone), `~/.terum/skills/cache/` (pinned checkouts by git tree hash). Placement into agent skill folders is delegated to the borrowed Vercel `skills` CLI (walk Decision 3), with a native Claude-Code-only fallback. | DECIDED |
-| D14 | `team/global/` is installed automatically on join. `team/<project>/` skills auto-install when `sync` runs inside a clone of the matching repo (per the `team.json` project registry). Individual profiles are opt-in via `use`. | DECIDED |
+| D14 | `team/global/` is installed automatically on join. `team/<project>/` skills auto-install when `sync` runs inside a clone of the matching repo (per the `team.json` project registry). Individual profiles are opt-in via `install`. | DECIDED |
 | D15 | Symlink on macOS and Linux, managed copy on Windows (Teddy works on Windows) — both handled by the borrowed Vercel `skills` CLI; `sync` refreshes through it. | DECIDED |
 | D16 | Name collisions get a handle prefix (`teddy-single-fix`, fixed by walk Decision 1) and the CLI tells the user. The rename is applied to the local pinned checkout before it is handed to the Vercel tool; directory rename vs frontmatter `name` rewrite still to be verified against how Claude Code resolves skill names. | DECIDED |
 | D17 | Scope is a first-class property of the skill, derived from its folder (3.3). Global skills install to `~/.claude/skills` via the Vercel tool's `-g`; project skills install into the matching repo's `.claude/skills`. (Whiteboard 2026-09-02, ratified same day; supersedes the earlier global-only proposal.) | DECIDED |
@@ -121,12 +122,12 @@ Rules for `use` (PROPOSED, load-bearing for the share flow in 3.8):
 | # | Decision | Status |
 |---|---|---|
 | D20 | Everything the UI shows lives in the repo: roster, profiles, skills, eval results, and usage selections. The UI is a renderer with no second source of truth. | DECIDED |
-| D21 | Primary UI is a local web UI served by the CLI (`terum-skills ui`). It reads the clone and calls the same functions as the CLI, so an Install button is the same code path as `terum-skills use`. Works offline, no auth, no hosting. | DECIDED |
+| D21 | Primary UI is a local web UI served by the CLI (`terum-skills ui`). It reads the clone and calls the same functions as the CLI, so an Install button is the same code path as `terum-skills install`. Works offline, no auth, no hosting. | DECIDED |
 | D22 | The CLI regenerates the repo README on publish: roster table, each member's skills, latest eval score per skill (column shows "—" until phase 3 ships). Profile folders get their own README. Free baseline UI on GitHub. | DECIDED |
 | D23 | The frontend is built against a small data interface, not the filesystem, so a later hosted dashboard is the same frontend pointed at an API. | PROPOSED |
 | D24 | Pages, enriched by the 2026-09-02 whiteboard marketplace mockup: Browse (search + filters; "new / most-used" card row; team skills bucketed by project and global; category card rows; people ranked by adoption), Profile (person, skills, who uses each), Skill (stats, rendered SKILL.md description, @author link, version history from git, latest evals, Install button), Evals (recent runs, filterable by person and skill). | PROPOSED |
 | D37 | Skill metadata schema (whiteboard "Skill Object"): `name`, `author`, `category`, `description` in SKILL.md frontmatter; scope and repo path derived from tree position (3.3). Categories come from a small fixed list in `team.json`, extendable by admins. | DECIDED |
-| D38 | "Rated" throughout the UI means usage counts — how many teammates `use` a skill, computed from committed `profile.json` selections. No separate rating machinery, no human votes; eval scores remain a distinct signal shown alongside. | DECIDED |
+| D38 | "Rated" throughout the UI means install counts — how many teammates have a skill installed, computed from committed `profile.json` records. No separate rating machinery, no human votes; eval scores remain a distinct signal shown alongside. | DECIDED |
 | D25 | Known limit: the local UI shows the repo as of last pull and cannot give a teammate a link to your view. If that bites early, it is the signal that the hosted tier (section 4, deferred) is due. | DECIDED |
 
 ### 3.7 Evaluations
@@ -158,7 +159,7 @@ Sub-questions delegated to the eval-integration spec (trigger: phase 3 is a week
 | D28 | A PNG cannot carry a clickable link, so Share produces a bundle: the PNG card, the install one-liner as text, and a GitHub link to the skill folder at that commit. | DECIDED |
 | D29 | The card shows skill name, author, team, date, score summary, short version hash, and the install line printed at the bottom so it survives if the text gets separated. Sized like a link-preview image so it sits well in Slack. | PROPOSED |
 | D30 | The card is one SVG template. The browser rasterizes it through a canvas element (no dependency). The `terum-skills eval --share` terminal path renders the same template with a small SVG-to-PNG library. Library choice is OPEN. | PROPOSED |
-| D31 | The one-liner is fully qualified and version-pinned: `npx terum-skills use acme/ryan/single-fix@a1b2c3d`. See the `use` rules in 3.4. | DECIDED |
+| D31 | The one-liner is fully qualified and version-pinned: `npx terum-skills install acme/ryan/single-fix@a1b2c3d`. See the `install` rules in 3.4. | DECIDED |
 | D32 | Recipient-side verify: `terum-skills eval show ryan/single-fix@a1b2c3d` reads the committed JSON, so the PNG can always be checked against the repo. | PROPOSED |
 
 ### 3.9 Open-source boundary
@@ -229,14 +230,14 @@ Everyone else:
 ```
 npm install -g terum-skills
 terum-skills team join acme/team-skills
-terum-skills use ryan/single-fix
+terum-skills install ryan/single-fix
 ```
 
 Share a result:
 ```
 terum-skills eval ryan/single-fix --share
 ```
-produces the PNG, copies `npx terum-skills use acme/ryan/single-fix@<hash>`, and prints the GitHub link.
+produces the PNG, copies `npx terum-skills install acme/ryan/single-fix@<version>`, and prints the GitHub link.
 
 ## 8. Related records (Terum, the team's shared memory)
 

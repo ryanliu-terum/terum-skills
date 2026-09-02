@@ -5,14 +5,14 @@
 **Parents:** `.planning/specs/2026-09-01-team-skill-sharing.md` (decision ledger, D1–D38) and `.planning/decisions/2026-09-01-team-skill-sharing-decision-walk.md` (walk verdicts). This spec adds no product forks; where the ledger left a design gap it states a default and marks it **[default — veto cheap]**.
 
 ## 1. Context
-
+ q
 The decision ledger is complete: phase 1 is the CLI plus the generated README (walk Decision 2), covering ledger sections 3.1–3.5 and D22, with the scoped repo layout, skill schema, and usage signals ratified 2026-09-02. This spec turns those decisions into a buildable plan. Phases 2 (local web UI) and 3 (eval + share) stay behind their gates and appear here only where phase 1 must leave room for them.
 
 North Star check: after phase 1, a teammate installs a skill with one command, the repo records who published and who uses what, and nothing runs anywhere but laptops and the git host.
 
 ## 2. Scope
 
-**In:** `login`, `team create|join|leave|remove`, `invite`, `publish`, `ls`, `use`, `unuse`, `sync`, `promote`; the write guard; the pin cache; the Placer adapter (Vercel shell-out + native Claude Code fallback); the README generator; the session-start sync hook; Apache-2.0 LICENSE; npm packaging.
+**In:** `login`, `team create|join|leave|remove`, `invite`, `publish`, `ls`, `install`, `uninstall`, `sync`, `promote`; the write guard; the version cache; the Placer adapter (Vercel shell-out + native Claude Code fallback); the README generator; the session-start sync hook; Apache-2.0 LICENSE; npm packaging.
 
 **Out (gated/deferred):** `eval`, `eval show`, `ui`, share bundle, device-flow login, host-side rulesets, commands/agents/hooks in profiles, project-scoped anything beyond what D14/D17 define, hosted tier.
 
@@ -29,7 +29,7 @@ src/
     teamRepo.ts         clone locations, git operations, remote matching
     schema.ts           zod schemas: team.json, profile.json, config.json, frontmatter
     guard.ts            own-folder write guard (D12)
-    pin.ts              tree-hash pinning + cache checkout
+    version.ts          tree-hash version resolution + cache checkout
     placer.ts           Placer interface + vercel-skills + native-claude-code impls
     readme.ts           README generator (D22)
     auth.ts             gh detection + token fallback (D7/D8)
@@ -63,7 +63,7 @@ team-skills/
 │           └── SKILL.md
 ├── ryan/                         one folder per member (name = handle); written ONLY by that member
 │   ├── README.md                 GENERATED mini-README for this profile
-│   ├── profile.json              display name, bio, `uses` records (schema §5.2)
+│   ├── profile.json              display name, bio, `installs` records (schema §5.2)
 │   ├── global/
 │   │   └── single-fix/           the personal original; promote COPIED it to team/global/
 │   │       ├── SKILL.md
@@ -100,7 +100,7 @@ Rules the tree encodes:
 └── cache/
     └── terum/
         └── a1b2c3d/              immutable checkout at skill tree hash a1b2c3d
-            └── single-fix/       created on first pinned use; content-addressed, never mutated
+            └── single-fix/       created on first pinned install; content-addressed, never mutated
                 ├── SKILL.md
                 └── references/
                     └── usage.md
@@ -152,13 +152,13 @@ All JSON validated with zod on read; unknown fields preserved on write (forward 
   "handle": "ryan",
   "display_name": "Ryan Liu",
   "bio": "one line",
-  "uses": [
-    { "ref": "terum/ajay/single-fix", "pin": "a1b2c3d", "scope": "global", "since": "2026-09-02" }
+  "installs": [
+    { "ref": "terum/ajay/single-fix", "version": "a1b2c3d", "scope": "global", "since": "2026-09-02" }
   ]
 }
 ```
 
-- `uses` is the D20/D38 usage record: `use`/`unuse` edit **your own** profile.json, commit (`ryan: use ajay/single-fix`), and push. This is deliberate write-traffic — the receipt that powers "who uses this" in the README and later the marketplace. `pin` is null when tracking latest.
+- `installs` is the D20/D38 usage record: `install`/`uninstall` edit **your own** profile.json, commit (`ryan: install ajay/single-fix`), and push. This is deliberate write-traffic — the receipt that powers "who uses this" in the README and later the marketplace. `version` is null when tracking latest.
 
 ### 5.3 SKILL.md frontmatter (D37)
 
@@ -185,7 +185,7 @@ Clone and cache locations as in §4.2. Token file mode 0600; keychain storage de
 
 ## 6. Command behavior
 
-Refs: `<team>/<handle>/<skill>[@<pin>]`; within a single joined team, `<handle>/<skill>` suffices. `@<pin>` is the skill folder's short git tree hash.
+Refs: `<team>/<handle>/<skill>[@<version>]`; within a single joined team, `<handle>/<skill>` suffices. A version is the skill folder's short git tree hash — `@<version>` pins the install to exactly that content.
 
 - **`login`** — runs `gh auth status`; if logged in, prints "using gh" and stores nothing. Else prompts for a fine-grained PAT (needs repository Administration + Contents on the team repo/org), verifies scopes with a probe call, stores in config. Only admins ever need this (D7/D8).
 - **`team create <name> [--org <org>] [--remote <url>]`** — with GitHub auth: creates private repo `<org-or-user>/team-skills`, scaffolds layout (team.json with the caller as first member, `team/global/.gitkeep`, LICENSE-free — the *team* repo carries no license), pushes, clones to the cache location, installs the session-start hook. With `--remote`: skips creation, pushes scaffold to the given remote (non-GitHub path).
@@ -193,28 +193,29 @@ Refs: `<team>/<handle>/<skill>[@<pin>]`; within a single joined team, `<handle>/
 - **`invite <handle>...`** — admin: `gh api` (or PAT) to add collaborators; prints the join command to paste into Slack (D9).
 - **`team leave <name>` / `team remove <handle>`** — leave: uninstalls that team's skills, removes clone + config entry (access revocation is the admin's side). remove: revokes collaborator access, sets `archived: true` in team.json (D11).
 - **`publish <path> [--project <name>]`** — validates frontmatter (category known, name legal); copies into `<handle>/global/<skill>/` or `<handle>/<project>/<skill>/`; regenerates READMEs; commits `<handle>: publish <skill>` and pushes. Rerun to update. Refuses paths that would land outside your own folder (guard). Also refuses a skill name you already publish under a *different* scope — a member's skill names are unique across their scopes, which is what keeps `<handle>/<skill>` refs unambiguous without a scope segment.
-- **`ls`** — roster, each member's skills grouped by scope, usage counts, what you have installed and at which pin.
-- **`use` — one skill, a member's skills, or a project's skills.** Three selector forms, composable where it makes sense:
-  - `use <ref>[@pin] [--global]` — one skill. Global-scoped → Placer installs to `~/.claude/skills` (`-g`); project-scoped → if cwd's repo matches the project, installs to that repo's `.claude/skills`, else explains and offers `--global`. Pinned: checks out the tree hash into the cache and installs from there; unpinned: installs from the clone (symlink → `sync` updates it). For a stranger with repo access, `npx terum-skills use <full-ref>` walks them through join first (D31/3.4 rules).
-  - `use <handle>` — everything in that member's profile: their global skills install globally; their project skills install where cwd matches, otherwise they're listed as skipped with the command to run from the right repo.
-  - `use --project <name>` — every skill scoped to that project: `team/<name>/` plus each member's `<handle>/<name>/`. Combines with a handle (`use ryan --project terum-mvp` = only Ryan's skills for that project).
-  - Bulk forms are snapshots — they install what exists now and print a per-skill summary (installed / skipped / collided); a teammate's *future* publishes arrive only by re-running (a `follow` semantic is deferred). `@pin` is single-skill only. Every install, bulk or not, is recorded per-skill in profile.json `uses` (usage counts stay honest), committed once, pushed.
-- **`unuse <ref> | <handle> | --project <name>`** — symmetric to `use`: Placer remove + per-skill profile.json update, one commit, push.
+- **`ls`** — roster, each member's skills grouped by scope, install counts, what you have installed and at which version.
+- **`install` — one skill, a member's skills, or a project's skills.** Keyword selectors (a bare argument can't distinguish a handle from a project name, so bulk forms name their namespace):
+  - `install <ref>[@<version>] [--global]` — one skill. Global-scoped → Placer installs to `~/.claude/skills` (`-g`); project-scoped → if cwd's repo matches the project, installs to that repo's `.claude/skills`, else explains and offers `--global`. Versioned: checks out the tree hash into the cache and installs from there (pinned); unversioned: installs from the clone (symlink → `sync` updates it). For a stranger with repo access, `npx terum-skills install <full-ref>` walks them through join first (D31/3.4 rules).
+  - `install member <handle>` — everything in that member's profile: their global skills install globally; their project skills install where cwd matches, otherwise they're listed as skipped with the command to run from the right repo.
+  - `install project <name>` — every skill scoped to that project: `team/<name>/` plus each member's `<handle>/<name>/`.
+  - Intersection: `install member <handle> --project <name>` — one person's skills for one project.
+  - Bulk forms are snapshots — they install what exists now and print a per-skill summary (installed / skipped / collided); a teammate's *future* publishes arrive only by re-running (a `follow` semantic is deferred). `@<version>` is single-skill only. Every install, bulk or not, is recorded per-skill in profile.json `installs` (counts stay honest), committed once, pushed.
+- **`uninstall <ref> | member <handle> | project <name>`** — symmetric to `install`: Placer remove + per-skill profile.json update, one commit, push.
 - **`sync`** — `git pull` each team clone; refresh placements (re-run Placer for tracked skills; prune links whose source vanished); when run inside a repo matching a registered project, auto-install that project's `team/<project>/` skills (D14). `--quiet` for the hook.
-- **`promote <handle>/<skill> [--project <name>]`** — copies the skill at its current tree hash into `team/global/` or `team/<project>/`. With `policy.promote: "pr"` (default): pushes branch `promote/<skill>` and opens a PR via `gh` (title `promote: <handle>/<skill> @<pin>`); merge is the review (D12). With `"push"` or no `gh`: commits directly after a y/N confirmation showing the diff. **[default — veto cheap: "pr" as default]**
-- **Versioning:** content tree hash only in v1; no tags/semver. `ls` shows short pins; nothing else is built. **[default — veto cheap]**
+- **`promote <handle>/<skill> [--project <name>]`** — copies the skill at its current tree hash into `team/global/` or `team/<project>/`. With `policy.promote: "pr"` (default): pushes branch `promote/<skill>` and opens a PR via `gh` (title `promote: <handle>/<skill> @<version>`); merge is the review (D12). With `"push"` or no `gh`: commits directly after a y/N confirmation showing the diff. **[default — veto cheap: "pr" as default]**
+- **Versioning:** content tree hash only in v1; no tags/semver. `ls` shows short versions; nothing else is built. **[default — veto cheap]**
 
 **Write guard (D12):** every git-writing code path goes through `guard.ts`, which diffs the staged tree and hard-fails if any path is outside `<own-handle>/` — except the named exemptions: `team.json` membership edits by join/remove, `team/` writes by promote, and README regeneration. `team create` also writes a CODEOWNERS mapping each `<handle>/` to its member.
 
 ## 7. Pinning and placement
 
-- **Pin resolve:** a skill's pin is `git rev-parse HEAD:<path>` (tree hash, short). To materialize `@<pin>`: find a commit containing that tree (`git log --format=%H -- <path>` walked until `rev-parse <commit>:<path>` matches), then `git archive <commit> <path> | tar -x` into the cache. Cache entries are immutable and content-addressed; safe to reuse.
+- **Version resolve:** a skill's version is `git rev-parse HEAD:<path>` (tree hash, short). To materialize `@<version>`: find a commit containing that tree (`git log --format=%H -- <path>` walked until `rev-parse <commit>:<path>` matches), then `git archive <commit> <path> | tar -x` into the cache. Cache entries are immutable and content-addressed; safe to reuse.
 - **Placer:** `place(localPath, skillName, agents, scope)`, `remove`, `list`. Default impl shells `npx skills add <localPath> --skill <name> -g -y` with `DISABLE_TELEMETRY=1` in the child env (walk Decision 3); project scope drops `-g` and runs from the target repo root. Fallback impl (`native-claude-code`) symlinks (copies on Windows) into `~/.claude/skills/` or `<repo>/.claude/skills/`; used when `npx skills` is unavailable or offline. Collisions: prefix the *placement name* `<handle>-<skill>` and inform the user (D16) — see verification V3 for rename mechanics.
 - **Session-start hook (D6):** `team create`/`join` offer to add a Claude Code SessionStart hook running `terum-skills sync --quiet` to `~/.claude/settings.json`; never installed without a y/N.
 
 ## 8. README generator (D22)
 
-Regenerated on every publish/promote/join/remove; committed in the same commit. Repo README: team name, roster table (handle, display name, skill count, archived flag), then per-member sections grouped global/project — each skill row: name, category, description, usage count (from all profile.json `uses`), eval score column (shows "—" until phase 3), and the one-line install command. Profile folders get a mini-README (same rows, one member). Generated content sits between `<!-- terum-skills:begin/end -->` markers; anything outside the markers is preserved.
+Regenerated on every publish/promote/join/remove; committed in the same commit. Repo README: team name, roster table (handle, display name, skill count, archived flag), then per-member sections grouped global/project — each skill row: name, category, description, install count (from all profile.json `installs`), eval score column (shows "—" until phase 3), and the one-line install command. Profile folders get a mini-README (same rows, one member). Generated content sits between `<!-- terum-skills:begin/end -->` markers; anything outside the markers is preserved.
 
 ## 9. Verification tasks (do before or during M1)
 
@@ -226,13 +227,13 @@ Regenerated on every publish/promote/join/remove; committed in the same commit. 
 ## 10. Build order
 
 - **M1 — plumbing:** scaffold package, config, schemas, auth, `team create`/`join` against a real private repo. *Exit: two laptops joined to one team repo.*
-- **M2 — the loop:** `publish`, `use`/`unuse`, `sync`, Placer (both impls), pin cache. *Exit: the section-7 onboarding walkthrough from the parent spec works end-to-end for two people, including a pinned install.*
+- **M2 — the loop:** `publish`, `install`/`uninstall`, `sync`, Placer (both impls), version cache. *Exit: the section-7 onboarding walkthrough from the parent spec works end-to-end for two people, including a pinned install.*
 - **M3 — the team layer:** `invite`, `remove`, `leave`, `ls`, guard + CODEOWNERS, README generator, `promote` (both policies). *Exit: README on GitHub shows roster/skills/usage; a promote PR merges and syncs to the second laptop.*
-- **M4 — ship:** session-start hook, Windows pass (copy placement), LICENSE (Apache-2.0), npm metadata, `npm publish` dry-run, reserve the name with 0.1.0. *Exit: `npx terum-skills use terum/<handle>/<skill>` works on a machine that has never seen the tool.*
+- **M4 — ship:** session-start hook, Windows pass (copy placement), LICENSE (Apache-2.0), npm metadata, `npm publish` dry-run, reserve the name with 0.1.0. *Exit: `npx terum-skills install terum/<handle>/<skill>` works on a machine that has never seen the tool.*
 
 ## 11. Acceptance
 
-Phase 1 is done when, with Ryan and Ajay on separate machines and one private GitHub repo: create → invite → join → publish (one global, one project-scoped) → use (one pinned, one latest) → sync-in-project auto-install → promote via PR → README reflects all of it — and every write lands via the guard, with `git log` reading as the team's activity feed. Tests: unit for schema/guard/pin/readme; E2E against a local bare-repo fixture in CI (no network).
+Phase 1 is done when, with Ryan and Ajay on separate machines and one private GitHub repo: create → invite → join → publish (one global, one project-scoped) → install (one pinned, one latest) → sync-in-project auto-install → promote via PR → README reflects all of it — and every write lands via the guard, with `git log` reading as the team's activity feed. Tests: unit for schema/guard/version/readme; E2E against a local bare-repo fixture in CI (no network).
 
 ## 12. Defaults chosen here (veto any before M1 ends)
 
