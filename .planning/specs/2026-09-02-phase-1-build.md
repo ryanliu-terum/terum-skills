@@ -36,11 +36,95 @@ src/
 test/                   vitest; unit for lib/, E2E against a local bare repo fixture
 ```
 
-## 4. Data schemas
+## 4. File trees
+
+Three distinct surfaces. Everything in 4.1 is shared truth (committed); everything in 4.2 is local, disposable, and rebuildable from 4.1; everything in 4.3 is a link (or Windows copy) the Placer owns.
+
+### 4.1 The team repo (shared truth — e.g. `github.com/ryanliu-terum/team-skills`)
+
+Shown populated: two members, one registered project (`terum-mvp`), one promoted skill.
+
+```
+team-skills/
+├── README.md                     GENERATED (D22): roster, skills, usage counts; regenerated
+│                                 on publish/promote/join/remove, between
+│                                 <!-- terum-skills:begin/end --> markers (hand edits outside survive)
+├── CODEOWNERS                    GENERATED at team create: one line per member,
+│                                 e.g. "/ryan/ @ryanliu" — makes cross-folder diffs ping the owner
+├── team.json                     name, members, categories, project registry, policy (schema §5.1)
+├── team/                         team-endorsed skills; written ONLY by promote
+│   ├── global/
+│   │   └── single-fix/           a skill = one folder, SKILL.md + any aux files it ships
+│   │       ├── SKILL.md
+│   │       └── references/
+│   │           └── usage.md
+│   └── terum-mvp/                one folder per registered project (name = team.json projects key)
+│       └── mvp-debug/
+│           └── SKILL.md
+├── ryan/                         one folder per member (name = handle); written ONLY by that member
+│   ├── README.md                 GENERATED mini-README for this profile
+│   ├── profile.json              display name, bio, `uses` records (schema §5.2)
+│   ├── global/
+│   │   └── single-fix/           the personal original; promote COPIED it to team/global/
+│   │       ├── SKILL.md
+│   │       └── references/
+│   │           └── usage.md
+│   └── terum-mvp/
+│       └── mvp-debug/
+│           └── SKILL.md
+├── ajay/
+│   ├── README.md
+│   ├── profile.json
+│   └── global/
+│       └── zetamac-tracker/
+│           └── SKILL.md
+└── evals/                        reserved for phase 3 (parent spec 3.7); scaffolded empty
+    └── .gitkeep
+```
+
+Rules the tree encodes:
+- **Depth is fixed:** `<owner>/<scope>/<skill>/…` where owner ∈ {`team`, `<handle>`} and scope ∈ {`global`, `<project>`}. Nothing else at those levels; the CLI treats any other layout as `layout_version` drift and refuses with a message.
+- A member folder exists only after that member's first publish (D9); `team create` scaffolds only `team/global/.gitkeep` and `evals/.gitkeep`.
+- Scope and repo path are **derived from position** — no scope field in any file (D37).
+- Generated files (`README.md`s, `CODEOWNERS`) are committed like everything else, so the repo is complete without the tool.
+
+### 4.2 Local state (`~/.terum/skills/` — never committed, safe to delete)
+
+```
+~/.terum/skills/
+├── config.json                   handle, joined teams, optional PAT (0600) (schema §5.4)
+├── teams/
+│   └── terum/                    full clone of the team repo — THE working copy;
+│       └── …                     unpinned placements symlink into it, so `sync` (git pull)
+│                                 is what updates installed skills
+└── cache/
+    └── terum/
+        └── a1b2c3d/              immutable checkout at skill tree hash a1b2c3d
+            └── single-fix/       created on first pinned use; content-addressed, never mutated
+                ├── SKILL.md
+                └── references/
+                    └── usage.md
+```
+
+### 4.3 Placement targets (Placer-owned links; managed copies on Windows)
+
+```
+~/.claude/skills/                                  global-scoped installs
+├── single-fix        → ~/.terum/skills/teams/terum/ryan/global/single-fix    (unpinned: tracks the clone)
+├── ajay-single-fix   → …/ajay/global/single-fix                              (collision-prefixed, D16)
+└── zetamac-tracker   → ~/.terum/skills/cache/terum/a1b2c3d/zetamac-tracker   (pinned: tracks the cache)
+
+<product repo>/.claude/skills/                     project-scoped installs, only in repos whose
+└── mvp-debug         → …/teams/terum/team/terum-mvp/mvp-debug               remote matches the registry
+```
+
+`sync` reconciles 4.3 against 4.1: refreshes links, prunes any whose source folder vanished, and adds `team/<project>/` links when run inside a matching repo (D14). The Placer (Vercel shell-out or native fallback) is the only code that touches these directories.
+
+## 5. Data schemas
 
 All JSON validated with zod on read; unknown fields preserved on write (forward compatibility for phases 2–3).
 
-### 4.1 `team.json` (repo root)
+### 5.1 `team.json` (repo root)
 
 ```jsonc
 {
@@ -59,9 +143,9 @@ All JSON validated with zod on read; unknown fields preserved on write (forward 
 
 - `categories`: the D37 fixed list; the seven above are the starter set **[default — veto cheap]**. Admins edit the file (or `terum-skills` warns-and-suggests on publish with an unknown category).
 - `projects`: the D14/D17 registry. Remote matching rule: normalize both sides — strip protocol, credentials, `.git` suffix, trailing slash, lowercase host — and compare. A repo matches a project if any of its git remotes normalizes to an entry in `remotes`.
-- `policy.promote`: `"pr"` (default) or `"push"`. See §5 promote.
+- `policy.promote`: `"pr"` (default) or `"push"`. See §6 promote.
 
-### 4.2 `<handle>/profile.json`
+### 5.2 `<handle>/profile.json`
 
 ```jsonc
 {
@@ -76,7 +160,7 @@ All JSON validated with zod on read; unknown fields preserved on write (forward 
 
 - `uses` is the D20/D38 usage record: `use`/`unuse` edit **your own** profile.json, commit (`ryan: use ajay/single-fix`), and push. This is deliberate write-traffic — the receipt that powers "who uses this" in the README and later the marketplace. `pin` is null when tracking latest.
 
-### 4.3 SKILL.md frontmatter (D37)
+### 5.3 SKILL.md frontmatter (D37)
 
 ```yaml
 name: single-fix
@@ -87,7 +171,7 @@ category: workflow    # from team.json categories
 
 Scope and repo path are derived from tree position (`<owner>/global/...` vs `<owner>/<project>/...`), never duplicated in frontmatter. `publish` validates frontmatter and injects `author` (from config handle) and a `license` line into packaging metadata if missing, so skills pass SkillEvaluator's Tier-1 gate by construction.
 
-### 4.4 `~/.terum/skills/config.json` (local, never committed)
+### 5.4 `~/.terum/skills/config.json` (local, never committed)
 
 ```jsonc
 {
@@ -97,9 +181,9 @@ Scope and repo path are derived from tree position (`<owner>/global/...` vs `<ow
 }
 ```
 
-Clones live at `~/.terum/skills/teams/<team>/`; pin cache at `~/.terum/skills/cache/<team>/<pin>/<skill>/`. Token file mode 0600; keychain storage deferred.
+Clone and cache locations as in §4.2. Token file mode 0600; keychain storage deferred.
 
-## 5. Command behavior
+## 6. Command behavior
 
 Refs: `<team>/<handle>/<skill>[@<pin>]`; within a single joined team, `<handle>/<skill>` suffices. `@<pin>` is the skill folder's short git tree hash.
 
@@ -118,35 +202,35 @@ Refs: `<team>/<handle>/<skill>[@<pin>]`; within a single joined team, `<handle>/
 
 **Write guard (D12):** every git-writing code path goes through `guard.ts`, which diffs the staged tree and hard-fails if any path is outside `<own-handle>/` — except the named exemptions: `team.json` membership edits by join/remove, `team/` writes by promote, and README regeneration. `team create` also writes a CODEOWNERS mapping each `<handle>/` to its member.
 
-## 6. Pinning and placement
+## 7. Pinning and placement
 
 - **Pin resolve:** a skill's pin is `git rev-parse HEAD:<path>` (tree hash, short). To materialize `@<pin>`: find a commit containing that tree (`git log --format=%H -- <path>` walked until `rev-parse <commit>:<path>` matches), then `git archive <commit> <path> | tar -x` into the cache. Cache entries are immutable and content-addressed; safe to reuse.
 - **Placer:** `place(localPath, skillName, agents, scope)`, `remove`, `list`. Default impl shells `npx skills add <localPath> --skill <name> -g -y` with `DISABLE_TELEMETRY=1` in the child env (walk Decision 3); project scope drops `-g` and runs from the target repo root. Fallback impl (`native-claude-code`) symlinks (copies on Windows) into `~/.claude/skills/` or `<repo>/.claude/skills/`; used when `npx skills` is unavailable or offline. Collisions: prefix the *placement name* `<handle>-<skill>` and inform the user (D16) — see verification V3 for rename mechanics.
 - **Session-start hook (D6):** `team create`/`join` offer to add a Claude Code SessionStart hook running `terum-skills sync --quiet` to `~/.claude/settings.json`; never installed without a y/N.
 
-## 7. README generator (D22)
+## 8. README generator (D22)
 
 Regenerated on every publish/promote/join/remove; committed in the same commit. Repo README: team name, roster table (handle, display name, skill count, archived flag), then per-member sections grouped global/project — each skill row: name, category, description, usage count (from all profile.json `uses`), eval score column (shows "—" until phase 3), and the one-line install command. Profile folders get a mini-README (same rows, one member). Generated content sits between `<!-- terum-skills:begin/end -->` markers; anything outside the markers is preserved.
 
-## 8. Verification tasks (do before or during M1)
+## 9. Verification tasks (do before or during M1)
 
 - **V1:** Claude Code tolerates extra frontmatter keys (`author`, `category`) in SKILL.md — load a skill with both and confirm it still triggers.
 - **V2:** `npx skills add <local path> --skill <name> -g -y` works with a local folder, and confirm the current flag names against the installed version (the ledger's grounding is from 2026-09-01).
 - **V3:** whether Claude Code resolves a skill by directory name or frontmatter `name` — decides if D16 collision handling renames the folder, rewrites frontmatter `name`, or both.
 - **V4:** `gh api /user/repository_invitations` accept flow works with a fine-grained-token `gh` login (not just OAuth).
 
-## 9. Build order
+## 10. Build order
 
 - **M1 — plumbing:** scaffold package, config, schemas, auth, `team create`/`join` against a real private repo. *Exit: two laptops joined to one team repo.*
 - **M2 — the loop:** `publish`, `use`/`unuse`, `sync`, Placer (both impls), pin cache. *Exit: the section-7 onboarding walkthrough from the parent spec works end-to-end for two people, including a pinned install.*
 - **M3 — the team layer:** `invite`, `remove`, `leave`, `ls`, guard + CODEOWNERS, README generator, `promote` (both policies). *Exit: README on GitHub shows roster/skills/usage; a promote PR merges and syncs to the second laptop.*
 - **M4 — ship:** session-start hook, Windows pass (copy placement), LICENSE (Apache-2.0), npm metadata, `npm publish` dry-run, reserve the name with 0.1.0. *Exit: `npx terum-skills use terum/<handle>/<skill>` works on a machine that has never seen the tool.*
 
-## 10. Acceptance
+## 11. Acceptance
 
 Phase 1 is done when, with Ryan and Ajay on separate machines and one private GitHub repo: create → invite → join → publish (one global, one project-scoped) → use (one pinned, one latest) → sync-in-project auto-install → promote via PR → README reflects all of it — and every write lands via the guard, with `git log` reading as the team's activity feed. Tests: unit for schema/guard/pin/readme; E2E against a local bare-repo fixture in CI (no network).
 
-## 11. Defaults chosen here (veto any before M1 ends)
+## 12. Defaults chosen here (veto any before M1 ends)
 
 1. Deps: commander + zod + yaml, nothing else.
 2. Starter categories: debugging, testing, docs, workflow, research, infra, misc.
