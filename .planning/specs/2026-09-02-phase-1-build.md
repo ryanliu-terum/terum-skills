@@ -5,7 +5,7 @@
 **Parents:** `.planning/specs/2026-09-01-team-skill-sharing.md` (decision ledger, D1–D38) and `.planning/decisions/2026-09-01-team-skill-sharing-decision-walk.md` (walk verdicts). This spec adds no product forks; where the ledger left a design gap it states a default and marks it **[default — veto cheap]**.
 
 ## 1. Context
- q
+ 
 The decision ledger is complete: phase 1 is the CLI plus the generated README (walk Decision 2), covering ledger sections 3.1–3.5 and D22, with the scoped repo layout, skill schema, and usage signals ratified 2026-09-02. This spec turns those decisions into a buildable plan. Phases 2 (local web UI) and 3 (eval + share) stay behind their gates and appear here only where phase 1 must leave room for them.
 
 North Star check: after phase 1, a teammate installs a skill with one command, the repo records who published and who uses what, and nothing runs anywhere but laptops and the git host.
@@ -210,7 +210,7 @@ Refs: `<team>/<handle>/<skill>[@<version>]`; within a single joined team, `<hand
 ## 7. Pinning and placement
 
 - **Version resolve:** a skill's version is `git rev-parse HEAD:<path>` (tree hash, short). To materialize `@<version>`: find a commit containing that tree (`git log --format=%H -- <path>` walked until `rev-parse <commit>:<path>` matches), then `git archive <commit> <path> | tar -x` into the cache. Cache entries are immutable and content-addressed; safe to reuse.
-- **Placer:** `place(localPath, skillName, agents, scope)`, `remove`, `list`. Default impl shells `npx skills add <localPath> --skill <name> -g -y` with `DISABLE_TELEMETRY=1` in the child env (walk Decision 3); project scope drops `-g` and runs from the target repo root. Fallback impl (`native-claude-code`) symlinks (copies on Windows) into `~/.claude/skills/` or `<repo>/.claude/skills/`; used when `npx skills` is unavailable or offline. Collisions: prefix the *placement name* `<handle>-<skill>` and inform the user (D16) — see verification V3 for rename mechanics.
+- **Placer:** `place(localPath, skillName, agents, scope)`, `remove`, `list`. Default impl shells `npx skills add <localPath> --skill <name> -g -y` with `DISABLE_TELEMETRY=1` in the child env (walk Decision 3); project scope drops `-g` and runs from the target repo root. Fallback impl (`native-claude-code`) symlinks (copies on Windows) into `~/.claude/skills/` or `<repo>/.claude/skills/`; used when `npx skills` is unavailable or offline. For every project-scoped placement the Placer also appends the link's path to the target repo's `.git/info/exclude` (per-clone ignore, never committed) — orgs split on whether `.claude/` is committed or gitignored, and this keeps our machine-local links out of their repo in either case, including the `git add -A` accident when `.claude/` didn't exist before. Collisions: prefix the *placement name* `<handle>-<skill>` and inform the user (D16) — see verification V3 for rename mechanics.
 - **Session-start hook (D6):** `team create`/`join` offer to add a Claude Code SessionStart hook running `terum-skills sync --quiet` to `~/.claude/settings.json`; never installed without a y/N.
 
 ## 8. README generator (D22)
