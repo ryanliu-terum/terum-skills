@@ -8,8 +8,8 @@ deferred:
     trigger: "a teammate asks to browse skills without the terminal, or a third team joins"
   - item: "Phase 3 — eval and share (Decision 2)"
     trigger: "the eval-integration spec exists and phase 3 is a week from being built"
-  - item: "Native placement fallback beyond Claude Code (Decision 3)"
-    trigger: "the Vercel shell-out breaks twice on a contract change, or a team needs an agent their tool drops"
+  - item: "Agent-selection flag for the native Placer (Decision 3, reopened 2026-09-03)"
+    trigger: "a team needs Codex, Cursor, or another agent the vendored path table already covers"
   - item: "GitHub device-flow login (Decision 4)"
     trigger: "an admin turns up with neither gh nor patience for a token, or two support requests about token scopes"
   - item: "Eval-integration spec (Decision 5, delegated)"
@@ -86,7 +86,7 @@ deferred:
 
 ## Decision 3 — Build or borrow the install layer (reframed from "Codex in v1")
 
-**Verdict: LOCK** (sub-fork deferred: when to expand the native fallback beyond Claude Code)
+**Verdict: LOCK — reopened 2026-09-03 and re-locked on "borrow code, not a tool."** The original walk compared building from scratch with borrowing Vercel's CLI. A third option surfaced in the iflytek/skillhub comparison: vendor that project's Apache-licensed, registry-independent agent path table, per-file fingerprint, and target lock (about 150 lines) and own placement outright. Ryan overrode Ajay's same-day ruling for the Vercel shell-out — his words: "override ajay's decision, make the changes to the spec from skillhub" — and the override is recorded in Terum. **New call: native Placer, Vercel removed.** Sub-fork deferred: the agent-selection flag. Build spec §7 (rev 6) is authoritative; the walk text below is the original reasoning, kept for the record.
 
 ### Plain English
 - **What's at stake:** whether terum-skills spends its effort on the part that already exists, putting files where each agent reads them, or on the part nobody has: the team model, the receipt, the share card.
