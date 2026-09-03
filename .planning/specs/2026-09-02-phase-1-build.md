@@ -1,24 +1,25 @@
 # terum-skills — Phase 1 build spec
 
-**Status:** BUILD-READY.
-**Date:** 2026-09-02
-**Parents:** `.planning/specs/2026-09-01-team-skill-sharing.md` (decision ledger, D1–D38) and `.planning/decisions/2026-09-01-team-skill-sharing-decision-walk.md` (walk verdicts). This spec adds no product forks; where the ledger left a design gap it states a default and marks it **[default — veto cheap]**.
+**Status:** BUILD-READY (rev 2, 2026-09-03).
+**Parents:** `.planning/specs/2026-09-01-team-skill-sharing.md` (decision ledger) and the decision walk. **Inputs to this revision:** Teddy's source-verified review of rev 1 (2026-09-03, `phase-1-build-review.md` — all five blockers and the corrections are folded in) and Ajay's flat-store restructure (2026-09-03). Design gaps closed here carry a stated default marked **[default — veto cheap]**.
 
 ## 1. Context
- 
-The decision ledger is complete: phase 1 is the CLI plus the generated README (walk Decision 2), covering ledger sections 3.1–3.5 and D22, with the scoped repo layout, skill schema, and usage signals ratified 2026-09-02. This spec turns those decisions into a buildable plan. Phases 2 (local web UI) and 3 (eval + share) stay behind their gates and appear here only where phase 1 must leave room for them.
 
-North Star check: after phase 1, a teammate installs a skill with one command, the repo records who published and who uses what, and nothing runs anywhere but laptops and the git host.
+Rev 2 makes two structural changes over rev 1. **(a) Flat skill store with ID references** — skills live once under `skills/`; per-person installs, team endorsement, and project assignment are lists of skill IDs, not folder positions or copies. This supersedes the scoped folder layout ratified 2026-09-02 (same-day revision by its author; recorded in the parent ledger). **(b) The review's findings** — legal frontmatter, a concurrency-safe write path, a correct join flow, a hardened session hook, and install-time review of tool grants.
+
+Verb model (settled this session): **`share`** puts a skill into your authorship once, after which updates flow automatically on sync; **`publish`** is the deliberate act of endorsing a skill to the team (PR-gated); **`install`** places skills locally. "Promote" no longer exists.
+
+North Star check: one command installs a skill; the repo records who authored, endorsed, and installed what; nothing runs anywhere but laptops and the git host (the optional GitHub Action runs on the host's compute, not a server of ours).
 
 ## 2. Scope
 
-**In:** `login`, `team create|join|leave|remove`, `invite`, `publish`, `ls`, `install`, `uninstall`, `sync`, `promote`; the write guard; the version cache; the Placer adapter (Vercel shell-out + native Claude Code fallback); the README generator; the session-start sync hook; Apache-2.0 LICENSE; npm packaging.
+**In:** `login`, `team create|join|leave|remove`, `invite`, `share`, `publish`, `ls`, `install`, `uninstall`, `sync`; the metadata write guard; the version cache; the Placer (Vercel shell-out + native fallback); the README generator + repo GitHub Action; the session-start hook; Apache-2.0 LICENSE; npm packaging.
 
-**Out (gated/deferred):** `eval`, `eval show`, `ui`, share bundle, device-flow login, host-side rulesets, commands/agents/hooks in profiles, project-scoped anything beyond what D14/D17 define, hosted tier.
+**Out (gated/deferred):** `eval`, `eval show`, `ui`, share-card bundle, device-flow login, host-side rulesets, commands/agents/hooks in profiles, hosted tier, `follow` semantics for bulk installs.
 
 ## 3. Stack and product repo layout
 
-Node 20+, TypeScript, ESM. Distributed as npm package `terum-skills` (binary `terum-skills`; `npx terum-skills …` is the canonical invocation). Minimal dependencies: `commander` (CLI parsing), `zod` (schema validation for the JSON files), `yaml` (SKILL.md frontmatter). Everything else — git, GitHub API, placement — is a shell-out to `git`, `gh`, `npx skills`. No HTTP client, no server, no daemon. **[default — veto cheap: the three deps]**
+Node **22+** (the Vercel `skills` CLI declares `engines.node >=22.20`; Node 20 is EOL), TypeScript, ESM. npm package `terum-skills`; every printed command uses `npx -y terum-skills@latest …` (`-y` so a first-run machine doesn't stall on npx's install prompt). Deps: `commander`, `zod`, `yaml` **[default — veto cheap]**. Everything else shells out to `git`, `gh`, `npx skills`. No HTTP client, no server, no daemon.
 
 ```
 src/
@@ -26,219 +27,210 @@ src/
   commands/<verb>.ts    one file per verb
   lib/
     config.ts           ~/.terum/skills/config.json read/write
-    teamRepo.ts         clone locations, git operations, remote matching
-    schema.ts           zod schemas: team.json, profile.json, config.json, frontmatter
-    guard.ts            own-folder write guard (D12)
+    teamRepo.ts         clone locations, remote matching, and safeWrite() — see §6.0
+    schema.ts           zod schemas: team.json, people/<handle>.json, config.json, frontmatter
+    guard.ts            metadata-based write guard (D12) — see §6.0
     version.ts          tree-hash version resolution + cache checkout
     placer.ts           Placer interface + vercel-skills + native-claude-code impls
     readme.ts           README generator (D22)
-    auth.ts             gh detection + token fallback (D7/D8)
-test/                   vitest; unit for lib/, E2E against a local bare repo fixture
+    auth.ts             gh detection + per-team token fallback (D7/D8)
+    hook.ts             SessionStart hook install + non-interactive sync mode
+test/                   vitest; unit for lib/, E2E + concurrency against local bare-repo fixtures
 ```
+
+Before building `placer.ts`, spend an hour on prior art: `gh skill install|publish` (preview; has `--pin`, `--agent`, `--scope`) and the Vercel CLI's lock file — either may replace plumbing we'd otherwise write.
 
 ## 4. File trees
 
-Three distinct surfaces. Everything in 4.1 is shared truth (committed); everything in 4.2 is local, disposable, and rebuildable from 4.1; everything in 4.3 is a link (or Windows copy) the Placer owns.
-
-### 4.1 The team repo (shared truth — e.g. `github.com/ryanliu-terum/team-skills`)
-
-Shown populated: two members, one registered project (`terum-mvp`), one promoted skill.
+### 4.1 The team repo (shared truth)
 
 ```
 team-skills/
-├── README.md                     GENERATED (D22): roster, skills, usage counts; regenerated
-│                                 on publish/promote/join/remove, between
-│                                 <!-- terum-skills:begin/end --> markers (hand edits outside survive)
-├── CODEOWNERS                    GENERATED at team create: one line per member,
-│                                 e.g. "/ryan/ @ryanliu" — makes cross-folder diffs ping the owner
-├── team.json                     name, members, categories, project registry, policy (schema §5.1)
-├── team/                         team-endorsed skills; written ONLY by promote
-│   ├── global/
-│   │   └── single-fix/           a skill = one folder, SKILL.md + any aux files it ships
-│   │       ├── SKILL.md
-│   │       └── references/
-│   │           └── usage.md
-│   └── terum-mvp/                one folder per registered project (name = team.json projects key)
-│       └── mvp-debug/
-│           └── SKILL.md
-├── ryan/                         one folder per member (name = handle); written ONLY by that member
-│   ├── README.md                 GENERATED mini-README for this profile
-│   ├── profile.json              display name, bio, `installs` records (schema §5.2)
-│   ├── global/
-│   │   └── single-fix/           the personal original; promote COPIED it to team/global/
-│   │       ├── SKILL.md
-│   │       └── references/
-│   │           └── usage.md
-│   └── terum-mvp/
-│       └── mvp-debug/
-│           └── SKILL.md
-├── ajay/
-│   ├── README.md
-│   ├── profile.json
-│   └── global/
-│       └── zetamac-tracker/
-│           └── SKILL.md
-└── evals/                        reserved for phase 3 (parent spec 3.7); scaffolded empty
-    └── .gitkeep
+├── README.md                    GENERATED between <!-- terum-skills:begin/end --> markers;
+│                                regenerated by the repo Action on main (laptop fallback §9)
+├── team.json                    team config + endorsement lists (schema §5.1); skill lists
+│                                change only via publish PRs — low-churn shared file
+├── .github/workflows/
+│   └── terum-skills.yml         GENERATED at team create: regenerates README on main,
+│                                comments on publish PRs (§9) [default — veto cheap]
+├── skills/                      THE flat store — every shared skill, exactly once
+│   ├── single-fix/
+│   │   ├── SKILL.md             frontmatter: name/description/license + metadata{id, author, terum-category}
+│   │   └── references/…         aux files travel inside the folder
+│   ├── decision-walk/
+│   └── …                        folder name == frontmatter name, unique repo-wide
+├── people/                      one file per member — the ONLY file that member's installs touch
+│   ├── ryan.json                identity + installed/declined skill-ID lists (schema §5.2)
+│   └── ajay.json
+└── evals/                       reserved for phase 3; keyed by ID
+    └── <skill-id>/<version>.json
 ```
 
 Rules the tree encodes:
-- **Depth is fixed:** `<owner>/<scope>/<skill>/…` where owner ∈ {`team`, `<handle>`} and scope ∈ {`global`, `<project>`}. Nothing else at those levels; the CLI treats any other layout as `layout_version` drift and refuses with a message.
-- A member folder exists only after that member's first publish (D9); `team create` scaffolds only `team/global/.gitkeep` and `evals/.gitkeep`.
-- Scope and repo path are **derived from position** — no scope field in any file (D37).
-- Generated files (`README.md`s, `CODEOWNERS`) are committed like everything else, so the repo is complete without the tool.
+- **A skill exists once.** Endorsement and project assignment reference its ID; nothing is ever copied within the repo.
+- **Membership is derived**: you are a member iff `people/<handle>.json` exists (created at join). No shared members array — the review's concurrency fix.
+- **Skill folder name == frontmatter `name`** (1–64 lowercase alphanumerics/hyphens, no leading/trailing/double hyphens — Claude Code dispatches by directory name), unique repo-wide, enforced at `share`. Collisions surface at share time; the old install-time prefix machinery (D16) is gone.
+- **Ownership is metadata, not geography**: only the author named in a skill's `metadata.author` may modify its folder; only you may write `people/<you>.json`; `team.json` skill lists change via publish PRs. `guard.ts` enforces all three (§6.0).
+- No CODEOWNERS: it can't map metadata ownership, and it's decorative on GitHub Free anyway (review).
 
 ### 4.2 Local state (`~/.terum/skills/` — never committed, safe to delete)
 
 ```
 ~/.terum/skills/
-├── config.json                   handle, joined teams, optional PAT (0600) (schema §5.4)
-├── teams/
-│   └── terum/                    full clone of the team repo — THE working copy;
-│       └── …                     unpinned placements symlink into it, so `sync` (git pull)
-│                                 is what updates installed skills
-└── cache/
-    └── terum/
-        └── a1b2c3d/              immutable checkout at skill tree hash a1b2c3d
-            └── single-fix/       created on first pinned install; content-addressed, never mutated
-                ├── SKILL.md
-                └── references/
-                    └── usage.md
+├── config.json                  handle, email, per-team remotes+tokens, shared-skill tracking (§5.4)
+├── teams/<team>/                full clone — the working copy sync pulls
+├── cache/<team>/<full-tree-hash>/<skill>/    immutable pinned checkouts (git archive <tree>)
+└── run/<team>.lock, <team>.stamp             hook mutex + hourly rate-limit stamp (§8)
 ```
 
-### 4.3 Placement targets (Placer-owned links; managed copies on Windows)
+### 4.3 Placement targets (Placer-owned; copies, not symlinks into our clone)
+
+The Vercel CLI **copies** skills (canonical copy under `~/.agents/skills/<name>`, with a symlink from `~/.claude/skills/<name>` to it — never a link to our clone). Therefore `git pull` does NOT update placements; **`sync` re-places every tracked unpinned skill whose content changed**.
 
 ```
-~/.claude/skills/                                  global-scoped installs
-├── single-fix        → ~/.terum/skills/teams/terum/ryan/global/single-fix    (unpinned: tracks the clone)
-├── ajay-single-fix   → …/ajay/global/single-fix                              (collision-prefixed, D16)
-└── zetamac-tracker   → ~/.terum/skills/cache/terum/a1b2c3d/zetamac-tracker   (pinned: tracks the cache)
-
-<product repo>/.claude/skills/                     project-scoped installs, only in repos whose
-└── mvp-debug         → …/teams/terum/team/terum-mvp/mvp-debug               remote matches the registry
+~/.claude/skills/<name>   → ~/.agents/skills/<name>   (Vercel-managed; copy of clone or cache content)
+<product repo>/.claude/skills/<name>, .agents/skills/<name>    project-list installs (§6)
 ```
 
-`sync` reconciles 4.3 against 4.1: refreshes links, prunes any whose source folder vanished, and adds `team/<project>/` links when run inside a matching repo (D14). The Placer (Vercel shell-out or native fallback) is the only code that touches these directories.
+For every placement inside a product repo, the Placer appends both paths to that repo's `.git/info/exclude` (per-clone ignore, never committed) — safe whether the org commits or ignores `.claude/`, and immune to `git add -A`.
 
 ## 5. Data schemas
 
-All JSON validated with zod on read; unknown fields preserved on write (forward compatibility for phases 2–3).
+Zod-validated on read; unknown fields preserved on write.
 
-### 5.1 `team.json` (repo root)
+### 5.1 `team.json`
 
 ```jsonc
 {
-  "layout_version": 1,
+  "layout_version": 2,
   "name": "terum",
-  "members": [
-    { "handle": "ryan", "github": "ryanliu", "archived": false }
-  ],
   "categories": ["debugging", "testing", "docs", "workflow", "research", "infra", "misc"],
+  "global": ["8f3a2c1d-…"],                          // team-endorsed skill IDs
   "projects": {
-    "terum-mvp": { "remotes": ["github.com/ryanliu-terum/Terum-MVP"] }
+    "terum-mvp": { "remotes": ["github.com/ryanliu-terum/Terum-MVP"], "skills": ["b2e4…"] }
   },
-  "policy": { "promote": "pr" }
+  "archived": [],                                    // handles removed by team remove
+  "policy": { "publish": "pr", "skill_license": "UNLICENSED" }
 }
 ```
 
-- `categories`: the D37 fixed list; the seven above are the starter set **[default — veto cheap]**. Admins edit the file (or `terum-skills` warns-and-suggests on publish with an unknown category).
-- `projects`: the D14/D17 registry. Remote matching rule: normalize both sides — strip protocol, credentials, `.git` suffix, trailing slash, lowercase host — and compare. A repo matches a project if any of its git remotes normalizes to an entry in `remotes`.
-- `policy.promote`: `"pr"` (default) or `"push"`. See §6 promote.
+Remote matching: normalize (strip protocol/credentials/`.git`/trailing slash, lowercase host) and compare.
 
-### 5.2 `<handle>/profile.json`
+### 5.2 `people/<handle>.json`
 
 ```jsonc
 {
   "handle": "ryan",
   "display_name": "Ryan Liu",
+  "email": "ryan@terum.ai",                          // feeds metadata.author "Name <email>"
+  "github": "ryanliu",
   "bio": "one line",
-  "installs": [
-    { "ref": "terum/ajay/single-fix", "version": "a1b2c3d", "scope": "global", "since": "2026-09-02" }
-  ]
+  "installed": [ { "id": "8f3a2c1d-…", "version": null, "scope": "global", "since": "2026-09-03" } ],
+  "declined": ["c9d1…"]                              // team skills declined at the y/N prompt — never re-offered
 }
 ```
 
-- `installs` is the D20/D38 usage record: `install`/`uninstall` edit **your own** profile.json, commit (`ryan: install ajay/single-fix`), and push. This is deliberate write-traffic — the receipt that powers "who uses this" in the README and later the marketplace. `version` is null when tracking latest.
+`version` is the **full 40-char tree hash** when pinned, null when tracking latest (short forms are display-only). Install counts (D38) are computed across all `people/*.json`.
 
-### 5.3 SKILL.md frontmatter (D37)
+### 5.3 SKILL.md frontmatter
+
+Only Agent-Skills-legal top-level fields; everything custom nests under `metadata` (top-level unknown keys hard-fail Claude Code packaging, and SkillEvaluator reads `metadata.author` only):
 
 ```yaml
-name: single-fix
+name: single-fix                 # == directory name
 description: one-line description
-author: ryan          # == SkillEvaluator metadata.author (walk Decision 5 condition 3)
-category: workflow    # from team.json categories
+license: UNLICENSED              # from team.json policy.skill_license
+metadata:
+  id: 8f3a2c1d-4e5f-…            # UUID minted at share; stable across renames
+  author: "Ryan Liu <ryan@terum.ai>"   # SkillEvaluator's required Name <email> format
+  terum-category: workflow
 ```
 
-Scope and repo path are derived from tree position (`<owner>/global/...` vs `<owner>/<project>/...`), never duplicated in frontmatter. `publish` validates frontmatter and injects `author` (from config handle) and a `license` line into packaging metadata if missing, so skills pass SkillEvaluator's Tier-1 gate by construction.
+`share` injects `license`, `metadata.id`, and `metadata.author` (from config; email collected at first run, `gh api user` when available). This satisfies SkillEvaluator's author and license schema findings — no broader Tier-1 claim (Tier 1 also runs security/PII/quality checks that injection cannot guarantee; that's phase 3's concern).
 
-### 5.4 `~/.terum/skills/config.json` (local, never committed)
+### 5.4 `~/.terum/skills/config.json`
 
 ```jsonc
 {
   "handle": "ajay",
-  "teams": { "terum": { "remote": "github.com/ryanliu-terum/team-skills" } },
-  "github_token": null
+  "email": "ajay@terum.ai",
+  "teams": { "terum": { "remote": "github.com/ryanliu-terum/team-skills", "token": null } },  // per-team tokens (fine-grained PATs are single-owner)
+  "shared": { "8f3a2c1d-…": "~/.claude/skills/single-fix" }   // my authored skills: id → local source (drives auto-update)
 }
 ```
 
-Clone and cache locations as in §4.2. Token file mode 0600; keychain storage deferred.
+Tokens: mode 0600, passed to `gh` via `GH_TOKEN` in the child env — never `gh auth login --with-token` (gh's manual warns against it).
 
 ## 6. Command behavior
 
-Refs: `<team>/<handle>/<skill>[@<version>]`; within a single joined team, `<handle>/<skill>` suffices. A version is the skill folder's short git tree hash — `@<version>` pins the install to exactly that content.
+Refs: `<team>/<name>[@<version>]` or `<name>` within one team; names resolve to IDs via `skills/*/SKILL.md`; an 8-char ID prefix is accepted anywhere a name is.
 
-- **`login`** — runs `gh auth status`; if logged in, prints "using gh" and stores nothing. Else prompts for a fine-grained PAT (needs repository Administration + Contents on the team repo/org), verifies scopes with a probe call, stores in config. Only admins ever need this (D7/D8).
-- **`team create <name> [--org <org>] [--remote <url>]`** — with GitHub auth: creates private repo `<org-or-user>/team-skills`, scaffolds layout (team.json with the caller as first member, `team/global/.gitkeep`, LICENSE-free — the *team* repo carries no license), pushes, clones to the cache location, installs the session-start hook. With `--remote`: skips creation, pushes scaffold to the given remote (non-GitHub path).
-- **`team join <org>/<repo>`** — never authenticates (D10). With `gh`: auto-accepts the pending invite via `gh api /user/repository_invitations`. Clones; on permission failure prints the invite URL and says rerun after accepting. Then adds self to `team.json members` (commit `<handle>: join`), installs `team/global/` skills, prints roster.
-- **`invite <handle>...`** — admin: `gh api` (or PAT) to add collaborators; prints the join command to paste into Slack (D9).
-- **`team leave <name>` / `team remove <handle>`** — leave: uninstalls that team's skills, removes clone + config entry (access revocation is the admin's side). remove: revokes collaborator access, sets `archived: true` in team.json (D11).
-- **`publish <path> [--project <name>]`** — validates frontmatter (category known, name legal); copies into `<handle>/global/<skill>/` or `<handle>/<project>/<skill>/`; regenerates READMEs; commits `<handle>: publish <skill>` and pushes. Rerun to update. Refuses paths that would land outside your own folder (guard). Also refuses a skill name you already publish under a *different* scope — a member's skill names are unique across their scopes, which is what keeps `<handle>/<skill>` refs unambiguous without a scope segment.
-- **`ls`** — roster, each member's skills grouped by scope, install counts, what you have installed and at which version.
-- **`install` — one skill, a member's skills, or a project's skills.** Keyword selectors (a bare argument can't distinguish a handle from a project name, so bulk forms name their namespace):
-  - `install <ref>[@<version>] [--global]` — one skill. Global-scoped → Placer installs to `~/.claude/skills` (`-g`); project-scoped → if cwd's repo matches the project, installs to that repo's `.claude/skills`, else explains and offers `--global`. Versioned: checks out the tree hash into the cache and installs from there (pinned); unversioned: installs from the clone (symlink → `sync` updates it). For a stranger with repo access, `npx terum-skills install <full-ref>` walks them through join first (D31/3.4 rules).
-  - `install member <handle>` — everything in that member's profile: their global skills install globally; their project skills install where cwd matches, otherwise they're listed as skipped with the command to run from the right repo.
-  - `install project <name>` — every skill scoped to that project: `team/<name>/` plus each member's `<handle>/<name>/`.
-  - Intersection: `install member <handle> --project <name>` — one person's skills for one project.
-  - Bulk forms are snapshots — they install what exists now and print a per-skill summary (installed / skipped / collided); a teammate's *future* publishes arrive only by re-running (a `follow` semantic is deferred). `@<version>` is single-skill only. Every install, bulk or not, is recorded per-skill in profile.json `installs` (counts stay honest), committed once, pushed.
-- **`uninstall <ref> | member <handle> | project <name>`** — symmetric to `install`: Placer remove + per-skill profile.json update, one commit, push.
-- **`sync`** — `git pull` each team clone; refresh placements (re-run Placer for tracked skills; prune links whose source vanished); when run inside a repo matching a registered project, auto-install that project's `team/<project>/` skills (D14). `--quiet` for the hook.
-- **`promote <handle>/<skill> [--project <name>]`** — copies the skill at its current tree hash into `team/global/` or `team/<project>/`. With `policy.promote: "pr"` (default): pushes branch `promote/<skill>` and opens a PR via `gh` (title `promote: <handle>/<skill> @<version>`); merge is the review (D12). With `"push"` or no `gh`: commits directly after a y/N confirmation showing the diff. **[default — veto cheap: "pr" as default]**
-- **Versioning:** content tree hash only in v1; no tags/semver. `ls` shows short versions; nothing else is built. **[default — veto cheap]**
+### 6.0 Every write goes through `safeWrite()`
 
-**Write guard (D12):** every git-writing code path goes through `guard.ts`, which diffs the staged tree and hard-fails if any path is outside `<own-handle>/` — except the named exemptions: `team.json` membership edits by join/remove, `team/` writes by promote, and README regeneration. `team create` also writes a CODEOWNERS mapping each `<handle>/` to its member.
+The review reproduced the failure: two clones pushing → rejected push → rebase → conflict in derived files. `teamRepo.safeWrite(mutate)` wraps every mutating verb: fetch → rebase local commit onto `origin/main` → **re-run generators after rebase** (derived content is rebuilt, never merged) → push → on rejection retry with backoff (jittered, max 5). The guard (`guard.ts`) runs inside it: the staged diff may touch only (a) skill folders whose `metadata.author` is you, (b) `people/<you>.json`, (c) `team.json` on the publish/remove paths, (d) generated files. A `pre-push` hook installed in the clone runs the same check. Threat model: **prevents accidents, not abuse** — raw git bypass remains possible and attributed.
+
+- **`login`** — admins. `gh auth status` → use gh. Else prompt for a **per-team** fine-grained PAT (repo Administration + Contents), verify with a probe, store per-team. Collects name/email for `metadata.author` on first run (any user, `gh api user` default).
+- **`team create <name> [--org <org>] [--remote <url>]`** — creates the private repo (`gh repo create … --private`), scaffolds §4.1 (team.json, empty `skills/`+`people/`+`evals/`, workflow file, README), pushes, clones, offers the hook (§8). `--remote`: push scaffold to an existing empty remote instead (non-GitHub path).
+- **`team join <org>/<repo>`** — never authenticates *with our tool*; it needs ordinary git/GitHub credentials. With `gh` logged in (OAuth): list invitations, accept via `PATCH /user/repository_invitations/{id}`; an empty list is treated as "already a collaborator" (fine-grained tokens **cannot** accept invitations — review). Without `gh`: check invitation state first and print the accept URL *before* attempting the clone. Then clone, create `people/<handle>.json` via safeWrite (this *is* joining), show the `team.json` global set and prompt **y/N** to install it (per-skill prompt for anything with `allowed-tools`), print the roster.
+- **`invite <handle>...`** — adds collaborators, branching 201 (invited — GitHub also emails them) vs 204 (already has access); prints **one Slack-ready block** containing `npx -y terum-skills@latest team join <org>/<repo>`. Caps: 50 invitations/repo/day.
+- **`team leave <name>`** — uninstall this team's placements, drop clone + config entry. **`team remove <handle>`** — revoke collaborator, **cancel any pending invitation**, append handle to `team.json archived` via safeWrite; their `people/` file and skills remain (history intact; org base permissions can still grant read — document it).
+- **`share <path>`** — one-time entry into authorship. Validates name (regex, ==dirname, unique repo-wide — collision → suggest a rename), **rejects folders containing `.claude-plugin/` or hook definitions** unless `--allow-privileged`, mints the UUID, injects §5.3 fields, copies to `skills/<name>/`, records the id→source mapping in config `shared`, commits `ajay: share single-fix` via safeWrite. Thereafter automatic: **`sync` diffs each `shared` source against the repo copy and auto-commits `ajay: update single-fix`** — you never re-share.
+- **`publish <name> [--project <proj>]`** — the deliberate team-endorsement act: adds the skill's ID to `team.json global` (default) or the project list. `policy.publish: "pr"` (default): branch `publish/<name>`, `gh pr create`; merge is the review, and the Action comments on the PR. `"push"` or no `gh`: direct via safeWrite after a y/N showing the skill. **[default — veto cheap: "pr"]**
+- **`ls`** — roster (from `people/*`), skills with author, category, install count, latest short version; `ls member <handle>` (authored + installed), `ls project <proj>`.
+- **`install <ref>[@<version>] | member <handle> | project <name>`** — resolves ref→ID. **Before placing, parse frontmatter: any `allowed-tools` grant is printed and requires y/N** (workspace trust does not gate it — review). Versioned: cache checkout, place from cache. Unversioned: place from clone (a copy; refreshed by sync). Placement always passes `-a claude-code` (without it the Vercel tool installs to *every* detected agent) and pre-checks `npx skills list --json -g` so an existing same-named skill isn't silently overwritten. `member`/`project` are snapshot bulk forms with per-skill summaries; `@<version>` is single-skill only. Personal (non-endorsed) skills place globally; project-list skills place into the matching repo **[default — veto cheap: no per-install project flag in v1]**. Records `{id, version, scope}` in `people/<you>.json`, one safeWrite.
+- **`uninstall <ref> | member <handle> | project <name>`** — Placer remove (`-y`, or it blocks on a prompt) + people-file update; uninstalling a team-endorsed skill records it in `declined` so sync never re-offers it.
+- **`sync [--hook]`** — pull (ff-only); auto-update owned `shared` skills; **re-place** tracked unpinned installs whose content changed; new `team.json global` IDs (not installed, not declined) → interactive: y/N per batch; `--hook` (non-interactive): announce only — "2 new team skills — run `terum-skills sync` to review". Project-list skills auto-place in a matching repo (allowed-tools still gates). Orphaned placements are moved aside and reported; only explicit `sync prune` deletes. Prints one line when anything changed; silent otherwise.
 
 ## 7. Pinning and placement
 
-- **Version resolve:** a skill's version is `git rev-parse HEAD:<path>` (tree hash, short). To materialize `@<version>`: find a commit containing that tree (`git log --format=%H -- <path>` walked until `rev-parse <commit>:<path>` matches), then `git archive <commit> <path> | tar -x` into the cache. Cache entries are immutable and content-addressed; safe to reuse.
-- **Placer:** `place(localPath, skillName, agents, scope)`, `remove`, `list`. Default impl shells `npx skills add <localPath> --skill <name> -g -y` with `DISABLE_TELEMETRY=1` in the child env (walk Decision 3); project scope drops `-g` and runs from the target repo root. Fallback impl (`native-claude-code`) symlinks (copies on Windows) into `~/.claude/skills/` or `<repo>/.claude/skills/`; used when `npx skills` is unavailable or offline. For every project-scoped placement the Placer also appends the link's path to the target repo's `.git/info/exclude` (per-clone ignore, never committed) — orgs split on whether `.claude/` is committed or gitignored, and this keeps our machine-local links out of their repo in either case, including the `git add -A` accident when `.claude/` didn't exist before. Collisions: prefix the *placement name* `<handle>-<skill>` and inform the user (D16) — see verification V3 for rename mechanics.
-- **Session-start hook (D6):** `team create`/`join` offer to add a Claude Code SessionStart hook running `terum-skills sync --quiet` to `~/.claude/settings.json`; never installed without a y/N.
+- **Version resolve:** `git rev-parse HEAD:skills/<name>` → full tree hash (stored). Short forms resolve via `git rev-parse --verify <short>^{tree}`. Materialize with `git archive <tree> | tar -x` — a tree hash is accepted directly; no history walk (review-verified).
+- **Placer:** `place/remove/list`. Default shells `npx skills add <path> --skill <name> -a claude-code -g -y` with `DISABLE_TELEMETRY=1`; project placements run from the product-repo root without `-g` and register both `.claude/skills/` and `.agents/skills/` entries in `.git/info/exclude`. Windows uses the tool's `--copy` (no bespoke placer). Native fallback (no npx/offline): copy into the target skills dir directly. A rename-on-collision (rare now) stages a temp copy with the new dirname+`name` before placing.
 
-## 8. README generator (D22)
+## 8. Session-start hook
 
-Regenerated on every publish/promote/join/remove; committed in the same commit. Repo README: team name, roster table (handle, display name, skill count, archived flag), then per-member sections grouped global/project — each skill row: name, category, description, install count (from all profile.json `installs`), eval score column (shows "—" until phase 3), and the one-line install command. Profile folders get a mini-README (same rows, one member). Generated content sits between `<!-- terum-skills:begin/end -->` markers; anything outside the markers is preserved.
+Installed only after y/N at create/join. The literal settings block (matcher limits it to real startups — an omitted matcher would fire on every `/clear` and compaction; async so a slow pull can't block session start; stdout must be only the reload directive because SessionStart stdout is injected into context):
 
-## 9. Verification tasks (do before or during M1)
+```jsonc
+{ "hooks": { "SessionStart": [ { "matcher": "startup", "hooks": [ {
+  "type": "command",
+  "command": "npx -y terum-skills@latest sync --hook",
+  "async": true, "timeout": 60
+} ] } ] } }
+```
 
-- **V1:** Claude Code tolerates extra frontmatter keys (`author`, `category`) in SKILL.md — load a skill with both and confirm it still triggers.
-- **V2:** `npx skills add <local path> --skill <name> -g -y` works with a local folder, and confirm the current flag names against the installed version (the ledger's grounding is from 2026-09-01).
-- **V3:** whether Claude Code resolves a skill by directory name or frontmatter `name` — decides if D16 collision handling renames the folder, rewrites frontmatter `name`, or both.
-- **V4:** `gh api /user/repository_invitations` accept flow works with a fine-grained-token `gh` login (not just OAuth).
+`sync --hook` additionally: takes the `run/<team>.lock` mutex (three open windows must not run three pulls into one clone), no-ops within an hour of `run/<team>.stamp`, sets `GIT_TERMINAL_PROMPT=0`, and prints exactly `{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}` when it placed skills (otherwise nothing) — without it, newly placed skills appear only next session.
 
-## 10. Build order
+## 9. README generator and repo Action
 
-- **M1 — plumbing:** scaffold package, config, schemas, auth, `team create`/`join` against a real private repo. *Exit: two laptops joined to one team repo.*
-- **M2 — the loop:** `publish`, `install`/`uninstall`, `sync`, Placer (both impls), version cache. *Exit: the section-7 onboarding walkthrough from the parent spec works end-to-end for two people, including a pinned install.*
-- **M3 — the team layer:** `invite`, `remove`, `leave`, `ls`, guard + CODEOWNERS, README generator, `promote` (both policies). *Exit: README on GitHub shows roster/skills/usage; a promote PR merges and syncs to the second laptop.*
-- **M4 — ship:** session-start hook, Windows pass (copy placement), LICENSE (Apache-2.0), npm metadata, `npm publish` dry-run, reserve the name with 0.1.0. *Exit: `npx terum-skills install terum/<handle>/<skill>` works on a machine that has never seen the tool.*
+README from the flat data: team header; roster; **per-author sections** (grouped by `metadata.author` — the browse-by-person view GitHub's file tree no longer gives); per skill: name, category, description, install count (IDs resolved to names at generation time), endorsement badge (global/project), latest short version, eval column ("—" until phase 3), one-line install command. Markers preserve hand-written text.
 
-## 11. Acceptance
+Regeneration: the scaffolded **GitHub Action** regenerates README on pushes to main and posts one edited-in-place comment on `publish/*` PRs — removing derived-file churn from laptop commits (the exact conflict the review reproduced) and giving publishes a push signal. Laptop fallback (non-GitHub remotes): regenerate inside safeWrite post-rebase. **[default — veto cheap: Action on]**
 
-Phase 1 is done when, with Ryan and Ajay on separate machines and one private GitHub repo: create → invite → join → publish (one global, one project-scoped) → install (one pinned, one latest) → sync-in-project auto-install → promote via PR → README reflects all of it — and every write lands via the guard, with `git log` reading as the team's activity feed. Tests: unit for schema/guard/version/readme; E2E against a local bare-repo fixture in CI (no network).
+## 10. Verification tasks (before/during M1)
 
-## 12. Defaults chosen here (veto any before M1 ends)
+- **V2 (broadened):** live-check the Vercel CLI: `-a claude-code` targeting, copy placement locations, overwrite-on-collision behavior, `list --json`, `remove -y`, local-path installs, current flag names.
+- **V4 (rewritten):** with an ordinary `gh` OAuth login, list-then-PATCH invitation accept works end-to-end; confirm the fine-grained-token failure mode and the 204/empty-list "already collaborator" path.
+- **V5 (new):** run `skillevaluator validate` against one real shared skill before writing injection logic; confirm `metadata.author` and `license` findings clear.
+- **V6 (new):** `gh repo create --private` and `gh pr create` mechanics for `team create` and `publish` (unverified by the review).
+- (V1 and V3 from rev 1 are answered by the docs — deleted. Frontmatter must nest under `metadata`; Claude Code dispatches by directory name.)
 
-1. Deps: commander + zod + yaml, nothing else.
-2. Starter categories: debugging, testing, docs, workflow, research, infra, misc.
-3. `policy.promote` defaults to `"pr"`.
-4. Versioning is tree-hash-only in v1.
-5. Team repos are scaffolded without a license file (private team content isn't ours to license).
+## 11. Build order
+
+- **M1 — plumbing:** scaffold, config, schemas, auth, `safeWrite()` + guard, `team create`/`join` against a real private repo. *Exit: two laptops joined; the join prompt flow works.*
+- **M2 — the loop:** `share` (+auto-update), `install`/`uninstall`, `sync`, Placer, version cache. *Exit: onboarding walkthrough works for two people, including a pinned install and an allowed-tools prompt.*
+- **M3 — the team layer:** `invite`, `remove`, `leave`, `ls`, `publish` (both policies), README generator + Action. *Exit: a publish PR merges, teammate gets the y/N on next sync, README shows it all.*
+- **M4 — ship:** hook (§8), Windows pass, LICENSE (Apache-2.0), npm metadata + publish dry-run, reserve name at 0.1.0. *Exit: `npx -y terum-skills@latest install terum/<skill>` works on a machine that has never seen the tool.*
+
+## 12. Acceptance
+
+The two-person E2E: create → invite → join (y/N prompt) → share ×2 → edit-then-sync auto-update → install (one pinned, one latest) → publish via PR → teammate prompted and accepts → project-list skill auto-places in a matching repo → README + Action comment reflect all of it. Plus the review's concurrency test: **eight clones of one bare repo running join/share/install concurrently — all writes land, no dirty clone, no conflict**. Tests: unit for schema/guard/version/readme; E2E + concurrency against local bare-repo fixtures (no network).
+
+## 13. Defaults chosen here (veto before M1 ends)
+
+1. Verb for entering authorship: `share` (over `track`/`add`).
+2. Skill IDs: UUIDs minted at share; folder named by skill name; no file path in metadata (derivable).
+3. Deps commander+zod+yaml; Node 22 floor.
+4. Starter categories (7); `policy.publish` = `"pr"`; `skill_license` default `"UNLICENSED"`.
+5. GitHub Action on by default; laptop regeneration for non-GitHub remotes.
+6. Personal skills install globally; only team project lists place into product repos (no `--project` on install in v1).
+7. Team repos scaffold without a LICENSE file (team content isn't ours to license).
