@@ -136,6 +136,33 @@ same skills by choosing the framework. Consequences for phase 3:
 - The honest framing for share cards is SkillEvaluator's own verdict bands, not
   cross-framework "X% better" claims.
 
+## 5b. UPDATE — the real-key rerun (2026-09-03, same day)
+
+The 14-skill corpus was rerun with a real `OPENAI_API_KEY`, Docker env-mode, and real
+multi-turn execution (agent `codex` on `gpt-5.4-mini`; judge mini, bumped to `gpt-5.6-sol`
+for 3 skills). Full write-up:
+`~/skill-eval-comparison/results/skillevaluator/tier3-apikey/SUMMARY.md`. What it changes:
+
+- **§5's "lower bounds contaminated by the harness" hypothesis is confirmed.** Mean lift
+  went from −0.08 (shim) to **+0.238**; 14/14 skills PASS ≥ +0.05; the
+  Discoverability/Efficiency metrics discriminate instead of flatlining at 0. suricata got
+  its first fully-scored run anywhere (no usage-policy layer on the OpenAI judge path).
+- **New, sharper caveat: even with real execution, per-skill ranking does not track
+  SkillsBench** — Spearman ρ = −0.11 (n=14). All lifts compress into +0.07..+0.45, inside
+  which the ±0.1 single-run noise band (§4) scrambles order. Sign agreement 10/14.
+  **Product rule: a Tier-3 verdict is trustworthy as a binary with attribution of *why*
+  (execution vs knowledge dimensions); never rank or leaderboard skills by lift.** This
+  supersedes any idea of sorting the marketplace UI by lift.
+- **Judge model guidance:** `gpt-5.4-mini` as judge deterministically failed to emit
+  parseable `behavior_check` output on one lean4 case (and once transiently on xlsx).
+  Cheap config that works: **mini agent + `gpt-5.6-sol` judge**. Judge cost is ~20 small
+  calls/skill — cents.
+- **Ops lesson for the phase-3 spec:** per-trial network installs are the dominant failure
+  mode on imperfect networks. The rig needed four local patches (bake Node+Codex into task
+  images, skip-if-present installer, judge-call retry, pre-pulled base image) — an
+  upstream-worthy issue, and a reason the spec's eval flow should pin a patched fork or
+  upstream these fixes first.
+
 ## 6. Share-card rasterization (D30 — the OPEN library choice)
 
 Researched 2026-09-03 (npm registry + GitHub; agent report on file). Recommendation:
