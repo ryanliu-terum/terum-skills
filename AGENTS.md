@@ -44,9 +44,14 @@ author chose to close a gap — implement it as written, do not treat it as unde
   the per-target lock, into the directory the agent path table names for the agent the caller
   passed. Never auto-detect agents, never prompt for scope, never write `.agents/skills` in
   phase 1.
-- **Vendored code keeps its provenance.** `src/lib/placer/vendor/skillhub/` is copied from
-  iflytek/skillhub (Apache-2.0). Keep iFlytek's copyright header on each file, add a NOTICE
-  entry, mark any modified file. Do not vendor its auto-detect, prompt, or in-folder metadata code.
+- **Vendored code keeps its provenance.** `src/lib/placer/vendor/skillhub/` holds two files copied
+  from iflytek/skillhub `cli/src/services/` (Apache-2.0): `skill-fingerprint.ts` and
+  `skill-target-lock.ts`. Upstream carries no per-file copyright header, so each copy gets an
+  attribution header naming the source path, the pinned commit, the license, and whether it was
+  modified, plus a NOTICE entry (build spec §3). The Claude Code path row is *derived* from
+  skillhub's profile (both paths are `.claude/skills`), not copied — its profile factory bundles
+  auto-detect, which is not vendored. Do not vendor its auto-detect, prompt, or in-folder
+  metadata code.
 - **Frontmatter is Agent-Skills-legal** (§5.3): top-level `name`/`description`/`license` only;
   everything custom nests under `metadata`. Skill folder name equals frontmatter `name`.
 - **One active path per behavior.** Before writing a function, grep for one that already does the

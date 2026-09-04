@@ -57,8 +57,9 @@ pushes a branch and exits when `gh` is missing (a missing tool never downgrades 
 hand-edited placed copies are overwritten on `sync` and quarantined (placed copies are generated
 output); the session hook is async and promises no same-session reload; handles are per team;
 `metadata.author` is `Name <email>`, never the handle; provenance comes only from the
-`placements` ledger, never from scanning disk; `src/lib/placer/vendor/skillhub/` carries iFlytek
-copyright headers on purpose (Apache-2.0 vendoring).
+`placements` ledger, never from scanning disk; `src/lib/placer/vendor/skillhub/` carries attribution
+headers naming the upstream path and pinned commit on purpose (Apache-2.0 vendoring; upstream
+files have no per-file header of their own).
 
 ## Output discipline
 

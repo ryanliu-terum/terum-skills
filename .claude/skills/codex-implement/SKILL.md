@@ -32,9 +32,12 @@ grep -h rate_limits "$(ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl | head -1)"
    looks like it worked.
 3. **`AGENTS.md` must exist at repo root.** Without it Codex implements against the spec with
    zero knowledge of our top-8 invariants, the `.js`-not-`.ts` rule, or the nested `CLAUDE.md`
-   files. Missing → STOP, this is not an optional nicety. Both delegation targets have one:
-   Terum-MVP and `terum-capture` (added 2026-07-31 — its invariants are the sidecar-offset
-   anti-data-loss rule, stdout/stderr discipline, and non-zero exit on failure). A **third** repo
+   files. Missing → STOP, this is not an optional nicety. All three delegation targets have one:
+   Terum-MVP; `terum-capture` (added 2026-07-31 — its invariants are the sidecar-offset
+   anti-data-loss rule, stdout/stderr discipline, and non-zero exit on failure); and
+   `terum-skills` (repo `skill-management-software`, added 2026-09-03 — its invariants are
+   safeWrite-only writes, the guard as the authorization model, consent on the normalized grant
+   hash, and the `placements` ledger as the only source of deletable paths). A **fourth** repo
    with no `AGENTS.md` is still a STOP; write the loader first.
 4. **`~/.codex/config.toml` sanity.** If it still registers `gsd-*` agents or sets
    `features.codex_hooks = true`, warn: that is abandoned GSD scaffolding and it attaches stale
@@ -209,13 +212,14 @@ cd ../terum-codex/<slug> && <install>          # see the target-repo table below
   lib/dashboard/contracts && npm ci`) — it has its own lockfile, separate from the root install.
 
 **Target repo — resolve `<install>` and the gate battery before you go further.** A spec can target
-Terum-MVP or `terum-capture`, and they share no tooling. Pick from the repo you are actually in
-(`git remote get-url origin`), never from habit:
+Terum-MVP, `terum-capture`, or `terum-skills`, and they share no tooling. Pick from the repo you
+are actually in (`git remote get-url origin`), never from habit:
 
 | Repo | `<install>` | Gates (§ Step 5) | Notes |
 | --- | --- | --- | --- |
 | `Terum-MVP` | `npm install` | `npm run lint && npm run typecheck && npm test`, then `cd lib/dashboard/contracts && npm ci && npm test` | `.githooks/hooksPath` is absolute, so hook *bodies* execute from the primary checkout. Known quirk; do not "fix" it from inside the worktree. The contracts package has its OWN vitest and lockfile — root `npm test` does not reach it (vitest include is root-anchored `__tests__/**`), but the required `ci` check runs it. A contract change that skips it passes locally and reds CI. |
 | `terum-capture` | `pip install ".[dev]"` | `pytest -q` then `python scripts/check_error_streams.py` | Python 3.10–3.14. **No** npm, ruff, or mypy — do not invent one. No `.githooks/pre-push`; CI on `main` is the only backstop. Bug logs live in Terum-MVP (`.planning/debug/capture-cli/`) and numbers are global, so it cannot allocate one locally. |
+| `terum-skills` (repo `skill-management-software`, remote `ryanliu-terum/terum-skills`) | `npm install` — **but there is no `package.json` until milestone M1 lands.** Before the first run the orchestrator pre-scaffolds in the worktree: `package.json` (deps `commander`, `zod`, `yaml`, `proper-lockfile`; devDeps `typescript`, `vitest`, `eslint`; Node 22 floor, ESM), `npm install`, and the two vendored skillhub files copied into `src/lib/placer/vendor/skillhub/` with their attribution headers (build spec §3). The sandbox has **no network**, so Codex can do neither itself. | `npm run lint && npm run typecheck && npm test` (vitest, collocated `src/**/__tests__/`, bare-repo fixtures, no network) | Specs live in `.planning/specs/`; the build spec is authoritative over the ledger. No bug-log numbering, no migrations, no `extension/`, no contracts package — the MVP-only lines in § Step 3 do not apply. Run **per milestone** (spec §11): add `Implement milestone M<n> only; leave later milestones unbuilt` to the prompt, and use `--standard` at minimum — the spec is ~11k words, past Luna's long-context cliff. |
 
 Running the MVP battery against `terum-capture` fails with "missing script: lint" and reads as a
 broken worktree rather than the wrong table row — check the row first.
@@ -251,6 +255,11 @@ Write to the scratchpad (not the repo). Structure:
      conservative reading. Never resolve a design fork on your own.**
    - Do not commit. Do not push. Do not apply migrations. Leave changes in the working tree.
    - Stage nothing; the orchestrator reviews the raw diff.
+
+   The `lib/dashboard/contracts`, `next-bug-number.sh`, and `extension/` lines are
+   **Terum-MVP-specific**. For `terum-capture` and `terum-skills` drop them and substitute that
+   repo's gate row from § Step 2; for `terum-skills` also add the milestone scope line the row
+   names, and tell Codex the vendored skillhub files and `node_modules` are already in place.
 
 Feed it via **stdin**, never as a shell argument — this sidesteps Windows quoting entirely.
 
@@ -308,6 +317,9 @@ npm run check:bug-log-status && npm run check:migration-doc-sync
 
 # terum-capture
 pytest -q && python scripts/check_error_streams.py
+
+# terum-skills
+npm run lint && npm run typecheck && npm test
 ```
 
 Both `check:bug-log-status` and `check:migration-doc-sync` are unconditional steps of the required
@@ -324,7 +336,8 @@ Then, in order:
 1. **Read `codex-report.json`.** Note `openQuestions` and `deviations` — those are the spec's
    soft edges and they need a human, not a shrug.
 2. **Read the diff yourself** — `git -C <worktree> diff` — at minimum every file touching auth,
-   a Supabase query, a Zod contract, or `extension/`. Check it against the top-8 invariants.
+   a Supabase query, a Zod contract, or `extension/` (in `terum-skills`: `teamRepo.ts`'s
+   safeWrite, `guard.ts`, `placer.ts`, `hook.ts`, and anything that computes the grant hash). Check it against the top-8 invariants.
    Specifically confirm: no unchecked Supabase `error`, no 200-in-catch, no `private`-less admin
    cross-user read, no progress persisted before the work, and **no edits to ANY `.ts` file under
    `extension/` except `.d.ts`** — `.githooks/pre-commit` CHECK 7 is harness-agnostic and blocks
