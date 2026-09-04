@@ -53,9 +53,23 @@ the reference for evaluation *practices*, and its Tier-1 validation ideas are ad
 4. **Lifecycle mapping:** `share` → no eval requirement; `publish` PR → k=3
    candidate-vs-incumbent + trigger evals (CI); `verified` badge → skilldeck's bar
    (≥3 cases incl. one adversarial, near-miss negatives, k=10 pairwise win).
-5. **Display rules (evidence-mandated):** verdict-first on share cards with a one-line
-   attribution; full decomposition one click deeper; **never rank skills by lift**; no
-   number displayed below k=3; Security/hygiene surfaced only on failure.
+5. **Display rules (evidence-mandated; resolves D29, decided 2026-09-04):** verdict band
+   (PASS/NEUTRAL/FAIL) remains the frame, with a one-line attribution. The card's
+   **displayed numbers** are the two that reproduce:
+   - **Per-arm scores, side by side** ("0.82 with · 0.61 without" — plus incumbent where
+     applicable). Arm-level scores are stable across identical runs (r = 0.97, §4 of the
+     dossier); the *difference* between them is not (r = 0.35), so the gap is shown, never
+     printed as a number.
+   - **Trigger-eval counts with denominators** ("routes 9/10 · 0 false fires") — fully
+     deterministic, no LLM judge, no noise band; may display regardless of execution-eval
+     k since determinism, not repetition, supplies their precision.
+
+   Raw lift is **never the headline**: it lives one click deeper in the full
+   decomposition, always stamped with k, model, and config (interval display only at the
+   k=10 verified tier, where Wilson/McNemar machinery applies). **Never rank or sort
+   skills by lift or by any of these numbers** — denominators are too small for
+   cross-skill comparison even when each number is individually honest. No
+   execution-eval number displayed below k=3; Security/hygiene surfaced only on failure.
 
 ## Best practices adopted from SkillEvaluator (docs.nvidia.com/skills/skillevaluator)
 
