@@ -1,6 +1,6 @@
 # Team skill sharing: distribution, membership, UI, and share flow
 
-**Status:** Decision ledger, synced 2026-09-03 to the completed decision walk (`.planning/decisions/2026-09-01-team-skill-sharing-decision-walk.md`) and to the phase-1 build spec. **The build spec `.planning/specs/2026-09-02-phase-1-build.md` (rev 6, 2026-09-03) exists and is BUILD-READY; where this ledger and that spec disagree, the build spec is authoritative.**
+**Status:** Decision ledger, synced 2026-09-03 to the completed decision walk (`.planning/decisions/2026-09-01-team-skill-sharing-decision-walk.md`) and to the phase-1 build spec. **The build spec `.planning/specs/2026-09-02-phase-1-build.md` (rev 7, 2026-09-03) exists and is BUILD-READY; where this ledger and that spec disagree, the build spec is authoritative.**
 **Date:** 2026-09-01 (synced 2026-09-02)
 **Author:** Ryan Liu, drafted with Claude in a design session
 **Inputs:** Teddy and Ajay's verbal suggestion of a self-hosted Docker image over a per-person monorepo (not in Terum's record; taken from Ryan's summary). Team whiteboard session 2026-09-02 (photos: skill object schema, scoped repo layout, marketplace UI, skill detail page) — its scoping, categories, and usage-signal ideas ratified into D14/D17/D19/D37/D38 and section 3.3 the same day. Terum records cited in section 8.
@@ -74,10 +74,11 @@ Notes:
 
 ### 3.4 CLI surface
 
-Status: DECIDED (ratified 2026-09-02). Phase 1 builds every verb below except the gated `eval` and `ui`.
+Status: DECIDED (ratified 2026-09-02; `setup` and `search` added 2026-09-03, build spec rev 7). Phase 1 builds every verb below except the gated `eval` and `ui`.
 
 ```
-terum-skills login                          admins only: uses gh when present, else fine-grained token
+terum-skills setup [<org>/<repo> | <url>]   the onboarding wizard: creator with no argument, joiner with the target from the invite block (build spec §6.1)
+terum-skills login                          admins only: uses gh when present (offers gh's own login if installed but logged out), else fine-grained token
 terum-skills team create <name> [--org <org>] [--remote <url>]
 terum-skills team join <org>/<repo> | <remote-url>       the URL form joins a team created with --remote
 terum-skills team leave <name>
@@ -86,6 +87,7 @@ terum-skills invite <github-login>...        host identity, not the team handle 
 terum-skills share <path-to-skill>          one-time: enter the skill into skills/; updates then flow automatically on sync
 terum-skills publish <name> [--project <p>] endorse to the team: add its ID to team.json global or a project list, via PR
 terum-skills ls                             roster, skills with author/category/install counts, what you have installed
+terum-skills search <term> [--category <c>] [--author <h>] [--project <p>]   read-only substring search over the clone
 terum-skills install <ref>[@<version>] | member <handle> | project <name>
 terum-skills uninstall <ref> | member <handle> | project <name>
 terum-skills sync                           pull, auto-update shared skills, re-place installs, prompt on new team skills
@@ -99,6 +101,13 @@ Rules for `install` (load-bearing for the share flow in 3.8):
 - `@<version>` (the skill's content hash) pins to the exact content that was evaluated. No version means latest.
 - Scope is not a property of the skill and is not derived from any folder (D17): it is which `team.json` list references the skill's ID. Personal and team-endorsed **global** skills place into `~/.claude/skills`; skills on a **project** list place into that project's repo, matched through the `team.json` project registry. v1 has **no install-time scope override** — no `--global`, no `--project` (build spec §13).
 - `member <handle>` and `project <name>` are bulk selectors (keyword-marked because handles and project names can collide); details in the phase-1 build spec §6.
+
+Rules for `setup` (normative text is build spec §6.1; added 2026-09-03 to match Ryan's eight-step onboarding flow):
+- It sequences the verbs above and owns no write path and no consent prompt of its own; each y/N (hook, endorsed set, `allowed-tools`, `share` frontmatter) is asked by the verb that defines it.
+- The team name is collected before any skill action because the repo must exist first; invites come after the first actions; the hook offer is the second-to-last step; a community link is printed, never opened.
+- Steps that belong to the local UI (phase 2: the wizard ends by opening it) and to eval (phase 3) are absent from the phase-1 wizard, not stubbed. The phase gates from walk Decision 2 stand.
+- Re-running it resumes at the first unfinished step by detecting outcomes (config, remote people file, settings entry) — it keeps no state file and never creates a second repo, people file, or hook entry.
+- Joiners are never asked for a token (D8); the invite block now prints `setup <org>/<repo>`, with `team join` as the bare equivalent.
 
 ### 3.5 Materialization on disk
 
@@ -119,7 +128,7 @@ Rules for `install` (load-bearing for the share flow in 3.8):
 | D20 | Everything the UI shows lives in the repo: roster, profiles, skills, eval results, and usage selections. The UI is a renderer with no second source of truth. | DECIDED |
 | D21 | Primary UI is a local web UI served by the CLI (`terum-skills ui`). It reads the clone and calls the same functions as the CLI, so an Install button is the same code path as `terum-skills install`. Works offline, no auth, no hosting. | DECIDED |
 | D22 | The repo README is generated: roster, per-author skill sections (the browse-by-person view), install counts, endorsement badges, eval column ("—" until phase 3), install one-liners. A scaffolded GitHub Action regenerates it on main and comments on publish PRs (push signal; no derived-file churn in laptop commits); laptop regeneration inside the write helper is the non-GitHub fallback. | DECIDED |
-| D23 | The frontend is built against a small data interface, not the filesystem, so a later hosted dashboard is the same frontend pointed at an API. | PROPOSED |
+| D23 | The frontend is built against a small data interface, not the filesystem, so a later hosted dashboard is the same frontend pointed at an API. **Made concrete in phase 1 as the library-first rule (build spec §3): every verb is `run(args, io)` over a `Prompter`, and `setup` and the phase-2 UI call the same functions — so "the app opens the UI" is a change to the wizard's last step, not a second implementation.** | DECIDED (2026-09-03) |
 | D24 | Pages, enriched by the 2026-09-02 whiteboard marketplace mockup: Browse (search + filters; "new / most-used" card row; team skills bucketed by project and global; category card rows; people ranked by adoption), Profile (person, skills, who uses each), Skill (stats, rendered SKILL.md description, @author link, version history from git, latest evals, Install button), Evals (recent runs, filterable by person and skill). | PROPOSED |
 | D37 | Skill metadata schema (whiteboard "Skill Object", revised 2026-09-03 for spec-legality and the flat store): top-level `name`/`description`/`license`; `metadata.id` (UUID minted at share), `metadata.author` ("Name <email>" — SkillEvaluator's required shape), `metadata.terum-category` (from the `team.json` list, admin-extendable). File path is derived (`skills/<name>/`), never stored. | DECIDED |
 | D39 | Flat skill store with ID references: skills live once under `skills/`; installs, endorsement, and project assignment are skill-ID lists (`people/<handle>.json` per member — the per-writer concurrency primitive — and `team.json`). Supersedes the scoped-folder layout; kills promote-time copying and divergence. (Ajay, 2026-09-03.) | DECIDED |
@@ -218,19 +227,27 @@ Still open:
 
 First person:
 ```
-npm install -g terum-skills
+npx -y terum-skills@latest setup
+```
+walks the eight steps: welcome → GitHub (gh, or gh's own login, or a token) → team name → share a first skill and see the five one-liners → invite teddy ajay → community link → hook y/N → done (roster, repo URL, README URL). The bare verbs it sequences remain usable on their own:
+```
 terum-skills login
 terum-skills team create acme
 terum-skills share ~/.claude/skills/single-fix
 terum-skills invite teddy ajay
 ```
 
-Everyone else:
+Everyone else (pasting the block `invite` printed):
 ```
-npm install -g terum-skills
-terum-skills team join acme/team-skills
+npx -y terum-skills@latest setup acme-org/team-skills
+```
+welcome → GitHub (optional; a logged-in gh auto-accepts the invite, no token is ever requested) → join, with the endorsed-set y/N and any `allowed-tools` prompts → the five one-liners → community link → hook y/N → done. Bare equivalent:
+```
+terum-skills team join acme-org/team-skills
 terum-skills install single-fix
 ```
+
+Phase 2 changes exactly one line of this: the done step opens the local UI (D21). Phase 3 adds an eval action to the first-actions step. Neither is stubbed in phase 1.
 
 Share a result:
 ```
