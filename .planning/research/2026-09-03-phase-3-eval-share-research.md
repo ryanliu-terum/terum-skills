@@ -163,6 +163,37 @@ for 3 skills). Full write-up:
   upstream-worthy issue, and a reason the spec's eval flow should pin a patched fork or
   upstream these fixes first.
 
+## 5c. Feasibility probe — a `claude -p`-driven custom evaluator (2026-09-04)
+
+Context: the team is considering (NOT decided — walk Decision 5 still stands on record)
+building a custom eval framework instead of SkillEvaluator, motivated by its Docker + raw
+API-key requirements. The candidate architecture: drive the member's own logged-in Claude
+Code CLI headlessly, two-arm, in temp workspaces — subscription auth, no Docker.
+
+Probe (synthetic `area-reporter` skill with a checkable file-write convention, staged in
+one temp workspace's `.claude/skills/`, absent in the other; identical prompt via
+`claude -p --output-format json --max-turns 8`):
+
+- **Discovery + invocation + execution all work headlessly.** With-arm followed the
+  skill's convention end-to-end (exact file, exact JSON shape, exact reply format) in 4
+  turns / 9.4s; baseline arm computed generically. Two-arm discrimination is real.
+- **Permission mode is a required design decision:** default `claude -p` blocks writes
+  with nobody to approve (first with-arm attempt failed to save). `--permission-mode
+  acceptEdits` fixed it; the framework must pick a policy, and looser modes re-raise the
+  unsandboxed-trust question that Docker was solving.
+- **Deterministic verification works:** the probe graded itself by checking the artifact
+  file — SkillsBench-style verifiers are available for any case with checkable outputs,
+  reducing LLM-judge dependence (and the usage-policy-refusal exposure that comes with
+  subscription-side judging — the suricata lesson).
+- `--output-format json` returns `num_turns`, duration, and an API-equivalent cost
+  estimate (~$0.42 for the 4-turn run) — provenance and budget fields come free.
+
+Open design items if pursued: permission/trust policy, judge path (subscription `claude
+-p` judges vs deterministic verifiers vs optional API key), controlling global-skill
+contamination across arms (constant within a machine, varies across machines), and
+recording the member's Claude Code version in provenance. Artifacts:
+`<scratchpad>/claude-p-probe/`.
+
 ## 6. Share-card rasterization (D30 — the OPEN library choice)
 
 Researched 2026-09-03 (npm registry + GitHub; agent report on file). Recommendation:
