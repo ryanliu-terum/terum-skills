@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["refuted", "reason", "confidence", "correctedSeverity"],
+  "properties": {
+    "refuted": {
+      "type": "boolean",
+      "description": "true = this finding is NOT a real defect and should be killed."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Must quote what you actually found in the code."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "correctedSeverity": {
+      "type": ["string", "null"],
+      "enum": ["critical", "high", "medium", "low", null],
+      "description": "Set only if the finding is real but its severity is wrong; otherwise null."
+    }
+  }
+}

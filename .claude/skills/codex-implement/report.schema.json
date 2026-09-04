@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "summary",
+    "filesChanged",
+    "gates",
+    "openQuestions",
+    "deviations",
+    "invariantsTouched",
+    "testsModified",
+    "bugLogsCreated",
+    "leastConfidentClaim"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["complete", "partial", "blocked"],
+      "description": "complete = every spec requirement implemented and gates run. partial = some requirements implemented, others skipped (list them in deviations). blocked = could not proceed. NEVER report complete if any requirement was skipped."
+    },
+    "summary": {
+      "type": "string",
+      "description": "2-4 sentences: what was built and how."
+    },
+    "filesChanged": {
+      "type": "array",
+      "description": "Every file created, modified, or deleted. Repo-relative paths. Empty array if none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "change", "why"],
+        "properties": {
+          "path": { "type": "string" },
+          "change": { "type": "string", "enum": ["added", "modified", "deleted"] },
+          "why": { "type": "string", "description": "Which spec requirement this satisfies." }
+        }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lint", "typecheck", "test"],
+      "description": "Self-reported gate results. The orchestrator re-runs these independently; report honestly, a failure here costs nothing but a false green costs a lot.",
+      "properties": {
+        "lint": { "$ref": "#/$defs/gateResult" },
+        "typecheck": { "$ref": "#/$defs/gateResult" },
+        "test": { "$ref": "#/$defs/gateResult" }
+      }
+    },
+    "openQuestions": {
+      "type": "array",
+      "description": "Every place the spec was ambiguous. You were required to STOP rather than resolve a design fork - each one you hit goes here, with the conservative reading you implemented instead. Empty array only if the spec was genuinely unambiguous.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "specSection", "conservativeChoice"],
+        "properties": {
+          "question": { "type": "string" },
+          "specSection": { "type": "string" },
+          "conservativeChoice": { "type": "string", "description": "What you implemented pending an answer." }
+        }
+      }
+    },
+    "deviations": {
+      "type": "array",
+      "description": "Anywhere the implementation departs from the spec, including requirements skipped entirely, plus the reason. Empty array if none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["what", "why"],
+        "properties": {
+          "what": { "type": "string" },
+          "why": { "type": "string" }
+        }
+      }
+    },
+    "invariantsTouched": {
+      "type": "array",
+      "description": "Which of the AGENTS.md top-8 invariants this change interacts with (by number 1-8), and how you satisfied each. Empty array if none apply.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "howSatisfied"],
+        "properties": {
+          "number": { "type": "integer" },
+          "howSatisfied": { "type": "string" }
+        }
+      }
+    },
+    "testsModified": {
+      "type": "array",
+      "description": "Any existing test you changed, deleted, or weakened, with justification. Modifying a test to make a suite pass is a serious finding - declare it here rather than letting it be discovered in the diff. Empty array if you touched no existing tests.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "whatChanged", "justification"],
+        "properties": {
+          "path": { "type": "string" },
+          "whatChanged": { "type": "string" },
+          "justification": { "type": "string" }
+        }
+      }
+    },
+    "bugLogsCreated": {
+      "type": "array",
+      "description": "Paths of any bug logs created via scripts/next-bug-number.sh. Empty array if none.",
+      "items": { "type": "string" }
+    },
+    "leastConfidentClaim": {
+      "type": "string",
+      "description": "The single statement in this report most likely to be wrong, and why you are unsure."
+    }
+  },
+  "$defs": {
+    "gateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ran", "passed", "output", "preExistingFailures"],
+      "properties": {
+        "ran": { "type": "boolean" },
+        "passed": { "type": "boolean" },
+        "output": { "type": "string", "description": "Real counts, e.g. '181 passed, 2 failed'. Not an impression." },
+        "preExistingFailures": {
+          "type": "string",
+          "description": "Failures present before your change if you established a baseline; empty string if you did not."
+        }
+      }
+    }
+  }
+}

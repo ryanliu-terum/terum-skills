@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["targetFound", "title", "summary", "artifacts", "crossRefs", "siblingSpecs"],
+  "properties": {
+    "targetFound": { "type": "boolean" },
+    "title": { "type": "string" },
+    "summary": {
+      "type": "string",
+      "description": "One paragraph: what the spec proposes, plus any settled deferrals found in PRODUCT-CONCERNS.md that later reviewers must not re-flag."
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Every concrete thing the spec claims will exist or change.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name", "specSection"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["table", "migration", "route", "rpc", "file", "env", "other"] },
+          "name": { "type": "string" },
+          "specSection": { "type": "string" }
+        }
+      }
+    },
+    "crossRefs": {
+      "type": "array",
+      "description": "Other specs this one names or depends on.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["spec", "concept"],
+        "properties": {
+          "spec": { "type": "string" },
+          "concept": { "type": "string" }
+        }
+      }
+    },
+    "siblingSpecs": {
+      "type": "array",
+      "description": "Repo-relative paths of other specs to diff against, excluding the target and anything under .planning/specs/reviews/.",
+      "items": { "type": "string" }
+    }
+  }
+}

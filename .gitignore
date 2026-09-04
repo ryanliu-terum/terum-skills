@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Claude Code harness — machine-local / per-session files (tracked harness lives in .claude/)
+.claude/worktrees/
+.claude/settings.local.json
+.claude/handoff*.md
+.claude/summaries/
+.planning/debug/.bug-counter
+.planning/debug/.bug-counter.lock.d
+
+# Terum capture (personal — do not commit)
+CLAUDE.local.md

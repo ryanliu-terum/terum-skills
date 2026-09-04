@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "title", "specLocation", "evidence", "suggestion", "confidence"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["BLOCKER", "DRIFT", "AMBIGUITY", "GAP", "NOTE"] },
+          "title": { "type": "string" },
+          "specLocation": { "type": "string" },
+          "evidence": { "type": "string" },
+          "suggestion": { "type": "string" },
+          "confidence": { "type": "string", "enum": ["high", "medium", "low"] }
+        }
+      }
+    }
+  }
+}

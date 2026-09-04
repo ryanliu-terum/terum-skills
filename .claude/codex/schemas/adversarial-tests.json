@@ -1,0 +1,67 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["understanding", "cases", "contract_gaps", "assumptions"],
+  "properties": {
+    "understanding": {
+      "type": "string",
+      "description": "In your own words, what this function is supposed to do, derived ONLY from the contract you were given. If this is wrong, the contract is unclear — which is a finding in itself and more valuable than any test below."
+    },
+    "cases": {
+      "type": "array",
+      "description": "Adversarial inputs. Quality over quantity: 8 cases that each kill a different wrong implementation beat 40 permutations of the same idea.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "category", "inputs", "expected", "why_adversarial", "defeats"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Short snake_case name usable directly as a test name."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "boundary", "empty_or_null", "duplicate_or_ordering", "identity_confusion",
+              "unicode_or_whitespace", "adversarial_valid", "failure_path", "scale", "other"
+            ]
+          },
+          "inputs": {
+            "type": "string",
+            "description": "The exact arguments, as a JSON object or a short code snippet. Concrete values, never a description of values — 'two participants on different teams' is not an input; the actual array is."
+          },
+          "expected": {
+            "type": "string",
+            "description": "What the contract says must happen for this input. Derive it from the contract, never from what an implementation probably does. If the contract does not determine it, do NOT invent an answer — put it in contract_gaps instead."
+          },
+          "why_adversarial": {
+            "type": "string",
+            "description": "What makes this input one an implementer would plausibly not have thought of."
+          },
+          "defeats": {
+            "type": "string",
+            "description": "The specific wrong implementation this case kills — 'a version that trusts the first match', 'a regex on the identifier', 'a lookup table keyed on the happy-path shape'. If you cannot name one, the case is decorative; drop it."
+          }
+        }
+      }
+    },
+    "contract_gaps": {
+      "type": "array",
+      "description": "Behaviour the contract does NOT determine, so no honest test can assert it. This is a primary output, not an apology — an untestable gap in a privacy or correctness contract is usually the most valuable thing on this page.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["gap", "why_it_matters"],
+        "properties": {
+          "gap": { "type": "string" },
+          "why_it_matters": { "type": "string", "description": "What could silently differ between two correct-looking implementations because of this." }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "description": "Anything you had to assume to write a case. Each one is a place your expected value could be wrong rather than the code.",
+      "items": { "type": "string" }
+    }
+  }
+}

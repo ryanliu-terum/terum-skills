@@ -1,0 +1,80 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "answer", "grounded_in", "confidence", "ambiguity", "leak_risk", "superseded_risk", "could_not_verify"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "The question id you were given, echoed back verbatim."
+    },
+    "answer": {
+      "type": "string",
+      "description": "Your independently derived answer. Written as if the question had never been answered before, because as far as you are concerned it has not."
+    },
+    "grounded_in": {
+      "type": "array",
+      "description": "Every file you actually read to reach this answer, most load-bearing first, as path or path:line. Use the literal string 'prior-knowledge' for any part of the answer you did NOT read from a file in this run — that flag is the single most useful field here, because a prior-knowledge answer is exactly the one most likely to be wrong.",
+      "items": { "type": "string" }
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "How sure you are of YOUR answer. Low is a legitimate and useful answer."
+    },
+    "ambiguity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["is_ambiguous", "competing_answers", "reasoning"],
+      "properties": {
+        "is_ambiguous": {
+          "type": "boolean",
+          "description": "True if the question as worded admits more than one defensible answer — for example it does not say which repo, which branch, or whether it means 'written' or 'in effect'."
+        },
+        "competing_answers": {
+          "type": "array",
+          "description": "Each defensible reading and what it yields. Empty when is_ambiguous is false.",
+          "items": { "type": "string" }
+        },
+        "reasoning": { "type": "string" }
+      }
+    },
+    "leak_risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "where", "reasoning"],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["none", "findable", "stated_verbatim"],
+          "description": "stated_verbatim = the answer appears word-for-word somewhere trivially reachable (a code comment, a filename, a doc heading, a commit subject) so any taker can grep it without understanding anything. findable = reachable with one obvious search. none = requires actually reading and reasoning about code."
+        },
+        "where": {
+          "type": "array",
+          "description": "Exact locations that give the answer away. Empty when level is none.",
+          "items": { "type": "string" }
+        },
+        "reasoning": { "type": "string" }
+      }
+    },
+    "superseded_risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checked_for_later_changes", "notes"],
+      "properties": {
+        "checked_for_later_changes": {
+          "type": "boolean",
+          "description": "Did you actively check whether something LATER overrides the source you answered from — a later migration, a newer commit, current code that diverges from a doc?"
+        },
+        "notes": {
+          "type": "string",
+          "description": "What you checked and what you found. If an earlier authoritative-looking source disagrees with current reality, say both and say which one you believe."
+        }
+      }
+    },
+    "could_not_verify": {
+      "type": "array",
+      "description": "What you could not establish and why. Naming a gap beats guessing past it.",
+      "items": { "type": "string" }
+    }
+  }
+}
