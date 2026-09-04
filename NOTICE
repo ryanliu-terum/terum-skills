@@ -1,0 +1,16 @@
+terum-skills
+Copyright 2026 Terum
+
+This product includes software developed by iFlytek Co., Ltd. as part of skillhub
+(Copyright 2026 iFlytek Co., Ltd.)
+(https://github.com/iflytek/skillhub), licensed under the Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0). The following files were copied from that
+repository at commit 61aa957ecc45e6c3672d11e0c48c13bd601f15c5:
+
+  src/lib/placer/vendor/skillhub/skill-fingerprint.ts
+      from cli/src/services/skill-fingerprint.ts
+  src/lib/placer/vendor/skillhub/skill-target-lock.ts
+      from cli/src/services/skill-target-lock.ts
+
+Each copied file carries an attribution header naming its source path, the commit, the
+license, and whether it was modified.

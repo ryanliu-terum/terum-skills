@@ -12,3 +12,8 @@ __pycache__/
 
 # Terum capture (personal — do not commit)
 CLAUDE.local.md
+
+# npm
+node_modules/
+dist/
+coverage/
