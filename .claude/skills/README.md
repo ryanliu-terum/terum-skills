@@ -19,7 +19,7 @@ live in git so a teammate inherits them on clone. Only machine-specific paths, p
 | hybrid-review | skill | Same review + triage, but the verify panel runs on OpenAI Codex so verifiers don't share the finders' blind spots. |
 | codex-implement | skill | Hand a locked spec to Codex CLI in an isolated worktree, then verify the diff here. |
 | codex-spec | `/codex-spec` | Spec auditor with Codex finders and a Claude verify panel (mirror of hybrid-review), then the same mechanical / clear / fork / declined triage. |
-| harden | `/harden` | Review → fix → re-review loop over hybrid-review (code) or codex-spec (spec): up to 3 full rounds, applies triage's mechanical + clear fixes (critical/high or BLOCKER/DRIFT only) with one commit per round, returns a converged end state. Bookkeeping: `workflows/harden-state.mjs`. |
+| harden | `/harden` | Review → fix → confirm loop. Code: one full hybrid-review pass, then fix-scoped confirmation passes over the fix diff until no critical/high remain (cap 3). Spec: full codex-spec rounds until no BLOCKER/DRIFT remain (cap 3). Applies triage's mechanical + clear fixes with one commit per pass; returns a converged end state. Bookkeeping: `workflows/harden-state.mjs`. |
 | decision-walk | `/decision-walk` | Walk surfaced decisions to LOCK / GATE / DEFER / DELEGATE, written to a committed ledger. |
 | spec-readable | skill | Plain-English companion for a dense spec, written to `.planning/spec_readable/`. |
 | handoff | skill | Snapshot working context into `.claude/handoff.md` before `/clear`; `hooks/handoff-resume-marker.js` stamps it on read. |

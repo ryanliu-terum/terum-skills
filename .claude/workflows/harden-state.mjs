@@ -1,5 +1,11 @@
 #!/usr/bin/env node
-// harden-state.mjs — deterministic bookkeeping for /harden, the review → fix → re-review loop.
+// harden-state.mjs — deterministic bookkeeping for /harden, the review → fix → confirm loop.
+//
+// SHAPE (Ryan, 2026-09-04): the code lane follows the two-pass rule — pass 1 is `full` (the whole
+// target), every later pass is `confirm` (only the previous pass's fix diff, via the engine's
+// --base=<sha recorded before that fix commit>). The spec lane is `full` every round because the
+// codex-spec finder has no diff scope. The expected kind of the next pass is computed here and
+// a round.json with the wrong kind is refused.
 //
 // WHY A SCRIPT AND NOT PROSE
 // A /harden run lasts hours and spans several context windows. The two facts a human needs at
@@ -29,11 +35,12 @@
 //     spec:  .planning/specs/reviews/<slug>.codex-spec.r<N>.review.md
 //
 // round.json (written by the skill after each review + fix wave):
-//   { "round": 4, "report": "<path>", "valid": true, "invalidReason": null,
+//   { "round": 4, "kind": "full|confirm", "report": "<path>", "valid": true, "invalidReason": null,
 //     "counts": { "critical": 0, "high": 2, "medium": 5, "low": 0 },      // CONFIRMED only
 //     "triage": { "mechanical": 2, "clear": 3, "fork": 1, "declined": 1, "untriaged": 0 },
 //     "contested": 1, "unverified": 3,
 //     "applied": { "mechanical": 2, "clear": 3 }, "gates": "pass|fail|n/a", "commit": "<sha>|null",
+//     "confirmBase": "<sha of HEAD before this pass's fix commit>|null",   // the next confirm pass's --base
 //     "human": { "mediums": [{title,location}], "forks": [{title,location,why}],
 //                "notApplied": [{title,location,reason}], "contested": [{title,location}],
 //                "declinedByTriage": [{title,location,reason}], "declinedByLoop": [{title,location,reason}],
@@ -57,6 +64,7 @@ const flag = (name, dflt) => {
 }
 const has = (name) => argv.includes('--' + name)
 const die = (m) => { console.error('FATAL: ' + m); process.exit(1) }
+const log_warn = (m) => console.error('WARNING: ' + m)
 
 const ROOT = path.resolve(flag('root', process.cwd()))
 const SLUG = flag('slug', null)
@@ -65,10 +73,10 @@ const now = () => new Date().toISOString()
 const LANES = {
   code: { topTier: ['critical', 'high'], topLabel: 'critical + high', severities: ['critical', 'high', 'medium', 'low'],
           reportDir: '.planning/reviews', infix: 'hybrid', humanTier: 'Mediums', humanKey: 'mediums',
-          panel: 'hybrid-review — Claude finds, Codex verifies, Claude triages' },
+          panel: 'hybrid-review — Claude finds, Codex verifies, Claude triages', shape: 'two-pass' },
   spec: { topTier: ['blocker', 'drift'], topLabel: 'BLOCKER + DRIFT', severities: ['blocker', 'drift', 'ambiguity', 'gap', 'note'],
           reportDir: '.planning/specs/reviews', infix: 'codex-spec', humanTier: 'Ambiguity / gap', humanKey: 'mediums',
-          panel: 'codex-spec — Codex finds, Claude verifies and triages' },
+          panel: 'codex-spec — Codex finds, Claude verifies and triages', shape: 'full-rounds' },
 }
 
 const stateDir = () => path.join(ROOT, '.planning', 'harden')
@@ -99,6 +107,7 @@ const nextRoundOnDisk = (lane) => {
   const rounds = fs.readdirSync(dir).map((f) => f.match(re)).filter(Boolean).map((m) => Number(m[1]))
   return rounds.length ? Math.max(...rounds) + 1 : 1
 }
+const nextKindOf = (st) => (LANES[st.lane].shape === 'two-pass' && st.rounds.length > 0 ? 'confirm' : 'full')
 const topOf = (lane, counts) => LANES[lane].topTier.reduce((a, k) => a + n(counts[k]), 0)
 const totalOf = (counts) => Object.values(counts).reduce((a, v) => a + n(v), 0)
 const out = (obj) => console.log(JSON.stringify(obj))
@@ -117,16 +126,16 @@ if (CMD === 'init') {
   if (!['unattended', 'confirm'].includes(mode)) die('--mode unattended|confirm')
   if (fs.existsSync(statePath())) {
     const st = readState()
-    if (st.status === 'running') { out({ resumed: true, slug: SLUG, lane: st.lane, nextRound: st.nextRound, rounds: st.rounds.length, cap: st.cap, mode: st.mode, base: st.base, state: rel(statePath()) }); process.exit(0) }
+    if (st.status === 'running') { out({ resumed: true, slug: SLUG, lane: st.lane, shape: LANES[st.lane].shape, nextRound: st.nextRound, nextKind: nextKindOf(st), confirmBase: st.rounds.length ? st.rounds[st.rounds.length - 1].confirmBase || null : null, rounds: st.rounds.length, cap: st.cap, mode: st.mode, base: st.base, state: rel(statePath()) }); process.exit(0) }
     if (!has('force')) die(`run "${SLUG}" already finished (${st.status}); pass --force to archive it and start over`)
     const archived = statePath().replace(/\.state\.json$/, '.state.' + String(st.startedAt || 'old').replace(/[:.]/g, '-') + '.json')
     fs.renameSync(statePath(), archived)
   }
   const start = nextRoundOnDisk(lane)
-  const st = { slug: SLUG, lane, cap, mode, base: flag('base', null), args: flag('args', ''), startedAt: now(), finishedAt: null,
+  const st = { slug: SLUG, lane, shape: LANES[lane].shape, cap, mode, base: flag('base', null), args: flag('args', ''), startedAt: now(), finishedAt: null,
                status: 'running', verdict: null, startRound: start, nextRound: start, rounds: [], invalidAttempts: [] }
   writeState(st)
-  out({ resumed: false, slug: SLUG, lane, nextRound: start, cap, mode, base: st.base, state: rel(statePath()),
+  out({ resumed: false, slug: SLUG, lane, shape: st.shape, nextRound: start, nextKind: 'full', cap, mode, base: st.base, state: rel(statePath()),
         nextReport: path.join(LANES[lane].reportDir, reportName(lane, start)), ledger: rel(ledgerPath()) })
 }
 
@@ -139,6 +148,8 @@ if (CMD === 'round') {
   if (!Number.isInteger(r.round)) die('round.json: "round" must be an integer')
   if (r.round !== st.nextRound) die(`round.json: "round" is ${r.round} but the run expects ${st.nextRound}`)
   if (typeof r.report !== 'string' || !r.report) die('round.json: "report" path is required')
+  const expectedKind = nextKindOf(st)
+  if (r.kind !== expectedKind) die(`round.json: "kind" is ${JSON.stringify(r.kind)} but pass ${r.round} must be "${expectedKind}" (${lane.shape}: ${expectedKind === 'confirm' ? 'a fix-scoped confirmation over the previous pass\'s fixes' : 'a full pass'})`)
   if (typeof r.valid !== 'boolean') die('round.json: "valid" must be true or false')
   if (!r.valid) {
     st.invalidAttempts.push({ round: r.round, report: r.report, reason: r.invalidReason || 'unspecified', at: now() })
@@ -153,19 +164,21 @@ if (CMD === 'round') {
   const prev = st.rounds[st.rounds.length - 1] || null
   const regression = prev ? top > prev.top : false
   const applied = { mechanical: n(r.applied && r.applied.mechanical), clear: n(r.applied && r.applied.clear) }
-  const entry = { round: r.round, report: r.report, at: now(), counts, confirmed: totalOf(counts), top, regression,
+  const entry = { round: r.round, kind: r.kind, report: r.report, at: now(), counts, confirmed: totalOf(counts), top, regression,
                   triage: r.triage || {}, contested: n(r.contested), unverified: n(r.unverified), applied, gates: r.gates,
-                  commit: r.commit || null, human: r.human || {} }
+                  commit: r.commit || null, confirmBase: r.confirmBase || null, human: r.human || {} }
   st.rounds.push(entry)
   st.nextRound = r.round + 1
   let status = 'running', verdict = 'continue'
   if (r.gates === 'fail') { status = 'gates'; verdict = 'stop: gates failed — the baseline is red, so nothing from this round was kept; fix the baseline and start a new run' }
-  else if (top === 0) { status = 'converged'; verdict = `stop: converged — no confirmed ${lane.topLabel} findings remain` }
-  else if (st.rounds.length >= st.cap) { status = 'cap'; verdict = `stop: cap reached (${st.cap} rounds) with ${top} ${lane.topLabel} finding(s) still open` }
-  else if (applied.mechanical + applied.clear === 0) { status = 'no-progress'; verdict = `stop: no progress — nothing was applied this round, so a re-review would find the same ${top} finding(s); everything left needs a human` }
+  else if (top === 0) { status = 'converged'; verdict = `stop: converged — the ${r.kind} pass confirmed no ${lane.topLabel} findings` }
+  else if (st.rounds.length >= st.cap) { status = 'cap'; verdict = `stop: cap reached (${st.cap} passes) with ${top} ${lane.topLabel} finding(s) still open` }
+  else if (applied.mechanical + applied.clear === 0) { status = 'no-progress'; verdict = `stop: no progress — nothing was applied this pass, so the next pass would find the same ${top} finding(s); everything left needs a human` }
+  if (status === 'running' && lane.shape === 'two-pass' && !entry.confirmBase) log_warn(`round ${r.round}: no confirmBase recorded — the next confirmation pass has no --base; record \`git rev-parse HEAD\` before committing a pass`)
   if (status !== 'running') { st.status = status; st.verdict = verdict; st.finishedAt = now() }
   writeState(st)
-  out({ verdict, status, round: r.round, top, regression, applied, nextRound: st.status === 'running' ? st.nextRound : null,
+  out({ verdict, status, round: r.round, kind: r.kind, top, regression, applied, nextRound: st.status === 'running' ? st.nextRound : null,
+        nextKind: st.status === 'running' ? nextKindOf(st) : null, confirmBase: st.status === 'running' && nextKindOf(st) === 'confirm' ? entry.confirmBase : null,
         nextReport: st.status === 'running' ? path.join(lane.reportDir, reportName(st.lane, st.nextRound)) : null })
 }
 
@@ -225,20 +238,20 @@ const render = (st) => {
   const declined = [...unionBy(st.rounds, 'declinedByTriage').map((d) => ({ ...d, by: 'triage' })), ...unionBy(st.rounds, 'declinedByLoop').map((d) => ({ ...d, by: 'loop' }))]
   const commits = st.rounds.filter((r) => r.commit)
   const rows = st.rounds.map((r) =>
-    `| ${r.round} | \`${r.report}\` | ${r.confirmed} | ${r.top}${r.regression ? ' ⚠ up from ' + st.rounds[st.rounds.indexOf(r) - 1].top : ''} | ${r.applied.mechanical} / ${r.applied.clear} | ${r.gates} | ${r.commit ? '`' + r.commit + '`' : '—'} |`)
+    `| ${r.round} | ${r.kind} | \`${r.report}\` | ${r.confirmed} | ${r.top}${r.regression ? ' ⚠ up from ' + st.rounds[st.rounds.indexOf(r) - 1].top : ''} | ${r.applied.mechanical} / ${r.applied.clear} | ${r.gates} | ${r.commit ? '`' + r.commit + '`' : '—'} |`)
   const invalid = st.invalidAttempts.map((a) => `- round ${a.round} attempt at ${a.at}: ${a.reason} (${a.report})`)
   return (
     `# harden: ${SLUG}\n\n` +
-    `**Lane:** ${st.lane} (${lane.panel}) · **mode:** ${st.mode} · **cap:** ${st.cap} rounds` + (st.base ? ` · **base:** \`${st.base}\`` : '') + (st.args ? ` · **passthrough:** \`${st.args}\`` : '') + '\n' +
+    `**Lane:** ${st.lane} (${lane.panel}) · **shape:** ${lane.shape === 'two-pass' ? 'two-pass — one full pass, then fix-scoped confirmation passes' : 'full rounds — the whole spec every round'} · **mode:** ${st.mode} · **cap:** ${st.cap} passes` + (st.base ? ` · **base:** \`${st.base}\`` : '') + (st.args ? ` · **passthrough:** \`${st.args}\`` : '') + '\n' +
     `**Started:** ${st.startedAt}` + (st.finishedAt ? ` · **finished:** ${st.finishedAt}` : '') + '\n\n' +
-    `**Verdict:** ${st.status === 'running' ? `still running — round ${st.nextRound} is next` : st.verdict}\n\n` +
-    `## Convergence\n\n| Round | Report | Confirmed | Top tier (${lane.topLabel}) | Applied (mechanical / clear) | Gates | Commit |\n|---|---|---|---|---|---|---|\n` +
-    (rows.length ? rows.join('\n') + '\n' : '| — | no counted rounds yet | | | | | |\n') +
+    `**Verdict:** ${st.status === 'running' ? `still running — pass ${st.nextRound} (${nextKindOf(st)}) is next` : st.verdict}\n\n` +
+    `## Convergence\n\n| Pass | Kind | Report | Confirmed | Top tier (${lane.topLabel}) | Applied (mechanical / clear) | Gates | Commit |\n|---|---|---|---|---|---|---|---|\n` +
+    (rows.length ? rows.join('\n') + '\n' : '| — | | no counted passes yet | | | | | |\n') +
     (invalid.length ? `\n${invalid.length} invalid attempt(s), not counted:\n${invalid.join('\n')}\n` : '') +
-    `\n## What the loop changed\n\nOne commit per round; \`git revert <sha>\` undoes a round. Nothing was pushed.\n\n` +
-    (commits.length ? commits.map((r) => `- round ${r.round} — \`${r.commit}\` — ${r.applied.mechanical} mechanical + ${r.applied.clear} clear`).join('\n') + '\n' : '_nothing was applied._\n') +
+    `\n## What the loop changed\n\nOne commit per pass; \`git revert <sha>\` undoes a pass. Nothing was pushed.\n\n` +
+    (commits.length ? commits.map((r) => `- pass ${r.round} (${r.kind}) — \`${r.commit}\` — ${r.applied.mechanical} mechanical + ${r.applied.clear} clear`).join('\n') + '\n' : '_nothing was applied._\n') +
     `\n## Needs you\n\n` +
-    `### ${lane.humanTier} — fix or explicitly decline (${cur('mediums').length})\n\nNever applied by the loop. From the last counted round.\n\n` + list(cur('mediums'), (it) => `- **${it.title}**${loc(it)}`) +
+    `### ${lane.humanTier} — fix or explicitly decline (${cur('mediums').length})\n\nNever applied by the loop; the two-pass rule's own done-condition is that every one of these is fixed or explicitly declined by you. From the last counted pass.\n\n` + list(cur('mediums'), (it) => `- **${it.title}**${loc(it)}`) +
     `\n### Forks — run \`/decision-walk ${last ? last.report : '<report>'}\` (${forks.length})\n\nParked in the ledger, never resolved by the loop.\n\n` + list(forks, (it) => `- **${it.title}**${loc(it)} (round ${it.round})${it.why ? ' — ' + it.why : ''}`) +
     `\n### Eligible items not applied — mechanical or clear, with the reason (${notApplied.length})\n\n` + list(notApplied, (it) => `- **${it.title}**${loc(it)} (round ${it.round})${it.reason ? ' — ' + it.reason : ''}`) +
     `\n### Contested — panel split, needs your adjudication (${cur('contested').length})\n\n` + list(cur('contested'), (it) => `- **${it.title}**${loc(it)}`) +
@@ -258,7 +271,8 @@ if (CMD === 'render') {
 if (CMD === 'show') {
   const st = readState()
   out({ slug: SLUG, lane: st.lane, status: st.status, verdict: st.verdict, mode: st.mode, cap: st.cap, base: st.base, args: st.args,
-        startRound: st.startRound, nextRound: st.status === 'running' ? st.nextRound : null, roundsCounted: st.rounds.length,
+        shape: LANES[st.lane].shape, startRound: st.startRound, nextRound: st.status === 'running' ? st.nextRound : null, nextKind: st.status === 'running' ? nextKindOf(st) : null,
+        confirmBase: st.status === 'running' && st.rounds.length ? st.rounds[st.rounds.length - 1].confirmBase || null : null, roundsCounted: st.rounds.length,
         invalidAttempts: st.invalidAttempts.length, lastTop: st.rounds.length ? st.rounds[st.rounds.length - 1].top : null,
         nextReport: st.status === 'running' ? path.join(LANES[st.lane].reportDir, reportName(st.lane, st.nextRound)) : null,
         state: rel(statePath()), ledger: rel(ledgerPath()) })
