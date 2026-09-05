@@ -5,6 +5,7 @@ import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { parseOrExplain, teamNameSchema } from '../lib/schema.js';
+import { withCloneLock } from '../lib/teamRepo.js';
 import { removePlacements } from './uninstall.js';
 
 export interface LeaveArgs { name: string; config?: ConfigStore; }
@@ -33,19 +34,26 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
       throw new Error('Leave was cancelled.');
     }
 
-    const removed = await removePlacements(store, matching, io);
-    await Promise.all([
-      rm(clone, { recursive: true, force: true }),
-      rm(join(store.root, 'cache', name), { recursive: true, force: true }),
-      rm(join(store.root, 'run', `${name}.stamp`), { force: true }),
-      rm(join(store.root, 'teams', `.${name}.safewrite.lock`), { recursive: true, force: true }),
-    ]);
+    // The list shown before the prompt was a summary; the removal works from a fresh read, because a
+    // hook sync may have renamed or added a placement while the question waited.
+    const current = Object.entries((await store.read()).placements).filter(([, entry]) => entry.team === name);
+    const removedPaths = await removePlacements(store, current, io);
+    // The clone goes under the same lock safeWrite holds, so a sync mid-write is refused rather than
+    // having its working tree deleted underneath it; releasing the lock removes the lock directory.
+    await withCloneLock(clone, async () => {
+      await Promise.all([
+        rm(clone, { recursive: true, force: true }),
+        rm(join(store.root, 'cache', name), { recursive: true, force: true }),
+        rm(join(store.root, 'run', `${name}.stamp`), { force: true }),
+      ]);
+    });
     await store.update((fresh) => {
       delete fresh.teams[name];
       for (const [id, entry] of Object.entries(fresh.shared)) if (entry.team === name) delete fresh.shared[id];
       fresh.pending = fresh.pending.filter((entry) => entry.team !== name);
-      for (const [path, entry] of Object.entries(fresh.placements)) if (entry.team === name) delete fresh.placements[path];
+      for (const path of removedPaths) delete fresh.placements[path];
     });
+    const removed = removedPaths.length;
     io.print(`Left ${name}. You are still an active member of ${remote}; an admin archives membership with team remove ${binding.handle ?? '<handle>'}.`);
     return success({ team: name, remote, handle: binding.handle, removed, cloneRemoved });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }

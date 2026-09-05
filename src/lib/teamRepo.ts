@@ -329,3 +329,14 @@ export async function cloneOrigin(root: string, runner: Runner = systemRunner): 
     return null;
   }
 }
+
+/** The per-clone writer lock's path — the one safeWrite holds; `team leave` takes it before removing the clone. */
+export function cloneLockPath(root: string): string {
+  return join(dirname(root), `.${basename(root)}.safewrite.lock`);
+}
+
+/** Hold the per-clone writer lock while `action` runs; a second writer waits briefly, then fails rather than racing. */
+export async function withCloneLock<T>(root: string, action: () => Promise<T>): Promise<T> {
+  const release = await lockfile.lock(root, { lockfilePath: cloneLockPath(root), realpath: false, stale: 60_000, retries: { retries: 10, minTimeout: 50, maxTimeout: 500 }, onCompromised: () => undefined });
+  try { return await action(); } finally { await release().catch(() => undefined); }
+}

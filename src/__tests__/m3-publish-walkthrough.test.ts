@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { run as publish } from '../commands/publish.js';
@@ -35,6 +35,8 @@ describe('M3 publish walkthrough (§12)', () => {
     await expect(sync({ config: bStore }, first)).resolves.toMatchObject({ ok: true });
     expect(first.countAsked('Install 1 newly endorsed skill(s) from team?')).toBe(1);
     expect(await git(['show', 'main:people/bob.json'], fixture.bare)).toContain(sharedSkill.id);
-    await expect(sync({ config: bStore }, new ScriptedPrompter())).resolves.toMatchObject({ ok: true });
+    await expect(access(join(bHome, '.claude', 'skills', 'sample', 'SKILL.md'))).resolves.toBeUndefined();
+    // Offered once: an interactive second sync with no scripted answers would throw if it asked again, and defers nothing.
+    await expect(sync({ config: bStore }, new ScriptedPrompter([], [], true))).resolves.toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
   });
 });

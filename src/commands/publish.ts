@@ -43,11 +43,13 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     if (!record) throw new Error(`No skill ${args.ref} in team ${team}.`);
     const scope: PublishScope = args.project === undefined
       ? { kind: 'global' }
-      : teamJson.projects[args.project] ? { kind: 'project', project: args.project } : (() => { throw new Error(`Unknown project ${args.project}.`); })();
+      : Object.hasOwn(teamJson.projects, args.project) ? { kind: 'project', project: args.project } : (() => { throw new Error(`Unknown project ${args.project}.`); })();
     const scopeLabel = label(scope);
     const list = scope.kind === 'global' ? teamJson.global : teamJson.projects[scope.project]!.skills;
     const base: Omit<PublishResult, 'changed' | 'branch' | 'prUrl' | 'compareUrl'> = { team, id: record.id, name: record.name, scope, policy: teamJson.policy.publish };
     if (list.includes(record.id)) return alreadyEndorsed(base, scopeLabel, io);
+    const destination = teamJson.policy.publish === 'pr' ? `publish/${record.name}` : null;
+    if (destination !== null) await assertBranchReusable(runner, clone, destination, record.id, scope, binding.remote);
 
     if (teamJson.policy.publish === 'push') {
       printCard(record, scopeLabel, io);
@@ -62,10 +64,13 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       const parsed = skillSource === undefined ? undefined : parseSkillFrontmatter(treeText(skillSource));
       if (!parsed?.ok || parsed.data.metadata.id !== record.id) throw new Error(`${record.name} is no longer in the repository as ${record.id.slice(0, 8)}; run sync and retry.`);
       const fresh = parseJson(teamSchema, treeText(teamSource), 'team.json');
+      // The branch (or the direct push to main) was chosen from the policy read before the loop; the
+      // tree being written may be newer, and a policy the team changed meanwhile must win.
+      if (fresh.policy.publish !== teamJson.policy.publish) throw new Error(`The team publish policy changed to "${fresh.policy.publish}" while this publish ran; rerun publish.`);
       let target: string[];
       if (scope.kind === 'global') target = fresh.global;
       else {
-        const project = fresh.projects[scope.project];
+        const project = Object.hasOwn(fresh.projects, scope.project) ? fresh.projects[scope.project] : undefined;
         if (!project) throw new Error(`Unknown project ${scope.project}.`);
         target = project.skills;
       }
@@ -76,7 +81,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       action: 'publish',
       handle: binding.handle,
       message: `${binding.handle}: publish ${record.name}`,
-      ...(teamJson.policy.publish === 'pr' ? { branch: `publish/${record.name}` } : {}),
+      ...(destination !== null ? { branch: destination } : {}),
       ...args.safeWrite,
     });
     if (!written.changed) return alreadyEndorsed(base, scopeLabel, io);
@@ -99,6 +104,13 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
         io.print(prUrl);
         return success({ ...base, changed: true, branch, prUrl, compareUrl: null });
       }
+      // Re-running while the pull request is still open is not a failure: the branch was refreshed and the PR stands.
+      const reason = commandMessage(created.stderr, created.stdout);
+      if (/already exists/i.test(reason)) {
+        const existing = /https?:\/\/\S+/.exec(reason)?.[0] ?? null;
+        io.print(existing ?? `A pull request for ${branch} is already open.`);
+        return success({ ...base, changed: true, branch, prUrl: existing, compareUrl: existing ? null : compareUrl });
+      }
       io.print(compareUrl!);
       return failure(`The endorsement branch ${branch} was pushed but gh could not open the pull request: ${commandMessage(created.stderr, created.stdout)}. Open it at ${compareUrl}.`, { ...base, changed: true, branch, prUrl: null, compareUrl });
     }
@@ -119,6 +131,32 @@ function compare(remote: string, branch: string): string | null {
   return ownerRepo ? `https://github.com/${ownerRepo}/compare/main...${branch}?expand=1` : null;
 }
 function commandMessage(stderr: string, stdout: string): string { return (stderr || stdout).trim(); }
+
+/**
+ * An existing `publish/<name>` on the remote is reused — the lease then refreshes it — only when it
+ * already carries THIS endorsement: an abandoned attempt of the same publish, the case the spec
+ * means. Any other content (a project scope, someone else's pending endorsement, a hand-made
+ * branch) is refused before anything is committed, because force-replacing it would silently
+ * rewrite whoever's pull request is built on it. Existence is checked live on the remote; the
+ * content from the fetched object, and an unreadable one counts as different.
+ */
+async function assertBranchReusable(runner: Runner, clone: string, branch: string, id: string, scope: PublishScope, remote: string): Promise<void> {
+  const heads = await runner.run('git', ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], { cwd: clone });
+  if (heads.code !== 0) throw new Error(`Could not check the remote for ${branch}: ${commandMessage(heads.stderr, heads.stdout)}`);
+  const sha = heads.stdout.trim().split(/\s+/)[0];
+  if (!sha) return;
+  let carriesThis = false;
+  const shown = await runner.run('git', ['show', `${sha}:team.json`], { cwd: clone });
+  if (shown.code === 0) {
+    try {
+      const theirs = parseJson(teamSchema, shown.stdout, `${branch}:team.json`);
+      carriesThis = scope.kind === 'global' ? theirs.global.includes(id) : Boolean(Object.hasOwn(theirs.projects, scope.project) && theirs.projects[scope.project]!.skills.includes(id));
+    } catch { carriesThis = false; }
+  }
+  if (carriesThis) return;
+  const where = compare(remote, branch) ?? `${stripRemoteCredentials(remote)} — branch ${branch}`;
+  throw new Error(`${branch} already exists on the remote with a different endorsement (${where}). Merge or close its pull request, or delete the branch with \`git push origin --delete ${branch}\`, then retry.`);
+}
 function printCard(record: Awaited<ReturnType<typeof findSkill>> & {}, scopeLabel: string, io: Prompter): void {
   if (!record) return;
   io.print(`name: ${record.name}`);

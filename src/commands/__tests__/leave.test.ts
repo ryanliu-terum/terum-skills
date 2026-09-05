@@ -1,4 +1,6 @@
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import lockfile from 'proper-lockfile';
+import { cloneLockPath } from '../../lib/teamRepo.js';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
@@ -63,4 +65,43 @@ describe('team leave (§6)', () => {
     await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { cloneRemoved: false } });
     expect((await store.read()).teams).toEqual({});
   });
+  it('removes what the ledger says AFTER the prompt, so a placement renamed while the question waited is still removed', async () => {
+    const { store, placed } = await prepared();
+    const renamed = join(placed.path, '..', 'sample-renamed');
+    class RenamingPrompter extends ScriptedPrompter {
+      override async confirm(question: string): Promise<boolean> {
+        // What a hook sync's rename does: the folder moves and the ledger key follows it.
+        await rename(placed.path, renamed);
+        await store.update((config) => { const entry = config.placements[placed.path]!; delete config.placements[placed.path]; config.placements[renamed] = entry; });
+        return super.confirm(question);
+      }
+    }
+    await expect(run({ name: 'team', config: store }, new RenamingPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { removed: 1 } });
+    await expect(access(renamed)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await store.read()).placements).toEqual({});
+  });
+
+  it('a placement whose parent directory is gone is dropped from the ledger without recreating the tree', async () => {
+    const { store, placed } = await prepared();
+    const parent = join(placed.path, '..', '..');
+    await rm(parent, { recursive: true, force: true });
+    await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { removed: 1 } });
+    await expect(access(parent)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await store.read()).placements).toEqual({});
+  });
+
+  it('waits for, then refuses, a clone another operation is writing to, and removes nothing meanwhile', async () => {
+    const { store, clone, placed } = await prepared();
+    const release = await lockfile.lock(clone, { lockfilePath: cloneLockPath(clone), realpath: false, stale: 60_000 });
+    try {
+      await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/lock/i) });
+      await expect(access(clone)).resolves.toBeUndefined();
+      // The placement itself was already removed before the clone step; the config still names the team.
+      await expect(access(placed.path)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await store.read()).teams.team).toBeDefined();
+    } finally { await release(); }
+    await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { cloneRemoved: true } });
+    await expect(access(cloneLockPath(clone))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
 });
