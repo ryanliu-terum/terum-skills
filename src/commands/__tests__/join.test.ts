@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { join, MAX_HANDLE_ATTEMPTS, parseJoinTarget } from '../team.js';
+import { join as rawJoin, MAX_HANDLE_ATTEMPTS, parseJoinTarget } from '../team.js';
 import { PromptClosedError } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
 import { systemRunner } from '../../lib/runner.js';
@@ -9,6 +9,7 @@ import { bareTeam, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedProm
 
 const REMOTE = 'https://git.example/team.git';
 const answers = (handle = 'me', name = 'Me', email = 'me@example.com') => ['me', handle, name, email];
+const join = (args: Parameters<typeof rawJoin>[0], io: Parameters<typeof rawJoin>[1]) => rawJoin({ ...args, offerHook: false }, io);
 
 async function setup(extra?: { archived?: string[]; people?: Record<string, object> }) {
   const fixture = await bareTeam();
@@ -33,6 +34,18 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(JSON.parse(await git(['show', 'main:people/ajay-t.json'], fixture.bare)).email).toBe('ajay.two@example.com');
     expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).display_name).toBe('Existing');
     expect((await git(['log', '-1', '--format=%s', 'main'], fixture.bare)).trim()).toBe('ajay-t: join');
+  });
+
+  it('offers the session hook directly and setup can suppress that offer', async () => {
+    const { fixture, store, runner } = await setup();
+    const settingsFile = pathJoin(fixture.root, 'settings.json');
+    const direct = new ScriptedPrompter(answers(), [true]);
+    await expect(rawJoin({ target: REMOTE, config: store, runner, hook: { settingsFile, backupDir: pathJoin(fixture.root, 'backups') } }, direct)).resolves.toMatchObject({ ok: true });
+    expect(direct.countAsked('Install the Claude Code session-start hook')).toBe(1);
+    const second = await setup();
+    const suppressed = new ScriptedPrompter(answers());
+    await expect(rawJoin({ target: REMOTE, config: second.store, runner: second.runner, offerHook: false }, suppressed)).resolves.toMatchObject({ ok: true });
+    expect(suppressed.countAsked('Install the Claude Code session-start hook')).toBe(0);
   });
 
   it('prints the roster of active members after joining', async () => {
