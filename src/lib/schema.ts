@@ -20,6 +20,11 @@ export const scopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('global') }).passthrough(),
   z.object({ kind: z.literal('project'), project: z.string().min(1) }).passthrough(),
 ]);
+export function sameScope(a: unknown, b: unknown): boolean {
+  const left = scopeSchema.safeParse(a); const right = scopeSchema.safeParse(b);
+  if (!left.success || !right.success || left.data.kind !== right.data.kind) return false;
+  return left.data.kind === 'global' || left.data.project === (right.data as { kind: 'project'; project: string }).project;
+}
 
 export const installedSchema = z.object({
   id: skillIdSchema,

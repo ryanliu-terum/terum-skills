@@ -1,9 +1,12 @@
-import { access, readFile, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
-import { assertSafePath, openTeamRepo, PushRefused, SafeWriteExhausted } from '../teamRepo.js';
+import { assertSafePath, openTeamRepo, PushRefused, SafeWriteExhausted, treeText } from '../teamRepo.js';
+import { createConfigStore } from '../config.js';
+import { run as share } from '../../commands/share.js';
+import { ScriptedPrompter } from './fixtures.js';
 import { bareTeam, cloneWithIdentity, git, originSha, person, pushFromSeed, temporaryDirectory, wrapRunner } from './fixtures.js';
 
 const exists = (path: string) => access(path).then(() => true, () => false);
@@ -138,7 +141,7 @@ describe('safeWrite (§6.0)', () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'), 'Admin', 'admin@example.com');
     await openTeamRepo(clone, fixture.bare).safeWrite((tree) => {
-      const team = JSON.parse(tree.after('team.json')!);
+      const team = JSON.parse(treeText(tree.after('team.json')!));
       team.archived.push('seed');
       tree.set('team.json', `${JSON.stringify(team)}\n`);
     }, { action: 'team-remove', handle: 'admin', targetHandle: 'seed' });
@@ -182,5 +185,52 @@ describe('safeWrite (§6.0)', () => {
     const seen: boolean[] = [];
     await openTeamRepo(clone, fixture.bare, racing).safeWrite((tree) => { seen.push(tree.before('people/taken.json') !== undefined); tree.set('people/me.json', personJson('me')); }, { action: 'join', handle: 'me' });
     expect(seen).toEqual([false, true]);
+  });
+
+  it('writes a Buffer SKILL.md byte-for-byte instead of decoding it through UTF-8', async () => {
+    const fixture = await bareTeam();
+    const id = '11111111-1111-4111-8111-111111111111';
+    const initial = `---\nname: binary\ndescription: binary\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`;
+    await pushFromSeed(fixture.seed, 'skills/binary/SKILL.md', initial);
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const payload = Buffer.concat([Buffer.from(initial), Buffer.from([0xff, 0xfe, 0x80])]);
+    await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/binary/SKILL.md', payload), { action: 'sync', handle: 'me', author: 'Me <me@example.com>' });
+    expect(await readFile(join(clone, 'skills', 'binary', 'SKILL.md'))).toEqual(payload);
+  });
+
+  it('lists the tree as mutated, including additions and excluding removals', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/x/SKILL.md', 'skill');
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    let observed = false;
+    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => {
+      tree.set('people/new.json', personJson('new'));
+      tree.remove('skills/x/SKILL.md');
+      expect(tree.paths('people/')).toContain('people/new.json');
+      expect(tree.paths('skills/x/')).not.toContain('skills/x/SKILL.md');
+      observed = true;
+    }, { action: 'join', handle: 'new' })).rejects.toThrow(GuardError);
+    expect(observed).toBe(true);
+  });
+
+  it('lands eight barrier-released real shares with unique IDs and leaves every clone clean', async () => {
+    const fixture = await bareTeam();
+    const stores = await Promise.all(Array.from({ length: 8 }, async (_, index) => {
+      const store = createConfigStore(join(fixture.root, `state-${index}`));
+      const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'), `User ${index}`, `u${index}@example.com`);
+      await store.update((config) => { config.display_name = `User ${index}`; config.email = `u${index}@example.com`; config.teams.team = { remote: fixture.bare, token: null, handle: `u${index}` }; });
+      const source = join(fixture.root, `skill-${index}`); await mkdir(source);
+      await writeFile(join(source, 'SKILL.md'), `---\nname: skill-${index}\ndescription: skill ${index}\nmetadata:\n  terum-category: testing\n---\n`);
+      return { store, clone, source };
+    }));
+    let release!: () => void;
+    const barrier = new Promise<void>((done) => { release = done; });
+    const writes = stores.map(async ({ store, source }) => { await barrier; return share({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true])); });
+    release();
+    const results = await Promise.all(writes);
+    expect(results.every((result) => result.ok)).toBe(true);
+    for (const { clone } of stores) expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
+    const ids = await Promise.all(Array.from({ length: 8 }, (_, index) => git(['show', `main:skills/skill-${index}/SKILL.md`], fixture.bare).then((source) => /^\s+id:\s+(.+)$/m.exec(source)?.[1])));
+    expect(new Set(ids).size).toBe(8);
   });
 });

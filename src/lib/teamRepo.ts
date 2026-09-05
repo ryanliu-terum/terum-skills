@@ -17,8 +17,10 @@ import { CommandResult, Runner, systemRunner } from './runner.js';
  * the untracked paths this operation created, whether the loop succeeded, failed, or threw.
  */
 export interface MutableTree extends GuardTree {
-  set(path: string, content: string): void;
+  set(path: string, content: string | Buffer): void;
   remove(path: string): void;
+  /** Tracked paths in the freshly reset tree. Needed to make a skill-folder update a true mirror. */
+  paths(prefix?: string): readonly string[];
 }
 export type Mutate = (tree: MutableTree) => void;
 
@@ -176,24 +178,42 @@ export function assertSafePath(path: string): void {
 
 /** The tree handed to a mutation: lazy reads of the reset checkout plus an overlay of its edits. */
 function makeTree(root: string, tracked: ReadonlySet<string>): MutableTree {
-  const cache = new Map<string, string>();
-  const overlay = new Map<string, string | undefined>();
-  const before = (path: string): string | undefined => {
+  const cache = new Map<string, Buffer>();
+  const overlay = new Map<string, string | Buffer | undefined>();
+  const before = (path: string): string | Buffer | undefined => {
     if (!tracked.has(path)) return undefined;
     let content = cache.get(path);
-    if (content === undefined) { content = readFileSync(join(root, path), 'utf8'); cache.set(path, content); }
+    if (content === undefined) { content = readFileSync(join(root, path)); cache.set(path, content); }
     return content;
   };
   return {
     before,
-    after: (path) => (overlay.has(path) ? overlay.get(path) : before(path)),
+    after: (path) => {
+      const content = overlay.has(path) ? overlay.get(path) : before(path);
+      return content;
+    },
     get changedPaths() {
-      return [...overlay.keys()].filter((path) => overlay.get(path) !== before(path)).sort();
+      return [...overlay.keys()].filter((path) => !sameContent(overlay.get(path), before(path))).sort();
     },
     set(path, content) { assertSafePath(path); overlay.set(path, content); },
     remove(path) { assertSafePath(path); overlay.set(path, undefined); },
+    paths(prefix = '') {
+      return [...new Set([...tracked, ...overlay.keys()])]
+        .filter((path) => (!overlay.has(path) || overlay.get(path) !== undefined) && path.startsWith(prefix))
+        .sort();
+    },
   };
 }
+
+function sameContent(left: string | Buffer | undefined, right: string | Buffer | undefined): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  if (Buffer.isBuffer(left) && Buffer.isBuffer(right)) return left.equals(right);
+  if (typeof left === 'string' && typeof right === 'string') return left === right;
+  return Buffer.isBuffer(left) ? left.equals(Buffer.from(right as string)) : Buffer.from(left).equals(right as Buffer);
+}
+
+/** Decode a tree value only at a text consumer; binary paths stay byte-for-byte in the tree. */
+export function treeText(value: string | Buffer): string { return Buffer.isBuffer(value) ? value.toString('utf8') : value; }
 
 /** Resolve the parent directory and refuse it if a symlink would carry the write outside the clone. */
 async function assertInsideClone(root: string, realRoot: string, path: string): Promise<string> {

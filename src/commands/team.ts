@@ -9,7 +9,9 @@ import { normalizeRemote, remoteName, remoteToGitUrl } from '../lib/remote.js';
 import { Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { Person, Team, parseJson, parseOrExplain, personSchema, teamNameSchema, teamSchema } from '../lib/schema.js';
-import { cloneOrigin, cloneTeam, MutableTree, openTeamRepo } from '../lib/teamRepo.js';
+import { cloneOrigin, cloneTeam, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
+import { endorsedCandidates } from '../lib/skills.js';
+import { installOne } from './install.js';
 
 /**
  * §6 `team create` and `team join` (milestone M1). Both are `run(args, io)` over the Prompter.
@@ -146,6 +148,16 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     } catch (error) {
       io.print(`Joined, but the member list could not be read: ${error instanceof Error ? error.message : String(error)}`);
     }
+    // M2: the post-join endorsement offer deliberately reuses installOne, including its
+    // individual allowed-tools consent and persisted approval record. The set prompt itself is
+    // one question, as §6 requires.
+    const endorsed = await endorsedCandidates(clone, team, identity.handle, { onProblem: (problem) => io.print(`Skipping ${problem.name}: ${problem.message}`) });
+    if (endorsed.length && await io.confirm(`Install ${endorsed.length} team-endorsed skill(s)?`)) {
+      for (const skill of endorsed) {
+        try { await installOne({ team, id: skill.id, store, runner }, io); }
+        catch (error) { io.print(`Could not install endorsed skill ${skill.name}: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+    }
     return success({ team, handle: identity.handle, rejoined, roster });
   } catch (error) {
     return failure(error instanceof Error ? error.message : String(error));
@@ -164,10 +176,10 @@ export function joinMutation(tree: MutableTree, identity: Identity, boundHandle:
   const path = `people/${handle}.json`;
   const teamJson = tree.before('team.json');
   if (teamJson === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');
-  const teamDocument = parseJson(teamSchema, teamJson, 'team.json');
+  const teamDocument = parseJson(teamSchema, treeText(teamJson), 'team.json');
   const archived = teamDocument.archived.includes(handle);
   const existingJson = tree.before(path);
-  const existing = existingJson === undefined ? undefined : parseJson(personSchema, existingJson, path);
+  const existing = existingJson === undefined ? undefined : parseJson(personSchema, treeText(existingJson), path);
   if (existing) {
     const samePerson = existing.github.toLowerCase() === identity.github.toLowerCase() || existing.email.toLowerCase() === identity.email.toLowerCase();
     if (!archived && !(boundHandle === handle && samePerson)) throw new HandleCollisionError(handle);
