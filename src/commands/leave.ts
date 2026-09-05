@@ -1,6 +1,7 @@
 import { access, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
+import { defaultHookOptions, HookOptions, removeHook } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
@@ -8,7 +9,7 @@ import { parseOrExplain, teamNameSchema } from '../lib/schema.js';
 import { withCloneLock } from '../lib/teamRepo.js';
 import { removePlacements } from './uninstall.js';
 
-export interface LeaveArgs { name: string; config?: ConfigStore; }
+export interface LeaveArgs { name: string; config?: ConfigStore; hook?: HookOptions; }
 export interface LeaveResult { team: string; remote: string; handle: string | null; removed: number; cloneRemoved: boolean; }
 
 /** Leave only this machine: no team-repository mutation and no git invocation. */
@@ -47,12 +48,20 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
         rm(join(store.root, 'run', `${name}.stamp`), { force: true }),
       ]);
     });
+    let lastTeam = false;
     await store.update((fresh) => {
       delete fresh.teams[name];
       for (const [id, entry] of Object.entries(fresh.shared)) if (entry.team === name) delete fresh.shared[id];
       fresh.pending = fresh.pending.filter((entry) => entry.team !== name);
       for (const path of removedPaths) delete fresh.placements[path];
+      lastTeam = Object.keys(fresh.teams).length === 0;
     });
+    if (lastTeam) {
+      const options = { ...defaultHookOptions(store.root), ...args.hook };
+      // The local cleanup above already happened; an unreadable settings.json must not turn it into a failure.
+      try { if (await removeHook(options) === 'removed') io.print(`Removed the session hook from ${options.settingsFile}.`); }
+      catch (error) { io.print(`Left the session hook in place: ${error instanceof Error ? error.message : String(error)}`); }
+    }
     const removed = removedPaths.length;
     io.print(`Left ${name}. You are still an active member of ${remote}; an admin archives membership with team remove ${binding.handle ?? '<handle>'}.`);
     return success({ team: name, remote, handle: binding.handle, removed, cloneRemoved });

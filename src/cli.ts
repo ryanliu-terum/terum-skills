@@ -11,6 +11,7 @@ import { run as runLs } from './commands/ls.js';
 import { run as readme } from './commands/readme.js';
 import { run as runLeave } from './commands/leave.js';
 import { run as runPublish } from './commands/publish.js';
+import { run as runSetup } from './commands/setup.js';
 import { Prompter } from './lib/prompt.js';
 import { Result } from './lib/result.js';
 
@@ -19,10 +20,10 @@ import { Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>) => Promise<void>;
-export interface CliVerbs { login: typeof login; team: typeof runTeam; share?: typeof share; install?: typeof install; uninstall?: typeof uninstall; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; }
+export interface CliVerbs { login: typeof login; team: typeof runTeam; setup?: typeof runSetup; share?: typeof share; install?: typeof install; uninstall?: typeof uninstall; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }): Command {
-  const active: Required<CliVerbs> = { login: verbs.login, team: verbs.team, share: verbs.share ?? share, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave };
+  const active: Required<CliVerbs> = { login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, share: verbs.share ?? share, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave };
   const program = new Command();
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
 
@@ -30,6 +31,11 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .command('login')
     .description('Check the GitHub CLI and record your identity (name, email, GitHub login, default handle); writes no team entry')
     .action(async () => execute((io) => active.login({}, io)));
+
+  program
+    .command('setup [target]')
+    .description('Onboarding wizard: create a team (no argument) or join one (<org>/<repo> or a remote URL)')
+    .action(async (target: string | undefined) => execute((io) => active.setup({ target }, io)));
 
   const team = program.command('team').description('Create or join a team');
   team

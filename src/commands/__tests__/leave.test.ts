@@ -7,6 +7,7 @@ import { createConfigStore } from '../../lib/config.js';
 import { place } from '../../lib/placer.js';
 import { bareTeam, cloneWithIdentity, git, originSha, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
 import { run } from '../leave.js';
+import { installHook } from '../../lib/hook.js';
 
 async function prepared() {
   const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -57,6 +58,21 @@ describe('team leave (§6)', () => {
     await expect(run({ name: 'other', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { team: 'other' } });
     await expect(access(otherPlaced.path)).rejects.toMatchObject({ code: 'ENOENT' }); await expect(access(otherClone)).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await store.read()).teams).toEqual({});
+  });
+
+  it('keeps the hook while another team remains and removes it after the last team leaves', async () => {
+    const { fixture, store } = await prepared();
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    const hook = { settingsFile: join(fixture.root, 'settings.json'), backupDir: join(fixture.root, 'backups') };
+    await installHook(hook);
+    await expect(run({ name: 'team', config: store, hook }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true });
+    expect(JSON.parse(await readFile(hook.settingsFile, 'utf8')).hooks.SessionStart).toHaveLength(1);
+    const io = new ScriptedPrompter([], [true]);
+    await expect(run({ name: 'other', config: store, hook }, io)).resolves.toMatchObject({ ok: true });
+    expect(JSON.parse(await readFile(hook.settingsFile, 'utf8')).hooks).toBeUndefined();
+    expect(io.lines).toContain(`Removed the session hook from ${hook.settingsFile}.`);
   });
 
   it('refuses a ledger path outside a skills directory and keeps the team configured', async () => {
