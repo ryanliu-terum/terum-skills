@@ -4,15 +4,18 @@ import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
-import { skillEndorsement } from '../lib/readme.js';
+import { latestTree, shortHash, skillEndorsement } from '../lib/readme.js';
+import { Runner, systemRunner } from '../lib/runner.js';
+import { format as formatSkill } from './ls.js';
 
-export interface SearchArgs { term: string; category?: string; author?: string; project?: string; config?: ConfigStore; now?: () => number; }
-export interface SearchHit { team: string; name: string; author: string; category: string; installs: number; endorsed: string; }
+export interface SearchArgs { term: string; category?: string; author?: string; project?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
+export interface SearchHit { team: string; id: string; name: string; author: string; category: string; installs: number; latest: string; endorsed: string; }
 
-/** Read-only clone search: no runner, no prompts, no placement, no safeWrite. */
+/** Read-only clone search: git reads only (the latest tree hash), no prompts, no placement, no safeWrite. */
 export async function run(args: SearchArgs, io: Prompter): Promise<Result<SearchHit[]>> {
   try {
     const store = args.config ?? createConfigStore();
+    const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const term = args.term.toLowerCase();
     const hits: SearchHit[] = [];
@@ -35,9 +38,9 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         if (many && filtered.length) io.print(`${team}:`);
         for (const skill of filtered) {
         const endorsed = skillEndorsement(teamJson, skill.id);
-        const hit = { team, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: people.reduce((count, person) => count + Number(person.installed.some((item) => item.id === skill.id)), 0), endorsed };
+        const hit = { team, id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: people.reduce((count, person) => count + Number(person.installed.some((item) => item.id === skill.id)), 0), latest: shortHash(await latestTree(runner, clone, skill.name)), endorsed };
         hits.push(hit);
-        io.print(`${skill.name}  ${hit.author}  ${hit.category}  installs:${hit.installs}  ${hit.endorsed}`);
+        io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed }));
         }
         await staleNotice(store, team, io, args.now ?? Date.now);
       } catch (error) {

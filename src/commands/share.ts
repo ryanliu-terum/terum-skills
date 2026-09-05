@@ -7,7 +7,7 @@ import { exists } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
+import { allowedTools, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
 import { canonicalDigest, injectManagedFields, skillRecords } from '../lib/skills.js';
 import { MutableTree, openTeamRepo } from '../lib/teamRepo.js';
 
@@ -94,6 +94,15 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const repoSkill = join(record.directory, 'SKILL.md');
     const repoContents = await readFile(repoSkill, 'utf8');
     const repairedRepo = injectManagedFields(repoContents, { license: team.license, id, author });
+    // §5.3: a changed `name` is a rename, not a new skill — the ID carries across it. The source's
+    // declared name is the target; the repository folder follows on the local-edit row below.
+    // (The folder basename is not consulted: `share --relocate` may legitimately point anywhere.)
+    const declared = parseSkillFrontmatter(repaired);
+    const targetName = declared.ok ? declared.data.name : record.name;
+    if (targetName !== record.name) {
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(targetName) || targetName.length > 64) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); continue; }
+      if ((await skillRecords(clone, tracked.team)).some((item) => item.name === targetName && item.id !== id)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; another skill already uses that name.`); continue; }
+    }
     const sourceDigest = await canonicalDigest(tracked.source);
     const repoDigest = await canonicalDigest(record.directory);
     const baseline = tracked.baseline;
@@ -117,7 +126,15 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
       // narrow write first, then the normal author-owned content mirror on the replayed tree.
       await refreshRepo(repairedRepo);
       const files = await sourceFiles(tracked.source);
-      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => mirrorToTree(tree, `skills/${record!.name}`, files), { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
+      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => {
+        if (targetName !== record!.name) {
+          // The preflight list can be stale; only the freshly reset tree is authoritative for the name invariant.
+          if (tree.paths(`skills/${targetName}/`).length) throw new Error(`Skill name ${targetName} already exists in team ${tracked.team}; choose a unique name.`);
+          for (const path of tree.paths(`skills/${record!.name}/`)) tree.remove(path);
+        }
+        mirrorToTree(tree, `skills/${targetName}`, files);
+      }, { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: targetName === record!.name ? `${binding.handle}: update ${record.name}` : `${binding.handle}: rename ${record.name} to ${targetName}` });
+      if (targetName !== record.name) io.print(`Renamed shared skill ${record.name} to ${targetName}.`);
       await store.update((next) => { if (next.shared[id]) next.shared[id].baseline = sourceDigest; });
       } else {
         await replaceDirectory(record.directory, tracked.source);
@@ -185,6 +202,13 @@ function inspectSource(raw: string, name: string): string {
   const match = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(raw); if (!match) throw new Error('SKILL.md has no YAML frontmatter.');
   const parsed = YAML.parse(match[1]!) as Record<string, unknown>;
   if (!parsed || typeof parsed !== 'object' || parsed.name !== name || typeof parsed.description !== 'string') throw new Error(`SKILL.md name must equal folder ${name} and description is required.`);
+  // §5.4: a malformed `allowed-tools` never normalizes and never auto-places, so share refuses it
+  // outright and names the line — the author learns now, not when a teammate's install is blocked.
+  const grants = allowedTools(parsed['allowed-tools']);
+  if (!grants.ok) {
+    const line = raw.split(/\r?\n/).findIndex((text) => /^allowed-tools\s*:/.test(text)) + 1;
+    throw new Error(`${name}: allowed-tools is malformed${line ? ` (SKILL.md line ${line})` : ''}: ${JSON.stringify(grants.raw)}. Use a YAML list of tool patterns, or one comma-separated string.`);
+  }
   return parsed.description;
 }
 async function hasPrivilegedContent(root: string): Promise<boolean> {

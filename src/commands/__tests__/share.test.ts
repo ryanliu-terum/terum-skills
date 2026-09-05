@@ -24,6 +24,22 @@ describe('share (§5.3)', () => {
     expect(Object.keys((await store.read()).shared)).toHaveLength(1);
   });
 
+  it('rejects a malformed allowed-tools value at share time, names the line, and writes nothing', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const source = join(fixture.root, 'sample'); await mkdir(source);
+    const original = '---\nname: sample\ndescription: x\nallowed-tools:\n  bash: true\nmetadata:\n  terum-category: testing\n---\n';
+    await writeFile(join(source, 'SKILL.md'), original);
+    const before = await originSha(fixture.bare);
+    const result = await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true]));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('allowed-tools is malformed (SKILL.md line 4)') });
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(original);
+    expect((await store.read()).shared).toEqual({});
+  });
+
   it('preserves binary shared assets through sharing, sync updates, and a later install', async () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
@@ -226,6 +242,65 @@ describe('share (§5.3)', () => {
     expect(await originSha(fixture.bare)).toBe(sha);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toContain('name: sample');
     expect((await store.read()).shared[id]!.source).toBe(source);
+  });
+
+  it('propagates an author-side rename: the repository folder moves, the id carries, and an installer follows on its next sync', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const source = join(fixture.root, 'sample'); await mkdir(source);
+    await writeFile(join(source, 'SKILL.md'), '---\nname: sample\ndescription: x\nmetadata:\n  terum-category: testing\n---\n');
+    expect((await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true]))).ok).toBe(true);
+    const [id] = Object.keys((await store.read()).shared);
+    // A second machine installs it under the old name.
+    const secondStore = createConfigStore(join(fixture.root, 'second-state'));
+    await cloneWithIdentity(fixture.bare, secondStore.teamClone('team'));
+    await secondStore.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const home = join(fixture.root, 'second-home');
+    expect((await install({ ref: 'sample', config: secondStore, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
+    // The author renames: the folder, the tracking (relocate), and the name line.
+    const renamed = join(fixture.root, 'renamed'); await rename(source, renamed);
+    expect((await run({ relocate: `${id}:${renamed}`, config: store }, new ScriptedPrompter())).ok).toBe(true);
+    await writeFile(join(renamed, 'SKILL.md'), (await readFile(join(renamed, 'SKILL.md'), 'utf8')).replace('name: sample', 'name: renamed'));
+    const io = new ScriptedPrompter();
+    expect((await sync({ config: store }, io)).ok).toBe(true);
+    expect(io.lines).toContain('Renamed shared skill sample to renamed.');
+    const tree = await git(['ls-tree', '--name-only', 'main', 'skills/'], fixture.bare);
+    expect(tree).toContain('skills/renamed'); expect(tree).not.toContain('skills/sample');
+    expect(await git(['show', 'main:skills/renamed/SKILL.md'], fixture.bare)).toContain(`id: ${id}`);
+    expect((await store.read()).shared[id!]!.baseline).toBe(await canonicalDigest(renamed));
+    // The installer's next sync re-places under the new name and drops the old placement.
+    expect((await sync({ config: secondStore }, new ScriptedPrompter())).ok).toBe(true);
+    expect(await readFile(join(home, '.claude', 'skills', 'renamed', 'SKILL.md'), 'utf8')).toContain('name: renamed');
+    await expect(readFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(Object.keys((await secondStore.read()).placements)).toEqual([join(home, '.claude', 'skills', 'renamed')]);
+  });
+
+  it('refuses a rename to a name another skill already uses, and to an invalid name, leaving the repository unchanged', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const source = join(fixture.root, 'sample'); await mkdir(source);
+    await writeFile(join(source, 'SKILL.md'), '---\nname: sample\ndescription: x\nmetadata:\n  terum-category: testing\n---\n');
+    expect((await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true]))).ok).toBe(true);
+    const [id] = Object.keys((await store.read()).shared);
+    await pushFromSeed(fixture.seed, 'skills/taken/SKILL.md', '---\nname: taken\ndescription: t\nlicense: UNLICENSED\nmetadata:\n  id: 99999999-9999-4999-8999-999999999999\n  author: Other <other@example.com>\n  terum-category: testing\n---\n');
+    const before = await originSha(fixture.bare);
+    const baseline = (await store.read()).shared[id!]!.baseline;
+    const shared = await readFile(join(source, 'SKILL.md'), 'utf8');
+    await writeFile(join(source, 'SKILL.md'), shared.replace('name: sample', 'name: taken'));
+    const taken = new ScriptedPrompter();
+    expect((await sync({ config: store }, taken)).ok).toBe(true);
+    expect(taken.lines.join('\n')).toContain('cannot rename to taken; another skill already uses that name');
+    await writeFile(join(source, 'SKILL.md'), shared.replace('name: sample', 'name: Bad_Name'));
+    const invalid = new ScriptedPrompter();
+    expect((await sync({ config: store }, invalid)).ok).toBe(true);
+    expect(invalid.lines.join('\n')).toContain('cannot rename to Bad_Name');
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect((await store.read()).shared[id!]!.baseline).toBe(baseline);
+    expect(await git(['ls-tree', '--name-only', 'main', 'skills/'], fixture.bare)).toContain('skills/sample');
   });
 
   it('relocates a missing source and reconciles the next edit from its new path', async () => {
