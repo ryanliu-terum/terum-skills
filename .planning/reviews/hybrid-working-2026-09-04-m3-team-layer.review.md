@@ -1,0 +1,159 @@
+# ultrareview: working
+
+Reviewed the `m3-team-layer` worktree working diff (mode `working`, base HEAD; 14 files: new `invite`/`ls`/`readme` commands, `src/lib/readme.ts`, and changes to `team.ts`/`teamRepo.ts`/`cli.ts` plus tests) across 4 dimensions with 3-vote adversarial verification. 76 raw findings were filed, 41 merged as cross-dimension duplicates before verification, leaving 35 distinct: **26 confirmed, 3 contested, 6 dropped**. The gravity is on `team remove` — the trust chain for revoking repository access runs through `personSchema.github`, a bare `z.string()` that the person being removed is allowed to write themselves (guard row b), and the field is interpolated raw into admin-authenticated `gh api -X DELETE` paths; on top of that the `--archive-only` branch skips the only authorization probe in the verb entirely, and the invitation sweep reads one unpaginated page. Second cluster: the newly scaffolded GitHub Action ships a publish-comment step whose jq argument is mangled by JS template-literal escape collapse (verified by evaluating the literal in node and word-splitting the result in bash), and the test that "covers" it only greps a marker constant. Third cluster: the new README generation path is wired into `safeWrite` in a way that reads version hashes from pre-mutation HEAD, tolerates deleted paths through a non-null assertion, and is asserted by a test whose key expectation is unfalsifiable because `safeWrite`'s cleanup removes the file either way. `ls` also re-derives install/endorsement/ownership logic that `readme.ts` and `guard.ts` already own, in one case with a divergent (raw `===`) definition of authorship.
+
+| Severity | Count |
+| --- | --- |
+| Critical | 1 |
+| High | 3 |
+| Medium | 15 |
+| Low | 7 |
+| **Total confirmed** | **26** |
+
+---
+
+## Security & data-loss (12)
+
+- [ ] **[critical] `team remove` revokes GitHub access using the target's own unvalidated `github` field** — `src/commands/team.ts:71` *(merges 3 reviewer reports across Security / Terum invariants / Correctness)*
+  `const target = parseJson(personSchema, shown.stdout, ...)` (team.ts:62) feeds `runner.run('gh', ['api','-X','DELETE', \`repos/${ownerRepo}/collaborators/${target.github}\`], { env })`, and the last-admin check at team.ts:70 keys off the same field. `personSchema.github` is bare `z.string()` (src/lib/schema.ts:46) — no format, no `.min(1)` — sourced from free text at src/lib/auth.ts:62 (`gh api user` is only a *default*), and guard row b lets every member rewrite their own people file (src/lib/guard.ts:38). Three concrete failures: (a) `mallory` sets `github: "alice"`, an admin removes mallory, alice loses collaborator access while mallory keeps push (line 70 only fires when `adminLogins.length <= 1`); (b) `github: "x/../../../repos/acme/other"` retargets the admin-authenticated DELETE at another REST path; (c) `github: ""` yields `collaborators/` → non-204 → throw at line 72, making that member permanently unremovable.
+  **Fix:** add a GitHub-login regex to `personSchema.github` (`/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/`) *and* re-validate `target.github` at the call site (existing repos already carry unvalidated values). Sweep the same raw interpolation at src/commands/invite.ts:25, team.ts:73/78, team.ts:287. Longer term, bind handle↔login at join against `gh api user`.
+
+- [ ] **[high] `team remove --archive-only` performs no admin check: any member can deactivate any other member** — `src/commands/team.ts:63`
+  `hostOperationAllowed(binding.remote, Boolean(args.archiveOnly))` returns `{ ok: true }` immediately when `archiveOnly` is set (src/lib/remote.ts:95), and the verb's only authorization — `gh api repos/<owner>/<repo> -q .permissions.admin` (team.ts:65-66) — sits inside `if (!args.archiveOnly)`. The archive then reaches guard row d, which authorizes any actor: `if (context.action === 'team-remove' && context.targetHandle && context.targetHandle !== context.handle && archivedAppendedOnly(...)) return;` (src/lib/guard.ts:83). A non-admin collaborator can loop `team remove <handle> --archive-only` over every teammate, including all admins, pushing each to main; they vanish from the roster, the README, and `isMember()` (guard.ts:123). Untested — remove.test.ts only exercises archive-only on a generic remote with the caller already bound as admin.
+  **Fix:** run the `.permissions.admin` probe before the `if (!args.archiveOnly)` block for GitHub remotes; tighten guard row d so `team-remove` requires an admin actor, not merely a non-self target.
+
+- [ ] **[high] `team remove` lists pending invitations without `--paginate`, so a live invitation survives revocation while the command reports success** — `src/commands/team.ts:73` *(merges 2 reviewer reports across Security / Reuse)*
+  `runner.run('gh', ['api', \`repos/${ownerRepo}/invitations\`], { env })` returns only the first page (GitHub default `per_page=30`). If the target's invitation is on page 2+, `pending` is empty, the cancel loop no-ops, and the flow falls through to `safeWrite` + `io.print("Removed <handle> from <team>.")` — while the invitation stays live and accepting it restores push access to `people/`, `skills/`, and `team.json`. The codebase already knows >30 pending is reachable: src/commands/invite.ts:31 warns about GitHub's 50-invites/day cap and `invite` sends whole batches. Tests mock a single-element page (remove.test.ts:28) and `'[]'` (:75). The generated workflow in this same diff does pass `--paginate`.
+  **Fix:** add `--paginate` (note it concatenates JSON arrays — add `--slurp` or parse the concatenation). Add a case whose first page omits the target and assert the removal fails loudly rather than printing "Removed". Sweep the sibling unpaginated list calls at team.ts:67 (feeds the last-admin guard) and team.ts:300.
+
+- [ ] **[medium] Generated README's Latest column is computed from pre-mutation HEAD** — `src/lib/readme.ts:104` *(merges 5 reports across Security / Terum invariants / Correctness)*
+  `const latest = await latestTree(runner, clone, name).catch(() => '—')` runs `git rev-parse HEAD:skills/<name>` (readme.ts:66). `regenerateReadmeInTree` is called at src/lib/teamRepo.ts:109 — after `git reset --hard origin/main` (:100) but before `applyTree` (:114) and the commit (:120) — so HEAD is pre-mutation: a brand-new skill silently becomes `—`, an updated skill publishes the *previous* tree hash, in the same commit that changed it. Nothing corrects it (the next regeneration only happens on an unrelated write, and safeWrite short-circuits at :106 when the mutation is empty). The blanket `.catch` makes a failed lookup indistinguishable from genuinely unknown.
+  **Fix:** derive the version from the mutated tree (hash the in-memory subtree) or amend/regenerate the README after the commit; drop the blanket catch for skills present in `tree.paths`. `src/commands/ls.ts:47` uses the same helper read-only and is fine.
+
+- [ ] **[medium] `httpStatus()` treats gh's process exit code as an HTTP status; tests only exercise that dead branch** — `src/commands/invite.ts:55` *(merges 6 reports across Security / Correctness / Terum invariants / Reuse)*
+  `if ([201, 204, 422].includes(code)) return code;` — `code` is the child-process exit code (src/lib/runner.ts:26); real `gh` exits 0/1 and never 201/204/422, so this branch is unreachable in production. The only invite test fabricates exactly that branch (`{ code: 201 }` / `{ code: 204 }` / `{ code: 422 }`), leaving the actual production parser — `HTTP/\S+\s+(\d{3})` over `--include` output — with zero coverage. The fallback is also inverted: `match ? Number(match[1]) : code === 0 ? null : code` turns a successful invite with an unmatched header into `null`, which throws "GitHub status unknown" at invite.ts:30.
+  **Fix:** delete the exit-code branch, key on the `--include` status line (with gh's `(HTTP nnn)` stderr form as fallback), treat `code === 0` with no parsable status as success, and re-shape the fixtures to real gh output (`{ code: 0, stdout: 'HTTP/2.0 201 Created…' }`, `{ code: 1, stdout: 'HTTP/2.0 422 …' }`). Same pattern at team.ts:72 and :79.
+
+- [ ] **[medium] GitHub access is revoked before the roster write, with no rollback and no signal when the write fails** — `src/commands/team.ts:83` *(merges 4 reports across Security / Terum invariants / Correctness)*
+  Irreversible host mutations run first (DELETE collaborator :71, DELETE invitations :78), then `repo.safeWrite(...)`. safeWrite can fail independently — `PushRefused` (branch protection / missing Contents:write), `SafeWriteExhausted` (30s deadline), `GuardError` — and the catch at :86 returns `failure(error.message)` with no mention that access is already gone. The operator reads a plain failure and assumes nothing happened, while the member has lost access and team.json still lists them active (visible in `ls`, roster, README). Re-running does not converge: line 71 now 404s and throws before the archive retries, so only `--archive-only` can repair it.
+  **Fix:** either archive first and revoke after (DELETE collaborator is idempotent), or wrap the safeWrite rejection with "@<login>'s access was already revoked; re-run with --archive-only to finish". `create` (team.ts:136-140) already prints a recovery hint — mirror it. Add a test that forces a push refusal after successful DELETE mocks.
+
+- [ ] **[medium] `applyReadme` silently destroys hand-written prose when the END marker is missing** — `src/lib/readme.ts:57` *(merges 3 reports across Security / Correctness / Terum invariants)*
+  When a README has a BEGIN marker but no (or a mangled) END, the paired regex misses and the whole block — including a second BEGIN and an END — is appended. On the next run the non-greedy match spans from the orphan BEGIN to the appended END and `replace` deletes everything between: all author prose in that span, committed to main automatically by the Action's `git add README.md; git commit; git push` with no human in the loop. The documented contract ("everything outside the two markers is byte-for-byte retained", readme.ts:56) does not hold; tests cover only the well-formed and no-marker cases.
+  **Fix:** if `existing.includes(README_BEGIN)` but the pair does not match (or there are multiple BEGINs / END-before-BEGIN), throw instead of appending. Add those three cases to readme.test.ts.
+
+- [ ] **[medium] `invite` reports every HTTP 422 as "already has access (owner)", silently swallowing rejected invitations** — `src/commands/invite.ts:29`
+  422 on `PUT /repos/{owner}/{repo}/collaborators/{username}` is GitHub's generic Validation Failed — also returned when the invitee blocked the org, the account is suspended, or an outside-collaborator policy forbids it. All of those print `@x already has access (owner).`, land in the `already` array, exit 0, and print the join snippet, so the admin hands `team join acme/team` to someone who was never invited. Separately, line 30 throws on the first non-2xx/422, abandoning the rest of the batch and discarding the accumulated `invited`/`already`.
+  **Fix:** compare `login` against the repository owner before mapping 422; surface other 422s as per-login failures; collect per-login outcomes and return them all instead of throwing mid-batch.
+
+- [ ] **[low] Bare `.rejects.toThrow()` accepts any error, so the "push refused" premise is unverified** — `src/lib/__tests__/teamRepo.test.ts:31` *(merges 3 reports across Security / Correctness / Terum invariants)*
+  With no matcher this passes on any rejection — an `assertOrigin` mismatch, a `GuardError`, or a throw from `regenerateReadmeInTree` ("Cannot generate README without team.json.", readme.ts:96) — each of which also leaves README.md absent, so line 32 stays green too. Siblings in the same file pin the class (`.rejects.toThrow(PushRefused)` at :105, `/Permission to acme\/skills\.git denied/` at :106).
+  **Fix:** use `.rejects.toThrow(PushRefused)` (already imported at line 6) plus a `/Permission denied/` match; drop the now-redundant `remote get-url` stub at :25, which only masks an assertOrigin regression.
+
+- [ ] **[low] Scaffolded workflow grants `contents: write` to the PR job that checks out PR-authored content** — `src/commands/team.ts:353`
+  Top-level `permissions: { contents: write, pull-requests: write }` is inherited by both jobs. Only `readme` needs write. `publish-comment` checks out the PR head with `actions/checkout@v4` + `fetch-depth: 0` (default `persist-credentials: true`), writing a push-capable token into `.git/config` in a workspace of PR-authored content, then only reads the tree and posts a comment. Any code execution there — a `publish/*` PR touching the workflow, or a compromised `terum-skills@latest` via `npx -y` — inherits push access to main.
+  **Fix:** move `permissions` to job scope (`contents: write` on `readme`; `contents: read` + `pull-requests: write` on `publish-comment`), add `persist-credentials: false` to the PR checkout, and pin `terum-skills` to a released major.
+
+- [ ] **[low] `ls member <handle>` compares a raw CLI argument against lowercased stored handles** — `src/commands/ls.ts:51`
+  `people.find((person) => person.handle === handle)` with `handle` straight from commander. Handles are canonically lowercased on write (`handleSchema` transform, src/lib/schema.ts:7-10) and `guard.ts` normalizes explicitly for this reason. The sibling verb in this same diff does it right (`parseOrExplain(handleSchema, args.handle, 'member handle')` in team.ts). So `ls member Amy` reports "No member named Amy." while `ls member amy` works; a pasted trailing space also fails. ls.test.ts:57 only uses the already-lowercase form.
+  **Fix:** `parseOrExplain(handleSchema, rawHandle, 'member handle')` before lookup; add an ls.test.ts assertion for `value: 'Amy'`.
+
+- [ ] **[low] CLI wiring test only covers `team remove --archive-only`, never the access-revoking default** — `src/__tests__/cli.test.ts:50`
+  `archiveOnly` is the single flag separating a roster-only archive from the destructive host path (team.ts:63-81) and it drives `hostOperationAllowed(...)` at team.ts:52, yet only the flag-present parse is asserted. A regression making `archiveOnly` truthy by default (e.g. `.option('--archive-only', ..., true)` or a spread of defaulted options) would silently downgrade every removal — operator believes access was revoked, member keeps it — with this suite still green.
+  **Fix:** add `['team','remove','cy','--team','t']` and assert the recorded call has no truthy `archiveOnly`.
+
+---
+
+## Correctness & tests (5)
+
+- [ ] **[high] Scaffolded Action's publish-comment step is broken: the JS template literal eats the jq quote escapes** — `src/commands/team.ts:391` *(merges 2 reports across Correctness / Terum invariants)*
+  Source writes `--jq ".[] | select(.body | contains(\"$marker\")) | .id"`; in a JS template literal `\"` collapses to `"`, so the emitted YAML (verified by evaluating the literal in node) has unescaped inner quotes that close the double-quoted word. `$marker` (`<!-- terum-skills:pr-comment -->`) then expands unquoted and word-splits — reproduced in bash as three separate args (`.[] | select(.body | contains(<!--`, `terum-skills:pr-comment`, `-->)) | .id`). `gh api` accepts one positional, exits non-zero ("accepts 1 arg(s), received 3"), and under the Actions default `bash -e -o pipefail` the assignment failure kills the step: no preview comment is ever posted and every publish/* PR goes red. The test only greps the constant (`toContain('terum-skills:pr-comment')`, teamRepo.test.ts:31), which passes for any broken shell.
+  **Fix:** drop the variable entirely — `--jq '.[] | select(.body | contains("<!-- terum-skills:pr-comment -->")) | .id'` — or escape as `\\\"$marker\\\"`. Add a test that asserts the emitted line parses as a single `--jq` argument (`bash -n` on the run block, or an exact-string match) instead of a keyword `toContain`.
+
+- [ ] **[medium] `MutableTree.paths` reports files the mutation deleted, and its only consumer non-null-asserts them** — `src/lib/teamRepo.ts:201` *(merges 7 reports across Correctness / Security / Terum invariants / Reuse)*
+  The `!== undefined` filter applies only to the overlay half of the union, so `tree.remove(p)` on a *tracked* path leaves it in `paths` while `tree.after(p)` is `undefined`. The sole consumer, reached from the new `if (!isGitHubRemote(remote)) await regenerateReadmeInTree(...)` at teamRepo.ts:109, dereferences with `!`: `parseJson(personSchema, tree.after(path)!, path)` (readme.ts:98) throws `Invalid people/bob.json: Unexpected token 'u', "undefined" is not valid JSON`, aborting the whole write with an error naming neither the deletion nor the README generator; `parseSkillFrontmatter(tree.after(...)!)` (readme.ts:102) throws a TypeError from `FRONTMATTER.exec(undefined)`. Latent today (no shipped verb calls `remove`), but `remove()` is public MutableTree API.
+  **Fix:** define `paths` as "every path whose `after()` is defined": `[...new Set([...tracked, ...overlay.keys()])].filter((p) => after(p) !== undefined).sort()`. Add a teamRepo test removing a tracked `people/*.json` on a generic remote and a readme test asserting the roster row disappears.
+
+- [ ] **[medium] `team remove` tests only use members with a populated github login; an empty one aborts before the archive** — `src/commands/__tests__/remove.test.ts:12`
+  Every target is built with a non-empty github (`member-gh`, `late-gh`, or the handle default), but `personSchema.github` is unvalidated `z.string()` and `collectIdentity` accepts an empty prompt (auth.ts:62). For such a member the endpoint truncates to `repos/acme/team/collaborators/` → 404 → `Could not revoke @: …` thrown before `repo.safeWrite(...)` at team.ts:83, so the archive never happens and the member cannot be removed at all — with a message that does not even name them.
+  **Fix:** add a `person('ghost', { github: '' })` case asserting a clear, actionable error (or that the archive still proceeds), and validate `github` before interpolating it into any gh path.
+
+- [ ] **[medium] WORKFLOW assertions do not pin the readme push job the test name claims to cover** — `src/lib/__tests__/teamRepo.test.ts:35` *(merges 2 reports across Correctness / Terum invariants)*
+  The test is named "…carries both host jobs" but all three assertions (`'publish-comment:'`, `'terum-skills:pr-comment'`, `'npx -y terum-skills@latest readme'`) are satisfied by the `publish-comment` job alone — the third is a prefix of its `npx -y terum-skills@latest readme --pr-comment origin/main` step (team.ts:385). Delete the entire `readme:` job (team.ts:363-376) and this still passes; the only other scaffold assertion (create.test.ts:29) checks the file name, never the body.
+  **Fix:** assert `'  readme:'` plus the auto-commit step (`chore: regenerate skills README`) and its `if: github.event_name == 'push'` guard, or parse the YAML (the repo already depends on `yaml`) and assert `jobs` keys equal `['readme','publish-comment']`. Consider moving these WORKFLOW assertions to src/commands/__tests__/create.test.ts, since WORKFLOW is exported from team.ts, not teamRepo.ts.
+
+- [ ] **[low] CLI test skips the only non-trivial added wiring: the `ls` parent-level `--team` fallback and the bare `ls` action** — `src/__tests__/cli.test.ts:51` *(merges 2 reports across Correctness / Terum invariants)*
+  `['ls','project','app','--team','t']` resolves via the subcommand's own option, covering only the left side of `options.team ?? ls.opts().team` (src/cli.ts:56). The `??` fallback exists precisely because commander does not inherit the parent `--team`, and the invocations that need it (`ls --team t project app`, `ls --team t member amy`) are never parsed; the `ls` root action (`{ kind: 'all', ... }`, cli.ts:54) and `member` are unwired-untested — 3 of 5 added routes covered.
+  **Fix:** add `['ls','--team','t']` → `{ kind: 'all', team: 't' }` and `['ls','--team','t','member','amy']` → `{ kind: 'member', value: 'amy', team: 't' }`, building a fresh program per parse since commander retains option values on the Command instance across `parseAsync` calls.
+
+---
+
+## Terum invariants (4)
+
+- [ ] **[medium] `ls member` compares `metadata.author` with `===`, diverging from guard.ts's normalized ownership test** — `src/commands/ls.ts:60` *(merges 4 reports across Terum invariants / Reuse / Correctness)*
+  `if (parsed.data.metadata.author === \`${member.display_name} <${member.email}>\`)`. Every write-authorizing ownership check goes through `normalizeAuthor` (src/lib/guard.ts:75), which trims, collapses whitespace, and lowercases. `emailSchema` is `z.email()` with no case transform and `display_name` is free text, so `Amy <Amy@Example.com>` in a SKILL.md is owned by handle `amy` for every write path while `ls member amy` prints `Authored: —`. Two live definitions of "who authored this" is exactly the duplication CLAUDE.md forbids; the ls.test.ts fixture matches exactly, hiding it.
+  **Fix:** export `normalizeAuthor` (or `sameAuthor(a, b)`) from guard.ts and use it here; add an ls test with a case/whitespace-divergent author line. Also assert `installs` in the member form rather than leaving the hardcoded 0 unexamined.
+
+- [ ] **[medium] `ls project` re-reads and re-parses every SKILL.md and spawns a git process per skill just to filter** — `src/commands/ls.ts:71`
+  `showProject` calls `listSkills` — which already read and parsed every SKILL.md and already ran `git rev-parse HEAD:skills/<name>` per skill via `latestTree` — then re-reads and re-parses all N files solely to recover the `id` that `LsSkill` discards. Cost: 2N file reads + N git spawns to print a handful of rows, and the second parse silently swallows (`parsed.ok &&`) failures the first would have thrown on.
+  **Fix:** add `id` to `LsSkill` (ls.ts:12) and filter with `projectIds.has(skill.id)`; better, filter folder names against `projectIds` before calling `latestTree` at all.
+
+- [ ] **[medium] Nothing tests that an archived member disappears from the generated README roster** — `src/lib/__tests__/readme.test.ts:7`
+  The headline behaviour of `team remove` is the roster filter at src/lib/readme.ts:37-39, and no test in this batch touches it: readme.test.ts omits `archived` entirely, commands/readme.test.ts uses the fixture's `archived: []`, and remove.test.ts asserts only the team.json array and that `people/member.json` survives (:34, :63-64) — never README bytes. `grep -n archived src/lib/__tests__/readme.test.ts` is empty. Dropping the filter (or the `archived` passthrough at readme.ts:85/107) leaves the suite green while removed people stay listed. The 'No members yet.' / 'No shared skills yet.' fallbacks are likewise unexercised.
+  **Fix:** add a `generateReadme` case with `archived: ['bea']` asserting Bea is absent — and decide explicitly whether her installs still count toward the Installs column (they currently do) — plus a README-content assertion in the archive-only remove test.
+
+- [ ] **[low] `readme` command hard-fails on a missing README.md while the library path tolerates it** — `src/commands/readme.ts:32`
+  An unguarded `await readFile(join(cwd, 'README.md'), 'utf8')` throws raw `ENOENT`, failing the Action's readme job. Both sibling paths handle exactly this case: `applyReadme` branches on `existing.length === 0` (readme.ts:60) and `regenerateReadmeInTree` passes `tree.after('README.md') ?? ''` (readme.ts:107).
+  **Fix:** `await readFile(path, 'utf8').catch(() => '')`.
+
+---
+
+## Reuse, simplify, perf (5)
+
+- [ ] **[medium] GitHub-remote half of the new safeWrite test asserts nothing: cleanup guarantees the README is gone** — `src/lib/__tests__/teamRepo.test.ts:32` *(merges 5 reports across Reuse / Security / Terum invariants / Correctness)*
+  The claim under test is that README regeneration is skipped for GitHub remotes (teamRepo.ts:109), but both carrying assertions are unfalsifiable. The push is deliberately refused, so safeWrite's `finally` (teamRepo.ts:129-143) runs `git fetch origin` + `git reset --hard origin/main` and `removeCreated()`; the bare fixture's main has no README.md (fixtures.ts:65-74), so `exists(...) === false` holds whether or not `regenerateReadmeInTree` ran — delete the `!isGitHubRemote(remote)` guard and the test still passes. The bare `rejects.toThrow()` (no matcher, unlike :74/:105) means an unrelated failure also goes green, proving the opposite of the test's name.
+  **Fix:** assert where cleanup cannot reach — inside the existing `args[0] === 'push'` runner hook, capture `git show --name-only --format= HEAD` (or the staged set) and assert `README.md` is absent for the GitHub remote and present for the generic one; or let the GitHub push succeed against a mapped local bare and assert `git ls-tree --name-only main` has no README.md. Pin the class with `rejects.toThrow(PushRefused)`.
+
+- [ ] **[medium] `ls` re-implements readme.ts's install/endorsement aggregation, then re-reads every SKILL.md a second time** — `src/commands/ls.ts:39`
+  The install-count loop in `listSkills` (ls.ts:39-46) is a byte-level copy of readme.ts:29, and the endorsement expression copies readme.ts:46 except the empty case drifted from `'—'` to `'none'`. `showProject` (ls.ts:71-73) then re-reads/re-parses every SKILL.md to recover the dropped `id` (2N reads + 2N YAML parses), and `showMember` (ls.ts:60) is a third scan that fabricates `installs: 0, endorsement: 'none'` — so the same skill reports different values depending on the subcommand.
+  **Fix:** carry `id` on `LsSkill` and filter the single `listSkills` result in both `showProject` and `showMember`; move the count map and endorsement string into one exported helper in src/lib/readme.ts shared by `generateReadme` and `ls`.
+
+- [ ] **[medium] safeWrite spawns one serial `git rev-parse` per skill, per retry attempt, while holding the write lock** — `src/lib/teamRepo.ts:109` *(merges 2 reports across Reuse)*
+  Line 109 pulls `regenerateReadmeInTree` into the retry loop (:98-127) inside the `proper-lockfile` critical section, and that function loops `await latestTree(runner, clone, name)` per skill (readme.ts:101-106) → one `spawn()` each (runner.ts:14), serially awaited. A 50-skill team pays 50 sequential process spawns on every generic-remote write, repeated on each non-fast-forward retry, with other writers blocked and the 30s deadline ticking. `git ls-tree HEAD skills` returns all of it in one call.
+  **Fix:** replace per-skill `rev-parse` with a single `git ls-tree HEAD skills` map that `latestTree` looks up (or at minimum `Promise.all` the loop, as ls.ts:41 already does). Same serial shape at readme.ts:82, ls.ts:46, ls.ts:60 — one shared helper dedupes all four.
+
+- [ ] **[medium] New `readPeople` duplicates the existing `readRoster` reader instead of replacing it** — `src/lib/readme.ts:88`
+  readme.ts:88-91 is line-for-line the middle of team.ts:264-269 (`readdir` → `.json` filter → sort → `Promise.all(parseJson(personSchema, …))`), and team.ts:264 was left in place. The repo now has two active "read and parse people/*.json" implementations plus three archived-member filters (readRoster's `!team.archived.includes(...)`, readme.ts:37-38's Set, ls.ts:24's `active` flag).
+  **Fix:** rewrite `readRoster` to call `readPeople` + a shared archived filter so the join roster, README roster, and `ls` cannot drift.
+
+- [ ] **[low] Owner/repo extraction from a remote re-implemented twice outside remote.ts** — `src/commands/invite.ts:49`
+  remote.ts declares itself "the one place that decides what a remote is" and already exports `isGitHubRemote` (:79-81), yet the diff adds `githubRepository` (invite.ts:49-53, throwing) and `installRepository` (readme.ts:115-118, identical body returning null) — and team.ts:64 now imports the command-layer one from `./invite.js`, making one command module a remote-parsing library for another.
+  **Fix:** add a single `githubOwnerRepo(remote): string | null` to src/lib/remote.ts beside `isGitHubRemote`; have invite.ts (throwing wrapper), readme.ts:115, and team.ts:64 call it.
+
+---
+
+## Contested (split adversarial verdict — needs human adjudication)
+
+- **(low / Reuse, simplify, perf) Second early-return is unreachable and the second `guard()` call cannot change the outcome** @ `src/lib/teamRepo.ts:111` [vote 1-2]
+  Evidence: The new `if (tree.changedPaths.length === 0) return ...` at line 106 makes the pre-existing `if (changed.length === 0) return { changed: false, pushedTo: branch };` at line 111 dead: between them the only mutation is `regenerateReadmeInTree`, which can only `tree.set('README.md', ...)` (src/lib/readme.ts:107), i.e. it can add a changed path but never remove one. The `guard(tree, options)` at line 112 is likewise a no-op re-validation: the only path it sees that line 107's call did not is `README.md`, and guard's very first branch is `if (path === 'README.md') continue;` (src/lib/guard.ts:37, row f). It therefore cannot reject anything new, while re-parsing team.json (twice, before and after) and every changed SKILL.md's frontmatter a second time. The trailing comment "includes row f generated README" reads as if the second call authorizes something, which overstates what row f does.
+  Additional evidence cited for the same defect (other review dimensions): The diff added `if (tree.changedPaths.length === 0) return { changed: false, pushedTo: branch };` at teamRepo.ts:106 before the guard, but left the pre-existing copy at teamRepo.ts:110-111 (`const changed = tree.changedPaths; if (changed.length === 0) return ...`). Past line 106 the mutation has produced at least one change and `regenerateReadmeInTree` only ever adds paths, so the second branch can never be taken — a leftover parallel exit that also recomputes the O(n) `changedPaths` getter.
+
+- **(low / Reuse, simplify, perf) Second full `bareTeam()` fixture built serially where a second clone of the first would do** @ `src/lib/__tests__/teamRepo.test.ts:19` [vote 1-2]
+  Evidence:
+  ```ts
+  const githubFixture = await bareTeam();
+  const github = await cloneWithIdentity(githubFixture.bare, join(githubFixture.root, 'github'));
+  const publicRemote = 'https://github.com/acme/team.git';
+  await git(['remote', 'set-url', 'origin', publicRemote], github);
+  ```
+  `bareTeam()` (fixtures.ts:55-76) spawns ~12 serial git subprocesses (init --bare, symbolic-ref, clone, checkout, 2x config, add, commit, push) plus 5 file writes. Nothing in the GitHub half depends on that second bare being distinct: the clone's origin URL is immediately rewritten to `publicRemote`, and every remote-touching call (`fetch`, `remote get-url`, `push`) is stubbed by the wrapped runner, so the only real git work is against local refs from the clone. The first half's `fixture.bare` would serve identically.
+
+- **(low / Reuse, simplify, perf) New CLI test re-implements `harness()` instead of extending it** @ `src/__tests__/cli.test.ts:39` [vote 2-1]
+  Evidence: The file already has a factory for exactly this scaffolding (lines 7-17): `calls` array, an `Execute` that invokes with a `ScriptedPrompter`, `buildProgram(execute, verbs)`, and `configureOutput({ writeErr, writeOut })`. The new test copies all four steps verbatim rather than reusing it:
+  ```ts
+  const calls: unknown[] = [];
+  const execute: Execute = async (invoke) => { await invoke(new ScriptedPrompter()); };
+  const program = buildProgram(execute, { login: ..., team: ..., invite: ..., ls: ..., readme: ... });
+  program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+  ```
+  The only real difference is the extra verb stubs and that the second copy drops the `outcomes` recording. Two near-identical copies of the wiring harness means any future change to how the program is built under test (e.g. a new required verb in `CliVerbs`) must be made twice.

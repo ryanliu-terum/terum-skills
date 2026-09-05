@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hostOperationAllowed, isGitHubRemote, normalizeRemote, remoteName, remoteToGitUrl, sameRemote } from '../remote.js';
+import { githubOwnerRepo, hostOperationAllowed, isGitHubRemote, normalizeRemote, remoteName, remoteToGitUrl, sameRemote } from '../remote.js';
 
 describe('normalizeRemote (§5.1)', () => {
   it('strips protocol, credentials, port, .git, and trailing slash; lowercases the host, and the path on GitHub', () => {
@@ -42,6 +42,11 @@ describe('normalizeRemote (§5.1)', () => {
     expect(remoteName('git@github.com:Org/Team-Skills.git')).toBe('team-skills');
     expect(remoteName('https://gitlab.com/Org/Team-Skills.git')).toBe('Team-Skills');
     expect(remoteName('/tmp/x/team.git')).toBe('team');
+  });
+
+  it('extracts GitHub owner/repository only from GitHub remotes', () => {
+    expect(githubOwnerRepo('git@github.com:Acme/Team.git')).toBe('acme/team');
+    expect(githubOwnerRepo('https://gitlab.com/acme/team.git')).toBeNull();
   });
 });
 

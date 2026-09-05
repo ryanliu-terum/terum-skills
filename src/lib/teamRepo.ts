@@ -5,8 +5,9 @@ import lockfile from 'proper-lockfile';
 import { gitAuthEnv } from './auth.js';
 import { mkdirPrivate } from './fs.js';
 import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
-import { normalizeRemote, remoteToGitUrl } from './remote.js';
+import { isGitHubRemote, normalizeRemote, remoteToGitUrl } from './remote.js';
 import { CommandResult, Runner, systemRunner } from './runner.js';
+import { regenerateReadmeInTree } from './readme.js';
 
 /**
  * §6.0: every write to the team repo goes through `safeWrite()` — a re-apply model, not a rebase.
@@ -19,6 +20,7 @@ import { CommandResult, Runner, systemRunner } from './runner.js';
 export interface MutableTree extends GuardTree {
   set(path: string, content: string): void;
   remove(path: string): void;
+  readonly paths: readonly string[];
 }
 export type Mutate = (tree: MutableTree) => void;
 
@@ -99,12 +101,29 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
       const tracked = new Set((await requireGit(['ls-files', '-z'])).stdout.split('\0').filter(Boolean));
       const tree = makeTree(root, tracked);
       mutate(tree);
-      const changed = tree.changedPaths;
-      if (changed.length === 0) return { changed: false, pushedTo: branch };
-      guard(tree, options); // authorize BEFORE anything reaches the working tree
+      // Authorize the caller's own pure mutation before deriving any files from it. This keeps a
+      // forbidden skill write from being reported as a frontmatter/README generation error.
+      if (tree.changedPaths.length === 0) return { changed: false, pushedTo: branch };
+      guard(tree, options);
+      // §9: Actions own GitHub README commits; generic remotes regenerate as a derived safeWrite path.
+      let changed = tree.changedPaths;
       for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
       await applyTree(root, realRoot, tree, changed);
       await requireGit(['add', '-A', '--', ...changed]);
+      if (!isGitHubRemote(remote)) {
+        // The index is the exact tree about to be committed, including the caller's mutation.
+        // Resolve every skill version from it in one git call before deriving README.md.
+        const writtenTree = (await requireGit(['write-tree'])).stdout.trim();
+        const latestBySkill = await skillTrees(git, writtenTree);
+        await regenerateReadmeInTree(tree, remote, runner, root, latestBySkill);
+        changed = tree.changedPaths;
+        for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
+        const readmeChanged = changed.filter((path) => path === 'README.md');
+        if (readmeChanged.length) {
+          await applyTree(root, realRoot, tree, readmeChanged);
+          await requireGit(['add', '-A', '--', ...readmeChanged]);
+        }
+      }
       const staged = (await requireGit(['diff', '--cached', '--name-only', '--no-renames', '-z'])).stdout.split('\0').filter(Boolean).sort();
       if (JSON.stringify(staged) !== JSON.stringify([...changed].sort())) {
         throw new GuardError(`Staged diff [${staged.join(', ')}] does not match the mutation [${changed.join(', ')}]`);
@@ -190,9 +209,29 @@ function makeTree(root: string, tracked: ReadonlySet<string>): MutableTree {
     get changedPaths() {
       return [...overlay.keys()].filter((path) => overlay.get(path) !== before(path)).sort();
     },
+    get paths() {
+      return [...new Set([...tracked, ...overlay.keys()])].filter((path) => this.after(path) !== undefined).sort();
+    },
     set(path, content) { assertSafePath(path); overlay.set(path, content); },
     remove(path) { assertSafePath(path); overlay.set(path, undefined); },
   };
+}
+
+/** Every direct child in `skills/` is a skill tree; one ls-tree call resolves all latest versions. */
+async function skillTrees(git: Git, writtenTree: string): Promise<Map<string, string>> {
+  const listed = await requireGitResult(git, ['ls-tree', `${writtenTree}:skills`]);
+  const versions = new Map<string, string>();
+  for (const line of listed.stdout.split('\n')) {
+    const match = /^\d+\s+tree\s+([0-9a-f]{40})\t(.+)$/.exec(line);
+    if (match) versions.set(match[2]!, match[1]!);
+  }
+  return versions;
+}
+
+async function requireGitResult(git: Git, args: readonly string[]): Promise<CommandResult> {
+  const result = await git(args);
+  if (result.code !== 0) throw new Error(`git ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim()}`);
+  return result;
 }
 
 /** Resolve the parent directory and refuse it if a symlink would carry the write outside the clone. */

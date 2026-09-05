@@ -15,6 +15,8 @@ export const teamNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}
 
 export const skillIdSchema = z.uuid();
 export const emailSchema = z.email();
+/** GitHub login syntax, used wherever a value becomes part of a GitHub API path. */
+export const githubLoginSchema = z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/, 'a GitHub login is 1-39 letters, digits, or single internal hyphens');
 
 export const scopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('global') }).passthrough(),
@@ -43,7 +45,7 @@ export const personSchema = z.object({
   handle: handleSchema,
   display_name: z.string().min(1),
   email: emailSchema,
-  github: z.string(),
+  github: githubLoginSchema,
   bio: z.string(),
   installed: z.array(installedSchema),
   declined: z.array(skillIdSchema),

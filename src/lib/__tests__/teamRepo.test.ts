@@ -10,6 +10,57 @@ const exists = (path: string) => access(path).then(() => true, () => false);
 const personJson = (handle: string) => `${JSON.stringify(person(handle))}\n`;
 
 describe('safeWrite (§6.0)', () => {
+  it('regenerates README only for generic remotes before the push', async () => {
+    const fixture = await bareTeam();
+    const generic = await cloneWithIdentity(fixture.bare, join(fixture.root, 'generic'));
+    let genericStaged = '';
+    const genericRunner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'push') genericStaged = await git(['show', '--name-only', '--format=', 'HEAD'], generic);
+      return next();
+    });
+    await openTeamRepo(generic, fixture.bare, genericRunner).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' });
+    expect(await readFile(join(generic, 'README.md'), 'utf8')).toContain('<!-- terum-skills:begin -->');
+    expect(genericStaged).toContain('README.md');
+    const githubFixture = await bareTeam();
+    const github = await cloneWithIdentity(githubFixture.bare, join(githubFixture.root, 'github'));
+    const publicRemote = 'https://github.com/acme/team.git';
+    await git(['remote', 'set-url', 'origin', publicRemote], github);
+    let githubStaged = '';
+    const runner = wrapRunner(systemRunner, async (command, args, options, next) => {
+      if (command === 'git' && args[0] === 'fetch') return { code: 0, stdout: '', stderr: '' };
+      if (command === 'git' && args[0] === 'remote' && args[1] === 'get-url') return { code: 0, stdout: `${publicRemote}\n`, stderr: '' };
+      if (command === 'git' && args[0] === 'push') { githubStaged = await git(['show', '--name-only', '--format=', 'HEAD'], github); return { code: 1, stdout: '', stderr: 'remote: Permission denied' }; }
+      return next();
+    });
+    await expect(openTeamRepo(github, publicRemote, runner).safeWrite((tree) => tree.set('people/github.json', personJson('github')), { action: 'join', handle: 'github' })).rejects.toThrow(PushRefused);
+    expect(githubStaged).not.toContain('README.md');
+    expect(await exists(join(github, 'README.md'))).toBe(false);
+  });
+
+  it('derives every generic-remote README version from the written index in one ls-tree call', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    let lsTrees = 0;
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'ls-tree') lsTrees++;
+      return next();
+    });
+    const skill = '---\nname: new\ndescription: New\nlicense: UNLICENSED\nmetadata:\n  id: 55555555-5555-4555-8555-555555555555\n  author: Me <me@example.com>\n  terum-category: docs\n---\n';
+    await openTeamRepo(clone, fixture.bare, runner).safeWrite((tree) => tree.set('skills/new/SKILL.md', skill), { action: 'share', handle: 'me', author: 'Me <me@example.com>' });
+    await git(['fetch', '-q', 'origin'], fixture.seed);
+    await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
+    const latest = (await git(['rev-parse', 'main:skills/new'], fixture.bare)).trim();
+    expect(await readFile(join(fixture.seed, 'README.md'), 'utf8')).toContain(`| new | docs | New | 0 | — | ${latest.slice(0, 8)} |`);
+    expect(lsTrees).toBe(1);
+  });
+
+  it('omits a removed tracked person from the regenerated generic-remote README', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'people/me.json', personJson('me'));
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.remove('people/me.json'), { action: 'join', handle: 'me' });
+    expect(await readFile(join(clone, 'README.md'), 'utf8')).not.toContain('- @me — me');
+  });
   it('lands eight barrier-released writers within the deadline and leaves every clone clean', async () => {
     const fixture = await bareTeam();
     const clones = await Promise.all(Array.from({ length: 8 }, (_, index) => cloneWithIdentity(fixture.bare, join(fixture.root, `clone-${index}`), `User ${index}`, `u${index}@example.com`)));

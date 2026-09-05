@@ -80,6 +80,12 @@ export function isGitHubRemote(remote: string): boolean {
   return normalizeRemote(remote).startsWith('github.com/');
 }
 
+/** Return the canonical owner/repository pair for a GitHub remote, or null for every other host. */
+export function githubOwnerRepo(remote: string): string | null {
+  const normalized = normalizeRemote(remote);
+  return normalized.startsWith('github.com/') ? normalized.slice('github.com/'.length) : null;
+}
+
 /** The repository basename, used as the default team name at `team join <url>` (§6). */
 export function remoteName(remote: string): string {
   const normalized = normalizeRemote(remote);

@@ -72,7 +72,7 @@ function authorOf(source: string): string | null {
   return parsed.ok ? normalizeAuthor(parsed.data.metadata.author) : null;
 }
 
-function normalizeAuthor(author: string): string {
+export function normalizeAuthor(author: string): string {
   return author.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
