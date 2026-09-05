@@ -73,6 +73,21 @@ describe('sync --hook (§3, §6)', () => {
     expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe((await git(['rev-parse', 'origin/main'], clone)).trim());
   });
 
+  it('blocks a placement whose pinned version is not in the clone and touches nothing', async () => {
+    const { fixture, store } = await configuredSkill();
+    const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', team: 'team', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
+    const [path] = Object.keys((await store.read()).placements);
+    const before = await snapshotSkillDirectory(path!);
+    const unknown = '0123456789abcdef0123456789abcdef01234567';
+    await store.update((config) => { config.placements[path!]!.version = unknown; });
+    const io = new ScriptedPrompter();
+    expect((await run({ config: store }, io)).ok).toBe(true);
+    expect(io.lines.join('\n')).toContain(`Blocked ${path}: pinned version 01234567`);
+    expect((await snapshotSkillDirectory(path!)).fingerprint).toBe(before.fingerprint);
+    expect((await store.read()).placements[path!]!.version).toBe(unknown);
+  });
+
   it('adopts or declines orphans interactively and only defers them in hook mode', async () => {
     const adopt = await orphanedPlacement();
     expect((await run({ config: adopt.store }, new ScriptedPrompter([], [true], true))).ok).toBe(true);

@@ -107,7 +107,7 @@ export async function installOne(input: { team: string; reference?: string; id?:
     const raw = tree.before(path);
     if (!raw) throw new Error(`Missing ${path}.`);
     const person = parseJson(personSchema, treeText(raw), path);
-    const installed = person.installed.filter((entry) => !(entry.id === skill.id && JSON.stringify(entry.scope) === JSON.stringify(scope)));
+    const installed = person.installed.filter((entry) => !(entry.id === skill.id && sameScope(entry.scope, scope)));
     installed.push({ id: skill.id, version: latest, scope, since: new Date().toISOString().slice(0, 10) });
     const declined = person.declined.filter((id) => id !== skill.id);
     tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);

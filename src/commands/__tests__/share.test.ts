@@ -24,6 +24,22 @@ describe('share (§5.3)', () => {
     expect(Object.keys((await store.read()).shared)).toHaveLength(1);
   });
 
+  it('rejects a malformed allowed-tools value at share time, names the line, and writes nothing', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const source = join(fixture.root, 'sample'); await mkdir(source);
+    const original = '---\nname: sample\ndescription: x\nallowed-tools:\n  bash: true\nmetadata:\n  terum-category: testing\n---\n';
+    await writeFile(join(source, 'SKILL.md'), original);
+    const before = await originSha(fixture.bare);
+    const result = await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true]));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('allowed-tools is malformed (SKILL.md line 4)') });
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(original);
+    expect((await store.read()).shared).toEqual({});
+  });
+
   it('preserves binary shared assets through sharing, sync updates, and a later install', async () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));

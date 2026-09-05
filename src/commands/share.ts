@@ -7,7 +7,7 @@ import { exists } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
+import { allowedTools, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
 import { canonicalDigest, injectManagedFields, skillRecords } from '../lib/skills.js';
 import { MutableTree, openTeamRepo } from '../lib/teamRepo.js';
 
@@ -185,6 +185,13 @@ function inspectSource(raw: string, name: string): string {
   const match = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(raw); if (!match) throw new Error('SKILL.md has no YAML frontmatter.');
   const parsed = YAML.parse(match[1]!) as Record<string, unknown>;
   if (!parsed || typeof parsed !== 'object' || parsed.name !== name || typeof parsed.description !== 'string') throw new Error(`SKILL.md name must equal folder ${name} and description is required.`);
+  // §5.4: a malformed `allowed-tools` never normalizes and never auto-places, so share refuses it
+  // outright and names the line — the author learns now, not when a teammate's install is blocked.
+  const grants = allowedTools(parsed['allowed-tools']);
+  if (!grants.ok) {
+    const line = raw.split(/\r?\n/).findIndex((text) => /^allowed-tools\s*:/.test(text)) + 1;
+    throw new Error(`${name}: allowed-tools is malformed${line ? ` (SKILL.md line ${line})` : ''}: ${JSON.stringify(grants.raw)}. Use a YAML list of tool patterns, or one comma-separated string.`);
+  }
   return parsed.description;
 }
 async function hasPrivilegedContent(root: string): Promise<boolean> {
