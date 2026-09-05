@@ -1,19 +1,21 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, originSha, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, originSha, pushFromSeed, ScriptedPrompter, TEAM_JSON, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { run } from '../publish.js';
+import lockfile from 'proper-lockfile';
+import { cloneLockPath } from '../../lib/teamRepo.js';
 
 const REMOTE = 'https://github.com/acme/team.git';
 const ID = '11111111-1111-4111-8111-111111111111';
 const skill = (name = 'sample') => `---\nname: ${name}\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\nallowed-tools: Bash(git status)\n---\n`;
 
-/** Commit one file from the seed clone and push it to a branch only — main stays where it is; the seed is reset afterwards. */
-async function pushBranchFromSeed(seed: string, path: string, content: string, branch: string): Promise<string> {
+/** Commit files from the seed clone and push them to a branch only — main stays where it is; the seed is reset afterwards. */
+async function pushBranchFromSeed(seed: string, files: ReadonlyArray<{ path: string; content: string }>, branch: string): Promise<string> {
   await git(['fetch', '-q', 'origin'], seed);
   await git(['reset', '-q', '--hard', 'origin/main'], seed);
-  await writeFile(join(seed, path), content);
+  for (const file of files) { await mkdir(join(seed, file.path, '..'), { recursive: true }); await writeFile(join(seed, file.path), file.content); }
   await git(['add', '--all'], seed);
   await git(['commit', '-q', '-m', `${branch}: theirs`], seed);
   const sha = (await git(['rev-parse', 'HEAD'], seed)).trim();
@@ -127,15 +129,22 @@ describe('publish (§6)', () => {
     expect(JSON.parse(await git(['show', 'publish/sample:team.json'], abandoned.fixture.bare)).global).toContain(ID);
     expect(await originSha(abandoned.fixture.bare)).toBe(mainMoved);
     void mainBefore;
-    // A branch of that name holding anything else (an unrelated commit; someone else's project endorsement) is never replaced.
-    const projectEndorsement = { layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: ['x'], skills: [ID] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } };
-    for (const theirsOnBranch of [{ path: 'unrelated.txt', content: 'someone else' }, { path: 'team.json', content: `${JSON.stringify(projectEndorsement)}\n` }]) {
+    // A branch of that name holding anything else — an unrelated commit; someone else's project
+    // endorsement; THIS endorsement plus a review fixup (membership alone is not identity) — is never replaced.
+    const projectEndorsement = { ...TEAM_JSON, projects: { product: { remotes: ['x'], skills: [ID] } } };
+    const exactEndorsement = `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n`;
+    for (const theirsOnBranch of [
+      [{ path: 'unrelated.txt', content: 'someone else' }],
+      [{ path: 'team.json', content: `${JSON.stringify(projectEndorsement)}\n` }],
+      [{ path: 'team.json', content: exactEndorsement }, { path: 'skills/sample/SKILL.md', content: skill().replace('useful skill', 'reviewed on the branch') }],
+    ]) {
+      const label = theirsOnBranch.map((file) => file.path).join('+');
       const other = await prepared();
-      const theirs = await pushBranchFromSeed(other.fixture.seed, theirsOnBranch.path, theirsOnBranch.content, 'publish/sample');
+      const theirs = await pushBranchFromSeed(other.fixture.seed, theirsOnBranch, 'publish/sample');
       const otherMain = await originSha(other.fixture.bare);
       const theirRunner = mappedRunner(REMOTE, other.fixture.bare);
       const refused = await run({ ref: 'sample', config: other.store, runner: theirRunner }, new ScriptedPrompter());
-      expect(refused, theirsOnBranch.path).toMatchObject({ ok: false, error: expect.stringMatching(/publish\/sample already exists on the remote with a different endorsement[\s\S]*compare\/main\.\.\.publish\/sample[\s\S]*--delete publish\/sample/) });
+      expect(refused, label).toMatchObject({ ok: false, error: expect.stringMatching(/publish\/sample already exists on the remote with a different endorsement[\s\S]*compare\/main\.\.\.publish\/sample[\s\S]*--delete publish\/sample/) });
       expect(await originSha(other.fixture.bare, 'publish/sample')).toBe(theirs);
       expect(await originSha(other.fixture.bare)).toBe(otherMain);
       expect(theirRunner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
@@ -159,6 +168,31 @@ describe('publish (§6)', () => {
     expect(second).toMatchObject({ ok: true, value: { branch: 'publish/sample-2' } });
     expect(await originSha(stale.fixture.bare, 'publish/sample')).toBe(seedCommit);
     expect(await originSha(stale.fixture.bare)).toBe(staleMain);
+  });
+
+  it('refuses to refresh a clone another operation is writing to, and pushes nothing', async () => {
+    const { fixture, store } = await prepared();
+    const runner = mappedRunner(REMOTE, fixture.bare);
+    const clone = store.teamClone('team');
+    const release = await lockfile.lock(clone, { lockfilePath: cloneLockPath(clone), realpath: false, stale: 60_000 });
+    try {
+      await expect(run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/write lock/i) });
+      expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
+    } finally { await release(); }
+    expect((await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).ok).toBe(true);
+  });
+
+  it('vets the -2 fallback too: a foreign publish/<name>-2 refuses the publish before anything is pushed', async () => {
+    const { fixture, store } = await prepared();
+    const theirs = await pushBranchFromSeed(fixture.seed, [{ path: 'unrelated.txt', content: 'another skill, another PR' }], 'publish/sample-2');
+    const main = await originSha(fixture.bare);
+    const runner = mappedRunner(REMOTE, fixture.bare);
+    const refused = await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter());
+    expect(refused).toMatchObject({ ok: false, error: expect.stringMatching(/publish\/sample-2 already exists on the remote with a different endorsement[\s\S]*--delete publish\/sample-2/) });
+    expect(await originSha(fixture.bare, 'publish/sample-2')).toBe(theirs);
+    expect(await originSha(fixture.bare)).toBe(main);
+    expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
+    expect((await git(['branch', '--list', 'publish/sample'], fixture.bare)).trim()).toBe('');
   });
 
   it('rejects unknown names and resolves an ambiguous bare ref only with --team', async () => {

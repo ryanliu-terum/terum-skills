@@ -57,22 +57,31 @@ export function generateReadme(data: ReadmeData): string {
     list.push(skill);
     byAuthor.set(skill.author, list);
   }
-  const lines = [README_BEGIN, `## ${data.team.name} skills`, '', '### Roster'];
+  // Every value below comes from repo content nobody validated for rendering (team.json, people
+  // files, SKILL.md frontmatter); each one goes through inlineText()/cell() so it can neither break
+  // the table nor spell a block marker.
+  const lines = [README_BEGIN, `## ${inlineText(data.team.name)} skills`, '', '### Roster'];
   const roster = activePeople(data.people, data.team.archived).sort((a, b) => a.handle.localeCompare(b.handle));
-  lines.push(...(roster.length ? roster.map((person) => `- @${person.handle} — ${person.display_name}`) : ['- No members yet.']));
+  lines.push(...(roster.length ? roster.map((person) => `- @${person.handle} — ${inlineText(person.display_name)}`) : ['- No members yet.']));
   const repo = installRepository(data.team.remote);
   for (const [author, skills] of [...byAuthor.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    lines.push('', `### ${author}`);
+    lines.push('', `### ${inlineText(author)}`);
     lines.push('', '| Skill | Category | Description | Installs | Endorsed | Latest | Eval | Install |', '| --- | --- | --- | ---: | --- | --- | --- | --- |');
     for (const skill of skills.slice().sort((a, b) => a.name.localeCompare(b.name))) {
       const endorsement = skillEndorsement(data.team, skill.id);
-      const command = repo ? `\`npx -y terum-skills@latest install ${repo}/${skill.name}\`` : '—';
-      lines.push(`| ${skill.name} | ${skill.category} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${endorsement} | ${shortHash(skill.latest)} | — | ${command} |`);
+      const command = repo ? `\`npx -y terum-skills@latest install ${repo}/${cell(skill.name)}\`` : '—';
+      lines.push(`| ${cell(skill.name)} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | — | ${command} |`);
     }
   }
   if (byAuthor.size === 0) lines.push('', '### Skills', '', 'No shared skills yet.');
   lines.push('', README_END);
-  return `${lines.join('\n')}\n`;
+  const block = `${lines.join('\n')}\n`;
+  // Fails closed: a block with any other marker count would be committed once and then wedge every
+  // later write for every member, because applyReadme validates only the EXISTING file. Unreachable
+  // while every field goes through the sanitizers above; kept so a future raw interpolation cannot
+  // poison a team repository.
+  if (countMarkers(block, README_BEGIN) !== 1 || countMarkers(block, README_END) !== 1) throw new Error(`Refusing to write a README block carrying ${countMarkers(block, README_BEGIN)} ${README_BEGIN} and ${countMarkers(block, README_END)} ${README_END} markers.`);
+  return block;
 }
 
 /** Replace exactly the generated region. Everything outside the two markers is byte-for-byte retained. */
@@ -145,8 +154,15 @@ export async function regenerateReadmeInTree(tree: MutableTree, remote: string, 
   tree.set('README.md', applyReadme(asText(tree.after('README.md') ?? ''), generateReadme({ team: { name: team.name, remote, global: team.global, projects: team.projects, archived: team.archived }, people, skills })));
 }
 
-/** Markdown table cells: a pipe or newline inside a description would break the row. */
-function cell(value: string): string { return value.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|'); }
+/**
+ * Free repo text rendered inside a generated, marker-delimited artifact (team name, display names,
+ * authors, skill fields, PR-comment lines): one line, and never a comment opener — `<!--` becomes
+ * `&lt;!--`, which Markdown renders identically but can no longer spell README_BEGIN/README_END or
+ * the PR-comment anchor.
+ */
+export function inlineText(value: string): string { return value.replace(/\r?\n/g, ' ').replace(/<!--/g, '&lt;!--'); }
+/** Markdown table cells: inlineText() plus the pipe, and the backslash that could un-escape it. */
+function cell(value: string): string { return inlineText(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|'); }
 
 export function shortHash(value: string): string { return value === '—' ? value : value.slice(0, 8); }
 

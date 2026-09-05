@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { reconcileShared, run } from '../share.js';
@@ -116,9 +116,13 @@ describe('share (§5.3)', () => {
     const source = (await store.read()).shared[id]!.source;
     const remoteCopy = (await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).replace('description: x', 'description: other machine');
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', remoteCopy);
-    expect((await sync({ config: store }, new ScriptedPrompter())).ok).toBe(true);
+    const io = new ScriptedPrompter();
+    expect((await sync({ config: store }, io)).ok).toBe(true);
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toContain('description: other machine');
     expect((await store.read()).shared[id]!.baseline).toBe(await canonicalDigest(source));
+    // The displaced authoring folder is recoverable, never deleted: it sits in quarantine, announced.
+    expect(await quarantinedFiles(store.root, 'sample/SKILL.md')).toEqual([expect.stringContaining('description: x')]);
+    expect(io.lines.filter((line) => line.startsWith(`Previous source at ${source} moved to `))).toHaveLength(1);
   });
 
   it('continues reconciling healthy shares when one tracked source cannot be read', async () => {
@@ -215,13 +219,20 @@ describe('share (§5.3)', () => {
     const id = Object.keys((await store.read()).shared)[0]!;
     const source = (await store.read()).shared[id]!.source;
     await writeFile(join(source, 'SKILL.md'), (await readFile(join(source, 'SKILL.md'), 'utf8')).replace('description: x', 'description: source loser'));
+    await writeFile(join(source, 'notes.md'), 'unpublished notes that exist nowhere else');
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', (await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).replace('description: x', 'description: repo winner'));
     expect((await sync({ config: store }, new ScriptedPrompter())).ok).toBe(true);
-    expect((await run({ keepRepo: id, config: store }, new ScriptedPrompter())).ok).toBe(true);
+    const io = new ScriptedPrompter();
+    expect((await run({ keepRepo: id, config: store }, io)).ok).toBe(true);
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toContain('description: repo winner');
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).not.toContain('description: source loser');
+    await expect(readFile(join(source, 'notes.md'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toContain('description: repo winner');
     expect((await store.read()).shared[id]!.baseline).toBe(await canonicalDigest(source));
+    // The loser — edits no commit ever held — is in quarantine, every file of it, and the user was told where.
+    expect(await quarantinedFiles(store.root, 'sample/SKILL.md')).toEqual([expect.stringContaining('description: source loser')]);
+    expect(await quarantinedFiles(store.root, 'sample/notes.md')).toEqual(['unpublished notes that exist nowhere else']);
+    expect(io.lines.filter((line) => line.startsWith(`Previous source at ${source} moved to `))).toHaveLength(1);
   });
 
   it('warns once per sync for a missing source and keeps both the repository copy and tracking entry', async () => {
@@ -377,6 +388,29 @@ describe('share (§5.3)', () => {
     expect((await run({ path: source, team: 'team', config: store, allowPrivileged: true }, new ScriptedPrompter([], [true]))).ok).toBe(true);
   });
 
+  it('holds back hooks added to an already-shared source until the author re-consents with --keep-source --allow-privileged', async () => {
+    const { fixture, store } = await sharedFixture();
+    const id = Object.keys((await store.read()).shared)[0]!;
+    const source = (await store.read()).shared[id]!.source;
+    const baseline = (await store.read()).shared[id]!.baseline;
+    await mkdir(join(source, 'hooks')); await writeFile(join(source, 'hooks', 'session-start.sh'), '#!/bin/sh\necho hi\n');
+    const sha = await originSha(fixture.bare);
+    const io = new ScriptedPrompter();
+    expect((await sync({ config: store }, io)).ok).toBe(true);
+    expect(io.lines.join('\n')).toContain(`Shared skill sample now contains plugin or hook definitions; run share --keep-source ${id} --allow-privileged`);
+    expect(await originSha(fixture.bare)).toBe(sha);
+    expect(await git(['ls-tree', '-r', '--name-only', 'main', 'skills/sample/'], fixture.bare)).not.toContain('hooks/');
+    expect((await store.read()).shared[id]!.baseline).toBe(baseline);
+    await expect(run({ keepSource: id, config: store }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('--allow-privileged') });
+    expect(await originSha(fixture.bare)).toBe(sha);
+    expect((await run({ keepSource: id, allowPrivileged: true, config: store }, new ScriptedPrompter())).ok).toBe(true);
+    expect(await git(['ls-tree', '-r', '--name-only', 'main', 'skills/sample/'], fixture.bare)).toContain('skills/sample/hooks/session-start.sh');
+    // Once the repository copy carries the hooks, later edits publish normally again.
+    await writeFile(join(source, 'SKILL.md'), (await readFile(join(source, 'SKILL.md'), 'utf8')).replace('description: x', 'description: after consent'));
+    expect((await sync({ config: store }, new ScriptedPrompter())).ok).toBe(true);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toContain('description: after consent');
+  });
+
   it('refuses symlinked files and directories before it can rewrite a source or team repo', async () => {
     const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
     const before = await originSha(fixture.bare);
@@ -472,6 +506,12 @@ async function expectRejectedShare(directoryName: string, frontmatterName: strin
   expect(await originSha(fixture.bare)).toBe(sha);
   expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(original);
   expect((await store.read()).shared).toEqual({});
+}
+
+async function quarantinedFiles(storeRoot: string, suffix: string): Promise<string[]> {
+  const quarantine = join(storeRoot, 'quarantine');
+  const entries = await readdir(quarantine, { recursive: true });
+  return Promise.all(entries.filter((entry) => entry.endsWith(suffix)).map((entry) => readFile(join(quarantine, entry), 'utf8')));
 }
 
 async function sharedFixture() {

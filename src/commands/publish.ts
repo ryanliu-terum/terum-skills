@@ -3,7 +3,7 @@ import { ghState } from '../lib/auth.js';
 import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, isGitHubRemote, stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
-import { parseJson, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
+import { parseJson, parseSkillFrontmatter, Team, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { findSkill, readTeam } from '../lib/skills.js';
 import { openTeamRepo, refreshClone, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
@@ -48,7 +48,9 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const base: Omit<PublishResult, 'changed' | 'branch' | 'prUrl' | 'compareUrl'> = { team, id: record.id, name: record.name, scope, policy: teamJson.policy.publish };
     if (list.includes(record.id)) return alreadyEndorsed(base, scopeLabel, io);
     const destination = teamJson.policy.publish === 'pr' ? `publish/${record.name}` : null;
-    if (destination !== null) await assertBranchReusable(runner, clone, destination, record.id, scope, binding.remote);
+    // safeWrite retargets a stale-lease push to `<branch>-2` (teamRepo.ts push()), and `foo-2` is a
+    // legal skill name with an endorsement branch of its own, so BOTH names are held to the reuse rule.
+    if (destination !== null) for (const candidate of [destination, `${destination}-2`]) await assertBranchReusable(runner, clone, candidate, record.id, scope, binding.remote);
 
     if (teamJson.policy.publish === 'push') {
       printCard(record, scopeLabel, io);
@@ -66,16 +68,9 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       // The branch (or the direct push to main) was chosen from the policy read before the loop; the
       // tree being written may be newer, and a policy the team changed meanwhile must win.
       if (fresh.policy.publish !== teamJson.policy.publish) throw new Error(`The team publish policy changed to "${fresh.policy.publish}" while this publish ran; rerun publish.`);
-      let target: string[];
-      if (scope.kind === 'global') target = fresh.global;
-      else {
-        const project = Object.hasOwn(fresh.projects, scope.project) ? fresh.projects[scope.project] : undefined;
-        if (!project) throw new Error(`Unknown project ${scope.project}.`);
-        target = project.skills;
-      }
-      if (target.includes(record.id)) return;
-      target.push(record.id);
-      tree.set('team.json', `${JSON.stringify(fresh, null, 2)}\n`);
+      const next = endorse(fresh, record.id, scope);
+      if (next === undefined) return;
+      tree.set('team.json', next);
     }, {
       action: 'publish',
       handle: binding.handle,
@@ -132,29 +127,59 @@ function compare(remote: string, branch: string): string | null {
 function commandMessage(stderr: string, stdout: string): string { return (stderr || stdout).trim(); }
 
 /**
- * An existing `publish/<name>` on the remote is reused — the lease then refreshes it — only when it
- * already carries THIS endorsement: an abandoned attempt of the same publish, the case the spec
- * means. Any other content (a project scope, someone else's pending endorsement, a hand-made
- * branch) is refused before anything is committed, because force-replacing it would silently
- * rewrite whoever's pull request is built on it. Existence is checked live on the remote; the
- * content from the fetched object, and an unreadable one counts as different.
+ * The exact team.json this publish writes over `fresh` — the one serialization both the safeWrite
+ * mutation and the branch-reuse vet use, so "already carries exactly this endorsement" is a byte
+ * compare. Undefined when the ID is already listed (the mutation then writes nothing).
+ */
+function endorse(fresh: Team, id: string, scope: PublishScope): string | undefined {
+  let target: string[];
+  if (scope.kind === 'global') target = fresh.global;
+  else {
+    const project = Object.hasOwn(fresh.projects, scope.project) ? fresh.projects[scope.project] : undefined;
+    if (!project) throw new Error(`Unknown project ${scope.project}.`);
+    target = project.skills;
+  }
+  if (target.includes(id)) return undefined;
+  target.push(id);
+  return `${JSON.stringify(fresh, null, 2)}\n`;
+}
+
+/**
+ * A pre-existing `publish/<name>` — or the `<name>-2` fallback safeWrite may retarget a stale-lease
+ * push to — is reused (the lease then refreshes it) only when it is EXACTLY an abandoned attempt of
+ * this same publish (D2, 2026-09-05 close-out walk): its tip forks from main, the fork touches only
+ * team.json (plus the derived README.md on a generic remote), and that team.json is byte-for-byte
+ * what this publish writes over the fork point's copy. Anything else — a review fixup on the
+ * branch, a second endorsement squashed into the file, a project scope, someone else's branch,
+ * unreadable content — is refused before anything is committed, because force-replacing it would
+ * silently rewrite whoever's pull request is built on it. The lease cannot do this job: safeWrite
+ * re-reads it after its own fetch, so it guards a move DURING the write, never a branch that
+ * existed before it (§6.0). Existence is checked live on the remote; content from the fetched objects.
  */
 async function assertBranchReusable(runner: Runner, clone: string, branch: string, id: string, scope: PublishScope, remote: string): Promise<void> {
   const heads = await runner.run('git', ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], { cwd: clone });
   if (heads.code !== 0) throw new Error(`Could not check the remote for ${branch}: ${commandMessage(heads.stderr, heads.stdout)}`);
   const sha = heads.stdout.trim().split(/\s+/)[0];
   if (!sha) return;
-  let carriesThis = false;
-  const shown = await runner.run('git', ['show', `${sha}:team.json`], { cwd: clone });
-  if (shown.code === 0) {
-    try {
-      const theirs = parseJson(teamSchema, shown.stdout, `${branch}:team.json`);
-      carriesThis = scope.kind === 'global' ? theirs.global.includes(id) : Boolean(Object.hasOwn(theirs.projects, scope.project) && theirs.projects[scope.project]!.skills.includes(id));
-    } catch { carriesThis = false; }
-  }
-  if (carriesThis) return;
+  if (await isExactlyThisEndorsement(runner, clone, sha, id, scope, remote)) return;
   const where = compare(remote, branch) ?? `${stripRemoteCredentials(remote)} — branch ${branch}`;
   throw new Error(`${branch} already exists on the remote with a different endorsement (${where}). Merge or close its pull request, or delete the branch with \`git push origin --delete ${branch}\`, then retry.`);
+}
+
+async function isExactlyThisEndorsement(runner: Runner, clone: string, sha: string, id: string, scope: PublishScope, remote: string): Promise<boolean> {
+  const git = (args: string[]) => runner.run('git', args, { cwd: clone });
+  const fork = await git(['merge-base', sha, 'origin/main']);
+  const forkPoint = fork.stdout.trim();
+  if (fork.code !== 0 || !forkPoint) return false;
+  const touched = await git(['diff', '--name-only', forkPoint, sha]);
+  if (touched.code !== 0) return false;
+  const paths = touched.stdout.split('\n').filter(Boolean);
+  const allowed = new Set(isGitHubRemote(remote) ? ['team.json'] : ['team.json', 'README.md']);
+  if (!paths.includes('team.json') || paths.some((path) => !allowed.has(path))) return false;
+  const [theirs, base] = await Promise.all([git(['show', `${sha}:team.json`]), git(['show', `${forkPoint}:team.json`])]);
+  if (theirs.code !== 0 || base.code !== 0) return false;
+  try { return theirs.stdout === endorse(parseJson(teamSchema, base.stdout, `${forkPoint}:team.json`), id, scope); }
+  catch { return false; }
 }
 function printCard(record: Awaited<ReturnType<typeof findSkill>> & {}, scopeLabel: string, io: Prompter): void {
   if (!record) return;

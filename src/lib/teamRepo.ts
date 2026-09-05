@@ -181,7 +181,10 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<voi
  * replaced under a lease PINNED to the ref as it stood when this write first tried that target, so
  * a retry after ref-lock contention can never overwrite a commit someone pushed in between: git
  * reports that as stale and the write moves on to `<branch>-2`, once. Any other refusal is
- * terminal and carries git's own message.
+ * terminal and carries git's own message. Invariant the CALLER owns: both `<branch>` and
+ * `<branch>-2` are force-replaced under a lease read AFTER this write's own fetch, so the lease
+ * never protects a branch that existed before the write began — a non-`main` caller must vet BOTH
+ * names before safeWrite (publish's assertBranchReusable does).
  */
 async function push(git: Git, branch: string, leases: Map<string, string>): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
   if (branch === 'main') {
@@ -339,9 +342,19 @@ export async function cloneOrigin(root: string, runner: Runner = systemRunner): 
  * refresh for a clone we own (D5b, 2026-09-05 close-out walk).
  */
 export async function refreshClone(runner: Runner, clone: string, options: { label?: string; env?: NodeJS.ProcessEnv } = {}): Promise<void> {
-  for (const args of [['fetch', 'origin'], ['reset', '--hard', 'origin/main']]) {
-    const result = await runner.run('git', args, { cwd: clone, env: options.env });
-    if (result.code !== 0) throw new Error(`Could not refresh ${options.label ?? clone}: ${(result.stderr || result.stdout).trim()}`);
+  // Under the same writer lock safeWrite and `team leave` hold: a hard reset while another process
+  // sits between its commit and its push would rewind that commit, and its `push HEAD` would then
+  // report "everything up-to-date" for a write that never left the machine.
+  try {
+    await withCloneLock(clone, async () => {
+      for (const args of [['fetch', 'origin'], ['reset', '--hard', 'origin/main']]) {
+        const result = await runner.run('git', args, { cwd: clone, env: options.env });
+        if (result.code !== 0) throw new Error(`Could not refresh ${options.label ?? clone}: ${(result.stderr || result.stdout).trim()}`);
+      }
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOCKED') throw new Error(`Another terum-skills operation holds the write lock on ${options.label ?? clone}; retry when it finishes.`);
+    throw error;
   }
 }
 

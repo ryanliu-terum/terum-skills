@@ -57,6 +57,15 @@ describe('session hook (§8)', () => {
     expect(HOOK_COMMAND).toContain('terum-skills');
   });
 
+  it('offerHook surfaces an unreadable settings file as the thrown error, asks nothing, and changes no bytes', async () => {
+    const target = await options();
+    await writeFile(target.settingsFile, '{ not json');
+    const io = new ScriptedPrompter();
+    await expect(offerHook(io, target)).rejects.toThrow(`Cannot edit ${target.settingsFile}: it is not valid JSON`);
+    expect(io.asked).toEqual([]);
+    expect(await readFile(target.settingsFile, 'utf8')).toBe('{ not json');
+  });
+
   it('an interrupted rename leaves the previous file intact and parseable, and the next install succeeds', async () => {
     const target = await options();
     const original = JSON.stringify({ theme: 'dark' });

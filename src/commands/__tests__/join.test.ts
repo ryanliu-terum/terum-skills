@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { join as rawJoin, MAX_HANDLE_ATTEMPTS, parseJoinTarget } from '../team.js';
@@ -34,6 +34,19 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(JSON.parse(await git(['show', 'main:people/ajay-t.json'], fixture.bare)).email).toBe('ajay.two@example.com');
     expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).display_name).toBe('Existing');
     expect((await git(['log', '-1', '--format=%s', 'main'], fixture.bare)).trim()).toBe('ajay-t: join');
+  });
+
+  it('a completed join survives an unreadable settings.json: ok, one skipped-hook line, roster entry pushed, settings bytes untouched', async () => {
+    const { fixture, store, runner } = await setup();
+    const settingsFile = pathJoin(fixture.root, 'settings.json');
+    await writeFile(settingsFile, '{ not json');
+    const io = new ScriptedPrompter(answers());
+    const result = await rawJoin({ target: REMOTE, config: store, runner, hook: { settingsFile, backupDir: pathJoin(fixture.root, 'backups') } }, io);
+    expect(result).toMatchObject({ ok: true, value: { team: 'team', handle: 'me' } });
+    expect(io.lines.filter((line) => line.startsWith(`Skipped the session hook: Cannot edit ${settingsFile}`))).toHaveLength(1);
+    expect(io.countAsked('Install the Claude Code session-start hook')).toBe(0);
+    expect(await readFile(settingsFile, 'utf8')).toBe('{ not json');
+    expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare)).email).toBe('me@example.com');
   });
 
   it('offers the session hook directly and setup can suppress that offer', async () => {
@@ -246,6 +259,8 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(parseJoinTarget('acme/team.git')).toMatchObject({ ownerRepo: 'acme/team' });
     expect(parseJoinTarget('git@github.com:acme/team.git')).toEqual({ remote: 'git@github.com:acme/team.git', github: false });
     expect(parseJoinTarget('https://gitlab.com/acme/team.git')).toEqual({ remote: 'https://gitlab.com/acme/team.git', github: false });
+    // The canonical host/path spelling the tool stores and prints (`team join git.example/team`) is a remote, never a GitHub owner.
+    expect(parseJoinTarget('git.example/team')).toEqual({ remote: 'git.example/team', github: false });
     expect(() => parseJoinTarget('not a target')).toThrow('Unsupported remote');
     expect(parseJoinTarget('https://me:ghp_leak@gitlab.com/acme/team.git')).toEqual({ remote: 'https://gitlab.com/acme/team.git', github: false });
     expect(parseJoinTarget(' https://me:gh@p_leak@gitlab.com/acme/team.git')).toEqual({ remote: 'https://gitlab.com/acme/team.git', github: false });

@@ -33,7 +33,11 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
       const listed = teamJson.projects[project];
       if (!listed) throw new Error(`Unknown project ${project}.`);
       const targets: UninstallTarget[] = [];
-      for (const id of listed.skills) for (const scope of await ledgerScopes(store, team, id, [{ kind: 'project', project }])) targets.push({ id, scope });
+      // `uninstall project` is the exact inverse of `install project`, which always places at that
+      // project's scope: it takes back exactly that. A global copy the user installed separately is
+      // not part of the project and survives (the member verb keeps its wide union on purpose —
+      // `install member` re-derives each scope locally, so "wherever it landed here" is its inverse).
+      for (const id of listed.skills) targets.push({ id, scope: { kind: 'project', project } });
       return success(await uninstallMany({ team, targets, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
     }
     if (!args.ref) throw new Error('Provide a skill ref, `member <handle>`, or `project <name>`.');
@@ -88,7 +92,10 @@ export async function uninstallMany(input: UninstallInput & { targets: readonly 
     const isAuto = (id: string): boolean => endorsed ? endorsed.global.includes(id) || Object.values(endorsed.projects).some((project) => project.skills.includes(id)) : false;
     const installed = person.installed.filter((entry) => !input.targets.some((target) => entry.id === target.id && sameScope(entry.scope, target.scope)));
     const declined = [...person.declined];
-    for (const target of input.targets) if (isAuto(target.id) && !declined.includes(target.id)) declined.push(target.id);
+    // `declined` is keyed by skill id with no scope: a scope-targeted uninstall must not write an
+    // id-wide suppression while another scope's install record survives, or sync would skip the
+    // surviving placement forever.
+    for (const target of input.targets) if (isAuto(target.id) && !installed.some((entry) => entry.id === target.id) && !declined.includes(target.id)) declined.push(target.id);
     tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);
   }, { action: 'uninstall', handle: teamConfig.handle, message: `${teamConfig.handle}: uninstall ${label}`, ...input.safeWrite });
   await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !pendings.some((pending) => samePending(entry, pending))); });

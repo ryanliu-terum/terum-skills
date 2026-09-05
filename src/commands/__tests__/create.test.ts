@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
@@ -41,6 +41,20 @@ describe('team create (§6)', () => {
     const suppressed = new ScriptedPrompter(['other', 'other', 'Other', 'other@example.com']);
     await expect(rawCreate({ name: 'suppressed', remote: 'https://git.example/suppressed.git', config: createConfigStore(pathJoin(root, 'suppressed')), runner: mappedRunner('https://git.example/suppressed.git', empty.bare), offerHook: false }, suppressed)).resolves.toMatchObject({ ok: true });
     expect(suppressed.countAsked('Install the Claude Code session-start hook')).toBe(0);
+  });
+
+  it('a completed create survives an unreadable settings.json: ok, one skipped-hook line, settings bytes untouched', async () => {
+    const { root, bare } = await emptyBare();
+    const remote = 'https://git.example/broken-settings.git';
+    const settingsFile = pathJoin(root, 'settings.json');
+    await writeFile(settingsFile, '{ not json');
+    const io = new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']);
+    const result = await rawCreate({ name: 'broken-settings', remote, config: createConfigStore(pathJoin(root, 'direct')), runner: mappedRunner(remote, bare), hook: { settingsFile, backupDir: pathJoin(root, 'backups') } }, io);
+    expect(result).toMatchObject({ ok: true, value: { team: 'broken-settings' } });
+    expect(io.lines.filter((line) => line.startsWith(`Skipped the session hook: Cannot edit ${settingsFile}`))).toHaveLength(1);
+    expect(io.countAsked('Install the Claude Code session-start hook')).toBe(0);
+    expect(await readFile(settingsFile, 'utf8')).toBe('{ not json');
+    expect(await git(['ls-remote', '--heads', bare])).toContain('refs/heads/main');
   });
 
   it('scaffolds the §4.1 tree into an empty generic-git remote, records the team, and leaves the clone ready', async () => {
