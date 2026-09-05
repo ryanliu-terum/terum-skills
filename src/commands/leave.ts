@@ -58,7 +58,9 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
     });
     if (lastTeam) {
       const options = { ...defaultHookOptions(store.root), ...args.hook };
-      if (await removeHook(options) === 'removed') io.print(`Removed the session hook from ${options.settingsFile}.`);
+      // The local cleanup above already happened; an unreadable settings.json must not turn it into a failure.
+      try { if (await removeHook(options) === 'removed') io.print(`Removed the session hook from ${options.settingsFile}.`); }
+      catch (error) { io.print(`Left the session hook in place: ${error instanceof Error ? error.message : String(error)}`); }
     }
     const removed = removedPaths.length;
     io.print(`Left ${name}. You are still an active member of ${remote}; an admin archives membership with team remove ${binding.handle ?? '<handle>'}.`);

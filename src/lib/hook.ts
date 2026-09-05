@@ -79,7 +79,12 @@ export async function installHook(options: Required<HookOptions>): Promise<'inst
   const sessionStart = (hooks.SessionStart ??= []) as unknown[];
   const index = sessionStart.findIndex(matchingEntry);
   const outcome = index < 0 ? 'installed' : 'replaced';
-  if (index < 0) sessionStart.push(HOOK_ENTRY); else sessionStart[index] = HOOK_ENTRY;
+  if (index < 0) sessionStart.push(HOOK_ENTRY);
+  else {
+    // Replace the first match in place; every further match (a hand-edited duplicate, an older
+    // install under another spelling) goes, so the file never carries two of our entries.
+    hooks.SessionStart = sessionStart.flatMap((element, position) => (position === index ? [HOOK_ENTRY] : matchingEntry(element) ? [] : [element]));
+  }
   await backupOnce(options, source);
   await writeAtomically(options.settingsFile, value, source !== undefined);
   return outcome;
