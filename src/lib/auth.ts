@@ -149,7 +149,7 @@ export async function authenticateCreator(io: Prompter, dependencies: AuthDepend
 async function probeToken(token: string, remote: string | undefined, gh: GhState, runner: Runner): Promise<string | undefined> {
   const env = gitAuthEnv(token);
   if (remote !== undefined) {
-    const heads = await runner.run('git', ['ls-remote', '--heads', remoteToGitUrl(remote)], { env });
+    const heads = await runner.run('git', ['ls-remote', '--heads', '--', remoteToGitUrl(remote)], { env });
     if (heads.code !== 0) throw new Error(`GitHub token probe failed against ${normalizeRemote(remote)}: ${(heads.stderr || heads.stdout).trim()}`);
     if (!gh.installed) return undefined;
   } else if (!gh.installed) {

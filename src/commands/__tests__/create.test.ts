@@ -143,4 +143,34 @@ describe('team create (§6)', () => {
     expect((await create({ name: 'dup', remote: publicRemote, config: store, runner: mappedRunner(publicRemote, bare) }, io())).ok).toBe(true);
     expect(await create({ name: 'dup', remote: publicRemote, config: store, runner: mappedRunner(publicRemote, bare) }, io())).toMatchObject({ ok: false, error: expect.stringContaining('already configured') });
   });
+
+  it('refuses an option-shaped or helper-shaped --remote before running any git command', async () => {
+    const { root, bare } = await emptyBare();
+    const store = createConfigStore(pathJoin(root, 'local'));
+    for (const remote of ['--upload-pack=touch:pwned', 'ext::sh -c id']) {
+      const runner = mappedRunner(remote, bare);
+      expect(await create({ name: 'evil', remote, config: store, runner }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com'])), remote).toMatchObject({ ok: false, error: expect.stringContaining('Unsupported remote') });
+      expect(runner.calls.filter((call) => call.command === 'git'), remote).toEqual([]);
+    }
+    expect((await store.read()).teams).toEqual({});
+  });
+
+  it('a credential pasted into --remote (with `@` in the password and leading whitespace) never reaches git argv, config, the clone, or a message; the user is told once; every remote sits behind --', async () => {
+    const { root, bare } = await emptyBare();
+    const publicRemote = 'https://git.example/new-team.git';
+    const store = createConfigStore(pathJoin(root, 'local'));
+    const runner = mappedRunner(publicRemote, bare);
+    const io = new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']);
+    const result = await create({ name: 'new-team', remote: ' https://me:gh@p_leak@git.example/new-team.git', config: store, runner }, io);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.remote).toBe(publicRemote);
+    const everything = JSON.stringify([runner.calls, io.lines, await store.read()]);
+    expect(everything).not.toContain('p_leak');
+    expect(everything).not.toContain('gh@');
+    expect(io.lines.filter((line) => line.includes('Ignored the credential'))).toHaveLength(1);
+    expect((await git(['remote', 'get-url', 'origin'], store.teamClone('new-team'))).trim()).toBe(bare);
+    const positional = runner.calls.filter((call) => call.command === 'git' && call.args.includes(publicRemote));
+    expect(positional.length).toBeGreaterThanOrEqual(2);
+    for (const call of positional) expect(call.args[call.args.indexOf(publicRemote) - 1], call.args.join(' ')).toBe('--');
+  });
 });

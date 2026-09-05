@@ -5,7 +5,7 @@ import lockfile from 'proper-lockfile';
 import { gitAuthEnv } from './auth.js';
 import { mkdirPrivate } from './fs.js';
 import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
-import { normalizeRemote, remoteToGitUrl } from './remote.js';
+import { normalizeRemote, remoteToGitUrl, stripRemoteCredentials } from './remote.js';
 import { CommandResult, Runner, systemRunner } from './runner.js';
 
 /**
@@ -140,7 +140,7 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<voi
   if (origin.code !== 0) throw new Error(`Clone at ${root} has no origin remote`);
   const actual = origin.stdout.trim();
   if (normalizeRemote(actual) !== normalizeRemote(remote)) {
-    throw new Error(`Clone at ${root} points at ${actual}, not ${remote}; refusing to write to the wrong repository`);
+    throw new Error(`Clone at ${root} points at ${stripRemoteCredentials(actual)}, not ${stripRemoteCredentials(remote)}; refusing to write to the wrong repository`);
   }
 }
 
@@ -242,8 +242,8 @@ async function removeCreated(root: string, realRoot: string, path: string): Prom
 /** Clone a team repo into a private directory, checking out `main` explicitly so a bare remote whose HEAD points elsewhere still yields a working tree. */
 export async function cloneTeam(remote: string, destination: string, runner: Runner = systemRunner, token: string | null = null): Promise<void> {
   await mkdirPrivate(dirname(destination));
-  const clone = await runner.run('git', ['clone', '-q', '--branch', 'main', remoteToGitUrl(remote), destination], { env: gitAuthEnv(token) });
-  if (clone.code !== 0) throw new Error(`Could not clone ${remote}: ${(clone.stderr || clone.stdout).trim()}`);
+  const clone = await runner.run('git', ['clone', '-q', '--branch', 'main', '--', remoteToGitUrl(remote), destination], { env: gitAuthEnv(token) });
+  if (clone.code !== 0) throw new Error(`Could not clone ${stripRemoteCredentials(remote)}: ${(clone.stderr || clone.stdout).trim()}`);
 }
 
 /** The normalized origin of an existing clone, or null when the directory is not a clone. */
