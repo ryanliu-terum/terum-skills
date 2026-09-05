@@ -184,6 +184,23 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(parseJoinTarget('git@github.com:acme/team.git')).toEqual({ remote: 'git@github.com:acme/team.git', github: false });
     expect(parseJoinTarget('https://gitlab.com/acme/team.git')).toEqual({ remote: 'https://gitlab.com/acme/team.git', github: false });
     expect(() => parseJoinTarget('not a target')).toThrow('Unsupported remote');
+    expect(parseJoinTarget('https://me:ghp_leak@gitlab.com/acme/team.git')).toEqual({ remote: 'https://gitlab.com/acme/team.git', github: false });
+    expect(parseJoinTarget(' https://me:gh@p_leak@gitlab.com/acme/team.git')).toEqual({ remote: 'https://gitlab.com/acme/team.git', github: false });
+    for (const hostile of ['--upload-pack=touch:pwned', 'ext::sh -c id', 'git@-evil:acme/team.git']) expect(() => parseJoinTarget(hostile), hostile).toThrow('Unsupported remote');
+  });
+
+  it('a credential pasted into the join target (with `@` in the password and leading whitespace) never reaches git argv, the clone, config, or output; the user is told once; the remote sits behind --', async () => {
+    const { fixture, store, runner } = await setup();
+    const io = new ScriptedPrompter(answers());
+    const result = await join({ target: ' https://me:gh@p_leak@git.example/team.git', config: store, runner }, io);
+    if (!result.ok) throw new Error(result.error);
+    const everything = JSON.stringify([runner.calls, io.lines, await store.read()]);
+    expect(everything).not.toContain('p_leak');
+    expect(everything).not.toContain('gh@');
+    expect(io.lines.filter((line) => line.includes('Ignored the credential'))).toHaveLength(1);
+    expect((await git(['remote', 'get-url', 'origin'], store.teamClone('team'))).trim()).toBe(fixture.bare);
+    const clone = runner.calls.find((call) => call.command === 'git' && call.args[0] === 'clone');
+    expect(clone?.args.slice(-3)).toEqual(['--', REMOTE, store.teamClone('team')]);
   });
 
   it('a partial clone directory is reported, not silently reused or deleted', async () => {

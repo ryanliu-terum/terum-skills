@@ -85,7 +85,7 @@ describe('creator and joiner paths (D7/D8)', () => {
     const runner = { async run(command: 'git' | 'gh', args: readonly string[], options?: { env?: NodeJS.ProcessEnv }) { calls.push([command, ...args]); if (command === 'gh') throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); expect(options?.env?.GH_TOKEN).toBe('ghp_secret'); return { code: 0, stdout: 'abc\trefs/heads/main\n', stderr: '' }; } };
     const auth = await authenticateCreator(new ScriptedPrompter(['ghp_secret', 'me', 'me', 'Me', 'me@x.test']), { config: memoryStore(), runner }, { remote: 'github.com/acme/team' });
     expect(auth.token).toBe('ghp_secret');
-    expect(calls).toContainEqual(['git', 'ls-remote', '--heads', 'https://github.com/acme/team.git']);
+    expect(calls).toContainEqual(['git', 'ls-remote', '--heads', '--', 'https://github.com/acme/team.git']);
   });
 
   it('a PAT is refused for a non-GitHub remote, a bad PAT fails the probe, and an empty one is refused', async () => {

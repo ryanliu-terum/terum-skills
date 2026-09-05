@@ -5,7 +5,7 @@ import { askHandle, AuthDependencies, authenticateCreator, bindTeam, collectIden
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists, mkdirPrivate } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
-import { githubOwnerRepo, hostOperationAllowed, normalizeRemote, remoteName, remoteToGitUrl } from '../lib/remote.js';
+import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, normalizeRemote, remoteName, remoteToGitUrl, stripRemoteCredentials } from '../lib/remote.js';
 import { activePeople, readPeople } from '../lib/readme.js';
 import { Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
@@ -141,12 +141,14 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
     let token: string | null = null;
     let identity: Identity;
     if (args.remote) {
-      // Generic-git path: an existing EMPTY remote the user already has credentials for.
-      remote = args.remote;
+      // Generic-git path: an existing EMPTY remote the user already has credentials for. A credential
+      // pasted into the URL is dropped here, before the remote reaches git, config, or a message.
+      remote = stripRemoteCredentials(args.remote);
       const bound = teamByRemote(config, remote);
       if (bound) throw new Error(`${normalizeRemote(remote)} is already configured as team ${bound[0]}.`);
+      if (hasEmbeddedCredentials(args.remote)) io.print(credentialNotice(remote));
       identity = await collectIdentity(io, config, runner, { gh: await ghState(runner) });
-      const heads = await runner.run('git', ['ls-remote', '--heads', remoteToGitUrl(remote)]);
+      const heads = await runner.run('git', ['ls-remote', '--heads', '--', remoteToGitUrl(remote)]);
       if (heads.code !== 0) throw new Error(`Cannot reach ${remote}: ${(heads.stderr || heads.stdout).trim()}`);
       if (heads.stdout.trim()) throw new Error(`${remote} already has branches; \`team create --remote\` needs an empty repository. To join an existing team run \`team join ${remote}\`.`);
     } else {
@@ -188,6 +190,7 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     const runner = args.runner ?? systemRunner;
     const target = parseJoinTarget(args.target);
     const normalized = normalizeRemote(target.remote);
+    if (hasEmbeddedCredentials(args.target)) io.print(credentialNotice(normalized));
     const configBefore = await store.read();
 
     // §6: a second join of an already-configured remote updates that entry; it never creates a duplicate team.
@@ -327,7 +330,12 @@ export function parseJoinTarget(value: string): { remote: string; github: boolea
     return { remote: `https://github.com/${ownerRepo}.git`, github: true, ownerRepo };
   }
   normalizeRemote(trimmed);
-  return { remote: trimmed, github: false };
+  return { remote: stripRemoteCredentials(trimmed), github: false };
+}
+
+/** Printed once when a pasted remote carried a credential (§5.1): it was dropped, and the user should know where access comes from instead. */
+export function credentialNotice(remote: string): string {
+  return `Ignored the credential embedded in the remote URL: terum-skills never stores one or passes one to git. Access to ${normalizeRemote(remote)} comes from gh on GitHub, or from your git credential helper elsewhere.`;
 }
 
 /** GitHub invitations: gh logged in → list then PATCH; empty list means already a collaborator. Without gh → print the URL and wait. */
@@ -362,7 +370,7 @@ async function bootstrap(remote: string, clone: string, teamName: string, identi
   try {
     await git('init', '-q');
     await git('checkout', '-q', '-b', 'main');
-    await git('remote', 'add', 'origin', remoteToGitUrl(remote));
+    await git('remote', 'add', 'origin', '--', remoteToGitUrl(remote));
     await git('config', 'user.name', identity.displayName);
     await git('config', 'user.email', identity.email);
     const team: Team = { layout_version: 2, name: teamName, categories: CATEGORIES, global: [], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } };
