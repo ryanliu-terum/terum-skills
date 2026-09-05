@@ -23,7 +23,7 @@ describe('ls (§6)', () => {
     const store = createConfigStore(join(fixture.root, 'local'));
     await store.ensureRoot();
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'amy' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'amy' }; });
     const before = await git(['rev-parse', 'HEAD'], store.teamClone('team'));
     const io = new ScriptedPrompter();
     const result = await run({ config: store }, io);
@@ -42,7 +42,7 @@ describe('ls (§6)', () => {
     await writeFile(join(fixture.seed, 'skills', 'report', 'SKILL.md'), `---\nname: report\ndescription: Report writing\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Amy <amy@example.com>\n  terum-category: docs\n---\n`);
     await git(['add', '--all'], fixture.seed); await git(['commit', '-q', '-m', 'skills'], fixture.seed); await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
     const store = createConfigStore(join(fixture.root, 'local')); await store.ensureRoot(); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'amy' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'amy' }; });
     const member = await run({ kind: 'member', value: 'Amy', config: store }, new ScriptedPrompter());
     const project = await run({ kind: 'project', value: 'app', config: store }, new ScriptedPrompter());
     expect(member).toMatchObject({ ok: true, value: { skills: [{ name: 'report', installs: 1, endorsement: 'project: app' }] } });

@@ -12,8 +12,15 @@ describe('systemRunner', () => {
     expect(failed.stderr).toContain('fatal');
     const env = await systemRunner.run('git', ['var', 'GIT_COMMITTER_IDENT'], { cwd, env: { GIT_COMMITTER_NAME: 'Piped', GIT_COMMITTER_EMAIL: 'p@x.test' } });
     expect(env.stdout).toContain('Piped <p@x.test>');
-    const prompt = await systemRunner.run('git', ['-c', 'alias.p=!printf "%s" "$GIT_TERMINAL_PROMPT"', 'p'], { cwd });
-    expect(prompt.stdout).toBe('0');
+    // vitest's own env sets GIT_TERMINAL_PROMPT=0, which would make this assertion vacuous; the child must see 0 because the runner injects it.
+    const ambient = process.env.GIT_TERMINAL_PROMPT;
+    process.env.GIT_TERMINAL_PROMPT = '1';
+    try {
+      const prompt = await systemRunner.run('git', ['-c', 'alias.p=!printf "%s" "$GIT_TERMINAL_PROMPT"', 'p'], { cwd });
+      expect(prompt.stdout).toBe('0');
+    } finally {
+      process.env.GIT_TERMINAL_PROMPT = ambient;
+    }
   });
 
   it('rejects with ENOENT when the tool is not installed instead of resolving a fake result', async () => {

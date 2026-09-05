@@ -6,15 +6,15 @@ import { stdin as processStdin, stdout as processStdout } from 'node:process';
  * process.stdin / stdout / console; the ESLint rule in eslint.config.js enforces that and
  * src/lib/__tests__/prompt.test.ts proves the rule fires.
  *
- * Two additions beyond the four spec methods, both properties of the channel rather than of any
- * verb: `interactive` (a human is on the other end and stdio may be handed to a child process,
- * which is what the §6 `login` gh offer needs to know) and `secret` (a PAT must not echo).
+ * One addition beyond the four spec methods, a property of the channel rather than of any verb:
+ * `interactive` (a human is on the other end and stdio may be handed to a child process, which
+ * is what the §6 `login` gh offer needs to know). There is no hidden-input method: the tool never
+ * asks for a token (rev 9, Decision 2).
  */
 export interface Prompter {
   readonly interactive: boolean;
   confirm(question: string): Promise<boolean>;
   text(question: string, defaultValue?: string): Promise<string>;
-  secret(question: string): Promise<string>;
   select(question: string, choices: readonly string[]): Promise<string>;
   print(line: string): void;
 }
@@ -56,16 +56,12 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
   const output = streams.output ?? processStdout;
   const interactive = streams.interactive ?? Boolean(input.isTTY);
 
-  async function ask(question: string, hidden = false): Promise<string> {
+  async function ask(question: string): Promise<string> {
     if (!interactive) throw new PromptClosedError(question.trim(), 'not-interactive');
-    // No `output` while hidden: readline still handles the line, but nothing echoes.
-    const rl = hidden ? createInterface({ input, terminal: true }) : createInterface({ input, output, terminal: true });
+    const rl = createInterface({ input, output, terminal: true });
     const closed = new Promise<never>((_, reject) => rl.once('close', () => reject(new PromptClosedError(question.trim(), 'closed'))));
     try {
-      if (hidden) output.write(question);
-      const answer = await Promise.race([rl.question(hidden ? '' : question), closed]);
-      if (hidden) output.write('\n');
-      return answer;
+      return await Promise.race([rl.question(question), closed]);
     } finally {
       rl.close();
     }
@@ -81,9 +77,6 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
       const suffix = defaultValue === undefined || defaultValue === '' ? '' : ` [${defaultValue}]`;
       const answer = await ask(`${question}${suffix}: `);
       return answer.trim() || defaultValue || '';
-    },
-    async secret(question) {
-      return (await ask(`${question}: `, true)).trim();
     },
     async select(question, choices) {
       const lines = choices.map((choice, index) => `${index + 1}. ${choice}`).join('\n');

@@ -57,7 +57,9 @@ describe('handles and team names (§5.4)', () => {
   it('accepts only GitHub-login syntax in people records', () => {
     const valid = { handle: 'me', display_name: 'Me', email: 'me@example.com', github: 'me-gh', bio: '', installed: [], declined: [] };
     expect(personSchema.safeParse(valid).success).toBe(true);
-    for (const github of ['', 'x/../repos/acme/other', 'bad--login']) expect(personSchema.safeParse({ ...valid, github }).success, github).toBe(false);
+    for (const github of ['x/../repos/acme/other', 'bad--login', ' ']) expect(personSchema.safeParse({ ...valid, github }).success, github).toBe(false);
+    // Optional (rev 9): a generic-git member may have no GitHub account; an empty value is never identity evidence.
+    expect(personSchema.safeParse({ ...valid, github: '' }).success).toBe(true);
   });
 
   it('team names are safe directory and repository names', () => {

@@ -135,10 +135,13 @@ function archivedRemovedOnly(before: Team, after: Team, handle: string): boolean
 /** §4.1 membership: active iff the people file exists (and parses as that handle) AND the handle is not archived. */
 export function isMember(personJson: string | undefined, teamJson: string, handle: string): boolean {
   if (personJson === undefined) return false;
+  // Same normalization as guard(): stored handles are lowercase, so compare like with like; an invalid handle is simply not a member.
+  const normalized = handleSchema.safeParse(handle);
+  if (!normalized.success) return false;
   try {
-    const person = parseJson(personSchema, personJson, `people/${handle}.json`);
-    if (person.handle !== handle) return false;
-    return !parseJson(teamSchema, teamJson, 'team.json').archived.includes(handle);
+    const person = parseJson(personSchema, personJson, `people/${normalized.data}.json`);
+    if (person.handle !== normalized.data) return false;
+    return !parseJson(teamSchema, teamJson, 'team.json').archived.includes(normalized.data);
   } catch {
     return false;
   }

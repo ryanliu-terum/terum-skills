@@ -13,7 +13,7 @@ async function prepared() {
   const store = createConfigStore(join(fixture.root, 'local'));
   await store.ensureRoot();
   await cloneWithIdentity(fixture.bare, store.teamClone('team'), 'Admin', 'admin@example.com');
-  await store.update((config) => { config.teams.team = { remote: REMOTE, token: null, handle: 'admin' }; });
+  await store.update((config) => { config.teams.team = { remote: REMOTE, handle: 'admin' }; });
   return { fixture, store };
 }
 
@@ -57,7 +57,7 @@ describe('team remove (§6)', () => {
     const store = createConfigStore(join(fixture.root, 'local'));
     await store.ensureRoot();
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'admin' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'admin' }; });
     const before = (await git(['rev-parse', 'main'], fixture.bare)).trim();
     await expect(run({ kind: 'remove', handle: 'member', config: store }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('Access is managed on the host') });
     expect((await git(['rev-parse', 'main'], fixture.bare)).trim()).toBe(before);
@@ -149,4 +149,41 @@ describe('team remove (§6)', () => {
     await expect(run({ kind: 'remove', handle: 'member', config: store, runner }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: false, error: expect.stringContaining('Permission denied') });
     expect(base.calls.some((call) => call.command === 'gh' && call.args.includes('DELETE'))).toBe(false);
   });
+
+  it('archives a member who has no GitHub login on a generic remote: the login is only validated where it would reach the host', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'people/admin.json', `${JSON.stringify(person('admin'), null, 2)}\n`);
+    await pushFromSeed(fixture.seed, 'people/nogh.json', `${JSON.stringify(person('nogh', { github: '' }), null, 2)}\n`);
+    const store = createConfigStore(join(fixture.root, 'local'));
+    await store.ensureRoot();
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'admin' }; });
+    await expect(run({ kind: 'remove', handle: 'nogh', archiveOnly: true, config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true });
+    expect(JSON.parse(await git(['show', 'main:team.json'], fixture.bare)).archived).toEqual(['nogh']);
+  });
+
+  it('refuses to revoke a GitHub login that another ACTIVE member also declares, before archiving or touching the host', async () => {
+    const { fixture, store } = await prepared();
+    await pushFromSeed(fixture.seed, 'people/twin.json', `${JSON.stringify(person('twin', { github: 'Member-GH' }), null, 2)}\n`);
+    const host = (args: readonly string[]) => {
+      const key = args.join(' ');
+      if (key === 'api repos/acme/team -q .permissions.admin') return { code: 0, stdout: 'true\n', stderr: '' };
+      if (key === 'api repos/acme/team/collaborators?permission=admin --paginate --slurp') return { code: 0, stdout: JSON.stringify([[{ login: 'admin' }]]), stderr: '' };
+      if (key === 'api repos/acme/team/collaborators --paginate --slurp') return { code: 0, stdout: JSON.stringify([[{ login: 'member-gh' }]]), stderr: '' };
+      if (key === 'api repos/acme/team/invitations --paginate --slurp') return { code: 0, stdout: '[[]]', stderr: '' };
+      if (key === 'api -X DELETE repos/acme/team/collaborators/member-gh') return { code: 0, stdout: '', stderr: '' };
+      return { code: 1, stdout: '', stderr: `unexpected gh ${key}` };
+    };
+    const runner = mappedRunner(REMOTE, fixture.bare, host);
+    const before = (await git(['rev-parse', 'main'], fixture.bare)).trim();
+    await expect(run({ kind: 'remove', handle: 'member', config: store, runner }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: false, error: expect.stringContaining('active member twin also declares GitHub login @member-gh') });
+    expect((await git(['rev-parse', 'main'], fixture.bare)).trim()).toBe(before);
+    expect(runner.calls.some((call) => call.args.includes('DELETE'))).toBe(false);
+    // An ARCHIVED twin does not block, and an archive-only removal never consults the login at all.
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: {}, archived: ['twin'], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    const again = mappedRunner(REMOTE, fixture.bare, host);
+    await expect(run({ kind: 'remove', handle: 'member', config: store, runner: again }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true });
+    expect(JSON.parse(await git(['show', 'main:team.json'], fixture.bare)).archived).toEqual(['twin', 'member']);
+  });
+
 });

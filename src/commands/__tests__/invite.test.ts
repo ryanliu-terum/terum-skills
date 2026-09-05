@@ -6,7 +6,7 @@ import { run } from '../invite.js';
 describe('invite (§6 host scoping)', () => {
   it('parses real gh status headers for invited, existing, and repository-owner responses and prints one join block', async () => {
     const store = createConfigStore(await temporaryDirectory());
-    await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', token: null, handle: 'admin' }; });
+    await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'admin' }; });
     const runner = ghOnlyRunner((args) => {
       const endpoint = args.at(-1)!;
       if (endpoint.endsWith('/new')) return { code: 0, stdout: 'HTTP/2.0 201 Created\r\n', stderr: '' };
@@ -22,7 +22,7 @@ describe('invite (§6 host scoping)', () => {
 
   it('validates every API-path login and reports non-owner failures without stopping later invitations', async () => {
     const store = createConfigStore(await temporaryDirectory());
-    await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', token: null, handle: 'admin' }; });
+    await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'admin' }; });
     const runner = ghOnlyRunner((args) => {
       const endpoint = args.at(-1)!;
       if (endpoint.endsWith('/bad')) return { code: 1, stdout: 'HTTP/2.0 422 Unprocessable Entity\r\n', stderr: 'gh: Validation Failed (HTTP 422)' };
@@ -38,7 +38,7 @@ describe('invite (§6 host scoping)', () => {
 
   it('refuses a generic remote before it invokes gh', async () => {
     const store = createConfigStore(await temporaryDirectory());
-    await store.update((config) => { config.teams.team = { remote: 'git.example/acme/team', token: null, handle: 'admin' }; });
+    await store.update((config) => { config.teams.team = { remote: 'git.example/acme/team', handle: 'admin' }; });
     const runner = ghOnlyRunner(() => ({ code: 0, stdout: '', stderr: '' }));
     await expect(run({ logins: ['new'], config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('Access is managed on the host') });
     expect(runner.calls).toEqual([]);

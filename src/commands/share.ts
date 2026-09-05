@@ -49,7 +49,7 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
     const repo = openTeamRepo(clone, binding.remote, runner);
     // Refresh before changing the user's source so an upstream collision is a no-write refusal;
     // the mutation-time assertion below still protects a race after this preflight.
-    await repo.safeWrite(() => undefined, { action: 'share', handle: binding.handle, author, token: binding.token, message: `${binding.handle}: share ${name}` });
+    await repo.safeWrite(() => undefined, { action: 'share', handle: binding.handle, author, message: `${binding.handle}: share ${name}` });
     const records = await skillRecords(clone, team);
     if (records.some((record) => record.name === name)) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
     const id = randomUUID(); // minted before safeWrite, never inside its re-applied mutation
@@ -64,7 +64,7 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
       // authoritative for the repo-wide name invariant.
       if (tree.paths(`skills/${name}/`).length) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
       mirrorToTree(tree, `skills/${name}`, files);
-    }, { action: 'share', handle: binding.handle, author, token: binding.token, message: `${binding.handle}: share ${name}` });
+    }, { action: 'share', handle: binding.handle, author, message: `${binding.handle}: share ${name}` });
     const baseline = await canonicalDigest(source);
     await store.update((fresh) => { fresh.shared[id] = { source, team, baseline }; });
     return success({ id, name, reconciled: description.length > 0 });
@@ -105,7 +105,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const refreshRepo = async (content: string): Promise<void> => {
       if (content === repoContents) return;
       if (!binding?.handle) throw new Error(`Team ${tracked.team} has no joined handle.`);
-      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => tree.set(`skills/${record!.name}/SKILL.md`, content), { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, token: binding.token, message: `${binding.handle}: update ${record!.name}` });
+      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => tree.set(`skills/${record!.name}/SKILL.md`, content), { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: `${binding.handle}: update ${record!.name}` });
     };
       if (sourceDigest === baseline && repoDigest === baseline) {
         await refreshRepo(repairedRepo);
@@ -117,7 +117,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
       // narrow write first, then the normal author-owned content mirror on the replayed tree.
       await refreshRepo(repairedRepo);
       const files = await sourceFiles(tracked.source);
-      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => mirrorToTree(tree, `skills/${record!.name}`, files), { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, token: binding.token, message: `${binding.handle}: update ${record.name}` });
+      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => mirrorToTree(tree, `skills/${record!.name}`, files), { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
       await store.update((next) => { if (next.shared[id]) next.shared[id].baseline = sourceDigest; });
       } else {
         await replaceDirectory(record.directory, tracked.source);
@@ -154,10 +154,10 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
     const repairedRepo = injectManagedFields(repoContents, { license: team.license, id, author });
     const repo = openTeamRepo(clone, binding.remote, runner);
     if (repairedRepo !== repoContents) {
-      await repo.safeWrite((tree) => tree.set(`skills/${record.name}/SKILL.md`, repairedRepo), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, token: binding.token, message: `${binding.handle}: update ${record.name}` });
+      await repo.safeWrite((tree) => tree.set(`skills/${record.name}/SKILL.md`, repairedRepo), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
     }
     const files = await sourceFiles(tracked.source);
-    await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, token: binding.token, message: `${binding.handle}: update ${record.name}` });
+    await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
     const digest = await canonicalDigest(tracked.source);
     await store.update((fresh) => { fresh.shared[id]!.baseline = digest; });
   } else {

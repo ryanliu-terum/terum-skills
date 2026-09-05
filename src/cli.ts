@@ -26,18 +26,17 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
 
   program
     .command('login')
-    .description('Authenticate an admin for one team (gh, or a per-team PAT as the fallback)')
-    .requiredOption('--team <team>', 'team name')
-    .requiredOption('--remote <remote>', 'the team repository, e.g. github.com/org/team-skills')
-    .action(async (options: { team: string; remote: string }) => execute((io) => active.login({ team: options.team, remote: options.remote }, io)));
+    .description('Check the GitHub CLI and record your identity (name, email, GitHub login, default handle); writes no team entry')
+    .action(async () => execute((io) => active.login({}, io)));
 
   const team = program.command('team').description('Create or join a team');
   team
-    .command('create <name>')
-    .description('Create a private team repository and become its first member')
+    .command('create [name]')
+    .description('Create a private team repository and become its first member (asks for the team name and the repository name when omitted)')
     .option('--org <org>', 'GitHub organization (default: your own account)')
+    .option('--repo <repo>', 'GitHub repository name (default: the team name)')
     .option('--remote <url>', 'push the scaffold to an existing EMPTY remote instead of creating one on GitHub')
-    .action(async (name: string, options: { org?: string; remote?: string }) => execute((io) => active.team({ kind: 'create', name, ...options }, io)));
+    .action(async (name: string | undefined, options: { org?: string; repo?: string; remote?: string }) => execute((io) => active.team({ kind: 'create', name, ...options }, io)));
   team
     .command('join <target>')
     .description('Join a team: <org>/<repo> on GitHub, or any git remote URL')

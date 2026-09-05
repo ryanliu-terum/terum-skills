@@ -21,7 +21,7 @@ async function setup(extra?: { archived?: string[]; people?: Record<string, obje
 describe('team join (§6, §5.4 identity)', () => {
   it('a live collision re-prompts, the per-team handle diverges, and team one is untouched', async () => {
     const { fixture, store, runner } = await setup({ people: { ajay: person('ajay', { display_name: 'Existing' }) } });
-    await store.update((config) => { config.default_handle = 'ajay'; config.github = 'me'; config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.first = { remote: 'github.com/example/first', token: null, handle: 'ajay' }; });
+    await store.update((config) => { config.default_handle = 'ajay'; config.github = 'me'; config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.first = { remote: 'github.com/example/first', handle: 'ajay' }; });
     const io = new ScriptedPrompter(['me', 'ajay', 'Ajay Two', 'ajay.two@example.com', 'ajay-t']);
     const result = await join({ target: REMOTE, config: store, runner }, io);
     if (!result.ok) throw new Error(result.error);
@@ -29,7 +29,7 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(io.lines).toContain('Handle ajay is already in use by an active member.');
     const after = await store.read();
     expect(after.teams.first?.handle).toBe('ajay');
-    expect(after.teams.team).toEqual({ remote: 'git.example/team', token: null, handle: 'ajay-t' });
+    expect(after.teams.team).toEqual({ remote: 'git.example/team', handle: 'ajay-t' });
     expect(JSON.parse(await git(['show', 'main:people/ajay-t.json'], fixture.bare)).email).toBe('ajay.two@example.com');
     expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).display_name).toBe('Existing');
     expect((await git(['log', '-1', '--format=%s', 'main'], fixture.bare)).trim()).toBe('ajay-t: join');
@@ -71,7 +71,7 @@ describe('team join (§6, §5.4 identity)', () => {
     const { fixture, store } = await setup();
     let pushes = 0;
     const runner = wrapRunner(mappedRunner(REMOTE, fixture.bare), async (command, args, _options, next) => {
-      if (command === 'git' && args[0] === 'push' && pushes++ === 0) await pushFromSeed(fixture.seed, 'people/me.json', `${JSON.stringify(person('me', { display_name: 'First Mover' }))}\n`);
+      if (command === 'git' && args[0] === 'push' && pushes++ === 0) await pushFromSeed(fixture.seed, 'people/me.json', `${JSON.stringify(person('me', { display_name: 'First Mover', github: 'first-mover', email: 'first@example.com' }))}\n`);
       return next();
     });
     const io = new ScriptedPrompter([...answers(), 'me-2']);
@@ -91,7 +91,7 @@ describe('team join (§6, §5.4 identity)', () => {
     expect((await git(['ls-tree', '--name-only', 'main:people'], other.bare))).not.toContain('me.json');
     expect((await git(['ls-tree', '--name-only', 'main:people'], fixture.bare))).not.toContain('me.json');
     const store2 = createConfigStore(pathJoin(fixture.root, 'local2'));
-    await store2.update((config) => { config.teams.team = { remote: 'github.com/someone/team', token: null, handle: 'me' }; });
+    await store2.update((config) => { config.teams.team = { remote: 'github.com/someone/team', handle: 'me' }; });
     expect(await join({ target: REMOTE, config: store2, runner }, new ScriptedPrompter(answers()))).toMatchObject({ ok: false, error: expect.stringContaining('--as') });
   });
 
@@ -134,22 +134,70 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(io2.lines.some((line) => line.includes('single internal hyphens'))).toBe(true);
   });
 
-  it('a login-bound remote with no handle yet still runs the collision check; a bound handle only counts with matching identity', async () => {
+  it('an unbound machine reclaims a live file with a matching non-empty login or email; anyone else collides (Decision 1)', async () => {
     const { fixture, store, runner } = await setup({ people: { ajay: person('ajay', { github: 'real-ajay', email: 'real@example.com' }) } });
-    await store.update((config) => { config.teams.team = { remote: 'git.example/team', token: null, handle: null }; config.default_handle = 'ajay'; });
-    const io = new ScriptedPrompter([...answers('ajay'), 'ajay-2']);
+    // The second laptop: no binding for the team yet, the same GitHub login (case-insensitive) → the file is reclaimed, not collided with.
+    const io = new ScriptedPrompter(['Real-Ajay', 'ajay', 'Ajay Two', 'other@example.com']);
     const result = await join({ target: REMOTE, config: store, runner }, io);
     if (!result.ok) throw new Error(result.error);
-    expect(result.value.handle).toBe('ajay-2');
-    expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).github).toBe('real-ajay');
-    // A config that claims the handle but whose identity does not match the live file is still a collision.
+    expect(result.value).toMatchObject({ handle: 'ajay', rejoined: false });
+    expect(io.lines.some((line) => line.includes('already in use'))).toBe(false);
+    expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare))).toMatchObject({ display_name: 'Ajay Two', github: 'Real-Ajay', email: 'other@example.com' });
+    expect((await store.read()).teams.team?.handle).toBe('ajay');
+    // A matching email alone is enough too (the login may be blank on a generic-git team).
+    const byEmail = createConfigStore(pathJoin(fixture.root, 'local-email'));
+    const emailIo = new ScriptedPrompter(['', 'ajay', 'Ajay Three', 'other@example.com']);
+    const third = await join({ target: REMOTE, config: byEmail, runner }, emailIo);
+    if (!third.ok) throw new Error(third.error);
+    expect(third.value.handle).toBe('ajay');
+    expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).display_name).toBe('Ajay Three');
+    // An unbound machine whose identity does not match gets the collision prompt and never touches the file.
     const store2 = createConfigStore(pathJoin(fixture.root, 'local2'));
-    await store2.update((config) => { config.teams.team = { remote: 'git.example/team', token: null, handle: 'ajay' }; });
-    const io2 = new ScriptedPrompter(['impostor', 'Impostor', 'imp@example.com', 'ajay-3']);
+    const io2 = new ScriptedPrompter(['impostor', 'ajay', 'Impostor', 'imp@example.com', 'ajay-2']);
     const second = await join({ target: REMOTE, config: store2, runner }, io2);
     if (!second.ok) throw new Error(second.error);
-    expect(second.value.handle).toBe('ajay-3');
-    expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).email).toBe('real@example.com');
+    expect(second.value.handle).toBe('ajay-2');
+    expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).email).toBe('other@example.com');
+    // A blank login never matches anything, even against a file whose email differs: no reclaim by omission.
+    const store4 = createConfigStore(pathJoin(fixture.root, 'local4'));
+    const io4 = new ScriptedPrompter(['', 'ajay', 'Blank', 'blank@example.com', 'ajay-4']);
+    const fourth = await join({ target: REMOTE, config: store4, runner }, io4);
+    if (!fourth.ok) throw new Error(fourth.error);
+    expect(fourth.value.handle).toBe('ajay-4');
+    // A machine bound to the handle still needs matching identity: a config that claims the handle is not evidence.
+    const store3 = createConfigStore(pathJoin(fixture.root, 'local3'));
+    await store3.update((config) => { config.teams.team = { remote: 'git.example/team', handle: 'ajay' }; });
+    const io3 = new ScriptedPrompter(['impostor', 'Impostor', 'imp@example.com', 'ajay-3']);
+    const bound = await join({ target: REMOTE, config: store3, runner }, io3);
+    if (!bound.ok) throw new Error(bound.error);
+    expect(bound.value.handle).toBe('ajay-3');
+    expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).display_name).toBe('Ajay Three');
+  });
+
+  it('joins a second remote whose basename collides under --as, keeping two teams with distinct clones and remotes', async () => {
+    const { fixture, store, runner } = await setup();
+    expect((await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()))).ok).toBe(true);
+    const other = await bareTeam();
+    const otherRemote = 'https://git.example/other/team.git';
+    expect(await join({ target: otherRemote, config: store, runner: mappedRunner(otherRemote, other.bare) }, new ScriptedPrompter(answers()))).toMatchObject({ ok: false, error: expect.stringContaining('--as') });
+    const result = await join({ target: otherRemote, config: store, runner: mappedRunner(otherRemote, other.bare), as: 'team-two' }, new ScriptedPrompter(answers()));
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.team).toBe('team-two');
+    expect((await store.read()).teams).toEqual({ team: { remote: 'git.example/team', handle: 'me' }, 'team-two': { remote: 'git.example/other/team', handle: 'me' } });
+    expect((await git(['remote', 'get-url', 'origin'], store.teamClone('team'))).trim()).toBe(fixture.bare);
+    expect((await git(['remote', 'get-url', 'origin'], store.teamClone('team-two'))).trim()).toBe(other.bare);
+    expect(await git(['ls-tree', '--name-only', 'main:people'], other.bare)).toContain('me.json');
+  });
+
+  it('re-checks remote uniqueness under the config lock, so a remote bound by another process while we prompted is not bound twice', async () => {
+    const { fixture, store } = await setup();
+    const runner = wrapRunner(mappedRunner(REMOTE, fixture.bare), async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'push') await store.update((config) => { config.teams.other = { remote: 'git.example/team', handle: 'someone' }; });
+      return next();
+    });
+    const result = await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('already configured as team other') });
+    expect(Object.keys((await store.read()).teams)).toEqual(['other']);
   });
 
   it('an archived handle is only a rejoin for the same person; someone else gets the collision prompt', async () => {
@@ -186,7 +234,7 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(() => parseJoinTarget('not a target')).toThrow('Unsupported remote');
     expect(parseJoinTarget('https://me:ghp_leak@gitlab.com/acme/team.git')).toEqual({ remote: 'https://gitlab.com/acme/team.git', github: false });
     expect(parseJoinTarget(' https://me:gh@p_leak@gitlab.com/acme/team.git')).toEqual({ remote: 'https://gitlab.com/acme/team.git', github: false });
-    for (const hostile of ['--upload-pack=touch:pwned', 'ext::sh -c id', 'git@-evil:acme/team.git']) expect(() => parseJoinTarget(hostile), hostile).toThrow('Unsupported remote');
+    for (const hostile of ['--upload-pack=touch:pwned', 'ext::sh -c id', 'git@-evil:acme/team.git', '--upload-pack=x:y@z.com/p', 'ext::sh:x@evil.example/p', 'git@host.example:-oProxyCommand=x']) expect(() => parseJoinTarget(hostile), hostile).toThrow('Unsupported remote');
   });
 
   it('a credential pasted into the join target (with `@` in the password and leading whitespace) never reaches git argv, the clone, config, or output; the user is told once; the remote sits behind --', async () => {

@@ -6,7 +6,7 @@ import lockfile from 'proper-lockfile';
 import { mkdirPrivate } from './fs.js';
 import { Config, configSchema, emptyConfig, parseJson, parseOrExplain, teamNameSchema } from './schema.js';
 
-/** §5.4 `~/.terum/skills/config.json` — never committed, safe to delete, mode 0600 (it holds tokens). */
+/** §5.4 `~/.terum/skills/config.json` — never committed, safe to delete, mode 0600 (it names your teams, identity, and every placed path). */
 export interface ConfigStore {
   readonly root: string;
   read(): Promise<Config>;
@@ -45,22 +45,26 @@ export function createConfigStore(root = join(homedir(), '.terum', 'skills')): C
     ensureRoot,
     async update(mutate) {
       await ensureRoot();
+      // The default handler throws from a timer and crashes the CLI. Instead the compromise is
+      // recorded, and the write below is skipped: a snapshot read before another process took the
+      // lock must not be renamed over that process's write.
+      let compromised = false;
       const release = await lockfile.lock(path, {
         lockfilePath: `${path}.lock`,
         realpath: false,
         stale: 30_000,
         retries: { retries: 20, minTimeout: 25, maxTimeout: 250 },
-        // The default handler throws from a timer and crashes the CLI; the write below is short
-        // and atomic, so a compromised lock cannot corrupt the file, only reorder two writers.
-        onCompromised: () => undefined,
+        onCompromised: () => { compromised = true; },
       });
       try {
         const config = await read();
         await mutate(config);
+        if (compromised) throw new Error(`Lost the lock on ${path} to another process; nothing was written — retry the command.`);
         await writeAtomically(path, `${JSON.stringify(config, null, 2)}\n`);
         return config;
       } finally {
-        await release();
+        // A compromised lock rejects on release ('Lock is already released'); that must never replace the real outcome.
+        await release().catch(() => undefined);
       }
     },
     teamClone(team) {

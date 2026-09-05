@@ -27,7 +27,7 @@ describe('uninstall (§6 pending)', () => {
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const home = join(fixture.root, 'home');
     await store.update((config) => {
-      config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' };
+      config.teams.team = { remote: fixture.bare, handle: 'seed' };
       config.placements[join(home, '.claude', 'skills', 'first')] = { id: first, team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:first' };
       config.placements[join(home, '.claude', 'skills', 'second')] = { id: second, team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:second' };
     });
@@ -44,7 +44,7 @@ describe('uninstall (§6 pending)', () => {
     const home = join(fixture.root, 'home');
     const store = createConfigStore(join(home, '.terum', 'skills'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ ref: 'sample', config: store }, new ScriptedPrompter())).ok).toBe(true);
     let clock = 0;
     const rejecting = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'push'
@@ -69,7 +69,7 @@ describe('uninstall (§6 pending)', () => {
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [id], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const approved = (await store.read()).approvals[id];
     expect((await run({ ref: 'sample', team: 'team', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
@@ -93,7 +93,7 @@ describe('uninstall (§6 pending)', () => {
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
 
     expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkout }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     expect((await install({ ref: 'personal', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
@@ -131,7 +131,7 @@ describe('uninstall (§6 pending)', () => {
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkoutA = await cloneWithIdentity(product.bare, join(product.root, 'checkout-a'));
     const checkoutB = await cloneWithIdentity(product.bare, join(product.root, 'checkout-b'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
     expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkoutB }, new ScriptedPrompter())).ok).toBe(true);
     await store.update((config) => {
@@ -155,7 +155,7 @@ describe('uninstall (§6 pending)', () => {
     const storeA = createConfigStore(join(fixture.root, 'state-a')); const storeB = createConfigStore(join(fixture.root, 'state-b'));
     const cloneA = await cloneWithIdentity(fixture.bare, storeA.teamClone('team'));
     const cloneB = await cloneWithIdentity(fixture.bare, storeB.teamClone('team'));
-    for (const store of [storeA, storeB]) await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    for (const store of [storeA, storeB]) await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ ref: 'sample', config: storeA, home: homeA }, new ScriptedPrompter())).ok).toBe(true);
     await git(['pull', '--ff-only'], cloneB);
     const onB = new ScriptedPrompter();
@@ -176,7 +176,7 @@ describe('uninstall (§6 pending)', () => {
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [`note ${id}`], global: [], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
     expect((await run({ ref: 'team/sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
     expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).declined).not.toContain(id);

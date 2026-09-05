@@ -50,7 +50,9 @@ export const personSchema = z.object({
   handle: handleSchema,
   display_name: z.string().min(1),
   email: emailSchema,
-  github: githubLoginSchema,
+  // Optional: a generic-git member may have no GitHub account, and an empty value is never identity
+  // evidence (§5.4 reclaim). When present it is a real login, because `team remove` puts it in a REST path.
+  github: z.union([z.literal(''), githubLoginSchema]),
   bio: z.string(),
   installed: z.array(installedSchema),
   declined: z.array(skillIdSchema),
@@ -58,11 +60,11 @@ export const personSchema = z.object({
 export type Person = z.infer<typeof personSchema>;
 
 /**
- * §5.4 per-team entry. `handle` is the binding identity and is immutable once its people file
- * exists; it is null until `team create`/`team join` has proven it against the roster (a
- * `login` that runs first stores only the remote and the token).
+ * §5.4 per-team entry (rev 9). `handle` is the binding identity: only `team create`/`team join`
+ * write an entry, after proving the handle against the roster, so it is never null. There is no
+ * token field (Decision 2); an old `token` key in an existing config.json is read and ignored.
  */
-const teamConfigSchema = z.object({ remote: z.string().min(1), token: z.string().nullable(), handle: handleSchema.nullable() }).passthrough();
+const teamConfigSchema = z.object({ remote: z.string().min(1), handle: handleSchema }).passthrough();
 export type TeamConfig = z.infer<typeof teamConfigSchema>;
 export const configSchema = z.object({
   default_handle: handleSchema.optional(),

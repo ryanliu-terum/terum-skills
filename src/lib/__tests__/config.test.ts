@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../config.js';
@@ -18,7 +18,7 @@ describe('config store (§5.4)', () => {
   it('writes mode 0600 through a temp file, creates a 0700 root, and leaves no temp files behind', async () => {
     const root = join(await temporaryDirectory(), 'skills');
     const store = createConfigStore(root);
-    await store.update((config) => { config.teams.t = { remote: 'github.com/a/t', token: 'secret', handle: 'me' }; });
+    await store.update((config) => { config.teams.t = { remote: 'github.com/a/t', handle: 'me' }; });
     expect(((await stat(join(root, 'config.json'))).mode & 0o777).toString(8)).toBe('600');
     expect(((await stat(root)).mode & 0o777).toString(8)).toBe('700');
     expect(((await stat(join(root, 'teams'))).mode & 0o777).toString(8)).toBe('700');
@@ -26,19 +26,45 @@ describe('config store (§5.4)', () => {
     expect((await store.read()).teams.t?.handle).toBe('me');
   });
 
-  it('a team entry may be bound to a remote before it has a handle (login before join)', async () => {
-    const store = createConfigStore(join(await temporaryDirectory(), 'skills'));
-    await store.update((config) => { config.teams.t = { remote: 'github.com/a/t', token: 'secret', handle: null }; });
-    expect((await store.read()).teams.t).toEqual({ remote: 'github.com/a/t', token: 'secret', handle: null });
+  it('a team entry always carries its handle, and a stale token key from before rev 9 is read and ignored', async () => {
+    const root = join(await temporaryDirectory(), 'skills');
+    const store = createConfigStore(root);
+    await store.ensureRoot();
+    await writeFile(join(root, 'config.json'), JSON.stringify({ teams: { t: { remote: 'github.com/a/t', token: 'ghp_old', handle: 'me' } }, shared: {}, approvals: {}, pending: [], placements: {} }));
+    expect((await store.read()).teams.t).toMatchObject({ remote: 'github.com/a/t', handle: 'me' });
+    await writeFile(join(root, 'config.json'), JSON.stringify({ teams: { t: { remote: 'github.com/a/t', handle: null } }, shared: {}, approvals: {}, pending: [], placements: {} }));
+    await expect(store.read()).rejects.toThrow(/teams\.t\.handle/);
   });
 
   it('serializes concurrent updates so neither is lost', async () => {
     const store = createConfigStore(join(await temporaryDirectory(), 'skills'));
     await Promise.all(Array.from({ length: 6 }, (_, index) => store.update(async (config) => {
       await new Promise((done) => setTimeout(done, 5));
-      config.teams[`t${index}`] = { remote: `github.com/a/t${index}`, token: null, handle: 'me' };
+      config.teams[`t${index}`] = { remote: `github.com/a/t${index}`, handle: 'me' };
     })));
     expect(Object.keys((await store.read()).teams).sort()).toEqual(['t0', 't1', 't2', 't3', 't4', 't5']);
+  });
+
+  it('a throwing mutate leaves the file byte-identical and releases the lock for the next update', async () => {
+    const root = join(await temporaryDirectory(), 'skills');
+    const store = createConfigStore(root);
+    await store.update((config) => { config.default_handle = 'me'; });
+    const before = await readFile(join(root, 'config.json'), 'utf8');
+    await expect(store.update((config) => { config.default_handle = 'changed'; throw new Error('boom'); })).rejects.toThrow('boom');
+    expect(await readFile(join(root, 'config.json'), 'utf8')).toBe(before);
+    await store.update((config) => { config.default_handle = 'next'; });
+    expect((await store.read()).default_handle).toBe('next');
+    expect((await readdir(root)).filter((name) => name.includes('.lock'))).toEqual([]);
+  });
+
+  it('a corrupt config.json is reported, never silently replaced by an empty one', async () => {
+    const root = join(await temporaryDirectory(), 'skills');
+    const store = createConfigStore(root);
+    await store.ensureRoot();
+    await writeFile(join(root, 'config.json'), '{not json');
+    await expect(store.read()).rejects.toThrow(/Invalid .*config\.json/);
+    await expect(store.update((config) => { config.default_handle = 'me'; })).rejects.toThrow(/Invalid .*config\.json/);
+    expect(await readFile(join(root, 'config.json'), 'utf8')).toBe('{not json');
   });
 
   it('refuses a team name that would escape the teams directory', async () => {

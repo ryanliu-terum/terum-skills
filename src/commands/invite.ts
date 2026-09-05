@@ -1,5 +1,4 @@
 import { createConfigStore, ConfigStore, selectTeam } from '../lib/config.js';
-import { gitAuthEnv } from '../lib/auth.js';
 import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, hostOperationAllowed } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
@@ -25,7 +24,7 @@ export async function run(args: InviteArgs, io: Prompter): Promise<Result<Invite
     const failed: { login: string; error: string }[] = [];
     for (const rawLogin of args.logins) {
       const login = parseOrExplain(githubLoginSchema, rawLogin.trim(), 'GitHub login');
-      const response = await runner.run('gh', ['api', '-X', 'PUT', '--include', `repos/${endpoint}/collaborators/${login}`], { env: gitAuthEnv(binding.token) });
+      const response = await runner.run('gh', ['api', '-X', 'PUT', '--include', `repos/${endpoint}/collaborators/${login}`]);
       const status = httpStatus(response.code, response.stdout, response.stderr);
       if (status === 201) { invited.push(login); io.print(`Invited @${login}.`); continue; }
       if (status === 204) { already.push(login); io.print(`@${login} already has access.`); continue; }

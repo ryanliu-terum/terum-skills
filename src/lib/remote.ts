@@ -7,15 +7,16 @@
  *
  * A remote is data, never an option and never a transport helper. Anything that starts with `-`
  * (git would read it as an option) or with a `<helper>::` prefix (`ext::sh -c …` runs a shell) is
- * refused before any pattern runs. Embedded credentials (`https://user:tok@host/…`) are removed
- * before a remote reaches git argv, `.git/config`, or a message; the call sites also put `--`
- * before the remote so git reads it as a positional even if a future path skips this file.
- * Every accepted shape goes through ONE parser (`parseRemote`), so the comparison spelling and
- * the git spelling can never disagree about what is a remote.
+ * refused before any pattern runs; so is an option-shaped ssh login or scp path. Embedded
+ * credentials (`https://user:tok@host/…`) are removed before a remote reaches git argv,
+ * `.git/config`, or a message; the call sites also put `--` before the remote so git reads it as
+ * a positional even if a future path skips this file. Every accepted shape goes through ONE parser
+ * (`parseRemote`), so the comparison spelling and the git spelling can never disagree about what
+ * is a remote.
  */
 
 type ParsedRemote =
-  | { kind: 'file'; path: string }
+  | { kind: 'file'; path: string; canonical: string }
   | { kind: 'url'; scheme: string; user: string; host: string; port: string; path: string }
   | { kind: 'scp'; user: string; host: string; path: string }
   | { kind: 'canonical'; host: string; path: string };
@@ -25,9 +26,9 @@ type ParsedRemote =
 const URL_FORM = /^(https?|ssh|git):\/\/(?:([^/]*)@)?([^/:@]+)(?::(\d+))?\/(.+)$/i;
 // [user@]host:path — the host has no slash and is followed by a colon that does not start "//".
 const SCP_FORM = /^(?:([^@/:]+)@)?([^/:@]+):(?!\/\/)(.+)$/;
-const FILE_URL_FORM = /^file:\/\/(\/.+)$/i;
+const FILE_URL_FORM = /^file:\/\/(\/.*)$/i;
 // Our own normalized spelling for a local path: `file:<absolute path>`.
-const FILE_CANONICAL = /^file:(\/.+)$/;
+const FILE_CANONICAL = /^file:(\/.*)$/;
 // An already-normalized "host/path" for a dotted host; also what the CLI accepts for `--remote`.
 // A single-label host (an ssh alias, `localhost`) normalizes to the scp spelling `host:path`
 // instead, so a GitHub shorthand typed without its host (`org/repo`) is never mistaken for one.
@@ -38,9 +39,16 @@ const HELPER_PREFIX = /^[A-Za-z0-9+.-]+::/;
 /** Hosts whose owner/repo paths are case-insensitive, so identity comparison lowercases them. */
 const CASE_INSENSITIVE_HOSTS = new Set(['github.com']);
 
-/** For an input that was not a remote at all: scrub any `scheme://…tok@` or `user:tok@` run wherever it sits. */
+/**
+ * For an input that was not a remote at all: lossy on purpose. Everything between the scheme (or
+ * the start of the string) and the LAST `@` is replaced, so a password containing `/`, `:`, or
+ * `@` can never survive into a message. Precision is not the goal here; not echoing is.
+ */
 function redact(input: string): string {
-  return input.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s]*@/gi, '$1').replace(/[^\s/@]+:[^\s/]+@/g, '');
+  const at = input.lastIndexOf('@');
+  if (at === -1) return input;
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(input)?.[0] ?? '';
+  return `${scheme}<redacted>@${input.slice(at + 1)}`;
 }
 
 function unsupported(input: string, why?: string): Error {
@@ -56,10 +64,24 @@ function cleanPath(rawPath: string): string {
   return stripGitSuffix(rawPath.replace(/^\/+|\/+$/g, ''));
 }
 
-/** A host that starts with `-` would reach ssh as an option; a path that is nothing but `.git` names no repository. */
-function assertHostAndPath(host: string, path: string, input: string): void {
-  if (host.startsWith('-')) throw unsupported(input, 'looks like an option');
-  if (!cleanPath(path)) throw unsupported(input);
+/**
+ * A host, an ssh login, or an scp path that starts with `-` would reach ssh or git as an option;
+ * a path that is nothing but `.git` names no repository.
+ */
+function assertRemoteParts(input: string, parts: { host: string; path: string; user?: string; optionShapedPath?: boolean }): void {
+  if (parts.host.startsWith('-') || parts.user?.startsWith('-') || (parts.optionShapedPath && parts.path.startsWith('-'))) throw unsupported(input, 'looks like an option');
+  if (!cleanPath(parts.path)) throw unsupported(input);
+}
+
+/**
+ * A local path. Trailing slashes are dropped and an empty result is refused. `.git` is KEPT: on
+ * disk `team.git` and `team` are different directories, so the path is the identity, and what
+ * normalizes must still be fetchable (`remoteToGitUrl(normalizeRemote(p))` names the same dir).
+ */
+function filePath(rawPath: string, input: string): ParsedRemote {
+  const canonical = rawPath.replace(/\/+$/, '');
+  if (!canonical) throw unsupported(input);
+  return { kind: 'file', path: rawPath, canonical };
 }
 
 /** The one parser. Every shape check lives here, so `normalizeRemote` and `remoteToGitUrl` cannot drift. */
@@ -69,18 +91,18 @@ function parseRemote(input: string): ParsedRemote {
   if (trimmed.startsWith('-')) throw unsupported(input, 'looks like an option');
   if (HELPER_PREFIX.test(trimmed)) throw unsupported(input, 'transport helpers are not allowed');
   const fileUrl = FILE_URL_FORM.exec(trimmed);
-  if (fileUrl) return { kind: 'file', path: fileUrl[1]! };
+  if (fileUrl) return filePath(fileUrl[1]!, input);
   const fileCanonical = FILE_CANONICAL.exec(trimmed);
-  if (fileCanonical) return { kind: 'file', path: fileCanonical[1]! };
-  if (trimmed.startsWith('/')) return { kind: 'file', path: trimmed };
+  if (fileCanonical) return filePath(fileCanonical[1]!, input);
+  if (trimmed.startsWith('/')) return filePath(trimmed, input);
   const url = URL_FORM.exec(trimmed);
   if (url) {
     const scheme = url[1]!;
     const host = url[3]!;
     const path = url[5]!;
-    assertHostAndPath(host, path, input);
     // Only ssh keeps a login (`git@`); an http(s)/git userinfo is only ever a credential. A password never survives.
     const user = scheme.toLowerCase() === 'ssh' ? (url[2] ?? '').split(':')[0]! : '';
+    assertRemoteParts(input, { host, path, user });
     return { kind: 'url', scheme, user, host, port: url[4] ?? '', path };
   }
   const scp = SCP_FORM.exec(trimmed);
@@ -88,13 +110,14 @@ function parseRemote(input: string): ParsedRemote {
   if (scp && scp[2]!.length > 1) {
     // scp-style remotes carry no password, so `user:tok@host:path` parses as host `user` with the
     // token inside the path. An `@` in the first path segment is that shape; refuse it.
-    if (/^[^/]*@/.test(scp[3]!)) throw unsupported(input, 'credentials in an scp-style remote are not supported');
-    assertHostAndPath(scp[2]!, scp[3]!, input);
+    // A password containing `/` moves that `@` past the first segment; the real host:path separator then follows it.
+    if (/^[^/]*@/.test(scp[3]!) || /@[^/:]*:/.test(scp[3]!)) throw unsupported(input, 'credentials in an scp-style remote are not supported');
+    assertRemoteParts(input, { host: scp[2]!, path: scp[3]!, user: scp[1] ?? '', optionShapedPath: true });
     return { kind: 'scp', user: scp[1] ?? '', host: scp[2]!, path: scp[3]! };
   }
   const canonical = CANONICAL_FORM.exec(trimmed);
   if (canonical) {
-    assertHostAndPath(canonical[1]!, canonical[2]!, input);
+    assertRemoteParts(input, { host: canonical[1]!, path: canonical[2]! });
     return { kind: 'canonical', host: canonical[1]!, path: canonical[2]! };
   }
   throw unsupported(input);
@@ -117,13 +140,14 @@ function toGitUrl(remote: ParsedRemote): string {
 /**
  * Normalize a remote for comparison: strip protocol, credentials, port, `.git`, and trailing
  * slashes; lowercase the host (and the path on hosts known to be case-insensitive); local paths
- * become `file:<absolute path>`; a single-label host keeps the scp spelling `host:path`.
- * Idempotent: normalizing a normalized remote is a no-op, for every accepted form. Throws on
- * anything that is not recognizably a git remote.
+ * become `file:<absolute path>` with only trailing slashes removed (the path IS the identity);
+ * a single-label host keeps the scp spelling `host:path`. Idempotent: normalizing a normalized
+ * remote is a no-op, for every accepted form. Throws on anything that is not recognizably a git
+ * remote.
  */
 export function normalizeRemote(input: string): string {
   const remote = parseRemote(input);
-  if (remote.kind === 'file') return `file:${stripGitSuffix(remote.path)}`;
+  if (remote.kind === 'file') return `file:${remote.canonical}`;
   const host = remote.host.toLowerCase();
   const path = cleanPath(remote.path);
   if (!host.includes('.')) return `${host}:${path}`;
@@ -143,7 +167,7 @@ export function remoteToGitUrl(input: string): string {
 /**
  * The same remote with any embedded credential removed: `https://user:tok@host/p` becomes
  * `https://host/p`; an ssh login (`git@`) is kept. Trims. Never throws, so it is safe in messages —
- * an input that is not a remote at all is scrubbed textually instead.
+ * an input that is not a remote at all is scrubbed textually instead (lossily: see `redact`).
  */
 export function stripRemoteCredentials(input: string): string {
   const trimmed = input.trim();
@@ -170,16 +194,22 @@ export function githubOwnerRepo(remote: string): string | null {
   return normalized.startsWith('github.com/') ? normalized.slice('github.com/'.length) : null;
 }
 
-/** The repository basename, used as the default team name at `team join <url>` (§6). */
+/**
+ * The repository basename, used as the default team name at `team join <url>` (§6). Only the
+ * `file:<path>` and single-label `host:path` spellings carry a colon before the path; a dotted
+ * host never does, and a path may, so the colon is split only for those two.
+ */
 export function remoteName(remote: string): string {
   const normalized = normalizeRemote(remote);
-  return normalized.slice(Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf(':')) + 1);
+  const path = normalized.startsWith('file:')
+    ? normalized.slice('file:'.length)
+    : /^[^/:]+:(.*)$/.exec(normalized)?.[1] ?? normalized.slice(normalized.indexOf('/') + 1);
+  return path.slice(path.lastIndexOf('/') + 1).replace(/\.git$/i, '');
 }
 
 /**
- * §6.0 host scoping: `invite`, access-revoking `team remove`, and (D7) the per-team PAT are
- * GitHub-only in phase 1. On any other host they must fail before mutating; `--archive-only`
- * is the part that is ours.
+ * §6.0 host scoping: `invite` and access-revoking `team remove` are GitHub-only in phase 1. On
+ * any other host they must fail before mutating; `--archive-only` is the part that is ours.
  */
 export function hostOperationAllowed(remote: string, archiveOnly = false): { ok: true } | { ok: false; error: string } {
   if (archiveOnly) return { ok: true };

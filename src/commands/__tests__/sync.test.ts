@@ -18,7 +18,7 @@ async function configuredSkill() {
   await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('old'));
   const store = createConfigStore(join(fixture.root, 'state'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-  await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+  await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   return { fixture, store, clone };
 }
 
@@ -41,20 +41,6 @@ describe('sync --hook (§3, §6)', () => {
     expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
     expect(await readFile(path, 'utf8')).toContain('description: old');
     expect(Object.values((await store.read()).placements)[0]!.fingerprint).toBe(fingerprint);
-  });
-
-  it('passes the per-team PAT environment to pull', async () => {
-    const { fixture, store } = await configuredSkill();
-    await store.update((config) => { config.teams.team!.token = 'token'; });
-    const seen: NodeJS.ProcessEnv[] = [];
-    const runner = wrapRunner(systemRunner, async (command, args, options, next) => {
-      if (command === 'git' && args[0] === 'pull') seen.push(options?.env ?? {});
-      return next();
-    });
-    expect((await run({ config: store, runner }, new ScriptedPrompter())).ok).toBe(true);
-    expect(seen).toHaveLength(1);
-    expect(seen[0]!.GH_TOKEN).toBe('token');
-    void fixture;
   });
 
   it('defers newly endorsed global skills in hook mode without prompting or placing', async () => {
@@ -246,7 +232,7 @@ describe('sync --hook (§3, §6)', () => {
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkoutA = await cloneWithIdentity(product.bare, join(product.root, 'checkout-a'));
     const checkoutB = await cloneWithIdentity(product.bare, join(product.root, 'checkout-b'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
     expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkoutB }, new ScriptedPrompter())).ok).toBe(true);
     const path = join(checkoutA, '.claude', 'skills', 'projected', 'SKILL.md');
@@ -268,7 +254,7 @@ describe('sync --hook (§3, §6)', () => {
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('old', ['Bash(ls)', 'Read(*)']));
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const path = join(home, '.claude', 'skills', 'sample', 'SKILL.md');
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('reordered', ['Read(*)', 'Bash(ls)', 'Bash(ls)']));
@@ -337,7 +323,7 @@ async function configuredToolSkill() {
   await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('old', ['Bash(ls)']));
   const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
   await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-  await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+  await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
   return { fixture, store, home, oldApproval: (await store.read()).approvals[ID]!.grants };
 }
