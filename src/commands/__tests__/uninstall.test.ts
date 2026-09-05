@@ -14,7 +14,7 @@ describe('uninstall (§6 pending)', () => {
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('ambiguous') });
   });
 
-  it('uninstalls member skills sequentially so both safeWrites land', async () => {
+  it('uninstalls all of a member\'s skills with one team-repo write', async () => {
     const fixture = await bareTeam();
     const first = '11111111-1111-4111-8111-111111111111';
     const second = '22222222-2222-4222-8222-222222222222';
@@ -31,9 +31,13 @@ describe('uninstall (§6 pending)', () => {
       config.placements[join(home, '.claude', 'skills', 'first')] = { id: first, team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:first' };
       config.placements[join(home, '.claude', 'skills', 'second')] = { id: second, team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:second' };
     });
+    const commitsBefore = Number((await git(['rev-list', '--count', 'main'], fixture.bare)).trim());
     const result = await run({ kind: 'member', member: 'seed', team: 'team', config: store, home }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: true, value: [{ id: first }, { id: second }] });
     expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
+    // One write for the whole member, not one push per skill (M2 review 4b, D9 sweep).
+    expect(Number((await git(['rev-list', '--count', 'main'], fixture.bare)).trim())).toBe(commitsBefore + 1);
+    expect((await store.read()).pending).toEqual([]);
     expect((await store.read()).placements).toEqual({});
   });
 

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { run } from '../search.js';
 import { createConfigStore, ConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, originSha, pushFromSeed, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, originSha, person, pushFromSeed, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
 
 interface SearchSkill { name: string; description: string; category: string; author: string; id: string; }
 
@@ -65,6 +65,21 @@ describe('search (§6)', () => {
     const io = new ScriptedPrompter();
     expect((await run({ term: 'needle', config: store }, io)).ok).toBe(true);
     expect(io.lines.join('\n')).not.toContain('may be stale');
+  });
+
+  it('reports install count, endorsement, and the latest version, one hit per line in ls format', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const { fixture, store, clone } = await searchFixture('team', [{ name: 'sample', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id }]);
+    await pushFromSeed(fixture.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [{ id, version: null, scope: { kind: 'global' }, since: '2026-09-04' }] }), null, 2)}\n`);
+    const teamJson = JSON.parse(await git(['show', 'main:team.json'], fixture.bare)); teamJson.global = [id];
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify(teamJson, null, 2)}\n`);
+    await git(['fetch', '-q', 'origin'], clone); await git(['reset', '-q', '--hard', 'origin/main'], clone);
+    await freshStamp(store, 'team');
+    const io = new ScriptedPrompter();
+    const result = await run({ term: 'needle', config: store }, io);
+    const tree = (await git(['rev-parse', 'HEAD:skills/sample'], clone)).trim().slice(0, 8);
+    expect(result).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'sample', installs: 1, endorsed: 'global', latest: tree })] });
+    expect(io.lines).toEqual([`  sample — Seed <seed@example.com>; testing; 1 installs; ${tree}; global`]);
   });
 
   it('matches a skill name even when the term is absent from its description and category', async () => {

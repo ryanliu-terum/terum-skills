@@ -86,6 +86,12 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       if (person?.declined.includes(entry.id)) continue;
       const skill = await findSkill(clone, entry.team, entry.id);
       if (!skill) { notice(`Blocked ${path}: its skill is no longer in the repository.`); continue; }
+      // §6 blocked, second sub-case: the ledger pins a tree the clone does not have (placed from a
+      // newer or rewritten history). The tool must not resolve that alone: report, touch nothing.
+      if (entry.version && (await runner.run('git', ['cat-file', '-e', `${entry.version}^{tree}`], { cwd: clone })).code !== 0) {
+        notice(`Blocked ${path}: pinned version ${entry.version.slice(0, 8)} is not in the team repository (newer than this clone, or rewritten); leaving it untouched.`);
+        continue;
+      }
       const source = entry.version ? await materializeVersion(store, entry.team, clone, skill.name, entry.version, runner) : skill.directory;
       const grants = (await skillAtSource(source, skill)).grants;
       if (!approved((await store.read()), skill.id, grants)) {

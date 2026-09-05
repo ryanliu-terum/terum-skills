@@ -63,4 +63,5 @@ async function showProject(projectName: string | undefined, team: ReturnType<typ
   for (const skill of selected) io.print(format(skill));
   return success({ roster, skills: selected });
 }
-function format(skill: LsSkill): string { return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${skill.latest}; ${skill.endorsement}`; }
+/** One skill per line, the §6 `ls` format; `search` prints hits through the same function. */
+export function format(skill: LsSkill): string { return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${skill.latest}; ${skill.endorsement}`; }
