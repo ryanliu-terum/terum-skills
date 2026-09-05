@@ -84,14 +84,15 @@ describe('creator and joiner paths (D7/D8, rev 9 Decision 2: no token anywhere)'
     for (const runner of [ghOnlyRunner(fakeGh('me', {}, false)), noGhRunner]) {
       const io = new ScriptedPrompter(['me', 'me', 'Me', 'me@x.test']);
       await identityForJoiner(io, { config: memoryStore(), runner });
-      expect(io.asked.some((question) => /PAT|token/i.test(question))).toBe(false);
+      // Exactly the four identity questions and nothing else: a credential prompt of any wording would show up here.
+      expect(io.asked).toEqual(['GitHub login', 'Team handle', 'Your name', 'Your email']);
     }
   });
 
   it('a creator without gh gets a clear error naming gh and --remote, and is never asked for a token', async () => {
     const io = new ScriptedPrompter(['me', 'me', 'Me', 'me@x.test']);
     await expect(authenticateCreator(io, { config: memoryStore(), runner: noGhRunner })).rejects.toThrow(/GitHub CLI \(gh\)[\s\S]*--remote/);
-    expect(io.asked.some((question) => /PAT|token/i.test(question))).toBe(false);
+    expect(io.asked).toEqual([]);
   });
 
   it('a creator with gh logged out is offered gh auth login once; declined, the creator path stops without a token prompt', async () => {
@@ -103,7 +104,7 @@ describe('creator and joiner paths (D7/D8, rev 9 Decision 2: no token anywhere)'
     const declined = ghOnlyRunner(fakeGh('octocat', {}, false));
     const quiet = new ScriptedPrompter(['me', 'me', 'Me', 'me@x.test'], [false], true);
     await expect(authenticateCreator(quiet, { config: memoryStore(), runner: declined })).rejects.toThrow(/GitHub authentication is required[\s\S]*gh auth login[\s\S]*--remote/);
-    expect(quiet.asked.some((question) => /PAT|token/i.test(question))).toBe(false);
+    expect(quiet.asked).toEqual(['GitHub CLI is installed but logged out. Run `gh auth login` now?']);
     expect(declined.calls.some((call) => call.args.includes('--with-token') || call.env?.GH_TOKEN)).toBe(false);
     // Non-interactive: no offer, same stop.
     await expect(authenticateCreator(new ScriptedPrompter(['me', 'me', 'Me', 'me@x.test']), { config: memoryStore(), runner: ghOnlyRunner(fakeGh('me', {}, false)) })).rejects.toThrow('GitHub authentication is required');
