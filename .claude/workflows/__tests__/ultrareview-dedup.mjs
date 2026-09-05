@@ -186,5 +186,29 @@ const conserved = (out) => [...(out.confirmedFindings || []), ...(out.contestedF
   check('pre-change this run would have spent 40x3=120 verify agents; now 15', verifyAgents(calls).length === 15)
 }
 
+// --- T7: --fast is a Codex service-tier knob. It must reach every relay's `codex exec`
+// in hybrid mode, be a logged no-op outside it, and never trip the OFF-STANDARD note (same
+// model, effort, and vote count -- only the inference queue changes).
+{
+  console.log('T7 — --fast plumbs service_tier="fast" into the Codex relay, hybrid-only')
+  const relays = (calls) => calls.filter(c => /Codex verify relay/.test(c.prompt))
+  const FAST_ARG = '-c service_tier="fast"'
+  const both = await run({ clusterReply: { clusters: [] }, findings: [BY_DIM.correctness[1]], args: '--codex-verify --fast' })
+  check('hybrid+fast: every relay command carries the fast tier', relays(both.calls).length === 3 && relays(both.calls).every(c => c.prompt.includes(FAST_ARG)), `relays=${relays(both.calls).length}`)
+  check('hybrid+fast: modeDetail.codex.fast is true', both.out.modeDetail.codex && both.out.modeDetail.codex.fast === true, JSON.stringify(both.out.modeDetail.codex))
+  check('hybrid+fast: verify label carries +fast', both.out.modeDetail.models.verify === 'codex:gpt-5.6-sol@high+fast', both.out.modeDetail.models.verify)
+  check('hybrid+fast: still ON-STANDARD (no OFF-STANDARD note)', !both.logs.some(l => l.includes('OFF-STANDARD')))
+  check('hybrid+fast: relay is told to keep the full timeout', relays(both.calls).every(c => c.prompt.includes('keep the full timeout')))
+  check('hybrid+fast: logs the upstream no-op NOTE (openai/codex#32191)', both.logs.some(l => l.startsWith('NOTE: --fast requests Codex Fast mode') && l.includes('#32191')))
+  const hybrid = await run({ clusterReply: { clusters: [] }, findings: [BY_DIM.correctness[1]], args: '--codex-verify' })
+  check('hybrid only: no relay carries the fast tier', relays(hybrid.calls).length === 3 && relays(hybrid.calls).every(c => !c.prompt.includes(FAST_ARG)))
+  check('hybrid only: modeDetail.codex.fast is false', hybrid.out.modeDetail.codex && hybrid.out.modeDetail.codex.fast === false)
+  check('hybrid only: no --fast NOTEs of either kind', !hybrid.logs.some(l => l.includes('--fast')))
+  const claude = await run({ clusterReply: { clusters: [] }, findings: [BY_DIM.correctness[1]], args: '--fast' })
+  check('claude panel: --fast is a logged no-op', claude.logs.some(l => l.startsWith('NOTE: --fast ignored')))
+  check('claude panel: no Codex relay, no service tier anywhere', relays(claude.calls).length === 0 && claude.calls.every(c => !c.prompt.includes(FAST_ARG)) && claude.out.modeDetail.codex === null)
+  check('claude panel: verify model unchanged by --fast', claude.out.modeDetail.models.verify === 'inherit', claude.out.modeDetail.models.verify)
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

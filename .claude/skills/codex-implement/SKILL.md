@@ -1,6 +1,6 @@
 ---
 name: codex-implement
-description: Delegate implementation of a locked spec to OpenAI Codex CLI in an isolated git worktree, then verify the result yourself. Claude specs and reviews; Codex writes the code. Use when a spec in .planning/specs/ is ready to build and you want it implemented by Codex rather than inline. Args: <spec-path> [--routine|--standard|--deep] (aliases --light|--normal|--heavy) [--model=<sol|terra|luna>] [--effort=<low|medium|high|xhigh|max|ultra>] [--branch=<name>] [--here] [--dry-run]
+description: Delegate implementation of a locked spec to OpenAI Codex CLI in an isolated git worktree, then verify the result yourself. Claude specs and reviews; Codex writes the code. Use when a spec in .planning/specs/ is ready to build and you want it implemented by Codex rather than inline. Args: <spec-path> [--routine|--standard|--deep] (aliases --light|--normal|--heavy) [--model=<sol|terra|luna>] [--effort=<low|medium|high|xhigh|max|ultra>] [--fast] [--branch=<name>] [--here] [--dry-run]
 ---
 
 Hand a locked spec to Codex CLI for implementation, in a throwaway worktree, then bring the diff
@@ -67,7 +67,7 @@ grep -h rate_limits "$(ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl | head -1)"
    is logged `SUCCESS`. Never treat that log as evidence the sandbox works — check for the files.
 
 6. **Plan quota — report it to the user BEFORE launching, every run.** Codex runs on the
-   ChatGPT-plan quota (Ryan's is `plan_type: "edu"` — not visible on any web dashboard), and a
+   ChatGPT-plan quota (Ryan's is `plan_type: "pro"` as of 2026-09-04 — not visible on any web dashboard), and a
    quota kill MID-RUN is worse than a delayed start: B1 run 3 (2026-07-23) died to the weekly
    limit after completing its fixes but before updating 4 test files' mocks, leaving 86 failures
    to untangle by hand. The TUI's `/status` numbers are also written to the session logs — the
@@ -80,7 +80,8 @@ grep -h rate_limits "$(ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl | head -1)"
    Surface both windows (% left + reset time in local time) in the launch announcement. Gate:
    **weekly ≥ 80% used, or 5-hour ≥ 70% used on a `--deep`/`xhigh+` run → STOP and ask** whether
    to launch anyway, drop a tier, or wait for the reset — never launch heavy into a nearly-spent
-   window on your own call.
+   window on your own call. **`--fast` burns plan credits at 2.5× per token** (§ `--fast` below),
+   so apply the 5-hour gate to *every* `--fast` run, not only `--deep`/`xhigh+`.
 
 Also confirm the spec path exists and reads as **self-contained** — a spec that says "as we
 discussed" or leaves a fork open is not implementable by an agent with no conversation history.
@@ -194,6 +195,58 @@ credit-based limits on a rolling 5-hour window plus a weekly cap. Sol at `max` o
 is the single fastest way to exhaust a Plus allowance. Tell the user which tier you are about to
 spend before a `--deep` run on a big spec.
 
+### `--fast` — the speed dial (orthogonal to model and effort)
+
+`--fast` turns on Codex **Fast mode**: `-c service_tier="fast"`, which routes the run to OpenAI's
+priority inference queue (`fast` is the documented config alias for the request tier `priority`).
+It is a third, independent dial — same model, same effort, same sandbox, same prompt; only the
+queue changes — so it never alters *what* Codex produces, only how long you wait and what it
+costs.
+
+| | Standard | `--fast` |
+| --- | --- | --- |
+| Token speed (OpenAI's claim) | 1× | **~1.5×** — not 2× |
+| Token speed (measured here, 2026-09-04) | ~40 tok/s read-heavy · ~53 tok/s generation-heavy | ~40 · ~54 tok/s — **no measurable gain** |
+| Plan-credit burn on GPT-5.6 | 1× | **2.5×** |
+| Model / effort / output | unchanged | unchanged |
+
+Three things to know before reaching for it:
+
+- **The speedup is a ceiling, not a promise — and we have not observed it.** Measured
+  2026-09-04 (Sol, CLI 0.147.0, plan `pro`, n=2 per arm, same prompt): a read-heavy analysis at
+  `high` ran 263 s / 250 s standard vs 256 s / 305 s fast; a generation-heavy write at `medium`
+  ran 114 s / 97 s vs 108 s / 104 s. Output throughput was identical (~40 and ~53 tok/s in both
+  arms). **Root cause is upstream, not the flag, and not `exec`-specific:** the key is the
+  documented one and the CLI maps it to request tier `priority` and validates it against the
+  catalog; wire captures by other users (CLI 0.144.x and 0.149.0, ChatGPT auth) show `codex exec`
+  sending `service_tier: priority`. OpenAI's only reply ([#14204](https://github.com/openai/codex/issues/14204))
+  is that Fast is applied by server-side routing and the response's tier field is not a signal, so
+  timing is the test — and a fixed ~3,050-token output on Sol ran 57–60 s in all 16 of our runs
+  across `codex exec` on CLI 0.147.0 and 0.153.3 and the app-server path the IDE uses (as the VS
+  Code client identity and as an unknown one); fast was never more than 2% ahead. Other users'
+  3-vs-3 A/B: 57.4 s vs 57.5 s. Tracked as
+  [openai/codex#32191](https://github.com/openai/codex/issues/32191) /
+  [#30413](https://github.com/openai/codex/issues/30413), open since 2026-07 with no maintainer
+  reply; the speed docs list desktop app, CLI, IDE extension and never mention `exec`. The "2x
+  speed" figure belongs to GPT-6 Astra's Fast tier, not GPT-5.6's (1.5x). Whether a Fast request
+  that runs at standard speed still bills 2.5× is unverified. So today `--fast` is a **no-op** —
+  leave it off and re-time when #32191 closes.
+- **It is the most expensive knob per unit of benefit in this skill.** `--fast --deep` pays
+  Sol's 5× *and* the 2.5× multiplier on every token. Use it when a human is waiting on the
+  worktree — never as a habit, and never to make up for launching late into a 5-hour window that
+  is nearly spent (preflight 6 applies its 5-hour gate to every `--fast` run).
+- **Entitlement and silent fallback.** Fast mode needs ChatGPT Plus/Pro auth (Ryan's plan is
+  `pro`; accepted on `gpt-5.6-sol` 2026-09-04, CLI 0.147.0, no warning; Terra and Luna advertise
+  the same tier in the model catalog). An API key bills API priority pricing instead. On a model
+  that does **not** advertise the tier, Codex does not fail — it prints a `warning: Configured
+  service tier … is not advertised as supported for model … and will be omitted from requests`
+  line on stderr (an `error` item in the `--json` stream), runs at standard speed, and exits 0;
+  the `-o` report looks identical. All three tiers this skill can select advertise it, so this
+  only bites if the model table changes — see § Failure modes.
+
+Mechanics: Step 4 adds `-c service_tier="fast"` to the `codex exec` line. Nothing else changes —
+not how long you wait before calling it hung, not the worktree, not the gates.
+
 ---
 
 ## Step 2 — isolate
@@ -296,6 +349,9 @@ Flag rationale — each one is load-bearing:
 - **`--output-schema`** — forces the final answer into `report.schema.json` so you get an
   adjudicable object instead of prose.
 - **`-C`** — working root. Do not pass `--add-dir`; widening the writable set defeats the worktree.
+- **`-c service_tier="fast"`** — add this line, after the effort line, **only when the user passed
+  `--fast`**. Priority queue: ~1.5× token speed for 2.5× plan credits, same model and effort
+  (§ `--fast`). Name it in the launch announcement and in the report.
 
 Run it **backgrounded** (`run_in_background: true`) if the user is doing anything else; the
 harness re-invokes you on exit. Otherwise run it in the foreground with a generous timeout —
@@ -434,6 +490,8 @@ Concretely, for this repo:
 | Codex edited `extension/**/*.ts` | it does not know our no-build-step quirk | AGENTS.md invariant 8; revert and redo in the `.js` |
 | Gates green in report, red locally | self-reported, or tests were weakened | trust only your own run; diff `__tests__/` |
 | Permission prompt on every call | no allowlist entry | add `Bash(codex exec:*)` to `.claude/settings.json` `permissions.allow` |
+| `--fast` run is no faster than standard; exit 0, report looks normal | the model does not advertise the Fast tier (`gpt-5.4-mini`, the 5.3 family) or the catalog cache is stale. Codex emits `warning: Configured service tier … is not advertised as supported for model … and will be omitted from requests` on **stderr** (an `error` item under `--json`) and silently runs at standard speed; the `-o` file never shows it | grep the run's stderr for `not advertised as supported`; stay on the three gpt-5.6 tiers (all advertise it, verified 2026-09-04) |
+| 5-hour window drains 2–3× faster than the tier table predicts | `--fast` (2.5× credit multiplier) left on out of habit | drop `--fast`; it is per-run, never a default |
 
 ---
 
@@ -441,7 +499,7 @@ Concretely, for this repo:
 
 Close with:
 
-- **Spec** implemented, **preset/model/effort** used, **worktree + branch**.
+- **Spec** implemented, **preset/model/effort** used (plus `fast` when set), **worktree + branch**.
 - **Gate results from your own run**, with the pre-change baseline for comparison.
 - **Open questions / deviations** lifted verbatim from `codex-report.json`.
 - **Findings** from your diff read + `codex exec review` + `/ultra-review`, and the disposition

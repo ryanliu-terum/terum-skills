@@ -1,6 +1,6 @@
 ---
 name: hybrid-review
-description: Cross-model code-diff reviewer. Same 4-dimension review as /ultrareview, but the adversarial verify panel runs on OpenAI Codex instead of Claude, so the verifiers do not share the finders' blind spots. Use when a diff matters enough that a false positive surviving verification would cost real time — live auth/RLS/contract changes, pre-merge gates, or any batch where /ultrareview's findings felt over-confident. Args: same as /ultrareview — [<PR#>] [--working] [--no-fix] [--no-logs] + knobs/presets (--quick|--balanced|--in-depth|--max; --model/--review-model; --efficient/--verify) — except --verify-model, which here selects the Codex tier (sol|terra|luna) rather than a Claude model.
+description: Cross-model code-diff reviewer. Same 4-dimension review as /ultrareview, but the adversarial verify panel runs on OpenAI Codex instead of Claude, so the verifiers do not share the finders' blind spots. Use when a diff matters enough that a false positive surviving verification would cost real time — live auth/RLS/contract changes, pre-merge gates, or any batch where /ultrareview's findings felt over-confident. Args: same as /ultrareview — [<PR#>] [--working] [--no-fix] [--no-logs] + knobs/presets (--quick|--balanced|--in-depth|--max; --model/--review-model; --efficient/--verify) — except --verify-model, which here selects the Codex tier (sol|terra|luna) rather than a Claude model. Plus --fast (hybrid-only) for Codex Fast mode — a no-op as of 2026-09-04 (no measured speedup on exec or on the interactive app-server path; openai/codex#32191); same model, effort, and panel.
 ---
 
 Run the multi-agent code-diff reviewer with a **cross-model verify panel**: Claude finds, Codex verifies.
@@ -46,6 +46,58 @@ weak one.** Do not adjudicate it, do not summarize its verdicts, do not write it
 Expect it to be slow. `codex exec` at `high` needs **minutes per vote**, so a full panel over ~15
 findings is 45 relay calls and can run well over an hour of wall-clock. That is the cost of the
 tool; it is not a hang.
+
+### `--fast` — the one speed lever that stays on-standard
+
+`--fast` appends `-c service_tier="fast"` to every relay's `codex exec`: Codex **Fast mode**, the
+priority inference queue (`fast` is the documented alias for the request tier `priority`). Same
+model, same effort, same 3 votes — only the queue changes — so the panel keeps its name, the
+OFF-STANDARD note does not fire, and the report label becomes `codex:gpt-5.6-sol@high+fast`
+(`modeDetail.codex.fast: true`).
+
+What it costs and buys, per OpenAI: **2.5× plan credits** on GPT-5.6 for a claimed **~1.5× token
+speed** — not 2×. **Measured 2026-09-04 it bought nothing:** Sol at `high` on a read-heavy
+analysis (the shape of a verify vote) ran 263 s / 250 s standard vs 256 s / 305 s fast, and a
+generation-heavy task at `medium` 114 s / 97 s vs 108 s / 104 s — identical output throughput
+(~40 and ~53 tok/s) in both arms, n=2 each, CLI 0.147.0, plan `pro`.
+
+**Root cause — upstream, not ours, and not `exec`-specific.** The flag is spelled right:
+`service_tier = "fast"` is the documented key, it is what the TUI's `/fast on` persists, and the
+CLI maps it to the request tier `priority` and validates it against the model catalog (a model
+without the tier gets the `not advertised as supported` warning). Wire captures by two other users
+(CLI 0.144.x and 0.149.0, ChatGPT auth) show `codex exec` sending `service_tier: priority` plus an
+`x-codex-routing-hint … tier=priority` header, every request HTTP 200, and
+`response.completed.response.service_tier` coming back `default`. OpenAI's only on-record reply
+(pash-openai on [#14204](https://github.com/openai/codex/issues/14204), 2026-03) is that Fast "is
+handled by Codex routing logic server-side", so that `default` "does not mean Fast was ignored" —
+which makes **timing the only test that counts**. Timed 2026-09-04 on this account (Pro) with a
+fixed ~3,050-token output on Sol: `codex exec` on CLI 0.147.0 and 0.153.3, and the app-server path
+the desktop app and IDE use (once identifying as the VS Code extension, once as an unknown client)
+— 16 runs, every one 57–60 s, fast never more than 2% ahead of standard. Other users' 3-vs-3 A/B:
+57.4 s vs 57.5 s. So the missing speedup is not a headless quirk; on this account Fast mode
+delivers nothing on any surface we can drive. Tracked as
+[openai/codex#32191](https://github.com/openai/codex/issues/32191) and
+[#30413](https://github.com/openai/codex/issues/30413), open since 2026-07 with no maintainer
+reply; the [speed docs](https://learn.chatgpt.com/docs/agent-configuration/speed) list the desktop
+app, CLI, and IDE extension and never mention `exec`. (The "2x speed" figure in the catalog belongs
+to GPT-6 Astra's Fast tier, not GPT-5.6's, which says 1.5x.) Whether a Fast request that runs at
+standard speed still bills 2.5× is unverified. So today `--fast` is a **no-op**: the workflow logs
+`NOTE: --fast requests Codex Fast mode … Expect standard speed` whenever it is used. Keep it off;
+re-time when #32191 closes or the catalog's tier description changes.
+Fast mode needs ChatGPT Plus/Pro auth (Ryan's plan is `pro`; accepted on `gpt-5.6-sol`
+2026-09-04, CLI 0.147.0, no warning). Reach for it when someone is waiting on the gate; leave it
+off by default — a 45-relay panel at 2.5× is a real bite out of the weekly Codex window, so with
+`--fast` read the plan window first (the `rate_limits` grep in `/codex-implement` preflight 6)
+and apply its gate: weekly ≥ 80% used → say so and let the user pick standard speed.
+
+Two things do NOT change under `--fast`: the **10-minute relay timeout** (fast trims a vote, it
+does not bound it — a shorter timeout is the 2026-08-05 regression again) and the
+`relayFailures: 0` rule. And one silent failure to know: on a model that does not advertise the
+tier, Codex prints `warning: Configured service tier … is not advertised as supported … and will
+be omitted from requests` on stderr and runs at **standard** speed with exit 0. The relay sends
+stderr to `/dev/null`, so such a panel is indistinguishable from a standard one in the report.
+All three selectable tiers (`sol|terra|luna`) advertise it today, so this only matters if
+`CODEX_MODELS` ever changes.
 
 ### The relay timeout (the failure this standard exists to prevent)
 
@@ -119,6 +171,8 @@ decision to keep that preamble byte-identical across reviewer scripts is why).
 - `--model` / `--review-model` / `--fable-review` still take Claude models and apply to the Claude
   stages (manifest / review / dedup / synthesize). The workflow prints a NOTE if `--model` is set,
   so it never silently reads as if it steered the verifier.
+- `--fast` → Codex Fast mode on every relay (§ `--fast` above). Hybrid-only: from `/ultrareview`
+  the script logs `NOTE: --fast ignored` and runs unchanged.
 
 ## Step 2 — handle the result
 
@@ -152,8 +206,8 @@ Two additions specific to this mode:
    killed relays re-execute. If you edited the script between runs (e.g. the timeout), the cache
    invalidates from that call onward — which is correct, that is the call you wanted re-run.
 
-2. **Say which panel ran.** State `Verify: Codex <model>@<effort>, <n> voters, relayFailures <n>`
-   in the summary — all four numbers, every time. A reader
+2. **Say which panel ran.** State `Verify: Codex <model>@<effort>[+fast], <n> voters, relayFailures <n>`
+   in the summary — all four numbers, plus `+fast` whenever `--fast` was passed, every time. A reader
    comparing this report to an older `/ultrareview` run on the same diff needs to know the
    verifiers changed, or they will read a difference in confirmed-count as a change in the code.
 

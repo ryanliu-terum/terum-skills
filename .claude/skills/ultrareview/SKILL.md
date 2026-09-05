@@ -15,7 +15,7 @@ The workflow's canonical target/behavior args are `[<PR#>] [--working] [--no-fix
   - `--quick` / `--balanced` / `--in-depth` / `--max` (or `--preset=<name>`) — one word sets model + verification depth. In ultrareview `--in-depth` and `--max` differ only by review model (sonnet vs opus) — there is no drift stage for the drift cap to affect.
   - `--efficient[=level]` / `--verify=level` — verification depth (`full|conservative|balanced|aggressive`). `--drift` is accepted-but-ignored (ultrareview has no cross-spec drift stage).
   - `--model=<m>` / `--review-model=<m>` / `--verify-model=<m>` / `--fable-review` — pin a model per stage (`opus|sonnet|haiku|fable`); omit → inherit the session `/model`.
-  - `--codex-verify` is also parsed here, but it belongs to **`/hybrid-review`** (Claude finds, Codex verifies) — do not pass it from `/ultrareview`; route the user there instead. Note it also makes `--in-depth`/`--max` differ by Codex reasoning effort, not only by review model. See `.claude/skills/hybrid-review/SKILL.md`.
+  - `--codex-verify` is also parsed here, but it belongs to **`/hybrid-review`** (Claude finds, Codex verifies) — do not pass it from `/ultrareview`; route the user there instead. Note it also makes `--in-depth`/`--max` differ by Codex reasoning effort, not only by review model. See `.claude/skills/hybrid-review/SKILL.md`. `--fast` is the same story — parsed here, meaningful only with `--codex-verify` (it sets the Codex service tier); on its own the script logs `NOTE: --fast ignored` and runs unchanged.
 
 ## Step 0 — resolve the review target (do this BEFORE invoking the workflow)
 

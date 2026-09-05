@@ -130,6 +130,36 @@ const codexModelFlag = () => {
 const CODEX_TIER = CODEX_VERIFY ? (codexModelFlag() ?? 'sol') : null
 const CODEX_EFFORT = CODEX_VERIFY ? (CODEX_EFFORT_BY_PRESET[presetName] ?? 'high') : null
 const CODEX_SLUG = CODEX_VERIFY ? CODEX_MODELS[CODEX_TIER] : null
+// --fast: Codex "Fast mode" (config `service_tier = "fast"`, the documented alias for the
+// request tier `priority`). Same model, same weights, same effort -- only the inference
+// queue changes -- so a fast panel is still ON-STANDARD (sol@high x3) and does not trip the
+// OFF-STANDARD note below. Vendor claim: 1.5x token speed at 2.5x plan-credit burn on
+// GPT-5.6 (it is NOT 2x). Measured 2026-09-04 (sol, n=2 per arm, same prompt): NO gain --
+// ~40 tok/s read-heavy@high and ~53 tok/s generation-heavy@medium in BOTH arms, wall-clock
+// within noise. ROOT CAUSE (upstream, unresolved, NOT exec-specific): the client is correct --
+// wire captures on CLI 0.144 and 0.149 show `codex exec` sending service_tier=priority plus an
+// x-codex-routing-hint tier=priority header. OpenAI's only reply (#14204, 2026-03) is that Fast
+// is applied by server-side routing and the response's service_tier field is not a reliable
+// signal -- so timing is the only test. Timed 2026-09-04 with a fixed ~3,050-token output on
+// sol: exec on CLI 0.147.0 and 0.153.3, and the app-server path the IDE/desktop use (as the
+// VS Code client identity and as an unknown one) -- 16 runs, all 57-60 s, fast never >2% ahead.
+// Other users' 3-vs-3 A/B: 57.4 vs 57.5 s (openai/codex#32191; also #30413; open since 2026-07,
+// no maintainer reply). So --fast is a NO-OP today on every surface we can drive: the run below
+// logs a NOTE saying so whenever it is used. Keep the plumbing -- it is what the TUI's /fast
+// persists -- and re-time when #32191 closes or the catalog's tier description changes.
+// Opt-in per run, never a default: if the backend ever honours it, it spends the weekly Codex
+// quota 2.5x faster for the same verdicts. Hybrid-only -- the Claude verify panel has no service
+// tier, so outside --codex-verify it is a logged no-op. Verified 2026-09-04 (CLI 0.147.0,
+// plan_type pro): accepted on gpt-5.6-sol; terra and luna advertise the same tier in the
+// model catalog. A model that does NOT advertise it (gpt-5.4-mini) still exits 0 and runs
+// at STANDARD speed; the only signal is `warning: Configured service tier ... will be
+// omitted from requests` on stderr (an `error` item in the stream under --json) -- never in
+// the `-o` file -- and the relay sends both streams to /dev/null, so such a panel would be
+// indistinguishable from a standard one in the report. Only the three CODEX_MODELS are
+// reachable here, and all three advertise the tier.
+const CODEX_FAST = flagVal('fast') !== undefined
+if (CODEX_FAST && !CODEX_VERIFY) log('NOTE: --fast ignored -- it sets the CODEX service tier and this run verifies on Claude. Use /hybrid-review (--codex-verify) to get it.')
+if (CODEX_FAST && CODEX_VERIFY) log('NOTE: --fast requests Codex Fast mode (service_tier=priority), but as of 2026-09-04 it produced NO measurable speedup on this account on any surface -- codex exec on CLI 0.147/0.153 and the app-server path the IDE uses (openai/codex#32191, #30413; OpenAI on #14204: routing is server-side, the response tier field is not a signal). Expect standard speed; re-time before relying on it.')
 
 const pm = (k) => (preset ? preset[k] : undefined)
 // Precedence, most specific wins: stage flag > --fable-review (review only) >
@@ -150,10 +180,10 @@ const VERIFY_MODEL = CODEX_VERIFY
 const withModel = (opts, m) => (m ? { ...opts, model: m } : opts)
 const modelLabel = (m) => m || 'inherit'
 const LOW_CONFIDENCE = vp.votes < 2
-const verifyLabel = CODEX_VERIFY ? ('codex:' + CODEX_SLUG + '@' + CODEX_EFFORT) : modelLabel(VERIFY_MODEL)
+const verifyLabel = CODEX_VERIFY ? ('codex:' + CODEX_SLUG + '@' + CODEX_EFFORT + (CODEX_FAST ? '+fast' : '')) : modelLabel(VERIFY_MODEL)
 const MODE = {
   verify: VERIFY_LEVEL, preset: presetName || null, codexVerify: CODEX_VERIFY,
-  codex: CODEX_VERIFY ? { tier: CODEX_TIER, model: CODEX_SLUG, effort: CODEX_EFFORT } : null,
+  codex: CODEX_VERIFY ? { tier: CODEX_TIER, model: CODEX_SLUG, effort: CODEX_EFFORT, fast: CODEX_FAST } : null,
   models: { base: modelLabel(BASE_MODEL), review: modelLabel(REVIEW_MODEL), verify: verifyLabel },
 }
 log('Mode: ' + (CODEX_VERIFY ? 'HYBRID (claude finds -> codex verifies) | ' : '') + (presetName ? 'preset=' + presetName + ' -> ' : '') + 'verify=' + VERIFY_LEVEL + (FIX ? '' : ', NO-FIX') + (NO_LOGS ? ', no-logs' : '') + ' | models: base=' + modelLabel(BASE_MODEL) + ' review=' + modelLabel(REVIEW_MODEL) + ' verify=' + verifyLabel + (LOW_CONFIDENCE ? ' | LOW-CONFIDENCE (1-vote verify)' : ''))
@@ -505,6 +535,7 @@ const VERIFY_PROMPT = (f, v) =>
 const RELAY_TIMEOUT_MS = 600000
 const codexArgs = "-C . -s read-only --ephemeral -m " + CODEX_SLUG +
   " -c model_reasoning_effort=\"" + CODEX_EFFORT + "\"" +
+  (CODEX_FAST ? " -c service_tier=\"fast\"" : "") +
   " --output-schema .claude/workflows/codex-verdict.schema.json"
 
 const CODEX_RELAY_PROMPT = (f, v) =>
@@ -529,7 +560,7 @@ const CODEX_RELAY_PROMPT = (f, v) =>
   'cat "$P" | codex exec - ' + codexArgs + ' -o "$V" >/dev/null 2>&1 ; echo "rc=$?" ; cat "$V"\n' +
   '```\n\n' +
   '## MANDATORY -- pass `timeout: ' + RELAY_TIMEOUT_MS + '` to the Bash tool on that command (' + (RELAY_TIMEOUT_MS / 60000) + ' minutes).\n' +
-  'The Bash default is 120000ms and `codex exec` at ' + CODEX_EFFORT + ' effort routinely needs several MINUTES on one finding. Measured 2026-08-05: with the default timeout, 17 of 21 relay votes were SIGTERMed mid-run (exit 143, counted as RELAY_FAILED) and the whole panel was invalid. A timed-out relay is NOT a verdict. Do not shorten it, do not split the command, do not retry with a smaller timeout.\n\n' +
+  'The Bash default is 120000ms and `codex exec` at ' + CODEX_EFFORT + ' effort routinely needs several MINUTES on one finding.' + (CODEX_FAST ? ' `--fast` (Codex priority tier, ~1.5x) trims that; it does not remove it -- keep the full timeout.' : '') + ' Measured 2026-08-05: with the default timeout, 17 of 21 relay votes were SIGTERMed mid-run (exit 143, counted as RELAY_FAILED) and the whole panel was invalid. A timed-out relay is NOT a verdict. Do not shorten it, do not split the command, do not retry with a smaller timeout.\n\n' +
   '## Step 2 -- return the verdict\n' +
   '- The command prints `rc=<n>` then the JSON Codex wrote. Return THAT JSON as your structured output, unchanged: same `refuted`, same `reason` text, same `confidence`, same `correctedSeverity`.\n' +
   '- Do NOT rewrite, summarize, translate, shorten, or "improve" the reason. Copy it.\n' +
