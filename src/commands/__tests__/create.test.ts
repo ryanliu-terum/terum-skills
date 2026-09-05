@@ -1,7 +1,8 @@
 import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { create } from '../team.js';
+import YAML from 'yaml';
+import { create, WORKFLOW } from '../team.js';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, exists, fakeGh, git, mappedRunner, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 
@@ -13,6 +14,18 @@ async function emptyBare(): Promise<{ root: string; bare: string }> {
 }
 
 describe('team create (§6)', () => {
+  it('scaffolds a least-privilege, executable README and publish-comment workflow', () => {
+    expect(WORKFLOW.split('\n').find((line) => line.includes('--jq'))).toBe('          existing=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate --jq \'.[] | select(.body | contains("<!-- terum-skills:pr-comment -->")) | .id\' | head -n 1)');
+    const workflow = YAML.parse(WORKFLOW) as { jobs: Record<string, { if?: string; permissions?: Record<string, string>; steps: Array<{ run?: string; with?: Record<string, unknown> }> }> };
+    expect(Object.keys(workflow.jobs)).toEqual(['readme', 'publish-comment']);
+    expect(workflow.jobs.readme?.if).toBe("github.event_name == 'push'");
+    expect(workflow.jobs.readme?.permissions).toEqual({ contents: 'write' });
+    expect(workflow.jobs.readme?.steps.some((step) => step.run?.includes('chore: regenerate skills README'))).toBe(true);
+    expect(workflow.jobs['publish-comment']?.permissions).toEqual({ contents: 'read', 'pull-requests': 'write' });
+    expect(workflow.jobs['publish-comment']?.steps[0]?.with?.['persist-credentials']).toBe(false);
+    expect(WORKFLOW).toContain('npx -y terum-skills@latest');
+  });
+
   it('scaffolds the §4.1 tree into an empty generic-git remote, records the team, and leaves the clone ready', async () => {
     const { root, bare } = await emptyBare();
     const publicRemote = 'https://git.example/new-team.git';

@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
 import { askHandle, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, ghState, GhState, gitAuthEnv, Identity, identityForJoiner, setIdentity, teamByRemote } from '../lib/auth.js';
-import { ConfigStore, createConfigStore } from '../lib/config.js';
+import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists, mkdirPrivate } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
-import { normalizeRemote, remoteName, remoteToGitUrl } from '../lib/remote.js';
+import { githubOwnerRepo, hostOperationAllowed, normalizeRemote, remoteName, remoteToGitUrl } from '../lib/remote.js';
+import { activePeople, readPeople } from '../lib/readme.js';
 import { Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { Person, Team, parseJson, parseOrExplain, personSchema, teamNameSchema, teamSchema } from '../lib/schema.js';
+import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, teamNameSchema, teamSchema } from '../lib/schema.js';
 import { cloneOrigin, cloneTeam, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 import { endorsedCandidates } from '../lib/skills.js';
 import { installOne } from './install.js';
@@ -20,10 +21,12 @@ import { installOne } from './install.js';
 export interface TeamDependencies extends AuthDependencies { config?: ConfigStore; runner?: Runner; }
 export interface CreateArgs extends TeamDependencies { name: string; org?: string; remote?: string; }
 export interface JoinArgs extends TeamDependencies { target: string; as?: string; }
-export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs);
+export interface RemoveArgs extends TeamDependencies { handle: string; team?: string; archiveOnly?: boolean; }
+export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs);
 export type CreateResult = { team: string; remote: string };
 export type JoinResult = { team: string; handle: string; rejoined: boolean; roster: RosterEntry[] };
 export interface RosterEntry { handle: string; displayName: string; }
+export interface RemoveResult { team: string; handle: string; archiveOnly: boolean; }
 
 export class HandleCollisionError extends Error {
   constructor(readonly handle: string) { super(`Handle ${handle} is already in use by an active member.`); this.name = 'HandleCollisionError'; }
@@ -32,8 +35,96 @@ export class HandleCollisionError extends Error {
 const CATEGORIES = ['debugging', 'testing', 'docs', 'workflow', 'research', 'infra', 'misc'];
 export const MAX_HANDLE_ATTEMPTS = 3;
 
-export async function run(args: TeamArgs, io: Prompter): Promise<Result<CreateResult | JoinResult>> {
-  return args.kind === 'create' ? create(args, io) : join(args, io);
+export async function run(args: TeamArgs, io: Prompter): Promise<Result<CreateResult | JoinResult | RemoveResult>> {
+  if (args.kind === 'create') return create(args, io);
+  if (args.kind === 'join') return join(args, io);
+  return remove(args, io);
+}
+
+/** §6 `team remove`: GitHub access revocation plus the guarded, historical roster archive. */
+export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<RemoveResult>> {
+  try {
+    const store = args.config ?? createConfigStore();
+    const runner = args.runner ?? systemRunner;
+    const config = await store.read();
+    const [teamName, binding] = selectTeam(config.teams, args.team);
+    if (!binding.handle) throw new Error(`This machine has no member handle for ${teamName}; run team join first.`);
+    const targetHandle = parseOrExplain(handleSchema, args.handle, 'member handle');
+    if (targetHandle === binding.handle) throw new Error('You cannot remove yourself; use team leave when that command is available.');
+    const allowed = hostOperationAllowed(binding.remote, Boolean(args.archiveOnly));
+    if (!allowed.ok) throw new Error(allowed.error);
+    const clone = store.teamClone(teamName);
+    const env = gitAuthEnv(binding.token);
+    // Resolve the target against origin/main, not the possibly stale clone: a member who joined
+    // after this machine last synced must be removable, and the GitHub login must be current.
+    const fetched = await runner.run('git', ['fetch', '-q', 'origin'], { cwd: clone, env });
+    if (fetched.code !== 0) throw new Error(`Could not fetch ${binding.remote}: ${(fetched.stderr || fetched.stdout).trim()}`);
+    const shown = await runner.run('git', ['show', `origin/main:people/${targetHandle}.json`], { cwd: clone });
+    if (shown.code !== 0) throw new Error(`No member ${targetHandle} in ${teamName}: people/${targetHandle}.json is not on origin/main.`);
+    // Validate from the raw document as well as personSchema: legacy repositories can contain a
+    // login written before the schema existed, and it must never reach a gh API path.
+    const targetRaw = JSON.parse(shown.stdout) as { github?: unknown };
+    const login = parseOrExplain(githubLoginSchema, targetRaw.github, `GitHub login for ${targetHandle}`);
+    parseJson(personSchema, shown.stdout, `people/${targetHandle}.json`);
+    const ownerRepo = githubOwnerRepo(binding.remote);
+    let collaborator = false;
+    let pending: Array<{ id?: number; invitee?: { login?: string } }> = [];
+    if (ownerRepo !== null) {
+      const admin = await runner.run('gh', ['api', `repos/${ownerRepo}`, '-q', '.permissions.admin'], { env });
+      if (admin.code !== 0 || admin.stdout.trim() !== 'true') throw new Error('Team removal requires GitHub repository admin permission.');
+      if (!args.archiveOnly) {
+        const admins = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators?permission=admin`, '--paginate', '--slurp'], { env });
+        if (admins.code !== 0) throw new Error(`Could not list repository admins: ${(admins.stderr || admins.stdout).trim()}`);
+        const adminLogins = paginatedItems<{ login?: string }>(admins.stdout).map((member) => member.login?.toLowerCase()).filter((value): value is string => Boolean(value));
+        if (adminLogins.length <= 1 && adminLogins.includes(login.toLowerCase())) throw new Error(`Refusing to remove ${targetHandle}: they are the last remaining admin.`);
+        const collaborators = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators`, '--paginate', '--slurp'], { env });
+        if (collaborators.code !== 0) throw new Error(`Could not list repository collaborators: ${(collaborators.stderr || collaborators.stdout).trim()}`);
+        collaborator = paginatedItems<{ login?: string }>(collaborators.stdout).some((member) => member.login?.toLowerCase() === login.toLowerCase());
+        const invitations = await runner.run('gh', ['api', `repos/${ownerRepo}/invitations`, '--paginate', '--slurp'], { env });
+        if (invitations.code !== 0) throw new Error(`Could not list pending invitations: ${(invitations.stderr || invitations.stdout).trim()}`);
+        pending = paginatedItems<{ id?: number; invitee?: { login?: string } }>(invitations.stdout).filter((invite) => invite.invitee?.login?.toLowerCase() === login.toLowerCase());
+      }
+    }
+    const question = args.archiveOnly ? `Archive ${targetHandle}? (y/N)` : `Revoke GitHub access for @${login} and archive ${targetHandle}? (y/N)`;
+    if (!(await io.confirm(question))) throw new Error('Team removal was cancelled.');
+    const repo = openTeamRepo(clone, binding.remote, runner);
+    await repo.safeWrite((tree) => archiveMutation(tree, targetHandle), { action: 'team-remove', handle: binding.handle, targetHandle, token: binding.token, message: `${binding.handle}: remove ${targetHandle}` });
+    if (ownerRepo !== null && !args.archiveOnly) {
+      try {
+        if (collaborator) {
+          const revoked = await runner.run('gh', ['api', '-X', 'DELETE', `repos/${ownerRepo}/collaborators/${login}`], { env });
+          if (revoked.code !== 0) throw new Error((revoked.stderr || revoked.stdout).trim());
+        }
+        for (const invitation of pending) {
+          if (invitation.id === undefined) continue;
+          const cancelled = await runner.run('gh', ['api', '-X', 'DELETE', `repos/${ownerRepo}/invitations/${invitation.id}`], { env });
+          if (cancelled.code !== 0) throw new Error((cancelled.stderr || cancelled.stdout).trim());
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`${targetHandle} is archived; @${login}'s access could not be revoked: ${reason}. Re-run team remove ${targetHandle} to retry.`);
+      }
+      if (!collaborator && pending.length === 0) io.print(`@${login} is neither a current collaborator nor a pending invitee.`);
+    }
+    io.print(`${args.archiveOnly ? 'Archived' : 'Removed'} ${targetHandle} from ${teamName}.${args.archiveOnly ? ' Access remains managed on the host.' : ''}`);
+    return success({ team: teamName, handle: targetHandle, archiveOnly: Boolean(args.archiveOnly) });
+  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+}
+
+/** gh --paginate --slurp returns an array of response pages; accept one-page fixture output too. */
+function paginatedItems<T>(source: string): T[] {
+  const parsed = JSON.parse(source || '[]') as unknown;
+  if (!Array.isArray(parsed)) throw new Error('GitHub returned an invalid paginated response.');
+  return parsed.flatMap((page) => Array.isArray(page) ? page : [page]) as T[];
+}
+
+/** Pure safeWrite mutation: people and authored skills remain as history; only active membership changes. */
+export function archiveMutation(tree: MutableTree, targetHandle: string): void {
+  const source = tree.before('team.json');
+  if (source === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');
+  const team = parseJson(teamSchema, treeText(source), 'team.json');
+  if (team.archived.includes(targetHandle)) return;
+  tree.set('team.json', `${JSON.stringify({ ...team, archived: [...team.archived, targetHandle] }, null, 2)}\n`);
 }
 
 export async function create(args: CreateArgs, io: Prompter): Promise<Result<CreateResult>> {
@@ -214,9 +305,7 @@ async function ensureClone(clone: string, remote: string, normalized: string, ru
 
 async function readRoster(clone: string): Promise<RosterEntry[]> {
   const team = parseJson(teamSchema, await readFile(pathJoin(clone, 'team.json'), 'utf8'), 'team.json');
-  const files = (await readdir(pathJoin(clone, 'people'))).filter((file) => file.endsWith('.json')).sort();
-  const people = await Promise.all(files.map(async (file) => parseJson(personSchema, await readFile(pathJoin(clone, 'people', file), 'utf8'), `people/${file}`)));
-  return people.filter((person) => !team.archived.includes(person.handle)).map((person) => ({ handle: person.handle, displayName: person.display_name }));
+  return activePeople(await readPeople(clone), team.archived).map((person) => ({ handle: person.handle, displayName: person.display_name }));
 }
 
 async function requireGitConfig(runner: Runner, cwd: string, identity: { displayName: string; email: string }): Promise<void> {
@@ -298,8 +387,9 @@ async function bootstrap(remote: string, clone: string, teamName: string, identi
   }
 }
 
-/** §4.1 scaffold: the Action that regenerates README on main and comments on publish PRs lands in M3; the file reserves its path. */
-const WORKFLOW = `name: terum-skills
+/** §9 GitHub Action. It becomes executable once this package is published to npm in M4. */
+export const WORKFLOW = `# This workflow requires published terum-skills npm artifacts (M4).
+name: terum-skills
 on:
   push:
     branches: [main]
@@ -308,9 +398,43 @@ on:
     types: [opened, synchronize, reopened]
 jobs:
   readme:
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # README generation and the publish-PR comment are added in milestone M3.
-      - run: echo 'terum-skills README generation is pending M3'
+      - run: npx -y terum-skills@latest readme
+      - run: |
+          if ! git diff --quiet -- README.md; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add README.md
+            git commit -m 'chore: regenerate skills README'
+            git push
+          fi
+  publish-comment:
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'publish/')
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: comment
+        run: npx -y terum-skills@latest readme --pr-comment origin/main > /tmp/terum-skills-comment.md
+      - env:
+          GH_TOKEN: \${{ github.token }}
+          PR: \${{ github.event.pull_request.number }}
+        run: |
+          existing=$(gh api "repos/\${{ github.repository }}/issues/$PR/comments" --paginate --jq '.[] | select(.body | contains("<!-- terum-skills:pr-comment -->")) | .id' | head -n 1)
+          body=$(cat /tmp/terum-skills-comment.md)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/\${{ github.repository }}/issues/comments/$existing" -f body="$body"
+          else
+            gh api -X POST "repos/\${{ github.repository }}/issues/$PR/comments" -f body="$body"
+          fi
 `;

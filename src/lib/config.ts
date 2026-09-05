@@ -17,6 +17,15 @@ export interface ConfigStore {
   teamClone(team: string): string;
 }
 
+/** Resolve the configured team in one place so verbs cannot drift on ambiguity handling. */
+export function selectTeam<T extends { remote: string }>(teams: Record<string, T>, requested?: string): [string, T] {
+  if (requested) { const value = teams[requested]; if (!value) throw new Error(`Team ${requested} is not configured.`); return [requested, value]; }
+  const entries = Object.entries(teams);
+  if (entries.length === 1) return entries[0]!;
+  if (entries.length === 0) throw new Error('No team is configured. Run `team join` first.');
+  throw new Error(`More than one team is configured; pass --team <name> (${entries.map(([name]) => name).join(', ')}).`);
+}
+
 export function createConfigStore(root = join(homedir(), '.terum', 'skills')): ConfigStore {
   const path = join(root, 'config.json');
   const read = async (): Promise<Config> => {
