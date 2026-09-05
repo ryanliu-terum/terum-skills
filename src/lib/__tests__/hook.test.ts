@@ -14,6 +14,7 @@ describe('session hook (§8)', () => {
     const target = await options();
     await expect(installHook(target)).resolves.toBe('installed');
     expect(JSON.parse(await readFile(target.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [HOOK_ENTRY] } });
+    if (process.platform !== 'win32') expect((await stat(target.settingsFile)).mode & 0o777).toBe(0o600);
     expect(await hookInstalled(target.settingsFile)).toBe(true);
     await expect(stat(target.backupDir)).rejects.toMatchObject({ code: 'ENOENT' });
   });
@@ -39,6 +40,7 @@ describe('session hook (§8)', () => {
     expect(JSON.parse(await readFile(target.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'echo hi' }] }] }, theme: 'dark' });
     await expect(removeHook(target)).resolves.toBe('absent');
   });
+
 
   it('offers once: present asks nothing, decline writes nothing, acceptance installs', async () => {
     const target = await options();
