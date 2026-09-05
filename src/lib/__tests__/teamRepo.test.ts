@@ -1,9 +1,9 @@
-import { access, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
-import { assertSafePath, openTeamRepo, PushRefused, SafeWriteExhausted, treeText } from '../teamRepo.js';
+import { assertSafePath, cloneTeam, openTeamRepo, PushRefused, SafeWriteExhausted, treeText } from '../teamRepo.js';
 import { createConfigStore } from '../config.js';
 import { run as share } from '../../commands/share.js';
 import { ScriptedPrompter } from './fixtures.js';
@@ -269,7 +269,7 @@ describe('safeWrite (§6.0)', () => {
     const stores = await Promise.all(Array.from({ length: 8 }, async (_, index) => {
       const store = createConfigStore(join(fixture.root, `state-${index}`));
       const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'), `User ${index}`, `u${index}@example.com`);
-      await store.update((config) => { config.display_name = `User ${index}`; config.email = `u${index}@example.com`; config.teams.team = { remote: fixture.bare, token: null, handle: `u${index}` }; });
+      await store.update((config) => { config.display_name = `User ${index}`; config.email = `u${index}@example.com`; config.teams.team = { remote: fixture.bare, handle: `u${index}` }; });
       const source = join(fixture.root, `skill-${index}`); await mkdir(source);
       await writeFile(join(source, 'SKILL.md'), `---\nname: skill-${index}\ndescription: skill ${index}\nmetadata:\n  terum-category: testing\n---\n`);
       return { store, clone, source };
@@ -284,4 +284,84 @@ describe('safeWrite (§6.0)', () => {
     const ids = await Promise.all(Array.from({ length: 8 }, (_, index) => git(['show', `main:skills/skill-${index}/SKILL.md`], fixture.bare).then((source) => /^\s+id:\s+(.+)$/m.exec(source)?.[1])));
     expect(new Set(ids).size).toBe(8);
   });
+
+  it('never echoes a credential in the wrong-repository or failed-clone messages', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    await git(['remote', 'set-url', 'origin', 'https://me:tok@github.com/acme/team.git'], clone);
+    let mutated = false;
+    const wrong = await openTeamRepo(clone, 'https://me:tok@github.com/someone/else.git').safeWrite(() => { mutated = true; }, { action: 'join', handle: 'me' }).then(() => '', (error: Error) => error.message);
+    expect(mutated).toBe(false);
+    expect(wrong).toContain('points at https://github.com/acme/team.git, not https://github.com/someone/else.git');
+    expect(wrong).not.toContain('tok');
+    expect(wrong).not.toContain('@');
+    const refusing: Runner = { async run(command, args, options) { if (command === 'git' && args[0] === 'clone') return { code: 1, stdout: '', stderr: `fatal: repository '${args[args.length - 2]}' not found` }; return systemRunner.run(command, args, options); } };
+    const failed = await cloneTeam('https://me:tok@github.com/acme/team.git', join(fixture.root, 'dest'), refusing).then(() => '', (error: Error) => error.message);
+    expect(failed).toContain("Could not clone https://github.com/acme/team.git: fatal: repository 'https://github.com/acme/team.git' not found");
+    expect(failed).not.toContain('tok');
+    expect(failed).not.toContain('@');
+  });
+  it('retries ref-lock contention on a derived branch under the SAME pinned lease, so a commit pushed in between survives on `-2`; a protected-branch refusal is one push and a PushRefused', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    let pushes = 0;
+    const contended = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'push' && pushes++ === 0) return { code: 1, stdout: '', stderr: "error: cannot lock ref 'refs/heads/publish/x': is at abc but expected def" };
+      return next();
+    });
+    const result = await openTeamRepo(clone, fixture.bare, contended).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', branch: 'publish/x', deadlineMs: 5_000 });
+    expect(result.pushedTo).toBe('publish/x');
+    expect(pushes).toBe(2);
+    // Contention, and someone lands on publish/y before our retry: the pinned lease refuses to overwrite them.
+    let racing = 0;
+    const raced = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'push' && racing++ === 0) {
+        await git(['push', '-q', 'origin', 'HEAD:refs/heads/publish/y'], fixture.seed);
+        return { code: 1, stdout: '', stderr: "error: cannot lock ref 'refs/heads/publish/y'" };
+      }
+      return next();
+    });
+    const theirs = (await git(['rev-parse', 'HEAD'], fixture.seed)).trim();
+    const dodged = await openTeamRepo(clone, fixture.bare, raced).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"y"')), { action: 'join', handle: 'me', branch: 'publish/y', deadlineMs: 5_000 });
+    expect(dodged.pushedTo).toBe('publish/y-2');
+    expect(await originSha(fixture.bare, 'publish/y')).toBe(theirs);
+    let refused = 0;
+    const protectedBranch: Runner = { run(command, args, options) { if (command === 'git' && args[0] === 'push') { refused++; return Promise.resolve({ code: 1, stdout: '', stderr: ' ! [remote rejected] HEAD -> publish/z (protected branch hook declined)' }); } return systemRunner.run(command, args, options); } };
+    await expect(openTeamRepo(clone, fixture.bare, protectedBranch).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v2"')), { action: 'join', handle: 'me', branch: 'publish/z' })).rejects.toBeInstanceOf(PushRefused);
+    expect(refused).toBe(1);
+    expect((await git(['branch', '--list', 'publish/z*'], fixture.bare)).trim()).toBe('');
+  });
+
+  it('a deletion is restored by the finally when the push is refused, lands when it is not, and a byte-identical rewrite is no change', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'people/gone.json', personJson('gone'));
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const denied: Runner = { run(command, args, options) { if (command === 'git' && args[0] === 'push') return Promise.resolve({ code: 1, stdout: '', stderr: 'remote: Permission denied' }); return systemRunner.run(command, args, options); } };
+    await expect(openTeamRepo(clone, fixture.bare, denied).safeWrite((tree) => tree.remove('people/gone.json'), { action: 'join', handle: 'gone' })).rejects.toThrow(PushRefused);
+    expect(await exists(join(clone, 'people', 'gone.json'))).toBe(true);
+    expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
+    expect(await git(['ls-tree', '--name-only', 'main:people'], fixture.bare)).toContain('gone.json');
+    expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.remove('people/gone.json'), { action: 'join', handle: 'gone' })).toEqual({ changed: true, pushedTo: 'main' });
+    expect(await git(['ls-tree', '--name-only', 'main:people'], fixture.bare)).not.toContain('gone.json');
+    expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/seed.json', tree.before('people/seed.json')!), { action: 'join', handle: 'seed' })).toEqual({ changed: false, pushedTo: 'main' });
+  });
+
+  it('a lock lost to another process aborts before the push and does NOT reset the clone, which that process now owns', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const lock = join(fixture.root, '.clone.safewrite.lock');
+    // Steal the lock while our commit is being made; proper-lockfile notices at its next check (half the stale window).
+    const stolen = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      const result = await next();
+      if (command === 'git' && args[0] === 'commit') { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 1_500)); }
+      return result;
+    });
+    const before = await originSha(fixture.bare);
+    await expect(openTeamRepo(clone, fixture.bare, stolen).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', lockStale: 2_000 })).rejects.toThrow(/Lost the safeWrite lock/);
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe((await git(['rev-parse', 'origin/main'], clone)).trim());
+    // The next write resets the clone itself and lands.
+    expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' })).toEqual({ changed: true, pushedTo: 'main' });
+  });
+
 });

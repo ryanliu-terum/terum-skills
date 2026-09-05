@@ -50,7 +50,9 @@ export const personSchema = z.object({
   handle: handleSchema,
   display_name: z.string().min(1),
   email: emailSchema,
-  github: githubLoginSchema,
+  // Optional: a generic-git member may have no GitHub account, and an empty value is never identity
+  // evidence (§5.4 reclaim). When present it is a real login, because `team remove` puts it in a REST path.
+  github: z.union([z.literal(''), githubLoginSchema]),
   bio: z.string(),
   installed: z.array(installedSchema),
   declined: z.array(skillIdSchema),
@@ -58,18 +60,35 @@ export const personSchema = z.object({
 export type Person = z.infer<typeof personSchema>;
 
 /**
- * §5.4 per-team entry. `handle` is the binding identity and is immutable once its people file
- * exists; it is null until `team create`/`team join` has proven it against the roster (a
- * `login` that runs first stores only the remote and the token).
+ * §5.4 per-team entry (rev 9). `handle` is the binding identity: only `team create`/`team join`
+ * write an entry, after proving the handle against the roster, so it is never null. There is no
+ * token field (Decision 2).
  */
-const teamConfigSchema = z.object({ remote: z.string().min(1), token: z.string().nullable(), handle: handleSchema.nullable() }).passthrough();
+const teamConfigSchema = z.object({ remote: z.string().min(1), handle: handleSchema }).passthrough();
 export type TeamConfig = z.infer<typeof teamConfigSchema>;
+/**
+ * Migration on read (rev 9). The previous build's `login --team --remote` wrote entries with
+ * `handle: null` and possibly a `token`; neither can exist now, and a hard parse failure here
+ * would brick every verb, including the `sync --hook` on session start and the `team join` that
+ * would repair it. A handle-less entry has nothing worth keeping (only create/join may bind a
+ * team), so it is dropped; a retired `token` key is dropped from every entry. The next
+ * `update()` writes the file without them.
+ */
+const teamsSchema = z.preprocess((value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).flatMap(([name, entry]) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [[name, entry]];
+    const kept: Record<string, unknown> = { ...(entry as Record<string, unknown>) };
+    delete kept.token;
+    return kept.handle === null || kept.handle === undefined ? [] : [[name, kept]];
+  }));
+}, z.record(z.string(), teamConfigSchema));
 export const configSchema = z.object({
   default_handle: handleSchema.optional(),
   email: emailSchema.optional(),
   display_name: z.string().min(1).optional(),
   github: z.string().optional(),
-  teams: z.record(z.string(), teamConfigSchema),
+  teams: teamsSchema,
   shared: z.record(z.string(), z.object({ source: z.string(), team: z.string(), baseline: z.string().optional() }).passthrough()),
   approvals: z.record(z.string(), z.object({ grants: z.string(), approved_at: z.string() }).passthrough()),
   pending: z.array(z.object({ op: z.enum(['install', 'uninstall']), id: skillIdSchema, team: z.string(), scope: scopeSchema, started: z.string() }).passthrough()),

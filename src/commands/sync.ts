@@ -1,7 +1,6 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { gitAuthEnv } from '../lib/auth.js';
 import { lockTarget, moveToQuarantine, place, remove } from '../lib/placer.js';
 import { NonInteractivePrompter, Prompter } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
@@ -38,9 +37,9 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       return success({ placed: 0, deferred: [], notices: [], changed: true, hook: false });
     }
     const config = await store.read();
-    for (const [team, binding] of Object.entries(config.teams)) {
+    for (const team of Object.keys(config.teams)) {
       const clone = store.teamClone(team);
-      const pull = await runner.run('git', ['pull', '--ff-only'], { cwd: clone, env: { ...gitAuthEnv(binding.token), ...(args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {}) } });
+      const pull = await runner.run('git', ['pull', '--ff-only'], { cwd: clone, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {} });
       if (pull.code !== 0) throw new Error(`Could not fast-forward ${team}: ${(pull.stderr || pull.stdout).trim()}`);
       await skillRecords(clone, team, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
       // Pending is intent, never inferred from the filesystem. A replay uses the same command
@@ -70,7 +69,6 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       print: notice,
       confirm: (question) => ('confirm' in io ? io.confirm(question) : Promise.resolve(false)),
       text: (question, defaultValue) => ('text' in io ? io.text(question, defaultValue) : Promise.reject(new Error('sync --hook cannot prompt'))),
-      secret: (question) => ('secret' in io ? io.secret(question) : Promise.reject(new Error('sync --hook cannot prompt'))),
       select: (question, choices) => ('select' in io ? io.select(question, choices) : Promise.reject(new Error('sync --hook cannot prompt'))),
     };
     await reconcileShared(store, runner, reconcileIo);
@@ -177,7 +175,7 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
           fresh.installed.push({ id: placement.id, version: placement.version, scope: placement.scope, since: new Date().toISOString().slice(0, 10) });
           tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
         }
-      }, { action: 'install', handle: binding.handle, token: binding.token, message: `${binding.handle}: adopt ${placement.id.slice(0, 8)}` });
+      }, { action: 'install', handle: binding.handle, message: `${binding.handle}: adopt ${placement.id.slice(0, 8)}` });
       notice(`Adopted orphaned placement at ${path}.`);
     } else {
       await repo.safeWrite((tree) => {
@@ -187,7 +185,7 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
         const fresh = parseJson(personSchema, treeText(raw), personPath);
         if (!fresh.declined.includes(placement.id)) fresh.declined.push(placement.id);
         tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
-      }, { action: 'uninstall', handle: binding.handle, token: binding.token, message: `${binding.handle}: decline ${placement.id.slice(0, 8)}` });
+      }, { action: 'uninstall', handle: binding.handle, message: `${binding.handle}: decline ${placement.id.slice(0, 8)}` });
       notice(`Declined orphaned placement at ${path}.`);
     }
   }

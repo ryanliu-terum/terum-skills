@@ -1,21 +1,21 @@
 import { ConfigStore, createConfigStore } from './config.js';
 import { Prompter } from './prompt.js';
-import { isGitHubRemote, normalizeRemote, remoteToGitUrl } from './remote.js';
+import { normalizeRemote } from './remote.js';
 import { Runner, systemRunner } from './runner.js';
-import { Config, emailSchema, HANDLE_RULE, handleSchema, TeamConfig } from './schema.js';
+import { Config, emailSchema, githubLoginSchema, HANDLE_RULE, handleSchema, TeamConfig } from './schema.js';
 
 /**
- * §6 `login` / D7 / D8. gh is the credential; a per-team fine-grained PAT is the fallback for a
- * GitHub team when gh is logged out or absent. Tokens travel to gh as GH_TOKEN and to git as an
- * env-only credential helper scoped to github.com (`gitAuthEnv`) — never on a command line,
- * never in a URL, never `gh auth login --with-token`. Joiners are never asked for a PAT.
+ * §6 `login` / D7 / D8 (rev 9, Decision 2). gh is the only credential the tool touches on GitHub —
+ * through gh's own `gh auth login`, offered as a child process with inherited stdio. A generic-git
+ * remote uses whatever ambient git credentials the machine already has. The tool never prompts
+ * for, stores, probes, or passes a token, and nobody — creator or joiner — is ever asked for one.
  */
 export interface AuthDependencies { config?: ConfigStore; runner?: Runner; }
 export interface Identity { handle: string; displayName: string; email: string; github: string; }
 export interface GhState { installed: boolean; authenticated: boolean; }
 
 export const MAX_ATTEMPTS = 3;
-export const GITHUB_HOST = 'https://github.com';
+const GITHUB_LOGIN_RULE = 'a GitHub login is 1-39 letters, digits, or single internal hyphens; enter - if you have none';
 
 export async function ghState(runner: Runner = systemRunner): Promise<GhState> {
   try {
@@ -48,19 +48,29 @@ export interface IdentityOptions {
   /** §5.4: the per-team handle is immutable once its people file exists — when bound, it is not asked. */
   fixedHandle?: string;
   gh?: GhState;
-  /** A GitHub login already known (from a PAT probe); skips the `gh api user` lookup. */
-  githubLogin?: string;
 }
 
-/** First-run identity (§5.4 rules): GitHub login, handle (validated, re-prompted), name, email. */
+/**
+ * First-run identity (§5.4 rules): GitHub login, handle (validated, re-prompted), name, email.
+ * The login is optional (a generic-git member may have none) but, when given, must be a real
+ * GitHub login: it is identity evidence at `team join` (the §5.4 reclaim rule) and a REST path
+ * segment at `team remove`, so it is validated and re-asked like the handle.
+ */
 export async function collectIdentity(io: Prompter, existing: Config, runner: Runner = systemRunner, options: IdentityOptions = {}): Promise<Identity> {
-  let github = existing.github ?? options.githubLogin ?? '';
-  if (!github && options.gh?.authenticated) {
+  // A persisted value that is not a login (written before this validation existed) is no default: it would be re-offered forever.
+  let suggested = existing.github && githubLoginSchema.safeParse(existing.github).success ? existing.github : '';
+  if (!suggested && options.gh?.authenticated) {
     const login = await runner.run('gh', ['api', 'user', '-q', '.login']);
-    if (login.code === 0) github = login.stdout.trim();
+    if (login.code === 0 && githubLoginSchema.safeParse(login.stdout.trim()).success) suggested = login.stdout.trim();
   }
-  github = (await io.text('GitHub login', github)).trim();
-  const handle = options.fixedHandle ?? (await askHandle(io, existing.default_handle ?? github));
+  // Enter takes the suggestion, so `-` is the way to say "none" once one is offered.
+  const github = await askUntilValid(io, suggested ? 'GitHub login (- for none)' : 'GitHub login', suggested, (value) => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === '-') return { ok: true, value: '' };
+    const parsed = githubLoginSchema.safeParse(trimmed);
+    return parsed.success ? { ok: true, value: parsed.data } : { ok: false, rule: GITHUB_LOGIN_RULE };
+  });
+  const handle = options.fixedHandle ?? (await askHandle(io, existing.default_handle ?? (github || undefined)));
   const displayName = await askUntilValid(io, 'Your name', existing.display_name, (value) => (value.trim() ? { ok: true, value: value.trim() } : { ok: false, rule: 'a name is required' }));
   const email = await askUntilValid(io, 'Your email', existing.email, (value) => (emailSchema.safeParse(value.trim()).success ? { ok: true, value: value.trim() } : { ok: false, rule: 'enter a valid email address' }));
   return { handle, displayName, email, github };
@@ -88,79 +98,37 @@ export async function askUntilValid(io: Prompter, question: string, defaultValue
   throw new Error(`Invalid ${question.toLowerCase()} after ${MAX_ATTEMPTS} attempts: ${rule}`);
 }
 
-/**
- * Env for git/gh child processes when a per-team PAT is in play. Empty when there is no token.
- * The credential helper is scoped to github.com — tokens are GitHub-only (D7) — and is appended
- * after any GIT_CONFIG_* entries the caller's environment already carries.
- */
-export function gitAuthEnv(token: string | null | undefined, inherited: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  if (!token) return {};
-  const base = Number.parseInt(inherited.GIT_CONFIG_COUNT ?? '0', 10) || 0;
-  const key = `credential.${GITHUB_HOST}.helper`;
-  return {
-    GH_TOKEN: token,
-    GIT_CONFIG_COUNT: String(base + 2),
-    // An empty helper value resets the list for this URL scope; ours then answers from GH_TOKEN
-    // in the environment. Nothing is written to disk and the token never appears on a command line.
-    [`GIT_CONFIG_KEY_${base}`]: key,
-    [`GIT_CONFIG_VALUE_${base}`]: '',
-    [`GIT_CONFIG_KEY_${base + 1}`]: key,
-    [`GIT_CONFIG_VALUE_${base + 1}`]: '!f() { printf "username=x-access-token\\npassword=%s\\n" "$GH_TOKEN"; }; f',
-  };
-}
-
-export interface CreatorAuth { identity: Identity; gh: GhState; token: string | null; }
-export interface CreatorAuthOptions {
-  /** The team remote; a PAT is only ever accepted for a GitHub remote and is probed against it when known. */
-  remote?: string;
-  /** `team create` needs `gh repo create`; `login` does not. */
-  requireGh?: boolean;
-  fixedHandle?: string;
-}
+export interface CreatorAuth { identity: Identity; gh: GhState; }
 
 /**
- * Admin path (creator / `login`). gh logged in is the normal case. Otherwise, for a GitHub
- * remote, a per-team PAT: probed with `git ls-remote` against the team repo when the repo is
- * known, else with `gh api user` (which needs gh installed). Phase 1 has no HTTP client.
+ * Creator path: `team create` on GitHub needs `gh repo create`, so a logged-in gh is required —
+ * detection, the login offer, then identity. There is no token fallback (Decision 2): declined,
+ * or no gh at all, stops here and says what to do instead.
  */
-export async function authenticateCreator(io: Prompter, dependencies: AuthDependencies = {}, options: CreatorAuthOptions = {}): Promise<CreatorAuth> {
+export async function authenticateCreator(io: Prompter, dependencies: AuthDependencies = {}): Promise<CreatorAuth> {
   const store = dependencies.config ?? createConfigStore();
   const runner = dependencies.runner ?? systemRunner;
   const config = await store.read();
   const gh = await detectOrOfferGh(io, runner);
-  if (options.requireGh && !gh.installed) {
+  if (!gh.installed) {
     throw new Error('Creating a GitHub team needs the GitHub CLI (gh) in phase 1. Install it from https://cli.github.com and run `gh auth login`, or create the team against an existing empty remote with `team create <name> --remote <url>`.');
   }
-  let token: string | null = null;
-  let githubLogin: string | undefined;
   if (!gh.authenticated) {
-    if (options.remote !== undefined && !isGitHubRemote(options.remote)) {
-      throw new Error(`${normalizeRemote(options.remote)} is not on GitHub; a per-team PAT is GitHub-only (D7). Use your ambient git credentials for this remote.`);
-    }
-    token = await io.secret('Fine-grained GitHub PAT for this team (repo Administration + Contents)');
-    if (!token) throw new Error('GitHub authentication is required: log in with `gh auth login` or provide a per-team PAT.');
-    githubLogin = await probeToken(token, options.remote, gh, runner);
+    throw new Error('GitHub authentication is required to create a team: run `gh auth login` and retry, or create the team against an existing empty remote with `team create <name> --remote <url>`.');
   }
-  const identity = await collectIdentity(io, config, runner, { fixedHandle: options.fixedHandle, gh, githubLogin });
-  return { identity, gh, token };
+  const identity = await collectIdentity(io, config, runner, { gh });
+  return { identity, gh };
 }
 
-/** Verify a PAT. Against the team repo when known (no gh needed); otherwise via gh, which must exist. Returns the login when gh told us. */
-async function probeToken(token: string, remote: string | undefined, gh: GhState, runner: Runner): Promise<string | undefined> {
-  const env = gitAuthEnv(token);
-  if (remote !== undefined) {
-    const heads = await runner.run('git', ['ls-remote', '--heads', '--', remoteToGitUrl(remote)], { env });
-    if (heads.code !== 0) throw new Error(`GitHub token probe failed against ${normalizeRemote(remote)}: ${(heads.stderr || heads.stdout).trim()}`);
-    if (!gh.installed) return undefined;
-  } else if (!gh.installed) {
-    throw new Error('Cannot verify a PAT without gh or a known team repository.');
-  }
-  const who = await runner.run('gh', ['api', 'user', '-q', '.login'], { env });
-  if (who.code !== 0) throw new Error(`GitHub token probe failed: ${(who.stderr || who.stdout).trim()}`);
-  return who.stdout.trim() || undefined;
+/** When a gh call failed, the reason worth telling the user when the cause is gh itself (absent or logged out); null otherwise. */
+export async function explainGhFailure(runner: Runner = systemRunner): Promise<string | null> {
+  const gh = await ghState(runner);
+  if (!gh.installed) return 'GitHub CLI (gh) is not installed; this operation needs it on GitHub in phase 1. Install it from https://cli.github.com and run `gh auth login`.';
+  if (!gh.authenticated) return 'GitHub authentication is required: run `gh auth login` and retry.';
+  return null;
 }
 
-/** Joiner path (D8): detection and the gh offer only — a PAT is never requested. */
+/** Joiner path (D8): detection and the gh offer only — a token is never requested. */
 export async function identityForJoiner(io: Prompter, dependencies: AuthDependencies = {}, options: { fixedHandle?: string; gh?: GhState } = {}): Promise<{ identity: Identity; gh: GhState }> {
   const store = dependencies.config ?? createConfigStore();
   const runner = dependencies.runner ?? systemRunner;
@@ -177,15 +145,15 @@ export function setIdentity(config: Config, identity: Identity): void {
   config.github = identity.github;
 }
 
-/** The one place a `teams.<name>` entry is written. `token`/`handle` undefined = keep what is stored. */
-export function bindTeam(config: Config, name: string, entry: { remote: string; token?: string | null; handle?: string | null }): TeamConfig {
-  const current = config.teams[name];
-  const bound: TeamConfig = {
-    ...(current ?? {}),
-    remote: normalizeRemote(entry.remote),
-    token: entry.token === undefined ? (current?.token ?? null) : entry.token,
-    handle: entry.handle === undefined ? (current?.handle ?? null) : entry.handle,
-  };
+/**
+ * The one place a `teams.<name>` entry is written: `team create`/`team join` only, always with the
+ * handle they proved against the roster (rev 9, Decision 4). Unknown keys are kept, except a stale
+ * `token` from before Decision 2, which is dropped rather than carried forward.
+ */
+export function bindTeam(config: Config, name: string, entry: { remote: string; handle: string }): TeamConfig {
+  const current: Record<string, unknown> = { ...(config.teams[name] ?? {}) };
+  delete current.token;
+  const bound: TeamConfig = { ...current, remote: normalizeRemote(entry.remote), handle: entry.handle };
   config.teams[name] = bound;
   return bound;
 }
@@ -194,4 +162,17 @@ export function bindTeam(config: Config, name: string, entry: { remote: string; 
 export function teamByRemote(config: Config, remote: string): [string, TeamConfig] | undefined {
   const normalized = normalizeRemote(remote);
   return Object.entries(config.teams).find(([, team]) => team.remote === normalized);
+}
+
+/**
+ * One remote → one team name, one name → one remote. `create` and `join` check this before they
+ * prompt AND again under the config lock right before binding, so a verb that ran in between
+ * cannot leave two entries for one repository.
+ */
+export function assertBindable(config: Config, team: string, remote: string): void {
+  const normalized = normalizeRemote(remote);
+  const byRemote = teamByRemote(config, normalized);
+  if (byRemote && byRemote[0] !== team) throw new Error(`${normalized} is already configured as team ${byRemote[0]}.`);
+  const existing = config.teams[team];
+  if (existing && existing.remote !== normalized) throw new Error(`Team ${team} is configured for ${existing.remote}, not ${normalized}; pass --as <other-name>.`);
 }

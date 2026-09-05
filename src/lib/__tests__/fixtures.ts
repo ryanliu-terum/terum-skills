@@ -29,7 +29,6 @@ export class ScriptedPrompter implements Prompter {
     return answer;
   }
   async text(question: string, defaultValue?: string): Promise<string> { return this.next(question) || (defaultValue ?? ''); }
-  async secret(question: string): Promise<string> { return this.next(question); }
   async select(question: string, choices: readonly string[]): Promise<string> { return this.next(question) || choices[0] || ''; }
   print(line: string): void { this.lines.push(line); }
   askedAbout(fragment: string): boolean { return this.asked.some((question) => question.includes(fragment)); }

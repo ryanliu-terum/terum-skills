@@ -109,7 +109,7 @@ async function searchFixture(team: string, skills: SearchSkill[], projects?: Rec
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify(teamJson, null, 2)}\n`);
   }
   const clone = await cloneWithIdentity(fixture.bare, actualStore.teamClone(team));
-  await actualStore.update((config) => { config.teams[team] = { remote: fixture.bare, token: null, handle: 'seed' }; });
+  await actualStore.update((config) => { config.teams[team] = { remote: fixture.bare, handle: 'seed' }; });
   return { fixture, store: actualStore, clone };
 }
 

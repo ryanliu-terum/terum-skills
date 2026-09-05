@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
-import { askHandle, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, ghState, GhState, gitAuthEnv, Identity, identityForJoiner, setIdentity, teamByRemote } from '../lib/auth.js';
+import { askHandle, askUntilValid, assertBindable, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, ghState, GhState, Identity, identityForJoiner, setIdentity, teamByRemote, Validation } from '../lib/auth.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists, mkdirPrivate } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
@@ -9,7 +9,7 @@ import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, normaliz
 import { activePeople, readPeople } from '../lib/readme.js';
 import { Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, teamNameSchema, teamSchema } from '../lib/schema.js';
+import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
 import { cloneOrigin, cloneTeam, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 import { endorsedCandidates } from '../lib/skills.js';
 import { installOne } from './install.js';
@@ -19,7 +19,7 @@ import { installOne } from './install.js';
  * The §8 hook offer and the §6 endorsed-set install offer arrive with M4 and M2 respectively.
  */
 export interface TeamDependencies extends AuthDependencies { config?: ConfigStore; runner?: Runner; }
-export interface CreateArgs extends TeamDependencies { name: string; org?: string; remote?: string; }
+export interface CreateArgs extends TeamDependencies { name?: string; org?: string; remote?: string; repo?: string; }
 export interface JoinArgs extends TeamDependencies { target: string; as?: string; }
 export interface RemoveArgs extends TeamDependencies { handle: string; team?: string; archiveOnly?: boolean; }
 export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs);
@@ -34,6 +34,9 @@ export class HandleCollisionError extends Error {
 
 const CATEGORIES = ['debugging', 'testing', 'docs', 'workflow', 'research', 'infra', 'misc'];
 export const MAX_HANDLE_ATTEMPTS = 3;
+/** `gh repo create` tries per `team create`: the first answer plus two re-asks, like the handle and every other askUntilValid question. */
+export const MAX_REPO_ATTEMPTS = 3;
+const REPO_TAKEN = /already exists/i;
 
 export async function run(args: TeamArgs, io: Prompter): Promise<Result<CreateResult | JoinResult | RemoveResult>> {
   if (args.kind === 'create') return create(args, io);
@@ -54,33 +57,39 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
     const allowed = hostOperationAllowed(binding.remote, Boolean(args.archiveOnly));
     if (!allowed.ok) throw new Error(allowed.error);
     const clone = store.teamClone(teamName);
-    const env = gitAuthEnv(binding.token);
     // Resolve the target against origin/main, not the possibly stale clone: a member who joined
     // after this machine last synced must be removable, and the GitHub login must be current.
-    const fetched = await runner.run('git', ['fetch', '-q', 'origin'], { cwd: clone, env });
+    const fetched = await runner.run('git', ['fetch', '-q', 'origin'], { cwd: clone });
     if (fetched.code !== 0) throw new Error(`Could not fetch ${binding.remote}: ${(fetched.stderr || fetched.stdout).trim()}`);
     const shown = await runner.run('git', ['show', `origin/main:people/${targetHandle}.json`], { cwd: clone });
     if (shown.code !== 0) throw new Error(`No member ${targetHandle} in ${teamName}: people/${targetHandle}.json is not on origin/main.`);
-    // Validate from the raw document as well as personSchema: legacy repositories can contain a
-    // login written before the schema existed, and it must never reach a gh API path.
-    const targetRaw = JSON.parse(shown.stdout) as { github?: unknown };
-    const login = parseOrExplain(githubLoginSchema, targetRaw.github, `GitHub login for ${targetHandle}`);
-    parseJson(personSchema, shown.stdout, `people/${targetHandle}.json`);
     const ownerRepo = githubOwnerRepo(binding.remote);
+    const revoking = ownerRepo !== null && !args.archiveOnly;
+    // Validate the login from the raw document (a legacy repository can carry a value written before
+    // the schema existed) and only where it becomes a gh API path segment; archiving a member who
+    // has no GitHub login must still work.
+    const targetRaw = JSON.parse(shown.stdout) as { github?: unknown };
+    let login = '';
+    if (revoking) {
+      if (typeof targetRaw.github !== 'string' || targetRaw.github.trim() === '') throw new Error(`${targetHandle} has no GitHub login on the roster, so there is no host access to revoke; run \`team remove ${targetHandle} --archive-only\` to archive the membership.`);
+      login = parseOrExplain(githubLoginSchema, targetRaw.github, `GitHub login for ${targetHandle}`);
+    }
+    parseJson(personSchema, shown.stdout, `people/${targetHandle}.json`);
     let collaborator = false;
     let pending: Array<{ id?: number; invitee?: { login?: string } }> = [];
     if (ownerRepo !== null) {
-      const admin = await runner.run('gh', ['api', `repos/${ownerRepo}`, '-q', '.permissions.admin'], { env });
+      const admin = await runner.run('gh', ['api', `repos/${ownerRepo}`, '-q', '.permissions.admin']).catch(async (error: unknown) => { throw new Error((await explainGhFailure(runner)) ?? (error instanceof Error ? error.message : String(error))); });
+      if (admin.code !== 0) { const why = await explainGhFailure(runner); if (why) throw new Error(why); }
       if (admin.code !== 0 || admin.stdout.trim() !== 'true') throw new Error('Team removal requires GitHub repository admin permission.');
       if (!args.archiveOnly) {
-        const admins = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators?permission=admin`, '--paginate', '--slurp'], { env });
+        const admins = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators?permission=admin`, '--paginate', '--slurp']);
         if (admins.code !== 0) throw new Error(`Could not list repository admins: ${(admins.stderr || admins.stdout).trim()}`);
         const adminLogins = paginatedItems<{ login?: string }>(admins.stdout).map((member) => member.login?.toLowerCase()).filter((value): value is string => Boolean(value));
         if (adminLogins.length <= 1 && adminLogins.includes(login.toLowerCase())) throw new Error(`Refusing to remove ${targetHandle}: they are the last remaining admin.`);
-        const collaborators = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators`, '--paginate', '--slurp'], { env });
+        const collaborators = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators`, '--paginate', '--slurp']);
         if (collaborators.code !== 0) throw new Error(`Could not list repository collaborators: ${(collaborators.stderr || collaborators.stdout).trim()}`);
         collaborator = paginatedItems<{ login?: string }>(collaborators.stdout).some((member) => member.login?.toLowerCase() === login.toLowerCase());
-        const invitations = await runner.run('gh', ['api', `repos/${ownerRepo}/invitations`, '--paginate', '--slurp'], { env });
+        const invitations = await runner.run('gh', ['api', `repos/${ownerRepo}/invitations`, '--paginate', '--slurp']);
         if (invitations.code !== 0) throw new Error(`Could not list pending invitations: ${(invitations.stderr || invitations.stdout).trim()}`);
         pending = paginatedItems<{ id?: number; invitee?: { login?: string } }>(invitations.stdout).filter((invite) => invite.invitee?.login?.toLowerCase() === login.toLowerCase());
       }
@@ -88,16 +97,16 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
     const question = args.archiveOnly ? `Archive ${targetHandle}? (y/N)` : `Revoke GitHub access for @${login} and archive ${targetHandle}? (y/N)`;
     if (!(await io.confirm(question))) throw new Error('Team removal was cancelled.');
     const repo = openTeamRepo(clone, binding.remote, runner);
-    await repo.safeWrite((tree) => archiveMutation(tree, targetHandle), { action: 'team-remove', handle: binding.handle, targetHandle, token: binding.token, message: `${binding.handle}: remove ${targetHandle}` });
+    await repo.safeWrite((tree) => archiveMutation(tree, targetHandle, revoking ? login : undefined), { action: 'team-remove', handle: binding.handle, targetHandle, message: `${binding.handle}: remove ${targetHandle}` });
     if (ownerRepo !== null && !args.archiveOnly) {
       try {
         if (collaborator) {
-          const revoked = await runner.run('gh', ['api', '-X', 'DELETE', `repos/${ownerRepo}/collaborators/${login}`], { env });
+          const revoked = await runner.run('gh', ['api', '-X', 'DELETE', `repos/${ownerRepo}/collaborators/${login}`]);
           if (revoked.code !== 0) throw new Error((revoked.stderr || revoked.stdout).trim());
         }
         for (const invitation of pending) {
           if (invitation.id === undefined) continue;
-          const cancelled = await runner.run('gh', ['api', '-X', 'DELETE', `repos/${ownerRepo}/invitations/${invitation.id}`], { env });
+          const cancelled = await runner.run('gh', ['api', '-X', 'DELETE', `repos/${ownerRepo}/invitations/${invitation.id}`]);
           if (cancelled.code !== 0) throw new Error((cancelled.stderr || cancelled.stdout).trim());
         }
       } catch (error) {
@@ -118,18 +127,55 @@ function paginatedItems<T>(source: string): T[] {
   return parsed.flatMap((page) => Array.isArray(page) ? page : [page]) as T[];
 }
 
-/** Pure safeWrite mutation: people and authored skills remain as history; only active membership changes. */
-export function archiveMutation(tree: MutableTree, targetHandle: string): void {
+/**
+ * Pure safeWrite mutation: people and authored skills remain as history; only active membership
+ * changes. When access is about to be revoked for `login`, the login must be exclusive on the fresh
+ * origin/main roster: a second ACTIVE member declaring the same GitHub login would lose access for
+ * someone else's departure, so the removal is refused before anything is archived or revoked.
+ */
+export function archiveMutation(tree: MutableTree, targetHandle: string, login?: string): void {
   const source = tree.before('team.json');
   if (source === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');
   const team = parseJson(teamSchema, treeText(source), 'team.json');
+  if (login !== undefined) assertLoginUnclaimed(tree, team, targetHandle, login);
   if (team.archived.includes(targetHandle)) return;
   tree.set('team.json', `${JSON.stringify({ ...team, archived: [...team.archived, targetHandle] }, null, 2)}\n`);
 }
 
+/**
+ * Every other active `people/*.json` on the reset tree must declare a different GitHub login
+ * (case-insensitive) before that login is revoked. Fails closed: the file name is the handle (the
+ * archived check must not trust a self-declared one), the login is read from the raw document so a
+ * legacy file missing a schema field still counts, and a file that cannot be read at all refuses
+ * the removal rather than being skipped.
+ */
+function assertLoginUnclaimed(tree: MutableTree, team: Team, targetHandle: string, login: string): void {
+  for (const path of tree.paths('people/')) {
+    const match = /^people\/([^/]+)\.json$/.exec(path);
+    if (!match || match[1] === targetHandle || team.archived.includes(match[1]!.toLowerCase())) continue;
+    let declared: unknown;
+    try { declared = (JSON.parse(treeText(tree.before(path) ?? '')) as { github?: unknown }).github; }
+    catch { throw new Error(`Refusing to remove ${targetHandle}: ${path} cannot be read, so the roster cannot prove @${login} belongs to ${targetHandle} alone; fix that file first.`); }
+    if (typeof declared !== 'string' || declared.trim().toLowerCase() !== login.toLowerCase()) continue;
+    throw new Error(`Refusing to remove ${targetHandle}: active member ${match[1]} also declares GitHub login @${login}; fix the roster before revoking access.`);
+  }
+}
+
+const validateName = (value: string): Validation => {
+  const parsed = teamNameSchema.safeParse(value.trim());
+  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, rule: TEAM_NAME_RULE };
+};
+
+/**
+ * §6 `team create` (rev 9, Decision 5): two questions. The team name (the argument, or a prompt)
+ * names the config entry, the clone, and team.json; the GitHub repository name defaults to it and
+ * is re-asked when GitHub says it is taken, so a collision on the host never renames the team.
+ */
 export async function create(args: CreateArgs, io: Prompter): Promise<Result<CreateResult>> {
   try {
-    const name = parseOrExplain(teamNameSchema, args.name, 'team name');
+    const name = args.name !== undefined ? parseOrExplain(teamNameSchema, args.name, 'team name') : await askUntilValid(io, 'Team name', undefined, validateName);
+    if (args.remote && (args.repo !== undefined || args.org !== undefined)) throw new Error('--repo and --org apply only when creating the repository on GitHub; drop them when using --remote.');
+    if (args.org !== undefined) parseOrExplain(githubLoginSchema, args.org, 'GitHub organization');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
@@ -138,11 +184,13 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
     if (await exists(clone)) throw new Error(`A clone already exists at ${clone}; run \`team join\` for that team or pick another name.`);
 
     let remote: string;
-    let token: string | null = null;
     let identity: Identity;
     if (args.remote) {
-      // Generic-git path: an existing EMPTY remote the user already has credentials for. A credential
-      // pasted into the URL is dropped here, before the remote reaches git, config, or a message.
+      // Generic-git path: an existing EMPTY remote the user already has credentials for. The RAW
+      // input is validated first (an option- or helper-shaped string is refused here, as `team join`
+      // does), and only then is a credential pasted into the URL dropped — before the remote reaches
+      // git, config, or a message. Scrubbing first would let `--x=u:p@host/p` rewrite into `host/p`.
+      normalizeRemote(args.remote);
       remote = stripRemoteCredentials(args.remote);
       const bound = teamByRemote(config, remote);
       if (bound) throw new Error(`${normalizeRemote(remote)} is already configured as team ${bound[0]}.`);
@@ -152,30 +200,46 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       if (heads.code !== 0) throw new Error(`Cannot reach ${remote}: ${(heads.stderr || heads.stdout).trim()}`);
       if (heads.stdout.trim()) throw new Error(`${remote} already has branches; \`team create --remote\` needs an empty repository. To join an existing team run \`team join ${remote}\`.`);
     } else {
-      const auth = await authenticateCreator(io, { config: store, runner }, { requireGh: true });
-      identity = auth.identity;
-      token = auth.token;
-      const spec = args.org ? `${args.org}/${name}` : name;
-      const env = gitAuthEnv(token);
-      const created = await runner.run('gh', ['repo', 'create', spec, '--private'], { env });
-      if (created.code !== 0) throw new Error(`Could not create the GitHub repository ${spec}: ${(created.stderr || created.stdout).trim()}`);
+      // gh and identity first (the wizard's step 2), then the repository question (its step 3): a
+      // machine without gh hears about gh before it is asked anything.
+      identity = (await authenticateCreator(io, { config: store, runner })).identity;
+      let repo = args.repo !== undefined ? parseOrExplain(teamNameSchema, args.repo, 'repository name') : await askUntilValid(io, 'GitHub repository name', name, validateName);
+      let spec = args.org ? `${args.org}/${repo}` : repo;
+      for (let attempt = 1; ; attempt++) {
+        const created = await runner.run('gh', ['repo', 'create', spec, '--private']);
+        if (created.code === 0) break;
+        const reason = (created.stderr || created.stdout).trim();
+        if (!REPO_TAKEN.test(reason) || attempt >= MAX_REPO_ATTEMPTS) throw new Error(`Could not create the GitHub repository ${spec}: ${reason}`);
+        io.print(`The repository name ${spec} is already taken on GitHub.`);
+        repo = await askUntilValid(io, 'GitHub repository name', undefined, validateName);
+        spec = args.org ? `${args.org}/${repo}` : repo;
+      }
       // gh resolves a bare name to the authenticated login; ask it for the owner rather than guessing.
-      const view = await runner.run('gh', ['repo', 'view', spec, '--json', 'nameWithOwner', '-q', '.nameWithOwner'], { env });
+      const view = await runner.run('gh', ['repo', 'view', spec, '--json', 'nameWithOwner', '-q', '.nameWithOwner']);
       if (view.code !== 0 || !view.stdout.trim()) throw new Error(`Created ${spec} but could not resolve its owner: ${(view.stderr || view.stdout).trim()}`);
       remote = `https://github.com/${view.stdout.trim()}.git`;
     }
 
     await store.ensureRoot();
     try {
-      await bootstrap(remote, clone, name, identity, runner, token);
+      await bootstrap(remote, clone, name, identity, runner);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`${reason}\nThe repository ${remote} exists but holds no scaffold. Fix the cause and retry with \`team create ${name} --remote ${remote}\`, or delete the repository.`);
+      // Re-probe before claiming anything: a failure after the push leaves a scaffolded remote that
+      // `team join` can finish from, and a retry with `--remote` would only be refused as non-empty.
+      const heads = await runner.run('git', ['ls-remote', '--heads', '--', remoteToGitUrl(remote)]);
+      const advice = heads.code !== 0
+        ? `Could not determine whether the scaffold reached ${remote} (${(heads.stderr || heads.stdout).trim()}). Check the repository: if it has a main branch run \`team join ${remote}\`, otherwise retry with \`team create ${name} --remote ${remote}\`.`
+        : heads.stdout.trim() !== ''
+          ? `The scaffold was pushed to ${remote} but the local clone could not be completed; run \`team join ${remote}\` to finish, or delete the repository and retry.`
+          : `The repository ${remote} exists but holds no scaffold. Fix the cause and retry with \`team create ${name} --remote ${remote}\`, or delete the repository.`;
+      throw new Error(`${reason}\n${advice}`);
     }
     await store.update((fresh) => {
       if (fresh.teams[name]) throw new Error(`Team ${name} was configured by another process while this create ran; the repository ${remote} is scaffolded, run \`team join ${remote} --as <other-name>\` to use it.`);
+      assertBindable(fresh, name, remote);
       setIdentity(fresh, identity);
-      bindTeam(fresh, name, { remote, token, handle: identity.handle });
+      bindTeam(fresh, name, { remote, handle: identity.handle });
     });
     io.print(`Created team ${name} at ${remote}`);
     return success({ team: name, remote });
@@ -201,15 +265,14 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
       throw new Error(`Team name ${team} is already used for ${configBefore.teams[team].remote}; pass --as <other-name>.`);
     }
     // §5.4: the per-team handle is immutable once its people file exists — and only join/create bind it.
-    const boundHandle = existing?.[1].handle ?? undefined;
-    const token = existing?.[1].token ?? null;
+    const boundHandle = existing?.[1].handle;
 
     // gh detection (and the login offer) comes first, so credentials are in place before the clone.
     const gh = await detectOrOfferGh(io, runner);
     if (target.github) await acceptOrDirect(target.ownerRepo!, io, runner, gh);
     await store.ensureRoot();
     const clone = store.teamClone(team);
-    await ensureClone(clone, target.remote, normalized, runner, token);
+    await ensureClone(clone, target.remote, normalized, runner);
 
     const { identity: suggested } = await identityForJoiner(io, { config: store, runner }, { fixedHandle: boundHandle, gh });
     await requireGitConfig(runner, clone, suggested);
@@ -219,7 +282,7 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     let rejoined = false;
     for (let attempt = 1; ; attempt++) {
       try {
-        await repo.safeWrite((tree) => { rejoined = joinMutation(tree, identity, boundHandle); }, { action: 'join', handle: identity.handle, token, message: `${identity.handle}: join` });
+        await repo.safeWrite((tree) => { rejoined = joinMutation(tree, identity, boundHandle); }, { action: 'join', handle: identity.handle, message: `${identity.handle}: join` });
         break;
       } catch (error) {
         if (!(error instanceof HandleCollisionError) || attempt >= MAX_HANDLE_ATTEMPTS) throw error;
@@ -229,6 +292,10 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     }
 
     await store.update((fresh) => {
+      // Re-check under the lock: another verb may have bound this remote or name while we prompted.
+      // The roster write above is durable, so a refusal here says so and names the way forward.
+      try { assertBindable(fresh, team, normalized); }
+      catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)} Your roster entry people/${identity.handle}.json was already pushed to ${normalized}; run \`team join ${args.target}\` again to continue under the existing entry, or ask an admin to \`team remove ${identity.handle}\` if you did not mean to join twice.`); }
       setIdentity(fresh, identity);
       bindTeam(fresh, team, { remote: normalized, handle: identity.handle });
     });
@@ -261,9 +328,12 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
 /**
  * The PURE join mutation (§6.0 step 2): decides collision, rejoin, and the people file from the
  * tree it is handed — the freshly reset origin/main — never from a preflight snapshot. An existing
- * live file is only ours when this machine is bound to the handle AND the file carries our GitHub
- * login or email; an archived file is only a rejoin under the same test. Throws
- * HandleCollisionError so the caller can re-prompt; safeWrite's `finally` leaves the clone clean.
+ * live file is ours when it carries our NON-EMPTY GitHub login or email (case-insensitive) and this
+ * machine is either unbound for the team or bound to that same handle (rev 9, Decision 1: the
+ * second laptop and the rerun of an interrupted join); an archived file is a rejoin under the
+ * identity test alone. Empty values never match, and a bound machine never reclaims a different
+ * handle. Throws HandleCollisionError so the caller can re-prompt; safeWrite's `finally` leaves
+ * the clone clean.
  */
 export function joinMutation(tree: MutableTree, identity: Identity, boundHandle: string | undefined): boolean {
   const handle = identity.handle;
@@ -275,8 +345,9 @@ export function joinMutation(tree: MutableTree, identity: Identity, boundHandle:
   const existingJson = tree.before(path);
   const existing = existingJson === undefined ? undefined : parseJson(personSchema, treeText(existingJson), path);
   if (existing) {
-    const samePerson = existing.github.toLowerCase() === identity.github.toLowerCase() || existing.email.toLowerCase() === identity.email.toLowerCase();
-    if (!archived && !(boundHandle === handle && samePerson)) throw new HandleCollisionError(handle);
+    const samePerson = sameValue(existing.github, identity.github) || sameValue(existing.email, identity.email);
+    const mayReclaim = samePerson && (boundHandle === undefined || boundHandle === handle);
+    if (!archived && !mayReclaim) throw new HandleCollisionError(handle);
     if (archived && !samePerson) throw new HandleCollisionError(handle);
   }
   const person: Person = {
@@ -284,7 +355,8 @@ export function joinMutation(tree: MutableTree, identity: Identity, boundHandle:
     handle,
     display_name: identity.displayName,
     email: identity.email,
-    github: identity.github,
+    // A reclaim or rejoin that left the login blank keeps the one on file: an empty answer is "no change", not "none".
+    github: identity.github || existing?.github || '',
     bio: existing?.bio ?? '',
     installed: existing?.installed ?? [],
     declined: existing?.declined ?? [],
@@ -297,8 +369,14 @@ export function joinMutation(tree: MutableTree, identity: Identity, boundHandle:
   return archived;
 }
 
-async function ensureClone(clone: string, remote: string, normalized: string, runner: Runner, token: string | null): Promise<void> {
-  if (!(await exists(clone))) { await cloneTeam(remote, clone, runner, token); return; }
+/** Identity evidence: equal after trim + lowercase, and never empty — two blanks are not the same person. */
+function sameValue(a: string, b: string): boolean {
+  const left = a.trim().toLowerCase();
+  return left !== '' && left === b.trim().toLowerCase();
+}
+
+async function ensureClone(clone: string, remote: string, normalized: string, runner: Runner): Promise<void> {
+  if (!(await exists(clone))) { await cloneTeam(remote, clone, runner); return; }
   const origin = await cloneOrigin(clone, runner);
   if (origin === null || !(await exists(pathJoin(clone, 'team.json')))) {
     throw new Error(`${clone} exists but is not a complete clone of ${remote}; move it aside and retry.`);
@@ -357,13 +435,12 @@ async function acceptOrDirect(ownerRepo: string, io: Prompter, runner: Runner, g
 /**
  * The one write outside safeWrite: an EMPTY remote has no origin/main to fetch and reset, so the
  * scaffold is committed in a staging repo, pushed with `-u`, and the staging repo becomes the clone.
- * Every later write goes through safeWrite (open question for the spec, recorded in the M1 report).
+ * Every later write goes through safeWrite (§6.0 rev 9, Decision 3: the one documented exception).
  */
-async function bootstrap(remote: string, clone: string, teamName: string, identity: Identity, runner: Runner, token: string | null): Promise<void> {
+async function bootstrap(remote: string, clone: string, teamName: string, identity: Identity, runner: Runner): Promise<void> {
   const staging = `${clone}.bootstrap-${randomUUID()}`;
-  const env = gitAuthEnv(token);
   const git = async (...parts: string[]) => {
-    const result = await runner.run('git', parts, { cwd: staging, env });
+    const result = await runner.run('git', parts, { cwd: staging });
     if (result.code !== 0) throw new Error(`git ${parts.join(' ')} failed: ${(result.stderr || result.stdout).trim()}`);
   };
   await mkdirPrivate(staging);

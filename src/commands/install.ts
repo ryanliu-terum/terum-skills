@@ -111,7 +111,7 @@ export async function installOne(input: { team: string; reference?: string; id?:
     installed.push({ id: skill.id, version: latest, scope, since: new Date().toISOString().slice(0, 10) });
     const declined = person.declined.filter((id) => id !== skill.id);
     tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);
-  }, { action: 'install', handle: binding.handle, token: binding.token, message: `${binding.handle}: install ${skill.name}`, ...input.safeWrite });
+  }, { action: 'install', handle: binding.handle, message: `${binding.handle}: install ${skill.name}`, ...input.safeWrite });
   await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
   return { id: skill.id, team: input.team, path: placed!.path, version: latest };
 }

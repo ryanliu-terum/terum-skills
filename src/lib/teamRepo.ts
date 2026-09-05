@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { lstat, mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
 import lockfile from 'proper-lockfile';
-import { gitAuthEnv } from './auth.js';
 import { mkdirPrivate } from './fs.js';
 import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
 import { isGitHubRemote, normalizeRemote, remoteToGitUrl, stripRemoteCredentials } from './remote.js';
@@ -30,12 +29,12 @@ export interface SafeWriteOptions extends GuardContext {
   branch?: string;
   /** Commit message; defaults to `<handle>: <action>`. */
   message?: string;
-  /** Per-team PAT for git auth (§5.4); ambient credentials when null. */
-  token?: string | null;
   deadlineMs?: number;
   backoff?: (attempt: number) => number;
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
+  /** Test knob: the lock's stale window in ms (proper-lockfile floors it at 2000 and checks the lock every half window). */
+  lockStale?: number;
 }
 
 export interface SafeWriteResult { changed: boolean; pushedTo: string; }
@@ -58,9 +57,13 @@ export class PushRefused extends Error {
 export const DEFAULT_DEADLINE_MS = 30_000;
 const defaultBackoff = (attempt: number): number => Math.floor(Math.random() * Math.min(1_000, 25 * 2 ** attempt));
 const wait = (milliseconds: number) => new Promise<void>((done) => setTimeout(done, milliseconds));
-/** git's non-fast-forward vocabulary: the only push failures a retry can fix. */
+/** git's non-fast-forward vocabulary: the only `main` push failures a retry can fix. */
 const RETRYABLE = /fetch first|non-fast-forward|cannot lock ref|failed to lock|stale info|incorrect old value|remote ref updated since checkout/i;
-const STALE_LEASE = /stale info/i;
+/** The lease (CAS) vocabulary: the named ref moved since we read it — never retried against the same ref. */
+const STALE_LEASE = /stale info|incorrect old value|remote ref updated since checkout/i;
+/** Server-side ref-lock contention: transient, and the lease still stands, so the same ref is retried. */
+const REF_LOCK = /cannot lock ref|failed to lock/i;
+const lostLock = (root: string): string => `Lost the safeWrite lock on ${root} to another process; nothing was pushed — retry the command.`;
 
 type Git = (args: readonly string[]) => Promise<CommandResult>;
 
@@ -69,8 +72,7 @@ export function openTeamRepo(root: string, remote: string, runner: Runner = syst
 }
 
 async function safeWrite(root: string, remote: string, runner: Runner, mutate: Mutate, options: SafeWriteOptions): Promise<SafeWriteResult> {
-  const env = gitAuthEnv(options.token);
-  const git: Git = (args) => runner.run('git', args, { cwd: root, env });
+  const git: Git = (args) => runner.run('git', args, { cwd: root });
   const requireGit = async (args: readonly string[]) => {
     const result = await git(args);
     if (result.code !== 0) throw new Error(`git ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim()}`);
@@ -88,15 +90,20 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
   let lastError = 'push rejected';
 
   // One writer per clone per machine; a second process waits briefly, then fails rather than racing.
+  // A lock lost after the stale window (another process took it) is recorded and aborts the attempt
+  // before anything is pushed, instead of two writers reset-and-committing over one working tree.
+  let compromised = false;
   const release = await lockfile.lock(root, {
     lockfilePath: join(dirname(root), `.${basename(root)}.safewrite.lock`),
     realpath: false,
-    stale: 60_000,
+    stale: options.lockStale ?? 60_000,
     retries: { retries: 10, minTimeout: 50, maxTimeout: 500 },
-    onCompromised: () => undefined,
+    onCompromised: () => { compromised = true; },
   });
+  const leases = new Map<string, string>();
   try {
     while (now() <= deadline) {
+      if (compromised) throw new Error(lostLock(root));
       await requireGit(['fetch', 'origin']);
       await requireGit(['reset', '--hard', 'origin/main']);
       const tracked = new Set((await requireGit(['ls-files', '-z'])).stdout.split('\0').filter(Boolean));
@@ -130,7 +137,8 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
         throw new GuardError(`Staged diff [${staged.join(', ')}] does not match the mutation [${changed.join(', ')}]`);
       }
       await requireGit(['commit', '-q', '-m', options.message ?? `${options.handle}: ${options.action}`]);
-      const outcome = await push(git, branch);
+      if (compromised) throw new Error(lostLock(root));
+      const outcome = await push(git, branch, leases);
       if (outcome.ok) return { changed: true, pushedTo: outcome.pushedTo };
       if (!outcome.retryable) throw new PushRefused(`The remote refused the push: ${outcome.error.trim()}`);
       lastError = outcome.error;
@@ -139,19 +147,23 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
     }
     throw new SafeWriteExhausted(`safeWrite deadline exhausted after ${attempt + 1} attempt(s); the remote kept moving ahead: ${lastError.trim()}`);
   } finally {
-    // Cleanup can never change the outcome: the next safeWrite fetches and hard-resets anyway.
-    try {
-      await git(['fetch', 'origin']);
-      await git(['reset', '--hard', 'origin/main']);
-      for (const path of created) {
-        const tracked = await git(['ls-files', '--error-unmatch', '--', path]);
-        if (tracked.code !== 0) await removeCreated(root, realRoot, path);
+    // Cleanup can never change the outcome: the next safeWrite fetches and hard-resets anyway. A
+    // compromised lock means another writer owns this clone now; resetting it would rewind THAT
+    // writer's commit and turn its push into a no-op, so then only the lock is released.
+    if (!compromised) {
+      try {
+        await git(['fetch', 'origin']);
+        await git(['reset', '--hard', 'origin/main']);
+        for (const path of created) {
+          const tracked = await git(['ls-files', '--error-unmatch', '--', path]);
+          if (tracked.code !== 0) await removeCreated(root, realRoot, path);
+        }
+      } catch {
+        // swallowed on purpose; see above
       }
-    } catch {
-      // swallowed on purpose; see above
-    } finally {
-      await release();
     }
+    // A compromised lock rejects on release ('Lock is already released'); cleanup never replaces the real outcome.
+    await release().catch(() => undefined);
   }
 }
 
@@ -166,10 +178,12 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<voi
 
 /**
  * Push to exactly the named ref. `main` is a plain push. A derived branch (`publish/<name>`) is
- * replaced under a lease; only a genuinely stale lease falls back to `<branch>-2`, once. Any
- * other refusal is terminal and carries git's own message.
+ * replaced under a lease PINNED to the ref as it stood when this write first tried that target, so
+ * a retry after ref-lock contention can never overwrite a commit someone pushed in between: git
+ * reports that as stale and the write moves on to `<branch>-2`, once. Any other refusal is
+ * terminal and carries git's own message.
  */
-async function push(git: Git, branch: string): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
+async function push(git: Git, branch: string, leases: Map<string, string>): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
   if (branch === 'main') {
     const result = await git(['push', '-q', 'origin', 'HEAD:refs/heads/main']);
     if (result.code === 0) return { ok: true, pushedTo: 'main' };
@@ -178,12 +192,17 @@ async function push(git: Git, branch: string): Promise<{ ok: true; pushedTo: str
   }
   let lastError = '';
   for (const target of [branch, `${branch}-2`]) {
-    const result = await git(['push', '-q', '--force-with-lease', 'origin', `HEAD:refs/heads/${target}`]);
+    if (!leases.has(target)) {
+      const seen = await git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${target}`]);
+      leases.set(target, seen.code === 0 ? seen.stdout.trim() : '');
+    }
+    const result = await git(['push', '-q', `--force-with-lease=refs/heads/${target}:${leases.get(target)}`, 'origin', `HEAD:refs/heads/${target}`]);
     if (result.code === 0) return { ok: true, pushedTo: target };
     lastError = result.stderr || result.stdout || 'push rejected';
-    if (!STALE_LEASE.test(lastError)) return { ok: false, retryable: false, error: lastError };
+    if (!STALE_LEASE.test(lastError)) return { ok: false, retryable: REF_LOCK.test(lastError), error: lastError };
   }
-  return { ok: false, retryable: true, error: lastError };
+  // Both the branch and its `-2` moved since this write began: never overwrite either.
+  return { ok: false, retryable: false, error: lastError };
 }
 
 /** Repo-relative POSIX paths only: no absolute paths, no `..`, no `.git` anywhere (any case, NTFS short names included), no empty segments. */
@@ -295,9 +314,9 @@ async function removeCreated(root: string, realRoot: string, path: string): Prom
 }
 
 /** Clone a team repo into a private directory, checking out `main` explicitly so a bare remote whose HEAD points elsewhere still yields a working tree. */
-export async function cloneTeam(remote: string, destination: string, runner: Runner = systemRunner, token: string | null = null): Promise<void> {
+export async function cloneTeam(remote: string, destination: string, runner: Runner = systemRunner): Promise<void> {
   await mkdirPrivate(dirname(destination));
-  const clone = await runner.run('git', ['clone', '-q', '--branch', 'main', '--', remoteToGitUrl(remote), destination], { env: gitAuthEnv(token) });
+  const clone = await runner.run('git', ['clone', '-q', '--branch', 'main', '--', remoteToGitUrl(remote), destination]);
   if (clone.code !== 0) throw new Error(`Could not clone ${stripRemoteCredentials(remote)}: ${(clone.stderr || clone.stdout).trim()}`);
 }
 

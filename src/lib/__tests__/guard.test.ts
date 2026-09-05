@@ -108,6 +108,10 @@ describe('membership predicate (§4.1)', () => {
     expect(isMember(undefined, team(), 'me')).toBe(false);
     expect(isMember('not json', team(), 'me')).toBe(false);
     expect(isMember(me, team(), 'other')).toBe(false);
+    // Same normalization as guard(): a mixed-case caller is a member, an archived one is not, an invalid one never throws.
+    expect(isMember(me, team(), 'Me')).toBe(true);
+    expect(isMember(me, team({ archived: ['me'] }), 'ME')).toBe(false);
+    expect(isMember(me, team(), 'bad handle')).toBe(false);
   });
 });
 

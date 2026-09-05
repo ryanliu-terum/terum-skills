@@ -6,12 +6,11 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { NonInteractivePrompter, PromptClosedError, terminalPrompter } from '../prompt.js';
 
 describe('Prompter boundary (§3, §12 "prompter")', () => {
-  it('a verb handed the non-interactive Prompter cannot call confirm/text/select/secret — compile-time', () => {
+  it('a verb handed the non-interactive Prompter cannot call confirm/text/select — compile-time', () => {
     // `npm run typecheck` includes this file, so these assertions fail the typecheck gate, not just the suite.
     expectTypeOf<NonInteractivePrompter>().not.toHaveProperty('confirm');
     expectTypeOf<NonInteractivePrompter>().not.toHaveProperty('text');
     expectTypeOf<NonInteractivePrompter>().not.toHaveProperty('select');
-    expectTypeOf<NonInteractivePrompter>().not.toHaveProperty('secret');
     expectTypeOf<NonInteractivePrompter>().toHaveProperty('print');
     const hookIo: NonInteractivePrompter = { interactive: false, print: () => undefined };
     // @ts-expect-error — the hook Prompter has no way to ask a human anything
@@ -44,6 +43,8 @@ describe('Prompter boundary (§3, §12 "prompter")', () => {
       'export async function f() { const rl = await import("node:readline/promises"); return rl; }',
       'export async function f() { const p = await import("node:process"); return p; }',
       'export async function f() { const c = await import("console"); return c; }',
+      'process.exit(1);',
+      'export function f() { process.exit(0); }',
     ];
     for (const code of vectors) {
       expect(await flagged(code), code).not.toEqual([]);
@@ -77,7 +78,6 @@ describe('terminalPrompter behaviour', () => {
     expect(io.interactive).toBe(false);
     await expect(io.text('Name')).rejects.toThrow(PromptClosedError);
     await expect(io.confirm('Sure?')).rejects.toThrow(/interactive terminal/);
-    await expect(io.secret('PAT')).rejects.toThrow(PromptClosedError);
     await expect(io.select('Pick', ['a'])).rejects.toThrow(PromptClosedError);
   });
 
@@ -94,14 +94,34 @@ describe('terminalPrompter behaviour', () => {
     expect(results).toEqual([true, true, false, false, false, false]);
   });
 
-  it('text takes the default on a blank answer and trims; secret does not echo', async () => {
-    const { io, out } = channel(['', '  Ryan  ', 'ghp_secret_value']);
+  it('text takes the default on a blank answer and trims', async () => {
+    const { io, out } = channel(['', '  Ryan  ']);
     expect(await io.text('Name', 'Default')).toBe('Default');
     expect(await io.text('Name')).toBe('Ryan');
-    expect(await io.secret('PAT')).toBe('ghp_secret_value');
-    expect(out()).toContain('PAT: ');
-    expect(out()).not.toContain('ghp_secret_value');
     expect(out()).toContain('Name [Default]: ');
+  });
+
+  it('leaves no live reader on the input after a question settles, resolved or rejected', async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const counts = () => ({ data: input.listenerCount('data'), keypress: input.listenerCount('keypress'), end: input.listenerCount('end') });
+    const io = terminalPrompter({ input: Object.assign(input, { isTTY: true }), output, interactive: true });
+    // Node's readline attaches one permanent keypress decoder ('data' listener) to a stream on first
+    // use and never removes it; it is inert once the interface closes. Measure after that warm-up.
+    const warm = io.text('Warm');
+    input.write('up\n');
+    expect(await warm).toBe('up');
+    const baseline = counts();
+    const pending = io.text('Name');
+    expect(counts().keypress).toBe(baseline.keypress + 1);
+    input.write('Ryan\n');
+    expect(await pending).toBe('Ryan');
+    expect(counts()).toEqual(baseline);
+    expect(input.isPaused()).toBe(true);
+    const rejected = io.confirm('Again?');
+    input.end();
+    await expect(rejected).rejects.toThrow(PromptClosedError);
+    expect(counts()).toEqual(baseline);
   });
 
   it('select accepts a number or the exact choice, re-asks bad input, and gives up after three tries', async () => {

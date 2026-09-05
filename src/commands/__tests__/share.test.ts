@@ -16,7 +16,7 @@ describe('share (§5.3)', () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const source = join(fixture.root, 'sample'); await mkdir(source); await writeFile(join(source, 'SKILL.md'), '---\nname: sample\ndescription: x\nmetadata:\n  terum-category: testing\n---\n');
     const result = await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true]));
     expect(result.ok).toBe(true);
@@ -28,7 +28,7 @@ describe('share (§5.3)', () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const source = join(fixture.root, 'sample');
     const pixel = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0x01]);
     await mkdir(join(source, 'references'), { recursive: true });
@@ -44,7 +44,7 @@ describe('share (§5.3)', () => {
 
     const secondStore = createConfigStore(join(fixture.root, 'second-state'));
     await cloneWithIdentity(fixture.bare, secondStore.teamClone('team'));
-    await secondStore.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await secondStore.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const home = join(fixture.root, 'second-home');
     expect((await install({ ref: 'sample', config: secondStore, home }, new ScriptedPrompter())).ok).toBe(true);
     const placed = join(home, '.claude', 'skills', 'sample');
@@ -56,7 +56,7 @@ describe('share (§5.3)', () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const source = join(fixture.root, 'sample'); await mkdir(source);
     const original = '---\n# retain me\nname: sample\ndescription: "quoted value"\nmetadata:\n  terum-category: testing\n---\n';
     await writeFile(join(source, 'SKILL.md'), original);
@@ -276,7 +276,7 @@ describe('share (§5.3)', () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const source = join(fixture.root, 'sample'); await mkdir(source);
     const original = '---\nname: sample\ndescription: x\nmetadata:\n  terum-category: testing\n---\n';
     await writeFile(join(source, 'SKILL.md'), original);
@@ -291,7 +291,7 @@ describe('share (§5.3)', () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     for (const directory of ['plugin-skill', 'hook-skill']) {
       const source = join(fixture.root, directory); await mkdir(source);
       await writeFile(join(source, 'SKILL.md'), `---\nname: ${directory}\ndescription: x\nmetadata:\n  terum-category: testing\n---\n`);
@@ -306,7 +306,7 @@ describe('share (§5.3)', () => {
     const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
     const before = await originSha(fixture.bare);
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     for (const [name, directory] of [['file-link', false], ['directory-link', true]] as const) {
       const source = join(fixture.root, name); await mkdir(source);
       const original = `---\nname: ${name}\ndescription: x\nmetadata:\n  terum-category: testing\n---\n`;
@@ -334,7 +334,7 @@ describe('share (§5.3)', () => {
     const { fixture } = await sharedFixture();
     const second = createConfigStore(join(fixture.root, 'second-state'));
     await cloneWithIdentity(fixture.bare, second.teamClone('team'));
-    await second.update((config) => { config.display_name = 'Other'; config.email = 'other@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await second.update((config) => { config.display_name = 'Other'; config.email = 'other@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const source = join(fixture.root, 'other', 'sample');
     await mkdir(source, { recursive: true });
     const original = '---\nname: sample\ndescription: second\nmetadata:\n  terum-category: testing\n---\n';
@@ -351,7 +351,7 @@ describe('share (§5.3)', () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', '---\nname: sample\ndescription: upstream\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Me <me@example.com>\n  terum-category: testing\n---\n');
     const source = join(fixture.root, 'sample'); await mkdir(source);
     const original = '---\nname: sample\ndescription: local\nmetadata:\n  terum-category: testing\n---\n';
@@ -366,7 +366,7 @@ describe('share (§5.3)', () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const source = join(fixture.root, 'sample'); await mkdir(source);
     await writeFile(join(source, 'SKILL.md'), '---\nname: sample\ndescription: x\nmetadata:\n  terum-category: testing\n---\n');
     let rejected = false;
@@ -388,7 +388,7 @@ async function expectRejectedShare(directoryName: string, frontmatterName: strin
   const fixture = await bareTeam();
   const store = createConfigStore(join(fixture.root, 'state'));
   await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-  await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+  await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   const source = join(fixture.root, directoryName); await mkdir(source);
   const original = `---\nname: ${frontmatterName}\ndescription: x\nmetadata:\n  terum-category: testing\n---\n`;
   await writeFile(join(source, 'SKILL.md'), original);
@@ -403,7 +403,7 @@ async function sharedFixture() {
   const fixture = await bareTeam();
   const store = createConfigStore(join(fixture.root, 'state'));
   await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-  await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+  await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   const source = join(fixture.root, 'sample'); await mkdir(source);
   await writeFile(join(source, 'SKILL.md'), '---\nname: sample\ndescription: x\nmetadata:\n  terum-category: testing\n---\n');
   const shared = await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true]));

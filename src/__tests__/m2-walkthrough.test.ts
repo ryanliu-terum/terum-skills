@@ -17,7 +17,7 @@ describe('M2 walkthrough (§12)', () => {
     const aHome = join(fixture.root, 'a-home'); const bHome = join(fixture.root, 'b-home');
     const aStore = createConfigStore(join(aHome, '.terum', 'skills'));
     await cloneWithIdentity(fixture.bare, aStore.teamClone('team'), 'Alice', 'alice@example.com');
-    await aStore.update((config) => { config.display_name = 'Alice'; config.email = 'alice@example.com'; config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await aStore.update((config) => { config.display_name = 'Alice'; config.email = 'alice@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const source = join(fixture.root, 'guarded'); await mkdir(source); await writeFile(join(source, 'SKILL.md'), firstSkill('first', 'Bash(ls)'));
     const sharedFirst = await share({ path: source, team: 'team', config: aStore }, new ScriptedPrompter([], [true]));
     if (!sharedFirst.ok) throw new Error(sharedFirst.error);
@@ -25,7 +25,7 @@ describe('M2 walkthrough (§12)', () => {
     await pushFromSeed(fixture.seed, 'people/bob.json', `${JSON.stringify(person('bob', { display_name: 'Bob', email: 'bob@example.com', github: 'bob' }))}\n`);
     const bStore = createConfigStore(join(bHome, '.terum', 'skills'));
     const bClone = await cloneWithIdentity(fixture.bare, bStore.teamClone('team'), 'Bob', 'bob@example.com');
-    await bStore.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'bob' }; });
+    await bStore.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'bob' }; });
     const tree = (await git(['rev-parse', 'HEAD:skills/guarded'], bClone)).trim();
     expect((await install({ ref: `guarded@${tree}`, config: bStore }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const pinnedPath = join(bHome, '.claude', 'skills', 'guarded', 'SKILL.md');

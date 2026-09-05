@@ -20,7 +20,7 @@ describe('install (§6 refs)', () => {
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const tree = (await git(['rev-parse', 'HEAD:skills/sample'], clone)).trim();
     const result = await run({ ref: `sample@${tree.slice(0, 8)}`, config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: true, value: [{ version: tree }] });
@@ -37,7 +37,7 @@ describe('install (§6 refs)', () => {
     await pushFromSeed(fixture.seed, 'skills/helper/SKILL.md', `---\nname: helper\ndescription: current\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter([], [true]);
     expect(await run({ ref: `helper@${pinned}`, config: store, home: join(fixture.root, 'home') }, io)).toMatchObject({ ok: true });
     expect(io.askedAbout('Approve these tools')).toBe(true);
@@ -52,7 +52,7 @@ describe('install (§6 refs)', () => {
     const home = join(fixture.root, 'home');
     const store = createConfigStore(join(home, '.terum', 'skills'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     let clock = 0;
     const rejecting = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'push'
       ? { code: 1, stdout: '', stderr: ' ! [rejected] HEAD -> main (non-fast-forward)' }
@@ -84,7 +84,7 @@ describe('install (§6 refs)', () => {
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools:\n  Bash: \"*\"\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter([], [false]);
     const result = await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, io);
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('malformed allowed-tools') });
@@ -102,7 +102,7 @@ describe('install (§6 refs)', () => {
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const started = '2026-09-04T00:00:00.000Z';
     await store.update((config) => {
-      config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' };
+      config.teams.team = { remote: fixture.bare, handle: 'seed' };
       config.pending.push({ op: 'install', id, team: 'team', scope: { kind: 'global' }, started });
     });
     expect((await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter([], [false]))).ok).toBe(false);
@@ -116,7 +116,7 @@ describe('install (§6 refs)', () => {
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const target = join(home, '.claude', 'skills', 'sample');
     await mkdir(target, { recursive: true }); await writeFile(join(target, 'SKILL.md'), 'user-owned');
     const first = await run({ ref: 'sample', config: store, home }, new ScriptedPrompter());
@@ -139,7 +139,7 @@ describe('install (§6 refs)', () => {
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(home, '.terum', 'skills'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     await mkdir(join(home, '.claude'), { recursive: true }); await writeFile(join(home, '.claude', 'skills'), 'not a directory');
     const failed = await run({ ref: 'sample', config: store, home }, new ScriptedPrompter());
     expect(failed.ok).toBe(false);
@@ -168,7 +168,7 @@ describe('install (§6 refs)', () => {
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(home, '.terum', 'skills'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await run({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
     const global = join(home, '.claude', 'skills', 'sample');
     const quarantine = join(store.root, 'quarantine');
@@ -206,7 +206,7 @@ describe('install (§6 refs)', () => {
     const alphaOne = await cloneWithIdentity(productA.bare, join(productA.root, 'alpha-one'));
     const alphaTwo = await cloneWithIdentity(productA.bare, join(productA.root, 'alpha-two'));
     const beta = await cloneWithIdentity(productB.bare, join(productB.root, 'beta'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
 
     expect((await run({ kind: 'project', project: 'alpha', config: store, home, cwd: alphaOne }, new ScriptedPrompter())).ok).toBe(true);
     await expect(access(join(alphaOne, '.claude', 'skills', 'project-a', 'SKILL.md'))).resolves.toBeUndefined();
@@ -265,8 +265,8 @@ describe('install (§6 refs)', () => {
     await cloneWithIdentity(first.bare, store.teamClone('team-a'));
     await cloneWithIdentity(second.bare, store.teamClone('team-b'));
     await store.update((config) => {
-      config.teams['team-a'] = { remote: 'github.com/org/repo', token: null, handle: 'me' };
-      config.teams['team-b'] = { remote: second.bare, token: null, handle: 'seed' };
+      config.teams['team-a'] = { remote: 'github.com/org/repo', handle: 'me' };
+      config.teams['team-b'] = { remote: second.bare, handle: 'seed' };
     });
     const mapped = mappedRunner('github.com/org/repo', first.bare);
 
@@ -294,7 +294,7 @@ describe('install (§6 refs)', () => {
     const secondHome = join(first.root, 'second-home');
     const secondStore = createConfigStore(join(first.root, 'second-state'));
     await cloneWithIdentity(first.bare, secondStore.teamClone('team-a'));
-    await secondStore.update((config) => { config.teams['team-a'] = { remote: 'github.com/org/repo', token: null, handle: 'me' }; });
+    await secondStore.update((config) => { config.teams['team-a'] = { remote: 'github.com/org/repo', handle: 'me' }; });
     expect((await run({ kind: 'member', member: 'seed', team: 'team-a', config: secondStore, home: secondHome, runner: mapped }, new ScriptedPrompter())).ok).toBe(true);
     expect(Object.values((await secondStore.read()).placements).map((entry) => entry.id)).toEqual([memberId]);
     expect(await readFile(join(secondHome, '.claude', 'skills', 'member-only', 'SKILL.md'), 'utf8')).toContain('name: member-only');

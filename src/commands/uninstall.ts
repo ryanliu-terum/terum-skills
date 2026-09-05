@@ -78,7 +78,7 @@ export async function uninstallOne(input: { team: string; id: string; scope: { k
     const auto = endorsed ? endorsed.global.includes(input.id) || Object.values(endorsed.projects).some((project) => project.skills.includes(input.id)) : false;
     const declined = auto && !person.declined.includes(input.id) ? [...person.declined, input.id] : person.declined;
     tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);
-  }, { action: 'uninstall', handle: teamConfig.handle, token: teamConfig.token, message: `${teamConfig.handle}: uninstall ${input.id.slice(0, 8)}`, ...input.safeWrite });
+  }, { action: 'uninstall', handle: teamConfig.handle, message: `${teamConfig.handle}: uninstall ${input.id.slice(0, 8)}`, ...input.safeWrite });
   await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
   return { id: input.id, team: input.team, removed: matching.length };
 }

@@ -9,7 +9,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const outcomes: boolean[] = [];
     const execute: Execute = async (invoke) => { const result = await invoke(new ScriptedPrompter()); outcomes.push(result.ok); };
     const program = buildProgram(execute, {
-      login: async (args) => { calls.push({ verb: 'login', ...args }); return success({ authenticated: true, github: true }); },
+      login: async (args) => { calls.push({ verb: 'login', ...args }); return success({ gh: { installed: true, authenticated: true }, handle: 'me' }); },
       team: async (args) => { calls.push({ verb: 'team', ...args }); return args.kind === 'join' && args.target === 'fail/fail' ? failure('nope') : success({ team: 't', remote: 'r' }); },
       invite: async (args) => { calls.push({ verb: 'invite', ...args }); return success({ team: 't', invited: [], already: [] }); },
       ls: async (args) => { calls.push({ verb: 'ls', ...args }); return success({ roster: [], skills: [] }); },
@@ -23,26 +23,29 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const { program, calls } = harness();
     await program.parseAsync(['team', 'create', 'alpha', '--org', 'acme', '--remote', 'https://x/y.git'], { from: 'user' });
     await program.parseAsync(['team', 'join', 'acme/alpha', '--as', 'local-alpha'], { from: 'user' });
-    await program.parseAsync(['login', '--team', 'alpha', '--remote', 'github.com/acme/alpha'], { from: 'user' });
+    await program.parseAsync(['login'], { from: 'user' });
+    await program.parseAsync(['team', 'create', '--repo', 'skills-repo'], { from: 'user' });
     expect(calls).toEqual([
       { verb: 'team', kind: 'create', name: 'alpha', org: 'acme', remote: 'https://x/y.git' },
       { verb: 'team', kind: 'join', target: 'acme/alpha', as: 'local-alpha' },
-      { verb: 'login', team: 'alpha', remote: 'github.com/acme/alpha' },
+      { verb: 'login' },
+      { verb: 'team', kind: 'create', name: undefined, repo: 'skills-repo' },
     ]);
   });
 
-  it('routes a failing Result to execute and rejects a login without its required flags', async () => {
+  it('routes a failing Result to execute, and login takes no team or remote (rev 9, Decision 4)', async () => {
     const { program, outcomes } = harness();
     await program.parseAsync(['team', 'join', 'fail/fail'], { from: 'user' });
     expect(outcomes).toEqual([false]);
-    await expect(program.parseAsync(['login', '--team', 'alpha'], { from: 'user' })).rejects.toMatchObject({ code: 'commander.missingMandatoryOptionValue' });
+    expect(program.commands.find((command) => command.name() === 'login')?.options).toEqual([]);
+    await expect(program.parseAsync(['login', '--team', 'alpha'], { from: 'user' })).rejects.toMatchObject({ code: 'commander.unknownOption' });
   });
 
   it('wires every M2 verb and passes a missing install member value through as a clear command failure', async () => {
     const calls: unknown[] = []; const outcomes: boolean[] = [];
     const execute: Execute = async (invoke) => { outcomes.push((await invoke(new ScriptedPrompter())).ok); };
     const program = buildProgram(execute, {
-      login: async () => success({ authenticated: true, github: true }), team: async () => success({ team: 't', remote: 'r' }),
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
       share: async (args) => { calls.push(['share', args]); return success(undefined); },
       install: async (args) => { calls.push(['install', args]); return args.kind === 'member' && !args.member ? failure('Provide a member handle.') : success([]); },
       uninstall: async (args) => { calls.push(['uninstall', args]); return success([]); },
