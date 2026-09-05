@@ -25,19 +25,19 @@ Counts exclude the contested and unverified sections below. The 7 confirmed find
 
 ## Cross-spec drift
 
-- [ ] **BLOCKER — MISSING REFERENCE: IE3 omits required `validate` and CI hygiene wiring** `findings[13]` (vote 2-0; verifier suggests severity GAP)
+- [x] *(applied, plan rev 2 — eval side builds `validate` per Ajay)* **BLOCKER — MISSING REFERENCE: IE3 omits required `validate` and CI hygiene wiring** `findings[13]` (vote 2-0; verifier suggests severity GAP)
   - **Location:** Target §0 lines 21–22 and §1, IE3, lines 58–64
   - **Evidence:** Target lines 21–22 enumerate only “Hygiene wired into `share` (and later `publish`)”, and IE3 lines 60–61 say “Wire into `share` before `safeWrite`”. Sibling §6 lines 258–259 says “`validate <path|name>` gains the hygiene tier ... `share` and `publish` invoke it by construction”; sibling §9 lines 368–369 requires “`hygiene.ts`, run by `validate`, `share`, `publish`, and CI.”
   - **Suggested fix:** Add `validate` and CI to IE3’s wiring and acceptance tests, with `share` and `publish` invoking that same validation path.
 
-- [ ] **DRIFT — MISSING REFERENCE: README eval column remains permanently blank after receipt integration** `findings[5]` (vote 2-0; verifier concurs DRIFT)
+- [x] *(applied, plan rev 2)* **DRIFT — MISSING REFERENCE: README eval column remains permanently blank after receipt integration** `findings[5]` (vote 2-0; verifier concurs DRIFT)
   - **Location:** Target §1 IE2, lines 45–54 and §3, lines 103–107; sibling §9, line 397
   - **Evidence:** Target commits validated receipts and freezes their lookup rule: `evals/<id>/<hash>/<run>.json`, with the newest receipt selected by lexicographically last filename. Sibling requires an “eval column (`—` until phase 3).” The target’s exhaustive wiring list contains no README-generator work, so the phase-3 integration leaves that column at `—` despite committed results.
   - **Suggested fix:** Add receipt lookup and eval-column rendering to the integration plan and the sibling README contract, with tests for no receipt and newest-receipt selection.
 
 ## Spec-vs-code reality
 
-- [ ] **DRIFT — Integration plan still treats VE1 as open and pins the superseded eval spec revision** `findings[16]` (vote 2-0)
+- [x] *(applied, plan rev 2)* **DRIFT — Integration plan still treats VE1 as open and pins the superseded eval spec revision** `findings[16]` (vote 2-0)
   - **Location:** §0 lines 7–8; §2 lines 88–90
   - **Evidence:** The target says the authoritative design is `2026-09-04-eval-engine.md` “(rev 5)” and that “VE1/VE2 … closure not recorded.” The referenced spec is now rev 6 and explicitly records “VE1 closed” (`.planning/specs/2026-09-04-eval-engine.md:3`, `:428-435`). The implementation also contains the resulting pinned-CC behavior: it documents CC 2.1.236 and checks skill membership rather than list equality (`src/lib/evals/execution.ts:214-221`). VE2 remains open in the eval spec at lines 434–435.
   - **Suggested fix:** Update the integration plan’s authoritative revision reference and carry only VE2 as outstanding; do not require VE1 to be re-closed before IE1.
@@ -48,17 +48,17 @@ No standalone confirmed items — the one confirmed internal-quality finding (`f
 
 ## Build-readiness
 
-- [ ] **BLOCKER — IE1 deliberately bypasses the mandatory fail-closed hygiene gate** `findings[21]` (vote 2-0; verifier suggests severity DRIFT)
+- [x] *(applied, plan rev 2 — hygiene milestone now leads; no skip state)* **BLOCKER — IE1 deliberately bypasses the mandatory fail-closed hygiene gate** `findings[21]` (vote 2-0; verifier suggests severity DRIFT)
   - **Location:** `.planning/specs/2026-09-04-eval-integration.md:31-33`
   - **Evidence:** IE1 says “hygiene (once IE3 lands; skip-with-notice before that) → preflight”. The authoritative eval spec requires the opposite: “hygiene tier runs first and hard-stops on failure” at `.planning/specs/2026-09-04-eval-engine.md:245-248`, and calls every hygiene check “fail-closed” at lines 368-369. Following IE1 would execute unchecked teammate content with Bash-enabled arms.
   - **Suggested fix:** Make IE3 a prerequisite of IE1, or keep the eval command unavailable until hygiene exists. Remove the skip-with-notice state and test that no preflight or agent process starts after a hygiene failure.
 
-- [ ] **BLOCKER — Automatic sync updates bypass the secret/PII hygiene boundary** `findings[23]` (vote 2-0; verifier suggests severity GAP)
+- [x] *(applied, plan rev 2 — hygiene gates every skill-content mutation incl. sync reconcile)* **BLOCKER — Automatic sync updates bypass the secret/PII hygiene boundary** `findings[23]` (vote 2-0; verifier suggests severity GAP)
   - **Location:** `.planning/specs/2026-09-04-eval-integration.md:60-64`
   - **Evidence:** IE3 says only “Wire into `share` before `safeWrite` (and later `publish`)”. Phase 1 defines `share` as a one-time operation after which edits flow automatically through sync (`.planning/specs/2026-09-02-phase-1-build.md:12`). That path currently mirrors edited source files through `safeWrite` with action `sync` at `src/commands/share.ts:119-120`, with no hygiene call. A secret added after initial sharing would therefore be committed while an implementation followed IE3 exactly.
   - **Suggested fix:** Define hygiene as a prerequisite for every skill-content mutation, including `reconcileShared`/sync and divergence resolution. Specify failure behavior so the repository and stored baseline remain unchanged, and add a regression test with a secret introduced after initial share.
 
-- [ ] **BLOCKER — IE4 has no executable artifact path and no deployment path for existing team workflows** `findings[26]` + `findings[19]` — **merged** (both 2-0; verifier suggests severity GAP for `findings[19]` and `findings[26]`). *Merge note: `findings[19]` was raised on the internal-quality dimension and `findings[26]` on build-readiness; both identify the same defect — the interim CI step specifies a checkout/install/run sequence that cannot produce `dist/index.js` — with `findings[26]` additionally covering the missing migration for already-scaffolded team repos. Evidence from both is reproduced below.*
+- [x] *(applied, plan rev 2 — pinned dual checkout + build; `team workflow-update` admin PR for existing repos)* **BLOCKER — IE4 has no executable artifact path and no deployment path for existing team workflows** `findings[26]` + `findings[19]` — **merged** (both 2-0; verifier suggests severity GAP for `findings[19]` and `findings[26]`). *Merge note: `findings[19]` was raised on the internal-quality dimension and `findings[26]` on build-readiness; both identify the same defect — the interim CI step specifies a checkout/install/run sequence that cannot produce `dist/index.js` — with `findings[26]` additionally covering the missing migration for already-scaffolded team repos. Evidence from both is reproduced below.*
   - **Location:** `.planning/specs/2026-09-04-eval-integration.md:68-80` (and §1, IE4, line 77)
   - **Evidence (`findings[26]`):** The interim step says the team-repo job “Runs via checkout + `npm ci` + `node dist/index.js` until npm publish lands.” A generated team repo contains `team.json`, people, empty skills/evals, README, and the workflow—not this product's `package.json`, lockfile, source, or `dist` (`src/commands/team.ts:376-387`)—so a default checkout followed by `npm ci` cannot run. The workflow template itself says it requires published npm artifacts (`src/commands/team.ts:398-415`). Editing that template affects only newly scaffolded teams; the plan names no migration for already-created team repos, while the guard currently refuses `.github/workflows/**` writes (`src/lib/guard.ts:39-45`).
   - **Evidence (`findings[19]`):** Line 77 specifies “checkout + `npm ci` + `node dist/index.js` until npm publish lands.” The scaffolded workflow checks out the team repository (`src/commands/team.ts:431`), which has no CLI package to install or build. Even if the intended checkout is the terum-skills source repository, `dist/` is not tracked (`git ls-files dist` returned no files), and `package.json:20–21` builds it only through `npm run build`/`prepack`; `npm ci` alone does not create `dist/index.js`. Thus the interim job fails before evaluation.
