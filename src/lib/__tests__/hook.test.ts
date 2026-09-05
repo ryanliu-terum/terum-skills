@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { HOOK_COMMAND, HOOK_ENTRY, hookInstalled, installHook, offerHook, removeHook } from '../hook.js';
+import { fsForTests, HOOK_COMMAND, HOOK_ENTRY, hookInstalled, installHook, offerHook, removeHook } from '../hook.js';
 import { ScriptedPrompter, temporaryDirectory } from './fixtures.js';
 
 async function options() {
@@ -55,5 +55,19 @@ describe('session hook (§8)', () => {
     await expect(offerHook(present, target)).resolves.toBe('present');
     expect(present.asked).toEqual([]);
     expect(HOOK_COMMAND).toContain('terum-skills');
+  });
+
+  it('an interrupted rename leaves the previous file intact and parseable, and the next install succeeds', async () => {
+    const target = await options();
+    const original = JSON.stringify({ theme: 'dark' });
+    await writeFile(target.settingsFile, original);
+    const realRename = fsForTests.rename;
+    fsForTests.rename = async () => { throw new Error('simulated crash between write and rename'); };
+    try { await expect(installHook(target)).rejects.toThrow('simulated crash'); }
+    finally { fsForTests.rename = realRename; }
+    expect(await readFile(target.settingsFile, 'utf8')).toBe(original);
+    expect((await readdir(target.root)).filter((name) => name.includes('.tmp'))).toEqual([]);
+    await expect(installHook(target)).resolves.toBe('installed');
+    expect(JSON.parse(await readFile(target.settingsFile, 'utf8')).hooks.SessionStart).toEqual([HOOK_ENTRY]);
   });
 });

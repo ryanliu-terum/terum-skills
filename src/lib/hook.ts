@@ -4,6 +4,9 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Prompter } from './prompt.js';
 
+/** The one seam hook.test.ts needs to simulate a crash between the temp write and the rename. */
+export const fsForTests = { rename };
+
 export const HOOK_COMMAND = 'npx -y terum-skills@latest sync --hook';
 export const HOOK_ENTRY = { matcher: 'startup', hooks: [{ type: 'command', command: HOOK_COMMAND, async: true, timeout: 60 }] } as const;
 export interface HookOptions { settingsFile?: string; backupDir?: string; }
@@ -69,7 +72,7 @@ async function writeAtomically(path: string, value: Settings, existing: boolean)
     try { await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8'); await handle.sync(); }
     finally { await handle.close(); }
     if (existing) await chmod(temporary, (await stat(path)).mode);
-    await rename(temporary, path);
+    await fsForTests.rename(temporary, path);
   } catch (error) { await rm(temporary, { force: true }); throw error; }
 }
 
