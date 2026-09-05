@@ -1,5 +1,6 @@
 import { basename, dirname, join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
+import { exists } from '../lib/fs.js';
 import { lockTarget, remove } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
@@ -49,7 +50,6 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
 }
 
 export async function uninstallOne(input: { team: string; id: string; scope: { kind: 'global' } | { kind: 'project'; project: string }; store: ConfigStore; runner: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'> }, io: Prompter): Promise<UninstalledResult> {
-  void io;
   const config = await input.store.read();
   const teamConfig = config.teams[input.team];
   if (!teamConfig?.handle) throw new Error(`Team ${input.team} has no joined handle.`);
@@ -57,15 +57,7 @@ export async function uninstallOne(input: { team: string; id: string; scope: { k
   await input.store.update((fresh) => { if (!fresh.pending.some((entry) => samePending(entry, pending))) fresh.pending.push(pending); });
   const matching = Object.entries((await input.store.read()).placements).filter(([, entry]) => entry.id === input.id && entry.team === input.team && sameScope(entry.scope, input.scope));
   if (!matching.length) io.print(`${input.id.slice(0, 8)} is not placed on this machine.`);
-  for (const [path, entry] of matching) {
-    const root = dirname(path);
-    const release = await lockTarget(root, basename(path));
-    try {
-      const removed = await remove(root, path, entry.fingerprint, join(input.store.root, 'quarantine'));
-      if (removed.quarantined) io.print(`Local changes at ${path} moved to ${removed.quarantined}.`);
-      await input.store.update((fresh) => { delete fresh.placements[path]; });
-    } finally { await release(); }
-  }
+  await removePlacements(input.store, matching, io);
   const repo = openTeamRepo(input.store.teamClone(input.team), teamConfig.remote, input.runner);
   await repo.safeWrite((tree) => {
     const path = `people/${teamConfig.handle}.json`;
@@ -81,6 +73,28 @@ export async function uninstallOne(input: { team: string; id: string; scope: { k
   }, { action: 'uninstall', handle: teamConfig.handle, message: `${teamConfig.handle}: uninstall ${input.id.slice(0, 8)}`, ...input.safeWrite });
   await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
   return { id: input.id, team: input.team, removed: matching.length };
+}
+
+/**
+ * The placement ledger is the sole authority for paths that may be removed locally. Returns the
+ * ledger keys it processed, so a caller that took its list before a prompt can drop exactly those.
+ */
+export async function removePlacements(store: ConfigStore, matching: ReadonlyArray<[string, { fingerprint: string }]>, io: Pick<Prompter, 'print'>): Promise<string[]> {
+  const processed: string[] = [];
+  for (const [path, entry] of matching) {
+    const root = dirname(path);
+    // A placement whose parent is gone (a deleted checkout, an unmounted volume) has nothing to
+    // remove, and taking the target lock would recreate the tree: just drop the ledger entry.
+    if (!(await exists(root))) { await store.update((fresh) => { delete fresh.placements[path]; }); processed.push(path); continue; }
+    const release = await lockTarget(root, basename(path));
+    try {
+      const removed = await remove(root, path, entry.fingerprint, join(store.root, 'quarantine'));
+      if (removed.quarantined) io.print(`Local changes at ${path} moved to ${removed.quarantined}.`);
+      await store.update((fresh) => { delete fresh.placements[path]; });
+    } finally { await release(); }
+    processed.push(path);
+  }
+  return processed;
 }
 
 function samePending(a: { op: string; id: string; team: string; scope: unknown }, b: { op: string; id: string; team: string; scope: unknown }): boolean { return a.op === b.op && a.id === b.id && a.team === b.team && sameScope(a.scope, b.scope); }

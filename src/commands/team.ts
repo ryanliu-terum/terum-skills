@@ -53,7 +53,7 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
     const [teamName, binding] = selectTeam(config.teams, args.team);
     if (!binding.handle) throw new Error(`This machine has no member handle for ${teamName}; run team join first.`);
     const targetHandle = parseOrExplain(handleSchema, args.handle, 'member handle');
-    if (targetHandle === binding.handle) throw new Error('You cannot remove yourself; use team leave when that command is available.');
+    if (targetHandle === binding.handle) throw new Error('You cannot remove yourself; run team leave <team> to leave this machine, or ask another admin to remove you.');
     const allowed = hostOperationAllowed(binding.remote, Boolean(args.archiveOnly));
     if (!allowed.ok) throw new Error(allowed.error);
     const clone = store.teamClone(teamName);

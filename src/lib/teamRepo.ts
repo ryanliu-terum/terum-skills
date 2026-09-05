@@ -94,7 +94,7 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
   // before anything is pushed, instead of two writers reset-and-committing over one working tree.
   let compromised = false;
   const release = await lockfile.lock(root, {
-    lockfilePath: join(dirname(root), `.${basename(root)}.safewrite.lock`),
+    lockfilePath: cloneLockPath(root),
     realpath: false,
     stale: options.lockStale ?? 60_000,
     retries: { retries: 10, minTimeout: 50, maxTimeout: 500 },
@@ -328,4 +328,29 @@ export async function cloneOrigin(root: string, runner: Runner = systemRunner): 
   } catch {
     return null;
   }
+}
+
+/** The per-clone writer lock's path — the one safeWrite holds; `team leave` takes it before removing the clone. */
+/**
+ * Bring a clone to `origin/main` the way safeWrite does — fetch, then hard reset. The clone is
+ * disposable state (§4.2), so a local `main` that drifted (a process killed between safeWrite's
+ * commit and its reset) heals here instead of wedging every later verb behind a fast-forward
+ * failure. Verb preflights (`publish`, `sync`) share this; `pull --ff-only` is never the right
+ * refresh for a clone we own (D5b, 2026-09-05 close-out walk).
+ */
+export async function refreshClone(runner: Runner, clone: string, options: { label?: string; env?: NodeJS.ProcessEnv } = {}): Promise<void> {
+  for (const args of [['fetch', 'origin'], ['reset', '--hard', 'origin/main']]) {
+    const result = await runner.run('git', args, { cwd: clone, env: options.env });
+    if (result.code !== 0) throw new Error(`Could not refresh ${options.label ?? clone}: ${(result.stderr || result.stdout).trim()}`);
+  }
+}
+
+export function cloneLockPath(root: string): string {
+  return join(dirname(root), `.${basename(root)}.safewrite.lock`);
+}
+
+/** Hold the per-clone writer lock while `action` runs; a second writer waits briefly, then fails rather than racing. */
+export async function withCloneLock<T>(root: string, action: () => Promise<T>): Promise<T> {
+  const release = await lockfile.lock(root, { lockfilePath: cloneLockPath(root), realpath: false, stale: 60_000, retries: { retries: 10, minTimeout: 50, maxTimeout: 500 }, onCompromised: () => undefined });
+  try { return await action(); } finally { await release().catch(() => undefined); }
 }

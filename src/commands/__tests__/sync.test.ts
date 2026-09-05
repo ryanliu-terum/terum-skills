@@ -60,10 +60,17 @@ describe('sync --hook (§3, §6)', () => {
     const stamp = join(store.root, 'run', 'team.stamp');
     await expect(access(stamp)).resolves.toBeUndefined();
     await writeFile(stamp, 'old');
-    const failing = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'pull' ? { code: 1, stdout: '', stderr: 'failed' } : next());
+    const failing = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'fetch' ? { code: 1, stdout: '', stderr: 'failed' } : next());
     expect((await run({ config: store, runner: failing }, new ScriptedPrompter())).ok).toBe(false);
     expect(await readFile(stamp, 'utf8')).toBe('old');
     void fixture;
+  });
+
+  it('heals a clone whose local main drifted instead of failing to fast-forward', async () => {
+    const { store, clone } = await configuredSkill();
+    await writeFile(join(clone, 'stray.txt'), 'local'); await git(['add', '--all'], clone); await git(['commit', '-q', '-m', 'local-only'], clone);
+    expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe((await git(['rev-parse', 'origin/main'], clone)).trim());
   });
 
   it('adopts or declines orphans interactively and only defers them in hook mode', async () => {

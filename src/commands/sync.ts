@@ -9,7 +9,7 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { allowedTools, parseJson, personSchema, sameScope } from '../lib/schema.js';
 import { endorsedCandidates, findSkill, readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
-import { openTeamRepo, treeText } from '../lib/teamRepo.js';
+import { openTeamRepo, refreshClone, treeText } from '../lib/teamRepo.js';
 import { materializeVersion } from '../lib/version.js';
 import { reconcileShared } from './share.js';
 import { installOne, skillAtSource } from './install.js';
@@ -39,8 +39,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
     const config = await store.read();
     for (const team of Object.keys(config.teams)) {
       const clone = store.teamClone(team);
-      const pull = await runner.run('git', ['pull', '--ff-only'], { cwd: clone, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {} });
-      if (pull.code !== 0) throw new Error(`Could not fast-forward ${team}: ${(pull.stderr || pull.stdout).trim()}`);
+      await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {} });
       await skillRecords(clone, team, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
       // Pending is intent, never inferred from the filesystem. A replay uses the same command
       // primitive; an unapproved hook replay is deferred rather than silently completed.

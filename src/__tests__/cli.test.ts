@@ -14,6 +14,8 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       invite: async (args) => { calls.push({ verb: 'invite', ...args }); return success({ team: 't', invited: [], already: [] }); },
       ls: async (args) => { calls.push({ verb: 'ls', ...args }); return success({ roster: [], skills: [] }); },
       readme: async (args) => { calls.push({ verb: 'readme', ...args }); return success({ changed: false }); },
+      publish: async (args) => { calls.push({ verb: 'publish', ...args }); return args.ref === 'fail' ? failure('nope') : success({ team: 't', id: 'id', name: args.ref, scope: { kind: 'global' as const }, policy: 'pr' as const, changed: false, branch: null, prUrl: null, compareUrl: null }); },
+      leave: async (args) => { calls.push({ verb: 'leave', ...args }); return args.name === 'fail' ? failure('nope') : success({ team: args.name, remote: 'r', handle: null, removed: 0, cloneRemoved: false }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     return { program, calls, outcomes };
@@ -91,5 +93,23 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(await parse(['team', 'remove', 'cy', '--team', 't'])).toEqual([{ verb: 'team', kind: 'remove', handle: 'cy', team: 't' }]);
     expect(await parse(['ls', '--team', 't'])).toEqual([{ verb: 'ls', kind: 'all', team: 't' }]);
     expect(await parse(['ls', '--team', 't', 'member', 'amy'])).toEqual([{ verb: 'ls', kind: 'member', value: 'amy', team: 't' }]);
+  });
+
+  it('wires publish (bare and with every flag) and team leave, and routes their failing Results to execute', async () => {
+    const { program, calls, outcomes } = harness();
+    await program.parseAsync(['publish', 'x'], { from: 'user' });
+    await program.parseAsync(['publish', 'x', '--project', 'p', '--team', 't'], { from: 'user' });
+    await program.parseAsync(['team', 'leave', 't'], { from: 'user' });
+    await program.parseAsync(['publish', 'fail'], { from: 'user' });
+    await program.parseAsync(['team', 'leave', 'fail'], { from: 'user' });
+    expect(calls).toEqual([
+      { verb: 'publish', ref: 'x' },
+      { verb: 'publish', ref: 'x', project: 'p', team: 't' },
+      { verb: 'leave', name: 't' },
+      { verb: 'publish', ref: 'fail' },
+      { verb: 'leave', name: 'fail' },
+    ]);
+    expect(Object.keys(calls[0] as object)).toEqual(['verb', 'ref']);
+    expect(outcomes).toEqual([true, true, true, false, false]);
   });
 });
