@@ -1,16 +1,17 @@
 export const meta = {
   name: 'ultrareview',
-  description: 'In-session multi-agent code-diff reviewer with per-stage model + cost knobs and quick/balanced/in-depth/max presets. Manifest -> Review (4 dims x file-batch) -> Dedup -> adversarial Verify -> Synthesize.',
+  description: 'In-session multi-agent code-diff reviewer with per-stage model + cost knobs and quick/balanced/in-depth/max presets. Manifest -> Review (4 dims x file-batch) -> Dedup -> adversarial Verify -> Triage (mechanical / clear / fork / declined) -> Synthesize.',
   phases: [
     { title: 'Manifest', detail: 'acquire the diff -> changed-file list' },
     { title: 'Review', detail: 'parallel reviewers across dimensions x file-batches, reading real files' },
     { title: 'Dedup', detail: 'merge the same defect reported by multiple dimensions, BEFORE paying to verify it' },
     { title: 'Verify', detail: 'adversarial verification per DISTINCT finding (full=3-vote; efficient lowers votes/scope)' },
-    { title: 'Synthesize', detail: 'merge, severity-rank, emit a review report' },
+    { title: 'Triage', detail: 'investigate each CONFIRMED finding: root cause, fix options, single-fix ratings, a patch when mechanical; the bucket is derived in code' },
+    { title: 'Synthesize', detail: 'merge, severity-rank, emit a review report (the triage buckets are appended verbatim)' },
   ],
 }
 
-// ultrareview + knobs. Invoke: Workflow({ scriptPath, args: '[<PR#>] [--working] [--no-fix] [--no-logs]
+// ultrareview + knobs. Invoke: Workflow({ scriptPath, args: '[<PR#>] [--working] [--no-triage] [--no-logs]
 //   [--efficient[=level]] [--verify=level] [--preset=quick|balanced|in-depth|max | --quick|--balanced|--in-depth|--max]
 //   [--model=<m>] [--review-model=<m>] [--verify-model=<m>] [--fable-review] [--codex-verify]' })
 // Cost levels: full|conservative|balanced|aggressive (verify depth). Models: opus|sonnet|haiku|fable per stage.
@@ -18,6 +19,8 @@ export const meta = {
 //   In that mode --verify-model selects the CODEX tier (sol|terra|luna) instead of a Claude model.
 // No --drift (ultrareview reviews the whole diff; cost dial trims verification only). --in-depth vs --max differ only by review model (sonnet vs opus) here, since costDrift is inert.
 // A Dedup stage sits between Review and Verify: it cuts REDUNDANCY, never depth (every distinct finding still gets the full vp.votes panel).
+// A Triage stage sits between Verify and Synthesize: one read-only agent per CONFIRMED finding investigates and RATES the fix;
+//   the bucket (mechanical / clear / fork / declined) is derived HERE from the ratings, never chosen by the agent. --no-triage (alias --no-fix) skips it.
 
 const FILES_PER_BATCH = 6
 const DIMENSIONS = [
@@ -37,15 +40,17 @@ const VERIFY_PARAMS = {
 // --- Parse args ---
 const RAW = (typeof args === 'string' ? args : '').trim()
 const TOKENS = RAW.split(/\s+/).filter(Boolean)
-// Fix proposal is ON by default; --no-fix opts out. (--fix still accepted, now a no-op.)
-// REVERSES the 2026-07-21 decision "ultra-review keeps --fix opt-in because code-review fix
-// proposals are more action-oriented and should not run by default" -- reversed deliberately by
-// Ryan 2026-07-30, do not silently re-flip. Grounds: every RECORDED run of this tool enabled
-// --fix anyway (2026-07-15 all three PRs; 2026-07-21 21:04 Ghost base), so opt-in was a tax, not
-// a guard. The action-oriented risk is real but lives at APPLY time, and is already gated twice --
+// Triage is ON by default; --no-triage opts out. --no-fix is kept as an ALIAS: the Triage stage
+// replaced the fix proposer on 2026-09-04 (Ryan), and triage is now the only source of patches.
+// The on-by-default stance carries over the 2026-07-30 reversal (Ryan) of the 2026-07-21 "fix
+// proposals stay opt-in" decision -- do not silently re-flip. Grounds then, still true: every
+// RECORDED run enabled proposals anyway (2026-07-15 all three PRs; 2026-07-21 21:04 Ghost base), so
+// opt-in was a tax, not a guard; the action-oriented risk lives at APPLY time and is gated twice --
 // the workflow only proposes, and the skill forbids applying without explicit user confirmation.
-// Matches /ultraspec, which flipped to --no-fix on 2026-07-02 for the same reason.
-const FIX = !TOKENS.includes('--no-fix')
+// Triage WIDENS the scope (every confirmed finding, not just critical/high) and adds the
+// mechanical / clear / fork / declined split; it does not loosen the apply gate.
+const TRIAGE = !(TOKENS.includes('--no-triage') || TOKENS.includes('--no-fix'))
+if (TOKENS.includes('--no-fix')) log('NOTE: --no-fix is an alias for --no-triage (the Triage stage replaced the fix proposer, 2026-09-04); skipping triage AND patches.')
 const NO_LOGS = TOKENS.includes('--no-logs')
 const WORKING = TOKENS.includes('--working')
 const PR = TOKENS.map(t => t.match(/^#?(\d+)$/)).filter(Boolean).map(m => m[1])[0] || null
@@ -182,18 +187,18 @@ const modelLabel = (m) => m || 'inherit'
 const LOW_CONFIDENCE = vp.votes < 2
 const verifyLabel = CODEX_VERIFY ? ('codex:' + CODEX_SLUG + '@' + CODEX_EFFORT + (CODEX_FAST ? '+fast' : '')) : modelLabel(VERIFY_MODEL)
 const MODE = {
-  verify: VERIFY_LEVEL, preset: presetName || null, codexVerify: CODEX_VERIFY,
+  verify: VERIFY_LEVEL, preset: presetName || null, codexVerify: CODEX_VERIFY, triage: TRIAGE,
   codex: CODEX_VERIFY ? { tier: CODEX_TIER, model: CODEX_SLUG, effort: CODEX_EFFORT, fast: CODEX_FAST } : null,
   models: { base: modelLabel(BASE_MODEL), review: modelLabel(REVIEW_MODEL), verify: verifyLabel },
 }
-log('Mode: ' + (CODEX_VERIFY ? 'HYBRID (claude finds -> codex verifies) | ' : '') + (presetName ? 'preset=' + presetName + ' -> ' : '') + 'verify=' + VERIFY_LEVEL + (FIX ? '' : ', NO-FIX') + (NO_LOGS ? ', no-logs' : '') + ' | models: base=' + modelLabel(BASE_MODEL) + ' review=' + modelLabel(REVIEW_MODEL) + ' verify=' + verifyLabel + (LOW_CONFIDENCE ? ' | LOW-CONFIDENCE (1-vote verify)' : ''))
+log('Mode: ' + (CODEX_VERIFY ? 'HYBRID (claude finds -> codex verifies) | ' : '') + (presetName ? 'preset=' + presetName + ' -> ' : '') + 'verify=' + VERIFY_LEVEL + (TRIAGE ? '' : ', NO-TRIAGE') + (NO_LOGS ? ', no-logs' : '') + ' | models: base=' + modelLabel(BASE_MODEL) + ' review=' + modelLabel(REVIEW_MODEL) + ' verify=' + verifyLabel + (LOW_CONFIDENCE ? ' | LOW-CONFIDENCE (1-vote verify)' : ''))
 // The hybrid STANDARD (Ryan, 2026-08-04): gpt-5.6-sol @ high, 3 surviving votes per finding,
 // relayFailures 0. Bare `--codex-verify` already resolves to exactly that; a preset can drop
 // below it (`--quick` -> medium effort, 1 vote), so say so out loud rather than letting a
 // thinner panel wear the same name in the report.
 if (CODEX_VERIFY && (vp.votes < 3 || CODEX_EFFORT === 'medium')) log('NOTE: OFF-STANDARD hybrid panel (' + CODEX_SLUG + '@' + CODEX_EFFORT + ', ' + vp.votes + ' vote(s)). The standard is sol@high x3 votes -- drop the preset flags to get it. Say which panel ran when you report the result.')
 // --model must never read as if it steered the verifier in hybrid mode.
-if (CODEX_VERIFY && EXPLICIT_MODEL) log('NOTE: --model=' + EXPLICIT_MODEL + ' applies to the CLAUDE stages only (manifest/review/dedup/synthesize); the verify panel runs on ' + CODEX_SLUG + '. Use --verify-model=sol|terra|luna to change it.')
+if (CODEX_VERIFY && EXPLICIT_MODEL) log('NOTE: --model=' + EXPLICIT_MODEL + ' applies to the CLAUDE stages only (manifest/review/dedup/triage/synthesize); the verify panel runs on ' + CODEX_SLUG + '. Use --verify-model=sol|terra|luna to change it.')
 
 // --- Helpers ---
 const tally = (arr) => arr.reduce((a, f) => { a[f.severity] = (a[f.severity] || 0) + 1; return a }, { critical: 0, high: 0, medium: 0, low: 0 })
@@ -280,16 +285,37 @@ const REPORT_SCHEMA = {
     }},
   },
 }
-const FIX_SCHEMA = {
-  type: 'object', required: ['edits'],
+// Triage verdict per CONFIRMED finding. The agent investigates, lists options, and RATES the
+// recommended one; it does NOT pick a bucket -- bucketOf() (Triage stage) derives that from the
+// ratings, so a rating cannot be bent toward a wanted outcome without the bend showing in the rating.
+const TRIAGE_SCHEMA = {
+  type: 'object',
+  required: ['rootCause', 'rootCauseLocation', 'disposition', 'options', 'recommended', 'oneClearlyWins', 'whyOneOrFork', 'difficulty', 'risk', 'scope'],
   properties: {
-    edits: { type: 'array', items: {
-      type: 'object', required: ['file', 'change'],
-      properties: { file: { type: 'string' }, line: { type: 'number' }, findingTitle: { type: 'string' }, change: { type: 'string' } },
+    rootCause: { type: 'string' },
+    rootCauseLocation: { type: 'string' },
+    disposition: { enum: ['fix', 'decline'] },
+    declineReason: { type: 'string' },
+    options: { type: 'array', items: {
+      type: 'object', required: ['name', 'change', 'depth', 'cost', 'winsIf'],
+      properties: { name: { type: 'string' }, change: { type: 'string' }, depth: { type: 'number' }, cost: { type: 'number' }, winsIf: { type: 'string' } },
     }},
-    patchMarkdown: { type: 'string' },
+    recommended: { type: 'number' },
+    oneClearlyWins: { type: 'boolean' },
+    whyOneOrFork: { type: 'string' },
+    difficulty: { enum: ['trivial', 'moderate', 'hard'] },
+    risk: { enum: ['low', 'medium', 'high'] },
+    scope: { enum: ['isolated', 'pattern'] },
+    patternDetail: { type: 'string' },
+    patch: { type: 'string' },
   },
 }
+const BUCKETS = ['mechanical', 'clear', 'fork', 'declined', 'untriaged']
+const emptyTriage = (skipped) => ({
+  enabled: TRIAGE, skipped,
+  counts: Object.fromEntries(BUCKETS.map(b => [b, 0])),
+  buckets: Object.fromEntries(BUCKETS.map(b => [b, []])),
+})
 
 // --- Phase 1: Manifest (diff acquisition) ---
 phase('Manifest')
@@ -490,8 +516,9 @@ if (unverified.length > 0) log('NOTE: ' + unverified.length + ' finding(s) liste
 const emptyStats = { verify: VERIFY_LEVEL, changedFiles: changedFiles.length, reviewers: reviewResults.length, rawFindings: allFindings.length, distinctFindings: findings.length, mergedAway }
 if (findings.length === 0) {
   return {
-    target: manifest.target, mode: MODE_KIND, modeDetail: MODE, baseRef: manifest.baseRef, fixMode: FIX, noLogs: NO_LOGS,
+    target: manifest.target, mode: MODE_KIND, modeDetail: MODE, baseRef: manifest.baseRef, triageMode: TRIAGE, noLogs: NO_LOGS,
     summary: 'Clean: ' + manifest.target + ' raised no findings across ' + reviewResults.length + ' reviewers (' + changedFiles.length + ' files).',
+    triage: emptyTriage('no findings'),
     reportMarkdown: '# ultrareview: ' + manifest.target + '\n\n**Verdict:** clean. No correctness, security, invariant, or reuse findings across ' + changedFiles.length + ' changed files.\n',
     counts: { critical: 0, high: 0, medium: 0, low: 0 },
     topFindings: [], confirmedFindings: [], contestedFindings: [], droppedFindings: [], unverifiedFindings: [],
@@ -664,7 +691,100 @@ const contested = verified.filter(f => f.verdict === 'contested')
 const killed = verified.filter(f => f.verdict === 'killed')
 log('Verify: ' + confirmed.length + ' confirmed, ' + contested.length + ' contested, ' + killed.length + ' dropped')
 
-// --- Phase 4: Synthesize ---
+// --- Phase 4: Triage (investigate each CONFIRMED finding; sort into mechanical / clear / fork / declined) ---
+// Replaced the fix proposer 2026-09-04 (Ryan). The proposer patched only critical/high and left
+// every other confirmed finding for the human to investigate by hand -- and after every recorded
+// run (2026-08-20, 2026-08-22, 2026-09-04) Ryan did the same split by hand: "these are mechanical,
+// apply them; these are clear, do them; these need a product decision". This stage does the
+// per-finding investigation and the SPLIT, in code. The agent RATES; the bucket is DERIVED here
+// from the ratings (single-fix Phase 2: commit to the ratings, THEN evaluate the gate -- never
+// rate toward a wanted bucket, and never let the agent pick its own bucket).
+//
+//   declined    the agent, applying the skill's step-4 adjudication rules, says do not fix: a
+//               settled deferral (cited), a load-bearing convention (cited), or not a defect on
+//               inspection. Surfaced WITH the citation; the human can overrule. A decline with
+//               no reason is not a decline -- it lands untriaged. Convention alone ("matches the
+//               siblings / pre-existing") is never a reason: the standalone test applies.
+//   fork        no single fix clearly wins: a real depth-vs-cost trade-off, or it hinges on a
+//               product/design decision the code cannot settle. Goes to /decision-walk with its
+//               options; never decided here (2026-09-03 lesson: autonomous batch decisions in
+//               place of the human walk was the failure pattern). A fork stays a fork even when
+//               the recommended option happens to be trivial and comes with a patch.
+//   mechanical  one fix clearly wins AND trivial + low risk + isolated (the single-fix auto-fix
+//               gate, verbatim) AND a concrete patch was supplied. Batch-appliable on one confirm.
+//   clear       one fix clearly wins but it is not mechanical: moderate/hard, shared code, a
+//               pattern with siblings to sweep -- or rated mechanical with no patch supplied.
+//   untriaged   the triage agent died, returned nothing, or returned something unusable. Fail
+//               visible; never silently dropped -- conservation is by index, see below.
+//
+// Skipped, with a NOTE, when: --no-triage; the files are not on disk (an un-checked-out PR cannot
+// be investigated, and a confident patch built from diff text alone is worse than none); or the
+// hybrid panel is invalid (relayFailures > 0 -- nothing from an invalid run is adjudicated, so
+// triaging it would only produce output the skill must then ignore). CONFIRMED findings only:
+// contested/unverified are not real yet, and a same-model triage of a cross-model split would
+// quietly re-adjudicate the very thing the panel exists to decide.
+//
+// Runs on REVIEW_MODEL, not BASE_MODEL: triage reads code and reasons about fixes the way a finder
+// does, and the cross-model value lives in *verification* -- triage on Claude is the recorded
+// preference (2026-08-01: point Codex at conclusions, not at discovery or bug triage).
+const AUTO_FIX_GATE = (t) => t.difficulty === 'trivial' && t.risk === 'low' && t.scope === 'isolated'
+const nonEmpty = (s) => typeof s === 'string' && s.trim().length > 0
+const bucketOf = (t) => {
+  if (!t) return 'untriaged'
+  if (t.disposition === 'decline') return nonEmpty(t.declineReason) ? 'declined' : 'untriaged'
+  const opts = Array.isArray(t.options) ? t.options : []
+  if (!opts.length || !Number.isInteger(t.recommended) || t.recommended < 0 || t.recommended >= opts.length) return 'untriaged'
+  if (!t.oneClearlyWins) return 'fork'
+  return AUTO_FIX_GATE(t) && nonEmpty(t.patch) ? 'mechanical' : 'clear'
+}
+const TRIAGE_PROMPT = (f) =>
+  '## Finding Triage (ultrareview)\n\n' +
+  'Review target: ' + manifest.target + ' (mode ' + MODE_KIND + ', base ' + manifest.baseRef + ').\n' +
+  'This finding SURVIVED ' + vp.votes + '-vote adversarial verification (' + (CODEX_VERIFY ? 'Codex' : 'Claude') + ' panel, vote ' + (f.validVotes - f.refutedVotes) + '-' + f.refutedVotes + '). Do not re-litigate whether it is real. Investigate HOW to fix it and whether one fix clearly wins. Read-only: do NOT edit anything.\n\n' +
+  '## Finding\nDimension: ' + f.dimension + '\nSeverity: ' + f.severity + '\nFile: ' + f.file + (f.line ? ':' + f.line : '') + '\nTitle: ' + f.title + '\nEvidence: ' + f.evidence + '\n' + (f.suggestion ? 'Reviewer suggestion (a hypothesis, not the answer): ' + f.suggestion + '\n' : '') + '\n' +
+  '## Step 1 -- investigate\n' + DIFF_HOWTO() + ' Read the cited file at the cited line plus enough context (callers, callees, the collocated test) to name the root cause as file:line and say WHY the code produces the defect. Grep for sibling call-sites that share the pattern.\n\n' +
+  '## Step 2 -- disposition\n' +
+  'Default `fix`. Set `decline` ONLY for: (a) a settled deferral explicitly recorded in PRODUCT-CONCERNS.md or a `.planning/debug/**/*.deferred.md` entry -- cite which; (b) an intentional choice with a concrete LOAD-BEARING reason you can cite, such that deviating would itself be a bug (a code comment explaining why counts -- read above and below the line); (c) on inspection it is not a defect -- quote exactly what you found. "It matches the other call-sites / it is pre-existing" is NOT a reason: apply the standalone test (would this be wrong or fragile as the ONLY place doing it?) -- if yes, it is a fix with scope=pattern, not a decline. Put the citation in declineReason; a decline without one is discarded.\n\n' +
+  '## Step 3 -- options (1-3, best first; do NOT manufacture alternatives -- one sensible fix means one option)\n' +
+  'Each option: name; change (what and where, concretely); depth 0-4 = how much of the problem it removes (0 hides the symptom, 2 fixes this site, 4 removes the cause everywhere); cost 0-4 (0 minutes, code-only, plain revert; 1 an hour, few callers, revert-safe; 2 shared code, a migration, or a prod apply; 3 migration plus backfill, or many callers newly able to throw; 4 multi-repo, or only confirmable against prod data); winsIf = the specific condition under which THIS option beats the recommended one (for the recommended option itself: the condition under which it wins, one line). Never add or average depth and cost.\n' +
+  '`recommended` = 0-based index into options. `oneClearlyWins` = true when the recommended option dominates: no alternative beats it on an axis that matters here, or every alternative is strictly worse. false when a real trade-off remains (more depth only at real cost, with no obvious answer) OR the right choice hinges on a product/design decision the code cannot settle. Say which in whyOneOrFork, in plain English a non-engineer could decide from.\n\n' +
+  '## Step 4 -- rate the RECOMMENDED option (definitions mirror .claude/skills/single-fix/SKILL.md Phase 1 Q2-Q4; keep them in sync)\n' +
+  'difficulty: trivial = ~1-10 line mechanical change (wrong field name, missing null check, wrong boolean/enum, off-by-one, missing await, swapped args, typo in a string key); moderate = 10-50 lines, needs design thought, or coordinated changes across functions/files; hard = architectural, unclear fix boundary, new abstraction, or the right fix is debatable.\n' +
+  'risk: low = one expression changed or a check added, no callers affected, no behavior change for non-buggy inputs; medium = few callers that need verification, additive but touches shared code; high = many callers, shared state, removes/restructures paths, or ordering/timing invariants.\n' +
+  'scope: isolated = this code path only, fixing here is complete; pattern = the same mistake likely exists elsewhere -- name every location you found in patternDetail (that list is the sweep worklist).\n' +
+  'Commit to the ratings on their merits. Do NOT adjust them to land the finding in a bucket -- the bucket is computed from them afterwards, and a mis-rated "trivial" gets applied without a human reading it.\n\n' +
+  '## Step 5 -- patch (ONLY when trivial + low + isolated; otherwise leave patch empty)\n' +
+  'A unified diff for the recommended option: `--- a/<file>` / `+++ b/<file>` header, @@ hunks, removed lines copied EXACTLY from the file as read. Include the collocated test change when one is needed. This is a proposal -- nothing is applied here.\n\n' +
+  'Structured output only.'
+
+const triageSkip = !TRIAGE ? '--no-triage'
+  : !filesOnDisk ? 'files not on disk (un-checked-out PR) -- check out the branch and re-run to get triage + patches'
+  : (CODEX_VERIFY && relayFailures > 0) ? 'INVALID hybrid panel (relayFailures ' + relayFailures + ') -- nothing from this run is adjudicated'
+  : !confirmed.length ? 'no confirmed findings'
+  : null
+const buckets = Object.fromEntries(BUCKETS.map(b => [b, []]))
+if (triageSkip) {
+  log('NOTE: Triage skipped -- ' + triageSkip + '.')
+} else {
+  phase('Triage')
+  const results = await parallel(confirmed.map((f) => () =>
+    agent(TRIAGE_PROMPT(f), withModel({ label: 't:' + f.title.slice(0, 30), phase: 'Triage', schema: TRIAGE_SCHEMA, agentType: 'Explore' }, REVIEW_MODEL))
+  ))
+  // Conservation by INDEX: parallel() resolves a dead thunk to null IN PLACE, so results[i] is
+  // always confirmed[i]'s verdict-or-nothing. Every confirmed finding lands in exactly one bucket.
+  confirmed.forEach((f, i) => {
+    const t = results[i] || null
+    const bucket = bucketOf(t)
+    if (!t) log('  UNTRIAGED "' + clip(f.title, 44) + '": triage agent returned nothing')
+    else if (bucket === 'untriaged') log('  UNTRIAGED "' + clip(f.title, 44) + '": ' + (t.disposition === 'decline' ? 'decline with no cited reason' : 'no usable options / recommended index'))
+    else if (bucket === 'clear' && AUTO_FIX_GATE(t)) log('  NOTE "' + clip(f.title, 44) + '": rated trivial/low/isolated but no patch supplied -> clear, not mechanical')
+    f.triage = { ...(t || {}), bucket }
+    buckets[bucket].push(f)
+  })
+  log('Triage: ' + confirmed.length + ' confirmed -> ' + buckets.mechanical.length + ' mechanical, ' + buckets.clear.length + ' clear, ' + buckets.fork.length + ' fork, ' + buckets.declined.length + ' declined' + (buckets.untriaged.length ? ', ' + buckets.untriaged.length + ' UNTRIAGED' : ''))
+}
+
+// --- Phase 5: Synthesize ---
 phase('Synthesize')
 const dupTag = (f) => (f.dupCount > 1 ? '   Merged: ' + f.dupCount + ' reviewer reports across ' + (f.dupDimensions || []).join(' / ') : '')
 const findingsBlock = confirmed.map((f, i) =>
@@ -703,18 +823,49 @@ const report = await agent(
   withModel({ label: 'synthesize', phase: 'Synthesize', schema: REPORT_SCHEMA, agentType: 'Explore' }, BASE_MODEL)
 )
 
-const slimMap = (f) => ({ severity: f.severity, dimension: f.dimension, dimKey: f.dimKey, title: f.title, file: f.file, line: f.line, evidence: f.evidence, suggestion: f.suggestion, vote: (f.validVotes - f.refutedVotes) + '-' + f.refutedVotes, dupCount: f.dupCount, dupDimensions: f.dupDimensions, dupDimKeys: f.dupDimKeys })
+const slimMap = (f) => ({ severity: f.severity, dimension: f.dimension, dimKey: f.dimKey, title: f.title, file: f.file, line: f.line, evidence: f.evidence, suggestion: f.suggestion, vote: (f.validVotes - f.refutedVotes) + '-' + f.refutedVotes, dupCount: f.dupCount, dupDimensions: f.dupDimensions, dupDimKeys: f.dupDimKeys, triage: f.triage })
 const slimConfirmed = confirmed.map(slimMap)
 const slimContested = contested.map(slimMap)
 const slimKilled = killed.map(slimMap)
 const slimUnverified = unverified.map(f => ({ severity: f.severity, dimension: f.dimension, title: f.title, file: f.file, line: f.line, evidence: f.evidence, dupCount: f.dupCount }))
 const stats = { ...emptyStats, verified: verified.length, confirmed: confirmed.length, contested: contested.length, dropped: killed.length, unverified: unverified.length, codexVerify: CODEX_VERIFY, relayFailures, expectedVotes: toVerify.length * vp.votes, panelValid: !CODEX_VERIFY || relayFailures === 0 }
 
+// --- Triage section: built HERE, deterministically, and appended AFTER synthesis ---
+// Never handed to the synthesizer: it is known to drop lines it was told to echo (see the banner
+// re-insertion above), and a dropped patch or a dropped fork is exactly the kind of silent loss
+// this stage exists to prevent. The Forks section is written in /decision-walk's input shape.
+const loc = (f) => '`' + f.file + (f.line ? ':' + f.line : '') + '`'
+const optLine = (o, i, rec) => '  - ' + (i === rec ? '**' : '') + 'Option ' + (i + 1) + ': ' + o.name + (i === rec ? ' (recommended)**' : '') + ' — Depth ' + o.depth + '/4 · Cost ' + o.cost + '/4. ' + o.change + ' *Wins if:* ' + o.winsIf
+const item = (f) => '- **' + f.severity + ' — ' + f.title + '** — ' + loc(f) + '\n  - Root cause: ' + (f.triage.rootCause || '?') + ' (' + (f.triage.rootCauseLocation || '?') + ')'
+const ratings = (t) => t.difficulty + ' / ' + t.risk + ' risk / ' + t.scope + (t.scope === 'pattern' && nonEmpty(t.patternDetail) ? ' — siblings: ' + t.patternDetail : '')
+const section = (title, list, body) => '\n### ' + title + ' (' + list.length + ')\n\n' + (list.length ? list.map(body).join('\n') + '\n' : '_none_\n')
+const triageMarkdown = triageSkip
+  ? '\n## Triage\n\n_Skipped: ' + triageSkip + '._\n'
+  : '\n## Triage — ' + confirmed.length + ' confirmed → ' + buckets.mechanical.length + ' mechanical · ' + buckets.clear.length + ' clear · ' + buckets.fork.length + ' fork · ' + buckets.declined.length + ' declined' + (buckets.untriaged.length ? ' · ' + buckets.untriaged.length + ' UNTRIAGED' : '') + '\n\n' +
+    'Buckets are derived in code from each finding\'s ratings (single-fix gate: trivial + low risk + isolated + patch = mechanical). NOTHING here has been applied.\n' +
+    section('Mechanical — one fix, trivial / low-risk / isolated, patch supplied; batch-apply on ONE confirmation', buckets.mechanical,
+      (f) => item(f) + '\n  - Fix: ' + f.triage.options[f.triage.recommended].change + '\n\n```diff\n' + f.triage.patch.trim() + '\n```\n') +
+    section('Clear — one fix clearly wins, but not mechanical; confirm each, or hand to /parallel-fix', buckets.clear,
+      (f) => item(f) + '\n  - Rated: ' + ratings(f.triage) + '\n  - Why one fix: ' + f.triage.whyOneOrFork + '\n' + f.triage.options.map((o, i) => optLine(o, i, f.triage.recommended)).join('\n')) +
+    section('Forks — no single fix clearly wins; run `/decision-walk <this report>`', buckets.fork,
+      (f) => item(f) + '\n  - Why it is a fork: ' + f.triage.whyOneOrFork + '\n' + f.triage.options.map((o, i) => optLine(o, i, f.triage.recommended)).join('\n')) +
+    section('Declined by triage — overrule if you disagree (the standalone test applies)', buckets.declined,
+      (f) => item(f) + '\n  - Reason: ' + f.triage.declineReason) +
+    section('Untriaged — the triage agent returned nothing usable; investigate by hand or resume the run', buckets.untriaged,
+      (f) => '- **' + f.severity + ' — ' + f.title + '** — ' + loc(f))
+const slimTriage = (f) => ({ ...slimMap(f) })
+const triage = {
+  enabled: TRIAGE, skipped: triageSkip,
+  counts: Object.fromEntries(BUCKETS.map(b => [b, buckets[b].length])),
+  buckets: Object.fromEntries(BUCKETS.map(b => [b, buckets[b].map(slimTriage)])),
+}
+
 if (!report) {
   return {
-    target: manifest.target, mode: MODE_KIND, modeDetail: MODE, baseRef: manifest.baseRef, fixMode: FIX, noLogs: NO_LOGS,
+    target: manifest.target, mode: MODE_KIND, modeDetail: MODE, baseRef: manifest.baseRef, triageMode: TRIAGE, noLogs: NO_LOGS,
     error: 'Synthesis failed -- returning verified findings raw.',
-    counts: tally(confirmed), confirmedFindings: slimConfirmed, contestedFindings: slimContested, droppedFindings: slimKilled, unverifiedFindings: slimUnverified, stats,
+    counts: tally(confirmed), triage, triageMarkdown,
+    confirmedFindings: slimConfirmed, contestedFindings: slimContested, droppedFindings: slimKilled, unverifiedFindings: slimUnverified, stats,
   }
 }
 if (banner && report.reportMarkdown) {
@@ -722,36 +873,10 @@ if (banner && report.reportMarkdown) {
   const missing = banners.filter(b => !report.reportMarkdown.includes(b.slice(2, 26)))
   if (missing.length) report.reportMarkdown = report.reportMarkdown.replace(/^(#[^\n]*\n)/, '$1\n' + missing.join('\n') + '\n')
 }
-
-// --- Fix proposer (ON by default, --no-fix opts out; proposes only, NEVER applies) ---
-// Skipped entirely when the files are not on disk: on an un-checked-out PR the reviewers are
-// explicitly told "review from the diff text alone", but this stage's prompt says "Read each
-// file to get exact surrounding code" -- so it would propose old->new edits against code it
-// could not read, at line numbers it could not confirm. A confidently-formatted patch built
-// from diff text alone is worse than no patch. Check out the PR branch to get proposals.
-let proposedFix = null
-if (FIX && !filesOnDisk) {
-  log('NOTE: skipping fix proposals -- files are not on disk (un-checked-out PR), so patches could not be verified against real code. Check out the PR branch and re-run to get them.')
-  proposedFix = { edits: [], patchMarkdown: '_Fix proposals skipped: the PR head branch is not checked out, so patches could not be built against real file contents. Check out the branch and re-run._' }
-} else if (FIX) {
-  const fixable = confirmed.filter(f => f.severity === 'critical' || f.severity === 'high')
-  if (fixable.length) {
-    phase('Synthesize')
-    proposedFix = await agent(
-      '## Fix Proposer (ultrareview)\n\n' +
-      'Review target: ' + manifest.target + '\n\n' +
-      'Propose concrete patches to resolve these confirmed critical/high findings. Read each file to get exact surrounding code. Do NOT apply anything -- only propose.\n\n' +
-      '## Findings\n' + fixable.map(f => '- (' + f.severity + ') ' + f.title + ' @ ' + f.file + (f.line ? ':' + f.line : '') + ' :: ' + f.evidence).join('\n') + '\n\n' +
-      'For each: file, line, findingTitle, and the precise change (old code -> new code). Also a patchMarkdown summarizing all edits.\n\nStructured output only.',
-      withModel({ label: 'propose-fix', phase: 'Synthesize', schema: FIX_SCHEMA, agentType: 'Explore' }, BASE_MODEL)
-    )
-  } else {
-    proposedFix = { edits: [], patchMarkdown: '_No confirmed critical/high findings qualified for a patch proposal._' }
-  }
-}
+if (report.reportMarkdown) report.reportMarkdown = report.reportMarkdown.replace(/\s*$/, '\n') + triageMarkdown
 
 return {
-  target: manifest.target, mode: MODE_KIND, modeDetail: MODE, baseRef: manifest.baseRef, fixMode: FIX, noLogs: NO_LOGS,
-  ...report, proposedFix,
+  target: manifest.target, mode: MODE_KIND, modeDetail: MODE, baseRef: manifest.baseRef, triageMode: TRIAGE, noLogs: NO_LOGS,
+  ...report, triage, triageMarkdown,
   confirmedFindings: slimConfirmed, contestedFindings: slimContested, droppedFindings: slimKilled, unverifiedFindings: slimUnverified, stats,
 }

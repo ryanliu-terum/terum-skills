@@ -15,10 +15,10 @@ live in git so a teammate inherits them on clone. Only machine-specific paths, p
 |---|---|---|
 | single-fix | `/single-fix` | Triage one bug through the 4-question diagnosis; auto-fix trivial/safe/isolated, escalate the rest with a briefing. |
 | parallel-fix | skill | Fix many bugs from existing bug logs in parallel worktrees after a review. |
-| ultrareview | `/ultrareview` | In-session multi-agent code-diff reviewer, 4 dimensions, 3-vote adversarial verify. Engine: `workflows/ultrareview.js`. |
-| hybrid-review | skill | Same review, but the verify panel runs on OpenAI Codex so verifiers don't share the finders' blind spots. |
+| ultrareview | `/ultrareview` | In-session multi-agent code-diff reviewer, 4 dimensions, 3-vote adversarial verify, then a triage of every confirmed finding into mechanical / clear / fork / declined. Engine: `workflows/ultrareview.js`. |
+| hybrid-review | skill | Same review + triage, but the verify panel runs on OpenAI Codex so verifiers don't share the finders' blind spots. |
 | codex-implement | skill | Hand a locked spec to Codex CLI in an isolated worktree, then verify the diff here. |
-| codex-spec | `/codex-spec` | Spec auditor with Codex finders and a Claude verify panel (mirror of hybrid-review). |
+| codex-spec | `/codex-spec` | Spec auditor with Codex finders and a Claude verify panel (mirror of hybrid-review), then the same mechanical / clear / fork / declined triage. |
 | decision-walk | `/decision-walk` | Walk surfaced decisions to LOCK / GATE / DEFER / DELEGATE, written to a committed ledger. |
 | spec-readable | skill | Plain-English companion for a dense spec, written to `.planning/spec_readable/`. |
 | handoff | skill | Snapshot working context into `.claude/handoff.md` before `/clear`; `hooks/handoff-resume-marker.js` stamps it on read. |

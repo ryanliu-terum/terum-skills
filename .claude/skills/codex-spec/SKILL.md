@@ -1,6 +1,6 @@
 ---
 name: codex-spec
-description: Cross-model spec auditor. Same four dimensions as /ultraspec (cross-spec drift, spec-vs-code reality, internal quality, build-readiness), but the FINDERS run on OpenAI Codex and the adversarial verify panel runs on Claude — the mirror image of /hybrid-review. Use when a spec was written by Claude and you want it reviewed by something that does not share the author's blind spots, especially before handing it to /codex-implement. Args: <path-to-spec> [--dims <list>] [--tier sol|terra|luna] [--effort <level>] [--verify full|conservative|balanced|aggressive] [--drift-cap N] [--batch N] [--concurrency N] [--timeout <ms>].
+description: Cross-model spec auditor. Same four dimensions as /ultraspec (cross-spec drift, spec-vs-code reality, internal quality, build-readiness), but the FINDERS run on OpenAI Codex and the adversarial verify panel runs on Claude — the mirror image of /hybrid-review. Use when a spec was written by Claude and you want it reviewed by something that does not share the author's blind spots, especially before handing it to /codex-implement. The default flow ends in a triage: every confirmed finding is investigated and sorted into mechanical / clear / fork / declined (with a diff for the mechanical ones), so the run finishes with "apply this batch on one confirmation, confirm these one by one, walk these forks" — never with an autonomous spec rewrite. Args: <path-to-spec> [--dims <list>] [--tier sol|terra|luna] [--effort <level>] [--verify full|conservative|balanced|aggressive] [--drift-cap N] [--batch N] [--concurrency N] [--timeout <ms>] [--no-triage].
 ---
 
 Audit a planning spec with **Codex finding and Claude verifying**.
@@ -96,13 +96,13 @@ only checks the arg is non-empty, not that the file is there.
 Workflow({ scriptPath: ".claude/workflows/codex-spec-verify.js",
            args: { specPath, findingsPath, specTitle, generatedBy, finderFailures,
                    index: [{ i, dimension, severity, title }, …],
-                   verify: "conservative" } })
+                   verify: "conservative", triage: true } })
 ```
 
 Build `index` from `findings.json` — one entry per finding, in order, carrying **only** `i`,
 `dimension`, `severity`, `title`.
 
-> **Never put `evidence` or `suggestion` in `args`.** The verify agents read them from
+> **Never put `evidence` or `suggestion` in `args`.** The verify and triage agents read them from
 > `findingsPath` themselves. Evidence quotes the spec and must match it byte-for-byte to be
 > checkable, and a model asked to copy a finding array verbatim rewrites it — measured 2026-08-01:
 > 26 of 26 curly quotes converted to ASCII despite an explicit instruction to preserve them, while
@@ -112,24 +112,73 @@ Build `index` from `findings.json` — one entry per finding, in order, carrying
 Knobs: `verify` (`full` 3-vote / `conservative` 2-vote / `balanced` and `aggressive` 1-vote — the
 cap and the per-dimension floor move with it: 30/4, 20/3, 12/2, 8/1), `floor` (verify slots
 guaranteed to each of the three non-drift dimensions), `driftFraction` (drift's max share of the
-cap, default 0.5), `verifyModel`, `model`.
+cap, default 0.5), `verifyModel`, `model`, and `triage` (default `true`; `--no-triage` on the
+command line → `triage: false`).
+
+**The Triage stage** (on by default, Ryan 2026-09-04) runs after verification, on Claude, one
+read-only agent per CONFIRMED finding: it reads the finding from `findingsPath` by index, reads
+the cited section *and every other place the spec states the same rule*, decides fix-vs-decline
+(with a citation), lists 1-3 resolution options with Depth/Cost/Wins-if, and rates the recommended
+one on the `/single-fix` scale with a spec twist — a rule stated in more than one place is
+`pattern`, never `isolated` (2026-09-03: a rule stated twice was fixed once and left superseded in
+the other place). The bucket is derived in code from the ratings, never chosen by the agent:
+`mechanical` (one resolution, trivial + low-risk + stated once, diff supplied), `clear` (one
+resolution, but text must be authored or sections move together), `fork` (hinges on a
+product/design decision the spec and its ledger have not made), `declined` (cited), `untriaged`
+(agent died). Contested and unverified findings are never triaged.
 
 ## Step 4 — report
 
 1. Write `reportMarkdown` to `.planning/specs/reviews/<basename>.codex-spec.review.md`. The
    `.codex-spec.` infix matters — it must not overwrite an `/ultraspec` report on the same spec;
-   comparing the two is a large part of the value.
-2. Inline summary: the severity-count table (CONFIRMED only) and `topFindings`.
-3. **State that the finders were Codex and the verifiers were Claude.** A reader comparing this to
-   an `/ultraspec` report on the same spec must know the panel changed, or they will read a
-   difference in confirmed counts as a change in the spec.
+   comparing the two is a large part of the value. The `## Triage` section is appended by the
+   workflow itself (in code, not by the synthesizer), so the saved report carries the buckets, the
+   mechanical diffs, and the forks in `/decision-walk`'s input shape.
+2. Inline summary: the severity-count table (CONFIRMED only) and `topFindings`, then the triage
+   line from `triage.counts`: `Triage: N confirmed → a mechanical · b clear · c fork · d declined
+   (· e UNTRIAGED)`. If `triage.skipped` is set, say why — a missing triage must never read as
+   "nothing to do".
+3. **State that the finders were Codex and the verifiers (and triagers) were Claude.** A reader
+   comparing this to an `/ultraspec` report on the same spec must know the panel changed, or they
+   will read a difference in confirmed counts as a change in the spec.
 4. Surface `contestedFindings` (panel split — needs human adjudication) and `unverifiedFindings`
-   (beyond the cap). Never fold either into the counts.
+   (beyond the cap). Never fold either into the counts, and never triage them by hand as if they
+   were confirmed.
 5. If `mode.votes < 2`, say plainly that findings were single-verifier checked and are not a trust
    gate.
 6. Report the saved path.
 
-Do not apply any suggested fix without explicit confirmation.
+## Step 5 — act on the buckets (the default ending)
+
+Print the `## Triage` section — or point at it in the saved report when it is long — under an
+explicit **"Triage — NOTHING APPLIED YET"** heading, then:
+
+- **Mechanical** — ask ONE question: "Apply all N?" with the titles listed; the user may pick a
+  subset. Only on an explicit yes: apply each diff with the Edit tool using the removed lines as the
+  exact `old_string`. If the old text does not match, the diff's punctuation was normalized in
+  transit — re-read the section and apply by hand; never "fix" the spec's quotes or dashes to make
+  a patch match. After applying, grep the spec once more for each touched rule's key terms (the
+  `scope: pattern` rating guards against the twice-stated-rule failure; this grep is the belt to
+  that brace). Bump the spec's revision line if it carries one. One commit.
+- **Clear** — present each with its root cause, the recommended option (Depth/Cost/Wins-if) and
+  ratings, and the other places it is stated if `pattern`. Confirm one at a time; draft the text
+  and show it before writing it.
+- **Forks** — do NOT resolve them. Offer
+  `/decision-walk .planning/specs/reviews/<basename>.codex-spec.review.md`; the Forks section is
+  already in decision-walk's input shape. The 2026-09-03 audit loop went wrong at exactly this
+  point — autonomous batch decisions in place of the human walk — so a fork resolved without the
+  user's pick is a defect in the run, not a time saving. If the user wants to decide inline,
+  present each fork plain-English-first per CLAUDE.md's escalation-briefing style and record their
+  pick; never pick silently.
+- **Declined** — the cited reason is printed; overrule if you disagree (then treat as clear).
+- **Untriaged** — investigate by hand, or resume the verify workflow with `resumeFromRunId` so
+  only the dead triage agents re-execute.
+
+Then, if anything beyond the mechanical batch changed, re-run `/codex-spec` on the revised spec
+before calling it build-ready — the existing cadence.
+
+Do not apply any suggested fix without explicit confirmation — the triage stage proposes; only
+you, on the user's word, apply.
 
 ## Known risks to watch
 

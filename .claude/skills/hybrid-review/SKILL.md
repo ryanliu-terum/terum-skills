@@ -1,6 +1,6 @@
 ---
 name: hybrid-review
-description: Cross-model code-diff reviewer. Same 4-dimension review as /ultrareview, but the adversarial verify panel runs on OpenAI Codex instead of Claude, so the verifiers do not share the finders' blind spots. Use when a diff matters enough that a false positive surviving verification would cost real time — live auth/RLS/contract changes, pre-merge gates, or any batch where /ultrareview's findings felt over-confident. Args: same as /ultrareview — [<PR#>] [--working] [--no-fix] [--no-logs] + knobs/presets (--quick|--balanced|--in-depth|--max; --model/--review-model; --efficient/--verify) — except --verify-model, which here selects the Codex tier (sol|terra|luna) rather than a Claude model. Plus --fast (hybrid-only) for Codex Fast mode — a no-op as of 2026-09-04 (no measured speedup on exec or on the interactive app-server path; openai/codex#32191); same model, effort, and panel.
+description: Cross-model code-diff reviewer. Same 4-dimension review as /ultrareview, but the adversarial verify panel runs on OpenAI Codex instead of Claude, so the verifiers do not share the finders' blind spots. Use when a diff matters enough that a false positive surviving verification would cost real time — live auth/RLS/contract changes, pre-merge gates, or any batch where /ultrareview's findings felt over-confident. Args: same as /ultrareview — [<PR#>] [--working] [--no-triage] [--no-logs] + knobs/presets (--quick|--balanced|--in-depth|--max; --model/--review-model; --efficient/--verify) — except --verify-model, which here selects the Codex tier (sol|terra|luna) rather than a Claude model. Plus --fast (hybrid-only) for Codex Fast mode — a no-op as of 2026-09-04 (no measured speedup on exec or on the interactive app-server path; openai/codex#32191); same model, effort, and panel. The default flow ends in a triage: every confirmed finding is investigated and sorted into mechanical / clear / fork / declined, with a patch for the mechanical ones — nothing is applied without your confirmation.
 ---
 
 Run the multi-agent code-diff reviewer with a **cross-model verify panel**: Claude finds, Codex verifies.
@@ -122,7 +122,7 @@ does not recognize, so translate intent → canonical args here rather than pass
 | a specific GitHub PR ("PR 109", "review 109 from the remote") | the bare number, e.g. `109` |
 | uncommitted/staged work ("my working tree", "uncommitted edits") | `--working` |
 | this branch's full diff ("branch vs main", "everything since main") | (no positional arg) |
-| + skip patch proposals ("just the report") | add `--no-fix` |
+| + skip triage / patches ("just the report", "don't investigate") | add `--no-triage` |
 | + skip bug logs | add `--no-logs` |
 
 - A PR target needs an actual digit token. If unclear which PR, ASK — do not guess.
@@ -169,24 +169,35 @@ decision to keep that preamble byte-identical across reviewer scripts is why).
   `ultra` is deliberately unreachable — it delegates to Codex's own subagents, and nondeterministic
   sub-fan-out inside a deterministic vote panel defeats the point of a vote panel.
 - `--model` / `--review-model` / `--fable-review` still take Claude models and apply to the Claude
-  stages (manifest / review / dedup / synthesize). The workflow prints a NOTE if `--model` is set,
-  so it never silently reads as if it steered the verifier.
+  stages (manifest / review / dedup / triage / synthesize). The workflow prints a NOTE if `--model`
+  is set, so it never silently reads as if it steered the verifier.
 - `--fast` → Codex Fast mode on every relay (§ `--fast` above). Hybrid-only: from `/ultrareview`
   the script logs `NOTE: --fast ignored` and runs unchanged.
 
 ## Step 2 — handle the result
 
 **Identical to `/ultrareview` steps 1-7** (report to `.planning/reviews/<target>.review.md`,
-inline summary, adjudicate with the standalone test, auto bug-logs for confirmed
-**critical/high/security** findings, print `proposedFix` under a "NOT YET ADJUDICATED" heading
-without applying). Follow `.claude/skills/ultrareview/SKILL.md` for those steps verbatim — do not
-re-derive them; the auto-log threshold and the fix-proposal defaults live there and must not drift.
+inline summary, adjudicate from the Triage buckets with the standalone test, auto bug-logs for
+confirmed **critical/high/security** findings, then act on the buckets — mechanical patches
+batch-applied only on your explicit confirmation, clear fixes confirmed one by one, forks handed to
+`/decision-walk`). Follow `.claude/skills/ultrareview/SKILL.md` for those steps verbatim — do not
+re-derive them; the auto-log threshold, the bucket rules and the apply gate live there and must
+not drift.
 
-Defaults worth stating because they are opt-OUT, not opt-in: **fix proposals run by default**
-(`--no-fix` skips; they are never applied without your explicit confirmation, and are skipped
-automatically on an un-checked-out PR), and **auto bug-logs run by default** for confirmed
+Defaults worth stating because they are opt-OUT, not opt-in: **triage runs by default**
+(`--no-triage` skips; it investigates every confirmed finding, supplies a patch only for the
+trivial + low-risk + isolated ones, and never applies anything — and it is skipped automatically on
+an un-checked-out PR and on an invalid panel), and **auto bug-logs run by default** for confirmed
 critical/high/security findings (`--no-logs` skips). Confirmed medium/low findings are
 deliberately not logged — hand one to `/single-fix` and it writes its own log on demand.
+
+The triage agents run on **Claude** (the review model), not on Codex. That is deliberate: the
+cross-model value of this tool lives in *verification* — "is this finding real?" — where a
+same-lineage panel confirms its own misreadings. Triage asks "how do we fix it, and does one fix
+clearly win?", which is where Claude's knowledge of the repo's history and conventions earns its
+place (2026-08-01 decision: point Codex at conclusions Claude might self-confirm, not at discovery
+or bug triage). And if the panel was invalid, triage is skipped entirely — nothing from an invalid
+run is adjudicated, patches included.
 
 Two additions specific to this mode:
 

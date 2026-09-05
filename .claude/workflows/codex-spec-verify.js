@@ -1,15 +1,16 @@
 export const meta = {
   name: 'codex-spec-verify',
-  description: 'Verify half of /codex-spec: adversarially verifies Codex-found spec findings on Claude, then synthesizes a severity-ranked report.',
+  description: 'Verify half of /codex-spec: adversarially verifies Codex-found spec findings on Claude, triages each confirmed one (mechanical / clear / fork / declined), then synthesizes a severity-ranked report.',
   phases: [
     { title: 'Verify', detail: 'per-dimension quota, then N-vote adversarial verification per finding' },
-    { title: 'Synthesize', detail: 'merge, severity-rank, emit a REVIEW report' },
+    { title: 'Triage', detail: 'investigate each CONFIRMED finding: root cause, resolution options, spec-flavored single-fix ratings, a diff when mechanical; the bucket is derived in code' },
+    { title: 'Synthesize', detail: 'merge, severity-rank, emit a REVIEW report (the triage buckets are appended verbatim)' },
   ],
 }
 
 // Invoked by the /codex-spec skill AFTER codex-spec-find.mjs has run:
 //   Workflow({ scriptPath: ".claude/workflows/codex-spec-verify.js",
-//              args: { specPath, findingsPath, index: [{i, dimension, severity, title}], ... } })
+//              args: { specPath, findingsPath, index: [{i, dimension, severity, title}], triage: true|false, ... } })
 //
 // EVIDENCE NEVER PASSES THROUGH A MODEL. args carries only a slim index — position,
 // dimension, severity, title — enough to allocate the verify quota. Each verify agent
@@ -66,20 +67,32 @@ const VERIFY_MODEL = A.verifyModel || undefined
 const BASE_MODEL = A.model || undefined
 const withModel = (opts, m) => (m ? { ...opts, model: m } : opts)
 const LOW_CONFIDENCE = vp.votes < 2
+// Triage is ON by default (2026-09-04, Ryan): after verification, one read-only agent per
+// CONFIRMED finding investigates the resolution and rates it; the bucket (mechanical / clear /
+// fork / declined) is derived in code. `triage: false` in args skips it.
+const TRIAGE = A.triage !== false
+const BUCKETS = ['mechanical', 'clear', 'fork', 'declined', 'untriaged']
+const emptyTriage = (skipped) => ({
+  enabled: TRIAGE, skipped,
+  counts: Object.fromEntries(BUCKETS.map((b) => [b, 0])),
+  buckets: Object.fromEntries(BUCKETS.map((b) => [b, []])),
+})
 
 log('codex-spec verify — ' + baseName(SPEC_PATH) + ' | ' + ALL.length + ' raw findings from Codex' +
     ' | verify=' + LEVEL + ' (' + vp.votes + '-vote, cap ' + vp.cap + ', floor ' + vp.floor + ')' +
+    (TRIAGE ? '' : ' | NO-TRIAGE') +
     (LOW_CONFIDENCE ? ' | LOW-CONFIDENCE (single verifier)' : ''))
 if (FINDER_FAILURES.length) log('WARNING: ' + FINDER_FAILURES.length + ' Codex reviewer(s) failed during the find phase — coverage is incomplete: ' + FINDER_FAILURES.map(f => f.id).join(', '))
 
 if (!ALL.length) {
   return {
-    specPath: SPEC_PATH, mode: { verify: LEVEL, votes: vp.votes }, finderFailures: FINDER_FAILURES,
+    specPath: SPEC_PATH, mode: { verify: LEVEL, votes: vp.votes, triage: TRIAGE }, finderFailures: FINDER_FAILURES,
     summary: 'Codex raised no findings on ' + baseName(SPEC_PATH) + '.',
     reportMarkdown: '# codex-spec review: ' + baseName(SPEC_PATH) + '\n\n**Verdict:** Codex returned no findings across the requested dimensions.\n' +
       (FINDER_FAILURES.length ? '\n> ⚠ ' + FINDER_FAILURES.length + ' reviewer(s) FAILED — this is not a clean result, it is an incomplete one.\n' : ''),
     counts: { blocker: 0, drift: 0, ambiguity: 0, gap: 0, note: 0 },
     confirmedFindings: [], contestedFindings: [], droppedFindings: [], unverifiedFindings: [],
+    triage: emptyTriage('no findings'),
     stats: { raw: 0, verified: 0, confirmed: 0, contested: 0, dropped: 0, unverified: 0 },
   }
 }
@@ -175,7 +188,106 @@ const contested = verified.filter((f) => f.verdict === 'contested')
 const killed = verified.filter((f) => f.verdict === 'killed')
 log('Verify: ' + confirmed.length + ' confirmed, ' + contested.length + ' contested, ' + killed.length + ' dropped')
 
-// --- Phase 2: Synthesize ----------------------------------------------------
+// --- Phase 2: Triage (investigate each CONFIRMED finding; sort into mechanical / clear / fork / declined) ---
+// Same design as ultrareview.js's Triage stage (2026-09-04, Ryan): the agent investigates, lists
+// resolution options with Depth/Cost/Wins-if, and RATES the recommended one; the bucket is
+// derived HERE from the ratings, never chosen by the agent (single-fix Phase 2: commit to the
+// ratings, then evaluate the gate). What the split means for a SPEC:
+//
+//   declined    a settled deferral / ledger row / spec-justified choice, CITED. Human can overrule.
+//   fork        no single resolution clearly wins because it hinges on a product or design
+//               decision the spec and its ledger have not made. Goes to /decision-walk, never
+//               resolved here -- the 2026-09-03 audit loop failed precisely by replacing the human
+//               decision walk with autonomous batch decisions on this class of finding.
+//   mechanical  one resolution clearly wins AND trivial + low risk + isolated AND a diff was
+//               supplied. `isolated` matters more here than in code: a rule this spec stated in
+//               two places was fixed in one and left superseded in the other (2026-09-03), so a
+//               rule stated more than once is `pattern`, hence never mechanical.
+//   clear       one resolution clearly wins but text has to be authored, or other sections must
+//               move with it.
+//   untriaged   the agent died or returned nothing usable. Fail visible.
+//
+// Evidence still never crosses a model boundary: the triage agent reads its finding from
+// findingsPath by index, exactly like the verify agents, and only its own ratings come back.
+// CONFIRMED findings only; skipped (with a NOTE) on `triage: false` or when nothing was confirmed.
+const AUTO_FIX_GATE = (t) => t.difficulty === 'trivial' && t.risk === 'low' && t.scope === 'isolated'
+const nonEmpty = (s) => typeof s === 'string' && s.trim().length > 0
+const bucketOf = (t) => {
+  if (!t) return 'untriaged'
+  if (t.disposition === 'decline') return nonEmpty(t.declineReason) ? 'declined' : 'untriaged'
+  const opts = Array.isArray(t.options) ? t.options : []
+  if (!opts.length || !Number.isInteger(t.recommended) || t.recommended < 0 || t.recommended >= opts.length) return 'untriaged'
+  if (!t.oneClearlyWins) return 'fork'
+  return AUTO_FIX_GATE(t) && nonEmpty(t.patch) ? 'mechanical' : 'clear'
+}
+const TRIAGE_SCHEMA = {
+  type: 'object',
+  required: ['rootCause', 'rootCauseLocation', 'disposition', 'options', 'recommended', 'oneClearlyWins', 'whyOneOrFork', 'difficulty', 'risk', 'scope'],
+  properties: {
+    rootCause: { type: 'string' },
+    rootCauseLocation: { type: 'string' },
+    disposition: { enum: ['fix', 'decline'] },
+    declineReason: { type: 'string' },
+    options: { type: 'array', items: {
+      type: 'object', required: ['name', 'change', 'depth', 'cost', 'winsIf'],
+      properties: { name: { type: 'string' }, change: { type: 'string' }, depth: { type: 'number' }, cost: { type: 'number' }, winsIf: { type: 'string' } },
+    }},
+    recommended: { type: 'number' },
+    oneClearlyWins: { type: 'boolean' },
+    whyOneOrFork: { type: 'string' },
+    difficulty: { enum: ['trivial', 'moderate', 'hard'] },
+    risk: { enum: ['low', 'medium', 'high'] },
+    scope: { enum: ['isolated', 'pattern'] },
+    patternDetail: { type: 'string' },
+    patch: { type: 'string' },
+  },
+}
+const TRIAGE_PROMPT = (f) =>
+  '## Spec-Finding Triage (codex-spec)\n\n' +
+  'Target spec: ' + SPEC_PATH + '\n' +
+  'This finding was raised by Codex and SURVIVED a ' + vp.votes + '-vote Claude adversarial panel (vote ' + (f.validVotes - f.refutedVotes) + '-' + f.refutedVotes + '). Do not re-litigate whether it is real. Investigate HOW to resolve it in the spec and whether one resolution clearly wins. Read-only: do NOT edit the spec.\n\n' +
+  '## Step 1 — read the finding from disk\n' +
+  'Read `' + FINDINGS_PATH + '` and take element **' + f.i + '** of its `findings` array (0-indexed). Work from THAT object\'s `specLocation`, `evidence` and `suggestion` verbatim — the evidence quotes the spec. For orientation only — dimension: ' + f.dimension + ' · severity: ' + f.severity + ' · title: ' + f.title + '\n\n' +
+  '## Step 2 — investigate\n' +
+  'Read the cited section, then grep the spec for the rule\'s key terms and read EVERY other place that states the same rule (measured 2026-09-03: a rule this spec stated in two places was fixed in one and left superseded in the other). For drift findings read the sibling spec or the ledger row too. Name the root cause as section/line and say WHY the text is wrong, contradictory, ambiguous, or missing.\n\n' +
+  '## Step 3 — disposition\n' +
+  'Default `fix`. Set `decline` ONLY for: (a) a settled deferral explicitly recorded in PRODUCT-CONCERNS.md, a `.planning/decisions/*` ledger row, or a `.planning/debug/**/*.deferred.md` entry — cite which; (b) a choice the spec already justifies — quote the justification; (c) on inspection it is not a defect — quote what you found. "Not built yet" is never a defect in a forward-looking spec, but a finding the panel confirmed is presumed to be more than that — re-check before declining on those grounds. Put the citation in declineReason; a decline without one is discarded.\n\n' +
+  '## Step 4 — options (1-3, best first; do NOT manufacture alternatives — one sensible resolution means one option)\n' +
+  'Each option: name; change (what text changes, in which sections, concretely); depth 0-4 = how much of the problem it removes (0 papers over the wording, 2 fixes this section, 4 fixes the rule everywhere it is stated and in the ledger); cost 0-4 (0 a wording edit; 1 a paragraph or a table row; 2 a new sub-section, or a rule restated in several places; 3 a contract change a sibling spec or ledger row depends on; 4 a product decision that reopens locked decisions); winsIf = the specific condition under which THIS option beats the recommended one. Never add or average depth and cost.\n' +
+  '`recommended` = 0-based index. `oneClearlyWins` = true when the recommended option dominates. false when a real trade-off remains OR the right resolution hinges on a product/design decision the spec and its ledger have NOT made (which predicate defines "orphaned", whether a feature stays, who is allowed to do what) — those go to a human decision walk, not to you. Say which in whyOneOrFork, in plain English a non-engineer could decide from.\n\n' +
+  '## Step 5 — rate the RECOMMENDED option (spec analogues of .claude/skills/single-fix/SKILL.md Phase 1 Q2-Q4)\n' +
+  'difficulty: trivial = one obvious edit of ~1-10 lines in ONE place whose content is fully determined by the finding (a stale revision number, a cross-reference, a rule restated inconsistently where one side is plainly the current one); moderate = new text must be authored (a sub-section, a set of rows, a test list) but its content is determined by the finding; hard = the content depends on a decision not yet made, or the fix boundary is unclear.\n' +
+  'risk: low = no other section\'s meaning changes; medium = other sections restate the rule and must be edited together to stay consistent; high = changes a contract that a sibling spec, an implementer, or a decision-ledger row depends on.\n' +
+  'scope: isolated = the rule is stated once; pattern = the same rule appears in more than one place — list every location in patternDetail (that list is the sweep worklist, and it is why a one-place edit is NOT mechanical here).\n' +
+  'Commit to the ratings on their merits. Do NOT adjust them to land the finding in a bucket — the bucket is computed from them afterwards, and a mis-rated "trivial" gets applied without a human reading it.\n\n' +
+  '## Step 6 — patch (ONLY when trivial + low + isolated; otherwise leave patch empty)\n' +
+  'A unified diff against the spec: `--- a/<spec>` / `+++ b/<spec>` header, @@ hunks, removed lines copied EXACTLY from the spec as read — keep curly quotes, dashes and § exactly as they are, never normalize punctuation. Nothing is applied here.\n\n' +
+  'Structured output only.'
+
+const triageSkip = !TRIAGE ? 'triage: false' : !confirmed.length ? 'no confirmed findings' : null
+const buckets = Object.fromEntries(BUCKETS.map((b) => [b, []]))
+if (triageSkip) {
+  log('NOTE: Triage skipped — ' + triageSkip + '.')
+} else {
+  phase('Triage')
+  const results = await parallel(confirmed.map((f) => () =>
+    agent(TRIAGE_PROMPT(f), withModel({ label: 't:' + String(f.title).slice(0, 30), phase: 'Triage', schema: TRIAGE_SCHEMA, agentType: 'Explore' }, BASE_MODEL))
+  ))
+  // Conservation by INDEX: parallel() resolves a dead thunk to null in place, so results[i] is
+  // always confirmed[i]'s verdict-or-nothing. Every confirmed finding lands in exactly one bucket.
+  confirmed.forEach((f, i) => {
+    const t = results[i] || null
+    const bucket = bucketOf(t)
+    if (!t) log('  UNTRIAGED "' + String(f.title).slice(0, 44) + '": triage agent returned nothing')
+    else if (bucket === 'untriaged') log('  UNTRIAGED "' + String(f.title).slice(0, 44) + '": ' + (t.disposition === 'decline' ? 'decline with no cited reason' : 'no usable options / recommended index'))
+    else if (bucket === 'clear' && AUTO_FIX_GATE(t)) log('  NOTE "' + String(f.title).slice(0, 44) + '": rated trivial/low/isolated but no patch supplied -> clear, not mechanical')
+    f.triage = { ...(t || {}), bucket }
+    buckets[bucket].push(f)
+  })
+  log('Triage: ' + confirmed.length + ' confirmed -> ' + buckets.mechanical.length + ' mechanical, ' + buckets.clear.length + ' clear, ' + buckets.fork.length + ' fork, ' + buckets.declined.length + ' declined' + (buckets.untriaged.length ? ', ' + buckets.untriaged.length + ' UNTRIAGED' : ''))
+}
+
+// --- Phase 3: Synthesize ----------------------------------------------------
 phase('Synthesize')
 const REPORT_SCHEMA = {
   type: 'object', required: ['summary', 'reportMarkdown', 'counts'],
@@ -223,21 +335,51 @@ const report = await agent(
 
 // `index` points back into findingsPath for the full evidence; it is deliberately not
 // copied here, so nothing downstream can quietly hand around a mutated quotation.
-const slim = (f) => ({ index: f.i, severity: f.severity, dimension: f.dimension, title: f.title, correctedSeverity: f.correctedSeverity || null, vote: (f.validVotes - f.refutedVotes) + '-' + f.refutedVotes })
+const slim = (f) => ({ index: f.i, severity: f.severity, dimension: f.dimension, title: f.title, correctedSeverity: f.correctedSeverity || null, vote: (f.validVotes - f.refutedVotes) + '-' + f.refutedVotes, triage: f.triage })
 const stats = {
   raw: ALL.length, verified: verified.length, confirmed: confirmed.length,
   contested: contested.length, dropped: killed.length, unverified: unverified.length,
   byDimensionVerified: dimCount(toVerify), finderFailures: FINDER_FAILURES.length,
 }
+
+// --- Triage section: built HERE, deterministically, and appended AFTER synthesis ---
+// Never handed to the synthesizer (it drops lines it was told to echo -- see the banner
+// re-insertion below). The Forks section is written in /decision-walk's input shape.
+const tLoc = (f) => 'findings[' + f.i + ']' + (nonEmpty(f.triage.rootCauseLocation) ? ' · ' + f.triage.rootCauseLocation : '')
+const optLine = (o, i, rec) => '  - ' + (i === rec ? '**' : '') + 'Option ' + (i + 1) + ': ' + o.name + (i === rec ? ' (recommended)**' : '') + ' — Depth ' + o.depth + '/4 · Cost ' + o.cost + '/4. ' + o.change + ' *Wins if:* ' + o.winsIf
+const item = (f) => '- **' + f.severity + ' — ' + f.title + '** — ' + tLoc(f) + '\n  - Root cause: ' + (f.triage.rootCause || '?')
+const ratings = (t) => t.difficulty + ' / ' + t.risk + ' risk / ' + t.scope + (t.scope === 'pattern' && nonEmpty(t.patternDetail) ? ' — also stated at: ' + t.patternDetail : '')
+const section = (title, list, body) => '\n### ' + title + ' (' + list.length + ')\n\n' + (list.length ? list.map(body).join('\n') + '\n' : '_none_\n')
+const triageMarkdown = triageSkip
+  ? '\n## Triage\n\n_Skipped: ' + triageSkip + '._\n'
+  : '\n## Triage — ' + confirmed.length + ' confirmed → ' + buckets.mechanical.length + ' mechanical · ' + buckets.clear.length + ' clear · ' + buckets.fork.length + ' fork · ' + buckets.declined.length + ' declined' + (buckets.untriaged.length ? ' · ' + buckets.untriaged.length + ' UNTRIAGED' : '') + '\n\n' +
+    'Buckets are derived in code from each finding\'s ratings (single-fix gate: trivial + low risk + isolated + diff = mechanical; a rule stated in more than one place is never isolated). NOTHING here has been applied to the spec.\n' +
+    section('Mechanical — one resolution, trivial / low-risk / stated once, diff supplied; batch-apply on ONE confirmation', buckets.mechanical,
+      (f) => item(f) + '\n  - Fix: ' + f.triage.options[f.triage.recommended].change + '\n\n```diff\n' + f.triage.patch.trim() + '\n```\n') +
+    section('Clear — one resolution clearly wins, but text must be authored or sections move together; confirm each', buckets.clear,
+      (f) => item(f) + '\n  - Rated: ' + ratings(f.triage) + '\n  - Why one resolution: ' + f.triage.whyOneOrFork + '\n' + f.triage.options.map((o, i) => optLine(o, i, f.triage.recommended)).join('\n')) +
+    section('Forks — hinges on a product/design decision the spec has not made; run `/decision-walk <this report>`', buckets.fork,
+      (f) => item(f) + '\n  - Why it is a fork: ' + f.triage.whyOneOrFork + '\n' + f.triage.options.map((o, i) => optLine(o, i, f.triage.recommended)).join('\n')) +
+    section('Declined by triage — overrule if you disagree', buckets.declined,
+      (f) => item(f) + '\n  - Reason: ' + f.triage.declineReason) +
+    section('Untriaged — the triage agent returned nothing usable; investigate by hand or resume the run', buckets.untriaged,
+      (f) => '- **' + f.severity + ' — ' + f.title + '** — findings[' + f.i + ']')
+const triage = {
+  enabled: TRIAGE, skipped: triageSkip,
+  counts: Object.fromEntries(BUCKETS.map((b) => [b, buckets[b].length])),
+  buckets: Object.fromEntries(BUCKETS.map((b) => [b, buckets[b].map(slim)])),
+}
+
 const out = {
   specPath: SPEC_PATH,
-  mode: { verify: LEVEL, votes: vp.votes, floor: vp.floor, driftFraction: vp.driftFraction, finders: 'codex', verifiers: 'claude', codex: A.generatedBy || null },
+  mode: { verify: LEVEL, votes: vp.votes, floor: vp.floor, driftFraction: vp.driftFraction, triage: TRIAGE, finders: 'codex', verifiers: 'claude', triagers: 'claude', codex: A.generatedBy || null },
   finderFailures: FINDER_FAILURES,
   confirmedFindings: confirmed.map(slim),
   contestedFindings: contested.map(slim),
   droppedFindings: killed.map(slim),
   unverifiedFindings: unverified.map((f) => ({ index: f.i, severity: f.severity, dimension: f.dimension, title: f.title })),
   findingsPath: FINDINGS_PATH,
+  triage, triageMarkdown,
   stats,
 }
 if (!report) return { ...out, error: 'Synthesis failed — returning verified findings raw.' }
@@ -245,4 +387,5 @@ if (!report) return { ...out, error: 'Synthesis failed — returning verified fi
 // Belt-and-braces: the banners are the run's honesty markers; never let a synthesizer drop them.
 let md = report.reportMarkdown || ''
 for (const b of banners) if (md && !md.includes(b.slice(0, 40))) md = md.replace(/^(#[^\n]*\n)/, '$1\n' + b + '\n')
+if (md) md = md.replace(/\s*$/, '\n') + triageMarkdown
 return { ...out, ...report, reportMarkdown: md }
