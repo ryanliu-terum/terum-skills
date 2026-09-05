@@ -92,4 +92,18 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(await parse(['ls', '--team', 't'])).toEqual([{ verb: 'ls', kind: 'all', team: 't' }]);
     expect(await parse(['ls', '--team', 't', 'member', 'amy'])).toEqual([{ verb: 'ls', kind: 'member', value: 'amy', team: 't' }]);
   });
+
+  it('wires publish and team leave arguments', async () => {
+    const calls: unknown[] = [];
+    const execute: Execute = async (invoke) => { await invoke(new ScriptedPrompter()); };
+    const program = buildProgram(execute, {
+      login: async () => success({ authenticated: true, github: true }), team: async () => success({ team: 't', remote: 'r' }),
+      publish: async (args) => { calls.push(['publish', args]); return success({ team: 't', id: 'id', name: 'x', scope: { kind: 'global' }, policy: 'pr', changed: false, branch: null, prUrl: null, compareUrl: null }); },
+      leave: async (args) => { calls.push(['leave', args]); return success({ team: 't', remote: 'r', handle: null, removed: 0, cloneRemoved: false }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['publish', 'x', '--project', 'p', '--team', 't'], { from: 'user' });
+    await program.parseAsync(['team', 'leave', 't'], { from: 'user' });
+    expect(calls).toEqual([['publish', { ref: 'x', project: 'p', team: 't' }], ['leave', { name: 't' }]]);
+  });
 });
