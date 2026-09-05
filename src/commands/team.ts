@@ -4,6 +4,7 @@ import { join as pathJoin } from 'node:path';
 import { askHandle, askUntilValid, assertBindable, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, ghState, GhState, Identity, identityForJoiner, setIdentity, teamByRemote, Validation } from '../lib/auth.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists, mkdirPrivate } from '../lib/fs.js';
+import { defaultHookOptions, HookOptions, offerHook } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, normalizeRemote, remoteName, remoteToGitUrl, stripRemoteCredentials } from '../lib/remote.js';
 import { activePeople, readPeople } from '../lib/readme.js';
@@ -16,11 +17,11 @@ import { installOne } from './install.js';
 
 /**
  * §6 `team create` and `team join` (milestone M1). Both are `run(args, io)` over the Prompter.
- * The §8 hook offer and the §6 endorsed-set install offer arrive with M4 and M2 respectively.
+ * The §8 hook offer is shared with setup; a setup invocation suppresses it until its final step.
  */
-export interface TeamDependencies extends AuthDependencies { config?: ConfigStore; runner?: Runner; }
-export interface CreateArgs extends TeamDependencies { name?: string; org?: string; remote?: string; repo?: string; }
-export interface JoinArgs extends TeamDependencies { target: string; as?: string; }
+export interface TeamDependencies extends AuthDependencies { config?: ConfigStore; runner?: Runner; hook?: HookOptions; }
+export interface CreateArgs extends TeamDependencies { name?: string; org?: string; remote?: string; repo?: string; offerHook?: boolean; }
+export interface JoinArgs extends TeamDependencies { target: string; as?: string; offerHook?: boolean; }
 export interface RemoveArgs extends TeamDependencies { handle: string; team?: string; archiveOnly?: boolean; }
 export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs);
 export type CreateResult = { team: string; remote: string };
@@ -242,6 +243,7 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       bindTeam(fresh, name, { remote, handle: identity.handle });
     });
     io.print(`Created team ${name} at ${remote}`);
+    if (args.offerHook !== false) await offerHook(io, { ...defaultHookOptions(store.root), ...args.hook });
     return success({ team: name, remote });
   } catch (error) {
     return failure(error instanceof Error ? error.message : String(error));
@@ -319,6 +321,7 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
         catch (error) { io.print(`Could not install endorsed skill ${skill.name}: ${error instanceof Error ? error.message : String(error)}`); }
       }
     }
+    if (args.offerHook !== false) await offerHook(io, { ...defaultHookOptions(store.root), ...args.hook });
     return success({ team, handle: identity.handle, rejoined, roster });
   } catch (error) {
     return failure(error instanceof Error ? error.message : String(error));

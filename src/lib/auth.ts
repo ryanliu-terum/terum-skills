@@ -100,6 +100,13 @@ export async function askUntilValid(io: Prompter, question: string, defaultValue
 
 export interface CreatorAuth { identity: Identity; gh: GhState; }
 
+/** Shared wording for `team create` and setup's read-only GitHub preflight. */
+export function creatorAuthenticationError(gh: GhState): string | null {
+  if (!gh.installed) return 'Creating a GitHub team needs the GitHub CLI (gh) in phase 1. Install it from https://cli.github.com and run `gh auth login`, or create the team against an existing empty remote with `team create <name> --remote <url>`.';
+  if (!gh.authenticated) return 'GitHub authentication is required to create a team: run `gh auth login` and retry, or create the team against an existing empty remote with `team create <name> --remote <url>`.';
+  return null;
+}
+
 /**
  * Creator path: `team create` on GitHub needs `gh repo create`, so a logged-in gh is required —
  * detection, the login offer, then identity. There is no token fallback (Decision 2): declined,
@@ -110,12 +117,8 @@ export async function authenticateCreator(io: Prompter, dependencies: AuthDepend
   const runner = dependencies.runner ?? systemRunner;
   const config = await store.read();
   const gh = await detectOrOfferGh(io, runner);
-  if (!gh.installed) {
-    throw new Error('Creating a GitHub team needs the GitHub CLI (gh) in phase 1. Install it from https://cli.github.com and run `gh auth login`, or create the team against an existing empty remote with `team create <name> --remote <url>`.');
-  }
-  if (!gh.authenticated) {
-    throw new Error('GitHub authentication is required to create a team: run `gh auth login` and retry, or create the team against an existing empty remote with `team create <name> --remote <url>`.');
-  }
+  const authenticationError = creatorAuthenticationError(gh);
+  if (authenticationError) throw new Error(authenticationError);
   const identity = await collectIdentity(io, config, runner, { gh });
   return { identity, gh };
 }
