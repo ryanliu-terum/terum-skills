@@ -47,7 +47,7 @@ export interface JudgeVerdict {
   winner: 'left' | 'right' | 'tie';
   reason: string;
   swapped: boolean;
-  decidedBy: 'judge' | 'judge-unparseable' | 'judge-refused';
+  decidedBy: 'judge' | 'judge-split' | 'judge-unparseable' | 'judge-refused';
 }
 
 export interface JudgeOptions {
@@ -64,14 +64,14 @@ export interface JudgeOptions {
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Compare two transcripts. left/right are the caller's labels; A/B assignment is randomized here
- * so the judge can't develop a position bias, and the swap is recorded in the row.
- */
-export async function judgePair(agent: AgentApi, options: JudgeOptions): Promise<JudgeVerdict> {
+type AskOutcome =
+  | { kind: 'judged'; winner: 'left' | 'right' | 'tie'; reason: string }
+  | { kind: 'judge-refused' | 'judge-unparseable'; reason: string };
+
+/** One ask at a fixed ordering, through the escalation chain. */
+async function askOnce(agent: AgentApi, options: JudgeOptions, swap: boolean): Promise<AskOutcome> {
   const model = options.model ?? DEFAULT_MODEL;
   const sleep = options.sleep ?? defaultSleep;
-  const swap = options.rng() < 0.5;
   const [a, b] = swap ? [options.rightText, options.leftText] : [options.leftText, options.rightText];
   const prompt = PROMPT
     .replace('{task}', options.task)
@@ -86,15 +86,35 @@ export async function judgePair(agent: AgentApi, options: JudgeOptions): Promise
       const verdict = await agent.askJson(prompt, { model: chain[attempt]! });
       const winner = String(verdict['winner'] ?? 'tie').trim().toUpperCase();
       const reason = String(verdict['reason'] ?? '');
-      if (winner !== 'A' && winner !== 'B') return { winner: 'tie', reason, swapped: swap, decidedBy: 'judge' };
-      const mapped = (winner === 'A') !== swap ? 'left' : 'right';
-      return { winner: mapped, reason, swapped: swap, decidedBy: 'judge' };
+      if (winner !== 'A' && winner !== 'B') return { kind: 'judged', winner: 'tie', reason };
+      return { kind: 'judged', winner: (winner === 'A') !== swap ? 'left' : 'right', reason };
     } catch (error) {
       if (!(error instanceof AgentRunError)) throw error;
       lastError = error.message;
-      if (REFUSAL.test(lastError)) return { winner: 'tie', reason: lastError.slice(0, 300), swapped: swap, decidedBy: 'judge-refused' };
+      if (REFUSAL.test(lastError)) return { kind: 'judge-refused', reason: lastError.slice(0, 300) };
       if (attempt < chain.length - 1) await sleep(500 * (attempt + 1));
     }
   }
-  return { winner: 'tie', reason: lastError.slice(0, 300), swapped: swap, decidedBy: 'judge-unparseable' };
+  return { kind: 'judge-unparseable', reason: lastError.slice(0, 300) };
+}
+
+/**
+ * Compare two transcripts. left/right are the caller's labels; the judge is asked TWICE, once in
+ * each ordering (rev 7 — position bias becomes a tie instead of a coin flip). Agreement across
+ * orderings is the verdict; disagreement is a tie labeled `judge-split`. The recorded `swapped`
+ * is the first ask's ordering (rng-driven, so run trees stay reproducible under a fixed seed).
+ */
+export async function judgePair(agent: AgentApi, options: JudgeOptions): Promise<JudgeVerdict> {
+  const swap = options.rng() < 0.5;
+  const first = await askOnce(agent, options, swap);
+  if (first.kind !== 'judged') return { winner: 'tie', reason: first.reason, swapped: swap, decidedBy: first.kind };
+  const second = await askOnce(agent, options, !swap);
+  if (second.kind !== 'judged') return { winner: 'tie', reason: second.reason, swapped: swap, decidedBy: second.kind };
+  if (first.winner === second.winner) return { winner: first.winner, reason: first.reason, swapped: swap, decidedBy: 'judge' };
+  return {
+    winner: 'tie',
+    reason: `orderings disagree (${first.winner} vs ${second.winner}) — position-sensitive verdict discarded`,
+    swapped: swap,
+    decidedBy: 'judge-split',
+  };
 }

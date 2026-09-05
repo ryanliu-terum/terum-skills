@@ -10,7 +10,7 @@ const row = (outcome: 'win' | 'loss' | 'tie', decidedBy = 'checks', comparison =
 });
 
 const sample = (arm: ArmSample['arm'], fraction: number | null, extra: Partial<ArmSample> = {}): ArmSample => ({
-  kind: 'arm', case: 'c', rep: 0, arm, failed: false, fraction, turns: 5, duration_ms: 10_000, cost_usd: 0.2, skill_list: null, ...extra,
+  kind: 'arm', case: 'c', rep: 0, arm, failed: false, retried: false, fraction, turns: 5, duration_ms: 10_000, cost_usd: 0.2, skill_list: null, model_id: null, ...extra,
 });
 
 describe('run ids (§4.2, rev 5)', () => {

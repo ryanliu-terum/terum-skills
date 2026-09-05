@@ -149,11 +149,15 @@ export interface ArmSample {
   rep: number;
   arm: Arm;
   failed: boolean;
+  /** Rev 7: true when the first attempt died on an AgentRunError and the retry was used. */
+  retried: boolean;
   fraction: number | null;
   turns: number | null;
   duration_ms: number | null;
   cost_usd: number | null;
   skill_list: string[] | null;
+  /** Rev 7: resolved model snapshot from the init event — the request alias floats. */
+  model_id: string | null;
 }
 
 export interface RunCaseDeps {
@@ -188,16 +192,23 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
     const transcripts = new Map<Arm, Transcript | null>();
     const checksByArm = new Map<Arm, CheckResult[]>();
     for (const [arm, skillDir] of armDirs) {
-      const sandbox = await seedSandbox(evalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch });
+      // Rev 7: one retry on AgentRunError, in a FRESH sandbox (a timed-out attempt leaves side
+      // effects) — an infra flake scored against the empty transcript is a spurious loss.
+      let sandbox = '';
       let transcript: Transcript | null = null;
-      try {
-        transcript = await deps.agent.runAgent(evalCase.task, sandbox, {
-          transcriptPath: join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.jsonl`),
-          model: deps.model ?? DEFAULT_MODEL,
-        });
-      } catch (error) {
-        if (!(error instanceof AgentRunError)) throw error;
-        log(`  ${evalCase.name} rep${rep} ${arm}: agent run failed: ${error.message}`);
+      let retried = false;
+      for (let attempt = 0; attempt < 2 && transcript === null; attempt++) {
+        sandbox = await seedSandbox(evalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch });
+        try {
+          transcript = await deps.agent.runAgent(evalCase.task, sandbox, {
+            transcriptPath: join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.jsonl`),
+            model: deps.model ?? DEFAULT_MODEL,
+          });
+        } catch (error) {
+          if (!(error instanceof AgentRunError)) throw error;
+          if (attempt === 0) retried = true;
+          log(`  ${evalCase.name} rep${rep} ${arm}: agent run failed${attempt === 0 ? ', retrying once' : ' twice, scoring empty'}: ${error.message}`);
+        }
       }
       const skillList = transcript?.skillList() ?? null;
       // §7.3 (rev 6): the CLI's init event always lists its built-in skills, so the contamination
@@ -214,7 +225,7 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
       transcripts.set(arm, transcript);
       checksByArm.set(arm, checks);
       const efficiency = transcript?.efficiency() ?? { turns: null, duration_ms: null, cost_usd: null };
-      samples.push({ kind: 'arm', case: evalCase.name, rep, arm, failed: transcript === null, fraction: fractionPassed(checks), ...efficiency, skill_list: skillList });
+      samples.push({ kind: 'arm', case: evalCase.name, rep, arm, failed: transcript === null, retried, fraction: fractionPassed(checks), ...efficiency, skill_list: skillList, model_id: transcript?.modelId() ?? null });
     }
 
     for (const opponent of ['baseline', 'incumbent'] as const) {

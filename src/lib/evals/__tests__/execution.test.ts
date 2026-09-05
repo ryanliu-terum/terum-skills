@@ -70,7 +70,10 @@ describe('sandbox seeding (§4.3, strictly in order)', () => {
 });
 
 describe('row verdicts (§7.1, port of _decide)', () => {
-  const deps = { agent: { runAgent: () => Promise.reject(new Error('x')), askJson: () => Promise.resolve({ winner: 'A', reason: 'better' }) } as AgentApi, rng: () => 0.9 };
+  // Rev 7 double-ask: the stub must be order-consistent (A then B alternating maps to the same
+  // side both times under rng 0.9); an always-A stub is position-biased and correctly splits.
+  let judgeCalls = 0;
+  const deps = { agent: { runAgent: () => Promise.reject(new Error('x')), askJson: () => Promise.resolve({ winner: ++judgeCalls % 2 === 1 ? 'A' : 'B', reason: 'better' }) } as AgentApi, rng: () => 0.9 };
   const passed = [{ name: 'c', passed: true, detail: '' }];
   const failed = [{ name: 'c', passed: false, detail: '' }];
   const t = transcriptWith('hello');
@@ -135,7 +138,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     expect(rows.map((row) => row.comparison).sort()).toEqual(['candidate-vs-baseline', 'candidate-vs-incumbent']);
   });
 
-  it('a failed arm never aborts the matrix; its row scores against the empty transcript (§7.1)', async () => {
+  it('a twice-failed arm never aborts the matrix; its row scores against the empty transcript (§7.1)', async () => {
     const skillDir = await skillFixture();
     const flaky: AgentApi = {
       runAgent: (_task, cwd) => (existsSync(join(cwd, '.claude', 'skills', 's'))
@@ -149,7 +152,32 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
       { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
     );
     expect(rows[0]).toMatchObject({ outcome: 'win', decided_by: 'opponent-run-failed' });
-    expect(arms.find((sample) => sample.arm === 'baseline')).toMatchObject({ failed: true, fraction: 0, turns: null });
+    expect(arms.find((sample) => sample.arm === 'baseline')).toMatchObject({ failed: true, retried: true, fraction: 0, turns: null });
+  });
+
+  it('a single flake is retried in a fresh sandbox and scores normally (§7.1 rev 7)', async () => {
+    const skillDir = await skillFixture();
+    const failures = new Map<string, number>();
+    const flakyOnce: AgentApi = {
+      runAgent: (_task, cwd) => {
+        const arm = existsSync(join(cwd, '.claude', 'skills', 's')) ? 'candidate' : 'baseline';
+        const seen = failures.get(arm) ?? 0;
+        failures.set(arm, seen + 1);
+        if (arm === 'baseline' && seen === 0) return Promise.reject(new AgentRunError('transient'));
+        return Promise.resolve(transcriptWith(arm === 'candidate' ? 'ran PREFLIGHT' : 'nope', [
+          { type: 'system', subtype: 'init', skills: arm === 'candidate' ? ['s'] : [], model: 'claude-sonnet-5-20260115' },
+        ]));
+      },
+      askJson: () => Promise.resolve({}),
+    };
+    const { rows, arms } = await runCase(
+      { agent: flakyOnce, rng: () => 0.9 },
+      caseOf({ checks: [{ transcript_mentions: 'PREFLIGHT' }] }),
+      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+    );
+    expect(rows[0]).toMatchObject({ outcome: 'win', decided_by: 'checks' });
+    expect(arms.find((sample) => sample.arm === 'baseline')).toMatchObject({ failed: false, retried: true, model_id: 'claude-sonnet-5-20260115' });
+    expect(arms.find((sample) => sample.arm === 'candidate')).toMatchObject({ retried: false, model_id: 'claude-sonnet-5-20260115' });
   });
 
   // §7.3 rev 6: membership of the skill under eval, not list equality — the real CLI's init

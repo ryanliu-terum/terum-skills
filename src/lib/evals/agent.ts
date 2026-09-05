@@ -14,6 +14,13 @@ import { failure, success } from '../result.js';
 export const DEFAULT_MODEL = 'sonnet'; // §16.9 [provisional]
 export const DEFAULT_TIMEOUT_MS = 600_000;
 const AGENT_TOOLS = 'Bash Read Write Edit Glob Grep';
+/**
+ * Rev 7: appended to every arm run, identically, so the comparison stays fair. A headless agent
+ * that stops to ask a question dies silently and scores as skill failure (measured: the dominant
+ * noise source in the 2026-09-04 determinism probe).
+ */
+export const HEADLESS_NOTE =
+  'You are running inside an automated, unattended evaluation. No human can answer questions; never stop to ask one — act on your best judgment and complete the task.';
 
 const agentCmd = (): string => process.env['TERUM_SKILLS_AGENT_CMD'] ?? 'claude';
 
@@ -81,6 +88,12 @@ export class Transcript {
       duration_ms: num(result?.['duration_ms']),
       cost_usd: num(result?.['total_cost_usd']) ?? num(result?.['cost_usd']),
     };
+  }
+
+  /** Rev 7: the resolved model snapshot from the init event — the alias (`sonnet`) floats day to day. */
+  modelId(): string | null {
+    const init = this.events.find((event) => event.type === 'system' && event.subtype === 'init') as Record<string, unknown> | undefined;
+    return typeof init?.['model'] === 'string' && init['model'] ? init['model'] : null;
   }
 
   /** §7.3: the arm's resolved skill list from the init event, or null when the field is absent (VE1). */
@@ -152,6 +165,7 @@ function run(task: string, cwd: string, options: RunAgentOptions): Promise<Spawn
     // §7.3 contamination control by construction: the sandbox is the entire project scope.
     '--setting-sources', 'project',
     '--strict-mcp-config',
+    '--append-system-prompt', HEADLESS_NOTE,
     '--model', options.model ?? DEFAULT_MODEL,
   ], { cwd, env: { CLAUDE_PROJECT_DIR: cwd }, timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS });
 }

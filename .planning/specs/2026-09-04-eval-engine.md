@@ -1,6 +1,6 @@
 # terum-skills eval engine — build spec
 
-**Status:** DRAFT (rev 6, 2026-09-04; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe) — written under a partial lift of the phase-3 spec
+**Status:** DRAFT (rev 6, 2026-09-04; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe; rev 7 = variance reducers, same probe: §7.5 judge double-asked in both orderings with disagreement → `judge-split` tie, §7.1 headless note appended to every arm + one arm retry in a fresh sandbox + `model_id` snapshot recorded per arm) — written under a partial lift of the phase-3 spec
 gate (Ajay, in-session 2026-09-04: "we're on a time crunch … just do as much as you can";
 the override did not record in Terum — receipt rejected — so the shared ledger still
 shows the gate standing). Items that genuinely need published-skill experience are marked
@@ -286,15 +286,25 @@ Per rep per arm: seed sandbox (§4.3) → `runAgent(task, sandbox)`:
 ```
 claude -p <task> --output-format stream-json --verbose --max-turns 25
        --permission-mode acceptEdits --allowedTools "Bash Read Write Edit Glob Grep"
-       --setting-sources project --strict-mcp-config --model <m>
+       --setting-sources project --strict-mcp-config
+       --append-system-prompt <HEADLESS_NOTE> --model <m>
        (cwd = sandbox, env += CLAUDE_PROJECT_DIR=<sandbox>, timeout 600 s)
 ```
+
+`HEADLESS_NOTE` (rev 7) tells the agent it is unattended and must act rather than stop
+to ask — applied to every arm identically so the comparison stays fair (measured: the
+balk-and-ask death was the dominant noise source in the 2026-09-04 probe). Each arm
+sample also records `model_id`, the **resolved model snapshot from the init event**
+(rev 7) — the request alias (`sonnet`) floats day to day, and only the snapshot makes
+the §16.9 same-model comparability rule checkable.
 
 → run checks → emit one row per (rep × opponent). Verdict per row, in order: both arms
 failed → tie; one failed → other wins; check pass-sets differ → decided by checks;
 equal + no rubric → tie; equal + rubric → judge (§7.5). An `AgentRunError` or timeout
-never aborts the matrix — the arm's row is scored against an empty transcript and
-`execution_status` reflects any unscored holes.
+is **retried once in a fresh sandbox** (rev 7 — an infra flake scored against the
+empty transcript is a spurious loss; `retried` is recorded on the arm sample); a
+second failure never aborts the matrix — the arm's row is scored against an empty
+transcript and `execution_status` reflects any unscored holes.
 
 ### 7.2 Trigger evals
 
@@ -331,9 +341,14 @@ seconds instead of six wasted trials). Preflight also fails with a clear message
 
 ### 7.5 Judge chain
 
-Pairwise, rubric-anchored, last-6000-chars per transcript, position randomized by a
-seeded RNG (seed 0 — reproducible), swap recorded in the row. Escalation chain (adopted
-practice; skilldeck has none): parse failure → one retry → re-ask on
+Pairwise, rubric-anchored, last-6000-chars per transcript. **Double-asked (rev 7):**
+the judge is asked twice, once in each A/B ordering (first ordering randomized by the
+seeded RNG, seed 0 — reproducible; recorded in the row). Agreement across orderings is
+the verdict; disagreement is a tie, `decided_by: "judge-split"` — a position-biased
+verdict is discarded instead of surviving as a coin flip (measured motivation: judge
+flips were a top-two noise source in the 2026-09-04 determinism probe; judge calls are
+the cheap half of a comparison). Each ask runs the escalation chain (adopted practice;
+skilldeck has none): parse failure → one retry → re-ask on
 `--judge-escalation-model` (default `opus`) **[provisional]** → final failure = tie,
 `decided_by: "judge-unparseable"`. All judge calls wrapped in retry-with-backoff for
 transient network failures. Usage-policy refusals on subscription-side judging (the

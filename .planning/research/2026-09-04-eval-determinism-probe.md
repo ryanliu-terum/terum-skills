@@ -59,3 +59,35 @@ Kept out of scope: a built-ins allowlist for detecting planted *foreign* skills
 (indistinguishable from built-ins by name; `--setting-sources project` remains the
 exclusion mechanism), and any re-measurement at k=10 — worth doing once the `eval`
 verb (ME2) exists and the harness can be retired.
+
+## Probe #2 — rev 7 variance reducers (same day)
+
+Four changes landed as spec rev 7 and re-measured on the identical protocol
+(same toy skill, cases, k=3, seed, model):
+
+1. **Judge double-asked in both orderings; disagreement → `judge-split` tie.**
+2. **Headless note** (`--append-system-prompt`) on every arm: unattended, never
+   stop to ask.
+3. **One arm retry** on AgentRunError, in a fresh sandbox; `retried` recorded.
+4. **`model_id`** snapshot recorded per arm from the init event (measured value:
+   `claude-sonnet-5`; the request alias `sonnet` floats).
+
+| | probe #1 (rev 6) | probe #2 (rev 7) |
+|---|---|---|
+| stub runs | byte-identical | byte-identical |
+| row-level agreement | 1/6 | **6/6** |
+| verdicts | PASS vs NEUTRAL | **PASS vs PASS** |
+| W/L/T | 2W/0L/4T vs 3W/2L/1T | 6W/0L/0T, both runs |
+| candidate arm score | 0.75 / 0.58 | **1.00, both runs** |
+
+The headless note did the heavy lifting: candidate compliance went to 100% (the
+balk-and-ask death mode vanished), and with clean transcripts the double-asked judge
+picked the candidate consistently in all six judge rows across both runs.
+
+**Caveats, honestly:** n=2 runs on a 2-case toy suite that was accidentally
+adversarial in exactly the way change 2 targets — this is strong evidence the
+targeted noise sources are gone, not proof of general verdict stability; a
+band-edge skill will still wobble. And the headless note is a measurement
+trade-off recorded deliberately: arms no longer measure whether an agent would
+stop to ask a human, because in this harness there is no human — both arms get
+the note identically, so the *comparison* stays fair.
