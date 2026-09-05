@@ -94,6 +94,15 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const repoSkill = join(record.directory, 'SKILL.md');
     const repoContents = await readFile(repoSkill, 'utf8');
     const repairedRepo = injectManagedFields(repoContents, { license: team.license, id, author });
+    // §5.3: a changed `name` is a rename, not a new skill — the ID carries across it. The source's
+    // declared name is the target; the repository folder follows on the local-edit row below.
+    // (The folder basename is not consulted: `share --relocate` may legitimately point anywhere.)
+    const declared = parseSkillFrontmatter(repaired);
+    const targetName = declared.ok ? declared.data.name : record.name;
+    if (targetName !== record.name) {
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(targetName) || targetName.length > 64) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); continue; }
+      if ((await skillRecords(clone, tracked.team)).some((item) => item.name === targetName && item.id !== id)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; another skill already uses that name.`); continue; }
+    }
     const sourceDigest = await canonicalDigest(tracked.source);
     const repoDigest = await canonicalDigest(record.directory);
     const baseline = tracked.baseline;
@@ -117,7 +126,15 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
       // narrow write first, then the normal author-owned content mirror on the replayed tree.
       await refreshRepo(repairedRepo);
       const files = await sourceFiles(tracked.source);
-      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => mirrorToTree(tree, `skills/${record!.name}`, files), { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
+      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => {
+        if (targetName !== record!.name) {
+          // The preflight list can be stale; only the freshly reset tree is authoritative for the name invariant.
+          if (tree.paths(`skills/${targetName}/`).length) throw new Error(`Skill name ${targetName} already exists in team ${tracked.team}; choose a unique name.`);
+          for (const path of tree.paths(`skills/${record!.name}/`)) tree.remove(path);
+        }
+        mirrorToTree(tree, `skills/${targetName}`, files);
+      }, { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: targetName === record!.name ? `${binding.handle}: update ${record.name}` : `${binding.handle}: rename ${record.name} to ${targetName}` });
+      if (targetName !== record.name) io.print(`Renamed shared skill ${record.name} to ${targetName}.`);
       await store.update((next) => { if (next.shared[id]) next.shared[id].baseline = sourceDigest; });
       } else {
         await replaceDirectory(record.directory, tracked.source);
