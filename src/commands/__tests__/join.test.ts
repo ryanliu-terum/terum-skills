@@ -150,7 +150,8 @@ describe('team join (§6, §5.4 identity)', () => {
     const third = await join({ target: REMOTE, config: byEmail, runner }, emailIo);
     if (!third.ok) throw new Error(third.error);
     expect(third.value.handle).toBe('ajay');
-    expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).display_name).toBe('Ajay Three');
+    // A blank answer keeps the login on file; it never blanks a member's GitHub login.
+    expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare))).toMatchObject({ display_name: 'Ajay Three', github: 'Real-Ajay' });
     // An unbound machine whose identity does not match gets the collision prompt and never touches the file.
     const store2 = createConfigStore(pathJoin(fixture.root, 'local2'));
     const io2 = new ScriptedPrompter(['impostor', 'ajay', 'Impostor', 'imp@example.com', 'ajay-2']);
@@ -196,8 +197,9 @@ describe('team join (§6, §5.4 identity)', () => {
       return next();
     });
     const result = await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()));
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('already configured as team other') });
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/already configured as team other[\s\S]*people\/me\.json was already pushed[\s\S]*team remove me/) });
     expect(Object.keys((await store.read()).teams)).toEqual(['other']);
+    expect(await git(['ls-tree', '--name-only', 'main:people'], fixture.bare)).toContain('me.json');
   });
 
   it('an archived handle is only a rejoin for the same person; someone else gets the collision prompt', async () => {

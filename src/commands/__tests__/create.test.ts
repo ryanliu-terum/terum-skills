@@ -97,10 +97,10 @@ describe('team create (§6)', () => {
       'repo create new-team --private': { code: 0, stdout: 'https://github.com/octocat/new-team\n', stderr: '' },
       'repo view new-team --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'octocat/new-team\n', stderr: '' },
     }));
-    const io = new ScriptedPrompter(['', '', 'ryan', 'Ryan', 'ryan@example.com']);
+    const io = new ScriptedPrompter(['', 'ryan', 'Ryan', 'ryan@example.com', '']);
     const result = await create({ name: 'new-team', config: store, runner }, io);
     if (!result.ok) throw new Error(result.error);
-    expect(io.asked[0]).toBe('GitHub repository name');
+    expect(io.asked.at(-1)).toBe('GitHub repository name');
     expect(result.value.remote).toBe('https://github.com/octocat/new-team.git');
     expect((await store.read()).teams['new-team']).toEqual({ remote: 'github.com/octocat/new-team', handle: 'ryan' });
     expect(await git(['ls-tree', '--name-only', 'main:people'], bare)).toContain('ryan.json');
@@ -111,8 +111,10 @@ describe('team create (§6)', () => {
     const { root, bare } = await emptyBare();
     const store = createConfigStore(pathJoin(root, 'local'));
     const runner = mappedRunner('https://github.com/x/y.git', bare);
-    const result = await create({ name: 'y', config: store, runner }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    const io = new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']);
+    const result = await create({ name: 'y', config: store, runner }, io);
     expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/GitHub CLI \(gh\)[\s\S]*--remote/) });
+    expect(io.asked).toEqual([]);
     expect(await create({ name: '../evil', config: store, runner }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringMatching(/^Invalid team name: /) });
     expect(runner.calls.filter((call) => call.command === 'git')).toEqual([]);
   });
@@ -201,7 +203,7 @@ describe('team create (§6)', () => {
       'repo create acme/free --private': { code: 0, stdout: '', stderr: '' },
       'repo view acme/free --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'octocat/free\n', stderr: '' },
     }));
-    const io = new ScriptedPrompter(['taken', '', 'ryan', 'Ryan', 'ryan@example.com', 'free']);
+    const io = new ScriptedPrompter(['', 'ryan', 'Ryan', 'ryan@example.com', 'taken', 'free']);
     const result = await create({ name: 'acme', org: 'acme', config: store, runner }, io);
     if (!result.ok) throw new Error(result.error);
     expect(result.value.remote).toBe('https://github.com/octocat/free.git');
@@ -211,7 +213,7 @@ describe('team create (§6)', () => {
 
     const exhausted = createConfigStore(pathJoin(root, 'local2'));
     const always = mappedRunner('https://github.com/octocat/never.git', bare, fakeGh('octocat', { 'repo create a --private': taken, 'repo create b --private': taken, 'repo create c --private': taken }));
-    const io2 = new ScriptedPrompter(['a', '', 'ryan', 'Ryan', 'ryan@example.com', 'b', 'c']);
+    const io2 = new ScriptedPrompter(['', 'ryan', 'Ryan', 'ryan@example.com', 'a', 'b', 'c']);
     const failed = await create({ name: 'never', config: exhausted, runner: always }, io2);
     expect(failed).toMatchObject({ ok: false, error: expect.stringContaining('already exists') });
     expect(always.calls.filter((call) => call.command === 'gh' && call.args[0] === 'repo' && call.args[1] === 'create')).toHaveLength(3);
@@ -221,7 +223,7 @@ describe('team create (§6)', () => {
     expect(await exists(exhausted.teamClone('never'))).toBe(false);
     // Any other gh failure is terminal on the first try.
     const other = mappedRunner('https://github.com/octocat/x.git', bare, fakeGh('octocat', { 'repo create x --private': { code: 1, stdout: '', stderr: 'HTTP 403: rate limited' } }));
-    const io3 = new ScriptedPrompter(['', '', 'ryan', 'Ryan', 'ryan@example.com']);
+    const io3 = new ScriptedPrompter(['', 'ryan', 'Ryan', 'ryan@example.com', '']);
     expect(await create({ name: 'x', config: createConfigStore(pathJoin(root, 'local3')), runner: other }, io3)).toMatchObject({ ok: false, error: expect.stringContaining('rate limited') });
     expect(io3.countAsked('GitHub repository name')).toBe(1);
   });
@@ -254,6 +256,50 @@ describe('team create (§6)', () => {
     expect(later).toMatchObject({ ok: false, error: expect.stringMatching(/hung up unexpectedly[\s\S]*run `team join https:\/\/git\.example\/boot\.git`/) });
     expect(await readdir(pathJoin(store.root, 'teams'))).toEqual([]);
     expect((await git(['ls-remote', '--heads', bare])).trim()).toContain('refs/heads/main');
+  });
+
+  it('refuses --repo or --org together with --remote, and an invalid --org, before asking anything', async () => {
+    const { root, bare } = await emptyBare();
+    const store = createConfigStore(pathJoin(root, 'local'));
+    const runner = mappedRunner('https://git.example/x.git', bare);
+    for (const extra of [{ repo: 'skills' }, { org: 'acme' }]) {
+      const io = new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']);
+      expect(await create({ name: 'x', remote: 'https://git.example/x.git', ...extra, config: store, runner }, io)).toMatchObject({ ok: false, error: expect.stringContaining('--repo and --org apply only') });
+      expect(io.asked).toEqual([]);
+    }
+    expect(await create({ name: 'x', org: 'bad/org', config: store, runner }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringMatching(/^Invalid GitHub organization/) });
+    expect(runner.calls).toEqual([]);
+  });
+
+  it('re-checks under the config lock: a remote bound by another process while the scaffold pushed is not bound twice', async () => {
+    const { root, bare } = await emptyBare();
+    const publicRemote = 'https://git.example/raced.git';
+    const store = createConfigStore(pathJoin(root, 'local'));
+    const runner = wrapRunner(mappedRunner(publicRemote, bare), async (command, args, _options, next) => {
+      const result = await next();
+      if (command === 'git' && args[0] === 'push') await store.update((config) => { config.teams.other = { remote: 'git.example/raced', handle: 'someone' }; });
+      return result;
+    });
+    const result = await create({ name: 'raced', remote: publicRemote, config: store, runner }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('already configured as team other') });
+    expect(Object.keys((await store.read()).teams)).toEqual(['other']);
+    expect((await git(['ls-remote', '--heads', bare])).trim()).toContain('refs/heads/main');
+  });
+
+  it('a failed post-push re-probe admits it could not tell, and points at both recoveries', async () => {
+    const { root, bare } = await emptyBare();
+    const publicRemote = 'https://git.example/dark.git';
+    const store = createConfigStore(pathJoin(root, 'local'));
+    let pushed = false;
+    const dark = wrapRunner(mappedRunner(publicRemote, bare), async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'push') { pushed = true; return { code: 1, stdout: '', stderr: 'hung up unexpectedly' }; }
+      // The network dies with the push: the preflight probe worked, the post-push re-probe does not.
+      if (pushed && command === 'git' && args[0] === 'ls-remote') return { code: 128, stdout: '', stderr: 'Could not read from remote repository.' };
+      return next();
+    });
+    const result = await create({ name: 'dark', remote: publicRemote, config: store, runner: dark }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/hung up unexpectedly[\s\S]*Could not determine whether the scaffold reached[\s\S]*team join https:\/\/git\.example\/dark\.git[\s\S]*team create dark --remote/) });
+    expect(await readdir(pathJoin(store.root, 'teams'))).toEqual([]);
   });
 
 });

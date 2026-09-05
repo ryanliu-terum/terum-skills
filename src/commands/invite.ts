@@ -1,3 +1,4 @@
+import { explainGhFailure } from '../lib/auth.js';
 import { createConfigStore, ConfigStore, selectTeam } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, hostOperationAllowed } from '../lib/remote.js';
@@ -24,8 +25,10 @@ export async function run(args: InviteArgs, io: Prompter): Promise<Result<Invite
     const failed: { login: string; error: string }[] = [];
     for (const rawLogin of args.logins) {
       const login = parseOrExplain(githubLoginSchema, rawLogin.trim(), 'GitHub login');
-      const response = await runner.run('gh', ['api', '-X', 'PUT', '--include', `repos/${endpoint}/collaborators/${login}`]);
+      const response = await runner.run('gh', ['api', '-X', 'PUT', '--include', `repos/${endpoint}/collaborators/${login}`]).catch(async (error: unknown) => { throw new Error((await explainGhFailure(runner)) ?? (error instanceof Error ? error.message : String(error))); });
       const status = httpStatus(response.code, response.stdout, response.stderr);
+      // A failure with no HTTP status, or a 401, is gh itself rather than GitHub: say which, instead of the invitation cap.
+      if (response.code !== 0 && (status === null || status === 401)) { const why = await explainGhFailure(runner); if (why) throw new Error(why); }
       if (status === 201) { invited.push(login); io.print(`Invited @${login}.`); continue; }
       if (status === 204) { already.push(login); io.print(`@${login} already has access.`); continue; }
       // GitHub returns 422 when adding the repository owner, but other 422 responses are failures.

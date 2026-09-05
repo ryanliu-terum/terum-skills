@@ -109,9 +109,9 @@ function parseRemote(input: string): ParsedRemote {
   // A one-character "host" is a Windows drive letter, never an SSH host.
   if (scp && scp[2]!.length > 1) {
     // scp-style remotes carry no password, so `user:tok@host:path` parses as host `user` with the
-    // token inside the path. An `@` in the first path segment is that shape; refuse it.
-    // A password containing `/` moves that `@` past the first segment; the real host:path separator then follows it.
-    if (/^[^/]*@/.test(scp[3]!) || /@[^/:]*:/.test(scp[3]!)) throw unsupported(input, 'credentials in an scp-style remote are not supported');
+    // token inside the path — wherever the `@` lands once the password contains `/` or `:`. A
+    // legitimate `[user@]host:path` never carries a second `@`, so ANY `@` in the path is refused.
+    if (scp[3]!.includes('@')) throw unsupported(input, 'credentials in an scp-style remote are not supported');
     assertRemoteParts(input, { host: scp[2]!, path: scp[3]!, user: scp[1] ?? '', optionShapedPath: true });
     return { kind: 'scp', user: scp[1] ?? '', host: scp[2]!, path: scp[3]! };
   }
@@ -204,7 +204,9 @@ export function remoteName(remote: string): string {
   const path = normalized.startsWith('file:')
     ? normalized.slice('file:'.length)
     : /^[^/:]+:(.*)$/.exec(normalized)?.[1] ?? normalized.slice(normalized.indexOf('/') + 1);
-  return path.slice(path.lastIndexOf('/') + 1).replace(/\.git$/i, '');
+  // `<dir>/.git` names the repository at <dir>, as it does for git clone.
+  const repository = path.replace(/\/\.git$/i, '');
+  return repository.slice(repository.lastIndexOf('/') + 1).replace(/\.git$/i, '');
 }
 
 /**

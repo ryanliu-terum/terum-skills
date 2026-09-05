@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
-import { askHandle, askUntilValid, assertBindable, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, ghState, GhState, Identity, identityForJoiner, setIdentity, teamByRemote, Validation } from '../lib/auth.js';
+import { askHandle, askUntilValid, assertBindable, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, ghState, GhState, Identity, identityForJoiner, setIdentity, teamByRemote, Validation } from '../lib/auth.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists, mkdirPrivate } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
@@ -69,12 +69,17 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
     // the schema existed) and only where it becomes a gh API path segment; archiving a member who
     // has no GitHub login must still work.
     const targetRaw = JSON.parse(shown.stdout) as { github?: unknown };
-    const login = revoking ? parseOrExplain(githubLoginSchema, targetRaw.github, `GitHub login for ${targetHandle}`) : '';
+    let login = '';
+    if (revoking) {
+      if (typeof targetRaw.github !== 'string' || targetRaw.github.trim() === '') throw new Error(`${targetHandle} has no GitHub login on the roster, so there is no host access to revoke; run \`team remove ${targetHandle} --archive-only\` to archive the membership.`);
+      login = parseOrExplain(githubLoginSchema, targetRaw.github, `GitHub login for ${targetHandle}`);
+    }
     parseJson(personSchema, shown.stdout, `people/${targetHandle}.json`);
     let collaborator = false;
     let pending: Array<{ id?: number; invitee?: { login?: string } }> = [];
     if (ownerRepo !== null) {
-      const admin = await runner.run('gh', ['api', `repos/${ownerRepo}`, '-q', '.permissions.admin']);
+      const admin = await runner.run('gh', ['api', `repos/${ownerRepo}`, '-q', '.permissions.admin']).catch(async (error: unknown) => { throw new Error((await explainGhFailure(runner)) ?? (error instanceof Error ? error.message : String(error))); });
+      if (admin.code !== 0) { const why = await explainGhFailure(runner); if (why) throw new Error(why); }
       if (admin.code !== 0 || admin.stdout.trim() !== 'true') throw new Error('Team removal requires GitHub repository admin permission.');
       if (!args.archiveOnly) {
         const admins = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators?permission=admin`, '--paginate', '--slurp']);
@@ -137,21 +142,28 @@ export function archiveMutation(tree: MutableTree, targetHandle: string, login?:
   tree.set('team.json', `${JSON.stringify({ ...team, archived: [...team.archived, targetHandle] }, null, 2)}\n`);
 }
 
-/** Every other active `people/*.json` on the reset tree must declare a different GitHub login (case-insensitive) before that login is revoked. */
+/**
+ * Every other active `people/*.json` on the reset tree must declare a different GitHub login
+ * (case-insensitive) before that login is revoked. Fails closed: the file name is the handle (the
+ * archived check must not trust a self-declared one), the login is read from the raw document so a
+ * legacy file missing a schema field still counts, and a file that cannot be read at all refuses
+ * the removal rather than being skipped.
+ */
 function assertLoginUnclaimed(tree: MutableTree, team: Team, targetHandle: string, login: string): void {
   for (const path of tree.paths('people/')) {
     const match = /^people\/([^/]+)\.json$/.exec(path);
-    if (!match || match[1] === targetHandle) continue;
-    let person: Person;
-    try { person = parseJson(personSchema, treeText(tree.before(path)!), path); } catch { continue; }
-    if (team.archived.includes(person.handle) || person.github.toLowerCase() !== login.toLowerCase()) continue;
-    throw new Error(`Refusing to remove ${targetHandle}: active member ${person.handle} also declares GitHub login @${login}; fix the roster before revoking access.`);
+    if (!match || match[1] === targetHandle || team.archived.includes(match[1]!.toLowerCase())) continue;
+    let declared: unknown;
+    try { declared = (JSON.parse(treeText(tree.before(path) ?? '')) as { github?: unknown }).github; }
+    catch { throw new Error(`Refusing to remove ${targetHandle}: ${path} cannot be read, so the roster cannot prove @${login} belongs to ${targetHandle} alone; fix that file first.`); }
+    if (typeof declared !== 'string' || declared.trim().toLowerCase() !== login.toLowerCase()) continue;
+    throw new Error(`Refusing to remove ${targetHandle}: active member ${match[1]} also declares GitHub login @${login}; fix the roster before revoking access.`);
   }
 }
 
-const validateName = (what: string) => (value: string): Validation => {
+const validateName = (value: string): Validation => {
   const parsed = teamNameSchema.safeParse(value.trim());
-  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, rule: `${what}: ${TEAM_NAME_RULE}` };
+  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, rule: TEAM_NAME_RULE };
 };
 
 /**
@@ -161,7 +173,9 @@ const validateName = (what: string) => (value: string): Validation => {
  */
 export async function create(args: CreateArgs, io: Prompter): Promise<Result<CreateResult>> {
   try {
-    const name = args.name !== undefined ? parseOrExplain(teamNameSchema, args.name, 'team name') : await askUntilValid(io, 'Team name', undefined, validateName('a team name'));
+    const name = args.name !== undefined ? parseOrExplain(teamNameSchema, args.name, 'team name') : await askUntilValid(io, 'Team name', undefined, validateName);
+    if (args.remote && (args.repo !== undefined || args.org !== undefined)) throw new Error('--repo and --org apply only when creating the repository on GitHub; drop them when using --remote.');
+    if (args.org !== undefined) parseOrExplain(githubLoginSchema, args.org, 'GitHub organization');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
@@ -186,8 +200,10 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       if (heads.code !== 0) throw new Error(`Cannot reach ${remote}: ${(heads.stderr || heads.stdout).trim()}`);
       if (heads.stdout.trim()) throw new Error(`${remote} already has branches; \`team create --remote\` needs an empty repository. To join an existing team run \`team join ${remote}\`.`);
     } else {
-      let repo = args.repo !== undefined ? parseOrExplain(teamNameSchema, args.repo, 'repository name') : await askUntilValid(io, 'GitHub repository name', name, validateName('a repository name'));
+      // gh and identity first (the wizard's step 2), then the repository question (its step 3): a
+      // machine without gh hears about gh before it is asked anything.
       identity = (await authenticateCreator(io, { config: store, runner })).identity;
+      let repo = args.repo !== undefined ? parseOrExplain(teamNameSchema, args.repo, 'repository name') : await askUntilValid(io, 'GitHub repository name', name, validateName);
       let spec = args.org ? `${args.org}/${repo}` : repo;
       for (let attempt = 1; ; attempt++) {
         const created = await runner.run('gh', ['repo', 'create', spec, '--private']);
@@ -195,7 +211,7 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
         const reason = (created.stderr || created.stdout).trim();
         if (!REPO_TAKEN.test(reason) || attempt >= MAX_REPO_ATTEMPTS) throw new Error(`Could not create the GitHub repository ${spec}: ${reason}`);
         io.print(`The repository name ${spec} is already taken on GitHub.`);
-        repo = await askUntilValid(io, 'GitHub repository name', undefined, validateName('a repository name'));
+        repo = await askUntilValid(io, 'GitHub repository name', undefined, validateName);
         spec = args.org ? `${args.org}/${repo}` : repo;
       }
       // gh resolves a bare name to the authenticated login; ask it for the owner rather than guessing.
@@ -212,10 +228,12 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       // Re-probe before claiming anything: a failure after the push leaves a scaffolded remote that
       // `team join` can finish from, and a retry with `--remote` would only be refused as non-empty.
       const heads = await runner.run('git', ['ls-remote', '--heads', '--', remoteToGitUrl(remote)]);
-      const scaffolded = heads.code === 0 && heads.stdout.trim() !== '';
-      throw new Error(scaffolded
-        ? `${reason}\nThe scaffold was pushed to ${remote} but the local clone could not be completed; run \`team join ${remote}\` to finish, or delete the repository and retry.`
-        : `${reason}\nThe repository ${remote} exists but holds no scaffold. Fix the cause and retry with \`team create ${name} --remote ${remote}\`, or delete the repository.`);
+      const advice = heads.code !== 0
+        ? `Could not determine whether the scaffold reached ${remote} (${(heads.stderr || heads.stdout).trim()}). Check the repository: if it has a main branch run \`team join ${remote}\`, otherwise retry with \`team create ${name} --remote ${remote}\`.`
+        : heads.stdout.trim() !== ''
+          ? `The scaffold was pushed to ${remote} but the local clone could not be completed; run \`team join ${remote}\` to finish, or delete the repository and retry.`
+          : `The repository ${remote} exists but holds no scaffold. Fix the cause and retry with \`team create ${name} --remote ${remote}\`, or delete the repository.`;
+      throw new Error(`${reason}\n${advice}`);
     }
     await store.update((fresh) => {
       if (fresh.teams[name]) throw new Error(`Team ${name} was configured by another process while this create ran; the repository ${remote} is scaffolded, run \`team join ${remote} --as <other-name>\` to use it.`);
@@ -275,7 +293,9 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
 
     await store.update((fresh) => {
       // Re-check under the lock: another verb may have bound this remote or name while we prompted.
-      assertBindable(fresh, team, normalized);
+      // The roster write above is durable, so a refusal here says so and names the way forward.
+      try { assertBindable(fresh, team, normalized); }
+      catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)} Your roster entry people/${identity.handle}.json was already pushed to ${normalized}; run \`team join ${args.target}\` again to continue under the existing entry, or ask an admin to \`team remove ${identity.handle}\` if you did not mean to join twice.`); }
       setIdentity(fresh, identity);
       bindTeam(fresh, team, { remote: normalized, handle: identity.handle });
     });
@@ -335,7 +355,8 @@ export function joinMutation(tree: MutableTree, identity: Identity, boundHandle:
     handle,
     display_name: identity.displayName,
     email: identity.email,
-    github: identity.github,
+    // A reclaim or rejoin that left the login blank keeps the one on file: an empty answer is "no change", not "none".
+    github: identity.github || existing?.github || '',
     bio: existing?.bio ?? '',
     installed: existing?.installed ?? [],
     declined: existing?.declined ?? [],

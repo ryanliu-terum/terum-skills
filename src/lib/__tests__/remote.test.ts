@@ -54,7 +54,7 @@ describe('normalizeRemote (§5.1)', () => {
       expect(normalizeRemote(once), input).toBe(once);
       expect(() => remoteToGitUrl(once), input).not.toThrow();
       expect(() => hostOperationAllowed(once), input).not.toThrow();
-      expect(() => remoteName(once), input).not.toThrow();
+      expect(remoteName(once), input).not.toBe('');
     }
   });
 
@@ -115,6 +115,7 @@ describe('normalizeRemote (§5.1)', () => {
       'https://me:gh@p_leak@git.example/.git', ' https://me:p@ss@-evil.example/x',
       // a password with `/` (or `/` and `:` and `@`) fails the structured parse; the message fallback must still not echo it
       'https://me:aWxs/K3Q@git.example/team.git', 'https://me:a/b:c@d@git.example/team.git', 'me:aWxs/K3Q@git.example:team.git',
+      'me:aWxs/K3Q@git.example/team.git', 'user:AbC/dEf@github.com/org/repo.git',
     ];
     for (const input of rejected) {
       const message = thrownMessage(() => normalizeRemote(input));
@@ -149,6 +150,8 @@ describe('normalizeRemote (§5.1)', () => {
     expect(remoteName('/tmp/x/team.git')).toBe('team');
     expect(remoteName('file:/tmp/x/team.git')).toBe('team');
     expect(remoteName('/tmp/x/team')).toBe('team');
+    expect(remoteName('/tmp/x/team/.git')).toBe('team');
+    expect(remoteName('file:/tmp/x/team/.git')).toBe('team');
     expect(remoteName('localhost:org/repo.git')).toBe('repo');
     expect(remoteName('https://gitlab.com/Org/re:po.git')).toBe('re:po');
   });

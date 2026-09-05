@@ -1,4 +1,4 @@
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../config.js';
@@ -26,14 +26,18 @@ describe('config store (§5.4)', () => {
     expect((await store.read()).teams.t?.handle).toBe('me');
   });
 
-  it('a team entry always carries its handle, and a stale token key from before rev 9 is read and ignored', async () => {
+  it('migrates a pre-rev-9 config on read: a handle-less entry is dropped, a retired token is dropped, and the next write leaves neither on disk', async () => {
     const root = join(await temporaryDirectory(), 'skills');
     const store = createConfigStore(root);
     await store.ensureRoot();
-    await writeFile(join(root, 'config.json'), JSON.stringify({ teams: { t: { remote: 'github.com/a/t', token: 'ghp_old', handle: 'me' } }, shared: {}, approvals: {}, pending: [], placements: {} }));
-    expect((await store.read()).teams.t).toMatchObject({ remote: 'github.com/a/t', handle: 'me' });
-    await writeFile(join(root, 'config.json'), JSON.stringify({ teams: { t: { remote: 'github.com/a/t', handle: null } }, shared: {}, approvals: {}, pending: [], placements: {} }));
-    await expect(store.read()).rejects.toThrow(/teams\.t\.handle/);
+    const legacy = { teams: { t: { remote: 'github.com/a/t', token: 'ghp_old', handle: 'me' }, unbound: { remote: 'github.com/a/u', token: 'ghp_unbound', handle: null } }, shared: {}, approvals: {}, pending: [], placements: {} };
+    await writeFile(join(root, 'config.json'), JSON.stringify(legacy));
+    expect((await store.read()).teams).toEqual({ t: { remote: 'github.com/a/t', handle: 'me' } });
+    await store.update((config) => { config.default_handle = 'me'; });
+    const written = await readFile(join(root, 'config.json'), 'utf8');
+    expect(written).not.toContain('ghp_');
+    expect(written).not.toContain('unbound');
+    expect(JSON.parse(written).teams).toEqual({ t: { remote: 'github.com/a/t', handle: 'me' } });
   });
 
   it('serializes concurrent updates so neither is lost', async () => {
@@ -72,4 +76,19 @@ describe('config store (§5.4)', () => {
     for (const bad of ['../x', 'a/b', '.hidden', '']) expect(() => store.teamClone(bad), bad).toThrow('Invalid team name');
     expect(store.teamClone('team-skills-terum')).toBe(join(store.root, 'teams', 'team-skills-terum'));
   });
+  it('a lock lost to another process during the mutate aborts before the write and leaves the file byte-identical', async () => {
+    const root = join(await temporaryDirectory(), 'skills');
+    const store = createConfigStore(root, { lockStale: 2_000 });
+    await store.update((config) => { config.default_handle = 'me'; });
+    const before = await readFile(join(root, 'config.json'), 'utf8');
+    await expect(store.update(async (config) => {
+      await rm(join(root, 'config.json.lock'), { recursive: true, force: true });
+      await new Promise((done) => setTimeout(done, 1_500));
+      config.default_handle = 'stale-snapshot';
+    })).rejects.toThrow(/Lost the lock/);
+    expect(await readFile(join(root, 'config.json'), 'utf8')).toBe(before);
+    await store.update((config) => { config.default_handle = 'next'; });
+    expect((await store.read()).default_handle).toBe('next');
+  });
+
 });

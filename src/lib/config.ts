@@ -26,7 +26,12 @@ export function selectTeam<T extends { remote: string }>(teams: Record<string, T
   throw new Error(`More than one team is configured; pass --team <name> (${entries.map(([name]) => name).join(', ')}).`);
 }
 
-export function createConfigStore(root = join(homedir(), '.terum', 'skills')): ConfigStore {
+export interface ConfigStoreOptions {
+  /** Test knob: the lock's stale window in ms (proper-lockfile floors it at 2000 and checks the lock every half window). */
+  lockStale?: number;
+}
+
+export function createConfigStore(root = join(homedir(), '.terum', 'skills'), options: ConfigStoreOptions = {}): ConfigStore {
   const path = join(root, 'config.json');
   const read = async (): Promise<Config> => {
     try { return parseJson(configSchema, await readFile(path, 'utf8'), path); }
@@ -52,7 +57,7 @@ export function createConfigStore(root = join(homedir(), '.terum', 'skills')): C
       const release = await lockfile.lock(path, {
         lockfilePath: `${path}.lock`,
         realpath: false,
-        stale: 30_000,
+        stale: options.lockStale ?? 30_000,
         retries: { retries: 20, minTimeout: 25, maxTimeout: 250 },
         onCompromised: () => { compromised = true; },
       });

@@ -15,7 +15,7 @@ export interface Identity { handle: string; displayName: string; email: string; 
 export interface GhState { installed: boolean; authenticated: boolean; }
 
 export const MAX_ATTEMPTS = 3;
-const GITHUB_LOGIN_RULE = 'a GitHub login is 1-39 letters, digits, or single internal hyphens (leave it empty if you have none)';
+const GITHUB_LOGIN_RULE = 'a GitHub login is 1-39 letters, digits, or single internal hyphens; enter - if you have none';
 
 export async function ghState(runner: Runner = systemRunner): Promise<GhState> {
   try {
@@ -57,14 +57,16 @@ export interface IdentityOptions {
  * segment at `team remove`, so it is validated and re-asked like the handle.
  */
 export async function collectIdentity(io: Prompter, existing: Config, runner: Runner = systemRunner, options: IdentityOptions = {}): Promise<Identity> {
-  let suggested = existing.github || '';
+  // A persisted value that is not a login (written before this validation existed) is no default: it would be re-offered forever.
+  let suggested = existing.github && githubLoginSchema.safeParse(existing.github).success ? existing.github : '';
   if (!suggested && options.gh?.authenticated) {
     const login = await runner.run('gh', ['api', 'user', '-q', '.login']);
-    if (login.code === 0) suggested = login.stdout.trim();
+    if (login.code === 0 && githubLoginSchema.safeParse(login.stdout.trim()).success) suggested = login.stdout.trim();
   }
-  const github = await askUntilValid(io, 'GitHub login', suggested, (value) => {
+  // Enter takes the suggestion, so `-` is the way to say "none" once one is offered.
+  const github = await askUntilValid(io, suggested ? 'GitHub login (- for none)' : 'GitHub login', suggested, (value) => {
     const trimmed = value.trim();
-    if (!trimmed) return { ok: true, value: '' };
+    if (!trimmed || trimmed === '-') return { ok: true, value: '' };
     const parsed = githubLoginSchema.safeParse(trimmed);
     return parsed.success ? { ok: true, value: parsed.data } : { ok: false, rule: GITHUB_LOGIN_RULE };
   });
@@ -97,14 +99,13 @@ export async function askUntilValid(io: Prompter, question: string, defaultValue
 }
 
 export interface CreatorAuth { identity: Identity; gh: GhState; }
-export interface CreatorAuthOptions { fixedHandle?: string; }
 
 /**
  * Creator path: `team create` on GitHub needs `gh repo create`, so a logged-in gh is required —
  * detection, the login offer, then identity. There is no token fallback (Decision 2): declined,
  * or no gh at all, stops here and says what to do instead.
  */
-export async function authenticateCreator(io: Prompter, dependencies: AuthDependencies = {}, options: CreatorAuthOptions = {}): Promise<CreatorAuth> {
+export async function authenticateCreator(io: Prompter, dependencies: AuthDependencies = {}): Promise<CreatorAuth> {
   const store = dependencies.config ?? createConfigStore();
   const runner = dependencies.runner ?? systemRunner;
   const config = await store.read();
@@ -115,8 +116,16 @@ export async function authenticateCreator(io: Prompter, dependencies: AuthDepend
   if (!gh.authenticated) {
     throw new Error('GitHub authentication is required to create a team: run `gh auth login` and retry, or create the team against an existing empty remote with `team create <name> --remote <url>`.');
   }
-  const identity = await collectIdentity(io, config, runner, { fixedHandle: options.fixedHandle, gh });
+  const identity = await collectIdentity(io, config, runner, { gh });
   return { identity, gh };
+}
+
+/** When a gh call failed, the reason worth telling the user when the cause is gh itself (absent or logged out); null otherwise. */
+export async function explainGhFailure(runner: Runner = systemRunner): Promise<string | null> {
+  const gh = await ghState(runner);
+  if (!gh.installed) return 'GitHub CLI (gh) is not installed; this operation needs it on GitHub in phase 1. Install it from https://cli.github.com and run `gh auth login`.';
+  if (!gh.authenticated) return 'GitHub authentication is required: run `gh auth login` and retry.';
+  return null;
 }
 
 /** Joiner path (D8): detection and the gh offer only — a token is never requested. */

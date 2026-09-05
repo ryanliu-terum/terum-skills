@@ -38,6 +38,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     await program.parseAsync(['team', 'join', 'fail/fail'], { from: 'user' });
     expect(outcomes).toEqual([false]);
     expect(program.commands.find((command) => command.name() === 'login')?.options).toEqual([]);
+    await expect(program.parseAsync(['login', '--team', 'alpha'], { from: 'user' })).rejects.toMatchObject({ code: 'commander.unknownOption' });
   });
 
   it('wires every M2 verb and passes a missing install member value through as a clear command failure', async () => {

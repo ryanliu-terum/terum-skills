@@ -37,7 +37,8 @@ describe('execute — the bin contract (§3)', () => {
     expect(failed.lines).toEqual(['note', 'Could not fast-forward team: offline']);
     expect(failed.codes).toEqual([1]);
     const quiet = sink();
-    await quiet.execute(async () => success({ placed: 1, deferred: [], notices: [], changed: true, hook: false }));
+    // A plain (non-hook) sync carries the same shape; its notices already went to stdout, so nothing is echoed here.
+    await quiet.execute(async () => success({ placed: 1, deferred: ['a'], notices: ['note'], changed: true, hook: false }));
     expect(quiet.lines).toEqual([]);
   });
 });

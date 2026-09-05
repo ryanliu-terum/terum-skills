@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { askUntilValid, assertBindable, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, identityForJoiner, teamByRemote } from '../auth.js';
+import { askUntilValid, assertBindable, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, identityForJoiner, teamByRemote } from '../auth.js';
 import { ConfigStore } from '../config.js';
 import { emptyConfig } from '../schema.js';
 import { fakeGh, ghOnlyRunner, noGhRunner, ScriptedPrompter } from './fixtures.js';
@@ -44,10 +44,20 @@ describe('identity (§5.4)', () => {
     const blank = await collectIdentity(new ScriptedPrompter(['', 'me', 'Me', 'me@x.test']), emptyConfig(), noGhRunner);
     expect(blank.github).toBe('');
     await expect(collectIdentity(new ScriptedPrompter(['a--b', 'a--b', 'a--b']), emptyConfig(), noGhRunner)).rejects.toThrow('Invalid github login after 3 attempts');
-    // A persisted '' is no default: the gh login is still looked up.
-    const runner = ghOnlyRunner(fakeGh('octocat'));
-    const suggested = await collectIdentity(new ScriptedPrompter(['', '', 'Me', 'me@x.test']), { ...emptyConfig(), github: '' }, runner, { gh: { installed: true, authenticated: true } });
-    expect(suggested).toMatchObject({ github: 'octocat', handle: 'octocat' });
+    // A persisted '' (or an invalid legacy value) is no default: the gh login is still looked up.
+    for (const persisted of ['', 'bad--login']) {
+      const runner = ghOnlyRunner(fakeGh('octocat'));
+      const suggested = await collectIdentity(new ScriptedPrompter(['', '', 'Me', 'me@x.test']), { ...emptyConfig(), github: persisted }, runner, { gh: { installed: true, authenticated: true } });
+      expect(suggested, persisted).toMatchObject({ github: 'octocat', handle: 'octocat' });
+    }
+    // Once a login is suggested, Enter takes it and `-` clears it.
+    const cleared = await collectIdentity(new ScriptedPrompter(['-', 'me', 'Me', 'me@x.test']), { ...emptyConfig(), github: 'octocat' }, noGhRunner);
+    expect(cleared.github).toBe('');
+    const kept = await collectIdentity(new ScriptedPrompter(['', '', 'Me', 'me@x.test']), { ...emptyConfig(), github: 'octocat' }, noGhRunner);
+    expect(kept).toMatchObject({ github: 'octocat', handle: 'octocat' });
+    // gh's own answer is validated too: a garbage login is never suggested.
+    const garbage = ghOnlyRunner((args) => (args[0] === '--version' || args.join(' ') === 'auth status' ? { code: 0, stdout: '', stderr: '' } : { code: 0, stdout: 'not a login/\n', stderr: '' }));
+    expect((await collectIdentity(new ScriptedPrompter(['', 'me', 'Me', 'me@x.test']), emptyConfig(), garbage, { gh: { installed: true, authenticated: true } })).github).toBe('');
   });
 
   it('a bound per-team handle is not asked again; an invalid email is re-prompted; an exhausted script fails loudly', async () => {
@@ -118,4 +128,12 @@ describe('team binding (§5.4, rev 9)', () => {
     expect(() => assertBindable(config, 'other', 'git@github.com:acme/team.git')).toThrow('already configured as team t');
     expect(() => assertBindable(config, 't', 'github.com/acme/other')).toThrow(/configured for github\.com\/acme\/team, not github\.com\/acme\/other/);
   });
+describe('explainGhFailure', () => {
+  it('names the missing or logged-out gh, and stays silent when gh itself is fine', async () => {
+    expect(await explainGhFailure(noGhRunner)).toContain('not installed');
+    expect(await explainGhFailure(ghOnlyRunner(fakeGh('me', {}, false)))).toContain('gh auth login');
+    expect(await explainGhFailure(ghOnlyRunner(fakeGh('me')))).toBeNull();
+  });
+});
+
 });

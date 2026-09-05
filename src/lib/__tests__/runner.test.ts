@@ -19,7 +19,7 @@ describe('systemRunner', () => {
       const prompt = await systemRunner.run('git', ['-c', 'alias.p=!printf "%s" "$GIT_TERMINAL_PROMPT"', 'p'], { cwd });
       expect(prompt.stdout).toBe('0');
     } finally {
-      process.env.GIT_TERMINAL_PROMPT = ambient;
+      if (ambient === undefined) delete process.env.GIT_TERMINAL_PROMPT; else process.env.GIT_TERMINAL_PROMPT = ambient;
     }
   });
 
