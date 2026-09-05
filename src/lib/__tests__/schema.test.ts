@@ -54,6 +54,12 @@ describe('handles and team names (§5.4)', () => {
     expect(() => parseOrExplain(teamNameSchema, '../x', 'team name')).not.toThrow(/\[/);
   });
 
+  it('accepts only GitHub-login syntax in people records', () => {
+    const valid = { handle: 'me', display_name: 'Me', email: 'me@example.com', github: 'me-gh', bio: '', installed: [], declined: [] };
+    expect(personSchema.safeParse(valid).success).toBe(true);
+    for (const github of ['', 'x/../repos/acme/other', 'bad--login']) expect(personSchema.safeParse({ ...valid, github }).success, github).toBe(false);
+  });
+
   it('team names are safe directory and repository names', () => {
     expect(teamNameSchema.safeParse('team-skills-terum').success).toBe(true);
     for (const bad of ['../x', '.hidden', 'a/b', '', 'a b', 'x'.repeat(101)]) expect(teamNameSchema.safeParse(bad).success, bad).toBe(false);

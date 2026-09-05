@@ -1,4 +1,5 @@
 import { handleSchema, parseJson, parseSkillFrontmatter, personSchema, Team, teamSchema } from './schema.js';
+import { canonicalSkillDigest } from './skills.js';
 
 /**
  * §6.0 write guard — the authorization model. A diff may touch only the rows a–f below, and
@@ -13,13 +14,15 @@ export interface GuardContext {
   handle: string;
   /** The actor's `Name <email>` (§5.3 metadata.author); required for skill-folder writes. */
   author?: string;
+  /** A config-driven §5.3 managed-author refresh may replace this committed author with `author`. */
+  previousAuthor?: string;
   /** `team remove` only: the handle being archived. */
   targetHandle?: string;
 }
 
 export interface GuardTree {
-  before(path: string): string | undefined;
-  after(path: string): string | undefined;
+  before(path: string): string | Buffer | undefined;
+  after(path: string): string | Buffer | undefined;
   readonly changedPaths: readonly string[];
 }
 
@@ -58,21 +61,29 @@ function normalizeHandle(handle: string): string {
 function ownsSkill(tree: GuardTree, name: string, context: GuardContext): boolean {
   if (!context.author) return false;
   const me = normalizeAuthor(context.author);
+  // Only sync's §5.3 managed-field refresh may additionally present the committed author it is
+  // replacing. It is deliberately narrower than ordinary ownership: only SKILL.md may change and
+  // its canonical content must be identical before and after.
+  const previousAuthor = context.previousAuthor === undefined || context.action !== 'sync' ? undefined : normalizeAuthor(context.previousAuthor);
   const skillFile = `skills/${name}/SKILL.md`;
   const before = tree.before(skillFile);
   const after = tree.after(skillFile);
   if (before === undefined && after === undefined) return false;
-  if (before !== undefined && authorOf(before) !== me) return false;
+  const beforeAuthor = before === undefined ? undefined : authorOf(before);
+  if (beforeAuthor !== undefined && beforeAuthor !== me) {
+    if (before === undefined || beforeAuthor !== previousAuthor || after === undefined || tree.changedPaths.length !== 1 || tree.changedPaths[0] !== skillFile) return false;
+    if (canonicalSkillDigest(before) !== canonicalSkillDigest(after)) return false;
+  }
   if (after !== undefined && authorOf(after) !== me) return false;
   return true;
 }
 
-function authorOf(source: string): string | null {
-  const parsed = parseSkillFrontmatter(source);
+function authorOf(source: string | Buffer): string | null {
+  const parsed = parseSkillFrontmatter(asText(source));
   return parsed.ok ? normalizeAuthor(parsed.data.metadata.author) : null;
 }
 
-function normalizeAuthor(author: string): string {
+export function normalizeAuthor(author: string): string {
   return author.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
@@ -85,11 +96,13 @@ function guardTeam(tree: GuardTree, context: GuardContext): void {
   throw new GuardError(`Write guard refused team.json for ${context.action} by ${context.handle}`);
 }
 
-function parseTeam(value: string | undefined): Team {
+function parseTeam(value: string | Buffer | undefined): Team {
   if (value === undefined) throw new GuardError('Write guard cannot authorize a missing team.json');
-  try { return parseJson(teamSchema, value, 'team.json'); }
+  try { return parseJson(teamSchema, asText(value), 'team.json'); }
   catch (error) { throw new GuardError(error instanceof Error ? error.message : String(error)); }
 }
+
+function asText(value: string | Buffer): string { return Buffer.isBuffer(value) ? value.toString('utf8') : value; }
 
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 

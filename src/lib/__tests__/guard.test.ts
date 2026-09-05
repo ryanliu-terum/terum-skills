@@ -110,3 +110,19 @@ describe('membership predicate (§4.1)', () => {
     expect(isMember(me, team(), 'other')).toBe(false);
   });
 });
+
+describe('row a — previousAuthor is the §5.3 managed-field refresh, for sync only', () => {
+  it('lets sync replace the committed author with the configured one, but only as a SKILL.md-only canonical refresh', () => {
+    const refresh = (before: string, after: string) => tree({ 'skills/x/SKILL.md': [skill(before), skill(after)] });
+    const ctx = (action: GuardContext['action']): GuardContext => ({ action, handle: 'me', author: 'Me <new@x.test>', previousAuthor: 'Me <old@x.test>' });
+    expect(() => guard(refresh('Me <old@x.test>', 'Me <new@x.test>'), ctx('sync'))).not.toThrow();
+    // Once the refresh has landed, the actor retains ordinary ownership even when the prior
+    // author is still supplied for a replayed mutation.
+    expect(() => guard(tree({ 'skills/x/SKILL.md': [skill('Me <new@x.test>'), skill('Me <new@x.test>').replace('# x', '# changed')] }), ctx('sync'))).not.toThrow();
+    refuse(tree({ 'skills/x/SKILL.md': [skill('Me <old@x.test>'), skill('Me <new@x.test>').replace('# x', '# changed')] }), ctx('sync'), 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/x/SKILL.md': [skill('Me <old@x.test>'), skill('Me <new@x.test>')], 'skills/x/note.md': [undefined, 'extra'] }), ctx('sync'), 'skills/x/SKILL.md');
+    refuse(refresh('Me <old@x.test>', 'Me <new@x.test>'), ctx('share'), 'skills/x/SKILL.md');
+    refuse(refresh('Them <them@x.test>', 'Me <new@x.test>'), ctx('sync'), 'skills/x/SKILL.md');
+    refuse(refresh('Me <old@x.test>', 'Them <them@x.test>'), ctx('sync'), 'skills/x/SKILL.md');
+  });
+});
