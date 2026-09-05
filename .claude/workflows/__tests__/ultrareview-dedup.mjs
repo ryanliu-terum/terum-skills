@@ -196,7 +196,7 @@ const conserved = (out) => [...(out.confirmedFindings || []), ...(out.contestedF
   const both = await run({ clusterReply: { clusters: [] }, findings: [BY_DIM.correctness[1]], args: '--codex-verify --fast' })
   check('hybrid+fast: every relay command carries the fast tier', relays(both.calls).length === 3 && relays(both.calls).every(c => c.prompt.includes(FAST_ARG)), `relays=${relays(both.calls).length}`)
   check('hybrid+fast: modeDetail.codex.fast is true', both.out.modeDetail.codex && both.out.modeDetail.codex.fast === true, JSON.stringify(both.out.modeDetail.codex))
-  check('hybrid+fast: verify label carries +fast', both.out.modeDetail.models.verify === 'codex:gpt-5.6-sol@high+fast', both.out.modeDetail.models.verify)
+  check('hybrid+fast: verify label carries +fast', both.out.modeDetail.models.verify === 'codex:gpt-6-astra@high+fast', both.out.modeDetail.models.verify)
   check('hybrid+fast: still ON-STANDARD (no OFF-STANDARD note)', !both.logs.some(l => l.includes('OFF-STANDARD')))
   check('hybrid+fast: relay is told to keep the full timeout', relays(both.calls).every(c => c.prompt.includes('keep the full timeout')))
   check('hybrid+fast: logs the upstream no-op NOTE (openai/codex#32191)', both.logs.some(l => l.startsWith('NOTE: --fast requests Codex Fast mode') && l.includes('#32191')))
@@ -204,6 +204,13 @@ const conserved = (out) => [...(out.confirmedFindings || []), ...(out.contestedF
   check('hybrid only: no relay carries the fast tier', relays(hybrid.calls).length === 3 && relays(hybrid.calls).every(c => !c.prompt.includes(FAST_ARG)))
   check('hybrid only: modeDetail.codex.fast is false', hybrid.out.modeDetail.codex && hybrid.out.modeDetail.codex.fast === false)
   check('hybrid only: no --fast NOTEs of either kind', !hybrid.logs.some(l => l.includes('--fast')))
+  // The standard tier is astra (Ryan, 2026-09-05). Bare --codex-verify must resolve to it and stay
+  // ON-STANDARD; an explicit 5.6 tier is still selectable but must be called out as OFF-STANDARD.
+  check('hybrid default tier is astra@high', hybrid.out.modeDetail.codex.tier === 'astra' && hybrid.out.modeDetail.codex.model === 'gpt-6-astra' && hybrid.out.modeDetail.codex.effort === 'high', JSON.stringify(hybrid.out.modeDetail.codex))
+  check('hybrid default: ON-STANDARD (no OFF-STANDARD note)', !hybrid.logs.some(l => l.includes('OFF-STANDARD')))
+  const sol = await run({ clusterReply: { clusters: [] }, findings: [BY_DIM.correctness[1]], args: '--codex-verify --verify-model=sol' })
+  check('hybrid --verify-model=sol: still selectable, resolves to gpt-5.6-sol', sol.out.modeDetail.codex.tier === 'sol' && sol.out.modeDetail.codex.model === 'gpt-5.6-sol', JSON.stringify(sol.out.modeDetail.codex))
+  check('hybrid --verify-model=sol: logged OFF-STANDARD naming astra as the standard', sol.logs.some(l => l.includes('OFF-STANDARD') && l.includes('astra@high x3')), sol.logs.filter(l => l.includes('OFF-STANDARD')).join(' | '))
   const claude = await run({ clusterReply: { clusters: [] }, findings: [BY_DIM.correctness[1]], args: '--fast' })
   check('claude panel: --fast is a logged no-op', claude.logs.some(l => l.startsWith('NOTE: --fast ignored')))
   check('claude panel: no Codex relay, no service tier anywhere', relays(claude.calls).length === 0 && claude.calls.every(c => !c.prompt.includes(FAST_ARG)) && claude.out.modeDetail.codex === null)

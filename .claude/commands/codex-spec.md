@@ -6,7 +6,7 @@ This is the mirror image of `/hybrid-review`: there Claude finds and Codex verif
 
 `$ARGUMENTS` is `<path-to-spec>` plus optional knobs:
 
-- **Find phase** (`codex-spec-find.mjs`): `--dims drift,reality,quality,readiness` (default all) · `--tier sol|terra|luna` (default `sol`) · `--effort <level>` (default `high`) · `--drift-cap N` (default 8) · `--batch N` (artifacts per reality reviewer, default 8) · `--concurrency N` (default 6). **Space-separated values only** — the find script matches a flag by exact token, so `--effort=high` is silently ignored and the default is used.
+- **Find phase** (`codex-spec-find.mjs`): `--dims drift,reality,quality,readiness` (default all) · `--tier astra|sol|terra|luna` (default `sol`) · `--effort <level>` (default `high`) · `--drift-cap N` (default 8) · `--batch N` (artifacts per reality reviewer, default 8) · `--concurrency N` (default 6). **Space-separated values only** — the find script matches a flag by exact token, so `--effort=high` is silently ignored and the default is used.
 - **Verify + triage phase** (`codex-spec-verify.js`): `--verify full|conservative|balanced|aggressive` (default `conservative` = 2-vote) · `--floor N` (per-dimension guaranteed verify slots) · `--verify-model <m>` · `--no-triage` (skip the default triage stage; passes `triage: false` in the workflow args).
 
 Example: `.planning/specs/foo.md` · `.planning/specs/foo.md --verify full --effort xhigh` · `.planning/specs/foo.md --dims quality,readiness` · `.planning/specs/foo.md --no-triage`

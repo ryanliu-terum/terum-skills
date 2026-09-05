@@ -1,6 +1,6 @@
 ---
 name: codex-spec
-description: Cross-model spec auditor. Same four dimensions as /ultraspec (cross-spec drift, spec-vs-code reality, internal quality, build-readiness), but the FINDERS run on OpenAI Codex and the adversarial verify panel runs on Claude — the mirror image of /hybrid-review. Use when a spec was written by Claude and you want it reviewed by something that does not share the author's blind spots, especially before handing it to /codex-implement. The default flow ends in a triage: every confirmed finding is investigated and sorted into mechanical / clear / fork / declined (with a diff for the mechanical ones), so the run finishes with "apply this batch on one confirmation, confirm these one by one, walk these forks" — never with an autonomous spec rewrite. Args: <path-to-spec> [--dims <list>] [--tier sol|terra|luna] [--effort <level>] [--verify full|conservative|balanced|aggressive] [--drift-cap N] [--batch N] [--concurrency N] [--timeout <ms>] [--no-triage].
+description: Cross-model spec auditor. Same four dimensions as /ultraspec (cross-spec drift, spec-vs-code reality, internal quality, build-readiness), but the FINDERS run on OpenAI Codex and the adversarial verify panel runs on Claude — the mirror image of /hybrid-review. Use when a spec was written by Claude and you want it reviewed by something that does not share the author's blind spots, especially before handing it to /codex-implement. The default flow ends in a triage: every confirmed finding is investigated and sorted into mechanical / clear / fork / declined (with a diff for the mechanical ones), so the run finishes with "apply this batch on one confirmation, confirm these one by one, walk these forks" — never with an autonomous spec rewrite. Args: <path-to-spec> [--dims <list>] [--tier astra|sol|terra|luna] [--effort <level>] [--verify full|conservative|balanced|aggressive] [--drift-cap N] [--batch N] [--concurrency N] [--timeout <ms>] [--no-triage].
 ---
 
 Audit a planning spec with **Codex finding and Claude verifying**.
@@ -37,7 +37,7 @@ per-dimension floor so that cannot happen.
 
 | | `/ultraspec` | `/codex-spec` |
 | --- | --- | --- |
-| Finders | Claude | **Codex** (`gpt-5.6-sol`) |
+| Finders | Claude | **Codex** (`gpt-5.6-sol`; `--tier astra` for `gpt-6-astra`) |
 | Verifiers | Claude | Claude |
 | Best for | everyday spec audits; drift-heavy specs with many siblings | a Claude-written spec before build, anything heading to `/codex-implement`, security-shaped specs where an unstated contract is the risk |
 | Requires | nothing | `codex login status` authenticated |
@@ -67,7 +67,7 @@ Run it from the repo root. **Run it in the background** (`run_in_background: tru
 15+ Codex calls and routinely exceeds the foreground Bash timeout. A bounded default run on a
 158-line spec took ~9 minutes at `--effort high`.
 
-Flags: `--dims drift,reality,quality,readiness` · `--tier sol|terra|luna` · `--effort <level>` ·
+Flags: `--dims drift,reality,quality,readiness` · `--tier astra|sol|terra|luna` (default `sol`) · `--effort <level>` ·
 `--drift-cap N` (default 8) · `--batch N` artifacts per reality reviewer (default 8) ·
 `--concurrency N` (default 6) · `--timeout <ms>` per call.
 

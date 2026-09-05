@@ -16,7 +16,7 @@ export const meta = {
 //   [--model=<m>] [--review-model=<m>] [--verify-model=<m>] [--fable-review] [--codex-verify]' })
 // Cost levels: full|conservative|balanced|aggressive (verify depth). Models: opus|sonnet|haiku|fable per stage.
 // --codex-verify (= /hybrid-review): finders stay on Claude, the verify panel runs on OpenAI Codex.
-//   In that mode --verify-model selects the CODEX tier (sol|terra|luna) instead of a Claude model.
+//   In that mode --verify-model selects the CODEX tier (astra|sol|terra|luna) instead of a Claude model.
 // No --drift (ultrareview reviews the whole diff; cost dial trims verification only). --in-depth vs --max differ only by review model (sonnet vs opus) here, since costDrift is inert.
 // A Dedup stage sits between Review and Verify: it cuts REDUNDANCY, never depth (every distinct finding still gets the full vp.votes panel).
 // A Triage stage sits between Verify and Synthesize: one read-only agent per CONFIRMED finding investigates and RATES the fix;
@@ -125,17 +125,23 @@ const modelFlag = (name) => {
 // contested-not-confirmed. Claude's recorded score on the same 5 was 0/5.
 //
 // Two axes on Codex (tier x reasoning effort), so the mapping is explicit:
-// --verify-model keeps meaning "which model" (sol|terra|luna); effort rides the preset.
+// --verify-model keeps meaning "which model" (astra|sol|terra|luna); effort rides the preset.
 // `ultra` is deliberately NOT reachable -- it is "maximum reasoning with automatic task
 // delegation", i.e. Codex spawning its own subagents. Nondeterministic sub-fan-out inside
 // a deterministic vote panel defeats the purpose of having a vote panel.
 const CODEX_VERIFY = TOKENS.includes('--codex-verify')
-const CODEX_MODELS = { sol: 'gpt-5.6-sol', terra: 'gpt-5.6-terra', luna: 'gpt-5.6-luna' }
+// `astra` = GPT-6 Astra (catalog slug `gpt-6-astra`, "Our most capable model for complex, demanding
+// work"; listed and entitled at `high` on this account 2026-09-05, CLI 0.153.4, plan pro). It is the
+// DEFAULT verify tier per Ryan's 2026-09-05 directive ("change the hybrid review to use astra on
+// high"), superseding sol@high (2026-08-04). The three GPT-5.6 tiers stay selectable via
+// --verify-model, but any of them is an OFF-STANDARD panel now (see the check below).
+const CODEX_MODELS = { astra: 'gpt-6-astra', sol: 'gpt-5.6-sol', terra: 'gpt-5.6-terra', luna: 'gpt-5.6-luna' }
+const CODEX_DEFAULT_TIER = 'astra'
 // `balanced` runs at HIGH, same as in-depth (Ryan, 2026-07-30). Deliberate: the verifier is the
 // stage where cheapening causes false positives to survive, so the effort dial is NOT the axis
 // that separates balanced from in-depth -- vote count (2 vs 3) and base model (sonnet vs opus) are.
 const CODEX_EFFORT_BY_PRESET = { quick: 'medium', balanced: 'high', 'in-depth': 'high', max: 'xhigh' }
-// Bare invocation (no preset) gets HIGH, not the sol/medium floor: bare already means the
+// Bare invocation (no preset) gets HIGH, not a medium floor: bare already means the
 // FULL panel (3 votes, all severities, cap 40), so pairing the deepest vote structure with
 // the shallowest reasoning was incoherent once balanced moved to high. There is no
 // "inherit session model" analog on the Codex side, so this fallback must be an explicit pick.
@@ -143,15 +149,15 @@ const codexModelFlag = () => {
   const raw = flagVal('verify-model')
   if (raw === undefined || raw === '') return undefined
   if (CODEX_MODELS[raw]) return raw
-  log('WARNING: ignoring unknown Codex model "' + raw + '" for --verify-model (expected ' + Object.keys(CODEX_MODELS).join('/') + '); using sol')
+  log('WARNING: ignoring unknown Codex model "' + raw + '" for --verify-model (expected ' + Object.keys(CODEX_MODELS).join('/') + '); using ' + CODEX_DEFAULT_TIER)
   return undefined
 }
-const CODEX_TIER = CODEX_VERIFY ? (codexModelFlag() ?? 'sol') : null
+const CODEX_TIER = CODEX_VERIFY ? (codexModelFlag() ?? CODEX_DEFAULT_TIER) : null
 const CODEX_EFFORT = CODEX_VERIFY ? (CODEX_EFFORT_BY_PRESET[presetName] ?? 'high') : null
 const CODEX_SLUG = CODEX_VERIFY ? CODEX_MODELS[CODEX_TIER] : null
 // --fast: Codex "Fast mode" (config `service_tier = "fast"`, the documented alias for the
 // request tier `priority`). Same model, same weights, same effort -- only the inference
-// queue changes -- so a fast panel is still ON-STANDARD (sol@high x3) and does not trip the
+// queue changes -- so a fast panel is still ON-STANDARD (astra@high x3) and does not trip the
 // OFF-STANDARD note below. Vendor claim: 1.5x token speed at 2.5x plan-credit burn on
 // GPT-5.6 (it is NOT 2x). Measured 2026-09-04 (sol, n=2 per arm, same prompt): NO gain --
 // ~40 tok/s read-heavy@high and ~53 tok/s generation-heavy@medium in BOTH arms, wall-clock
@@ -169,13 +175,14 @@ const CODEX_SLUG = CODEX_VERIFY ? CODEX_MODELS[CODEX_TIER] : null
 // Opt-in per run, never a default: if the backend ever honours it, it spends the weekly Codex
 // quota 2.5x faster for the same verdicts. Hybrid-only -- the Claude verify panel has no service
 // tier, so outside --codex-verify it is a logged no-op. Verified 2026-09-04 (CLI 0.147.0,
-// plan_type pro): accepted on gpt-5.6-sol; terra and luna advertise the same tier in the
+// plan_type pro): accepted on gpt-5.6-sol; terra, luna and gpt-6-astra advertise the same tier in the
 // model catalog. A model that does NOT advertise it (gpt-5.4-mini) still exits 0 and runs
 // at STANDARD speed; the only signal is `warning: Configured service tier ... will be
 // omitted from requests` on stderr (an `error` item in the stream under --json) -- never in
 // the `-o` file -- and the relay sends both streams to /dev/null, so such a panel would be
-// indistinguishable from a standard one in the report. Only the three CODEX_MODELS are
-// reachable here, and all three advertise the tier.
+// indistinguishable from a standard one in the report. Only the four CODEX_MODELS are
+// reachable here, and all four advertise the tier (astra's catalog entry claims "2x speed" where
+// the 5.6 tiers say 1.5x; the no-op timing above was on sol and has not been repeated on astra).
 const CODEX_FAST = flagVal('fast') !== undefined
 if (CODEX_FAST && !CODEX_VERIFY) log('NOTE: --fast ignored -- it sets the CODEX service tier and this run verifies on Claude. Use /hybrid-review (--codex-verify) to get it.')
 if (CODEX_FAST && CODEX_VERIFY) log('NOTE: --fast requests Codex Fast mode (service_tier=priority), but as of 2026-09-04 it produced NO measurable speedup on this account on any surface -- codex exec on CLI 0.147/0.153 and the app-server path the IDE uses (openai/codex#32191, #30413; OpenAI on #14204: routing is server-side, the response tier field is not a signal). Expect standard speed; re-time before relying on it.')
@@ -206,13 +213,14 @@ const MODE = {
   models: { base: modelLabel(BASE_MODEL), review: modelLabel(REVIEW_MODEL), verify: verifyLabel },
 }
 log('Mode: ' + (CODEX_VERIFY ? 'HYBRID (claude finds -> codex verifies) | ' : '') + (presetName ? 'preset=' + presetName + ' -> ' : '') + 'verify=' + VERIFY_LEVEL + (TRIAGE ? '' : ', NO-TRIAGE') + (NO_LOGS ? ', no-logs' : '') + ' | models: base=' + modelLabel(BASE_MODEL) + ' review=' + modelLabel(REVIEW_MODEL) + ' verify=' + verifyLabel + (LOW_CONFIDENCE ? ' | LOW-CONFIDENCE (1-vote verify)' : ''))
-// The hybrid STANDARD (Ryan, 2026-08-04): gpt-5.6-sol @ high, 3 surviving votes per finding,
-// relayFailures 0. Bare `--codex-verify` already resolves to exactly that; a preset can drop
-// below it (`--quick` -> medium effort, 1 vote), so say so out loud rather than letting a
-// thinner panel wear the same name in the report.
-if (CODEX_VERIFY && (vp.votes < 3 || CODEX_EFFORT === 'medium')) log('NOTE: OFF-STANDARD hybrid panel (' + CODEX_SLUG + '@' + CODEX_EFFORT + ', ' + vp.votes + ' vote(s)). The standard is sol@high x3 votes -- drop the preset flags to get it. Say which panel ran when you report the result.')
+// The hybrid STANDARD (Ryan, 2026-09-05, superseding sol@high of 2026-08-04): gpt-6-astra @ high,
+// 3 surviving votes per finding, relayFailures 0. Bare `--codex-verify` already resolves to exactly
+// that; a preset can drop below it (`--quick` -> medium effort, 1 vote) and `--verify-model=sol|
+// terra|luna` swaps the model out from under the name, so say so out loud rather than letting a
+// thinner or different panel wear the same name in the report.
+if (CODEX_VERIFY && (vp.votes < 3 || CODEX_EFFORT === 'medium' || CODEX_TIER !== CODEX_DEFAULT_TIER)) log('NOTE: OFF-STANDARD hybrid panel (' + CODEX_SLUG + '@' + CODEX_EFFORT + ', ' + vp.votes + ' vote(s)). The standard is ' + CODEX_DEFAULT_TIER + '@high x3 votes -- drop the preset and --verify-model flags to get it. Say which panel ran when you report the result.')
 // --model must never read as if it steered the verifier in hybrid mode.
-if (CODEX_VERIFY && EXPLICIT_MODEL) log('NOTE: --model=' + EXPLICIT_MODEL + ' applies to the CLAUDE stages only (manifest/review/dedup/triage/synthesize); the verify panel runs on ' + CODEX_SLUG + '. Use --verify-model=sol|terra|luna to change it.')
+if (CODEX_VERIFY && EXPLICIT_MODEL) log('NOTE: --model=' + EXPLICIT_MODEL + ' applies to the CLAUDE stages only (manifest/review/dedup/triage/synthesize); the verify panel runs on ' + CODEX_SLUG + '. Use --verify-model=astra|sol|terra|luna to change it.')
 
 // --- Helpers ---
 const tally = (arr) => arr.reduce((a, f) => { a[f.severity] = (a[f.severity] || 0) + 1; return a }, { critical: 0, high: 0, medium: 0, low: 0 })

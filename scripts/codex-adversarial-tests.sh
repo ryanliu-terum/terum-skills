@@ -46,6 +46,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --target)   TARGET="${2:-}"; shift 2 ;;
     --target=*) TARGET="${1#*=}"; shift ;;
+    --model=astra) MODEL="gpt-6-astra";   shift ;;
     --model=sol)   MODEL="gpt-5.6-sol";   shift ;;
     --model=terra) MODEL="gpt-5.6-terra"; shift ;;
     --model=luna)  MODEL="gpt-5.6-luna";  shift ;;
@@ -57,7 +58,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$TARGET" ] || [ ${#CONTRACTS[@]} -eq 0 ]; then
-  echo "usage: bash scripts/codex-adversarial-tests.sh --target \"<function under test>\" <contract-file>... [--model=sol|terra|luna] [--effort=<level>] [--out=<json-path>]" >&2
+  echo "usage: bash scripts/codex-adversarial-tests.sh --target \"<function under test>\" <contract-file>... [--model=astra|sol|terra|luna] [--effort=<level>] [--out=<json-path>]" >&2
   exit 1
 fi
 
