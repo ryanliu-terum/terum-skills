@@ -152,14 +152,40 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     expect(arms.find((sample) => sample.arm === 'baseline')).toMatchObject({ failed: true, fraction: 0, turns: null });
   });
 
-  it('refuses the run when an arm’s resolved skill list contradicts its construction (§7.3)', async () => {
+  // §7.3 rev 6: membership of the skill under eval, not list equality — the real CLI's init
+  // event always carries its built-in skills (16 of them on CC 2.1.236).
+  const BUILTINS = ['deep-research', 'dataviz', 'code-review', 'loop', 'schedule', 'claude-api'];
+  const initAgent = (skillsByArm: (withSkill: boolean) => string[], skillName = 's'): AgentApi => ({
+    runAgent: (_task, cwd) => {
+      const withSkill = existsSync(join(cwd, '.claude', 'skills', skillName));
+      return Promise.resolve(transcriptWith('ran PREFLIGHT', [{ type: 'system', subtype: 'init', skills: skillsByArm(withSkill) }]));
+    },
+    askJson: () => Promise.resolve({}),
+  });
+
+  it('ignores CLI built-in skills in every arm (§7.3)', async () => {
     const skillDir = await skillFixture();
-    const contaminated: AgentApi = {
-      runAgent: () => Promise.resolve(transcriptWith('x', [{ type: 'system', subtype: 'init', skills: ['planted-global-skill'] }])),
-      askJson: () => Promise.resolve({}),
-    };
+    const { rows } = await runCase(
+      { agent: initAgent((withSkill) => (withSkill ? [...BUILTINS, 's'] : BUILTINS)), rng: () => 0.9 },
+      caseOf({ checks: [{ transcript_mentions: 'PREFLIGHT' }] }),
+      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it('refuses the run when the staged skill is missing from a staged arm (§7.3)', async () => {
+    const skillDir = await skillFixture();
     await expect(runCase(
-      { agent: contaminated, rng: () => 0.9 },
+      { agent: initAgent(() => BUILTINS), rng: () => 0.9 },
+      caseOf(),
+      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+    )).rejects.toThrow(ContaminationError);
+  });
+
+  it('refuses the run when the skill under eval leaks into the baseline arm (§7.3)', async () => {
+    const skillDir = await skillFixture();
+    await expect(runCase(
+      { agent: initAgent(() => [...BUILTINS, 's']), rng: () => 0.9 },
       caseOf(),
       { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
     )).rejects.toThrow(ContaminationError);

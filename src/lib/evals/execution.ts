@@ -200,9 +200,15 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
         log(`  ${evalCase.name} rep${rep} ${arm}: agent run failed: ${error.message}`);
       }
       const skillList = transcript?.skillList() ?? null;
-      const expected = skillDir === null ? [] : [options.skillName];
-      if (skillList !== null && (skillList.length !== expected.length || !expected.every((name) => skillList.includes(name)))) {
-        throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}], expected [${expected.join(', ')}] — refusing the run (§7.3)`);
+      // §7.3 (rev 6): the CLI's init event always lists its built-in skills, so the contamination
+      // signal is membership of the skill under eval, never list equality. Everything else in the
+      // list is CLI-provided; user/global skills are excluded by construction (--setting-sources
+      // project), measured on CC 2.1.236 (VE1).
+      if (skillList !== null) {
+        const staged = skillDir !== null;
+        if (skillList.includes(options.skillName) !== staged) {
+          throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}] — '${options.skillName}' ${staged ? 'is missing from an arm that staged it' : 'leaked into an arm without it staged'}; refusing the run (§7.3)`);
+        }
       }
       const checks = runChecks(evalCase.checks, transcript ?? emptyTranscript, sandbox);
       transcripts.set(arm, transcript);

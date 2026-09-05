@@ -1,6 +1,6 @@
 # terum-skills eval engine — build spec
 
-**Status:** DRAFT (rev 4, 2026-09-04; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay) — written under a partial lift of the phase-3 spec
+**Status:** DRAFT (rev 6, 2026-09-04; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe) — written under a partial lift of the phase-3 spec
 gate (Ajay, in-session 2026-09-04: "we're on a time crunch … just do as much as you can";
 the override did not record in Terum — receipt rejected — so the shared ledger still
 shows the gate standing). Items that genuinely need published-skill experience are marked
@@ -154,6 +154,12 @@ Verbatim skilldeck format plus one optional field:
 }
 ```
 
+Authoring rule (from the 2026-09-04 determinism probe): skill conventions and case
+tasks must not pattern-match to prompt injection — an unconditional magic-string
+mandate ("every report MUST start with the literal line X") makes a wary agent stop
+and ask instead of complying, and a headless agent that asks a question dies silently,
+scoring as skill failure. Phrase conventions as natural practice, not incantation.
+
 Unknown check kinds **fail** (they never error the run). Checks are all-or-nothing per
 arm; there is no partial credit inside a case.
 
@@ -306,10 +312,15 @@ lines per failing prompt.
 `--setting-sources project` + `CLAUDE_PROJECT_DIR=<sandbox>` means user-level
 (`~/.claude`) skills are not loaded — the sandbox is the entire project scope, so the
 global-copy contamination SkillEvaluator worries about is excluded **by construction**,
-not by warning (VE1 verifies this on the pinned CC version before ME2 completes). Each
-arm's resolved skill list is captured from the init event into
-`provenance.arm_skill_lists`; the engine asserts baseline = [] and
-candidate/incumbent = [skill] and refuses the run on mismatch.
+not by warning (VE1 closed 2026-09-04, see §13). Each arm's resolved skill list is
+captured from the init event into `provenance.arm_skill_lists`; the engine asserts
+**membership of the skill under eval** — present in candidate/incumbent, absent in
+baseline — and refuses the run on mismatch (rev 6). List *equality* is not asserted:
+the CLI's init event always carries its built-in skills (16 on CC 2.1.236), so the
+original baseline = [] assertion refused every real run. A planted skill with a name
+other than the one under eval is indistinguishable from a built-in by name alone;
+`--setting-sources project` remains the mechanism that excludes it, and
+`arm_skill_lists` in the receipt keeps the full lists auditable.
 
 ### 7.4 Preflight
 
@@ -399,9 +410,12 @@ surface.
 
 ## 13. Verification tasks (before/during ME1–ME4)
 
-- **VE1 (new):** on the pinned CC version, prove `--setting-sources project` +
-  `CLAUDE_PROJECT_DIR` excludes `~/.claude/skills` from a sandbox run, and that the
-  init event exposes the resolved skill list (needed for §7.3). Blocker for ME2.
+- **VE1 (CLOSED 2026-09-04, CC 2.1.236):** measured live via a determinism probe
+  (`.planning/research/2026-09-04-eval-determinism-probe.md`). Confirmed:
+  `--setting-sources project` + `CLAUDE_PROJECT_DIR` excludes `~/.claude/skills`, the
+  init event exposes the resolved skill list, and that list **always includes the
+  CLI's 16 built-in skills** — which is why §7.3 asserts membership, not equality
+  (rev 6).
 - **VE2 (new):** confirm `stream-json` result events carry `num_turns`, duration, and
   cost fields on current CC; record actual field names for `efficiency`.
 - **VE3 (new):** guard row g adversarial suite: non-UUID dir, 39/41-char hash, receipt
@@ -467,6 +481,10 @@ skipped), **triggers** (errored selection call counts in neither tn nor fp),
 5. Verdict bands on candidate-vs-baseline net lift: PASS ≥ +1/3, FAIL ≤ −1/3, else
    NEUTRAL **[provisional — the dead-zone width needs team-scale data]**.
 6. At k=3 the band alone gates; sign p is reported but never gates below k=10.
+   Measured caveat (2026-09-04 probe): two identical k=3 runs flipped PASS↔NEUTRAL
+   with a net lift sitting on the +1/3 boundary — band-edge verdicts at k=3 are one
+   wobbly rep from flipping. Append-only receipts (rev 5) are the designed answer:
+   re-runs accumulate rather than overwrite.
 7. Regression gate for publish is candidate-vs-**incumbent** not-FAIL; baseline
    comparison is informational at PR time.
 8. Trigger CI is report-only at first **[provisional]**.
