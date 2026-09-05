@@ -56,7 +56,7 @@ export const DEFAULT_DEADLINE_MS = 30_000;
 const defaultBackoff = (attempt: number): number => Math.floor(Math.random() * Math.min(1_000, 25 * 2 ** attempt));
 const wait = (milliseconds: number) => new Promise<void>((done) => setTimeout(done, milliseconds));
 /** git's non-fast-forward vocabulary: the only push failures a retry can fix. */
-const RETRYABLE = /fetch first|non-fast-forward|cannot lock ref|failed to lock|stale info/i;
+const RETRYABLE = /fetch first|non-fast-forward|cannot lock ref|failed to lock|stale info|incorrect old value|remote ref updated since checkout/i;
 const STALE_LEASE = /stale info/i;
 
 type Git = (args: readonly string[]) => Promise<CommandResult>;
