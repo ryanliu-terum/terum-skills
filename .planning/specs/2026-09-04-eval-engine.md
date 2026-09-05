@@ -1,6 +1,6 @@
 # terum-skills eval engine — build spec
 
-**Status:** DRAFT (rev 1, 2026-09-04) — written under a partial lift of the phase-3 spec
+**Status:** DRAFT (rev 4, 2026-09-04; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay) — written under a partial lift of the phase-3 spec
 gate (Ajay, in-session 2026-09-04: "we're on a time crunch … just do as much as you can";
 the override did not record in Terum — receipt rejected — so the shared ledger still
 shows the gate standing). Items that genuinely need published-skill experience are marked
@@ -38,9 +38,9 @@ commit is the receipt"), and the UI renders receipts, never re-runs anything.
 
 **In:** the `eval` verb and engine library (`src/lib/evals/`); execution cases and
 trigger files as authored artifacts inside skill folders; the committed receipt schema
-at `evals/<skill-id>/<tree-hash>.json`; the guard row and `GuardAction` for receipt
+at `evals/<skill-id>/<tree-hash>/<run-id>.json`; the guard row and `GuardAction` for receipt
 writes; the hygiene (deep deterministic validation) tier wired into `share`/`publish`;
-secret redaction; the publish-PR CI eval job; the `verified` badge bar; the UI data
+secret redaction; the publish-PR CI eval job; the UI data
 contract (what Teddy renders, from where).
 
 **Out (gated/deferred):** share-card rasterization (D30 stays OPEN; candidate survey in
@@ -94,7 +94,7 @@ team-skills/
 │       ├── triggers.yaml           should_trigger / should_not_trigger prompt lists
 │       ├── cases/<case>.yaml       one execution case per file; stem = case name
 │       └── fixtures/<fixture>/…    sandbox seed trees, referenced by cases
-└── evals/<skill-id>/<tree-hash>.json    committed receipts (D26), one per evaluated version
+└── evals/<skill-id>/<tree-hash>/<run-id>.json   committed receipts (D26), one per committed run
 ```
 
 Rules the tree encodes:
@@ -102,7 +102,8 @@ Rules the tree encodes:
   the phase-1 tree-hash version *is* the dataset digest — a receipt keyed by tree hash
   pins skill text AND the cases that judged it. No separate `dataset_digest` bookkeeping.
 - **Receipts are keyed by identity, not name:** `evals/<metadata.id UUID>/<full 40-char
-  tree hash>.json`. Renames don't orphan receipts; content pinning is exact.
+  tree hash>/<run-id>.json`. Renames don't orphan receipts; content pinning is exact;
+  the run-id filename (UTC timestamp) makes lexicographic order chronological.
 - The `evals/` root dir already exists in every scaffold (`team create`, phase-1 M1).
 - Raw run trees (transcripts, sandboxes) are **never** committed; receipts reference
   them by `run_id` (D26 + adaptation §2).
@@ -163,7 +164,7 @@ should_trigger:      ["<prompt that must select this skill>", …]
 should_not_trigger:  ["<NEAR-MISS prompt — unrelated prompts are worthless>", …]
 ```
 
-### 5.3 The committed receipt (`evals/<id>/<tree-hash>.json`)
+### 5.3 The committed receipt (`evals/<id>/<tree-hash>/<run-id>.json`)
 
 `receiptSchema` in `receipt.ts`; zod, `.passthrough()` at every level (phase-1
 forward-compat convention). Annotated shape:
@@ -216,8 +217,11 @@ redaction (§8) before the receipt is built.
 
 ### 5.4 Receipt keying and comparability contracts
 
-- One receipt per (skill_id, version). Re-running the same version **overwrites** the
-  receipt (last-write-wins through `safeWrite`; history lives in git).
+- One immutable receipt file per committed run: `evals/<id>/<tree-hash>/<run-id>.json`.
+  Re-running the same version **appends** a new file beside the old — receipts are never
+  overwritten or deleted (rev 5, Ajay 2026-09-04). The run-id filename is the UTC
+  timestamp, so lexicographic order is chronological. Display surfaces show only the
+  latest receipt per version; older ones stay in the tree as history.
 - Numbers from receipts with different `model` or `cc_version` are never merged or
   compared by any surface. The UI shows provenance beside any number.
 - A receipt with `execution_status: "partial"` displays its verdict greyed with
@@ -228,8 +232,8 @@ redaction (§8) before the receipt is built.
 ### 6.0 Invariant — evals never mutate anything but their own surfaces
 
 `eval` reads the team clone and the store; it writes only (a) its local run tree and
-(b), with `--commit`, the single receipt path through `safeWrite` under the new guard
-row. It never touches `skills/`, `people/`, `team.json`, or the member's placed skills.
+(b), with `--commit`, one new receipt file through `safeWrite` under the new guard
+row (append-only — an existing receipt path is never rewritten). It never touches `skills/`, `people/`, `team.json`, or the member's placed skills.
 
 - **`eval <name|id> [--k N] [--triggers-only|--execution-only] [--case <stem>]
   [--model <m>] [--judge-model <m>] [--commit] [--team <t>]`** — resolve the skill in
@@ -239,7 +243,7 @@ row. It never touches `skills/`, `people/`, `team.json`, or the member's placed 
   `--triggers-only`; write the run tree; print the report (verdict, W/L/T + net lift +
   sign p per comparison, arm scores, trigger MISS/FALSE-FIRE lines, efficiency deltas);
   with `--commit`, build + redact the receipt and `safeWrite` it (action `eval`).
-  Defaults: `--k 3` ("use 10 for the verified bar"), `--model sonnet`
+  Defaults: `--k 3` (`--k 10` for depth when it matters), `--model sonnet`
   **[provisional — cost/quality balance unmeasured at team scale]**.
 - **Evaluating the working tree** (author loop): if the skill resolves to a local
   authored source registered in `config.shared`, `--working` evaluates that directory
@@ -254,10 +258,11 @@ row. It never touches `skills/`, `people/`, `team.json`, or the member's placed 
 |---|---|
 | `share` | No eval requirement. Hygiene tier must pass (extends phase-1 V5 gate). |
 | `publish` PR | CI runs `eval --k 3` : candidate-vs-**incumbent** must not be FAIL (regression gate), and trigger evals run **report-only** (comment, no block) **[provisional — flip to blocking once false-positive rate is known]**. |
-| `verified` badge | ≥3 cases including ≥1 `bucket: adversarial`; both trigger lists non-empty (near-miss negatives); a fresh receipt at the current version with `k: 10`, candidate-vs-baseline PASS and `sign_p ≤ 0.05` **[provisional thresholds]**. Badge is a `team.json` marking, set by `publish --verified` after the receipt exists. |
 
-The sign test is decoration at k=3 (a 3/3 sweep is p = 0.25 two-sided — it cannot gate);
-the verdict band alone gates at PR level. The p-value becomes meaningful at k=10.
+There is no tier above `publish` — the verified badge was scrapped (rev 4, Ajay). The
+sign test is decoration at k=3 (a 3/3 sweep is p = 0.25 two-sided — it cannot gate);
+the verdict band alone gates at PR level. The p-value becomes meaningful at k=10,
+available to anyone who wants a deeper receipt, but nothing in the lifecycle demands it.
 
 ## 7. Engine mechanics
 
@@ -352,15 +357,14 @@ gated. Checks, all fail-closed:
 ## 10. Guard and write path
 
 - New `GuardAction: 'eval'`. New row **g**: path matches
-  `^evals/<uuid>/<40-hex>\.json$` where the UUID equals some `skills/*/SKILL.md`
-  `metadata.id` in the **post-image** — allowed for action `eval` by any member. No
+  `^evals/<uuid>/<40-hex>/<run-id>\.json$` (run-id = `YYYYMMDDTHHMMSSZ`) where the UUID
+  equals some `skills/*/SKILL.md` `metadata.id` in the **post-image**, and the path does
+  **not** exist in the pre-image (receipts are append-only, rev 5) — allowed for action
+  `eval` by any member. No
   ownership requirement: anyone may evaluate anyone's skill (evals are testimony, not
   authorship); the receipt records `runner_handle`.
 - The mutation validates the receipt against `receiptSchema` before `safeWrite`; the
   guard row stays structural (path shape + id existence) per guard house style.
-- `publish --verified` reuses existing row c mechanics (`onlySkillListsChanged`) with
-  the verified marking added to the allowed team.json delta **[shape: `verified:
-  [skillId]` array — provisional pending Teddy's UI needs]**.
 
 ## 11. CI (publish PRs)
 
@@ -369,11 +373,13 @@ for each changed skill run `terum-skills eval <name> --k 3 --commit` with
 `ANTHROPIC_API_KEY` from repo secrets (raw-key path is CI-only; laptops ride
 subscription auth). If the secret is unconfigured the job emits a neutral "evals
 skipped — no key" status and the PR relies on a locally-committed receipt
-**[provisional policy]**. Nightly `--k 10` over `verified` skills, refreshing receipts.
+**[provisional policy]**.
 
 ## 12. UI contract (Teddy)
 
 The receipt JSON is the API. The UI never runs evals and never derives new statistics.
+For a given version the UI renders the **latest** receipt (max `run_id`); older receipts
+are history — kept, never displayed side by side or merged.
 Card (per the D29 resolution, commit `25ff226`):
 
 | Card slot | Source |
@@ -381,10 +387,10 @@ Card (per the D29 resolution, commit `25ff226`):
 | Verdict chip (PASS/NEUTRAL/FAIL frame) | `verdict` (+ greyed style when `execution_status != "complete"`) |
 | Arm scores, side by side | `arm_scores.candidate` vs `.baseline` ("0.82 with · 0.61 without") |
 | Trigger counts | `triggers`: "routes {tp}/{tp+fn} · {fp} false fires" |
-| One-line why | `attribution` |
+| Efficiency line | `efficiency.candidate` vs `.baseline`, side by side, same with/without style as arm scores ("$0.38 · 41s with — $0.51 · 53s without"). Cost + duration on the card; turns and incumbent arm one click deeper. (Added rev 2, Ajay 2026-09-04.) |
 | Version | first 12 chars of `version` |
 | Provenance line (small) | `provenance.model`, `.k`, `.cc_version`, `.timestamp`, `.runner_handle` |
-| One click deeper | `comparisons` (W/L/T, net lift, sign p), `efficiency` deltas, full provenance |
+| One click deeper | `attribution` (one-line why), `comparisons` (W/L/T, net lift, sign p), full `efficiency` breakdown, full provenance |
 
 Hard rules: no skill list is ever sorted or ranked by any receipt number; no lift-style
 decimal appears at card level; a skill without a receipt shows "—" (phase-1 D22
@@ -400,7 +406,7 @@ surface.
   cost fields on current CC; record actual field names for `efficiency`.
 - **VE3 (new):** guard row g adversarial suite: non-UUID dir, 39/41-char hash, receipt
   for a nonexistent id, receipt write under action `share`, path traversal inside
-  `evals/`.
+  `evals/`, malformed run-id filename, overwrite of an existing receipt path.
 - **VE4 (new):** redaction: plant a team token + `ghp_` + PEM in a judge reason; assert
   the committed receipt carries none.
 - **VE5 (new):** stats property tests: `sign_test(0,0)=1`, symmetry, known values
@@ -424,7 +430,7 @@ surface.
   efficiency capture. *Exit:* a two-arm run on a real shared skill reproduces the §5c
   probe result shape; VE6 closed.
 - **ME4 — product surface.** `commands/eval.ts`, `--commit` receipts through
-  `safeWrite`, CI job, `verified` marking, UI contract frozen (§12 published to Teddy).
+  `safeWrite`, CI job, UI contract frozen (§12 published to Teddy).
   *Exit:* one publish PR on a real team repo carrying a green receipt end-to-end.
 - **ME5 (deferred) — `eval-gen`**: model-authored cases/triggers with the four-bucket
   taxonomy, `# generated — review before trusting` header, check-kind whitelist.
@@ -435,7 +441,7 @@ A member shares a skill; hygiene passes by construction. They author two cases a
 trigger file in the skill folder, run `terum-skills eval deploy-preflight`, read
 "PASS — +44% net lift (5W/1L/3T), routes 6/6 · 0 false fires, 0.82 with · 0.61
 without", and re-run with `--commit`; the receipt lands as one commit touching exactly
-`evals/<id>/<hash>.json`. A publish PR for a regression shows candidate-vs-incumbent
+`evals/<id>/<hash>/<run-id>.json`; a later re-run lands a second file beside it. A publish PR for a regression shows candidate-vs-incumbent
 FAIL and blocks. Teddy's UI renders the card from the receipt alone, offline.
 
 Adversarial cases per suite: **guard-eval** (VE3 list), **redaction** (VE4),
@@ -453,8 +459,9 @@ skipped), **triggers** (errored selection call counts in neither tn nor fp),
    only. (Checked against Terum: consistent with the recorded engine decision.)
 2. Eval assets live inside `skills/<name>/evals/` and version with the tree hash;
    dataset digest = version, no separate digest field.
-3. Receipts keyed `evals/<uuid>/<40-hex-tree-hash>.json`, one per version,
-   overwrite-on-rerun, history in git.
+3. Receipts keyed `evals/<uuid>/<40-hex-tree-hash>/<run-id>.json`, one immutable file
+   per committed run, append-only (rev 5); surfaces display the latest per version,
+   older receipts stay in the tree.
 4. Arm score = mean over (case × rep) of fraction-of-checks-passed; judge-only cases
    excluded; `null` when no checks exist. This is the D29 "arm scores" number.
 5. Verdict bands on candidate-vs-baseline net lift: PASS ≥ +1/3, FAIL ≤ −1/3, else
@@ -477,7 +484,8 @@ skipped), **triggers** (errored selection call counts in neither tn nor fp),
 15. Skill staging into arms excludes `evals/` and `fixtures/`. (Whether the phase-1
     Placer should also exclude `evals/` from placements is flagged to Ryan as a
     phase-1 question, not decided here.)
-16. `verified` bar: ≥3 cases incl. one adversarial, non-empty trigger lists, k=10
-    PASS with sign p ≤ 0.05 at the current version **[provisional]**.
+16. *(Removed rev 4 — the verified badge tier is scrapped entirely: no badge, no
+    `publish --verified`, no team.json marking, no nightly verified refresh. Ajay,
+    2026-09-04.)*
 17. D30 (rasterizer library) stays OPEN; `@resvg/resvg-js` is the researched
     recommendation to confirm at ME4+.
