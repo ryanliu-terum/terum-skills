@@ -341,3 +341,14 @@ async function configuredToolSkill() {
   expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
   return { fixture, store, home, oldApproval: (await store.read()).approvals[ID]!.grants };
 }
+
+describe('sync --hook keeps shared-source reconciliation off stdout (§8)', () => {
+  it('reports a missing shared source through notices, never through the hook stdout', async () => {
+    const { fixture, store } = await configuredSkill();
+    await store.update((config) => { config.shared[ID] = { source: join(fixture.root, 'gone'), team: 'team', baseline: 'sha256:0' }; });
+    const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    const result = await run({ hook: true, config: store }, io);
+    expect(result).toMatchObject({ ok: true, value: { notices: [expect.stringContaining('missing')] } });
+    expect(io.lines).toEqual([]);
+  });
+});

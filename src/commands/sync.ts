@@ -63,7 +63,17 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         }
       }
     }
-    await reconcileShared(store, runner, io as Prompter);
+    // Reconciliation never prompts, but it reports. Its lines must ride the notice channel so a
+    // hook run keeps stdout for the reload directive alone (§8) and stderr carries the rest.
+    const reconcileIo: Prompter = {
+      interactive: 'confirm' in io ? io.interactive : false,
+      print: notice,
+      confirm: (question) => ('confirm' in io ? io.confirm(question) : Promise.resolve(false)),
+      text: (question, defaultValue) => ('text' in io ? io.text(question, defaultValue) : Promise.reject(new Error('sync --hook cannot prompt'))),
+      secret: (question) => ('secret' in io ? io.secret(question) : Promise.reject(new Error('sync --hook cannot prompt'))),
+      select: (question, choices) => ('select' in io ? io.select(question, choices) : Promise.reject(new Error('sync --hook cannot prompt'))),
+    };
+    await reconcileShared(store, runner, reconcileIo);
     // Existing ledger paths drive every later decision. A folder merely present on disk is never
     // adopted, quarantined, or deleted without a ledger entry.
     const currentConfig = await store.read();
