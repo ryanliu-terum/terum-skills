@@ -11,7 +11,7 @@ export const meta = {
   ],
 }
 
-// ultrareview + knobs. Invoke: Workflow({ scriptPath, args: '[<PR#>] [--working] [--no-triage] [--no-logs]
+// ultrareview + knobs. Invoke: Workflow({ scriptPath, args: '[<PR#>] [--working] [--no-triage] [--no-logs] [--base=<ref>]
 //   [--efficient[=level]] [--verify=level] [--preset=quick|balanced|in-depth|max | --quick|--balanced|--in-depth|--max]
 //   [--model=<m>] [--review-model=<m>] [--verify-model=<m>] [--fable-review] [--codex-verify]' })
 // Cost levels: full|conservative|balanced|aggressive (verify depth). Models: opus|sonnet|haiku|fable per stage.
@@ -55,6 +55,20 @@ const NO_LOGS = TOKENS.includes('--no-logs')
 const WORKING = TOKENS.includes('--working')
 const PR = TOKENS.map(t => t.match(/^#?(\d+)$/)).filter(Boolean).map(m => m[1])[0] || null
 const MODE_KIND = PR ? 'pr' : (WORKING ? 'working' : 'branch')
+// --base=<ref>: branch mode diffs against this ref instead of `main`. Parsed here, not via
+// flagVal, because flagVal lowercases values and branch names are case-sensitive. /harden
+// needs it (2026-09-04): a loop that commits a round of fixes and then re-reviews everything
+// since the run started has no stable target otherwise -- `main...HEAD` is empty when the work
+// already sits on main, and `--working` is empty the moment a round is committed. Ignored with a
+// NOTE outside branch mode (a PR carries its own base; --working diffs against HEAD). The ref is
+// interpolated into a prompt that tells an agent to run `git diff <ref>...HEAD`, so anything
+// that is not a plain ref falls back to main with a WARNING rather than reaching a shell.
+const BASE_RAW = TOKENS.find(t => t.toLowerCase().startsWith('--base='))
+const BASE_GIVEN = BASE_RAW ? BASE_RAW.slice('--base='.length) : ''
+const BASE_OK = /^[A-Za-z0-9][A-Za-z0-9._\/~^@{}-]*$/.test(BASE_GIVEN)
+const BASE_REF = (MODE_KIND === 'branch' && BASE_GIVEN && BASE_OK) ? BASE_GIVEN : 'main'
+if (BASE_GIVEN && !BASE_OK) log('WARNING: ignoring --base "' + BASE_GIVEN + '" (not a plain git ref); diffing against main')
+if (BASE_GIVEN && MODE_KIND !== 'branch') log('NOTE: --base is ignored in ' + MODE_KIND + ' mode (a PR has its own base; --working diffs against HEAD).')
 
 // --- Shared knob preamble (keep byte-identical with ultraspec; only PARAMS/severities differ) ---
 const LEVELS = ['full', 'conservative', 'balanced', 'aggressive']
@@ -187,7 +201,7 @@ const modelLabel = (m) => m || 'inherit'
 const LOW_CONFIDENCE = vp.votes < 2
 const verifyLabel = CODEX_VERIFY ? ('codex:' + CODEX_SLUG + '@' + CODEX_EFFORT + (CODEX_FAST ? '+fast' : '')) : modelLabel(VERIFY_MODEL)
 const MODE = {
-  verify: VERIFY_LEVEL, preset: presetName || null, codexVerify: CODEX_VERIFY, triage: TRIAGE,
+  verify: VERIFY_LEVEL, preset: presetName || null, codexVerify: CODEX_VERIFY, triage: TRIAGE, base: MODE_KIND === 'branch' ? BASE_REF : null,
   codex: CODEX_VERIFY ? { tier: CODEX_TIER, model: CODEX_SLUG, effort: CODEX_EFFORT, fast: CODEX_FAST } : null,
   models: { base: modelLabel(BASE_MODEL), review: modelLabel(REVIEW_MODEL), verify: verifyLabel },
 }
@@ -324,7 +338,7 @@ const manifest = await agent(
   'Mode: ' + MODE_KIND + (PR ? ('  PR #' + PR) : '') + '\n\n' +
   '## Task -- acquire the review-target diff and return its file list. Do NOT review anything yet.\n' +
   (MODE_KIND === 'branch'
-    ? '1. Run `git rev-parse --is-inside-work-tree`; if not a repo, return diffAvailable:false. baseRef = "main". Run `git diff --numstat main...HEAD` and `git diff --name-status main...HEAD`. target = `git rev-parse --abbrev-ref HEAD`. filesOnDisk = true.\n'
+    ? '1. Run `git rev-parse --is-inside-work-tree`; if not a repo, return diffAvailable:false. baseRef = "' + BASE_REF + '". Run `git diff --numstat ' + BASE_REF + '...HEAD` and `git diff --name-status ' + BASE_REF + '...HEAD`. target = `git rev-parse --abbrev-ref HEAD`. filesOnDisk = true.\n'
     : MODE_KIND === 'working'
     ? '1. baseRef = "HEAD". Run `git diff --numstat HEAD` and `git diff --name-status HEAD` (covers staged + unstaged TRACKED changes; untracked files are NOT included -- if any exist, mention them in note). target = "working". filesOnDisk = true.\n'
     : '1. Run `gh pr view ' + (PR || '') + ' --json files,headRefName,baseRefName,number`. baseRef = baseRefName. target = "pr-' + (PR || '') + '". Derive changed files + churn from that JSON (and `gh pr diff ' + (PR || '') + ' --name-only` if needed). filesOnDisk = (headRefName === current `git rev-parse --abbrev-ref HEAD`).\n') +

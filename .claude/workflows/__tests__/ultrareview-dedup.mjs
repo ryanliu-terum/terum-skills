@@ -210,5 +210,26 @@ const conserved = (out) => [...(out.confirmedFindings || []), ...(out.contestedF
   check('claude panel: verify model unchanged by --fast', claude.out.modeDetail.models.verify === 'inherit', claude.out.modeDetail.models.verify)
 }
 
+
+// --- T8: --base=<ref> retargets branch mode. /harden re-reviews "everything since the run
+// started" after committing each round; without a stable base that diff is empty on main.
+{
+  console.log('T8 — --base=<ref> retargets the branch-mode diff, branch mode only')
+  const manifestPrompt = (calls) => calls.find(c => c.label === 'manifest').prompt
+  const based = await run({ clusterReply: { clusters: [] }, findings: [BY_DIM.correctness[1]], args: '--base=harden/Base-1' })
+  check('branch+base: manifest is told to diff against the ref, case preserved',
+    manifestPrompt(based.calls).includes('git diff --numstat harden/Base-1...HEAD') && manifestPrompt(based.calls).includes('baseRef = "harden/Base-1"'))
+  check('branch+base: modeDetail.base carries the ref', based.out.modeDetail.base === 'harden/Base-1', based.out.modeDetail.base)
+  check('branch+base: no --base NOTE/WARNING', !based.logs.some(l => l.includes('--base')))
+  const plain = await run({ clusterReply: { clusters: [] }, findings: [BY_DIM.correctness[1]], args: '' })
+  check('branch, no flag: still diffs against main', manifestPrompt(plain.calls).includes('git diff --numstat main...HEAD') && plain.out.modeDetail.base === 'main')
+  const working = await run({ clusterReply: { clusters: [] }, findings: [BY_DIM.correctness[1]], args: '--working --base=abc123' })
+  check('working+base: ignored with a NOTE, diff stays vs HEAD',
+    working.logs.some(l => l.startsWith('NOTE: --base is ignored in working mode')) && manifestPrompt(working.calls).includes('git diff --numstat HEAD') && working.out.modeDetail.base === null)
+  const bad = await run({ clusterReply: { clusters: [] }, findings: [BY_DIM.correctness[1]], args: '--base=abc;rm' })
+  check('branch+bad ref: WARNING and fallback to main, ref never reaches the prompt',
+    bad.logs.some(l => l.startsWith('WARNING: ignoring --base')) && manifestPrompt(bad.calls).includes('main...HEAD') && !manifestPrompt(bad.calls).includes('abc;rm'))
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

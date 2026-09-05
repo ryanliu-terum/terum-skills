@@ -1,7 +1,7 @@
 # Skill library
 
 Seeded 2026-09-01 from `conflict-detection/MVP/.claude` (canonical copy: `ryanliu-terum/Terum-MVP` → `.claude/`).
-These eleven directories are the project-agnostic **workflow tools**, copied byte-identical. MVP's sixteen
+Eleven of these directories are the project-agnostic **workflow tools**, copied byte-identical; `harden` was added here on 2026-09-04. MVP's sixteen
 `terum-*` knowledge skills were deliberately left behind — they encode Terum-MVP facts (auth guards, EVI scoring,
 bug-log history, Supabase prod state) and would mislead an agent here.
 
@@ -9,7 +9,7 @@ bug-log history, Supabase prod state) and would mislead an agent here.
 live in git so a teammate inherits them on clone. Only machine-specific paths, personal cost/UX preferences
 (`model`, `effortLevel`, `theme`), and credentials stay in `~/.claude`.
 
-## The eleven tools
+## The twelve tools
 
 | Skill | Invoke | What it does |
 |---|---|---|
@@ -19,6 +19,7 @@ live in git so a teammate inherits them on clone. Only machine-specific paths, p
 | hybrid-review | skill | Same review + triage, but the verify panel runs on OpenAI Codex so verifiers don't share the finders' blind spots. |
 | codex-implement | skill | Hand a locked spec to Codex CLI in an isolated worktree, then verify the diff here. |
 | codex-spec | `/codex-spec` | Spec auditor with Codex finders and a Claude verify panel (mirror of hybrid-review), then the same mechanical / clear / fork / declined triage. |
+| harden | `/harden` | Review → fix → re-review loop over hybrid-review (code) or codex-spec (spec): up to 3 full rounds, applies triage's mechanical + clear fixes (critical/high or BLOCKER/DRIFT only) with one commit per round, returns a converged end state. Bookkeeping: `workflows/harden-state.mjs`. |
 | decision-walk | `/decision-walk` | Walk surfaced decisions to LOCK / GATE / DEFER / DELEGATE, written to a committed ledger. |
 | spec-readable | skill | Plain-English companion for a dense spec, written to `.planning/spec_readable/`. |
 | handoff | skill | Snapshot working context into `.claude/handoff.md` before `/clear`; `hooks/handoff-resume-marker.js` stamps it on read. |
@@ -35,6 +36,7 @@ The fix/review tools were written against MVP's planning layout. Create these as
   `conventions.md` and `bug-groups.md`. MVP's versions are a reasonable starting point.
 - `.planning/specs/` and `.planning/specs/reviews/` — specs and their review reports.
 - `.planning/decisions/` — decision-walk ledgers.
+- `.planning/harden/` — harden run state + end-state reports; `.planning/debug/harden/<slug>.deferred.md` — the deferrals ledger the review engines read.
 - `npm run lint` / `typecheck` / `test` gates — the skills re-run these after Codex work.
 
 Prose inside the skills still cites a few MVP-only paths (`terum-capture`, `terum-dashboard`, `extension/`,
