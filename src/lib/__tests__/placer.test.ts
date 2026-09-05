@@ -63,12 +63,16 @@ describe('native Placer (§7)', () => {
   });
 
   it('fails fast for a second contender and refuses nested and absent-ledger removals', async () => {
-    const root = await temporaryDirectory(); const target = join(root, 'target');
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills');
     const release = await lockTarget(target, 'sample');
     await expect(lockTarget(target, 'sample')).rejects.toThrow('target is busy');
     await release();
     await expect(remove(target, join(target, 'sample', 'nested'), 'sha256:test', join(root, 'quarantine'))).rejects.toThrow('unowned');
     await expect(remove(target, join(target, 'sample'), 'sha256:test', join(root, 'quarantine'))).resolves.toEqual({});
+    // The root must be a skills directory: a ledger key pointing anywhere else is refused, not quarantined.
+    const elsewhere = join(root, 'documents'); await mkdir(join(elsewhere, 'thing'), { recursive: true }); await writeFile(join(elsewhere, 'thing', 'file.txt'), 'keep');
+    await expect(remove(elsewhere, join(elsewhere, 'thing'), 'sha256:test', join(root, 'quarantine'))).rejects.toThrow('not a skills directory');
+    expect(await readFile(join(elsewhere, 'thing', 'file.txt'), 'utf8')).toBe('keep');
   });
 
   it('reclaims a stale target lock but keeps a young target lock exclusive', async () => {
@@ -95,7 +99,7 @@ describe('native Placer (§7)', () => {
   });
 
   it('quarantines edited placements but deletes identical ones, and refuses symlinked sources', async () => {
-    const root = await temporaryDirectory(); const target = join(root, 'target'); const source = join(root, 'source');
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
     await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'original');
     const first = await place(source, target, 'edited');
     await writeFile(join(first.path, 'SKILL.md'), 'edited by user');

@@ -6,7 +6,7 @@ import { failure, Result, success } from '../lib/result.js';
 import { parseJson, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { findSkill, readTeam } from '../lib/skills.js';
-import { openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
+import { openTeamRepo, refreshClone, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
 
 export interface PublishArgs {
@@ -35,8 +35,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const binding = config.teams[team]!;
     if (!binding.handle) throw new Error(`Team ${team} has no joined handle.`);
     const clone = store.teamClone(team);
-    const pulled = await runner.run('git', ['pull', '--ff-only'], { cwd: clone });
-    if (pulled.code !== 0) throw new Error(`Could not fast-forward ${team}: ${commandMessage(pulled.stderr, pulled.stdout)}`);
+    await refreshClone(runner, clone, { label: team });
 
     const teamJson = await readTeam(clone);
     const record = await findSkill(clone, team, reference.name);

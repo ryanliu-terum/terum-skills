@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 /**
  * Our deliberately small agent path table. Derived from iflytek/skillhub
@@ -14,4 +14,14 @@ export const AGENT_PATHS = {
 } as const;
 
 export type SupportedAgent = keyof typeof AGENT_PATHS;
+
+/**
+ * True when `root` is a skills directory one of our agents owns (`…/.claude/skills`). The Placer
+ * removes only directly under such a root: the ledger names the path, this names the only kind of
+ * place a ledger path may point (D5a, 2026-09-05 close-out walk).
+ */
+export function isSkillsRoot(root: string): boolean {
+  const resolved = resolve(root);
+  return Object.values(AGENT_PATHS).some((agent) => resolved.endsWith(`${sep}${agent.global('')}`));
+}
 

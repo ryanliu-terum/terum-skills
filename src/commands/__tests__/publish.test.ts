@@ -28,7 +28,7 @@ async function prepared(policy: 'pr' | 'push' = 'pr') {
   if (policy === 'push') await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: {}, archived: [], policy: { publish: policy, skill_license: 'UNLICENSED' } })}\n`);
   const store = createConfigStore(join(fixture.root, 'state'));
   await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-  await store.update((config) => { config.teams.team = { remote: REMOTE, token: null, handle: 'seed' }; });
+  await store.update((config) => { config.teams.team = { remote: REMOTE, handle: 'seed' }; });
   return { fixture, store };
 }
 
@@ -42,6 +42,16 @@ describe('publish (§6)', () => {
     expect(await originSha(fixture.bare)).toBe(before);
     expect(JSON.parse(await git(['show', 'publish/sample:team.json'], fixture.bare)).global).toContain(ID);
     expect(runner.calls.some((call) => call.command === 'git' && call.args.includes('HEAD:refs/heads/main'))).toBe(false);
+  });
+
+  it('heals a clone whose local main drifted instead of failing to fast-forward', async () => {
+    const { fixture, store } = await prepared();
+    const clone = store.teamClone('team');
+    await writeFile(join(clone, 'stray.txt'), 'local'); await git(['add', '--all'], clone); await git(['commit', '-q', '-m', 'local-only'], clone);
+    const before = await originSha(fixture.bare);
+    const result = await run({ ref: 'sample', config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { branch: 'publish/sample' } });
+    expect(await originSha(fixture.bare)).toBe(before);
   });
 
   it('keeps the PR policy when gh is unavailable or logged out', async () => {
@@ -154,7 +164,7 @@ describe('publish (§6)', () => {
   it('rejects unknown names and resolves an ambiguous bare ref only with --team', async () => {
     const { fixture, store } = await prepared();
     const other = await bareTeam();
-    await store.update((config) => { config.teams.other = { remote: other.bare, token: null, handle: 'seed' }; });
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
     const runner = mappedRunner(REMOTE, fixture.bare);
     await expect(run({ ref: 'team/missing', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: 'No skill team/missing in team team.' });
     await expect(run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('A bare skill ref is ambiguous across configured teams') });
@@ -164,9 +174,10 @@ describe('publish (§6)', () => {
   it('re-verifies the skill against the reset tree before publishing', async () => {
     const { fixture, store } = await prepared();
     const base = mappedRunner(REMOTE, fixture.bare);
-    let removed = false;
+    let removed = false; let fetches = 0;
     const runner = wrapRunner(base, async (command, args, _options, next) => {
-      if (command === 'git' && args[0] === 'fetch' && !removed) {
+      // The first fetch is the preflight refresh; safeWrite's own fetch is the second — the race the spec means.
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2 && !removed) {
         removed = true;
         await git(['fetch', '-q', 'origin'], fixture.seed);
         await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
@@ -207,9 +218,10 @@ describe('publish (§6)', () => {
   it('re-reads the publish policy on the reset tree: a policy flipped from push to pr mid-write is refused, nothing lands on main', async () => {
     const { fixture, store } = await prepared('push');
     const before = await originSha(fixture.bare);
-    let flipped = false;
+    let flipped = false; let fetches = 0;
     const runner = wrapRunner(mappedRunner(REMOTE, fixture.bare), async (command, args, _options, next) => {
-      if (command === 'git' && args[0] === 'fetch' && !flipped) {
+      // Second fetch = safeWrite's, after the preflight refresh: the flip must land mid-write.
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2 && !flipped) {
         flipped = true;
         await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
       }

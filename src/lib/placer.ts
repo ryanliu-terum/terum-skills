@@ -2,7 +2,7 @@ import { cp, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { AGENT_PATHS, SupportedAgent } from './placer/agent-paths.js';
+import { AGENT_PATHS, isSkillsRoot, SupportedAgent } from './placer/agent-paths.js';
 import { acquireSkillTargetLock } from './placer/vendor/skillhub/skill-target-lock.js';
 import { SkillSnapshot, snapshotSkillDirectory } from './placer/vendor/skillhub/skill-fingerprint.js';
 import { Runner, systemRunner } from './runner.js';
@@ -79,10 +79,15 @@ export async function place(source: string, targetRoot: string, name: string, op
   }
 }
 
-/** A deletion is valid only for a ledger-owned path directly underneath this scope's skills root. */
+/**
+ * A deletion is valid only for a ledger-owned path directly underneath a skills root — and the
+ * root itself must be a skills directory (`…/.claude/skills`): callers derive it from the ledger
+ * path, so without this check a bad ledger key could name any folder on the machine.
+ */
 export async function remove(targetRoot: string, path: string, expectedFingerprint: string, quarantineRoot: string): Promise<{ quarantined?: string }> {
   const root = resolve(targetRoot);
   const destination = resolve(path);
+  if (!isSkillsRoot(root)) throw new Error(`Refusing to remove ${path}: ${root} is not a skills directory this tool places into`);
   if (dirname(destination) !== root || !isAbsolute(destination)) {
     throw new Error(`Refusing to remove unowned placement ${path}`);
   }
