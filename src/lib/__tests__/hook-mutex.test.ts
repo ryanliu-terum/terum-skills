@@ -116,10 +116,23 @@ describe('sync --hook mutex and rate limit (§8, §12 "hook mutex")', () => {
     try { expect(await reclaimStaleLock(path, judged)).toBe(false); } finally { fsForTests.rename = realRename; }
     expect(await readFile(path, 'utf8')).toBe(competing);
     expect((await readdir(join(root, 'run'))).filter((name) => name.includes('.stale-'))).toEqual([]);
-    // With no competitor the displaced record is put back — by an exclusive create, not an overwrite.
+    // With no competitor the displaced record is put back — by a hard link, never an overwrite.
     await writeFile(path, fresh);
     expect(await reclaimStaleLock(path, judged)).toBe(false);
     expect(await readFile(path, 'utf8')).toBe(fresh);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('a reclaim puts back a displaced record it cannot even read, byte-for-byte, and leaves no aside', async () => {
+    const root = await temporaryDirectory();
+    const path = lockPath(root, 'team');
+    await mkdir(join(root, 'run'), { recursive: true });
+    const judged = JSON.stringify({ pid: 1, host: hostname(), started: new Date(0).toISOString() });
+    const fresh = JSON.stringify({ pid: 2, host: hostname(), token: 'fresh', started: new Date().toISOString() });
+    await writeFile(path, fresh);
+    await chmod(path, 0o000);
+    try { expect(await reclaimStaleLock(path, judged)).toBe(false); } finally { await chmod(path, 0o600); }
+    expect(await readFile(path, 'utf8')).toBe(fresh);
+    expect((await readdir(join(root, 'run'))).filter((name) => name.includes('.stale-'))).toEqual([]);
   });
 
   it.skipIf(process.platform === 'win32')('tightens a run/ directory that already existed with loose permissions, so the 0600 lock is not undone by its folder', async () => {

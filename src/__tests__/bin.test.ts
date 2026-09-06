@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
@@ -26,7 +26,8 @@ describe('the built bin (dist/index.js)', () => {
   let bin = '';
   let env: Record<string, string> = {};
   beforeAll(async () => {
-    out = await mkdtemp(resolve(tmpdir(), 'terum-bin-'));
+    // Realpathed: the loader resolves the built module through realpath (/var -> /private/var on macOS), so `bin` and the launcher the built resolver derives from `import.meta.url` name the same path instead of merely ending the same way.
+    out = await realpath(await mkdtemp(resolve(tmpdir(), 'terum-bin-')));
     // No source maps: the built module is imported below, and a map pointing at sources that are not beside it only makes vitest warn.
     await run(process.execPath, [tsc, '-p', 'tsconfig.build.json', '--outDir', out, '--sourceMap', 'false', '--declarationMap', 'false'], { cwd: root });
     // What `npm pack` would ship alongside dist/: the module type and the installed dependencies.

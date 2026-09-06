@@ -34,9 +34,13 @@ export async function run(args: GuardPushArgs, io: Prompter): Promise<Result<Gua
     if (!configured) throw new Error(`Push guard: ${stripRemoteCredentials(args.url)} is not a team this machine has joined, so ownership cannot be checked. Push from a configured clone, or bypass with \`git push --no-verify\` (attributed to you).`);
     const [team, binding] = configured;
     const author = config.display_name && config.email ? `${config.display_name} <${config.email}>` : undefined;
-    // git's `$1` is the push target as typed — the credentialed URL itself, not a name, when someone
-    // pushes by URL (githooks(5)) — so it is scrubbed once here: no message and no git argument below echoes a token.
-    const remoteLabel = stripRemoteCredentials(args.remote);
+    // git's `$1` is the push target as typed — a remote NAME ordinarily, the credentialed URL itself
+    // when someone pushes by URL (githooks(5)). Only a target that CAN hold a credential is scrubbed:
+    // every URL and scp spelling carries a colon and a nickname never does, so no message and no git
+    // argument below echoes a token, while a name — `up@stream` included, which the scrub's lossy
+    // non-remote fallback would rewrite to `<redacted>@stream` — reaches the ref lookup and the
+    // printed remedy byte-for-byte.
+    const remoteLabel = args.remote.includes(':') ? stripRemoteCredentials(args.remote) : args.remote;
     const git: Git = (parts) => runner.run('git', parts, { cwd });
     const refs = args.refs ?? [];
     if (refs.length % 4 !== 0) throw new Error('Push guard: expected <local ref> <local sha> <remote ref> <remote sha> groups.');
@@ -106,11 +110,17 @@ async function treeBetween(git: Git, base: string, head: string, changedPaths: r
   const wanted = new Set<string>(changedPaths.filter((path) => path === 'team.json'));
   for (const path of changedPaths) { const folder = /^skills\/([^/]+)\//.exec(path); if (folder) wanted.add(`skills/${folder[1]}/SKILL.md`); }
   const before = new Map<string, string>(); const after = new Map<string, string>();
-  // Every wanted blob is independent of every other, so the whole set is read in one pass: this runs inside `git push`, which blocks until the hook exits.
-  await Promise.all([...wanted].map(async (path) => {
-    const [was, is] = await Promise.all([git(['show', `${base}:${path}`]), git(['show', `${head}:${path}`])]);
-    if (was.code === 0) before.set(path, was.stdout);
-    if (is.code === 0) after.set(path, is.stdout);
-  }));
+  // Every wanted blob is independent of every other, so they are read a slice at a time — this runs
+  // inside `git push`, which blocks until the hook exits — with the fan-out bounded: the touched-folder
+  // count of a push sets it, and the guard must not fail because it asked the OS for more processes
+  // than it could get (an EMFILE here would refuse the push outright).
+  const paths = [...wanted];
+  for (let index = 0; index < paths.length; index += 8) {
+    await Promise.all(paths.slice(index, index + 8).map(async (path) => {
+      const [was, is] = await Promise.all([git(['show', `${base}:${path}`]), git(['show', `${head}:${path}`])]);
+      if (was.code === 0) before.set(path, was.stdout);
+      if (is.code === 0) after.set(path, is.stdout);
+    }));
+  }
   return { before: (path) => before.get(path), after: (path) => after.get(path), changedPaths };
 }

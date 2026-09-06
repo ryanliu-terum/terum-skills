@@ -26,12 +26,15 @@ describe('team leave (§6)', () => {
     // A hook killed mid-sync leaves a stale §8 mutex (and, killed mid-reclaim, an aside copy) behind; leave reclaims the one and sweeps the other, so the next join of this name starts clean.
     const lock = lockPath(store.root, 'team');
     await writeFile(lock, `${JSON.stringify({ pid: process.pid, host: 'this-host', started: new Date(Date.now() - 20 * 60_000).toISOString() })}\n`);
-    await writeFile(`${lock}.stale-0000`, 'abandoned mid-reclaim');
+    await writeFile(`${lock}.stale-00000000-0000-4000-8000-000000000000`, 'abandoned mid-reclaim');
+    // `team.lock.stale-neighbour` is itself a legal team name: its live mutex and stamp begin with this team's aside prefix and are not ours to sweep.
+    await writeFile(`${lock}.stale-neighbour.lock`, 'another team holds this');
+    await writeFile(`${lock}.stale-neighbour.stamp`, 'another team synced');
     await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { removed: 1, cloneRemoved: true } });
     await expect(access(placed.path)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(cache)).rejects.toMatchObject({ code: 'ENOENT' }); await expect(access(stamp)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(lock)).rejects.toMatchObject({ code: 'ENOENT' });
-    expect((await readdir(join(store.root, 'run'))).filter((name) => name.startsWith('team.'))).toEqual([]);
+    expect((await readdir(join(store.root, 'run'))).filter((name) => name.startsWith('team.')).sort()).toEqual(['team.lock.stale-neighbour.lock', 'team.lock.stale-neighbour.stamp']);
     const config = await store.read(); expect(config.teams).toEqual({}); expect(config.placements).toEqual({}); expect(config.pending).toEqual([]); expect(config.shared).toEqual({}); expect(config.approvals.keep).toBeDefined();
     expect(await originSha(fixture.bare)).toBe(before);
     expect(await git(['show', 'main:people/seed.json'], fixture.bare)).toBe(personBefore);

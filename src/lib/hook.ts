@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { mkdirPrivate } from './fs.js';
@@ -204,26 +204,23 @@ async function judgeLock(path: string, host: string, now: () => number, pidAlive
 /**
  * Reclaim a lock judged stale. The file is moved aside atomically first — one reclaimer wins the
  * rename and any other sees ENOENT — and removed only once its content proves it is still the
- * record that was judged. A fresh holder's record that arrived in between is re-created with an
- * exclusive create: a process that took the freed path meanwhile owns the mutex now, and the
- * displaced copy is dropped, never written over it. The aside copy never outlives the call.
+ * record that was judged. A fresh holder's record that arrived in between is put back by a hard
+ * link: atomic, needs no readable content, keeps the record's bytes and mtime, and fails EEXIST
+ * exactly when a process took the freed path meanwhile — that process owns the mutex now, and the
+ * displaced copy is dropped, never written over it. The aside is removed only on those settled
+ * outcomes; any other failure rethrows and leaves `<team>.lock.stale-<uuid>` holding the displaced
+ * record, an artifact removeRunArtifacts sweeps, so a live holder's record is never destroyed.
  * Exported for the mutex test alone.
  */
 export async function reclaimStaleLock(path: string, judged: string): Promise<boolean> {
   const aside = `${path}.stale-${randomUUID()}`;
   try { await fsForTests.rename(path, aside); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true; throw error; }
-  try {
-    const moved = await readFile(aside, 'utf8').catch(() => null);
-    if (moved === judged) return true;
-    if (moved !== null) {
-      try {
-        const handle = await open(path, 'wx', 0o600);
-        try { await handle.writeFile(moved, 'utf8'); } finally { await handle.close(); }
-      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-    }
-    return false;
-  } finally { await rm(aside, { force: true }); }
+  if ((await readFile(aside, 'utf8').catch(() => null)) === judged) { await rm(aside, { force: true }); return true; }
+  try { await link(aside, path); }
+  catch (error) { const code = (error as NodeJS.ErrnoException).code; if (code !== 'EEXIST' && code !== 'ENOENT') throw error; }
+  await rm(aside, { force: true });
+  return false;
 }
 
 /**
@@ -233,10 +230,15 @@ export async function reclaimStaleLock(path: string, judged: string): Promise<bo
  */
 export async function removeRunArtifacts(storeRoot: string, team: string): Promise<void> {
   const run = join(storeRoot, 'run');
+  // Matched by the reclaim's exact shape, never by a bare prefix: a team name may legally contain
+  // dots and hyphens, so a longer team's live mutex (`<team>.lock.stale-x.lock`) begins with this
+  // team's aside prefix, and sweeping it would free a mutex a running hook still holds.
+  const asidePrefix = `${team}.lock.stale-`;
+  const isAside = (name: string): boolean => name.startsWith(asidePrefix) && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(name.slice(asidePrefix.length));
   let entries: string[];
   try { entries = await readdir(run); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
-  await Promise.all(entries.filter((name) => name === `${team}.stamp` || name.startsWith(`${team}.lock.stale-`)).map((name) => rm(join(run, name), { force: true })));
+  await Promise.all(entries.filter((name) => name === `${team}.stamp` || isAside(name)).map((name) => rm(join(run, name), { force: true })));
 }
 
 function isPidAlive(pid: number): boolean {

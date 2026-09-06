@@ -135,7 +135,11 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         if (person && !person.installed.some((item) => item.id === entry.id && sameScope(item.scope, entry.scope)) && !currentConfig.pending.some((pending) => pending.id === entry.id && pending.team === entry.team && sameScope(pending.scope, entry.scope))) continue;
         if (person?.declined.includes(entry.id)) continue;
         const skill = await findSkill(clone, entry.team, entry.id);
-        if (!skill) { blocked(entry.team, basename(path), `Blocked ${path}: its skill is no longer in the repository.`); continue; }
+        // Reported, never recorded as undone work: the skill is gone upstream while the people file still
+        // lists it, so no later run can clear this — the orphan pass skips the entry and `uninstall <ref>`
+        // cannot even resolve the ref — and a stamp withheld forever would refetch at every session start
+        // and advertise a `run sync` that cannot help.
+        if (!skill) { notice(`Blocked ${path}: its skill is no longer in the repository.`); continue; }
         // §6 blocked, second sub-case: the ledger pins a tree the clone does not have (placed from a
         // newer or rewritten history). The tool must not resolve that alone: report, touch nothing.
         if (entry.version && (await runner.run('git', ['cat-file', '-e', `${entry.version}^{tree}`], { cwd: clone })).code !== 0) {
@@ -211,8 +215,13 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       // installOne, so the batch question cannot answer a consent prompt on the user's behalf.
       for (const [team, binding] of Object.entries(config.teams)) {
         if (!binding.handle || skipped.has(team)) continue;
-        const candidates = await endorsedCandidates(store.teamClone(team), team, binding.handle, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
-        if (!candidates.length) continue;
+        // The clone can vanish under this walk — `team leave` removes it BEFORE it deletes the ledger entry,
+        // so a fresh read would not close the window — and endorsedCandidates reads team.json and the people
+        // file straight off disk. That costs this team's batch alone, reported: the shape the pending and
+        // placement loops already have. No label: `deferred` is rendered as a count of SKILLS needing review.
+        const candidates = await endorsedCandidates(store.teamClone(team), team, binding.handle, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) })
+          .catch((error: unknown) => { notice(`Skipping endorsed batch for ${team}: ${error instanceof Error ? error.message : String(error)}`); defer(team); return undefined; });
+        if (!candidates?.length) continue;
         if (!interactive) {
           defer(team, ...candidates.map((skill) => skill.name));
           continue;
@@ -234,7 +243,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
     if (changed && !args.hook) (io as { print(line: string): void }).print('Skills synchronized.');
     if (args.hook && placed) (io as { print(line: string): void }).print('{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}');
     // §8: the stamp means "this team is fully synced". A failed run throws past this line; a team this
-    // run skipped, or left work undone in (a deferral, a blocked placement), keeps its old stamp, so
+    // run skipped, or left work undone in (a deferral, a blocked placement a later run can still clear), keeps its old stamp, so
     // the next session retries instead of rate-limiting the gap into an hour of silence. Only the
     // teams this run walked are stamped — a team bound meanwhile was never refreshed — and only when
     // the final ledger holds no pending work for them: an install recorded after this team's replay

@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { acquireTeamLock, lockPath, stampPath } from '../../lib/hook.js';
+import { acquireTeamLock, lockPath, removeRunArtifacts, stampPath } from '../../lib/hook.js';
 import { run } from '../sync.js';
 import { run as install } from '../install.js';
 import { NonInteractivePrompter } from '../../lib/prompt.js';
@@ -60,6 +60,35 @@ describe('sync --hook (§3, §6)', () => {
     expect(io.lines).toEqual([]);
     expect((await store.read()).placements).toEqual({});
     void fixture;
+  });
+
+  it('a clone removed mid-run costs that team\'s endorsed batch alone: the run still succeeds and every other team is stamped', async () => {
+    const { fixture, store } = await configuredSkill();
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    // `team leave team` in another window: it removes the clone before it deletes the ledger entry, so
+    // the endorsed batch — which walks the start-of-run snapshot — can reach a clone that is gone.
+    let fetches = 0;
+    const midRun = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) await rm(store.teamClone('team'), { recursive: true, force: true });
+      return next();
+    });
+    const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    expect(await run({ hook: true, config: store, runner: midRun }, io)).toMatchObject({ ok: true, value: { deferred: [], notices: expect.arrayContaining([expect.stringContaining('Skipping endorsed batch for team')]) } });
+    await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('a malformed allowed-tools value blocks the placement, is counted for review, and leaves the stamp unwritten', async () => {
+    const { fixture, store, home } = await configuredToolSkill();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: broken grants\nlicense: UNLICENSED\nallowed-tools:\n  a: 1\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nbroken grants\n`);
+    const io = new ScriptedPrompter();
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+    expect(io.lines).toContain('Blocked sample: allowed-tools is malformed.');
+    expect(await readFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('stamps every team the run did complete: one team\'s deferral never withholds another\'s stamp (§8)', async () => {
@@ -478,12 +507,14 @@ describe('sync --hook (§3, §6)', () => {
     await git(['fetch', '-q', 'origin'], fixture.seed); await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
     await git(['rm', '-qr', 'skills/sample'], fixture.seed); await git(['commit', '-q', '-m', 'remove sample'], fixture.seed); await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
     const interactive = new ScriptedPrompter();
-    expect(await run({ config: store }, interactive)).toMatchObject({ ok: true, value: { placed: 0, notices: [expect.stringContaining('Blocked')] } });
+    expect(await run({ config: store }, interactive)).toMatchObject({ ok: true, value: { placed: 0, deferred: [], notices: [expect.stringContaining('Blocked')] } });
     expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toBe(before);
     expect(JSON.stringify((await store.read()).placements)).toBe(ledger);
-    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    // Reported, not counted: nothing a later run does can clear a skill deleted upstream, so the team is
+    // not held unsynced forever and no `run sync` that cannot help is advertised.
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
     const hook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await run({ hook: true, config: store, now: later }, hook)).toMatchObject({ ok: true, value: { notices: [expect.stringContaining('Blocked')] } });
+    expect(await run({ hook: true, config: store, now: later }, hook)).toMatchObject({ ok: true, value: { deferred: [], notices: [expect.stringContaining('Blocked')] } });
     expect(hook.lines).toEqual([]);
   });
 
@@ -743,6 +774,26 @@ describe('sync --hook mutex and rate limit (§8, §12 "hook mutex")', () => {
     await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
     await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(stampPath(store.root, 'late'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('never stamps a team removed mid-run: the stamp a concurrent teardown swept is not re-created (§8)', async () => {
+    const { store } = await configuredSkill();
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    await mkdir(join(store.root, 'run'), { recursive: true });
+    await writeFile(stampPath(store.root, 'team'), new Date().toISOString());
+    let fetches = 0;
+    // A teardown that lands while the run walks its snapshot — during other's fetch, team's walk already
+    // done — unbinds team and sweeps run/team.stamp. Re-creating that stamp would rate-limit the first
+    // hook sync after a `team join team` into a silent no-op for the rest of the hour.
+    const midRun = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) { await store.update((config) => { delete config.teams.team; }); await removeRunArtifacts(store.root, 'team'); }
+      return next();
+    });
+    expect((await run({ config: store, runner: midRun }, new ScriptedPrompter())).ok).toBe(true);
+    await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('a failed hook sync releases the mutex and leaves the old stamp, so the next session retries', async () => {

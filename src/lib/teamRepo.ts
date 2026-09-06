@@ -358,12 +358,15 @@ function packageVersion(): string | null {
  * The pre-push hook body. It checks that its launcher still exists before running it, and exits 0
  * with one warning line when it does not (an npx cache pruned, a node upgraded away): the guard
  * prevents accidents, not abuse, and `--no-verify` bypasses it anyway, so a push blocked by
- * infrastructure would buy no safety — but a push that was NOT checked must say so. Once the
- * launcher does run, a non-zero exit is always the guard speaking — a refusal, or its declining to
+ * infrastructure would buy no safety — but a push that was NOT checked must say so. Once the CLI
+ * itself is entered, a non-zero exit is always the guard speaking — a refusal, or its declining to
  * permit what it could not evaluate — never a bare internal error: guardPush.run re-voices anything
  * else and names the same attributed bypass. git hands the pushed refs to the hook on stdin, and
  * the CLI reads stdin nowhere outside the Prompter (§3), so the hook turns them into arguments.
  * Without a built entry the fallback is `npx` pinned to this package's version — never `@latest`.
+ * That fallback is the one exception to the invariant above: it `exec`s npx, so a version npx
+ * cannot resolve (offline, a proxy, a registry outage) exits as npm, not as the guard, and blocks
+ * the push. Only a source run arms it: a built install ships dist/index.js, this package's `bin`.
  */
 export function pushGuardHook(launcher: PushGuardLauncher | null): string {
   const check = launcher ? `[ -x ${shellQuote(launcher.node)} ] && [ -f ${shellQuote(launcher.entry)} ]` : 'command -v npx >/dev/null 2>&1';

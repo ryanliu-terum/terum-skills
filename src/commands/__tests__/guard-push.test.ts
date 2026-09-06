@@ -2,7 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
+import { systemRunner } from '../../lib/runner.js';
+import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { run } from '../guardPush.js';
 
 const MINE = '11111111-1111-4111-8111-111111111111';
@@ -93,8 +94,14 @@ describe('guard-push — the clone-local pre-push hook entry (D12)', () => {
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', advanced], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/SKILL.md') });
     await git(['update-ref', '-d', 'refs/remotes/origin/main'], clone);
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/publish/mine', own, 'refs/heads/publish/mine', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringMatching(/origin\/main could not be resolved[\s\S]*git push --no-verify/) });
-    // git hands the hook the push target as `$1` — the credentialed URL itself when someone pushes by URL — and a refusal must never echo it.
-    expect(await run({ remote: 'https://user:ghp_secret_token@github.com/org/team.git', url: fixture.bare, refs: ['refs/heads/publish/mine', own, 'refs/heads/publish/mine', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.not.stringContaining('ghp_secret_token') });
+    // git hands the hook the push target as `$1` — the credentialed URL itself when someone pushes by URL — and neither a refusal nor a git argument may echo it.
+    const argv: string[][] = [];
+    const recording = wrapRunner(systemRunner, async (command, args, _options, next) => { if (command === 'git') argv.push([...args]); return next(); });
+    expect(await run({ remote: 'https://user:ghp_secret_token@github.com/org/team.git', url: fixture.bare, refs: ['refs/heads/publish/mine', own, 'refs/heads/publish/mine', ZERO], cwd: clone, config: store, runner: recording }, io)).toMatchObject({ ok: false, error: expect.not.stringContaining('ghp_secret_token') });
+    expect(argv.flat().some((arg) => arg.includes('ghp_secret_token'))).toBe(false);
+    expect(argv.some((args) => args[0] === 'rev-parse' && args.some((arg) => arg.startsWith('refs/remotes/') && arg.includes('github.com/org/team')))).toBe(true);
+    // ...but a NAME is not a URL: a remote called `up@stream` must survive whole into `refs/remotes/<name>/main` and into a remedy that can be run.
+    expect(await run({ remote: 'up@stream', url: fixture.bare, refs: ['refs/heads/publish/mine', own, 'refs/heads/publish/mine', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Run `git fetch up@stream`') });
   });
 
   it('re-voices a failure that is not a verdict — a corrupt config.json — so the blocked push still names the guard and the attributed bypass', async () => {

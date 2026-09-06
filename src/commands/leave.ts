@@ -65,7 +65,7 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
         for (const path of removedPaths) delete fresh.placements[path];
         lastTeam = Object.keys(fresh.teams).length === 0;
       });
-    } finally { await releaseTeam(); }
+    } finally { await releaseTeam().catch(() => undefined); } // a lock that could not be removed is reclaimed by the next acquire; it must never replace the real outcome
     if (lastTeam) {
       const options = { ...defaultHookOptions(store.root), ...args.hook };
       // The local cleanup above already happened; an unreadable settings.json must not turn it into a failure.
