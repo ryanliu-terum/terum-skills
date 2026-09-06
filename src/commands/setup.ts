@@ -9,13 +9,14 @@ import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '
 import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
 import { Prompter } from '../lib/prompt.js';
 import { activePeople, readPeople } from '../lib/readme.js';
-import { githubOwnerRepo, isGitHubRemote, stripRemoteCredentials } from '../lib/remote.js';
+import { githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { parseJson, teamSchema } from '../lib/schema.js';
+import { describeClone } from '../lib/teamRepo.js';
 import { run as invite } from './invite.js';
 import { run as share } from './share.js';
-import { parseJoinTarget, run as team } from './team.js';
+import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
 
 export interface SetupVerbs {
   team: typeof team;
@@ -125,16 +126,26 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     }
 
     const clone = store.teamClone(teamName);
-    // A configured team whose clone is gone or incomplete (an interrupted `team leave`, a wiped
-    // directory) is not set up: every later verb fails on it, and the resumed step above never
-    // re-clones. The wizard says so HERE — before it prompts for a skill, invites anyone or writes
-    // the hook — and names the repair that actually works: `team join` re-clones an absent directory
-    // but refuses one that is present and incomplete, which must be moved aside first. (Interim:
-    // whether setup should re-clone by itself is a product call recorded in the close-out.)
+    // A configured team whose clone is gone or incomplete is not set up: every later verb fails on
+    // it, and the resumed team step above never re-clones. Decided HERE — before the wizard prompts
+    // for a skill, invites anyone or writes the hook — from the one definition of "a complete clone"
+    // that `team join` uses (rulings walk R9, 2026-09-06). An absent clone is re-cloned by the wizard
+    // itself, with the git identity later writes need: its banner promises a re-run fixes the
+    // machine (R8). A folder that is present but incomplete, or another team's, may hold someone's
+    // work and is refused with the move-aside repair.
     if (steps.team === 'skipped') {
       const repair = `\`terum-skills team join ${stripRemoteCredentials(remote)}\``;
-      if (!(await exists(clone))) return failed(new Error(`Team ${teamName} is configured but its clone at ${clone} is missing; run ${repair} to restore it, then re-run setup.`), role, teamName, remote, steps);
-      if (!(await exists(join(clone, 'team.json')))) return failed(new Error(`Team ${teamName} is configured, but ${clone} exists and is not a complete clone of ${stripRemoteCredentials(remote)}; move it aside, run ${repair} to restore it, then re-run setup.`), role, teamName, remote, steps);
+      const described = await describeClone(clone, normalizeRemote(remote), runner);
+      if (described.state === 'absent') {
+        say(`Team ${teamName}'s clone at ${clone} is missing; re-cloning it from ${stripRemoteCredentials(remote)}.`);
+        await ensureClone(clone, remote, normalizeRemote(remote), runner);
+        if (before.display_name && before.email) await requireGitConfig(runner, clone, { displayName: before.display_name, email: before.email });
+        steps.team = 'done';
+      } else if (described.state === 'incomplete') {
+        return failed(new Error(`Team ${teamName} is configured, but ${clone} exists and is not a complete clone of ${stripRemoteCredentials(remote)}; move it aside, run ${repair} to restore it, then re-run setup.`), role, teamName, remote, steps);
+      } else if (described.state === 'foreign') {
+        return failed(new Error(`Team ${teamName} is configured, but ${clone} is a clone of ${described.origin}, not ${stripRemoteCredentials(remote)}; move it aside, run ${repair} to restore it, then re-run setup.`), role, teamName, remote, steps);
+      }
     }
 
     if (role === 'creator') {

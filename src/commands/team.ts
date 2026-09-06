@@ -11,7 +11,7 @@ import { activePeople, readPeople } from '../lib/readme.js';
 import { Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
-import { cloneOrigin, cloneTeam, installPushGuard, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
+import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 import { endorsedCandidates } from '../lib/skills.js';
 import { installOne } from './install.js';
 
@@ -384,13 +384,12 @@ function sameValue(a: string, b: string): boolean {
   return left !== '' && left === b.trim().toLowerCase();
 }
 
-async function ensureClone(clone: string, remote: string, normalized: string, runner: Runner): Promise<void> {
-  if (!(await exists(clone))) { await cloneTeam(remote, clone, runner); return; }
-  const origin = await cloneOrigin(clone, runner);
-  if (origin === null || !(await exists(pathJoin(clone, 'team.json')))) {
-    throw new Error(`${clone} exists but is not a complete clone of ${remote}; move it aside and retry.`);
-  }
-  if (origin !== normalized) throw new Error(`${clone} is a clone of ${origin}, not ${normalized}; pass --as <other-name> to keep both teams.`);
+/** `team join`'s clone step, shared with setup's self-heal (R8): clone an absent directory; refuse an incomplete one or another team's — decided by describeClone, the one definition both verbs use (R9); arm the guard. */
+export async function ensureClone(clone: string, remote: string, normalized: string, runner: Runner): Promise<void> {
+  const described = await describeClone(clone, normalized, runner);
+  if (described.state === 'absent') { await cloneTeam(remote, clone, runner); return; }
+  if (described.state === 'incomplete') throw new Error(`${clone} exists but is not a complete clone of ${remote}; move it aside and retry.`);
+  if (described.state === 'foreign') throw new Error(`${clone} is a clone of ${described.origin}, not ${normalized}; pass --as <other-name> to keep both teams.`);
   // Arming is idempotent, so it belongs on every join, not only on a fresh clone: a clone that exists
   // but was never armed — an interrupted create or join, an arming that failed after the clone landed
   // — is exactly the state whose printed advice is `team join <remote>`. After the origin checks, so
@@ -403,7 +402,7 @@ async function readRoster(clone: string): Promise<RosterEntry[]> {
   return activePeople(await readPeople(clone), team.archived).map((person) => ({ handle: person.handle, displayName: person.display_name }));
 }
 
-async function requireGitConfig(runner: Runner, cwd: string, identity: { displayName: string; email: string }): Promise<void> {
+export async function requireGitConfig(runner: Runner, cwd: string, identity: { displayName: string; email: string }): Promise<void> {
   for (const [key, value] of [['user.name', identity.displayName], ['user.email', identity.email]] as const) {
     const result = await runner.run('git', ['config', key, value], { cwd });
     if (result.code !== 0) throw new Error(`Could not configure the git identity in ${cwd}: ${(result.stderr || result.stdout).trim()}`);

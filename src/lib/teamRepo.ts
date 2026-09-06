@@ -401,6 +401,23 @@ export async function cloneOrigin(root: string, runner: Runner = systemRunner): 
   }
 }
 
+export type CloneState = { state: 'absent' } | { state: 'incomplete' } | { state: 'foreign'; origin: string } | { state: 'ok'; origin: string };
+
+/**
+ * The one definition of "a complete clone of this team" (rulings walk R9, 2026-09-06), which `team join`
+ * and `setup` both decide from — two hand-written copies had drifted, and setup's accepted a folder
+ * with team.json but no repository. `absent`: nothing at the path. `incomplete`: present but not a git
+ * repository, or without team.json (an interrupted `team leave`, a restore that skipped dotfiles).
+ * `foreign`: a clone of a different remote. `ok`: this team's clone, with its normalized origin.
+ */
+export async function describeClone(root: string, normalized: string, runner: Runner = systemRunner): Promise<CloneState> {
+  if (!existsSync(root)) return { state: 'absent' };
+  const origin = await cloneOrigin(root, runner);
+  if (origin === null || !existsSync(join(root, 'team.json'))) return { state: 'incomplete' };
+  if (origin !== normalized) return { state: 'foreign', origin };
+  return { state: 'ok', origin };
+}
+
 /** The per-clone writer lock's path — the one safeWrite holds; `team leave` takes it before removing the clone. */
 /**
  * Bring a clone to `origin/main` the way safeWrite does — fetch, then hard reset. The clone is
