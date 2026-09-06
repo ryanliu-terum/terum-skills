@@ -44,7 +44,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
 
   program
     .command('setup [target]')
-    .description('Onboarding wizard: create a team (no argument) or join one (<org>/<repo> or a remote URL)')
+    .description('Onboarding wizard: on a new machine, asks whether to create a team or join one; re-run to resume; pass <org>/<repo> or a remote URL to join directly')
     .action(async (target: string | undefined) => execute((io) => active.setup({ target }, io)));
 
   const team = program.command('team').description('Create or join a team');

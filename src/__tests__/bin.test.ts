@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConfigStore } from '../lib/config.js';
 import { systemRunner } from '../lib/runner.js';
 import { installPushGuard } from '../lib/teamRepo.js';
-import { bareTeam, cloneWithIdentity, git, pushFromSeed } from '../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, exists, git, pushFromSeed } from '../lib/__tests__/fixtures.js';
 
 const run = promisify(execFile);
 const MINE = '11111111-1111-4111-8111-111111111111';
@@ -40,6 +40,20 @@ describe('the built bin (dist/index.js)', () => {
     env = { PATH: process.env.PATH ?? '', HOME: home, USERPROFILE: home, GH_CONFIG_DIR: resolve(home, '.config', 'gh'), NODE_NO_WARNINGS: '1' };
   });
   afterAll(async () => { await rm(out, { recursive: true, force: true }); });
+
+  it('a bare `setup` with stdin not a TTY fails closed at the create-or-join question: exit 1, no gh or git spawned, nothing written under HOME', async () => {
+    const home = resolve(out, 'notty-home'); await mkdir(home, { recursive: true });
+    const shims = resolve(out, 'notty-shims'); await mkdir(shims, { recursive: true });
+    for (const tool of ['gh', 'git']) { await writeFile(resolve(shims, tool), `#!/bin/sh\n: > "${resolve(out, `notty-${tool}-called`)}"\nexit 1\n`); await chmod(resolve(shims, tool), 0o755); }
+    const child = { ...env, HOME: home, USERPROFILE: home, GH_CONFIG_DIR: resolve(home, '.config', 'gh'), PATH: `${shims}${delimiter}${env.PATH}` };
+    const failed = await run(process.execPath, [bin, 'setup'], { cwd: root, env: child }).then(() => { throw new Error('expected a non-zero exit'); }, (error: { code?: number; stdout: string; stderr: string }) => error);
+    expect.soft(failed.code).toBe(1);
+    expect.soft(failed.stderr).toBe('Cannot ask "Create a team or join one?\n1. Create a new team\n2. Join an existing team\n>": this command needs an interactive terminal (stdin is not a TTY).\n');
+    expect.soft(failed.stdout).toContain('Creating a new team creates a private GitHub repository under your account.');
+    for (const tool of ['gh', 'git']) expect.soft(await exists(resolve(out, `notty-${tool}-called`)), `${tool} was spawned`).toBe(false);
+    expect.soft(await exists(resolve(home, '.terum'))).toBe(false);
+    expect.soft(await exists(resolve(home, '.claude'))).toBe(false);
+  });
 
   it('builds with a shebang, prints help with exit 0, and fails a verb with its message on stderr and exit 1', async () => {
     expect((await readFile(bin, 'utf8')).split('\n')[0]).toBe('#!/usr/bin/env node');
