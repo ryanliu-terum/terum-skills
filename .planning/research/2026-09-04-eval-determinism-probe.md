@@ -129,9 +129,13 @@ triggers. Remaining untested for real: partial/timeout greying (unit-covered
 only), redaction at the sharing boundary (unit-covered only), and everything
 CLI-side.
 
-## Probe #4 — real SkillsBench/skilldeck skills (2026-09-06)
+## Probe #4 — real skilldeck skills (2026-09-06)
 
-First run on non-toy skills: the four skilldeck skills at 42084dc, their case
+First run on non-toy skills: the four skilldeck demo skills at 42084dc (NOT the
+14-skill SkillsBench corpus from ~/skill-eval-comparison — zero skill overlap;
+per-skill comparison to SkillsBench's published lifts is impossible, and the
+2026-09-01 cross-framework study already showed such lifts are nearly
+uncorrelated across frameworks anyway), their case
 files, fixtures, setup hooks, and trigger files consumed by our engine **byte-for-
 byte unmodified** — the §5.1 "verbatim skilldeck format" claim is empirically true.
 Sonnet, k=2, baseline+candidate; 32 arm runs + 30 trigger prompts; zero retries,
