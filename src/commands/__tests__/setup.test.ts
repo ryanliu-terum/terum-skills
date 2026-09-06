@@ -357,7 +357,7 @@ describe('setup (§6.1)', () => {
       '  terum-skills ls                       — list members and shared skills',
       '  terum-skills search <term>            — find a skill by name, description, or category',
       '  terum-skills sync                     — pull updates and finish pending work',
-      '  terum-skills publish <skill>          — endorse a skill for the whole team',
+      expect.stringMatching(/^  npx -y terum-skills@\S+ publish <skill> — endorse a skill already shared with the team$/),
       'Feedback and requests: https://example.test/community', 'Members:', '  @alice — Alice',
       'Repository: https://github.com/alice/alpha-repo', 'README: https://github.com/alice/alpha-repo/blob/main/README.md',
     ]));
@@ -505,4 +505,34 @@ it('setup prints roster in handle order and diagnoses a filename mismatch instea
   expect(io.lines.filter((line) => line.startsWith('  @'))).toEqual(['a', 'a-b', 'a0', 'b', 'seed'].map((handle) => `  @${handle} — ${handle}`));
   expect(io.lines.some((line) => /^  people\/old\.json: .+/.test(line))).toBe(true);
   expect(io.lines).toContain(`README: ${fixture.bare}`);
+});
+
+class RecordingPrompter extends ScriptedPrompter {
+  choices: string[][] = [];
+  override select(q: string, c: readonly string[]) {
+    this.choices.push([...c]);
+    return super.select(q, c);
+  }
+}
+
+it('the creator picker omits name-mismatched folders and reports the skipped count', async () => {
+  const fixture = await bareTeam();
+  const bare = join(fixture.root, 'empty.git');
+  await git(['init', '-q', '--bare', bare]);
+  const root = join(fixture.root, 'creator');
+  const home = join(root, 'home');
+  await skillUnder(home);
+  await skillUnder(home, 'gsd-x');
+  await writeFile(join(home, '.claude', 'skills', 'gsd-x', 'SKILL.md'), '---\nname: gsd:x\ndescription: GSD skill\n---\n');
+  const store = createConfigStore(join(root, 'state'));
+  const remote = githubRemote('alice', 'alpha-repo');
+  const runner = mappedRunner(remote, bare, fakeGh('alice', {
+    'repo create alpha-repo --private': { code: 0, stdout: '', stderr: '' },
+    'repo view alpha-repo --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/alpha-repo\n', stderr: '' },
+  }));
+  const io = new RecordingPrompter(['alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'starter', ''], [true, false]);
+  const result = await run({ config: store, home, runner, hook: hookFor(root), communityUrl: '' }, io);
+  if (!result.ok) throw new Error(result.error);
+  expect(io.choices[0]).toEqual(['starter', 'skip']);
+  expect(io.lines).toContain('Skipped 1 local folders that fail share validation.');
 });
