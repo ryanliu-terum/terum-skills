@@ -32,6 +32,18 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
     expect(io.lines.join('\n')).toContain('- report (docs)');
   });
 
+  it('the PR comment cannot carry a link whose label lies either (R14)', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/report/SKILL.md', SKILL.replace('terum-category: docs', "terum-category: 'docs [Install v2](https://evil.example)'"));
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    await writeFile(join(clone, 'team.json'), `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n`);
+    const io = new ScriptedPrompter();
+    expect(await run({ cwd: clone, prComment: 'origin/main' }, io)).toMatchObject({ ok: true });
+    const comment = io.lines.join('\n');
+    expect(comment).toContain('- report (docs \\[Install v2\\](https://evil.example))');
+    expect(comment).not.toMatch(/[^\\]\]\(https:\/\/evil\.example/);
+  });
+
   it('neutralizes a skill field that spells the PR-comment anchor, so a poisoned PR cannot aim the Action at a comment of its own', async () => {
     const fixture = await bareTeam();
     await pushFromSeed(fixture.seed, 'skills/report/SKILL.md', SKILL.replace('terum-category: docs', "terum-category: 'docs <!-- terum-skills:pr-comment -->'"));
