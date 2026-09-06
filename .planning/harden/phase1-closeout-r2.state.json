@@ -1,0 +1,160 @@
+{
+  "slug": "phase1-closeout-r2",
+  "lane": "code",
+  "shape": "two-pass",
+  "cap": 2,
+  "mode": "unattended",
+  "base": "0e0c150",
+  "args": "",
+  "startedAt": "2026-09-06T12:57:13.987Z",
+  "finishedAt": "2026-09-06T18:29:05.768Z",
+  "status": "converged",
+  "verdict": "stop: converged — the confirm pass confirmed no critical + high findings",
+  "startRound": 1,
+  "nextRound": 3,
+  "rounds": [
+    {
+      "round": 1,
+      "kind": "full",
+      "report": ".planning/reviews/phase1-closeout-r2.hybrid.r1.review.md",
+      "at": "2026-09-06T16:57:38.357Z",
+      "counts": {
+        "critical": 0,
+        "high": 1,
+        "medium": 11,
+        "low": 6
+      },
+      "confirmed": 18,
+      "top": 1,
+      "regression": false,
+      "triage": {
+        "mechanical": 7,
+        "clear": 10,
+        "fork": 1,
+        "declined": 0,
+        "untriaged": 0
+      },
+      "contested": 2,
+      "unverified": 0,
+      "applied": {
+        "mechanical": 7,
+        "clear": 9
+      },
+      "gates": "pass",
+      "commit": "2eb01ed197dd5e625506e65b38e07b50167ea8ab",
+      "confirmBase": "3a9088a5a48dcdaae026739fde6a18a4c774170b",
+      "human": {
+        "mediums": [],
+        "forks": [
+          {
+            "title": "search's new batching spawns one unbounded `git rev-parse` child per hit, when an existing helper resolves every skill tree in a single `git ls-tree`",
+            "location": "src/commands/search.ts:41",
+            "why": "A timing call: lift teamRepo's skillTrees into an exported latestTrees(runner, clone) — one `git ls-tree` per clone — and adopt it in search, ls and the Action's README path (option 1, recommended; touches shared code used by three commands and needs an empty-`skills/`-tree guard), or cap the per-hit fan-out with a small bounded map at search and ls (option 2; ~10 revert-safe lines, N git processes stay)."
+          }
+        ],
+        "notApplied": [
+          {
+            "title": "place()'s new quarantineRoot is optional, but the undefined branch is reachable only from tests and strands the copy inside the skills root — the invariant the fix cites",
+            "location": "src/lib/placer.ts:89",
+            "reason": "low; making quarantineRoot required edits 14 test call sites; the misreport half (displacedExists) is applied — left for the next sweep"
+          }
+        ],
+        "contested": [
+          {
+            "title": "Skill-cell bracket escape leaves the raw-HTML anchor vector open, so a crafted folder name still renders as an attacker-labelled link",
+            "location": "src/lib/readme.ts:78"
+          },
+          {
+            "title": "Duplicate `rm(temporary)` — the catch-block copy is dead now that a finally does the same",
+            "location": "src/lib/placer.ts:72"
+          }
+        ],
+        "declinedByTriage": [],
+        "declinedByLoop": [
+          {
+            "title": "Duplicate `rm(temporary)` — the catch-block copy is dead now that a finally does the same",
+            "location": "src/lib/placer.ts:72",
+            "reason": "contested 1-2; the catch-block rm now carries a .catch so it cannot abort the recovery, and the finally repeats it — harmless, left as is"
+          }
+        ],
+        "untriaged": []
+      }
+    },
+    {
+      "round": 2,
+      "kind": "confirm",
+      "report": ".planning/reviews/phase1-closeout-r2.hybrid.r2.review.md",
+      "at": "2026-09-06T18:29:05.768Z",
+      "counts": {
+        "critical": 0,
+        "high": 0,
+        "medium": 7,
+        "low": 4
+      },
+      "confirmed": 11,
+      "top": 0,
+      "regression": false,
+      "triage": {
+        "mechanical": 5,
+        "clear": 5,
+        "fork": 1,
+        "declined": 0,
+        "untriaged": 0
+      },
+      "contested": 0,
+      "unverified": 0,
+      "applied": {
+        "mechanical": 5,
+        "clear": 2
+      },
+      "gates": "pass",
+      "commit": "465bd0ffc92b5f789a6c345a2b4a8c767d13ef48",
+      "confirmBase": "2eb01ed197dd5e625506e65b38e07b50167ea8ab",
+      "human": {
+        "mediums": [
+          {
+            "title": "place() reports a placement that fully succeeded as a failure when only the displaced-copy cleanup fails, instead of using its own notices channel",
+            "location": "src/lib/placer.ts:82"
+          },
+          {
+            "title": "latestTree-per-skill resilience fixed at 1 of 3 call sites; ls still dies whole on the same ghost folder",
+            "location": "src/commands/ls.ts:45"
+          },
+          {
+            "title": "setup's hoisted clone guard reimplements a weaker copy of ensureClone's completeness predicate",
+            "location": "src/commands/setup.ts:134"
+          }
+        ],
+        "forks": [
+          {
+            "title": "search now returns an untracked, unshared folder as a real hit, unlike the malformed-folder path four lines below which excludes it",
+            "location": "src/commands/search.ts:52",
+            "why": "A product call: should a skill folder that sits in the clone on this machine but was never committed to the team repo appear in `search` at all? Keep the row and add `unresolved: boolean` to SearchHit so the phase-2 SPA can grey out Install without string-matching `—` (option 1, recommended, Depth 2 / Cost 0); report-and-skip it like a malformed folder (option 2, Depth 3 / Cost 1 — but a rejection is not proof of untrackedness: git not on PATH rejects the same way, so a machine without git would print N reasons then 'No skills found'); or teach latestTree to tell 'not in HEAD' from 'git broke' and skip only the former (option 3, Depth 4 / Cost 2 — do it with the parked latestTrees fork if option 2's rule is wanted)."
+          }
+        ],
+        "notApplied": [
+          {
+            "title": "place() reports a placement that fully succeeded as a failure when only the displaced-copy cleanup fails, instead of using its own notices channel",
+            "location": "src/lib/placer.ts:82",
+            "reason": "changes place()'s contract (a landed swap whose cleanup failed returns with a notice instead of throwing) after the last panel; the control flow predates the close-out, only the wording is the close-out's — left for Ryan with option 1 recommended"
+          },
+          {
+            "title": "latestTree-per-skill resilience fixed at 1 of 3 call sites; ls still dies whole on the same ghost folder",
+            "location": "src/commands/ls.ts:45",
+            "reason": "ls.ts is outside the reviewed diff and the change is behaviour (ls degrades one row instead of failing whole); left for Ryan with option 1 recommended, deletable under either outcome of the parked fan-out fork"
+          },
+          {
+            "title": "setup's hoisted clone guard reimplements a weaker copy of ensureClone's completeness predicate",
+            "location": "src/commands/setup.ts:134",
+            "reason": "the guard's weakness predates the close-out (which hoisted it) and the fix changes what setup refuses, touching teamRepo.ts and team.ts; left for Ryan with option 1 recommended"
+          }
+        ],
+        "contested": [],
+        "declinedByTriage": [],
+        "declinedByLoop": [],
+        "untriaged": []
+      }
+    }
+  ],
+  "invalidAttempts": []
+}
