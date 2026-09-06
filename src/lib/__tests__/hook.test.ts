@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { fsForTests, HOOK_COMMAND, HOOK_ENTRY, hookInstalled, installHook, offerHook, removeHook } from '../hook.js';
+import { staleLine, stampPath, fsForTests, HOOK_COMMAND, HOOK_ENTRY, hookInstalled, installHook, offerHook, removeHook } from '../hook.js';
 import { ScriptedPrompter, temporaryDirectory } from './fixtures.js';
 
 async function options() {
@@ -79,4 +79,13 @@ describe('session hook (§8)', () => {
     await expect(installHook(target)).resolves.toBe('installed');
     expect(JSON.parse(await readFile(target.settingsFile, 'utf8')).hooks.SessionStart).toEqual([HOOK_ENTRY]);
   });
+});
+
+it('staleLine shares the freshness predicate and runnable sync spelling', async () => {
+  const root = await temporaryDirectory();
+  const line = 'team may be stale; run `npx -y terum-skills@latest sync`.';
+  expect(await staleLine(root, 'team')).toBe(line);
+  await mkdir(join(root, 'run')); await writeFile(stampPath(root, 'team'), '');
+  expect(await staleLine(root, 'team')).toBeNull();
+  expect(await staleLine(root, 'team', () => Date.now() + 7_200_000)).toBe(line);
 });

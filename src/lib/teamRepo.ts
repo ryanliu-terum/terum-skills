@@ -339,7 +339,7 @@ export function localPushGuardLauncher(): PushGuardLauncher | null {
 function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
 
 /** This package's version, for the pinned `npx` fallback; null when package.json is out of reach (an unusual bundle). */
-function packageVersion(): string | null {
+export function packageVersion(): string | null {
   try { return (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? null; } catch { return null; }
 }
 
@@ -393,29 +393,35 @@ export async function installPushGuard(clone: string, runner: Runner = systemRun
 
 /** The normalized origin of an existing clone, or null when the directory is not a clone. */
 export async function cloneOrigin(root: string, runner: Runner = systemRunner): Promise<string | null> {
-  try {
-    const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: root });
-    return origin.code === 0 ? normalizeRemote(origin.stdout.trim()) : null;
-  } catch {
-    return null;
-  }
+  const probe = await probeOrigin(root, runner);
+  return probe.state === 'ok' ? probe.origin : null;
 }
 
-export type CloneState = { state: 'absent' } | { state: 'incomplete' } | { state: 'foreign'; origin: string } | { state: 'ok'; origin: string };
+export type CloneState = { state: 'absent' } | { state: 'incomplete'; reason: 'not-a-repository' | 'no-team-json' | 'unverifiable'; error?: string } | { state: 'foreign'; origin: string } | { state: 'ok'; origin: string };
+
+/** One origin probe for both callers, retaining why verification failed without another git call. */
+async function probeOrigin(root: string, runner: Runner): Promise<Extract<CloneState, { state: 'ok' | 'incomplete' }>> {
+  try {
+    const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: root });
+    return origin.code === 0 ? { state: 'ok', origin: normalizeRemote(origin.stdout.trim()) } : { state: 'incomplete', reason: 'not-a-repository' };
+  } catch (error) { return { state: 'incomplete', reason: 'unverifiable', error: error instanceof Error ? error.message : String(error) }; }
+}
 
 /**
  * The one definition of "a complete clone of this team" (rulings walk R9, 2026-09-06), which `team join`
  * and `setup` both decide from — two hand-written copies had drifted, and setup's accepted a folder
  * with team.json but no repository. `absent`: nothing at the path. `incomplete`: present but not a git
- * repository, or without team.json (an interrupted `team leave`, a restore that skipped dotfiles).
+ * repository, without team.json (an interrupted `team leave`, a restore that skipped dotfiles), or
+ * unverifiable because the origin probe threw; its reason retains that distinction for read-only status.
  * `foreign`: a clone of a different remote. `ok`: this team's clone, with its normalized origin.
  */
 export async function describeClone(root: string, normalized: string, runner: Runner = systemRunner): Promise<CloneState> {
   if (!existsSync(root)) return { state: 'absent' };
-  const origin = await cloneOrigin(root, runner);
-  if (origin === null || !existsSync(join(root, 'team.json'))) return { state: 'incomplete' };
-  if (origin !== normalized) return { state: 'foreign', origin };
-  return { state: 'ok', origin };
+  const probe = await probeOrigin(root, runner);
+  if (probe.state === 'incomplete') return probe;
+  if (!existsSync(join(root, 'team.json'))) return { state: 'incomplete', reason: 'no-team-json' };
+  if (probe.origin !== normalized) return { state: 'foreign', origin: probe.origin };
+  return probe;
 }
 
 /** The per-clone writer lock's path — the one safeWrite holds; `team leave` takes it before removing the clone. */

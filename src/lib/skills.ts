@@ -63,6 +63,26 @@ export async function endorsedCandidates(clone: string, team: string, handle: st
 export async function readTeam(clone: string): Promise<Team> { return parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json'); }
 export async function readPerson(clone: string, handle: string): Promise<Person> { return parseJson(personSchema, await readFile(join(clone, 'people', `${handle}.json`), 'utf8'), `people/${handle}.json`); }
 
+export interface RosterEntry { handle: string; displayName: string; }
+
+/** Active roster with filename-checked identities; one bad people file never hides the others. */
+export async function readRoster(clone: string): Promise<{ roster: RosterEntry[]; problems: { file: string; message: string }[] }> {
+  const team = await readTeam(clone);
+  const files = (await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).sort();
+  const roster: RosterEntry[] = [];
+  const problems: { file: string; message: string }[] = [];
+  for (const file of files) {
+    try {
+      const handle = file.slice(0, -5);
+      const person = await readPerson(clone, handle);
+      if (person.handle !== handle) throw new Error(`Declared handle ${person.handle} does not match filename ${file}.`);
+      if (!team.archived.includes(handle)) roster.push({ handle, displayName: person.display_name });
+    } catch (error) { problems.push({ file: `people/${file}`, message: error instanceof Error ? error.message : String(error) }); }
+  }
+  roster.sort((a, b) => a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0);
+  return { roster, problems };
+}
+
 /** Canonical §5.3 digest: all bytes count except the three Terum-managed YAML fields. */
 export async function canonicalDigest(root: string): Promise<string> {
   const files = await walk(root);

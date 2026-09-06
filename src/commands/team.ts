@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
 import { askHandle, askUntilValid, assertBindable, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, ghState, GhState, Identity, identityForJoiner, setIdentity, teamByRemote, Validation } from '../lib/auth.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
@@ -7,12 +7,11 @@ import { exists, mkdirPrivate } from '../lib/fs.js';
 import { defaultHookOptions, HookOptions, offerHook } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, normalizeRemote, remoteName, remoteToGitUrl, stripRemoteCredentials } from '../lib/remote.js';
-import { activePeople, readPeople } from '../lib/readme.js';
 import { Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
 import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
-import { endorsedCandidates } from '../lib/skills.js';
+import { endorsedCandidates, readRoster, RosterEntry } from '../lib/skills.js';
 import { installOne } from './install.js';
 
 /**
@@ -26,7 +25,7 @@ export interface RemoveArgs extends TeamDependencies { handle: string; team?: st
 export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs);
 export type CreateResult = { team: string; remote: string };
 export type JoinResult = { team: string; handle: string; rejoined: boolean; roster: RosterEntry[] };
-export interface RosterEntry { handle: string; displayName: string; }
+export type { RosterEntry } from '../lib/skills.js';
 export interface RemoveResult { team: string; handle: string; archiveOnly: boolean; }
 
 export class HandleCollisionError extends Error {
@@ -310,9 +309,11 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     // The join is durable once safeWrite returned; a read-back problem must not turn it into a failure.
     let roster: RosterEntry[] = [];
     try {
-      roster = await readRoster(clone);
+      const read = await readRoster(clone);
+      roster = read.roster;
       io.print('Members:');
       for (const member of roster) io.print(`  ${member.handle}  ${member.displayName}`);
+      for (const problem of read.problems) io.print(`  ${problem.file}: ${problem.message}`);
     } catch (error) {
       io.print(`Joined, but the member list could not be read: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -395,11 +396,6 @@ export async function ensureClone(clone: string, remote: string, normalized: str
   // — is exactly the state whose printed advice is `team join <remote>`. After the origin checks, so
   // another team's clone is never written into.
   await installPushGuard(clone, runner);
-}
-
-async function readRoster(clone: string): Promise<RosterEntry[]> {
-  const team = parseJson(teamSchema, await readFile(pathJoin(clone, 'team.json'), 'utf8'), 'team.json');
-  return activePeople(await readPeople(clone), team.archived).map((person) => ({ handle: person.handle, displayName: person.display_name }));
 }
 
 export async function requireGitConfig(runner: Runner, cwd: string, identity: { displayName: string; email: string }): Promise<void> {

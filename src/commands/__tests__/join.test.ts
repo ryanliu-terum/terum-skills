@@ -350,3 +350,12 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(io.lines.join('\n')).toContain('Could not install endorsed skill tool');
   });
 });
+
+it('join prints handle order and reports mismatched roster filenames without losing healthy members', async () => {
+  const { store, runner } = await setup({ people: { 'a-b': person('a-b'), a: person('a'), a0: person('a0'), b: person('b'), old: person('new') }, archived: ['old'] });
+  const io = new ScriptedPrompter(answers());
+  const result = await join({ target: REMOTE, config: store, runner }, io);
+  expect(result).toMatchObject({ ok: true, value: { roster: ['a', 'a-b', 'a0', 'b', 'me', 'seed'].map((handle) => ({ handle, displayName: handle === 'me' ? 'Me' : handle })) } });
+  expect(io.lines.filter((line) => /^  (a|a-b|a0|b)  /.test(line))).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => `  ${handle}  ${handle}`));
+  expect(io.lines.some((line) => /^  people\/old\.json: .+/.test(line))).toBe(true);
+});

@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { stampIsFresh } from '../lib/hook.js';
+import { staleLine } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
@@ -57,7 +57,8 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         hits.push(hit);
         io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed }));
         }
-        await staleNotice(store, team, io, args.now ?? Date.now);
+        const stale = await staleLine(store.root, team, args.now);
+        if (stale) io.print(stale);
         // Per-row degradation covers ONE unresolvable folder. When every hit in the team failed to
         // resolve, the git side itself is unusable — git not on PATH, an unborn HEAD, a corrupt object
         // store — and the team is as unsearched as the catch below would have called it, so the exit
@@ -78,9 +79,3 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
 
 function isMissing(error: unknown): boolean { return error instanceof Error && 'code' in error && error.code === 'ENOENT'; }
 
-/** One definition of "fresh" for `run/<team>.stamp` — the §8 predicate the hook uses; an unreadable stamp is not evidence of a recent sync either. */
-async function staleNotice(store: ConfigStore, team: string, io: Prompter, now: () => number): Promise<void> {
-  let fresh = false;
-  try { fresh = await stampIsFresh(store.root, team, now); } catch { /* an unreadable stamp is not evidence of a recent sync */ }
-  if (!fresh) io.print(`${team} may be stale; run \`terum-skills sync\`.`);
-}

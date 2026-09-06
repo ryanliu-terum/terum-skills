@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, isGitHubRemote, normalizeRemote, remoteName, remoteToGitUrl, sameRemote, stripRemoteCredentials } from '../remote.js';
+import { repositoryUrl, githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, isGitHubRemote, normalizeRemote, remoteName, remoteToGitUrl, sameRemote, stripRemoteCredentials } from '../remote.js';
 
 // `aWxs/K3Q` carries a `/`, which the structured parse cannot cross (an unencoded `/` ends the
 // authority for git and curl too), so it can only be kept out of a message by the lossy fallback.
@@ -174,4 +174,10 @@ describe('host scoping (§6.0)', () => {
     expect(hostOperationAllowed('nonsense')).toMatchObject({ ok: false });
     expect(hostOperationAllowed('https://user@github.com.evil.example/acme/team.git')).toMatchObject({ ok: false });
   });
+});
+
+it('repositoryUrl renders GitHub links and strips credentials from other hosts', () => {
+  expect(repositoryUrl('https://secret:token@github.com/Acme/Team.git')).toBe('https://github.com/acme/team');
+  expect(repositoryUrl('file:/tmp/team.git')).toBe('file:/tmp/team.git');
+  expect(repositoryUrl('https://secret:token@git.example/acme/team.git')).toBe('https://git.example/acme/team.git');
 });

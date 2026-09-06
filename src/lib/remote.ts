@@ -194,6 +194,12 @@ export function githubOwnerRepo(remote: string): string | null {
   return normalized.startsWith('github.com/') ? normalized.slice('github.com/'.length) : null;
 }
 
+/** The shareable repository URL, with credentials removed for every host. */
+export function repositoryUrl(remote: string): string {
+  const ownerRepo = githubOwnerRepo(remote);
+  return ownerRepo ? `https://github.com/${ownerRepo}` : stripRemoteCredentials(remote);
+}
+
 /**
  * The repository basename, used as the default team name at `team join <url>` (§6). Only the
  * `file:<path>` and single-label `host:path` spellings carry a colon before the path; a dotted

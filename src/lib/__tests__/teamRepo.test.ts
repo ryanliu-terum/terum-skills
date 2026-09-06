@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
-import { assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText } from '../teamRepo.js';
+import { packageVersion, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText } from '../teamRepo.js';
 import { createConfigStore } from '../config.js';
 import { run as share } from '../../commands/share.js';
 import { ScriptedPrompter } from './fixtures.js';
@@ -453,4 +453,19 @@ describe('the clone-local push guard arming (D12)', () => {
     expect(pushGuardHook(null)).toContain(`terum-skills@${version}`);
     expect(pushGuardHook(null)).not.toContain('@latest');
   });
+});
+
+it('packageVersion resolves this installed package under vitest', async () => {
+  expect(packageVersion()).toBe(JSON.parse(await readFile(new URL('../../../package.json', import.meta.url), 'utf8')).version);
+});
+
+it('describeClone distinguishes failed probes from a runner that cannot verify, preserving cloneOrigin compatibility', async () => {
+  const root = await temporaryDirectory();
+  const failed: Runner = { async run() { return { code: 1, stdout: '', stderr: 'not a repository' }; } };
+  const unavailable: Runner = { async run() { throw new Error('spawn git ENOENT'); } };
+  expect(await describeClone(root, 'github.com/acme/team', failed)).toEqual({ state: 'incomplete', reason: 'not-a-repository' });
+  expect(await describeClone(root, 'github.com/acme/team', unavailable)).toEqual({ state: 'incomplete', reason: 'unverifiable', error: 'spawn git ENOENT' });
+  expect(await cloneOrigin(root, unavailable)).toBeNull();
+  const origin: Runner = { async run() { return { code: 0, stdout: 'github.com/acme/team', stderr: '' }; } };
+  expect(await describeClone(root, 'github.com/acme/team', origin)).toEqual({ state: 'incomplete', reason: 'no-team-json' });
 });
