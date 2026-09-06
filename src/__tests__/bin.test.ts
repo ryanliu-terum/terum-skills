@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConfigStore } from '../lib/config.js';
@@ -27,7 +27,8 @@ describe('the built bin (dist/index.js)', () => {
   let env: Record<string, string> = {};
   beforeAll(async () => {
     out = await mkdtemp(resolve(tmpdir(), 'terum-bin-'));
-    await run(process.execPath, [tsc, '-p', 'tsconfig.build.json', '--outDir', out], { cwd: root });
+    // No source maps: the built module is imported below, and a map pointing at sources that are not beside it only makes vitest warn.
+    await run(process.execPath, [tsc, '-p', 'tsconfig.build.json', '--outDir', out, '--sourceMap', 'false', '--declarationMap', 'false'], { cwd: root });
     // What `npm pack` would ship alongside dist/: the module type and the installed dependencies.
     await writeFile(resolve(out, 'package.json'), '{ "type": "module" }\n');
     await symlink(resolve(root, 'node_modules'), resolve(out, 'node_modules'), 'dir');
@@ -67,8 +68,12 @@ describe('the built bin (dist/index.js)', () => {
     const home = resolve(out, 'guard-home');
     const store = createConfigStore(resolve(home, '.terum', 'skills'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'), 'Seed', 'seed@example.com');
-    // The hook runs the built bin as its launcher (what a real arming records); the machine's identity is the config under this HOME.
-    await installPushGuard(clone, systemRunner, { node: process.execPath, entry: bin });
+    // Armed through the BUILT package's own default — the resolver a real install runs (dist/index.js beside dist/lib/), not a hand-picked launcher; the machine's identity is the config under this HOME.
+    const built = await import(pathToFileURL(resolve(out, 'lib', 'teamRepo.js')).href) as typeof import('../lib/teamRepo.js');
+    await built.installPushGuard(clone, systemRunner);
+    const armed = await readFile(resolve(clone, '.git', 'hooks', 'pre-push'), 'utf8');
+    expect(armed).toContain(bin);
+    expect(armed).not.toContain('npx');
     // A machine-wide core.hooksPath pointing away from .git/hooks would hide the guard: the clone-local override is what makes the refusal below fire.
     await mkdir(resolve(home, 'no-hooks'), { recursive: true });
     await writeFile(resolve(home, '.gitconfig'), `[core]\n\thooksPath = ${resolve(home, 'no-hooks')}\n`);

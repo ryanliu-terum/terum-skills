@@ -133,6 +133,7 @@ describe('the pre-push hook\'s verb (D12)', () => {
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     await program.parseAsync(['guard-push', 'origin', 'https://x/y.git', 'refs/heads/main', 'a', 'refs/heads/main', 'b'], { from: 'user' });
     expect(calls).toEqual([{ remote: 'origin', url: 'https://x/y.git', refs: ['refs/heads/main', 'a', 'refs/heads/main', 'b'] }]);
-    expect(program.commands.find((command) => command.name() === 'guard-push')).toBeDefined();
+    // Hidden: an internal hook verb has no place in `terum-skills --help` (the same rule `readme` follows above).
+    expect(program.helpInformation()).not.toContain('guard-push');
   });
 });

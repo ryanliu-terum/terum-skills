@@ -9,10 +9,11 @@ import { NonInteractivePrompter } from '../lib/prompt.js';
 import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter } from '../lib/__tests__/fixtures.js';
 
 const firstSkill = (description: string, tools: string) => `---\nname: guarded\ndescription: ${description}\nallowed-tools: ${tools}\nmetadata:\n  terum-category: testing\n---\n${description}\n`;
-const secondSkill = '---\nname: plain\ndescription: plain\nmetadata:\n  terum-category: testing\n---\nplain\n';
+const secondSkill = (description: string) => `---\nname: plain\ndescription: ${description}\nmetadata:\n  terum-category: testing\n---\n${description}\n`;
 
 describe('M2 walkthrough (§12)', () => {
-  it('keeps B pinned, tracks B unpinned, and defers A’s widened tool grant in hook sync', async () => {
+  // Hook-mode deferral of a widened grant is proven in sync.test.ts ('normalizes reordered grants but defers an added or widened grant in hook mode'): B's only copy of `guarded` here is pinned, so the widened grant never reaches it.
+  it('keeps B’s pinned copy untouched under A’s widened grant, tracks B’s unpinned copy, and never places the widened grant', async () => {
     const fixture = await bareTeam();
     const aHome = join(fixture.root, 'a-home'); const bHome = join(fixture.root, 'b-home');
     const aStore = createConfigStore(join(aHome, '.terum', 'skills'));
@@ -33,26 +34,31 @@ describe('M2 walkthrough (§12)', () => {
 
     await writeFile(join(source, 'SKILL.md'), firstSkill('A edited', 'Bash(ls)'));
     expect((await sync({ config: aStore }, new ScriptedPrompter())).ok).toBe(true);
-    const secondSource = join(fixture.root, 'plain'); await mkdir(secondSource); await writeFile(join(secondSource, 'SKILL.md'), secondSkill);
+    const secondSource = join(fixture.root, 'plain'); await mkdir(secondSource); await writeFile(join(secondSource, 'SKILL.md'), secondSkill('plain'));
     const sharedSecond = await share({ path: secondSource, team: 'team', config: aStore }, new ScriptedPrompter([], [true]));
     if (!sharedSecond.ok) throw new Error(sharedSecond.error);
     const secondId = sharedSecond.value!.id;
     expect((await sync({ config: bStore }, new ScriptedPrompter())).ok).toBe(true);
     expect((await install({ ref: 'plain', config: bStore }, new ScriptedPrompter())).ok).toBe(true);
     const plainPath = join(bHome, '.claude', 'skills', 'plain', 'SKILL.md');
-    const plainBytes = await readFile(plainPath, 'utf8');
+    expect(await readFile(plainPath, 'utf8')).toContain('description: plain');
 
+    // A widens guarded's grant and edits plain in the same round; B's hook sync must track the one and not place the other.
     await writeFile(join(source, 'SKILL.md'), firstSkill('grant widened', 'Bash(*)'));
+    await writeFile(join(secondSource, 'SKILL.md'), secondSkill('plain edited'));
     expect((await sync({ config: aStore }, new ScriptedPrompter())).ok).toBe(true);
     const hook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
     // §8: the interactive sync above stamped this team, and a hook run within the hour is a silent
     // no-op — clock past the hour so the hook sync below really runs and these assertions bite.
-    expect(await sync({ hook: true, config: bStore, now: () => Date.now() + 2 * 3_600_000 }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
-    expect(hook.lines).toEqual([]);
-    // It did fetch the widened grant into B's clone — and still left both placed copies alone.
+    const hookRun = await sync({ hook: true, config: bStore, now: () => Date.now() + 2 * 3_600_000 }, hook);
+    expect(hookRun).toMatchObject({ ok: true, value: { placed: 1, deferred: [] } });
+    // Nothing was blocked either: in hook mode the notice-only blocked outcomes reach `notices` alone.
+    expect(hookRun.ok ? hookRun.value.notices.filter((line) => line.startsWith('Blocked')) : hookRun.error).toEqual([]);
+    expect(hook.lines).toEqual(['{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}']);
+    // It fetched the widened grant into B's clone, left the pinned copy alone, and re-placed the unpinned one.
     expect(await git(['show', 'HEAD:skills/guarded/SKILL.md'], bClone)).toContain('Bash(*)');
     expect(await readFile(pinnedPath, 'utf8')).toBe(pinnedBytes);
-    expect(await readFile(plainPath, 'utf8')).toBe(plainBytes);
+    expect(await readFile(plainPath, 'utf8')).toContain('description: plain edited');
     const bConfig = await bStore.read();
     expect(Object.values(bConfig.placements)).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: firstId, version: tree }), expect.objectContaining({ id: secondId, version: null }),

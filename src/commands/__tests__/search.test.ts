@@ -60,12 +60,16 @@ describe('search (§6)', () => {
     expect(io.lines).toEqual(['No skills found.']);
   });
 
-  it('omits the stale notice when its stamp is younger than one hour', async () => {
+  it('omits the stale notice when its stamp is younger than one hour, and prints it for a stamp dated in the future (the same rule the hook applies)', async () => {
     const { store } = await searchFixture('team', [{ name: 'sample', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
     await freshStamp(store, 'team');
     const io = new ScriptedPrompter();
     expect((await run({ term: 'needle', config: store }, io)).ok).toBe(true);
     expect(io.lines.join('\n')).not.toContain('may be stale');
+    // A clock stepped back a day: the stamp claims a sync that has not happened yet, and the notice must not go quiet.
+    const backwards = new ScriptedPrompter();
+    expect((await run({ term: 'needle', config: store, now: () => Date.now() - 24 * 3_600_000 }, backwards)).ok).toBe(true);
+    expect(backwards.lines.join('\n')).toContain('may be stale');
   });
 
   it('reports install count, endorsement, and the latest version, one hit per line in ls format', async () => {

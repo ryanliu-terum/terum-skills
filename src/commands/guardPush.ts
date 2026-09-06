@@ -34,6 +34,9 @@ export async function run(args: GuardPushArgs, io: Prompter): Promise<Result<Gua
     if (!configured) throw new Error(`Push guard: ${stripRemoteCredentials(args.url)} is not a team this machine has joined, so ownership cannot be checked. Push from a configured clone, or bypass with \`git push --no-verify\` (attributed to you).`);
     const [team, binding] = configured;
     const author = config.display_name && config.email ? `${config.display_name} <${config.email}>` : undefined;
+    // git's `$1` is the push target as typed — the credentialed URL itself, not a name, when someone
+    // pushes by URL (githooks(5)) — so it is scrubbed once here: no message and no git argument below echoes a token.
+    const remoteLabel = stripRemoteCredentials(args.remote);
     const git: Git = (parts) => runner.run('git', parts, { cwd });
     const refs = args.refs ?? [];
     if (refs.length % 4 !== 0) throw new Error('Push guard: expected <local ref> <local sha> <remote ref> <remote sha> groups.');
@@ -48,19 +51,32 @@ export async function run(args: GuardPushArgs, io: Prompter): Promise<Result<Gua
       // An existing branch is judged against the content it replaces (a force-push included). A new branch
       // is judged from its fork point off main — what a PR merge applies — never from main's tip, which
       // would charge the pusher with the reversal of every commit that landed there since the branch was cut.
-      const base = ZERO_SHA.test(remoteSha) ? await forkPoint(git, args.remote, localSha) : remoteSha;
-      if (base === null) throw new Error(`Push guard: ${remoteRef} is new and ${args.remote}/main could not be resolved to check it against, so ownership cannot be checked. Run \`git fetch ${args.remote}\`, or bypass with \`git push --no-verify\` (attributed to you).`);
+      const base = ZERO_SHA.test(remoteSha) ? await forkPoint(git, remoteLabel, localSha) : remoteSha;
+      if (base === null) throw new Error(`Push guard: ${remoteRef} is new and ${remoteLabel}/main could not be resolved to check it against, so ownership cannot be checked. Run \`git fetch ${remoteLabel}\`, or bypass with \`git push --no-verify\` (attributed to you).`);
       // `--no-renames`: a rename is a delete plus an add, so the path being taken away is judged too — the
       // spelling safeWrite uses. `-z`: paths arrive verbatim, never C-quoted.
       const listed = await git(['diff', '--name-only', '--no-renames', '-z', base, localSha]);
-      if (listed.code !== 0) throw new Error(`Push guard could not diff ${base.slice(0, 8)}..${localSha.slice(0, 8)}: ${(listed.stderr || listed.stdout).trim()}. Run \`git fetch ${args.remote}\` and retry, or bypass with \`git push --no-verify\` (attributed to you).`);
+      if (listed.code !== 0) throw new Error(`Push guard could not diff ${base.slice(0, 8)}..${localSha.slice(0, 8)}: ${(listed.stderr || listed.stdout).trim()}. Run \`git fetch ${remoteLabel}\` and retry, or bypass with \`git push --no-verify\` (attributed to you).`);
       const changedPaths = listed.stdout.split('\0').filter(Boolean).sort();
       guardRawPush(await treeBetween(git, base, localSha, changedPaths), { handle: binding.handle, author });
       checked += changedPaths.length;
     }
     if (checked) io.print(`terum-skills push guard: ${checked} path(s) to ${stripRemoteCredentials(args.url)} are yours.`);
     return success({ team, checked });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return failure(pushGuardMessage(error)); }
+}
+
+/**
+ * Every non-zero exit from this verb aborts the push, so every message it exits with has to be the
+ * guard's own. A refusal already names who refused and how to bypass; anything else — a corrupt
+ * `~/.terum/skills/config.json`, an unreadable clone, an unexpected throw — is the guard declining
+ * to permit what it could not evaluate (`forkPoint`'s rule), and is re-voiced so the pusher learns
+ * which tool blocked the push and that the attributed bypass is theirs to take.
+ */
+function pushGuardMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith('Push guard')) return message;
+  return `Push guard could not run: ${message}${message.endsWith('.') ? '' : '.'} Nothing was checked, so the push is refused; fix that, or bypass with \`git push --no-verify\` (attributed to you).`;
 }
 
 async function revParse(git: Git, ref: string): Promise<string | null> {
@@ -90,10 +106,11 @@ async function treeBetween(git: Git, base: string, head: string, changedPaths: r
   const wanted = new Set<string>(changedPaths.filter((path) => path === 'team.json'));
   for (const path of changedPaths) { const folder = /^skills\/([^/]+)\//.exec(path); if (folder) wanted.add(`skills/${folder[1]}/SKILL.md`); }
   const before = new Map<string, string>(); const after = new Map<string, string>();
-  for (const path of wanted) {
+  // Every wanted blob is independent of every other, so the whole set is read in one pass: this runs inside `git push`, which blocks until the hook exits.
+  await Promise.all([...wanted].map(async (path) => {
     const [was, is] = await Promise.all([git(['show', `${base}:${path}`]), git(['show', `${head}:${path}`])]);
     if (was.code === 0) before.set(path, was.stdout);
     if (is.code === 0) after.set(path, is.stdout);
-  }
+  }));
   return { before: (path) => before.get(path), after: (path) => after.get(path), changedPaths };
 }

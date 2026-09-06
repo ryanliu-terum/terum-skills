@@ -204,16 +204,39 @@ async function judgeLock(path: string, host: string, now: () => number, pidAlive
 /**
  * Reclaim a lock judged stale. The file is moved aside atomically first — one reclaimer wins the
  * rename and any other sees ENOENT — and removed only once its content proves it is still the
- * record that was judged; a fresh holder's record that arrived in between is put back untouched
- * and the reclaim reports failure. Exported for the mutex test alone.
+ * record that was judged. A fresh holder's record that arrived in between is re-created with an
+ * exclusive create: a process that took the freed path meanwhile owns the mutex now, and the
+ * displaced copy is dropped, never written over it. The aside copy never outlives the call.
+ * Exported for the mutex test alone.
  */
 export async function reclaimStaleLock(path: string, judged: string): Promise<boolean> {
   const aside = `${path}.stale-${randomUUID()}`;
-  try { await rename(path, aside); }
+  try { await fsForTests.rename(path, aside); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true; throw error; }
-  if ((await readFile(aside, 'utf8').catch(() => null)) === judged) { await rm(aside, { force: true }); return true; }
-  await rename(aside, path);
-  return false;
+  try {
+    const moved = await readFile(aside, 'utf8').catch(() => null);
+    if (moved === judged) return true;
+    if (moved !== null) {
+      try {
+        const handle = await open(path, 'wx', 0o600);
+        try { await handle.writeFile(moved, 'utf8'); } finally { await handle.close(); }
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    }
+    return false;
+  } finally { await rm(aside, { force: true }); }
+}
+
+/**
+ * Every `run/` artifact of one team that no live process owns — its stamp, and any `.lock.stale-*`
+ * copy a reclaim killed mid-move left behind. The lock itself is not listed: only its holder's
+ * release removes it, and `team leave` holds it while it tears the team down.
+ */
+export async function removeRunArtifacts(storeRoot: string, team: string): Promise<void> {
+  const run = join(storeRoot, 'run');
+  let entries: string[];
+  try { entries = await readdir(run); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  await Promise.all(entries.filter((name) => name === `${team}.stamp` || name.startsWith(`${team}.lock.stale-`)).map((name) => rm(join(run, name), { force: true })));
 }
 
 function isPidAlive(pid: number): boolean {

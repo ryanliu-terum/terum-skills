@@ -1,6 +1,7 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
+import { stampIsFresh } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
@@ -73,7 +74,9 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
 
 function isMissing(error: unknown): boolean { return error instanceof Error && 'code' in error && error.code === 'ENOENT'; }
 
+/** One definition of "fresh" for `run/<team>.stamp` — the §8 predicate the hook uses; an unreadable stamp is not evidence of a recent sync either. */
 async function staleNotice(store: ConfigStore, team: string, io: Prompter, now: () => number): Promise<void> {
-  try { if (now() - (await stat(join(store.root, 'run', `${team}.stamp`))).mtimeMs > 3_600_000) io.print(`${team} may be stale; run \`terum-skills sync\`.`); }
-  catch { io.print(`${team} may be stale; run \`terum-skills sync\`.`); }
+  let fresh = false;
+  try { fresh = await stampIsFresh(store.root, team, now); } catch { /* an unreadable stamp is not evidence of a recent sync */ }
+  if (!fresh) io.print(`${team} may be stale; run \`terum-skills sync\`.`);
 }

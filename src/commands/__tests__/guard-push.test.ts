@@ -93,6 +93,15 @@ describe('guard-push — the clone-local pre-push hook entry (D12)', () => {
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', advanced], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/SKILL.md') });
     await git(['update-ref', '-d', 'refs/remotes/origin/main'], clone);
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/publish/mine', own, 'refs/heads/publish/mine', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringMatching(/origin\/main could not be resolved[\s\S]*git push --no-verify/) });
+    // git hands the hook the push target as `$1` — the credentialed URL itself when someone pushes by URL — and a refusal must never echo it.
+    expect(await run({ remote: 'https://user:ghp_secret_token@github.com/org/team.git', url: fixture.bare, refs: ['refs/heads/publish/mine', own, 'refs/heads/publish/mine', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.not.stringContaining('ghp_secret_token') });
+  });
+
+  it('re-voices a failure that is not a verdict — a corrupt config.json — so the blocked push still names the guard and the attributed bypass', async () => {
+    const { fixture, store, clone, main } = await prepared();
+    const own = await commitOnMain(clone, 'skills/mine/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>', 'edited'));
+    await writeFile(join(store.root, 'config.json'), '{ this is not json');
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main], cwd: clone, config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringMatching(/^Push guard could not run: Invalid[\s\S]*git push --no-verify/) });
   });
 
   it('sees the path a rename takes away — a teammate\'s folder cannot be taken over by moving it and rewriting the author, nor their aux file by moving it into yours — and reads a non-ASCII path verbatim', async () => {

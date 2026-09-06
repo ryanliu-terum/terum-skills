@@ -44,6 +44,8 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
     const runner = args.runner ?? systemRunner;
     const interactive = !args.hook && io.interactive && 'confirm' in io;
     const notice = (line: string) => { notices.push(line); if (!args.hook) io.print(line); };
+    // A blocked placement is reported AND recorded as undone work, so the team is not stamped as fully synced (§8).
+    const blocked = (team: string, label: string, line: string) => { notice(line); defer(team, label); };
     // Every verb sync runs on the user's behalf (a pending replay, the endorsed batch, shared-source
     // reconciliation) prints through this channel: in hook mode the lines ride SyncResult.notices to
     // stderr (§8), so stdout carries the reload directive alone; interactively they print as before.
@@ -69,10 +71,16 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
     for (const team of Object.keys(config.teams)) {
       const clone = store.teamClone(team);
       if (args.hook) {
-        if (await stampIsFresh(store.root, team, args.now)) { skipped.add(team); continue; }
-        const release = await acquireTeamLock(store.root, team, args.lock);
-        if (!release) { skipped.add(team); continue; }
-        releases.push(release);
+        // The gate can throw — a lock file this process cannot read, a refused run/ directory — and
+        // that costs this team alone, reported: the shape the CloneBusy handler below already has.
+        try {
+          if (await stampIsFresh(store.root, team, args.now)) { skipped.add(team); continue; }
+          const release = await acquireTeamLock(store.root, team, args.lock);
+          if (!release) { skipped.add(team); continue; }
+          releases.push(release);
+        } catch (error) {
+          notice(`Skipping ${team}: ${error instanceof Error ? error.message : String(error)}`); skipped.add(team); continue;
+        }
       }
       try {
         await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {}, lockStale: args.lockStale });
@@ -127,17 +135,17 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         if (person && !person.installed.some((item) => item.id === entry.id && sameScope(item.scope, entry.scope)) && !currentConfig.pending.some((pending) => pending.id === entry.id && pending.team === entry.team && sameScope(pending.scope, entry.scope))) continue;
         if (person?.declined.includes(entry.id)) continue;
         const skill = await findSkill(clone, entry.team, entry.id);
-        if (!skill) { notice(`Blocked ${path}: its skill is no longer in the repository.`); continue; }
+        if (!skill) { blocked(entry.team, basename(path), `Blocked ${path}: its skill is no longer in the repository.`); continue; }
         // §6 blocked, second sub-case: the ledger pins a tree the clone does not have (placed from a
         // newer or rewritten history). The tool must not resolve that alone: report, touch nothing.
         if (entry.version && (await runner.run('git', ['cat-file', '-e', `${entry.version}^{tree}`], { cwd: clone })).code !== 0) {
-          notice(`Blocked ${path}: pinned version ${entry.version.slice(0, 8)} is not in the team repository (newer than this clone, or rewritten); leaving it untouched.`);
+          blocked(entry.team, basename(path), `Blocked ${path}: pinned version ${entry.version.slice(0, 8)} is not in the team repository (newer than this clone, or rewritten); leaving it untouched.`);
           continue;
         }
         const source = entry.version ? await materializeVersion(store, entry.team, clone, skill.name, entry.version, runner) : skill.directory;
         const grants = (await skillAtSource(source, skill)).grants;
         if (!approved((await store.read()), skill.id, grants)) {
-          if (!grants.ok) { notice(`Blocked ${skill.name}: allowed-tools is malformed.`); continue; }
+          if (!grants.ok) { blocked(entry.team, skill.name, `Blocked ${skill.name}: allowed-tools is malformed.`); continue; }
           if (!interactive) { defer(entry.team, skill.name); continue; }
           (io as Prompter).print(`allowed-tools changed for ${skill.name}:\n${grants.normalized}`);
           if (!(await (io as Prompter).confirm(`Approve updated tools for ${skill.name}?`))) { defer(entry.team, skill.name); continue; }
@@ -171,7 +179,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
           // decided BEFORE anything moves: a blocked placement is touched by nothing, quarantine included.
           const destination = join(root, skill.name);
           const collision = await inspect(destination, (await store.read()).placements[destination]?.id === skill.id);
-          if (collision.kind === 'foreign') { notice(`Blocked ${path}: ${destination} already exists and is not a placement this tool owns; leaving both untouched.`); continue; }
+          if (collision.kind === 'foreign') { blocked(entry.team, basename(path), `Blocked ${path}: ${destination} already exists and is not a placement this tool owns; leaving both untouched.`); continue; }
           // A placed copy that no longer matches its ledger fingerprint is moved to quarantine, never
           // deleted — the same helper install uses when it re-places over an owned target.
           const drift = await quarantineDrift(path, entry.fingerprint, join(store.root, 'quarantine'));
@@ -195,14 +203,13 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         placed++; changed = true;
       } catch (error) {
         if (error instanceof PromptClosedError) throw error; // the channel is gone, not this placement
-        notice(`Blocked ${path}: ${error instanceof Error ? error.message : String(error)}`);
-        defer(entry.team, basename(path));
+        blocked(entry.team, basename(path), `Blocked ${path}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     {
       // Newly endorsed global skills are an opt-in batch. Per-skill tool approval remains inside
       // installOne, so the batch question cannot answer a consent prompt on the user's behalf.
-      for (const [team, binding] of Object.entries((await store.read()).teams)) {
+      for (const [team, binding] of Object.entries(config.teams)) {
         if (!binding.handle || skipped.has(team)) continue;
         const candidates = await endorsedCandidates(store.teamClone(team), team, binding.handle, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
         if (!candidates.length) continue;
@@ -228,9 +235,17 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
     if (args.hook && placed) (io as { print(line: string): void }).print('{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}');
     // §8: the stamp means "this team is fully synced". A failed run throws past this line; a team this
     // run skipped, or left work undone in (a deferral, a blocked placement), keeps its old stamp, so
-    // the next session retries instead of rate-limiting the gap into an hour of silence. A project
-    // placement outside its checkout is not undone work: that placement belongs to another session.
-    for (const team of Object.keys((await store.read()).teams)) if (!skipped.has(team) && !incomplete.has(team)) await writeStamp(store, team);
+    // the next session retries instead of rate-limiting the gap into an hour of silence. Only the
+    // teams this run walked are stamped — a team bound meanwhile was never refreshed — and only when
+    // the final ledger holds no pending work for them: an install recorded after this team's replay
+    // is work this run never saw. A project placement outside its checkout is not undone work: that
+    // placement belongs to another session.
+    const final = await store.read();
+    for (const team of Object.keys(config.teams)) {
+      if (skipped.has(team) || incomplete.has(team) || !Object.hasOwn(final.teams, team)) continue;
+      if (final.pending.some((entry) => entry.team === team)) continue;
+      await writeStamp(store, team);
+    }
     return success({ placed, deferred, notices, changed, hook: Boolean(args.hook) });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error), args.hook ? { placed, deferred, notices, changed, hook: true } : undefined); }
   finally { for (const release of releases) await release().catch(() => undefined); }
@@ -284,7 +299,7 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
 async function actorPerson(store: ConfigStore, team: string, handle: string) {
   try { return await readPerson(store.teamClone(team), handle); } catch { return undefined; }
 }
-async function writeStamp(store: ConfigStore, team: string): Promise<void> { await mkdirPrivate(join(store.root, 'run')); await writeFile(stampPath(store.root, team), new Date().toISOString(), 'utf8'); }
+async function writeStamp(store: ConfigStore, team: string): Promise<void> { await mkdirPrivate(dirname(stampPath(store.root, team))); await writeFile(stampPath(store.root, team), new Date().toISOString(), 'utf8'); }
 
 async function matchingProjectRoot(clone: string, project: string, runner: Runner, cwd?: string): Promise<string | undefined> {
   const root = await runner.run('git', ['rev-parse', '--show-toplevel'], cwd ? { cwd } : undefined);
