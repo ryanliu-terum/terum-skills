@@ -22,9 +22,11 @@ describe('M3 publish walkthrough (§12)', () => {
     const sharedSkill = shared.value;
     await aStore.update((config) => { config.teams.team!.remote = REMOTE; });
     const published = await publish({ ref: 'sample', config: aStore, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
-    expect(published).toMatchObject({ ok: true, value: { branch: 'publish/sample' } });
+    // One fresh branch per publish (R2): the name is minted per run, so the walkthrough follows the result.
+    expect(published).toMatchObject({ ok: true, value: { branch: expect.stringMatching(/^publish\/sample-seed-[0-9a-f]{8}$/) } });
+    const endorsementBranch = published.ok ? published.value.branch! : '';
     await git(['fetch', 'origin'], fixture.seed);
-    await git(['push', 'origin', 'refs/remotes/origin/publish/sample:main'], fixture.seed);
+    await git(['push', 'origin', `refs/remotes/origin/${endorsementBranch}:main`], fixture.seed);
     expect(JSON.parse(await git(['show', 'main:team.json'], fixture.bare)).global).toContain(sharedSkill.id);
 
     await pushFromSeed(fixture.seed, 'people/bob.json', `${JSON.stringify(person('bob', { display_name: 'Bob', email: 'bob@example.com', github: 'bob' }))}\n`);
