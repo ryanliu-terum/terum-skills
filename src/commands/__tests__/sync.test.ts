@@ -111,9 +111,11 @@ describe('sync --hook (§3, §6)', () => {
       await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(access(join(store.root, 'run', 'other.stamp'))).resolves.toBeUndefined();
     } finally { await release(); }
-    expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
+    // Once the clone is free the team syncs; what this noninteractive-shaped run cannot ask about (the
+    // endorsed candidate, the orphan) is deferred, and a deferral leaves the stamp for the next session (§8).
+    expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: expect.arrayContaining(['second']) } });
     expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe(head);
-    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('a clone lock lost mid-fetch costs exactly that team as well: the sync continues and the other team lands', async () => {
@@ -189,7 +191,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: new');
   });
 
-  it('defers one endorsed candidate that cannot be placed, still installs the rest, and still stamps', async () => {
+  it('defers one endorsed candidate that cannot be placed, still installs the rest, and leaves the stamp unwritten so the next session retries', async () => {
     const { fixture, store } = await configuredSkill();
     await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID, SECOND_ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
@@ -201,7 +203,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(io.lines.filter((line) => line.startsWith('Deferred endorsed sample: '))).toHaveLength(1);
     expect(await readFile(join(store.root, '.claude', 'skills', 'second', 'SKILL.md'), 'utf8')).toContain('description: second');
     expect(await readFile(join(stranger, 'SKILL.md'), 'utf8')).toBe('user-owned, not a placement');
-    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('a closed prompt channel is one failure, never a damaged placement per remaining entry', async () => {
@@ -214,7 +216,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(join(setup.home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
   });
 
-  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('reports one unreadable placement as blocked and still refreshes the others and writes the stamp', async () => {
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('reports one unreadable placement as blocked, still refreshes the others, and leaves the stamp unwritten (§8: a partial run is retried next session)', async () => {
     const { fixture, store } = await configuredSkill();
     const home = join(fixture.root, 'home');
     await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
@@ -229,7 +231,7 @@ describe('sync --hook (§3, §6)', () => {
     finally { await chmod(join(broken, 'SKILL.md'), 0o644); }
     expect(io.lines.filter((line) => line.startsWith(`Blocked ${broken}: `))).toHaveLength(1);
     expect(await readFile(join(healthy, 'SKILL.md'), 'utf8')).toContain('description: second updated');
-    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('heals a clone whose local main drifted instead of failing to fast-forward', async () => {
@@ -405,16 +407,21 @@ describe('sync --hook (§3, §6)', () => {
     expect((await store.read()).pending).toHaveLength(0);
   });
 
-  it('leaves a project pending install deferred outside its worktree and replays it inside', async () => {
+  it('leaves a project pending install deferred outside its worktree — without stamping, so the next session inside the checkout is not rate-limited — and replays it inside', async () => {
     const { fixture, store, clone } = await configuredSkill();
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { project: { remotes: [fixture.bare], skills: [ID] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
     await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'project', project: 'project' }, started: '2026-09-04T00:00:00Z' }); });
     const outside = await temporaryDirectory();
-    expect(await run({ config: store, cwd: outside }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: [expect.stringContaining('project')] } });
+    const hook: NonInteractivePrompter = { interactive: false, print: () => undefined };
+    expect(await run({ hook: true, config: store, cwd: outside }, hook)).toMatchObject({ ok: true, value: { deferred: [expect.stringContaining('project')] } });
     expect((await store.read()).pending).toHaveLength(1);
-    expect((await run({ config: store, cwd: clone }, new ScriptedPrompter())).ok).toBe(true);
+    // §8: the deferral left the stamp unwritten, so the hook run five minutes later — in the checkout the
+    // deferral was waiting for — really runs instead of being an hourly no-op.
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await run({ hook: true, config: store, cwd: clone }, hook)).toMatchObject({ ok: true, value: { placed: 1, deferred: [] } });
     expect((await store.read()).pending).toHaveLength(0);
     expect(await readFile(join(clone, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
   });
 
   it('classifies an update as available and re-places into the ledger-recorded target', async () => {
@@ -659,6 +666,19 @@ describe('sync --hook mutex and rate limit (§8, §12 "hook mutex")', () => {
     expect(await run({ hook: true, config: store, runner: counting, now: () => Date.now() + 2 * 3_600_000 }, hookIo())).toMatchObject({ ok: true });
     expect(fetches).toBe(2);
     expect(await head(clone)).not.toBe(before);
+  });
+
+  it('leaves a skipped team\'s orphans alone: neither the hourly no-op nor a held mutex reads its clone or defers', async () => {
+    const orphan = await orphanedPlacement();
+    expect(await run({ hook: true, config: orphan.store }, hookIo())).toMatchObject({ ok: true, value: { deferred: ['sample'] } });
+    // The deferral left no stamp (§8); a stamp from a run that did finish makes the next hour a no-op —
+    // the orphan pass included, so nothing is deferred and createExecute prints no "needs review" line.
+    await writeFile(stampPath(orphan.store.root, 'team'), new Date().toISOString());
+    expect(await run({ hook: true, config: orphan.store }, hookIo())).toMatchObject({ ok: true, value: { deferred: [], notices: [] } });
+    const release = await acquireTeamLock(orphan.store.root, 'team');
+    try {
+      expect(await run({ hook: true, config: orphan.store, now: later }, hookIo())).toMatchObject({ ok: true, value: { deferred: [], notices: [] } });
+    } finally { await release!(); }
   });
 
   it('a failed hook sync releases the mutex and leaves the old stamp, so the next session retries', async () => {

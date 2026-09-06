@@ -388,6 +388,11 @@ async function ensureClone(clone: string, remote: string, normalized: string, ru
     throw new Error(`${clone} exists but is not a complete clone of ${remote}; move it aside and retry.`);
   }
   if (origin !== normalized) throw new Error(`${clone} is a clone of ${origin}, not ${normalized}; pass --as <other-name> to keep both teams.`);
+  // Arming is idempotent, so it belongs on every join, not only on a fresh clone: a clone that exists
+  // but was never armed — an interrupted create or join, an arming that failed after the clone landed
+  // — is exactly the state whose printed advice is `team join <remote>`. After the origin checks, so
+  // another team's clone is never written into.
+  await installPushGuard(clone, runner);
 }
 
 async function readRoster(clone: string): Promise<RosterEntry[]> {
@@ -487,8 +492,11 @@ async function bootstrap(remote: string, clone: string, teamName: string, identi
     await git('add', '--all');
     await git('commit', '-q', '-m', `${identity.handle}: create team ${teamName}`);
     await git('push', '-q', '--no-verify', '-u', 'origin', 'main');
+    // Armed on `staging`, before the rename: the hook file and the relative `core.hooksPath` both live
+    // inside the repo and survive the move, and the rename stays the last statement of the try, so
+    // every failure path leaves exactly `staging` for the catch below to delete.
+    await installPushGuard(staging, runner);
     await rename(staging, clone);
-    await installPushGuard(clone, runner);
   } catch (error) {
     await rm(staging, { recursive: true, force: true });
     throw error;

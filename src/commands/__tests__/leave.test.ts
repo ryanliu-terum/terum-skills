@@ -6,7 +6,7 @@ import { createConfigStore } from '../../lib/config.js';
 import { place } from '../../lib/placer.js';
 import { bareTeam, cloneWithIdentity, git, holdCloneLock, originSha, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run } from '../leave.js';
-import { installHook } from '../../lib/hook.js';
+import { installHook, lockPath } from '../../lib/hook.js';
 
 async function prepared() {
   const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -22,9 +22,13 @@ describe('team leave (§6)', () => {
     const personBefore = await git(['show', 'main:people/seed.json'], fixture.bare);
     const cache = join(store.root, 'cache', 'team', 'cached-version'); const stamp = join(store.root, 'run', 'team.stamp');
     await mkdir(cache, { recursive: true }); await mkdir(join(store.root, 'run'), { recursive: true }); await writeFile(stamp, 'stamp');
+    // A hook killed mid-sync leaves its §8 mutex behind; leave must not hand that lock to the next join of the same name.
+    const lock = lockPath(store.root, 'team');
+    await writeFile(lock, `${JSON.stringify({ pid: process.pid, host: 'this-host', started: new Date().toISOString() })}\n`);
     await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { removed: 1, cloneRemoved: true } });
     await expect(access(placed.path)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(cache)).rejects.toMatchObject({ code: 'ENOENT' }); await expect(access(stamp)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(lock)).rejects.toMatchObject({ code: 'ENOENT' });
     const config = await store.read(); expect(config.teams).toEqual({}); expect(config.placements).toEqual({}); expect(config.pending).toEqual([]); expect(config.shared).toEqual({}); expect(config.approvals.keep).toBeDefined();
     expect(await originSha(fixture.bare)).toBe(before);
     expect(await git(['show', 'main:people/seed.json'], fixture.bare)).toBe(personBefore);

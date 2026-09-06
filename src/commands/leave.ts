@@ -1,7 +1,7 @@
 import { access, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { defaultHookOptions, HookOptions, removeHook } from '../lib/hook.js';
+import { defaultHookOptions, HookOptions, lockPath, removeHook, stampPath } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
@@ -45,7 +45,9 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
       await Promise.all([
         rm(clone, { recursive: true, force: true }),
         rm(join(store.root, 'cache', name), { recursive: true, force: true }),
-        rm(join(store.root, 'run', `${name}.stamp`), { force: true }),
+        // Both §8 run artifacts: a lock a killed hook left behind must not be handed to the next join of this name.
+        rm(stampPath(store.root, name), { force: true }),
+        rm(lockPath(store.root, name), { force: true }),
       ]);
     });
     let lastTeam = false;

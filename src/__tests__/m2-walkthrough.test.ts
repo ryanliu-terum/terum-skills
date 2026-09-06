@@ -45,8 +45,12 @@ describe('M2 walkthrough (§12)', () => {
     await writeFile(join(source, 'SKILL.md'), firstSkill('grant widened', 'Bash(*)'));
     expect((await sync({ config: aStore }, new ScriptedPrompter())).ok).toBe(true);
     const hook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await sync({ hook: true, config: bStore }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+    // §8: the interactive sync above stamped this team, and a hook run within the hour is a silent
+    // no-op — clock past the hour so the hook sync below really runs and these assertions bite.
+    expect(await sync({ hook: true, config: bStore, now: () => Date.now() + 2 * 3_600_000 }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
     expect(hook.lines).toEqual([]);
+    // It did fetch the widened grant into B's clone — and still left both placed copies alone.
+    expect(await git(['show', 'HEAD:skills/guarded/SKILL.md'], bClone)).toContain('Bash(*)');
     expect(await readFile(pinnedPath, 'utf8')).toBe(pinnedBytes);
     expect(await readFile(plainPath, 'utf8')).toBe(plainBytes);
     const bConfig = await bStore.read();

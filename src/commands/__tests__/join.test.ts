@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { join as rawJoin, MAX_HANDLE_ATTEMPTS, parseJoinTarget } from '../team.js';
@@ -90,9 +90,13 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(JSON.parse(await git(['show', 'main:people/ghost.json'], fixture.bare))).toMatchObject({ bio: 'old bio', display_name: 'Ghost Again' });
   });
 
-  it('a repeat join on the same machine keeps the bound handle, asks no handle question, and creates no second people file', async () => {
+  it('a repeat join on the same machine keeps the bound handle, asks no handle question, creates no second people file, and re-arms the push guard', async () => {
     const { fixture, store, runner } = await setup();
     expect((await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()))).ok).toBe(true);
+    // A clone that exists but is not armed — an interrupted create or join — is re-armed by the join the printed advice names (D12).
+    const hook = pathJoin(store.teamClone('team'), '.git', 'hooks', 'pre-push');
+    await rm(hook);
+    await git(['config', '--unset', 'core.hooksPath'], store.teamClone('team'));
     const io = new ScriptedPrompter(['me', 'Me Again', 'me@example.com']);
     const again = await join({ target: REMOTE, config: store, runner, as: 'other' }, io);
     if (!again.ok) throw new Error(again.error);
@@ -100,6 +104,8 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(io.askedAbout('Team handle')).toBe(false);
     expect(io.lines.some((line) => line.includes('ignoring --as other'))).toBe(true);
     expect((await readdir(pathJoin(store.teamClone('team'), 'people'))).sort()).toEqual(['me.json', 'seed.json']);
+    expect(await readFile(hook, 'utf8')).toContain('guard-push');
+    expect((await git(['config', 'core.hooksPath'], store.teamClone('team'))).trim()).toBe('.git/hooks');
     expect(Object.keys((await store.read()).teams)).toEqual(['team']);
     expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare)).display_name).toBe('Me Again');
   });

@@ -1,7 +1,8 @@
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { readdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { acquireTeamLock, stampIsFresh, TeamLockOptions } from '../lib/hook.js';
+import { mkdirPrivate } from '../lib/fs.js';
+import { acquireTeamLock, stampIsFresh, stampPath, TeamLockOptions } from '../lib/hook.js';
 import { inspect, lockTarget, place, quarantineDrift, remove, snapshotIfPresent } from '../lib/placer.js';
 import { NonInteractivePrompter, Prompter, PromptClosedError } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
@@ -31,6 +32,10 @@ export function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResult>>;
 export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter): Promise<Result<SyncResult>> {
   const notices: string[] = [];
   const deferred: string[] = [];
+  // §8: a team this run left work undone in is not stamped, so the next session retries instead of
+  // waiting out the hour. Tracked per team: one team's deferral never withholds another's stamp.
+  const incomplete = new Set<string>();
+  const defer = (team: string, ...labels: string[]) => { deferred.push(...labels); incomplete.add(team); };
   const releases: Array<() => Promise<void>> = [];
   let placed = 0;
   let changed = false;
@@ -87,17 +92,17 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
           // once the author deleted the skill upstream. Only the install path needs the record.
           if (pending.op === 'uninstall') { await uninstallOne({ team, id: pending.id, scope: pending.scope, store, runner, cwd: args.cwd }, childIo); changed = true; continue; }
           const skill = await findSkill(clone, team, pending.id);
-          if (!skill) { deferred.push(`${pending.id.slice(0, 8)} is no longer in ${team}`); continue; }
+          if (!skill) { defer(team, `${pending.id.slice(0, 8)} is no longer in ${team}`); continue; }
           const version = 'version' in pending && typeof pending.version === 'string' ? pending.version : undefined;
           const source = version ? await materializeVersion(store, team, clone, skill.name, version, runner) : skill.directory;
           const placedSkill = await skillAtSource(source, skill);
-          if (!approved((await store.read()), skill.id, placedSkill.grants) && !interactive) { deferred.push(skill.name); continue; }
+          if (!approved((await store.read()), skill.id, placedSkill.grants) && !interactive) { defer(team, skill.name); continue; }
           await installOne({ team, id: pending.id, scope: pending.scope, version, store, runner, cwd: args.cwd }, childIo);
           placed++; changed = true;
         } catch (error) {
           if (error instanceof PromptClosedError) throw error; // the channel is gone, not this entry
           const message = error instanceof Error ? error.message : String(error);
-          deferred.push(pending.scope.kind === 'project' && message.includes('no matching project context') ? `${pending.id.slice(0, 8)} needs a checkout for project ${pending.scope.project}` : pending.id.slice(0, 8));
+          defer(team, pending.scope.kind === 'project' && message.includes('no matching project context') ? `${pending.id.slice(0, 8)} needs a checkout for project ${pending.scope.project}` : pending.id.slice(0, 8));
           notice(`Deferred pending ${pending.op} for ${pending.id.slice(0, 8)}: ${message}`);
         }
       }
@@ -133,9 +138,9 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         const grants = (await skillAtSource(source, skill)).grants;
         if (!approved((await store.read()), skill.id, grants)) {
           if (!grants.ok) { notice(`Blocked ${skill.name}: allowed-tools is malformed.`); continue; }
-          if (!interactive) { deferred.push(skill.name); continue; }
+          if (!interactive) { defer(entry.team, skill.name); continue; }
           (io as Prompter).print(`allowed-tools changed for ${skill.name}:\n${grants.normalized}`);
-          if (!(await (io as Prompter).confirm(`Approve updated tools for ${skill.name}?`))) { deferred.push(skill.name); continue; }
+          if (!(await (io as Prompter).confirm(`Approve updated tools for ${skill.name}?`))) { defer(entry.team, skill.name); continue; }
           await store.update((fresh) => { fresh.approvals[skill.id] = { grants: grants.hash, approved_at: new Date().toISOString().slice(0, 10) }; });
         }
         // The ledger is provenance for the exact placement, including a particular project checkout.
@@ -191,7 +196,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       } catch (error) {
         if (error instanceof PromptClosedError) throw error; // the channel is gone, not this placement
         notice(`Blocked ${path}: ${error instanceof Error ? error.message : String(error)}`);
-        deferred.push(basename(path));
+        defer(entry.team, basename(path));
       }
     }
     {
@@ -202,7 +207,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         const candidates = await endorsedCandidates(store.teamClone(team), team, binding.handle, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
         if (!candidates.length) continue;
         if (!interactive) {
-          deferred.push(...candidates.map((skill) => skill.name));
+          defer(team, ...candidates.map((skill) => skill.name));
           continue;
         }
         if (await (io as Prompter).confirm(`Install ${candidates.length} newly endorsed skill(s) from ${team}?`)) {
@@ -212,18 +217,20 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
             try { await installOne({ team, id: skill.id, store, runner, cwd: args.cwd }, childIo); placed++; changed = true; }
             catch (error) {
               if (error instanceof PromptClosedError) throw error; // the channel is gone, not this candidate
-              deferred.push(skill.name); notice(`Deferred endorsed ${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
+              defer(team, skill.name); notice(`Deferred endorsed ${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
             }
           }
         }
       }
     }
-    await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, deferred, notice, skipped);
+    await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, defer, notice, skipped);
     if (changed && !args.hook) (io as { print(line: string): void }).print('Skills synchronized.');
     if (args.hook && placed) (io as { print(line: string): void }).print('{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}');
-    // §8: the stamp is written only after a sync that fully succeeded — a failed run throws past
-    // this line and leaves the old stamp, so the next session retries instead of waiting an hour.
-    for (const team of Object.keys((await store.read()).teams)) if (!skipped.has(team)) await writeStamp(store, team);
+    // §8: the stamp means "this team is fully synced". A failed run throws past this line; a team this
+    // run skipped, or left work undone in (a deferral, a blocked placement), keeps its old stamp, so
+    // the next session retries instead of rate-limiting the gap into an hour of silence. A project
+    // placement outside its checkout is not undone work: that placement belongs to another session.
+    for (const team of Object.keys((await store.read()).teams)) if (!skipped.has(team) && !incomplete.has(team)) await writeStamp(store, team);
     return success({ placed, deferred, notices, changed, hook: Boolean(args.hook) });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error), args.hook ? { placed, deferred, notices, changed, hook: true } : undefined); }
   finally { for (const release of releases) await release().catch(() => undefined); }
@@ -232,11 +239,12 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
 function approved(config: Awaited<ReturnType<ConfigStore['read']>>, id: string, grants: ReturnType<typeof allowedTools>): boolean {
   return grants.ok && (grants.normalized === 'none' || config.approvals[id]?.grants === grants.hash);
 }
-async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, deferred: string[], notice: (line: string) => void, skipTeams: ReadonlySet<string>): Promise<void> {
+async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, defer: (team: string, label: string) => void, notice: (line: string) => void, skipTeams: ReadonlySet<string>): Promise<void> {
   const config = await store.read();
   for (const [path, placement] of Object.entries(config.placements)) {
-    // A clone this run could not refresh may be mid-write by the process that holds it: its roster
-    // is not evidence of an orphan, and a decline written against it would be wrong.
+    // A team this run skipped is left alone here too: a clone another process holds may be
+    // mid-write, so its roster is not evidence of an orphan and a decline written against it would
+    // be wrong; and a §8 rate-limited hook run defers nothing, so it stays a silent no-op.
     if (skipTeams.has(placement.team)) continue;
     if (config.pending.some((entry) => entry.id === placement.id && entry.team === placement.team && sameScope(entry.scope, placement.scope))) continue;
     const binding = config.teams[placement.team];
@@ -245,7 +253,7 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
     if (!person) continue;
     if (person.declined.includes(placement.id)) continue;
     if (person.installed.some((entry) => entry.id === placement.id && sameScope(entry.scope, placement.scope))) continue;
-    if (!io) { deferred.push(basename(path)); continue; }
+    if (!io) { defer(placement.team, basename(path)); continue; }
     const adopt = await io.confirm(`Adopt orphaned placement at ${path}?`);
     const repo = openTeamRepo(store.teamClone(placement.team), binding.remote, runner);
     if (adopt) {
@@ -276,7 +284,7 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
 async function actorPerson(store: ConfigStore, team: string, handle: string) {
   try { return await readPerson(store.teamClone(team), handle); } catch { return undefined; }
 }
-async function writeStamp(store: ConfigStore, team: string): Promise<void> { const run = join(store.root, 'run'); await mkdir(run, { recursive: true, mode: 0o700 }); await writeFile(join(run, `${team}.stamp`), new Date().toISOString(), 'utf8'); }
+async function writeStamp(store: ConfigStore, team: string): Promise<void> { await mkdirPrivate(join(store.root, 'run')); await writeFile(stampPath(store.root, team), new Date().toISOString(), 'utf8'); }
 
 async function matchingProjectRoot(clone: string, project: string, runner: Runner, cwd?: string): Promise<string | undefined> {
   const root = await runner.run('git', ['rev-parse', '--show-toplevel'], cwd ? { cwd } : undefined);

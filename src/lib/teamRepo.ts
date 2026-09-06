@@ -1,6 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { chmod, lstat, mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import lockfile from 'proper-lockfile';
 import { mkdirPrivate } from './fs.js';
 import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
@@ -330,20 +332,65 @@ export async function cloneTeam(remote: string, destination: string, runner: Run
   await installPushGuard(destination, runner);
 }
 
-/** What the clone-local pre-push hook runs; the same `npx` spelling as every printed command (§3). */
-export const PUSH_GUARD_COMMAND = 'npx -y terum-skills@latest guard-push';
+/** How the clone-local hook launches the guard: the node binary and the CLI entry that armed the clone. */
+export interface PushGuardLauncher { node: string; entry: string; }
+
+/**
+ * The CLI that is arming the clone, when it runs from a built package (`dist/index.js` beside
+ * `dist/lib/`, which is also how `npx` unpacks it); null under the TypeScript sources. A hook
+ * armed with an absolute path needs no registry on git's blocking path and runs the rules that
+ * armed it, not whatever was published last.
+ */
+export function localPushGuardLauncher(): PushGuardLauncher | null {
+  const entry = fileURLToPath(new URL('../index.js', import.meta.url));
+  return existsSync(entry) ? { node: process.execPath, entry } : null;
+}
+
+/** POSIX-shell single quoting: a HOME with a space or a quote is still one word. */
+function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
+
+/** This package's version, for the pinned `npx` fallback; null when package.json is out of reach (an unusual bundle). */
+function packageVersion(): string | null {
+  try { return (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? null; } catch { return null; }
+}
+
+/**
+ * The pre-push hook body. It checks that its launcher still exists before running it, and exits 0
+ * with one warning line when it does not (an npx cache pruned, a node upgraded away): the guard
+ * prevents accidents, not abuse, and `--no-verify` bypasses it anyway, so a push blocked by
+ * infrastructure would buy no safety — but a push that was NOT checked must say so. A non-zero exit
+ * is therefore always the guard's own refusal. git hands the pushed refs to the hook on stdin, and
+ * the CLI reads stdin nowhere outside the Prompter (§3), so the hook turns them into arguments.
+ * Without a built entry the fallback is `npx` pinned to this package's version — never `@latest`.
+ */
+export function pushGuardHook(launcher: PushGuardLauncher | null): string {
+  const check = launcher ? `[ -x ${shellQuote(launcher.node)} ] && [ -f ${shellQuote(launcher.entry)} ]` : 'command -v npx >/dev/null 2>&1';
+  const launch = launcher ? `${shellQuote(launcher.node)} ${shellQuote(launcher.entry)} guard-push` : `npx -y ${shellQuote(`terum-skills@${packageVersion() ?? 'latest'}`)} guard-push`;
+  const warning = `terum-skills push guard: ${launcher ? launcher.entry : 'npx'} is gone, so this push was NOT checked. Re-run \`terum-skills team join <remote>\` to re-arm it.`;
+  return [
+    '#!/bin/sh',
+    '# terum-skills: the D12 ownership guard for a raw push from this clone. Regenerated on every join; do not edit.',
+    `if ! { ${check}; }; then`,
+    `  echo ${shellQuote(warning)} >&2`,
+    '  exit 0',
+    'fi',
+    'set -- "$1" "$2" $(cat)',
+    `exec ${launch} "$@"`,
+    '',
+  ].join('\n');
+}
 
 /**
  * D12's clone-local half: a raw `git push` from a team clone runs the CLI's ownership rules
  * through the hidden `guard-push` verb. Accidents, not abuse — `--no-verify` bypasses it and is
- * attributed. Regenerated on every clone. git hands the pushed refs to the hook on stdin, and the
- * CLI reads stdin nowhere outside the Prompter (§3), so the hook turns them into arguments.
+ * attributed. Idempotent, and run on every clone AND every join of an existing clone, so an
+ * arming that never finished is repaired by the command the failure advice names.
  */
-export async function installPushGuard(clone: string, runner: Runner = systemRunner, command = PUSH_GUARD_COMMAND): Promise<void> {
+export async function installPushGuard(clone: string, runner: Runner = systemRunner, launcher: PushGuardLauncher | null = localPushGuardLauncher()): Promise<void> {
   const hooks = join(clone, '.git', 'hooks');
   await mkdir(hooks, { recursive: true });
   const hook = join(hooks, 'pre-push');
-  await writeFile(hook, `#!/bin/sh\n# terum-skills: the D12 ownership guard for a raw push from this clone. Regenerated on every clone; do not edit.\nset -- "$1" "$2" $(cat)\nexec ${command} "$@"\n`, { encoding: 'utf8', mode: 0o700 });
+  await writeFile(hook, pushGuardHook(launcher), { encoding: 'utf8', mode: 0o700 });
   await chmod(hook, 0o700);
   // A machine-wide core.hooksPath (a repo-hooks convention on this machine) would hide .git/hooks; this clone is ours.
   const configured = await runner.run('git', ['config', 'core.hooksPath', '.git/hooks'], { cwd: clone });

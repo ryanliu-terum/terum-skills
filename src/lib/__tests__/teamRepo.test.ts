@@ -1,9 +1,11 @@
-import { access, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { access, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
-import { assertSafePath, CloneBusy, cloneTeam, openTeamRepo, PushRefused, refreshClone, SafeWriteExhausted, treeText } from '../teamRepo.js';
+import { assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText } from '../teamRepo.js';
 import { createConfigStore } from '../config.js';
 import { run as share } from '../../commands/share.js';
 import { ScriptedPrompter } from './fixtures.js';
@@ -387,4 +389,43 @@ describe('safeWrite (§6.0)', () => {
     expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' })).toEqual({ changed: true, pushedTo: 'main' });
   });
 
+});
+
+describe('the clone-local push guard arming (D12)', () => {
+  /** Drive a hook the way git does: arguments plus the ref lines on stdin. */
+  const sh = (script: string, args: string[], stdin: string) => new Promise<{ code: number | null; stdout: string; stderr: string }>((done) => {
+    const child = spawn('sh', [script, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const out: Buffer[] = []; const err: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
+    child.on('close', (code) => done({ code, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') }));
+    child.stdin.end(stdin);
+  });
+
+  it('cloneTeam arms the guard: the hook at 0700 with core.hooksPath pinned to the clone; the hook turns git\'s stdin lines into arguments, fails open when its launcher is gone, and never falls back to `@latest`', async () => {
+    const fixture = await bareTeam();
+    const clone = join(fixture.root, 'armed');
+    await cloneTeam(fixture.bare, clone);
+    const hook = join(clone, '.git', 'hooks', 'pre-push');
+    if (process.platform !== 'win32') expect((await stat(hook)).mode & 0o777).toBe(0o700);
+    expect(await readFile(hook, 'utf8')).toContain('guard-push');
+    expect((await git(['config', '--local', 'core.hooksPath'], clone)).trim()).toBe('.git/hooks');
+    // The body, driven the way git drives it, with a stub launcher that echoes its arguments and exits 3: two stdin lines become one flat argument list, and the launcher's exit status is the hook's.
+    const stub = join(fixture.root, 'stub.js');
+    await writeFile(stub, 'console.log(process.argv.slice(2).join(" ")); process.exit(3);\n');
+    const armed = join(fixture.root, 'armed.sh');
+    await writeFile(armed, pushGuardHook({ node: process.execPath, entry: stub }));
+    const ran = await sh(armed, ['origin', 'https://x/y.git'], 'refs/heads/main a1 refs/heads/main b2\nrefs/heads/x c3 refs/heads/publish/x 00\n');
+    expect(ran).toEqual({ code: 3, stdout: 'guard-push origin https://x/y.git refs/heads/main a1 refs/heads/main b2 refs/heads/x c3 refs/heads/publish/x 00\n', stderr: '' });
+    const gone = join(fixture.root, 'gone.sh');
+    await writeFile(gone, pushGuardHook({ node: process.execPath, entry: join(fixture.root, 'missing.js') }));
+    const skipped = await sh(gone, ['origin', 'https://x/y.git'], 'refs/heads/main a1 refs/heads/main b2\n');
+    expect(skipped.code).toBe(0);
+    expect(skipped.stdout).toBe('');
+    expect(skipped.stderr).toContain('NOT checked');
+    // Under the TypeScript sources there is no built entry: the fallback is npx pinned to this package's version.
+    const { version } = createRequire(import.meta.url)('../../../package.json') as { version: string };
+    expect(pushGuardHook(null)).toContain(`terum-skills@${version}`);
+    expect(pushGuardHook(null)).not.toContain('@latest');
+  });
 });

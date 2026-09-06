@@ -9,16 +9,19 @@ import { CommandResult, Runner, systemRunner } from '../lib/runner.js';
 export interface GuardPushArgs { remote: string; url: string; refs?: readonly string[]; cwd?: string; config?: ConfigStore; runner?: Runner; }
 export interface GuardPushResult { team: string; checked: number; }
 
-const ZERO_SHA = /^0{40}$/;
+/** git's null OID — the "no content here" marker of a new branch or a deletion — matched by shape, not length: 40 zeros under sha-1, 64 under `--object-format=sha256`. */
+const ZERO_SHA = /^0+$/;
 type Git = (parts: readonly string[]) => Promise<CommandResult>;
 
 /**
  * The hidden pre-push hook entry (D12, the clone-local half of the write guard). git's
  * `<local ref> <local sha> <remote ref> <remote sha>` lines arrive as arguments — the hook turns
  * its stdin into them, because the CLI reads stdin nowhere outside the Prompter (§3) — and every
- * branch update is diffed against the ref it replaces (`origin/main` for a new branch) and held
- * to the pusher's own identity. A refusal is one line on stderr and exit 1, which makes git abort
- * the push. Accidents, not abuse: `--no-verify` bypasses it, attributed to the pusher.
+ * branch update is diffed against the content it replaces (its fork point off `main` for a new
+ * branch) and held to the pusher's own identity. What cannot be attributed — a deletion, a
+ * non-branch ref, a branch with no base to diff against — is refused, never waived. A refusal is
+ * one line on stderr and exit 1, which makes git abort the whole push. Accidents, not abuse:
+ * `--no-verify` bypasses it, attributed to the pusher.
  */
 export async function run(args: GuardPushArgs, io: Prompter): Promise<Result<GuardPushResult>> {
   try {
@@ -37,12 +40,21 @@ export async function run(args: GuardPushArgs, io: Prompter): Promise<Result<Gua
     let checked = 0;
     for (let index = 0; index < refs.length; index += 4) {
       const localSha = refs[index + 1]!; const remoteRef = refs[index + 2]!; const remoteSha = refs[index + 3]!;
-      if (ZERO_SHA.test(localSha) || !remoteRef.startsWith('refs/heads/')) continue; // a deletion, or not a branch: no content to own
-      const base = ZERO_SHA.test(remoteSha) ? await revParse(git, 'refs/remotes/origin/main') : remoteSha;
-      if (base === null) continue; // a first push to an empty remote: nothing to diff against
-      const listed = await git(['diff', '--name-only', base, localSha]);
-      if (listed.code !== 0) throw new Error(`Push guard could not diff ${base.slice(0, 8)}..${localSha.slice(0, 8)}: ${(listed.stderr || listed.stdout).trim()}`);
-      const changedPaths = listed.stdout.split('\n').filter(Boolean).sort();
+      // A deletion (`git push --prune` / `--mirror` / `--delete` / `:ref`) carries no new content but destroys
+      // content the guard cannot show is yours — a teammate's pending `publish/<skill>` branch exists nowhere
+      // else — and a non-branch ref carries no SKILL.md to read ownership from. Neither is waived.
+      if (ZERO_SHA.test(localSha)) throw new Error(`Push guard refused deleting ${remoteRef}: a deletion is pure loss and cannot be shown to be yours (D12). Delete it on the host, or bypass with \`git push --no-verify\` (attributed to you).`);
+      if (!remoteRef.startsWith('refs/heads/')) throw new Error(`Push guard refused ${remoteRef}: only branches carry team content, so ownership cannot be checked (D12). Bypass with \`git push --no-verify\` (attributed to you).`);
+      // An existing branch is judged against the content it replaces (a force-push included). A new branch
+      // is judged from its fork point off main — what a PR merge applies — never from main's tip, which
+      // would charge the pusher with the reversal of every commit that landed there since the branch was cut.
+      const base = ZERO_SHA.test(remoteSha) ? await forkPoint(git, args.remote, localSha) : remoteSha;
+      if (base === null) throw new Error(`Push guard: ${remoteRef} is new and ${args.remote}/main could not be resolved to check it against, so ownership cannot be checked. Run \`git fetch ${args.remote}\`, or bypass with \`git push --no-verify\` (attributed to you).`);
+      // `--no-renames`: a rename is a delete plus an add, so the path being taken away is judged too — the
+      // spelling safeWrite uses. `-z`: paths arrive verbatim, never C-quoted.
+      const listed = await git(['diff', '--name-only', '--no-renames', '-z', base, localSha]);
+      if (listed.code !== 0) throw new Error(`Push guard could not diff ${base.slice(0, 8)}..${localSha.slice(0, 8)}: ${(listed.stderr || listed.stdout).trim()}. Run \`git fetch ${args.remote}\` and retry, or bypass with \`git push --no-verify\` (attributed to you).`);
+      const changedPaths = listed.stdout.split('\0').filter(Boolean).sort();
       guardRawPush(await treeBetween(git, base, localSha, changedPaths), { handle: binding.handle, author });
       checked += changedPaths.length;
     }
@@ -56,9 +68,26 @@ async function revParse(git: Git, ref: string): Promise<string | null> {
   return result.code === 0 && result.stdout.trim() ? result.stdout.trim() : null;
 }
 
-/** A GuardTree over two commits: the changed paths, plus each touched skill folder's SKILL.md, which ownership is read from. */
+/** `main` on the remote being pushed to, falling back to `origin`: git hands the hook a URL rather than a name when someone pushes by URL. */
+async function mainOf(git: Git, remote: string): Promise<string | null> {
+  return (await revParse(git, `refs/remotes/${remote}/main`)) ?? revParse(git, 'refs/remotes/origin/main');
+}
+
+/**
+ * Where a new branch left main: the base a PR merge would apply it to. Null when main is unknown
+ * or unrelated, and the caller refuses — a guard that cannot evaluate must not permit (the
+ * unjoined-remote refusal above is the same rule).
+ */
+async function forkPoint(git: Git, remote: string, head: string): Promise<string | null> {
+  const main = await mainOf(git, remote);
+  if (main === null) return null;
+  const result = await git(['merge-base', main, head]);
+  return result.code === 0 && result.stdout.trim() ? result.stdout.trim() : null;
+}
+
+/** A GuardTree over two commits. Only the blobs guardRawPush reads are fetched — team.json and each touched skill folder's SKILL.md, where ownership lives; every other row is judged by name from changedPaths. */
 async function treeBetween(git: Git, base: string, head: string, changedPaths: readonly string[]): Promise<GuardTree> {
-  const wanted = new Set(changedPaths);
+  const wanted = new Set<string>(changedPaths.filter((path) => path === 'team.json'));
   for (const path of changedPaths) { const folder = /^skills\/([^/]+)\//.exec(path); if (folder) wanted.add(`skills/${folder[1]}/SKILL.md`); }
   const before = new Map<string, string>(); const after = new Map<string, string>();
   for (const path of wanted) {

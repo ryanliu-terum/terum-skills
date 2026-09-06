@@ -121,3 +121,18 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(outcomes).toEqual([true, true, true, false, false]);
   });
 });
+
+describe('the pre-push hook\'s verb (D12)', () => {
+  it('wires the hidden guard-push verb with the refs passed through as one flat list', async () => {
+    const calls: unknown[] = [];
+    const execute: Execute = async (invoke) => { await invoke(new ScriptedPrompter()); };
+    const program = buildProgram(execute, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+      guardPush: async (args) => { calls.push(args); return success({ team: 't', checked: 0 }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['guard-push', 'origin', 'https://x/y.git', 'refs/heads/main', 'a', 'refs/heads/main', 'b'], { from: 'user' });
+    expect(calls).toEqual([{ remote: 'origin', url: 'https://x/y.git', refs: ['refs/heads/main', 'a', 'refs/heads/main', 'b'] }]);
+    expect(program.commands.find((command) => command.name() === 'guard-push')).toBeDefined();
+  });
+});
