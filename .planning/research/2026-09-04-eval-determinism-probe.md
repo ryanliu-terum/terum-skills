@@ -6,7 +6,8 @@
 check-decided, `advice` judge-decided), k=3, baseline+candidate, model `sonnet`,
 judge `sonnet`, seeded RNG (seed 0), CC 2.1.236. Two invocation pairs: stub agent
 binary (via `TERUM_SKILLS_AGENT_CMD`), then the real CLI.
-**Visual report:** https://claude.ai/code/artifact/0ed1e5fc-a6f4-4249-b560-db98eacf4c07
+**Visual reports:** probe #1 https://claude.ai/code/artifact/0ed1e5fc-a6f4-4249-b560-db98eacf4c07 ·
+probes #2–3 (rev-7 rerun + validity battery) https://claude.ai/code/artifact/788d3a23-4131-4294-8f08-54d64a41e6b2
 
 ## Findings
 
