@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Prompter } from './prompt.js';
 
@@ -121,4 +121,71 @@ export async function offerHook(io: Prompter, options: Required<HookOptions>): P
 
 async function existsFile(path: string): Promise<boolean> {
   try { await stat(path); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+}
+
+// --- §8 mutex and rate limit (`sync --hook` only) -------------------------------------------
+
+/** §8: a hook run within an hour of the team's last fully successful sync is a no-op. */
+export const STAMP_FRESH_MS = 60 * 60_000;
+/** §8: a lock older than this is stale whoever holds it — a crashed process must not disable sync forever. */
+export const LOCK_STALE_MS = 10 * 60_000;
+
+export interface TeamLockOptions { now?: () => number; host?: string; pidAlive?: (pid: number) => boolean; }
+
+export function stampPath(storeRoot: string, team: string): string { return join(storeRoot, 'run', `${team}.stamp`); }
+export function lockPath(storeRoot: string, team: string): string { return join(storeRoot, 'run', `${team}.lock`); }
+
+/** True when `run/<team>.stamp` was written within the last hour. Only `sync --hook` consults it; an interactive sync always runs. */
+export async function stampIsFresh(storeRoot: string, team: string, now: () => number = Date.now): Promise<boolean> {
+  try { return now() - (await stat(stampPath(storeRoot, team))).mtimeMs < STAMP_FRESH_MS; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+}
+
+/**
+ * §8 mutex: one lock per team — so unrelated teams never serialize — created with O_CREAT|O_EXCL
+ * (atomic on every platform we target) and holding `{pid, host, started}`. Returns the release
+ * function, or null when another live holder has it: the caller exits 0 in silence, because
+ * another window is already doing the work and a queue of blocked startup hooks is the failure
+ * this lock exists to prevent. A stale lock — started more than ten minutes ago, or held by a dead
+ * pid on this host — is removed and the acquire retried exactly once; a live lock from another
+ * host is always respected. Release in a `finally`, on every exit path.
+ */
+export async function acquireTeamLock(storeRoot: string, team: string, options: TeamLockOptions = {}): Promise<(() => Promise<void>) | null> {
+  const now = options.now ?? Date.now;
+  const host = options.host ?? hostname();
+  const pidAlive = options.pidAlive ?? isPidAlive;
+  const path = lockPath(storeRoot, team);
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const handle = await open(path, 'wx', 0o600);
+      try { await handle.writeFile(`${JSON.stringify({ pid: process.pid, host, started: new Date(now()).toISOString() })}\n`, 'utf8'); }
+      finally { await handle.close(); }
+      return async () => { await rm(path, { force: true }); };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (attempt > 0 || !(await lockIsStale(path, host, now, pidAlive))) return null;
+      await rm(path, { force: true });
+    }
+  }
+  return null;
+}
+
+async function lockIsStale(path: string, host: string, now: () => number, pidAlive: (pid: number) => boolean): Promise<boolean> {
+  let raw: string; let details: { mtimeMs: number };
+  try { [raw, details] = await Promise.all([readFile(path, 'utf8'), stat(path)]); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT'; } // gone already: the retry finds it free
+  let record: { pid?: unknown; host?: unknown; started?: unknown } = {};
+  try { record = JSON.parse(raw) as typeof record; } catch { /* judged by age below */ }
+  // A record that cannot be read — a holder caught between its open and its write, or a crash
+  // mid-write — is judged by the file's age alone, so a racing holder is never mistaken for a crash.
+  const started = typeof record.started === 'string' ? Date.parse(record.started) : Number.NaN;
+  if (now() - (Number.isFinite(started) ? started : details.mtimeMs) > LOCK_STALE_MS) return true;
+  if (record.host !== host) return false;
+  return typeof record.pid === 'number' && !pidAlive(record.pid);
+}
+
+function isPidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; } // alive but not ours; ESRCH is dead
 }

@@ -1,6 +1,7 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
+import { acquireTeamLock, stampIsFresh, TeamLockOptions } from '../lib/hook.js';
 import { inspect, lockTarget, place, quarantineDrift, remove, snapshotIfPresent } from '../lib/placer.js';
 import { NonInteractivePrompter, Prompter, PromptClosedError } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
@@ -19,6 +20,8 @@ export interface SyncArgs {
   hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string;
   /** Test knob: the clone lock's stale window for refreshClone. */
   lockStale?: number;
+  /** Test knobs for the §8 rate limit and mutex (hook mode only). */
+  now?: () => number; lock?: TeamLockOptions;
 }
 export interface SyncResult { placed: number; deferred: string[]; notices: string[]; changed: boolean; hook: boolean; }
 
@@ -28,6 +31,7 @@ export function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResult>>;
 export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter): Promise<Result<SyncResult>> {
   const notices: string[] = [];
   const deferred: string[] = [];
+  const releases: Array<() => Promise<void>> = [];
   let placed = 0;
   let changed = false;
   try {
@@ -51,19 +55,27 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       return success({ placed: 0, deferred: [], notices: [], changed: true, hook: false });
     }
     const config = await store.read();
-    // A team whose clone another process is writing costs exactly that team, this run: it is
-    // reported and left alone — not refreshed, not read, not stamped fresh — and every other team
-    // still syncs, so the SessionStart hook still exits 0.
-    const busy = new Set<string>();
+    // A team this run cannot work on costs exactly that team: it is left alone — not refreshed,
+    // not read, not stamped fresh — and every other team still syncs, so the SessionStart hook
+    // still exits 0. Three reasons: another process holds the clone's writer lock (reported), or,
+    // in hook mode only (§8), the team synced within the hour or another hook holds its mutex —
+    // both silent, because another window is doing, or has just done, the work.
+    const skipped = new Set<string>();
     for (const team of Object.keys(config.teams)) {
       const clone = store.teamClone(team);
+      if (args.hook) {
+        if (await stampIsFresh(store.root, team, args.now)) { skipped.add(team); continue; }
+        const release = await acquireTeamLock(store.root, team, args.lock);
+        if (!release) { skipped.add(team); continue; }
+        releases.push(release);
+      }
       try {
         await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {}, lockStale: args.lockStale });
       } catch (error) {
         if (!(error instanceof CloneBusy)) throw error;
         // Reported through `notices` alone, which the hook already writes to stderr: `deferred` is
         // rendered as a count of SKILLS needing review (execute.ts), so a team never belongs on it.
-        notice(error.message); busy.add(team); continue;
+        notice(error.message); skipped.add(team); continue;
       }
       await skillRecords(clone, team, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
       // Pending is intent, never inferred from the filesystem. A replay uses the same command
@@ -91,7 +103,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       }
     }
     // Reconciliation never prompts, but it reports — through the same notice channel.
-    await reconcileShared(store, runner, childIo, busy);
+    await reconcileShared(store, runner, childIo, skipped);
     // Existing ledger paths drive every later decision. A folder merely present on disk is never
     // adopted, quarantined, or deleted without a ledger entry.
     const currentConfig = await store.read();
@@ -99,7 +111,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       // One damaged placement (an unreadable folder, a busy target lock, a failed copy) is reported
       // and skipped, and the rest of the run proceeds — the shape the pending loop above already has.
       try {
-        if (busy.has(entry.team)) continue;
+        if (skipped.has(entry.team)) continue;
         const clone = store.teamClone(entry.team);
         const projectRoot = entry.scope.kind === 'project' ? await matchingProjectRoot(clone, entry.scope.project, runner, args.cwd) : undefined;
         // Project placement is worktree-local. An unrelated session never even inspects another
@@ -186,7 +198,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       // Newly endorsed global skills are an opt-in batch. Per-skill tool approval remains inside
       // installOne, so the batch question cannot answer a consent prompt on the user's behalf.
       for (const [team, binding] of Object.entries((await store.read()).teams)) {
-        if (!binding.handle || busy.has(team)) continue;
+        if (!binding.handle || skipped.has(team)) continue;
         const candidates = await endorsedCandidates(store.teamClone(team), team, binding.handle, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
         if (!candidates.length) continue;
         if (!interactive) {
@@ -206,12 +218,15 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         }
       }
     }
-    await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, deferred, notice, busy);
+    await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, deferred, notice, skipped);
     if (changed && !args.hook) (io as { print(line: string): void }).print('Skills synchronized.');
     if (args.hook && placed) (io as { print(line: string): void }).print('{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}');
-    for (const team of Object.keys((await store.read()).teams)) if (!busy.has(team)) await writeStamp(store, team);
+    // §8: the stamp is written only after a sync that fully succeeded — a failed run throws past
+    // this line and leaves the old stamp, so the next session retries instead of waiting an hour.
+    for (const team of Object.keys((await store.read()).teams)) if (!skipped.has(team)) await writeStamp(store, team);
     return success({ placed, deferred, notices, changed, hook: Boolean(args.hook) });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error), args.hook ? { placed, deferred, notices, changed, hook: true } : undefined); }
+  finally { for (const release of releases) await release().catch(() => undefined); }
 }
 
 function approved(config: Awaited<ReturnType<ConfigStore['read']>>, id: string, grants: ReturnType<typeof allowedTools>): boolean {

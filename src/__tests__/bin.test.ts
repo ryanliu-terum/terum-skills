@@ -6,8 +6,15 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createConfigStore } from '../lib/config.js';
+import { systemRunner } from '../lib/runner.js';
+import { installPushGuard } from '../lib/teamRepo.js';
+import { bareTeam, cloneWithIdentity, git, pushFromSeed } from '../lib/__tests__/fixtures.js';
 
 const run = promisify(execFile);
+const MINE = '11111111-1111-4111-8111-111111111111';
+const THEIRS = '22222222-2222-4222-8222-222222222222';
+const skillOf = (name: string, id: string, author: string, body = 'body') => `---\nname: ${name}\ndescription: d\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: ${author}\n  terum-category: testing\n---\n${body}\n`;
 const root = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
 // The compiler this package installed, wherever the package manager put it — never a hardcoded node_modules path.
 const tsc = resolve(dirname(createRequire(import.meta.url).resolve('typescript')), '..', 'bin', 'tsc');
@@ -51,5 +58,31 @@ describe('the built bin (dist/index.js)', () => {
     const code = await new Promise<number | null>((done) => child.on('close', done));
     expect(Buffer.concat(stderr).toString('utf8')).toBe('');
     expect(code).toBe(0);
+  });
+
+  it('the clone-local pre-push guard (D12) makes a raw `git push` of another author\'s skill fail with the path named, and lets your own edit through', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/theirs/SKILL.md', skillOf('theirs', THEIRS, 'Other <other@example.com>'));
+    await pushFromSeed(fixture.seed, 'skills/mine/SKILL.md', skillOf('mine', MINE, 'Seed <seed@example.com>'));
+    const home = resolve(out, 'guard-home');
+    const store = createConfigStore(resolve(home, '.terum', 'skills'));
+    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'), 'Seed', 'seed@example.com');
+    // The hook runs the built bin instead of `npx -y terum-skills@latest`; the machine's identity is the config under this HOME.
+    await installPushGuard(clone, systemRunner, `${JSON.stringify(process.execPath)} ${JSON.stringify(bin)} guard-push`);
+    await store.update((config) => { config.display_name = 'Seed'; config.email = 'seed@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const main = (await git(['rev-parse', 'origin/main'], clone)).trim();
+    const pushEnv = { ...process.env, HOME: home, USERPROFILE: home, NODE_NO_WARNINGS: '1' };
+    const push = () => run('git', ['push', '-q', 'origin', 'HEAD:main'], { cwd: clone, env: pushEnv }).then(() => ({ code: 0, stderr: '' }), (error: { code?: number; stderr: string }) => ({ code: error.code ?? 1, stderr: error.stderr }));
+    await writeFile(resolve(clone, 'skills', 'theirs', 'SKILL.md'), skillOf('theirs', THEIRS, 'Other <other@example.com>', 'meddled'));
+    await git(['commit', '-q', '-am', 'meddle'], clone);
+    const refused = await push();
+    expect(refused.code).not.toBe(0);
+    expect(refused.stderr).toContain('Push guard refused skills/theirs/SKILL.md');
+    expect((await git(['rev-parse', 'main'], fixture.bare)).trim()).toBe(main);
+    await git(['reset', '-q', '--hard', 'origin/main'], clone);
+    await writeFile(resolve(clone, 'skills', 'mine', 'SKILL.md'), skillOf('mine', MINE, 'Seed <seed@example.com>', 'edited'));
+    await git(['commit', '-q', '-am', 'edit mine'], clone);
+    expect((await push()).code).toBe(0);
+    expect((await git(['rev-parse', 'main'], fixture.bare)).trim()).not.toBe(main);
   });
 });

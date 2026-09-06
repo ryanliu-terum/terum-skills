@@ -11,7 +11,7 @@ import { activePeople, readPeople } from '../lib/readme.js';
 import { Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
-import { cloneOrigin, cloneTeam, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
+import { cloneOrigin, cloneTeam, installPushGuard, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 import { endorsedCandidates } from '../lib/skills.js';
 import { installOne } from './install.js';
 
@@ -486,8 +486,9 @@ async function bootstrap(remote: string, clone: string, teamName: string, identi
     await writeFile(pathJoin(staging, '.github', 'workflows', 'terum-skills.yml'), WORKFLOW);
     await git('add', '--all');
     await git('commit', '-q', '-m', `${identity.handle}: create team ${teamName}`);
-    await git('push', '-q', '-u', 'origin', 'main');
+    await git('push', '-q', '--no-verify', '-u', 'origin', 'main');
     await rename(staging, clone);
+    await installPushGuard(clone, runner);
   } catch (error) {
     await rm(staging, { recursive: true, force: true });
     throw error;

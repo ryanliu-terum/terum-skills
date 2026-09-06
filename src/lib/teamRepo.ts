@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { lstat, mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
 import lockfile from 'proper-lockfile';
 import { mkdirPrivate } from './fs.js';
@@ -181,7 +181,9 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<voi
 }
 
 /**
- * Push to exactly the named ref. `main` is a plain push. A derived branch (`publish/<name>`) is
+ * Push to exactly the named ref — with `--no-verify`, because the guard above has already run on
+ * the exact tree being committed and the clone's own pre-push hook (installPushGuard) would only
+ * repeat it through an npx round trip. `main` is a plain push. A derived branch (`publish/<name>`) is
  * replaced under a lease PINNED to the ref as it stood when this write first tried that target, so
  * a retry after ref-lock contention can never overwrite a commit someone pushed in between: git
  * reports that as stale and the write moves on to `<branch>-2`, once. Any other refusal is
@@ -192,7 +194,7 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<voi
  */
 async function push(git: Git, branch: string, leases: Map<string, string>): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
   if (branch === 'main') {
-    const result = await git(['push', '-q', 'origin', 'HEAD:refs/heads/main']);
+    const result = await git(['push', '-q', '--no-verify', 'origin', 'HEAD:refs/heads/main']);
     if (result.code === 0) return { ok: true, pushedTo: 'main' };
     const error = result.stderr || result.stdout || 'push rejected';
     return { ok: false, retryable: RETRYABLE.test(error), error };
@@ -203,7 +205,7 @@ async function push(git: Git, branch: string, leases: Map<string, string>): Prom
       const seen = await git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${target}`]);
       leases.set(target, seen.code === 0 ? seen.stdout.trim() : '');
     }
-    const result = await git(['push', '-q', `--force-with-lease=refs/heads/${target}:${leases.get(target)}`, 'origin', `HEAD:refs/heads/${target}`]);
+    const result = await git(['push', '-q', '--no-verify', `--force-with-lease=refs/heads/${target}:${leases.get(target)}`, 'origin', `HEAD:refs/heads/${target}`]);
     if (result.code === 0) return { ok: true, pushedTo: target };
     lastError = result.stderr || result.stdout || 'push rejected';
     if (!STALE_LEASE.test(lastError)) return { ok: false, retryable: REF_LOCK.test(lastError), error: lastError };
@@ -320,11 +322,32 @@ async function removeCreated(root: string, realRoot: string, path: string): Prom
   }
 }
 
-/** Clone a team repo into a private directory, checking out `main` explicitly so a bare remote whose HEAD points elsewhere still yields a working tree. */
+/** Clone a team repo into a private directory, checking out `main` explicitly so a bare remote whose HEAD points elsewhere still yields a working tree, and arm the clone-local push guard. */
 export async function cloneTeam(remote: string, destination: string, runner: Runner = systemRunner): Promise<void> {
   await mkdirPrivate(dirname(destination));
   const clone = await runner.run('git', ['clone', '-q', '--branch', 'main', '--', remoteToGitUrl(remote), destination]);
   if (clone.code !== 0) throw new Error(`Could not clone ${stripRemoteCredentials(remote)}: ${(clone.stderr || clone.stdout).trim()}`);
+  await installPushGuard(destination, runner);
+}
+
+/** What the clone-local pre-push hook runs; the same `npx` spelling as every printed command (§3). */
+export const PUSH_GUARD_COMMAND = 'npx -y terum-skills@latest guard-push';
+
+/**
+ * D12's clone-local half: a raw `git push` from a team clone runs the CLI's ownership rules
+ * through the hidden `guard-push` verb. Accidents, not abuse — `--no-verify` bypasses it and is
+ * attributed. Regenerated on every clone. git hands the pushed refs to the hook on stdin, and the
+ * CLI reads stdin nowhere outside the Prompter (§3), so the hook turns them into arguments.
+ */
+export async function installPushGuard(clone: string, runner: Runner = systemRunner, command = PUSH_GUARD_COMMAND): Promise<void> {
+  const hooks = join(clone, '.git', 'hooks');
+  await mkdir(hooks, { recursive: true });
+  const hook = join(hooks, 'pre-push');
+  await writeFile(hook, `#!/bin/sh\n# terum-skills: the D12 ownership guard for a raw push from this clone. Regenerated on every clone; do not edit.\nset -- "$1" "$2" $(cat)\nexec ${command} "$@"\n`, { encoding: 'utf8', mode: 0o700 });
+  await chmod(hook, 0o700);
+  // A machine-wide core.hooksPath (a repo-hooks convention on this machine) would hide .git/hooks; this clone is ours.
+  const configured = await runner.run('git', ['config', 'core.hooksPath', '.git/hooks'], { cwd: clone });
+  if (configured.code !== 0) throw new Error(`Could not arm the push guard in ${clone}: ${(configured.stderr || configured.stdout).trim()}`);
 }
 
 /** The normalized origin of an existing clone, or null when the directory is not a clone. */

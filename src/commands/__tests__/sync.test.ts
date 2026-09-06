@@ -1,6 +1,9 @@
 import { expectTypeOf, describe, expect, it } from 'vitest';
-import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { acquireTeamLock, lockPath, stampPath } from '../../lib/hook.js';
 import { run } from '../sync.js';
 import { run as install } from '../install.js';
 import { NonInteractivePrompter } from '../../lib/prompt.js';
@@ -13,6 +16,8 @@ import { cloneLockPath } from '../../lib/teamRepo.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const SECOND_ID = '22222222-2222-4222-8222-222222222222';
+/** §8: a hook run within an hour of a successful sync is a no-op, so a hook run that follows an interactive sync in one test is clocked past the hour. */
+const later = () => Date.now() + 2 * 3_600_000;
 const skill = (description: string) => `---\nname: sample\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${description}\n`;
 const toolSkill = (description: string, tools: string[]) => `---\nname: sample\ndescription: ${description}\nlicense: UNLICENSED\nallowed-tools:\n${tools.map((tool) => `  - ${tool}`).join('\n')}\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${description}\n`;
 
@@ -266,7 +271,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(await run({ config: decline.store }, interactive)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
     expect(interactive.asked).toEqual([]);
     const declinedHook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await run({ hook: true, config: decline.store }, declinedHook)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+    expect(await run({ hook: true, config: decline.store, now: later }, declinedHook)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
     expect(declinedHook.lines).toEqual([]);
     expect(await readFile(join(decline.path, 'SKILL.md'), 'utf8')).toBe(declinedBefore);
     expect(JSON.stringify((await decline.store.read()).placements)).toBe(ledgerBefore);
@@ -453,7 +458,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toBe(before);
     expect(JSON.stringify((await store.read()).placements)).toBe(ledger);
     const hook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await run({ hook: true, config: store }, hook)).toMatchObject({ ok: true, value: { notices: [expect.stringContaining('Blocked')] } });
+    expect(await run({ hook: true, config: store, now: later }, hook)).toMatchObject({ ok: true, value: { notices: [expect.stringContaining('Blocked')] } });
     expect(hook.lines).toEqual([]);
   });
 
@@ -517,7 +522,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(path, 'utf8')).toContain('description: reordered');
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('widened', ['Bash(*)', 'Read(*)']));
     const hook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await run({ hook: true, config: store }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+    expect(await run({ hook: true, config: store, now: later }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
     expect(hook.lines).toEqual([]);
     expect(await readFile(path, 'utf8')).toContain('description: reordered');
   });
@@ -537,7 +542,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(join(declined.home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
     expect((await declined.store.read()).approvals[ID]!.grants).toBe(declined.oldApproval);
     const hook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await run({ hook: true, config: declined.store }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+    expect(await run({ hook: true, config: declined.store, now: later }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
     expect(hook.lines).toEqual([]);
   });
 
@@ -580,6 +585,95 @@ async function configuredToolSkill() {
   expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
   return { fixture, store, home, oldApproval: (await store.read()).approvals[ID]!.grants };
 }
+
+describe('sync --hook mutex and rate limit (§8, §12 "hook mutex")', () => {
+  const hookIo = (): NonInteractivePrompter & { lines: string[] } => ({ interactive: false, lines: [], print(line) { this.lines.push(line); } });
+  const head = async (clone: string) => (await git(['rev-parse', 'HEAD'], clone)).trim();
+  async function deadPid(): Promise<number> {
+    const child = spawn(process.execPath, ['-e', '0'], { stdio: 'ignore' });
+    const pid = child.pid!;
+    await new Promise((done) => child.on('close', done));
+    return pid;
+  }
+
+  it('a second hook racing on the same team exits 0 in silence and touches nothing; another host\'s lock is respected; a dead pid\'s lock is recovered and the sync proceeds', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    const before = await head(clone);
+    const release = await acquireTeamLock(store.root, 'team');
+    expect(release).not.toBeNull();
+    try {
+      const io = hookIo();
+      expect(await run({ hook: true, config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [], notices: [] } });
+      expect(io.lines).toEqual([]);
+      expect(await head(clone)).toBe(before);
+      await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(lockPath(store.root, 'team'))).resolves.toBeUndefined();
+    } finally { await release!(); }
+    await writeFile(lockPath(store.root, 'team'), JSON.stringify({ pid: process.pid, host: 'another-machine', started: new Date().toISOString() }));
+    expect(await run({ hook: true, config: store }, hookIo())).toMatchObject({ ok: true, value: { placed: 0, notices: [] } });
+    expect(await head(clone)).toBe(before);
+    await writeFile(lockPath(store.root, 'team'), JSON.stringify({ pid: await deadPid(), host: hostname(), started: new Date().toISOString() }));
+    expect(await run({ hook: true, config: store }, hookIo())).toMatchObject({ ok: true });
+    expect(await head(clone)).not.toBe(before);
+    await expect(access(lockPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
+  });
+
+  it('two teams do not serialize: a held lock on one team leaves the other fully synced and stamped', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    const other = await bareTeam();
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team').replace('name: sample', 'name: elsewhere'));
+    const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team moved').replace('name: sample', 'name: elsewhere'));
+    const before = await head(clone); const otherBefore = await head(otherClone);
+    const release = await acquireTeamLock(store.root, 'team');
+    try {
+      expect(await run({ hook: true, config: store }, hookIo())).toMatchObject({ ok: true, value: { notices: [] } });
+      expect(await head(clone)).toBe(before);
+      expect(await head(otherClone)).not.toBe(otherBefore);
+      await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+      await expect(access(lockPath(store.root, 'other'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally { await release!(); }
+  });
+
+  it('is a silent no-op within an hour of the last successful sync, never rate-limits an interactive sync, and runs again after the hour', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    expect(await run({ hook: true, config: store }, hookIo())).toMatchObject({ ok: true });
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    const before = await head(clone);
+    let fetches = 0;
+    const counting = wrapRunner(systemRunner, async (command, args, _options, next) => { if (command === 'git' && args[0] === 'fetch') fetches++; return next(); });
+    const io = hookIo();
+    expect(await run({ hook: true, config: store, runner: counting }, io)).toMatchObject({ ok: true, value: { placed: 0, notices: [] } });
+    expect(io.lines).toEqual([]);
+    expect(fetches).toBe(0);
+    expect(await head(clone)).toBe(before);
+    expect((await run({ config: store, runner: counting }, new ScriptedPrompter())).ok).toBe(true);
+    expect(fetches).toBe(1);
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('newer'));
+    expect(await run({ hook: true, config: store, runner: counting, now: () => Date.now() + 2 * 3_600_000 }, hookIo())).toMatchObject({ ok: true });
+    expect(fetches).toBe(2);
+    expect(await head(clone)).not.toBe(before);
+  });
+
+  it('a failed hook sync releases the mutex and leaves the old stamp, so the next session retries', async () => {
+    const { store } = await configuredSkill();
+    expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
+    const stamp = stampPath(store.root, 'team');
+    await writeFile(stamp, 'old');
+    const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000);
+    await utimes(stamp, twoHoursAgo, twoHoursAgo);
+    const failing = wrapRunner(systemRunner, async (command, args, _options, next) => (command === 'git' && args[0] === 'fetch' ? { code: 1, stdout: '', stderr: 'failed' } : next()));
+    expect((await run({ hook: true, config: store, runner: failing }, hookIo())).ok).toBe(false);
+    expect(await readFile(stamp, 'utf8')).toBe('old');
+    await expect(access(lockPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
 
 describe('sync --hook keeps shared-source reconciliation off stdout (§8)', () => {
   it('reports a missing shared source through notices, never through the hook stdout', async () => {
