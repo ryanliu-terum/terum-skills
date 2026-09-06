@@ -1,5 +1,7 @@
 # harden deferrals — phase1-closeout-r2
 
+> **Ruled 2026-09-06:** every `[fork]` entry below was resolved in `.planning/decisions/2026-09-06-phase1-rulings-decision-walk.md` (R1–R14) and the LOCKED ones are applied on `fix/phase1-rulings`; the entries stay so the review engines treat them as settled, and the ledger there is the record of what was decided.
+
 Findings the /harden loop settled WITHOUT a fix. The review engines tell their verify and triage
 agents to treat entries in `.planning/debug/**/*.deferred.md` as settled deferrals, so a later
 round does not spend verify budget re-confirming them. `declined` = a cited reason it is not a

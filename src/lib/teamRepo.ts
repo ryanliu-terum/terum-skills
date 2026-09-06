@@ -27,7 +27,7 @@ export interface MutableTree extends GuardTree {
 export type Mutate = (tree: MutableTree) => void;
 
 export interface SafeWriteOptions extends GuardContext {
-  /** Destination ref. Defaults to `main`; PR-policy `publish` passes `publish/<name>` (§6.0 step 4). */
+  /** Destination ref. Defaults to `main`; PR-policy `publish` passes a fresh `publish/<name>-<handle>-<id8>` (§6.0 step 4). A non-main branch is created, never replaced. */
   branch?: string;
   /** Commit message; defaults to `<handle>: <action>`. */
   message?: string;
@@ -106,7 +106,6 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
     retries: { retries: 10, minTimeout: 50, maxTimeout: 500 },
     onCompromised: () => { compromised = true; },
   });
-  const leases = new Map<string, string>();
   try {
     while (now() <= deadline) {
       if (compromised) throw new Error(lostLock(root));
@@ -144,7 +143,7 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
       }
       await requireGit(['commit', '-q', '-m', options.message ?? `${options.handle}: ${options.action}`]);
       if (compromised) throw new Error(lostLock(root));
-      const outcome = await push(git, branch, leases);
+      const outcome = await push(git, branch);
       if (outcome.ok) return { changed: true, pushedTo: outcome.pushedTo };
       if (!outcome.retryable) throw new PushRefused(`The remote refused the push: ${outcome.error.trim()}`);
       lastError = outcome.error;
@@ -185,35 +184,25 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<voi
 /**
  * Push to exactly the named ref — with `--no-verify`, because the guard above has already run on
  * the exact tree being committed and the clone's own pre-push hook (installPushGuard) would only
- * repeat it through an npx round trip. `main` is a plain push. A derived branch (`publish/<name>`) is
- * replaced under a lease PINNED to the ref as it stood when this write first tried that target, so
- * a retry after ref-lock contention can never overwrite a commit someone pushed in between: git
- * reports that as stale and the write moves on to `<branch>-2`, once. Any other refusal is
- * terminal and carries git's own message. Invariant the CALLER owns: both `<branch>` and
- * `<branch>-2` are force-replaced under a lease read AFTER this write's own fetch, so the lease
- * never protects a branch that existed before the write began — a non-`main` caller must vet BOTH
- * names before safeWrite (publish's assertBranchesReusable does).
+ * repeat it through an npx round trip. `main` is a plain push. A derived branch — publish's fresh
+ * `publish/<name>-<handle>-<id8>` — is CREATED, never replaced: the push carries a lease of "must
+ * not exist" (an empty expectation), so a name already on the remote is refused with git's own
+ * message and nothing is overwritten, ours or anyone's. No fallback name, no force: one publish is
+ * one fresh branch and one fresh PR, and competing PRs are two PRs that GitHub's conflict badge
+ * arbitrates (rulings walk R2, 2026-09-06). Ref-lock contention is transient and the name still
+ * must not exist, so it is retried; a stale lease means the name now exists — terminal.
  */
-async function push(git: Git, branch: string, leases: Map<string, string>): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
+async function push(git: Git, branch: string): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
   if (branch === 'main') {
     const result = await git(['push', '-q', '--no-verify', 'origin', 'HEAD:refs/heads/main']);
     if (result.code === 0) return { ok: true, pushedTo: 'main' };
     const error = result.stderr || result.stdout || 'push rejected';
     return { ok: false, retryable: RETRYABLE.test(error), error };
   }
-  let lastError = '';
-  for (const target of [branch, `${branch}-2`]) {
-    if (!leases.has(target)) {
-      const seen = await git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${target}`]);
-      leases.set(target, seen.code === 0 ? seen.stdout.trim() : '');
-    }
-    const result = await git(['push', '-q', '--no-verify', `--force-with-lease=refs/heads/${target}:${leases.get(target)}`, 'origin', `HEAD:refs/heads/${target}`]);
-    if (result.code === 0) return { ok: true, pushedTo: target };
-    lastError = result.stderr || result.stdout || 'push rejected';
-    if (!STALE_LEASE.test(lastError)) return { ok: false, retryable: REF_LOCK.test(lastError), error: lastError };
-  }
-  // Both the branch and its `-2` moved since this write began: never overwrite either.
-  return { ok: false, retryable: false, error: lastError };
+  const result = await git(['push', '-q', '--no-verify', `--force-with-lease=refs/heads/${branch}:`, 'origin', `HEAD:refs/heads/${branch}`]);
+  if (result.code === 0) return { ok: true, pushedTo: branch };
+  const error = result.stderr || result.stdout || 'push rejected';
+  return { ok: false, retryable: REF_LOCK.test(error) && !STALE_LEASE.test(error), error };
 }
 
 /** Repo-relative POSIX paths only: no absolute paths, no `..`, no `.git` anywhere (any case, NTFS short names included), no empty segments. */
@@ -410,6 +399,23 @@ export async function cloneOrigin(root: string, runner: Runner = systemRunner): 
   } catch {
     return null;
   }
+}
+
+export type CloneState = { state: 'absent' } | { state: 'incomplete' } | { state: 'foreign'; origin: string } | { state: 'ok'; origin: string };
+
+/**
+ * The one definition of "a complete clone of this team" (rulings walk R9, 2026-09-06), which `team join`
+ * and `setup` both decide from — two hand-written copies had drifted, and setup's accepted a folder
+ * with team.json but no repository. `absent`: nothing at the path. `incomplete`: present but not a git
+ * repository, or without team.json (an interrupted `team leave`, a restore that skipped dotfiles).
+ * `foreign`: a clone of a different remote. `ok`: this team's clone, with its normalized origin.
+ */
+export async function describeClone(root: string, normalized: string, runner: Runner = systemRunner): Promise<CloneState> {
+  if (!existsSync(root)) return { state: 'absent' };
+  const origin = await cloneOrigin(root, runner);
+  if (origin === null || !existsSync(join(root, 'team.json'))) return { state: 'incomplete' };
+  if (origin !== normalized) return { state: 'foreign', origin };
+  return { state: 'ok', origin };
 }
 
 /** The per-clone writer lock's path — the one safeWrite holds; `team leave` takes it before removing the clone. */

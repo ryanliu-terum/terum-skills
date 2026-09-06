@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { reconcileShared, run } from '../share.js';
@@ -22,6 +22,31 @@ describe('share (§5.3)', () => {
     expect(result.ok).toBe(true);
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toContain('license: UNLICENSED');
     expect(Object.keys((await store.read()).shared)).toHaveLength(1);
+  });
+
+  it('shares an off-the-shelf SKILL.md with no metadata block: the tool generates all four fields, shows the category default before the y/N, and the repository copy parses', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const source = join(fixture.root, 'stock'); await mkdir(source);
+    await writeFile(join(source, 'SKILL.md'), '---\nname: stock\ndescription: a skill exactly as it ships\n---\nUse it.\n');
+    const io = new ScriptedPrompter([], [true]);
+    const result = await run({ path: source, team: 'team', config: store }, io);
+    expect(result).toMatchObject({ ok: true, value: { name: 'stock' } });
+    const written = await readFile(join(source, 'SKILL.md'), 'utf8');
+    expect(written).toContain('terum-category: misc');
+    expect(written).toMatch(/\n---\nUse it\.\n$/);
+    expect(io.lines.join('\n')).toContain('Will add:\nlicense: UNLICENSED\nmetadata.id: ');
+    expect(io.lines.join('\n')).toContain('metadata.terum-category: misc (no category was set; edit SKILL.md any time)');
+    expect(await git(['show', 'main:skills/stock/SKILL.md'], fixture.bare)).toBe(written);
+    // A file that declares its category is shown three lines and keeps the category it declared.
+    const declared = join(fixture.root, 'declared'); await mkdir(declared);
+    await writeFile(join(declared, 'SKILL.md'), '---\nname: declared\ndescription: x\nmetadata:\n  terum-category: testing\n---\n');
+    const declaredIo = new ScriptedPrompter([], [true]);
+    expect((await run({ path: declared, team: 'team', config: store }, declaredIo)).ok).toBe(true);
+    expect(declaredIo.lines.join('\n')).not.toContain('terum-category');
+    expect(await readFile(join(declared, 'SKILL.md'), 'utf8')).toContain('terum-category: testing');
   });
 
   it('rejects a malformed allowed-tools value at share time, names the line, and writes nothing', async () => {
@@ -158,6 +183,22 @@ describe('share (§5.3)', () => {
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(local);
     expect((await store.read()).shared[id]!.baseline).toBe(baseline);
     expect(io.lines.join('\n')).toMatch(/diverged \(source sha256:.*repo sha256:/);
+  });
+
+  it('a diverged shared skill is undone work: sync defers it and withholds the team stamp instead of silencing the notice for an hour', async () => {
+    const { fixture, store } = await sharedFixture();
+    const id = Object.keys((await store.read()).shared)[0]!;
+    const source = (await store.read()).shared[id]!.source;
+    await writeFile(join(source, 'SKILL.md'), (await readFile(join(source, 'SKILL.md'), 'utf8')).replace('description: x', 'description: local'));
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', (await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).replace('description: x', 'description: remote'));
+    const io = new ScriptedPrompter();
+    expect(await sync({ config: store }, io)).toMatchObject({ ok: true, value: { deferred: ['sample'] } });
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(io.lines.join('\n')).toMatch(/diverged/);
+    // Resolved, the next sync completes and stamps the team.
+    expect((await run({ keepSource: id, config: store }, new ScriptedPrompter())).ok).toBe(true);
+    expect(await sync({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: [] } });
+    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
   });
 
   it('treats a missing baseline as divergence without changing either copy or restoring the baseline', async () => {

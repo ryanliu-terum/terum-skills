@@ -2,7 +2,7 @@ import { readdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { mkdirPrivate } from '../lib/fs.js';
-import { acquireTeamLock, stampIsFresh, stampPath, TeamLockOptions } from '../lib/hook.js';
+import { acquireTeamLock, lockPath, stampIsFresh, stampPath, TeamLockOptions } from '../lib/hook.js';
 import { inspect, lockTarget, place, quarantineDrift, remove, snapshotIfPresent } from '../lib/placer.js';
 import { NonInteractivePrompter, Prompter, PromptClosedError } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
@@ -21,7 +21,7 @@ export interface SyncArgs {
   hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string;
   /** Test knob: the clone lock's stale window for refreshClone. */
   lockStale?: number;
-  /** Test knobs for the §8 rate limit and mutex (hook mode only). */
+  /** Test knobs for the §8 rate limit (hook mode only) and the team mutex (every mode, R4). */
   now?: () => number; lock?: TeamLockOptions;
 }
 export interface SyncResult { placed: number; deferred: string[]; notices: string[]; changed: boolean; hook: boolean; }
@@ -64,23 +64,27 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
     const config = await store.read();
     // A team this run cannot work on costs exactly that team: it is left alone — not refreshed,
     // not read, not stamped fresh — and every other team still syncs, so the SessionStart hook
-    // still exits 0. Three reasons: another process holds the clone's writer lock (reported), or,
-    // in hook mode only (§8), the team synced within the hour or another hook holds its mutex —
-    // both silent, because another window is doing, or has just done, the work.
+    // still exits 0. Three reasons: another process holds the clone's writer lock (reported);
+    // another run holds the team's §8 mutex (reported, except to a hook, for which another window
+    // is doing the work); or, in hook mode only, the team synced within the hour (silent).
+    // EVERY sync takes the mutex, not only a hook (rulings walk R4, 2026-09-06): `team leave` holds
+    // it while it removes the team's placements, so a sync typed in another terminal can no longer
+    // re-place a folder seconds after leave removed it, or pull into a clone being deleted.
     const skipped = new Set<string>();
     for (const team of Object.keys(config.teams)) {
       const clone = store.teamClone(team);
-      if (args.hook) {
-        // The gate can throw — a lock file this process cannot read, a refused run/ directory — and
-        // that costs this team alone, reported: the shape the CloneBusy handler below already has.
-        try {
-          if (await stampIsFresh(store.root, team, args.now)) { skipped.add(team); continue; }
-          const release = await acquireTeamLock(store.root, team, args.lock);
-          if (!release) { skipped.add(team); continue; }
-          releases.push(release);
-        } catch (error) {
-          notice(`Skipping ${team}: ${error instanceof Error ? error.message : String(error)}`); skipped.add(team); continue;
+      // The gate can throw — a lock file this process cannot read, a refused run/ directory — and
+      // that costs this team alone, reported: the shape the CloneBusy handler below already has.
+      try {
+        if (args.hook && await stampIsFresh(store.root, team, args.now)) { skipped.add(team); continue; }
+        const release = await acquireTeamLock(store.root, team, args.lock);
+        if (!release) {
+          if (!args.hook) notice(`Skipping ${team}: another terum-skills sync holds its session lock (${lockPath(store.root, team)}); retry when it finishes.`);
+          skipped.add(team); continue;
         }
+        releases.push(release);
+      } catch (error) {
+        notice(`Skipping ${team}: ${error instanceof Error ? error.message : String(error)}`); skipped.add(team); continue;
       }
       try {
         await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {}, lockStale: args.lockStale });
@@ -116,7 +120,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       }
     }
     // Reconciliation never prompts, but it reports — through the same notice channel.
-    await reconcileShared(store, runner, childIo, skipped);
+    await reconcileShared(store, runner, childIo, skipped, defer);
     // Existing ledger paths drive every later decision. A folder merely present on disk is never
     // adopted, quarantined, or deleted without a ledger entry.
     const currentConfig = await store.read();

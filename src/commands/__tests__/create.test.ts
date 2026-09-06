@@ -138,6 +138,7 @@ describe('team create (§6)', () => {
     const runner = mappedRunner(publicRemote, bare, fakeGh('octocat', {
       'repo create new-team --private': { code: 0, stdout: 'https://github.com/octocat/new-team\n', stderr: '' },
       'repo view new-team --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'octocat/new-team\n', stderr: '' },
+      'repo edit octocat/new-team --delete-branch-on-merge': { code: 0, stdout: '', stderr: '' },
     }));
     const io = new ScriptedPrompter(['', 'ryan', 'Ryan', 'ryan@example.com', '']);
     const result = await create({ name: 'new-team', config: store, runner }, io);
@@ -147,6 +148,8 @@ describe('team create (§6)', () => {
     expect((await store.read()).teams['new-team']).toEqual({ remote: 'github.com/octocat/new-team', handle: 'ryan' });
     expect(await git(['ls-tree', '--name-only', 'main:people'], bare)).toContain('ryan.json');
     expect(runner.calls.some((call) => call.command === 'gh' && call.args.join(' ').startsWith('repo create'))).toBe(true);
+    // Endorsement branches are one per publish (R2): the repository deletes each after its PR merges.
+    expect(runner.calls.some((call) => call.command === 'gh' && call.args.join(' ') === 'repo edit octocat/new-team --delete-branch-on-merge')).toBe(true);
   });
 
   it('without gh, a GitHub create fails before creating anything and names the alternatives', async () => {

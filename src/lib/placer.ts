@@ -37,10 +37,10 @@ export async function inspect(dir: string, owned: boolean): Promise<Inspection> 
   }
 }
 
-/** Acquire one non-waiting lock per target skills root; callers own the returned release. */
-export async function lockTarget(targetRoot: string, name: string): Promise<() => Promise<void>> {
+/** Acquire one non-waiting lock per target skills root; callers own the returned release, which reports a lock another process reclaimed (R3). `options.stale` is a test knob. */
+export async function lockTarget(targetRoot: string, name: string, options: { stale?: number } = {}): Promise<() => Promise<void>> {
   await mkdir(targetRoot, { recursive: true });
-  return acquireSkillTargetLock(targetRoot, name);
+  return acquireSkillTargetLock(targetRoot, name, options);
 }
 
 /**
@@ -59,6 +59,7 @@ export async function place(source: string, targetRoot: string, name: string, op
   try {
     await assertNoSymlinks(source);
     await cp(source, temporary, { recursive: true, errorOnExist: true, force: false });
+    let stranded: string | undefined;
     try {
       await fsForTests.rename(temporary, destination);
     } catch (error) {
@@ -66,10 +67,16 @@ export async function place(source: string, targetRoot: string, name: string, op
       await fsForTests.rename(destination, displaced);
       displacedExists = true;
       await fsForTests.rename(temporary, destination);
-      await fsForTests.rm(displaced, { recursive: true, force: true });
+      // The swap has landed: the placement is complete and nothing is left to restore. Removing the
+      // old copy is a tidy-up; when it fails (an open file on Windows, a read-only subfolder) the copy
+      // goes to quarantine and the placement is reported as what it is — a success with a notice, so
+      // the ledger records the fingerprint that is on disk (rulings walk R5, 2026-09-06). The failure
+      // path below is only for a swap that did not land.
       displacedExists = false;
+      stranded = await discardDisplaced(displaced, name, options.quarantineRoot);
     }
     const result = { path: destination, snapshot: await snapshotSkillDirectory(destination), notices: [] as string[] };
+    if (stranded !== undefined) result.notices.push(`Placed ${destination} but the previous ${name} could not be removed; it is at ${stranded}`);
     if (options.projectRoot) await appendExclude(options.projectRoot, `.claude/skills/${name}`, options.runner).catch((error: unknown) => {
       result.notices.push(`Placed ${destination} but could not add .claude/skills/${name} to .git/info/exclude: ${error instanceof Error ? error.message : String(error)}`);
     });
@@ -91,10 +98,19 @@ export async function place(source: string, targetRoot: string, name: string, op
   }
 }
 
+/** After a landed swap: delete the displaced copy; when that fails, move it to quarantine (spec invariant 34: never left inside the skills root) and return where it is — its hidden path when even that fails. */
+async function discardDisplaced(displaced: string, name: string, quarantineRoot: string | undefined): Promise<string | undefined> {
+  try { await fsForTests.rm(displaced, { recursive: true, force: true }); return undefined; }
+  catch {
+    if (quarantineRoot === undefined) return displaced;
+    return moveToQuarantine(displaced, quarantineRoot, name).catch(() => displaced);
+  }
+}
+
 /**
- * After a failed replace: put the displaced copy back when the destination is empty; when it is not
- * (the new copy landed and only the cleanup failed) or the restore fails, move the copy to quarantine.
- * Returns where the copy is when it was not restored, undefined when it was (or nothing was displaced).
+ * After a swap that did NOT land (the rename of the new copy onto the destination threw): put the
+ * displaced copy back when the destination is empty; when it is not, or the restore fails, move the
+ * copy to quarantine. Returns where the copy is when it was not restored, undefined when it was.
  */
 async function restoreDisplaced(destination: string, displaced: string, name: string, quarantineRoot: string | undefined): Promise<string | undefined> {
   if (await isAbsent(displaced)) return undefined;

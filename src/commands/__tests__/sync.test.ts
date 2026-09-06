@@ -221,6 +221,24 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(join(mirror, 'SKILL.md'), 'utf8')).toContain('description: old');
   });
 
+  it('an interactive sync takes the §8 team mutex too: a team another process holds is skipped with a reason and left untouched, and syncs once the lock is released', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(home, '.claude', 'skills', 'sample');
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    // `team leave` holds this while it removes the team's placements; before R4 a typed sync ignored it.
+    const release = await acquireTeamLock(store.root, 'team');
+    expect(release).not.toBeNull();
+    try {
+      const io = new ScriptedPrompter();
+      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+      expect(io.lines.filter((line) => line === `Skipping team: another terum-skills sync holds its session lock (${lockPath(store.root, 'team')}); retry when it finishes.`)).toHaveLength(1);
+      expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: old');
+    } finally { await release!(); }
+    expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { placed: 1 } });
+    expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: new');
+  });
+
   it('reports a placement whose target lock another process holds as blocked and leaves it untouched', async () => {
     const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);

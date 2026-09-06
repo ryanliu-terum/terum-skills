@@ -63,10 +63,12 @@ describe('M3 setup walkthrough', () => {
       : fakeGh('alice')(args, options));
     const published = await publish({ ref: 'sample', config: aliceStore, runner: publishRunner }, new ScriptedPrompter());
     if (!published.ok) throw new Error(published.error);
-    expect(published.value).toMatchObject({ policy: 'pr', branch: 'publish/sample' });
+    // One fresh branch per publish (R2): the name is minted per run, so the walkthrough follows the result.
+    expect(published.value).toMatchObject({ policy: 'pr', branch: expect.stringMatching(/^publish\/sample-alice-[0-9a-f]{8}$/) });
+    const endorsementBranch = published.value.branch!;
     await git(['fetch', 'origin'], aliceStore.teamClone('team'));
     // The host merging the PR, simulated from Alice's clone: --no-verify because her clone now carries the D12 pre-push guard, which would run `npx terum-skills` (M4).
-    await git(['push', '--no-verify', 'origin', 'refs/remotes/origin/publish/sample:main'], aliceStore.teamClone('team'));
+    await git(['push', '--no-verify', 'origin', `refs/remotes/origin/${endorsementBranch}:main`], aliceStore.teamClone('team'));
 
     const syncIo = new ScriptedPrompter([], [true], true);
     const synchronized = await sync({ config: bobStore, runner: bobRunner }, syncIo);

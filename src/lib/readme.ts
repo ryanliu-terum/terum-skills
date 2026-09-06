@@ -77,11 +77,10 @@ export function generateReadme(data: ReadmeData): string {
       // A code span's only delimiter is a backtick, which cell() cannot escape, and this column is a
       // command a reader copies: a folder name the CLI itself would refuse to create gets no command.
       const command = repo && isSkillName(skill.name) ? `\`npx -y terum-skills@latest install ${repo}/${skill.name}\`` : '—';
-      // The Skill column shows the folder name as data even when the CLI would refuse it: a bracket
-      // pair there could otherwise label a link, and an angle bracket an HTML anchor. A no-op for every
-      // name the CLI accepts. (Whether the free-text columns may render Markdown at all is a product
-      // call, recorded in the close-out.)
-      const shownName = cell(skill.name).replace(/[[\]]/g, '\\$&').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      // The Skill column shows the folder name as data even when the CLI would refuse it: cell() has
+      // already defanged a link label (every cell has, per R14); an angle bracket could still spell an
+      // HTML anchor, so those become entities here. A no-op for every name the CLI accepts.
+      const shownName = cell(skill.name).replace(/</g, '&lt;').replace(/>/g, '&gt;');
       lines.push(`| ${shownName} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | — | ${command} |`);
     }
   }
@@ -173,9 +172,19 @@ export async function regenerateReadmeInTree(tree: MutableTree, remote: string, 
  * `&lt;!--`, which Markdown renders identically but can no longer spell README_BEGIN/README_END or
  * the PR-comment anchor.
  */
-export function inlineText(value: string): string { return value.replace(/\r\n|[\r\n]/g, ' ').replace(/<!--/g, '&lt;!--'); }
-/** Markdown table cells: inlineText() plus the pipe, and the backslash that could un-escape it. */
-function cell(value: string): string { return inlineText(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|'); }
+export function inlineText(value: string): string { return noLinkLabel(oneLine(value)); }
+function oneLine(value: string): string { return value.replace(/\r\n|[\r\n]/g, ' ').replace(/<!--/g, '&lt;!--'); }
+/**
+ * The link-label rule (rulings walk R14, 2026-09-06): `[` and `]` are escaped as the LAST step of both
+ * sanitizers, so nothing committed to a team repo — a description, a category, an author, a team or
+ * display name — can render as a Markdown link whose label lies about its destination, in any cell,
+ * heading, roster line or the Action's PR comment. Normal text renders pixel-identically; a bare URL
+ * still auto-links, only the label dies. Last, because a backslash escape written before cell()'s
+ * backslash doubling would come out as a literal backslash and a live link.
+ */
+function noLinkLabel(value: string): string { return value.replace(/[[\]]/g, '\\$&'); }
+/** Markdown table cells: oneLine() plus the pipe, the backslash that could un-escape it, and then the link brackets. */
+function cell(value: string): string { return noLinkLabel(oneLine(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|')); }
 
 export function shortHash(value: string): string { return value === '—' ? value : value.slice(0, 8); }
 

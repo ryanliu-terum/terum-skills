@@ -10,7 +10,7 @@ repository at commit 61aa957ecc45e6c3672d11e0c48c13bd601f15c5:
   src/lib/placer/vendor/skillhub/skill-fingerprint.ts
       from cli/src/services/skill-fingerprint.ts (modified: path separator handling)
   src/lib/placer/vendor/skillhub/skill-target-lock.ts
-      from cli/src/services/skill-target-lock.ts (modified: internal imports replaced, lock directory renamed)
+      from cli/src/services/skill-target-lock.ts (modified: internal imports replaced, lock directory renamed; stale window 60 s and a compromised lock reported from release — rulings walk R3, 2026-09-06)
 
 Each copied file carries an attribution header naming its source path, the commit, the
 license, and whether it was modified.

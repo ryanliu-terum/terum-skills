@@ -109,7 +109,7 @@ describe('search (§6)', () => {
     // Both halves of the title are counts, so both are pinned exactly: two rows in filter order
     // (`ghost` sorts first) and one report line. An extra or duplicated row, a report printed per
     // skill, or a dropped `formatSkill` row for the degraded hit has to fail here.
-    expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'ghost', latest: '—' }), expect.objectContaining({ name: 'healthy', latest: tree })] });
+    expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'ghost', latest: '—', unresolved: true }), expect.objectContaining({ name: 'healthy', latest: tree, unresolved: false })] });
     expect(io.lines).toEqual([expect.stringContaining('team/ghost: Could not resolve the latest version of ghost'), '  ghost — Seed <seed@example.com>; testing; 0 installs; —; —', `  healthy — Seed <seed@example.com>; testing; 0 installs; ${tree}; —`]);
   });
 

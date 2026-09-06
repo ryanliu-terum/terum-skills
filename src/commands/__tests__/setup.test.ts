@@ -35,25 +35,71 @@ describe('setup (§6.1)', () => {
     expect(io.lines).toContain(`Team team is already configured on this machine.`);
   });
 
-  it('refuses a configured team whose clone is missing before it prompts for or writes anything else, naming the repair', async () => {
+  it('re-clones a configured team whose clone is gone — with the git identity — before it prompts for anything else, and the run completes (R8)', async () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     const home = join(fixture.root, 'home');
-    // A shareable skill and a hook offer both sit after the team step; neither may run on a machine
-    // the wizard is about to refuse, so the repair message is what the user gets, not a share ENOENT.
-    await skillUnder(home);
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter();
     let hookOffers = 0;
     const result = await run({ config: store, home, runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
       offerHook: async () => { hookOffers += 1; return 'present'; },
     } }, io);
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`team join ${fixture.bare}`), value: { steps: { team: 'skipped' } } });
-    expect(result.ok ? '' : result.error).toContain('clone at');
-    expect(hookOffers).toBe(0);
-    expect(result.ok ? undefined : result.value?.steps.hook).toBeUndefined();
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.steps).toMatchObject({ team: 'done', actions: 'skipped', invite: 'skipped', hook: 'skipped', done: 'printed' });
+    const clone = store.teamClone('team');
+    expect(await readFile(join(clone, 'team.json'), 'utf8')).toContain('"name"');
+    expect((await git(['config', 'user.name'], clone)).trim()).toBe('Me');
+    expect((await git(['config', 'user.email'], clone)).trim()).toBe('me@example.com');
+    expect(io.lines).toContain(`Team team's clone at ${clone} is missing; re-cloning it from ${fixture.bare}.`);
+    expect(io.lines).toContain('Members:');
+    expect(hookOffers).toBe(1);
     expect(io.asked).toEqual([]);
-    expect(io.lines).not.toContain('Next, from any terminal:');
+  });
+
+  it('a re-clone that fails is the run\'s failure, before any prompt or hook offer', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const missing = join(fixture.root, 'nowhere.git');
+    await store.update((config) => { config.teams.team = { remote: missing, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    let hookOffers = 0;
+    const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(missing, missing, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+      offerHook: async () => { hookOffers += 1; return 'present'; },
+    } }, io);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Could not clone') });
+    expect(hookOffers).toBe(0);
+    expect(io.asked).toEqual([]);
+    expect(io.lines).not.toContain('Members:');
+  });
+
+  it('a folder with team.json but no repository — an interrupted leave, a restore that skipped dotfiles — is incomplete, not set up (R9)', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await rm(join(clone, '.git'), { recursive: true, force: true });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+      offerHook: async () => 'present',
+    } }, io);
+    expect(result.ok).toBe(false);
+    expect(result.ok ? '' : result.error).toContain(`${clone} exists and is not a complete clone`);
+    expect(result.ok ? '' : result.error).toContain('move it aside');
+    expect(io.lines).not.toContain('Members:');
+  });
+
+  it('refuses a clone of a different remote the way team join does, naming the origin (R9)', async () => {
+    const fixture = await bareTeam(); const other = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const clone = await cloneWithIdentity(other.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+      offerHook: async () => 'present',
+    } }, io);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`${clone} is a clone of`) });
+    expect(result.ok ? '' : result.error).toContain('move it aside');
     expect(io.lines).not.toContain('Members:');
   });
 

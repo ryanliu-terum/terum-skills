@@ -42,6 +42,21 @@ describe('README generator (§9)', () => {
     expect(hostile).toContain('&lt;a href="https://evil.example"&gt;\\[click\\]&lt;/a&gt;');
   });
 
+  it('no repo text renders as a link whose label lies — description, category, author heading, team name, roster — while a bare URL still auto-links (R14)', () => {
+    const hostile = generateReadme({
+      ...data,
+      team: { ...data.team, name: 'team [home](https://evil.example)' },
+      people: [{ ...data.people[0]!, display_name: '[Amy](https://evil.example)' }, data.people[1]!],
+      skills: [{ ...data.skills[1]!, description: 'see [Install v2](https://evil.example) or https://docs.example', category: 'testing [x](https://evil.example)', author: '[Amy](https://evil.example) <amy@example.com>' }],
+    });
+    // No unescaped `](` anywhere: the label is dead in every position; the bare URL is untouched.
+    expect(hostile).not.toMatch(/[^\\]\]\(https:\/\/evil\.example/);
+    expect(hostile).toContain('## team \\[home\\](https://evil.example) skills');
+    expect(hostile).toContain('- @amy — \\[Amy\\](https://evil.example)');
+    expect(hostile).toContain('### \\[Amy\\](https://evil.example) <amy@example.com>');
+    expect(hostile).toContain('| testing \\[x\\](https://evil.example) | see \\[Install v2\\](https://evil.example) or https://docs.example |');
+  });
+
   it('rejects malformed marker layouts without changing the input', () => {
     for (const malformed of [
       `Intro\n${'<!-- terum-skills:begin -->'}\n`,
