@@ -1,20 +1,16 @@
 #!/usr/bin/env node
 import { CommanderError } from 'commander';
 import { buildProgram } from './cli.js';
-import { Prompter, terminalPrompter } from './lib/prompt.js';
-import { Result } from './lib/result.js';
+import { createExecute } from './lib/execute.js';
+import { terminalPrompter } from './lib/prompt.js';
 
 // The bin entry: a terminal Prompter, failures on stderr, a non-zero exit for every failure path.
-async function execute(invoke: (io: Prompter) => Promise<Result<unknown>>): Promise<void> {
-  const io = terminalPrompter();
-  try {
-    const outcome = await invoke(io);
-    if (!outcome.ok) { process.stderr.write(`${outcome.error}\n`); process.exitCode = 1; }
-  } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
-  }
-}
+// The Result → stderr/exit-code mapping itself lives in lib/execute.ts, so it is tested without a process.
+const execute = createExecute({
+  io: terminalPrompter(),
+  stderr: (line) => { process.stderr.write(`${line}\n`); },
+  setExitCode: (code) => { process.exitCode = code; },
+});
 
 try {
   await buildProgram(execute).parseAsync();

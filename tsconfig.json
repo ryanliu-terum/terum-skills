@@ -14,12 +14,5 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts", "vitest.config.ts"],
-  "exclude": [
-    "node_modules",
-    "dist",
-    // M1 only: this vendored file still carries skillhub's three internal imports
-    // (../platform/paths, ../shared/errors, ../shared/constants). Build spec §3 says M2
-    // replaces them when the Placer is built; until then it is not compiled.
-    "src/lib/placer/vendor/skillhub/skill-target-lock.ts"
-  ]
+  "exclude": ["node_modules", "dist"]
 }

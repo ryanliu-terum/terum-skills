@@ -79,3 +79,10 @@ author chose to close a gap — implement it as written, do not treat it as unde
 - Handles are per team, not global. Deliberate: it is the only shape in which a second-team
   collision is recoverable.
 - `metadata.author` is `Name <email>`, never the handle. Deliberate: SkillEvaluator's schema.
+- The hidden `readme` verb writes `README.md` in the current clone directly, not through `safeWrite`.
+  Deliberate: it is the GitHub Action's entry point on the host's compute, where there is no
+  `~/.terum` config and the Action itself commits; on a laptop, README regeneration for
+  non-GitHub remotes still happens inside `safeWrite` (§9).
+- `guard.ts` accepts a `previousAuthor` for `sync` only, and only for a write that touches
+  `SKILL.md` alone with canonical content unchanged. Deliberate: it is the §5.3 managed-field
+  refresh after a config email or license change; it can never carry a content change.

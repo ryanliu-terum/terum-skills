@@ -10,7 +10,7 @@ import tseslint from 'typescript-eslint';
 // channel and src/index.ts is the bin entry that owns the exit code; both are exempt.
 const IO_MODULES = '^(node:)?(readline(/promises)?|process|console)$';
 // esquery regex literals end at the first unescaped slash.
-const IO_MODULES_SELECTOR = IO_MODULES.replace('/', '\\/');
+const IO_MODULES_SELECTOR = IO_MODULES.replaceAll('/', '\\/');
 const PROMPTER_BOUNDARY = {
   files: ['src/**/*.ts'],
   ignores: ['src/lib/prompt.ts', 'src/index.ts', 'src/lib/placer/vendor/**', 'src/**/__tests__/**'],
@@ -21,6 +21,7 @@ const PROMPTER_BOUNDARY = {
       { object: 'process', property: 'stdin', message: 'Use the Prompter instead.' },
       { object: 'process', property: 'stdout', message: 'Use the Prompter instead.' },
       { object: 'process', property: 'stderr', message: 'Use the Prompter instead.' },
+      { object: 'process', property: 'exit', message: 'Verbs return a Result; only src/index.ts sets process.exitCode.' },
       { object: 'globalThis', property: 'console', message: 'Use Prompter.print instead.' },
       { object: 'globalThis', property: 'process', message: 'Use the Prompter instead.' },
     ],

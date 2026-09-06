@@ -3,5 +3,5 @@
   "extends": "./tsconfig.json",
   "compilerOptions": { "noEmit": false, "outDir": "dist", "rootDir": "src", "sourceMap": true },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "src/**/__tests__/**", "src/lib/placer/vendor/skillhub/skill-target-lock.ts"]
+  "exclude": ["node_modules", "dist", "src/**/__tests__/**"]
 }

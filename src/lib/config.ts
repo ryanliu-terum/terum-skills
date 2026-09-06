@@ -6,7 +6,7 @@ import lockfile from 'proper-lockfile';
 import { mkdirPrivate } from './fs.js';
 import { Config, configSchema, emptyConfig, parseJson, parseOrExplain, teamNameSchema } from './schema.js';
 
-/** §5.4 `~/.terum/skills/config.json` — never committed, safe to delete, mode 0600 (it holds tokens). */
+/** §5.4 `~/.terum/skills/config.json` — never committed, safe to delete, mode 0600 (it names your teams, identity, and every placed path). */
 export interface ConfigStore {
   readonly root: string;
   read(): Promise<Config>;
@@ -17,7 +17,21 @@ export interface ConfigStore {
   teamClone(team: string): string;
 }
 
-export function createConfigStore(root = join(homedir(), '.terum', 'skills')): ConfigStore {
+/** Resolve the configured team in one place so verbs cannot drift on ambiguity handling. */
+export function selectTeam<T extends { remote: string }>(teams: Record<string, T>, requested?: string): [string, T] {
+  if (requested) { const value = teams[requested]; if (!value) throw new Error(`Team ${requested} is not configured.`); return [requested, value]; }
+  const entries = Object.entries(teams);
+  if (entries.length === 1) return entries[0]!;
+  if (entries.length === 0) throw new Error('No team is configured. Run `team join` first.');
+  throw new Error(`More than one team is configured; pass --team <name> (${entries.map(([name]) => name).join(', ')}).`);
+}
+
+export interface ConfigStoreOptions {
+  /** Test knob: the lock's stale window in ms (proper-lockfile floors it at 2000 and checks the lock every half window). */
+  lockStale?: number;
+}
+
+export function createConfigStore(root = join(homedir(), '.terum', 'skills'), options: ConfigStoreOptions = {}): ConfigStore {
   const path = join(root, 'config.json');
   const read = async (): Promise<Config> => {
     try { return parseJson(configSchema, await readFile(path, 'utf8'), path); }
@@ -36,22 +50,26 @@ export function createConfigStore(root = join(homedir(), '.terum', 'skills')): C
     ensureRoot,
     async update(mutate) {
       await ensureRoot();
+      // The default handler throws from a timer and crashes the CLI. Instead the compromise is
+      // recorded, and the write below is skipped: a snapshot read before another process took the
+      // lock must not be renamed over that process's write.
+      let compromised = false;
       const release = await lockfile.lock(path, {
         lockfilePath: `${path}.lock`,
         realpath: false,
-        stale: 30_000,
+        stale: options.lockStale ?? 30_000,
         retries: { retries: 20, minTimeout: 25, maxTimeout: 250 },
-        // The default handler throws from a timer and crashes the CLI; the write below is short
-        // and atomic, so a compromised lock cannot corrupt the file, only reorder two writers.
-        onCompromised: () => undefined,
+        onCompromised: () => { compromised = true; },
       });
       try {
         const config = await read();
         await mutate(config);
+        if (compromised) throw new Error(`Lost the lock on ${path} to another process; nothing was written — retry the command.`);
         await writeAtomically(path, `${JSON.stringify(config, null, 2)}\n`);
         return config;
       } finally {
-        await release();
+        // A compromised lock rejects on release ('Lock is already released'); that must never replace the real outcome.
+        await release().catch(() => undefined);
       }
     },
     teamClone(team) {

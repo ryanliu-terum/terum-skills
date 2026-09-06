@@ -261,7 +261,8 @@ spec gets written; not summarized further here.
 
 - The committed eval JSON schema itself (field naming, which raw metrics to keep) — needs
   the real `publish` flow and at least one real team skill through V5.
-- Share-card score summary (D29) — which of verdict/dimensions/lift appears; §4–5 argue
-  verdict-first, but that's design, not research.
+- ~~Share-card score summary (D29)~~ — RESOLVED 2026-09-04: verdict band frames the card;
+  displayed numbers are per-arm scores side by side + trigger-eval counts; lift one click
+  deeper with provenance. See display rules in `2026-09-04-eval-engine-adaptation.md`.
 - CI-on-publish-PRs (secrets, cost policy) and cheap-tier policy for teams.
 - Whether routing probes supplement Tier 3 (needs the Jul-5 rig re-read at spec time).

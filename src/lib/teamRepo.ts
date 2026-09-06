@@ -2,11 +2,11 @@ import { readFileSync } from 'node:fs';
 import { lstat, mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
 import lockfile from 'proper-lockfile';
-import { gitAuthEnv } from './auth.js';
 import { mkdirPrivate } from './fs.js';
 import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
-import { normalizeRemote, remoteToGitUrl } from './remote.js';
+import { isGitHubRemote, normalizeRemote, remoteToGitUrl, stripRemoteCredentials } from './remote.js';
 import { CommandResult, Runner, systemRunner } from './runner.js';
+import { regenerateReadmeInTree } from './readme.js';
 
 /**
  * §6.0: every write to the team repo goes through `safeWrite()` — a re-apply model, not a rebase.
@@ -17,8 +17,10 @@ import { CommandResult, Runner, systemRunner } from './runner.js';
  * the untracked paths this operation created, whether the loop succeeded, failed, or threw.
  */
 export interface MutableTree extends GuardTree {
-  set(path: string, content: string): void;
+  set(path: string, content: string | Buffer): void;
   remove(path: string): void;
+  /** Tracked paths in the freshly reset tree. Needed to make a skill-folder update a true mirror. */
+  paths(prefix?: string): readonly string[];
 }
 export type Mutate = (tree: MutableTree) => void;
 
@@ -27,12 +29,12 @@ export interface SafeWriteOptions extends GuardContext {
   branch?: string;
   /** Commit message; defaults to `<handle>: <action>`. */
   message?: string;
-  /** Per-team PAT for git auth (§5.4); ambient credentials when null. */
-  token?: string | null;
   deadlineMs?: number;
   backoff?: (attempt: number) => number;
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
+  /** Test knob: the lock's stale window in ms (proper-lockfile floors it at 2000 and checks the lock every half window). */
+  lockStale?: number;
 }
 
 export interface SafeWriteResult { changed: boolean; pushedTo: string; }
@@ -55,9 +57,13 @@ export class PushRefused extends Error {
 export const DEFAULT_DEADLINE_MS = 30_000;
 const defaultBackoff = (attempt: number): number => Math.floor(Math.random() * Math.min(1_000, 25 * 2 ** attempt));
 const wait = (milliseconds: number) => new Promise<void>((done) => setTimeout(done, milliseconds));
-/** git's non-fast-forward vocabulary: the only push failures a retry can fix. */
-const RETRYABLE = /fetch first|non-fast-forward|cannot lock ref|failed to lock|stale info/i;
-const STALE_LEASE = /stale info/i;
+/** git's non-fast-forward vocabulary: the only `main` push failures a retry can fix. */
+const RETRYABLE = /fetch first|non-fast-forward|cannot lock ref|failed to lock|stale info|incorrect old value|remote ref updated since checkout/i;
+/** The lease (CAS) vocabulary: the named ref moved since we read it — never retried against the same ref. */
+const STALE_LEASE = /stale info|incorrect old value|remote ref updated since checkout/i;
+/** Server-side ref-lock contention: transient, and the lease still stands, so the same ref is retried. */
+const REF_LOCK = /cannot lock ref|failed to lock/i;
+const lostLock = (root: string): string => `Lost the safeWrite lock on ${root} to another process; nothing was pushed — retry the command.`;
 
 type Git = (args: readonly string[]) => Promise<CommandResult>;
 
@@ -66,8 +72,7 @@ export function openTeamRepo(root: string, remote: string, runner: Runner = syst
 }
 
 async function safeWrite(root: string, remote: string, runner: Runner, mutate: Mutate, options: SafeWriteOptions): Promise<SafeWriteResult> {
-  const env = gitAuthEnv(options.token);
-  const git: Git = (args) => runner.run('git', args, { cwd: root, env });
+  const git: Git = (args) => runner.run('git', args, { cwd: root });
   const requireGit = async (args: readonly string[]) => {
     const result = await git(args);
     if (result.code !== 0) throw new Error(`git ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim()}`);
@@ -85,32 +90,55 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
   let lastError = 'push rejected';
 
   // One writer per clone per machine; a second process waits briefly, then fails rather than racing.
+  // A lock lost after the stale window (another process took it) is recorded and aborts the attempt
+  // before anything is pushed, instead of two writers reset-and-committing over one working tree.
+  let compromised = false;
   const release = await lockfile.lock(root, {
-    lockfilePath: join(dirname(root), `.${basename(root)}.safewrite.lock`),
+    lockfilePath: cloneLockPath(root),
     realpath: false,
-    stale: 60_000,
+    stale: options.lockStale ?? 60_000,
     retries: { retries: 10, minTimeout: 50, maxTimeout: 500 },
-    onCompromised: () => undefined,
+    onCompromised: () => { compromised = true; },
   });
+  const leases = new Map<string, string>();
   try {
     while (now() <= deadline) {
+      if (compromised) throw new Error(lostLock(root));
       await requireGit(['fetch', 'origin']);
       await requireGit(['reset', '--hard', 'origin/main']);
       const tracked = new Set((await requireGit(['ls-files', '-z'])).stdout.split('\0').filter(Boolean));
       const tree = makeTree(root, tracked);
       mutate(tree);
-      const changed = tree.changedPaths;
-      if (changed.length === 0) return { changed: false, pushedTo: branch };
-      guard(tree, options); // authorize BEFORE anything reaches the working tree
+      // Authorize the caller's own pure mutation before deriving any files from it. This keeps a
+      // forbidden skill write from being reported as a frontmatter/README generation error.
+      if (tree.changedPaths.length === 0) return { changed: false, pushedTo: branch };
+      guard(tree, options);
+      // §9: Actions own GitHub README commits; generic remotes regenerate as a derived safeWrite path.
+      let changed = tree.changedPaths;
       for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
       await applyTree(root, realRoot, tree, changed);
       await requireGit(['add', '-A', '--', ...changed]);
+      if (!isGitHubRemote(remote)) {
+        // The index is the exact tree about to be committed, including the caller's mutation.
+        // Resolve every skill version from it in one git call before deriving README.md.
+        const writtenTree = (await requireGit(['write-tree'])).stdout.trim();
+        const latestBySkill = await skillTrees(git, writtenTree);
+        await regenerateReadmeInTree(tree, remote, runner, root, latestBySkill);
+        changed = tree.changedPaths;
+        for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
+        const readmeChanged = changed.filter((path) => path === 'README.md');
+        if (readmeChanged.length) {
+          await applyTree(root, realRoot, tree, readmeChanged);
+          await requireGit(['add', '-A', '--', ...readmeChanged]);
+        }
+      }
       const staged = (await requireGit(['diff', '--cached', '--name-only', '--no-renames', '-z'])).stdout.split('\0').filter(Boolean).sort();
       if (JSON.stringify(staged) !== JSON.stringify([...changed].sort())) {
         throw new GuardError(`Staged diff [${staged.join(', ')}] does not match the mutation [${changed.join(', ')}]`);
       }
       await requireGit(['commit', '-q', '-m', options.message ?? `${options.handle}: ${options.action}`]);
-      const outcome = await push(git, branch);
+      if (compromised) throw new Error(lostLock(root));
+      const outcome = await push(git, branch, leases);
       if (outcome.ok) return { changed: true, pushedTo: outcome.pushedTo };
       if (!outcome.retryable) throw new PushRefused(`The remote refused the push: ${outcome.error.trim()}`);
       lastError = outcome.error;
@@ -119,19 +147,23 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
     }
     throw new SafeWriteExhausted(`safeWrite deadline exhausted after ${attempt + 1} attempt(s); the remote kept moving ahead: ${lastError.trim()}`);
   } finally {
-    // Cleanup can never change the outcome: the next safeWrite fetches and hard-resets anyway.
-    try {
-      await git(['fetch', 'origin']);
-      await git(['reset', '--hard', 'origin/main']);
-      for (const path of created) {
-        const tracked = await git(['ls-files', '--error-unmatch', '--', path]);
-        if (tracked.code !== 0) await removeCreated(root, realRoot, path);
+    // Cleanup can never change the outcome: the next safeWrite fetches and hard-resets anyway. A
+    // compromised lock means another writer owns this clone now; resetting it would rewind THAT
+    // writer's commit and turn its push into a no-op, so then only the lock is released.
+    if (!compromised) {
+      try {
+        await git(['fetch', 'origin']);
+        await git(['reset', '--hard', 'origin/main']);
+        for (const path of created) {
+          const tracked = await git(['ls-files', '--error-unmatch', '--', path]);
+          if (tracked.code !== 0) await removeCreated(root, realRoot, path);
+        }
+      } catch {
+        // swallowed on purpose; see above
       }
-    } catch {
-      // swallowed on purpose; see above
-    } finally {
-      await release();
     }
+    // A compromised lock rejects on release ('Lock is already released'); cleanup never replaces the real outcome.
+    await release().catch(() => undefined);
   }
 }
 
@@ -140,16 +172,18 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<voi
   if (origin.code !== 0) throw new Error(`Clone at ${root} has no origin remote`);
   const actual = origin.stdout.trim();
   if (normalizeRemote(actual) !== normalizeRemote(remote)) {
-    throw new Error(`Clone at ${root} points at ${actual}, not ${remote}; refusing to write to the wrong repository`);
+    throw new Error(`Clone at ${root} points at ${stripRemoteCredentials(actual)}, not ${stripRemoteCredentials(remote)}; refusing to write to the wrong repository`);
   }
 }
 
 /**
  * Push to exactly the named ref. `main` is a plain push. A derived branch (`publish/<name>`) is
- * replaced under a lease; only a genuinely stale lease falls back to `<branch>-2`, once. Any
- * other refusal is terminal and carries git's own message.
+ * replaced under a lease PINNED to the ref as it stood when this write first tried that target, so
+ * a retry after ref-lock contention can never overwrite a commit someone pushed in between: git
+ * reports that as stale and the write moves on to `<branch>-2`, once. Any other refusal is
+ * terminal and carries git's own message.
  */
-async function push(git: Git, branch: string): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
+async function push(git: Git, branch: string, leases: Map<string, string>): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
   if (branch === 'main') {
     const result = await git(['push', '-q', 'origin', 'HEAD:refs/heads/main']);
     if (result.code === 0) return { ok: true, pushedTo: 'main' };
@@ -158,12 +192,17 @@ async function push(git: Git, branch: string): Promise<{ ok: true; pushedTo: str
   }
   let lastError = '';
   for (const target of [branch, `${branch}-2`]) {
-    const result = await git(['push', '-q', '--force-with-lease', 'origin', `HEAD:refs/heads/${target}`]);
+    if (!leases.has(target)) {
+      const seen = await git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${target}`]);
+      leases.set(target, seen.code === 0 ? seen.stdout.trim() : '');
+    }
+    const result = await git(['push', '-q', `--force-with-lease=refs/heads/${target}:${leases.get(target)}`, 'origin', `HEAD:refs/heads/${target}`]);
     if (result.code === 0) return { ok: true, pushedTo: target };
     lastError = result.stderr || result.stdout || 'push rejected';
-    if (!STALE_LEASE.test(lastError)) return { ok: false, retryable: false, error: lastError };
+    if (!STALE_LEASE.test(lastError)) return { ok: false, retryable: REF_LOCK.test(lastError), error: lastError };
   }
-  return { ok: false, retryable: true, error: lastError };
+  // Both the branch and its `-2` moved since this write began: never overwrite either.
+  return { ok: false, retryable: false, error: lastError };
 }
 
 /** Repo-relative POSIX paths only: no absolute paths, no `..`, no `.git` anywhere (any case, NTFS short names included), no empty segments. */
@@ -176,23 +215,58 @@ export function assertSafePath(path: string): void {
 
 /** The tree handed to a mutation: lazy reads of the reset checkout plus an overlay of its edits. */
 function makeTree(root: string, tracked: ReadonlySet<string>): MutableTree {
-  const cache = new Map<string, string>();
-  const overlay = new Map<string, string | undefined>();
-  const before = (path: string): string | undefined => {
+  const cache = new Map<string, Buffer>();
+  const overlay = new Map<string, string | Buffer | undefined>();
+  const before = (path: string): string | Buffer | undefined => {
     if (!tracked.has(path)) return undefined;
     let content = cache.get(path);
-    if (content === undefined) { content = readFileSync(join(root, path), 'utf8'); cache.set(path, content); }
+    if (content === undefined) { content = readFileSync(join(root, path)); cache.set(path, content); }
     return content;
   };
   return {
     before,
-    after: (path) => (overlay.has(path) ? overlay.get(path) : before(path)),
+    after: (path) => {
+      const content = overlay.has(path) ? overlay.get(path) : before(path);
+      return content;
+    },
     get changedPaths() {
-      return [...overlay.keys()].filter((path) => overlay.get(path) !== before(path)).sort();
+      return [...overlay.keys()].filter((path) => !sameContent(overlay.get(path), before(path))).sort();
     },
     set(path, content) { assertSafePath(path); overlay.set(path, content); },
     remove(path) { assertSafePath(path); overlay.set(path, undefined); },
+    paths(prefix = '') {
+      return [...new Set([...tracked, ...overlay.keys()])]
+        .filter((path) => (!overlay.has(path) || overlay.get(path) !== undefined) && path.startsWith(prefix))
+        .sort();
+    },
   };
+}
+
+function sameContent(left: string | Buffer | undefined, right: string | Buffer | undefined): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  if (Buffer.isBuffer(left) && Buffer.isBuffer(right)) return left.equals(right);
+  if (typeof left === 'string' && typeof right === 'string') return left === right;
+  return Buffer.isBuffer(left) ? left.equals(Buffer.from(right as string)) : Buffer.from(left).equals(right as Buffer);
+}
+
+/** Decode a tree value only at a text consumer; binary paths stay byte-for-byte in the tree. */
+export function treeText(value: string | Buffer): string { return Buffer.isBuffer(value) ? value.toString('utf8') : value; }
+
+/** Every direct child in `skills/` is a skill tree; one ls-tree call resolves all latest versions. */
+async function skillTrees(git: Git, writtenTree: string): Promise<Map<string, string>> {
+  const listed = await requireGitResult(git, ['ls-tree', `${writtenTree}:skills`]);
+  const versions = new Map<string, string>();
+  for (const line of listed.stdout.split('\n')) {
+    const match = /^\d+\s+tree\s+([0-9a-f]{40})\t(.+)$/.exec(line);
+    if (match) versions.set(match[2]!, match[1]!);
+  }
+  return versions;
+}
+
+async function requireGitResult(git: Git, args: readonly string[]): Promise<CommandResult> {
+  const result = await git(args);
+  if (result.code !== 0) throw new Error(`git ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim()}`);
+  return result;
 }
 
 /** Resolve the parent directory and refuse it if a symlink would carry the write outside the clone. */
@@ -240,10 +314,10 @@ async function removeCreated(root: string, realRoot: string, path: string): Prom
 }
 
 /** Clone a team repo into a private directory, checking out `main` explicitly so a bare remote whose HEAD points elsewhere still yields a working tree. */
-export async function cloneTeam(remote: string, destination: string, runner: Runner = systemRunner, token: string | null = null): Promise<void> {
+export async function cloneTeam(remote: string, destination: string, runner: Runner = systemRunner): Promise<void> {
   await mkdirPrivate(dirname(destination));
-  const clone = await runner.run('git', ['clone', '-q', '--branch', 'main', remoteToGitUrl(remote), destination], { env: gitAuthEnv(token) });
-  if (clone.code !== 0) throw new Error(`Could not clone ${remote}: ${(clone.stderr || clone.stdout).trim()}`);
+  const clone = await runner.run('git', ['clone', '-q', '--branch', 'main', '--', remoteToGitUrl(remote), destination]);
+  if (clone.code !== 0) throw new Error(`Could not clone ${stripRemoteCredentials(remote)}: ${(clone.stderr || clone.stdout).trim()}`);
 }
 
 /** The normalized origin of an existing clone, or null when the directory is not a clone. */
@@ -254,4 +328,29 @@ export async function cloneOrigin(root: string, runner: Runner = systemRunner): 
   } catch {
     return null;
   }
+}
+
+/** The per-clone writer lock's path — the one safeWrite holds; `team leave` takes it before removing the clone. */
+/**
+ * Bring a clone to `origin/main` the way safeWrite does — fetch, then hard reset. The clone is
+ * disposable state (§4.2), so a local `main` that drifted (a process killed between safeWrite's
+ * commit and its reset) heals here instead of wedging every later verb behind a fast-forward
+ * failure. Verb preflights (`publish`, `sync`) share this; `pull --ff-only` is never the right
+ * refresh for a clone we own (D5b, 2026-09-05 close-out walk).
+ */
+export async function refreshClone(runner: Runner, clone: string, options: { label?: string; env?: NodeJS.ProcessEnv } = {}): Promise<void> {
+  for (const args of [['fetch', 'origin'], ['reset', '--hard', 'origin/main']]) {
+    const result = await runner.run('git', args, { cwd: clone, env: options.env });
+    if (result.code !== 0) throw new Error(`Could not refresh ${options.label ?? clone}: ${(result.stderr || result.stdout).trim()}`);
+  }
+}
+
+export function cloneLockPath(root: string): string {
+  return join(dirname(root), `.${basename(root)}.safewrite.lock`);
+}
+
+/** Hold the per-clone writer lock while `action` runs; a second writer waits briefly, then fails rather than racing. */
+export async function withCloneLock<T>(root: string, action: () => Promise<T>): Promise<T> {
+  const release = await lockfile.lock(root, { lockfilePath: cloneLockPath(root), realpath: false, stale: 60_000, retries: { retries: 10, minTimeout: 50, maxTimeout: 500 }, onCompromised: () => undefined });
+  try { return await action(); } finally { await release().catch(() => undefined); }
 }

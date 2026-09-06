@@ -1,10 +1,11 @@
-// Vendored from iflytek/skillhub cli/src/services/skill-fingerprint.ts @ 61aa957 — Apache-2.0 — modified: no
+// Vendored from iflytek/skillhub cli/src/services/skill-fingerprint.ts @ 61aa957 — Apache-2.0 — modified: yes
+// Modified: listSkillFiles rewrites path separators to '/' only on Windows (sep === '\\'); on POSIX a backslash is a legal filename character and stays in the snapshot key.
 // Source: https://github.com/iflytek/skillhub/blob/61aa957ecc45e6c3672d11e0c48c13bd601f15c5/cli/src/services/skill-fingerprint.ts
 // Full commit: 61aa957ecc45e6c3672d11e0c48c13bd601f15c5. License text: ./LICENSE at the repo root; attribution: ./NOTICE.
 
 import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 
 export interface SkillSnapshot {
   fingerprint: string
@@ -48,7 +49,8 @@ async function listSkillFiles(root: string): Promise<string[]> {
       if (entry.isDirectory()) {
         await walk(absolute)
       } else if (entry.isFile()) {
-        files.push(relative(root, absolute).split('\\').join('/'))
+        const rel = relative(root, absolute)
+        files.push(sep === '\\' ? rel.split('\\').join('/') : rel)
       }
     }
   }

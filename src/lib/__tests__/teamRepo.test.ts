@@ -1,15 +1,69 @@
-import { access, readFile, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
-import { assertSafePath, openTeamRepo, PushRefused, SafeWriteExhausted } from '../teamRepo.js';
+import { assertSafePath, cloneTeam, openTeamRepo, PushRefused, SafeWriteExhausted, treeText } from '../teamRepo.js';
+import { createConfigStore } from '../config.js';
+import { run as share } from '../../commands/share.js';
+import { ScriptedPrompter } from './fixtures.js';
 import { bareTeam, cloneWithIdentity, git, originSha, person, pushFromSeed, temporaryDirectory, wrapRunner } from './fixtures.js';
 
 const exists = (path: string) => access(path).then(() => true, () => false);
 const personJson = (handle: string) => `${JSON.stringify(person(handle))}\n`;
 
 describe('safeWrite (§6.0)', () => {
+  it('regenerates README only for generic remotes before the push', async () => {
+    const fixture = await bareTeam();
+    const generic = await cloneWithIdentity(fixture.bare, join(fixture.root, 'generic'));
+    let genericStaged = '';
+    const genericRunner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'push') genericStaged = await git(['show', '--name-only', '--format=', 'HEAD'], generic);
+      return next();
+    });
+    await openTeamRepo(generic, fixture.bare, genericRunner).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' });
+    expect(await readFile(join(generic, 'README.md'), 'utf8')).toContain('<!-- terum-skills:begin -->');
+    expect(genericStaged).toContain('README.md');
+    const githubFixture = await bareTeam();
+    const github = await cloneWithIdentity(githubFixture.bare, join(githubFixture.root, 'github'));
+    const publicRemote = 'https://github.com/acme/team.git';
+    await git(['remote', 'set-url', 'origin', publicRemote], github);
+    let githubStaged = '';
+    const runner = wrapRunner(systemRunner, async (command, args, options, next) => {
+      if (command === 'git' && args[0] === 'fetch') return { code: 0, stdout: '', stderr: '' };
+      if (command === 'git' && args[0] === 'remote' && args[1] === 'get-url') return { code: 0, stdout: `${publicRemote}\n`, stderr: '' };
+      if (command === 'git' && args[0] === 'push') { githubStaged = await git(['show', '--name-only', '--format=', 'HEAD'], github); return { code: 1, stdout: '', stderr: 'remote: Permission denied' }; }
+      return next();
+    });
+    await expect(openTeamRepo(github, publicRemote, runner).safeWrite((tree) => tree.set('people/github.json', personJson('github')), { action: 'join', handle: 'github' })).rejects.toThrow(PushRefused);
+    expect(githubStaged).not.toContain('README.md');
+    expect(await exists(join(github, 'README.md'))).toBe(false);
+  });
+
+  it('derives every generic-remote README version from the written index in one ls-tree call', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    let lsTrees = 0;
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'ls-tree') lsTrees++;
+      return next();
+    });
+    const skill = '---\nname: new\ndescription: New\nlicense: UNLICENSED\nmetadata:\n  id: 55555555-5555-4555-8555-555555555555\n  author: Me <me@example.com>\n  terum-category: docs\n---\n';
+    await openTeamRepo(clone, fixture.bare, runner).safeWrite((tree) => tree.set('skills/new/SKILL.md', skill), { action: 'share', handle: 'me', author: 'Me <me@example.com>' });
+    await git(['fetch', '-q', 'origin'], fixture.seed);
+    await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
+    const latest = (await git(['rev-parse', 'main:skills/new'], fixture.bare)).trim();
+    expect(await readFile(join(fixture.seed, 'README.md'), 'utf8')).toContain(`| new | docs | New | 0 | — | ${latest.slice(0, 8)} |`);
+    expect(lsTrees).toBe(1);
+  });
+
+  it('omits a removed tracked person from the regenerated generic-remote README', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'people/me.json', personJson('me'));
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.remove('people/me.json'), { action: 'join', handle: 'me' });
+    expect(await readFile(join(clone, 'README.md'), 'utf8')).not.toContain('- @me — me');
+  });
   it('lands eight barrier-released writers within the deadline and leaves every clone clean', async () => {
     const fixture = await bareTeam();
     const clones = await Promise.all(Array.from({ length: 8 }, (_, index) => cloneWithIdentity(fixture.bare, join(fixture.root, `clone-${index}`), `User ${index}`, `u${index}@example.com`)));
@@ -138,7 +192,7 @@ describe('safeWrite (§6.0)', () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'), 'Admin', 'admin@example.com');
     await openTeamRepo(clone, fixture.bare).safeWrite((tree) => {
-      const team = JSON.parse(tree.after('team.json')!);
+      const team = JSON.parse(treeText(tree.after('team.json')!));
       team.archived.push('seed');
       tree.set('team.json', `${JSON.stringify(team)}\n`);
     }, { action: 'team-remove', handle: 'admin', targetHandle: 'seed' });
@@ -183,4 +237,131 @@ describe('safeWrite (§6.0)', () => {
     await openTeamRepo(clone, fixture.bare, racing).safeWrite((tree) => { seen.push(tree.before('people/taken.json') !== undefined); tree.set('people/me.json', personJson('me')); }, { action: 'join', handle: 'me' });
     expect(seen).toEqual([false, true]);
   });
+
+  it('writes a Buffer SKILL.md byte-for-byte instead of decoding it through UTF-8', async () => {
+    const fixture = await bareTeam();
+    const id = '11111111-1111-4111-8111-111111111111';
+    const initial = `---\nname: binary\ndescription: binary\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`;
+    await pushFromSeed(fixture.seed, 'skills/binary/SKILL.md', initial);
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const payload = Buffer.concat([Buffer.from(initial), Buffer.from([0xff, 0xfe, 0x80])]);
+    await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/binary/SKILL.md', payload), { action: 'sync', handle: 'me', author: 'Me <me@example.com>' });
+    expect(await readFile(join(clone, 'skills', 'binary', 'SKILL.md'))).toEqual(payload);
+  });
+
+  it('lists the tree as mutated, including additions and excluding removals', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/x/SKILL.md', 'skill');
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    let observed = false;
+    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => {
+      tree.set('people/new.json', personJson('new'));
+      tree.remove('skills/x/SKILL.md');
+      expect(tree.paths('people/')).toContain('people/new.json');
+      expect(tree.paths('skills/x/')).not.toContain('skills/x/SKILL.md');
+      observed = true;
+    }, { action: 'join', handle: 'new' })).rejects.toThrow(GuardError);
+    expect(observed).toBe(true);
+  });
+
+  it('lands eight barrier-released real shares with unique IDs and leaves every clone clean', async () => {
+    const fixture = await bareTeam();
+    const stores = await Promise.all(Array.from({ length: 8 }, async (_, index) => {
+      const store = createConfigStore(join(fixture.root, `state-${index}`));
+      const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'), `User ${index}`, `u${index}@example.com`);
+      await store.update((config) => { config.display_name = `User ${index}`; config.email = `u${index}@example.com`; config.teams.team = { remote: fixture.bare, handle: `u${index}` }; });
+      const source = join(fixture.root, `skill-${index}`); await mkdir(source);
+      await writeFile(join(source, 'SKILL.md'), `---\nname: skill-${index}\ndescription: skill ${index}\nmetadata:\n  terum-category: testing\n---\n`);
+      return { store, clone, source };
+    }));
+    let release!: () => void;
+    const barrier = new Promise<void>((done) => { release = done; });
+    const writes = stores.map(async ({ store, source }) => { await barrier; return share({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true])); });
+    release();
+    const results = await Promise.all(writes);
+    expect(results.every((result) => result.ok)).toBe(true);
+    for (const { clone } of stores) expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
+    const ids = await Promise.all(Array.from({ length: 8 }, (_, index) => git(['show', `main:skills/skill-${index}/SKILL.md`], fixture.bare).then((source) => /^\s+id:\s+(.+)$/m.exec(source)?.[1])));
+    expect(new Set(ids).size).toBe(8);
+  });
+
+  it('never echoes a credential in the wrong-repository or failed-clone messages', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    await git(['remote', 'set-url', 'origin', 'https://me:tok@github.com/acme/team.git'], clone);
+    let mutated = false;
+    const wrong = await openTeamRepo(clone, 'https://me:tok@github.com/someone/else.git').safeWrite(() => { mutated = true; }, { action: 'join', handle: 'me' }).then(() => '', (error: Error) => error.message);
+    expect(mutated).toBe(false);
+    expect(wrong).toContain('points at https://github.com/acme/team.git, not https://github.com/someone/else.git');
+    expect(wrong).not.toContain('tok');
+    expect(wrong).not.toContain('@');
+    const refusing: Runner = { async run(command, args, options) { if (command === 'git' && args[0] === 'clone') return { code: 1, stdout: '', stderr: `fatal: repository '${args[args.length - 2]}' not found` }; return systemRunner.run(command, args, options); } };
+    const failed = await cloneTeam('https://me:tok@github.com/acme/team.git', join(fixture.root, 'dest'), refusing).then(() => '', (error: Error) => error.message);
+    expect(failed).toContain("Could not clone https://github.com/acme/team.git: fatal: repository 'https://github.com/acme/team.git' not found");
+    expect(failed).not.toContain('tok');
+    expect(failed).not.toContain('@');
+  });
+  it('retries ref-lock contention on a derived branch under the SAME pinned lease, so a commit pushed in between survives on `-2`; a protected-branch refusal is one push and a PushRefused', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    let pushes = 0;
+    const contended = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'push' && pushes++ === 0) return { code: 1, stdout: '', stderr: "error: cannot lock ref 'refs/heads/publish/x': is at abc but expected def" };
+      return next();
+    });
+    const result = await openTeamRepo(clone, fixture.bare, contended).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', branch: 'publish/x', deadlineMs: 5_000 });
+    expect(result.pushedTo).toBe('publish/x');
+    expect(pushes).toBe(2);
+    // Contention, and someone lands on publish/y before our retry: the pinned lease refuses to overwrite them.
+    let racing = 0;
+    const raced = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'push' && racing++ === 0) {
+        await git(['push', '-q', 'origin', 'HEAD:refs/heads/publish/y'], fixture.seed);
+        return { code: 1, stdout: '', stderr: "error: cannot lock ref 'refs/heads/publish/y'" };
+      }
+      return next();
+    });
+    const theirs = (await git(['rev-parse', 'HEAD'], fixture.seed)).trim();
+    const dodged = await openTeamRepo(clone, fixture.bare, raced).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"y"')), { action: 'join', handle: 'me', branch: 'publish/y', deadlineMs: 5_000 });
+    expect(dodged.pushedTo).toBe('publish/y-2');
+    expect(await originSha(fixture.bare, 'publish/y')).toBe(theirs);
+    let refused = 0;
+    const protectedBranch: Runner = { run(command, args, options) { if (command === 'git' && args[0] === 'push') { refused++; return Promise.resolve({ code: 1, stdout: '', stderr: ' ! [remote rejected] HEAD -> publish/z (protected branch hook declined)' }); } return systemRunner.run(command, args, options); } };
+    await expect(openTeamRepo(clone, fixture.bare, protectedBranch).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v2"')), { action: 'join', handle: 'me', branch: 'publish/z' })).rejects.toBeInstanceOf(PushRefused);
+    expect(refused).toBe(1);
+    expect((await git(['branch', '--list', 'publish/z*'], fixture.bare)).trim()).toBe('');
+  });
+
+  it('a deletion is restored by the finally when the push is refused, lands when it is not, and a byte-identical rewrite is no change', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'people/gone.json', personJson('gone'));
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const denied: Runner = { run(command, args, options) { if (command === 'git' && args[0] === 'push') return Promise.resolve({ code: 1, stdout: '', stderr: 'remote: Permission denied' }); return systemRunner.run(command, args, options); } };
+    await expect(openTeamRepo(clone, fixture.bare, denied).safeWrite((tree) => tree.remove('people/gone.json'), { action: 'join', handle: 'gone' })).rejects.toThrow(PushRefused);
+    expect(await exists(join(clone, 'people', 'gone.json'))).toBe(true);
+    expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
+    expect(await git(['ls-tree', '--name-only', 'main:people'], fixture.bare)).toContain('gone.json');
+    expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.remove('people/gone.json'), { action: 'join', handle: 'gone' })).toEqual({ changed: true, pushedTo: 'main' });
+    expect(await git(['ls-tree', '--name-only', 'main:people'], fixture.bare)).not.toContain('gone.json');
+    expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/seed.json', tree.before('people/seed.json')!), { action: 'join', handle: 'seed' })).toEqual({ changed: false, pushedTo: 'main' });
+  });
+
+  it('a lock lost to another process aborts before the push and does NOT reset the clone, which that process now owns', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const lock = join(fixture.root, '.clone.safewrite.lock');
+    // Steal the lock while our commit is being made; proper-lockfile notices at its next check (half the stale window).
+    const stolen = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      const result = await next();
+      if (command === 'git' && args[0] === 'commit') { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 1_500)); }
+      return result;
+    });
+    const before = await originSha(fixture.bare);
+    await expect(openTeamRepo(clone, fixture.bare, stolen).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', lockStale: 2_000 })).rejects.toThrow(/Lost the safeWrite lock/);
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe((await git(['rev-parse', 'origin/main'], clone)).trim());
+    // The next write resets the clone itself and lands.
+    expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' })).toEqual({ changed: true, pushedTo: 'main' });
+  });
+
 });
