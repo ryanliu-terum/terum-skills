@@ -26,7 +26,7 @@ npx -y terum-skills@latest install <org>/<repo>/<skill>
 
 If no teams are configured, this guides you through setup before installing the skill. You will still be asked to confirm setup and permissions. Replace the angle-bracket placeholders with your team's values.
 
-Every step the wizard runs is also a plain verb — `login`, `team create|join`, `share`, `install`, `invite`, `ls`, `search`, `publish`, `sync`, `uninstall`, `team leave`. Run `npx -y terum-skills@latest --help` for the list.
+Every step the wizard runs is also a plain verb — `login`, `team create|join`, `share`, `install`, `invite`, `ls`, `search`, `publish`, `sync`, `uninstall-skill`, `uninstall`, `team leave`. Run `npx -y terum-skills@latest --help` for the list.
 
 ## Install (optional)
 
@@ -39,6 +39,14 @@ Already ran `npm install terum-skills` without `-g`? npm links the command under
 ### `terum-skills: command not found` after `npm install -g`
 
 If a global command is not found, check `npm prefix -g`. On macOS/Linux, add that prefix's `bin` directory to PATH; on Windows, add the prefix itself. If the launcher is missing from that directory, check whether npm's `bin-links` setting is disabled: `npm config get bin-links` should print `true`.
+
+## Uninstall
+
+`terum-skills uninstall` (no skill name) removes the tool from this machine: every team you joined
+(placed skills, local clones, cache), the Claude Code session-start hook if present, and
+`~/.terum/skills` except its recovery data (`quarantine/`, `backups/`). It then prints the one
+package-manager line to finish with — `npm uninstall -g terum-skills` for a global install; nothing
+for the `npx` form. `terum-skills uninstall-skill <skill>` removes one skill only.
 
 ## Troubleshooting
 
