@@ -10,7 +10,11 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { format as formatSkill } from './ls.js';
 
 export interface SearchArgs { term: string; category?: string; author?: string; project?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
-export interface SearchHit { team: string; id: string; name: string; author: string; category: string; installs: number; latest: string; endorsed: string; }
+export interface SearchHit {
+  team: string; id: string; name: string; author: string; category: string; installs: number; latest: string; endorsed: string;
+  /** The `HEAD:skills/<name>` lookup failed — the folder is on disk but not in HEAD, or git would not run — so `latest` is `—`. The row stays (search's corpus is the working tree); a UI greys out Install from this, not from the dash (rulings walk R12, 2026-09-06). */
+  unresolved: boolean;
+}
 
 /** Read-only clone search: git reads only (the latest tree hash), no prompts, no placement, no safeWrite. */
 export async function run(args: SearchArgs, io: Prompter): Promise<Result<SearchHit[]>> {
@@ -49,7 +53,7 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         const endorsed = skillEndorsement(teamJson, skill.id);
         const settled = latest[index]!;
         if (settled.status === 'rejected') io.print(`${team}/${skill.name}: ${settled.reason instanceof Error ? settled.reason.message : String(settled.reason)}`);
-        const hit = { team, id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: settled.status === 'fulfilled' ? shortHash(settled.value) : '—', endorsed };
+        const hit: SearchHit = { team, id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: settled.status === 'fulfilled' ? shortHash(settled.value) : '—', endorsed, unresolved: settled.status === 'rejected' };
         hits.push(hit);
         io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed }));
         }
