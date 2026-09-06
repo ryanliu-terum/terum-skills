@@ -11,6 +11,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const program = buildProgram(execute, {
       login: async (args) => { calls.push({ verb: 'login', ...args }); return success({ gh: { installed: true, authenticated: true }, handle: 'me' }); },
       team: async (args) => { calls.push({ verb: 'team', ...args }); return args.kind === 'join' && args.target === 'fail/fail' ? failure('nope') : success({ team: 't', remote: 'r' }); },
+      setup: async (args) => { calls.push({ verb: 'setup', ...args }); return success({ role: args.target ? 'joiner' : 'creator', team: 't', remote: 'r', steps: {} as never }); },
       invite: async (args) => { calls.push({ verb: 'invite', ...args }); return success({ team: 't', invited: [], already: [] }); },
       ls: async (args) => { calls.push({ verb: 'ls', ...args }); return success({ roster: [], skills: [] }); },
       readme: async (args) => { calls.push({ verb: 'readme', ...args }); return success({ changed: false }); },
@@ -33,6 +34,13 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       { verb: 'login' },
       { verb: 'team', kind: 'create', name: undefined, repo: 'skills-repo' },
     ]);
+  });
+
+  it('passes an optional setup target through unchanged', async () => {
+    const { program, calls } = harness();
+    await program.parseAsync(['setup'], { from: 'user' });
+    await program.parseAsync(['setup', 'acme/team'], { from: 'user' });
+    expect(calls).toEqual([{ verb: 'setup', target: undefined }, { verb: 'setup', target: 'acme/team' }]);
   });
 
   it('routes a failing Result to execute, and login takes no team or remote (rev 9, Decision 4)', async () => {

@@ -91,19 +91,42 @@ export async function remove(targetRoot: string, path: string, expectedFingerpri
   if (dirname(destination) !== root || !isAbsolute(destination)) {
     throw new Error(`Refusing to remove unowned placement ${path}`);
   }
-  try {
-    const current = await snapshotSkillDirectory(destination);
-    if (current.fingerprint !== expectedFingerprint) return { quarantined: await moveToQuarantine(destination, quarantineRoot, basename(destination)) };
-  } catch (error) { if (!isMissing(error)) throw error; }
+  // "Already gone" is decided by quarantineDrift's single probe; every later error speaks for
+  // itself. A quarantine that cannot complete propagates instead of falling through to rm, and the
+  // delete happens only after the fingerprint was positively verified (spec §6: moved, never deleted).
+  const drift = await quarantineDrift(destination, expectedFingerprint, quarantineRoot);
+  if (drift.current === undefined) return {};
+  if (drift.quarantined) return { quarantined: drift.quarantined };
   await rm(destination, { recursive: true, force: true });
   return {};
+}
+
+/**
+ * The one rule for a placed copy that no longer matches its ledger fingerprint: move it to
+ * quarantine and report where, never delete it. `install` (re-placing over an owned target),
+ * `sync` (its ledger loop) and `remove` all go through here. `current` is absent only when the
+ * path itself is gone — decided by one lstat, so an ENOENT raised mid-scan is an error, not "gone".
+ */
+export async function quarantineDrift(path: string, expectedFingerprint: string, quarantineRoot: string): Promise<{ current?: SkillSnapshot; quarantined?: string }> {
+  try { await lstat(path); } catch (error) { if (isMissing(error)) return {}; throw error; }
+  const current = await snapshotSkillDirectory(path);
+  if (current.fingerprint === expectedFingerprint) return { current };
+  return { current, quarantined: await moveToQuarantine(path, quarantineRoot, basename(path)) };
 }
 
 export async function moveToQuarantine(path: string, quarantineRoot: string, name: string): Promise<string> {
   const directory = join(quarantineRoot, new Date().toISOString().replace(/[:.]/g, '-'));
   const destination = join(directory, name);
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  await rename(path, destination);
+  try {
+    await rename(path, destination);
+  } catch (error) {
+    // The folder lives on another volume than ~/.terum (an authoring folder outside HOME): the
+    // copy must exist in quarantine before the original is removed.
+    if (!(error instanceof Error && 'code' in error && error.code === 'EXDEV')) throw error;
+    await cp(path, destination, { recursive: true, errorOnExist: true, force: false });
+    await rm(path, { recursive: true, force: true });
+  }
   return destination;
 }
 

@@ -4,6 +4,7 @@ import { join as pathJoin } from 'node:path';
 import { askHandle, askUntilValid, assertBindable, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, ghState, GhState, Identity, identityForJoiner, setIdentity, teamByRemote, Validation } from '../lib/auth.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists, mkdirPrivate } from '../lib/fs.js';
+import { defaultHookOptions, HookOptions, offerHook } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, normalizeRemote, remoteName, remoteToGitUrl, stripRemoteCredentials } from '../lib/remote.js';
 import { activePeople, readPeople } from '../lib/readme.js';
@@ -16,11 +17,11 @@ import { installOne } from './install.js';
 
 /**
  * §6 `team create` and `team join` (milestone M1). Both are `run(args, io)` over the Prompter.
- * The §8 hook offer and the §6 endorsed-set install offer arrive with M4 and M2 respectively.
+ * The §8 hook offer is shared with setup; a setup invocation suppresses it until its final step.
  */
-export interface TeamDependencies extends AuthDependencies { config?: ConfigStore; runner?: Runner; }
-export interface CreateArgs extends TeamDependencies { name?: string; org?: string; remote?: string; repo?: string; }
-export interface JoinArgs extends TeamDependencies { target: string; as?: string; }
+export interface TeamDependencies extends AuthDependencies { config?: ConfigStore; runner?: Runner; hook?: HookOptions; }
+export interface CreateArgs extends TeamDependencies { name?: string; org?: string; remote?: string; repo?: string; offerHook?: boolean; }
+export interface JoinArgs extends TeamDependencies { target: string; as?: string; offerHook?: boolean; }
 export interface RemoveArgs extends TeamDependencies { handle: string; team?: string; archiveOnly?: boolean; }
 export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs);
 export type CreateResult = { team: string; remote: string };
@@ -242,6 +243,9 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       bindTeam(fresh, name, { remote, handle: identity.handle });
     });
     io.print(`Created team ${name} at ${remote}`);
+    // The create is durable once the scaffold pushed and the binding was written; an unreadable
+    // settings.json must not turn it into a failure (the leave.ts / roster read-back rule).
+    await offerHookAfterDurableWork(io, args, store.root);
     return success({ team: name, remote });
   } catch (error) {
     return failure(error instanceof Error ? error.message : String(error));
@@ -319,6 +323,8 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
         catch (error) { io.print(`Could not install endorsed skill ${skill.name}: ${error instanceof Error ? error.message : String(error)}`); }
       }
     }
+    // Same rule as the roster read-back above: the join is durable, the hook offer is decoration.
+    await offerHookAfterDurableWork(io, args, store.root);
     return success({ team, handle: identity.handle, rejoined, roster });
   } catch (error) {
     return failure(error instanceof Error ? error.message : String(error));
@@ -397,13 +403,29 @@ async function requireGitConfig(runner: Runner, cwd: string, identity: { display
 }
 
 /**
+ * The session-hook offer is the last, cosmetic step of `team create` / `team join`. Its first read
+ * (`hookInstalled`) throws on a hand-edited ~/.claude/settings.json by design; that throw is
+ * printed here, never returned, so completed and already-announced work is not reported as failed.
+ * `setup` deliberately keeps the throwing behaviour (its spec makes an unusable settings file a
+ * resumable stopping point), so this helper is not used there.
+ */
+async function offerHookAfterDurableWork(io: Prompter, args: { offerHook?: boolean; hook?: HookOptions }, storeRoot: string): Promise<void> {
+  if (args.offerHook === false) return;
+  try { await offerHook(io, { ...defaultHookOptions(storeRoot), ...args.hook }); }
+  catch (error) { io.print(`Skipped the session hook: ${error instanceof Error ? error.message : String(error)}`); }
+}
+
+/**
  * §6: `<org>/<repo>` is the GitHub form (invitation API); anything else is a remote joined with
  * ambient git credentials and no invitation API — even when the URL happens to be on github.com.
- * `git@host:org/repo` has a colon, so it is a URL, never an owner/repo pair.
+ * `git@host:org/repo` has a colon, so it is a URL, never an owner/repo pair. The owner segment
+ * takes no dot: a GitHub login never carries one (githubLoginSchema), while `git.example/team` is
+ * the canonical `host/path` spelling `normalizeRemote` stores and the verbs print back — reading
+ * it as an owner sent teammates to a github.com repository that cannot exist.
  */
 export function parseJoinTarget(value: string): { remote: string; github: boolean; ownerRepo?: string } {
   const trimmed = value.trim();
-  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(trimmed)) {
+  if (/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(trimmed)) {
     const ownerRepo = trimmed.replace(/\.git$/i, '');
     return { remote: `https://github.com/${ownerRepo}.git`, github: true, ownerRepo };
   }

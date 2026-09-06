@@ -162,7 +162,7 @@ describe('team remove (§6)', () => {
     expect(JSON.parse(await git(['show', 'main:team.json'], fixture.bare)).archived).toEqual(['nogh']);
   });
 
-  it('refuses to revoke a GitHub login that another ACTIVE member also declares, before archiving or touching the host', async () => {
+  it('refuses to revoke a GitHub login that another ACTIVE member also declares — checked inside the write on the fresh roster, after the y/N and the gh reads, before any archive or DELETE', async () => {
     const { fixture, store } = await prepared();
     await pushFromSeed(fixture.seed, 'people/twin.json', `${JSON.stringify(person('twin', { github: 'Member-GH' }), null, 2)}\n`);
     const host = (args: readonly string[]) => {

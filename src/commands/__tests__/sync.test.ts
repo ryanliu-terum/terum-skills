@@ -8,6 +8,8 @@ import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { systemRunner } from '../../lib/runner.js';
+import lockfile from 'proper-lockfile';
+import { cloneLockPath } from '../../lib/teamRepo.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const skill = (description: string) => `---\nname: sample\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${description}\n`;
@@ -66,11 +68,39 @@ describe('sync --hook (§3, §6)', () => {
     void fixture;
   });
 
+  it('refuses to refresh a clone another operation is writing to, and leaves that clone untouched', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    const head = (await git(['rev-parse', 'HEAD'], clone)).trim();
+    const release = await lockfile.lock(clone, { lockfilePath: cloneLockPath(clone), realpath: false, stale: 60_000 });
+    try {
+      expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringMatching(/write lock/i) });
+      expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
+    } finally { await release(); }
+    expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe(head);
+  });
+
   it('heals a clone whose local main drifted instead of failing to fast-forward', async () => {
     const { store, clone } = await configuredSkill();
     await writeFile(join(clone, 'stray.txt'), 'local'); await git(['add', '--all'], clone); await git(['commit', '-q', '-m', 'local-only'], clone);
     expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
     expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe((await git(['rev-parse', 'origin/main'], clone)).trim());
+  });
+
+  it('blocks a placement whose pinned version is not in the clone and touches nothing', async () => {
+    const { fixture, store } = await configuredSkill();
+    const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', team: 'team', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
+    const [path] = Object.keys((await store.read()).placements);
+    const before = await snapshotSkillDirectory(path!);
+    const unknown = '0123456789abcdef0123456789abcdef01234567';
+    await store.update((config) => { config.placements[path!]!.version = unknown; });
+    const io = new ScriptedPrompter();
+    expect((await run({ config: store }, io)).ok).toBe(true);
+    expect(io.lines.join('\n')).toContain(`Blocked ${path}: pinned version 01234567`);
+    expect((await snapshotSkillDirectory(path!)).fingerprint).toBe(before.fingerprint);
+    expect((await store.read()).placements[path!]!.version).toBe(unknown);
   });
 
   it('adopts or declines orphans interactively and only defers them in hook mode', async () => {
@@ -135,6 +165,24 @@ describe('sync --hook (§3, §6)', () => {
     expect(Object.keys((await store.read()).placements)).toEqual([newPath]);
   });
 
+  it('refuses to follow a rename onto a folder it does not own, leaving the stranger and the old placement untouched', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const oldPath = join(home, '.claude', 'skills', 'sample'); const stranger = join(home, '.claude', 'skills', 'renamed');
+    await mkdir(stranger, { recursive: true }); await writeFile(join(stranger, 'SKILL.md'), 'user-owned, not a placement');
+    await git(['fetch', '-q', 'origin'], fixture.seed); await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
+    await cp(join(fixture.seed, 'skills', 'sample'), join(fixture.seed, 'skills', 'renamed'), { recursive: true });
+    await rm(join(fixture.seed, 'skills', 'sample'), { recursive: true });
+    await writeFile(join(fixture.seed, 'skills', 'renamed', 'SKILL.md'), skill('renamed').replace('name: sample', 'name: renamed'));
+    await git(['add', '--all'], fixture.seed); await git(['commit', '-q', '-m', 'rename sample'], fixture.seed); await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
+    const io = new ScriptedPrompter();
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0 } });
+    expect(await readFile(join(stranger, 'SKILL.md'), 'utf8')).toBe('user-owned, not a placement');
+    expect(await readFile(join(oldPath, 'SKILL.md'), 'utf8')).toContain('description: old');
+    expect(Object.keys((await store.read()).placements)).toEqual([oldPath]);
+    expect(io.lines.filter((line) => line.startsWith(`Blocked ${oldPath}: ${stranger} already exists`))).toHaveLength(1);
+  });
+
   it('defers consent for a noninteractive-shaped interactive call without emitting hook stdout', async () => {
     const setup = await configuredToolSkill();
     await pushFromSeed(setup.fixture.seed, 'skills/sample/SKILL.md', toolSkill('widened', ['Bash(*)']));
@@ -152,6 +200,35 @@ describe('sync --hook (§3, §6)', () => {
     const result = await run({ hook: true, config: orphan.store }, io);
     expect(result).toMatchObject({ ok: true, value: { notices: [expect.stringContaining(orphan.path)] } });
     expect(io.lines).toEqual(['{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}']);
+  });
+
+  it('replays a pending uninstall in hook mode with its quarantine line on notices, never on stdout', async () => {
+    const orphan = await orphanedPlacement(true);
+    await writeFile(join(orphan.path, 'SKILL.md'), skill('hand edit'));
+    await orphan.store.update((config) => { config.pending.push({ op: 'uninstall', id: ID, team: 'team', scope: { kind: 'global' }, started: '2026-09-05T00:00:00Z' }); });
+    const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    const result = await run({ hook: true, config: orphan.store }, io);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.placed).toBe(0);
+    expect(result.value.notices.some((line) => line.startsWith(`Local changes at ${orphan.path} moved to `))).toBe(true);
+    expect(io.lines).toEqual([]);
+    expect((await orphan.store.read()).pending).toEqual([]);
+    expect((await orphan.store.read()).placements).toEqual({});
+    expect(JSON.parse(await readFile(join(orphan.clone, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
+  });
+
+  it('replays a pending install in hook mode with its placement notice on notices, stdout holding the reload directive alone', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { project: { remotes: [fixture.bare], skills: [ID] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'project', project: 'project' }, started: '2026-09-04T00:00:00Z' }); });
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'rev-parse' && args.includes('info/exclude') ? { code: 1, stdout: '', stderr: 'no exclude here' } : next());
+    const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    const result = await run({ hook: true, config: store, runner, cwd: clone }, io);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.placed).toBe(1);
+    expect(result.value.notices.some((line) => line.includes('could not add .claude/skills/sample to .git/info/exclude') && line.includes('no exclude here'))).toBe(true);
+    expect(io.lines).toEqual(['{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}']);
+    expect((await store.read()).pending).toHaveLength(0);
   });
 
   it('leaves a project pending install deferred outside its worktree and replays it inside', async () => {

@@ -1,7 +1,7 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { lockTarget, moveToQuarantine, place, remove } from '../lib/placer.js';
+import { inspect, lockTarget, place, quarantineDrift, remove } from '../lib/placer.js';
 import { NonInteractivePrompter, Prompter } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
@@ -31,6 +31,16 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
     const runner = args.runner ?? systemRunner;
     const interactive = !args.hook && io.interactive && 'confirm' in io;
     const notice = (line: string) => { notices.push(line); if (!args.hook) io.print(line); };
+    // Every verb sync runs on the user's behalf (a pending replay, the endorsed batch, shared-source
+    // reconciliation) prints through this channel: in hook mode the lines ride SyncResult.notices to
+    // stderr (§8), so stdout carries the reload directive alone; interactively they print as before.
+    const childIo: Prompter = {
+      interactive: 'confirm' in io ? io.interactive : false,
+      print: notice,
+      confirm: (question) => ('confirm' in io ? io.confirm(question) : Promise.resolve(false)),
+      text: (question, defaultValue) => ('text' in io ? io.text(question, defaultValue) : Promise.reject(new Error('sync --hook cannot prompt'))),
+      select: (question, choices) => ('select' in io ? io.select(question, choices) : Promise.reject(new Error('sync --hook cannot prompt'))),
+    };
     if (args.prune) {
       if (!interactive) throw new Error('sync prune needs an interactive terminal.');
       await prune(store, io as Prompter);
@@ -45,14 +55,17 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       // primitive; an unapproved hook replay is deferred rather than silently completed.
       for (const pending of (await store.read()).pending.filter((entry) => entry.team === team)) {
         try {
+          // An uninstall replay works from the placement ledger and the people file alone, so it is
+          // never gated on the clone: gating it wedged the entry (and the people-file record) forever
+          // once the author deleted the skill upstream. Only the install path needs the record.
+          if (pending.op === 'uninstall') { await uninstallOne({ team, id: pending.id, scope: pending.scope, store, runner, cwd: args.cwd }, childIo); changed = true; continue; }
           const skill = await findSkill(clone, team, pending.id);
           if (!skill) { deferred.push(`${pending.id.slice(0, 8)} is no longer in ${team}`); continue; }
-          if (pending.op === 'uninstall') { await uninstallOne({ team, id: pending.id, scope: pending.scope, store, runner, cwd: args.cwd }, io as Prompter); changed = true; continue; }
           const version = 'version' in pending && typeof pending.version === 'string' ? pending.version : undefined;
           const source = version ? await materializeVersion(store, team, clone, skill.name, version, runner) : skill.directory;
           const placedSkill = await skillAtSource(source, skill);
           if (!approved((await store.read()), skill.id, placedSkill.grants) && !interactive) { deferred.push(skill.name); continue; }
-          await installOne({ team, id: pending.id, scope: pending.scope, version, store, runner, cwd: args.cwd }, io as Prompter);
+          await installOne({ team, id: pending.id, scope: pending.scope, version, store, runner, cwd: args.cwd }, childIo);
           placed++; changed = true;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -61,16 +74,8 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         }
       }
     }
-    // Reconciliation never prompts, but it reports. Its lines must ride the notice channel so a
-    // hook run keeps stdout for the reload directive alone (§8) and stderr carries the rest.
-    const reconcileIo: Prompter = {
-      interactive: 'confirm' in io ? io.interactive : false,
-      print: notice,
-      confirm: (question) => ('confirm' in io ? io.confirm(question) : Promise.resolve(false)),
-      text: (question, defaultValue) => ('text' in io ? io.text(question, defaultValue) : Promise.reject(new Error('sync --hook cannot prompt'))),
-      select: (question, choices) => ('select' in io ? io.select(question, choices) : Promise.reject(new Error('sync --hook cannot prompt'))),
-    };
-    await reconcileShared(store, runner, reconcileIo);
+    // Reconciliation never prompts, but it reports — through the same notice channel.
+    await reconcileShared(store, runner, childIo);
     // Existing ledger paths drive every later decision. A folder merely present on disk is never
     // adopted, quarantined, or deleted without a ledger entry.
     const currentConfig = await store.read();
@@ -86,6 +91,12 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       if (person?.declined.includes(entry.id)) continue;
       const skill = await findSkill(clone, entry.team, entry.id);
       if (!skill) { notice(`Blocked ${path}: its skill is no longer in the repository.`); continue; }
+      // §6 blocked, second sub-case: the ledger pins a tree the clone does not have (placed from a
+      // newer or rewritten history). The tool must not resolve that alone: report, touch nothing.
+      if (entry.version && (await runner.run('git', ['cat-file', '-e', `${entry.version}^{tree}`], { cwd: clone })).code !== 0) {
+        notice(`Blocked ${path}: pinned version ${entry.version.slice(0, 8)} is not in the team repository (newer than this clone, or rewritten); leaving it untouched.`);
+        continue;
+      }
       const source = entry.version ? await materializeVersion(store, entry.team, clone, skill.name, entry.version, runner) : skill.directory;
       const grants = (await skillAtSource(source, skill)).grants;
       if (!approved((await store.read()), skill.id, grants)) {
@@ -95,12 +106,11 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         if (!(await (io as Prompter).confirm(`Approve updated tools for ${skill.name}?`))) { deferred.push(skill.name); continue; }
         await store.update((fresh) => { fresh.approvals[skill.id] = { grants: grants.hash, approved_at: new Date().toISOString().slice(0, 10) }; });
       }
-      const current = await snapshotSkillDirectory(path).catch(() => undefined);
-      if (current && current.fingerprint !== entry.fingerprint) {
-        const quarantined = await moveToQuarantine(path, join(store.root, 'quarantine'), basename(path));
-        notice(`Local changes at ${path} moved to ${quarantined}.`);
-        changed = true;
-      }
+      // A placed copy that no longer matches its ledger fingerprint is moved to quarantine, never
+      // deleted — the same helper install uses when it re-places over an owned target.
+      const drift = await quarantineDrift(path, entry.fingerprint, join(store.root, 'quarantine'));
+      const current = drift.current;
+      if (drift.quarantined) { notice(`Local changes at ${path} moved to ${drift.quarantined}.`); changed = true; }
       const repoSnapshot = await snapshotSkillDirectory(source);
       if (current?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
       // The ledger is provenance for the exact placement, including a particular project checkout.
@@ -108,7 +118,13 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       const root = dirname(path);
       const release = await lockTarget(root, skill.name);
       try {
-        const result = await place(source, root, skill.name, { replace: Boolean(current), projectRoot, runner });
+        // After an upstream rename the destination is not the ledger key: `replace` is authorized
+        // by what sits AT the destination (a ledger-owned placement, or nothing), never by the old
+        // path — D16, the check install.ts runs. A stranger's folder at the new name is reported.
+        const destination = join(root, skill.name);
+        const collision = await inspect(destination, (await store.read()).placements[destination]?.id === skill.id);
+        if (collision.kind === 'foreign') { notice(`Blocked ${path}: ${destination} already exists and is not a placement this tool owns; leaving both untouched.`); continue; }
+        const result = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot, runner });
         const renamed = basename(path) !== skill.name;
         await store.update((fresh) => {
           const placement = fresh.placements[path];
@@ -136,7 +152,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
           continue;
         }
         if (await (io as Prompter).confirm(`Install ${candidates.length} newly endorsed skill(s) from ${team}?`)) {
-          for (const skill of candidates) { await installOne({ team, id: skill.id, store, runner, cwd: args.cwd }, io as Prompter); placed++; changed = true; }
+          for (const skill of candidates) { await installOne({ team, id: skill.id, store, runner, cwd: args.cwd }, childIo); placed++; changed = true; }
         }
       }
     }

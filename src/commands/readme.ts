@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { Prompter } from '../lib/prompt.js';
-import { applyReadme, generateReadme, readReadmeData } from '../lib/readme.js';
+import { applyReadme, generateReadme, inlineText, readReadmeData } from '../lib/readme.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { parseJson, teamSchema } from '../lib/schema.js';
@@ -24,7 +24,8 @@ export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ chan
       const beforeIds = new Set([...before.global, ...Object.values(before.projects).flatMap((project) => project.skills)]);
       const added = new Set([...current.global, ...Object.values(current.projects).flatMap((project) => project.skills)].filter((id) => !beforeIds.has(id)));
       const skills = data.skills.filter((skill) => added.has(skill.id));
-      const comment = ['<!-- terum-skills:pr-comment -->', '## terum-skills publish preview', ...(skills.length ? skills.map((skill) => `- ${skill.name} (${skill.category})`) : ['- No new endorsements.'])].join('\n');
+      // The Action finds its own comment by the anchor below, so skill text must not be able to forge a second one.
+      const comment = ['<!-- terum-skills:pr-comment -->', '## terum-skills publish preview', ...(skills.length ? skills.map((skill) => `- ${inlineText(skill.name)} (${inlineText(skill.category)})`) : ['- No new endorsements.'])].join('\n');
       io.print(comment);
       return success({ comment });
     }

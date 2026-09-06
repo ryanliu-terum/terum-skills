@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { inspect, lockTarget, moveToQuarantine, place, resolveTarget } from '../lib/placer.js';
+import { inspect, lockTarget, moveToQuarantine, place, quarantineDrift, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
@@ -89,11 +89,18 @@ export async function installOne(input: { team: string; reference?: string; id?:
   const release = await lockTarget(root, skill.name);
   let placed: { path: string; snapshot: { fingerprint: string }; notices: string[] };
   try {
-    const owned = Boolean((await input.store.read()).placements[destination]?.id === skill.id);
+    const entry = (await input.store.read()).placements[destination];
+    const owned = entry?.id === skill.id;
     const collision = await inspect(destination, owned);
     if (collision.kind === 'foreign') {
       if (!input.force) throw new Error(`Install target ${destination} already contains another skill; retry with --force to move it to quarantine.`);
       await moveToQuarantine(destination, join(input.store.root, 'quarantine'), basename(destination));
+    }
+    if (collision.kind === 'ours' && entry) {
+      // Re-placing over our own placement keeps the user's edits (spec §4.3 / default 33): the
+      // same quarantine-on-mismatch rule sync and uninstall apply, through the same helper.
+      const drift = await quarantineDrift(destination, entry.fingerprint, join(input.store.root, 'quarantine'));
+      if (drift.quarantined) io.print(`Local changes at ${destination} moved to ${drift.quarantined}.`);
     }
     placed = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot: repoRoot, runner: input.runner });
     await input.store.update((fresh) => {
@@ -107,7 +114,7 @@ export async function installOne(input: { team: string; reference?: string; id?:
     const raw = tree.before(path);
     if (!raw) throw new Error(`Missing ${path}.`);
     const person = parseJson(personSchema, treeText(raw), path);
-    const installed = person.installed.filter((entry) => !(entry.id === skill.id && JSON.stringify(entry.scope) === JSON.stringify(scope)));
+    const installed = person.installed.filter((entry) => !(entry.id === skill.id && sameScope(entry.scope, scope)));
     installed.push({ id: skill.id, version: latest, scope, since: new Date().toISOString().slice(0, 10) });
     const declined = person.declined.filter((id) => id !== skill.id);
     tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);
@@ -118,7 +125,7 @@ export async function installOne(input: { team: string; reference?: string; id?:
 
 async function ensureConsent(store: ConfigStore, skill: SkillRecord, io: Prompter): Promise<void> {
   if (!skill.grants.ok) {
-    io.print(`allowed-tools for ${skill.name} could not be parsed: ${String(skill.grants.raw)}`);
+    io.print(`allowed-tools for ${skill.name} could not be parsed: ${JSON.stringify(skill.grants.raw)}`);
     if (!(await io.confirm(`Install ${skill.name} despite malformed allowed-tools?`))) throw new Error(`Consent was declined for malformed allowed-tools on ${skill.name}.`);
     return;
   }

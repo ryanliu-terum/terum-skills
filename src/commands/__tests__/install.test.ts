@@ -88,7 +88,7 @@ describe('install (§6 refs)', () => {
     const io = new ScriptedPrompter([], [false]);
     const result = await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, io);
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('malformed allowed-tools') });
-    expect(io.lines.join('\n')).toContain('[object Object]');
+    expect(io.lines.join('\n')).toContain('{"Bash":"*"}');
     expect(io.askedAbout('despite malformed')).toBe(true);
     expect((await store.read()).approvals).toEqual({});
     expect((await store.read()).pending).toEqual([]);
@@ -180,6 +180,26 @@ describe('install (§6 refs)', () => {
     expect((await run({ kind: 'project', project: 'product', config: store, home: projectHome, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
     expect(await readFile(join(foreign, 'SKILL.md'), 'utf8')).toBe('user-owned');
     await expect(access(join(checkout, '.claude', 'skills', 'sample', 'SKILL.md'))).resolves.toBeUndefined();
+  });
+
+  it('re-installing over an owned placement moves hand edits to quarantine instead of deleting them', async () => {
+    const fixture = await bareTeam();
+    const id = '55555555-5555-4555-8555-555555555555';
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    expect((await run({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const placed = join(home, '.claude', 'skills', 'sample');
+    await writeFile(join(placed, 'SKILL.md'), 'hand edited');
+    const io = new ScriptedPrompter();
+    expect((await run({ ref: 'sample', config: store, home }, io)).ok).toBe(true);
+    expect(await readFile(join(placed, 'SKILL.md'), 'utf8')).toContain('description: sample');
+    const quarantine = join(store.root, 'quarantine');
+    const entries = await readdir(quarantine, { recursive: true });
+    const copies = await Promise.all(entries.filter((item) => item.endsWith('sample/SKILL.md')).map((item) => readFile(join(quarantine, item), 'utf8')));
+    expect(copies).toEqual(['hand edited']);
+    expect(io.lines.filter((line) => line.startsWith(`Local changes at ${placed} moved to `))).toHaveLength(1);
   });
 
   it('keeps project placements worktree-local across two projects and two checkouts, and sync never guesses an unrelated checkout', async () => {

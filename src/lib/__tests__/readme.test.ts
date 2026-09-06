@@ -58,4 +58,27 @@ describe('README generator (§9)', () => {
     const existing = 'Intro\n\n<!-- terum-skills:begin -->\nold\n<!-- terum-skills:end -->\n';
     expect(applyReadme(existing, block)).toBe(`Intro\n\n${block.trimEnd()}\n`);
   });
+
+  it('neutralizes block markers, pipes, newlines and backslashes in every interpolated field, so a poisoned field cannot wedge later writes', () => {
+    const marker = '<!-- terum-skills:end -->';
+    const hostile: ReadmeData = {
+      ...data,
+      team: { ...data.team, name: `team ${marker}` },
+      people: [{ ...data.people[0]!, display_name: `Amy\n${marker}` }],
+      skills: [{ ...data.skills[1]!, name: `first|${marker}`, category: 'test\\ing|x', author: `Amy <amy@example.com> ${marker}`, description: `Ends here ${marker}` }],
+    };
+    const block = generateReadme(hostile);
+    expect(block.split('<!-- terum-skills:begin -->')).toHaveLength(2);
+    expect(block.split(marker)).toHaveLength(2);
+    expect(block).toContain('## team &lt;!-- terum-skills:end --> skills');
+    expect(block).toContain('- @amy — Amy &lt;!-- terum-skills:end -->');
+    expect(block).toContain('### Amy <amy@example.com> &lt;!-- terum-skills:end -->');
+    const row = block.split('\n').find((line) => line.startsWith('| first'))!;
+    expect(row).toContain('| first\\|&lt;!-- terum-skills:end --> | test\\\\ing\\|x | Ends here &lt;!-- terum-skills:end --> |');
+    expect(row.split(/(?<!\\)\|/)).toHaveLength(10);
+    const existing = 'Intro\n\n<!-- terum-skills:begin -->\nold\n<!-- terum-skills:end -->\n\nFooter\n';
+    const once = applyReadme(existing, block);
+    expect(applyReadme(once, generateReadme(hostile))).toBe(once);
+    expect(once).toContain('\n\nFooter\n');
+  });
 });

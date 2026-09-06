@@ -1,10 +1,14 @@
-import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
-import { create, WORKFLOW } from '../team.js';
+import { create as rawCreate, WORKFLOW } from '../team.js';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, exists, fakeGh, git, mappedRunner, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+
+// Existing create coverage predates the session hook. Keep it focused on creation; dedicated
+// hook-path coverage passes an explicit temp settings file below.
+const create = (args: Parameters<typeof rawCreate>[0], io: Parameters<typeof rawCreate>[1]) => rawCreate({ ...args, offerHook: false }, io);
 
 async function emptyBare(): Promise<{ root: string; bare: string }> {
   const root = await temporaryDirectory();
@@ -24,6 +28,33 @@ describe('team create (§6)', () => {
     expect(workflow.jobs['publish-comment']?.permissions).toEqual({ contents: 'read', 'pull-requests': 'write' });
     expect(workflow.jobs['publish-comment']?.steps[0]?.with?.['persist-credentials']).toBe(false);
     expect(WORKFLOW).toContain('npx -y terum-skills@latest');
+  });
+
+  it('offers the session hook directly unless setup explicitly suppresses it', async () => {
+    const { root, bare } = await emptyBare();
+    const remote = 'https://git.example/hook-team.git';
+    const settingsFile = pathJoin(root, 'settings.json');
+    const direct = new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com'], [true]);
+    await expect(rawCreate({ name: 'hook-team', remote, config: createConfigStore(pathJoin(root, 'direct')), runner: mappedRunner(remote, bare), hook: { settingsFile, backupDir: pathJoin(root, 'backups') } }, direct)).resolves.toMatchObject({ ok: true });
+    expect(direct.countAsked('Install the Claude Code session-start hook')).toBe(1);
+    const empty = await emptyBare();
+    const suppressed = new ScriptedPrompter(['other', 'other', 'Other', 'other@example.com']);
+    await expect(rawCreate({ name: 'suppressed', remote: 'https://git.example/suppressed.git', config: createConfigStore(pathJoin(root, 'suppressed')), runner: mappedRunner('https://git.example/suppressed.git', empty.bare), offerHook: false }, suppressed)).resolves.toMatchObject({ ok: true });
+    expect(suppressed.countAsked('Install the Claude Code session-start hook')).toBe(0);
+  });
+
+  it('a completed create survives an unreadable settings.json: ok, one skipped-hook line, settings bytes untouched', async () => {
+    const { root, bare } = await emptyBare();
+    const remote = 'https://git.example/broken-settings.git';
+    const settingsFile = pathJoin(root, 'settings.json');
+    await writeFile(settingsFile, '{ not json');
+    const io = new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']);
+    const result = await rawCreate({ name: 'broken-settings', remote, config: createConfigStore(pathJoin(root, 'direct')), runner: mappedRunner(remote, bare), hook: { settingsFile, backupDir: pathJoin(root, 'backups') } }, io);
+    expect(result).toMatchObject({ ok: true, value: { team: 'broken-settings' } });
+    expect(io.lines.filter((line) => line.startsWith(`Skipped the session hook: Cannot edit ${settingsFile}`))).toHaveLength(1);
+    expect(io.countAsked('Install the Claude Code session-start hook')).toBe(0);
+    expect(await readFile(settingsFile, 'utf8')).toBe('{ not json');
+    expect(await git(['ls-remote', '--heads', bare])).toContain('refs/heads/main');
   });
 
   it('scaffolds the §4.1 tree into an empty generic-git remote, records the team, and leaves the clone ready', async () => {
