@@ -1,17 +1,12 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { creatorAuthenticationError, detectOrOfferGh, teamByRemote } from '../lib/auth.js';
 import { COMMUNITY_URL } from '../lib/community.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { localSkillCandidates } from '../lib/local-skills.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
-import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
 import { Prompter } from '../lib/prompt.js';
 import { readRoster } from '../lib/skills.js';
 import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { packageVersion } from '../lib/package.js';
 import { describeClone } from '../lib/teamRepo.js';
 import { joinCommand, run as invite } from './invite.js';
 import { run as share } from './share.js';
@@ -189,28 +184,17 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     }
 
     if (role === 'creator') {
-      const root = AGENT_PATHS['claude-code'].global(args.home ?? homedir());
-      const { names: available, omitted, unreadable } = await localSkillCandidates(root, await store.read());
-      if (omitted.length + unreadable > 0) io.print(`Skipped ${omitted.length + unreadable} local folders that fail share validation.`);
-      if (available.length === 0) {
-        io.print(`No unshared skills under ${root}.`);
-        steps.actions = 'skipped';
-      } else {
-        const choice = await io.select('Share a skill with the team?', [...available, 'skip']);
-        if (choice === 'skip') steps.actions = 'skipped';
-        else {
-          const result = await verbs.share({ path: join(root, choice), team: teamName, config: store, runner }, io);
-          if (!result.ok) return failed(result.error, role, teamName, remote, steps);
-          steps.actions = 'done';
-        }
-      }
+      const result = await verbs.share({ team: teamName, home: args.home, config: store, runner }, io);
+      if (!result.ok) return failed(result.error, role, teamName, remote, steps);
+      steps.actions = result.value === undefined ? 'skipped' : 'done';
     } else steps.actions = 'skipped';
     say('Next, from any terminal:');
     say(`  terum-skills install ${teamName}/<skill>   — install a shared skill (add @<version> to pin it)`);
-    say('  terum-skills ls                       — list members and shared skills');
+    say('  terum-skills ls [--local]             — list members and shared skills; --local lists your own');
     say('  terum-skills search <term>            — find a skill by name, description, or category');
     say('  terum-skills sync                     — pull updates and finish pending work');
-    say(`  npx -y terum-skills@${packageVersion() ?? 'latest'} publish <skill> — endorse a skill already shared with the team`);
+    say(`  npx -y terum-skills@latest publish <skill> — endorse a skill already shared with the team`);
+    say('  npx -y terum-skills@latest share      — share one of your local skills (asks which)');
 
     const communityUrl = args.communityUrl ?? COMMUNITY_URL;
     if (communityUrl === '' || args.quiet) steps.community = 'skipped';

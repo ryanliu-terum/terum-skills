@@ -1,5 +1,10 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { localSkills, type LocalEntry } from '../lib/local-skills.js';
+import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
+import { printable } from '../lib/skill-source.js';
+import { readTeam, skillRecords } from '../lib/skills.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
@@ -8,14 +13,17 @@ import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
 
-export interface LsArgs { kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
+export interface LsArgs { local?: boolean; home?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
 export interface LsSkill { id: string; name: string; author: string; category: string; installs: number; latest: string; endorsement: string; }
-export interface LsResult { roster: readonly { handle: string; active: boolean }[]; skills: readonly LsSkill[]; }
+export interface LsResult { local?: { root: string; scope: 'global'; rows: { name: string; path: string; state: string; problem?: string }[]; notOffered: { name: string; path: string; reason: string }[]; problems: { path: string; reason: string }[] }; roster: readonly { handle: string; active: boolean }[]; skills: readonly LsSkill[]; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
 export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>> {
   try {
+    if (args.local && (args.kind === 'member' || args.kind === 'project')) throw new Error('--local cannot be combined with member or project.');
+    if (args.local && args.team) throw new Error('--local lists every configured team; drop --team.');
     const store = args.config ?? createConfigStore();
+    if (args.local) return await showLocal(store, args.home ?? homedir(), io);
     const [teamName] = selectTeam((await store.read()).teams, args.team);
     const clone = store.teamClone(teamName);
     const runner = args.runner ?? systemRunner;
@@ -31,6 +39,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     for (const member of roster) io.print(`  ${member.handle}${member.active ? '' : ' (inactive)'}`);
     io.print('Skills:');
     for (const skill of skills) io.print(format(skill));
+    io.print('Local skills: npx -y terum-skills@latest ls --local');
     return success({ roster, skills });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
 }
@@ -71,3 +80,63 @@ async function showProject(projectName: string | undefined, team: ReturnType<typ
 }
 /** One skill per line, the §6 `ls` format; `search` prints hits through the same function. */
 export function format(skill: LsSkill): string { return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${skill.latest}; ${skill.endorsement}`; }
+
+
+/** Local discovery is independent of team selection, and only enriches ledger references. */
+async function showLocal(store: ConfigStore, home: string, io: Prompter): Promise<Result<LsResult>> {
+  const inventory = await localSkills(AGENT_PATHS['claude-code'].global(home), await store.read());
+  const local: NonNullable<LsResult['local']> = { root: inventory.root, scope: inventory.scope, rows: [], notOffered: [], problems: [...inventory.problems] };
+  io.print(`Local Claude Code skills (${printable(inventory.root)}; global only):`);
+  const snapshots = new Map<string, { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; complete: boolean }>();
+  for (const entry of inventory.entries) {
+    for (const ref of [...entry.shared, ...(entry.placement ? [entry.placement] : [])]) {
+      if (snapshots.has(ref.team)) continue;
+      const snapshot: { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; complete: boolean } = { complete: false };
+      snapshots.set(ref.team, snapshot);
+      try {
+        const clone = store.teamClone(ref.team);
+        snapshot.teamJson = await readTeam(clone);
+        let complete = true;
+        const records = await skillRecords(clone, ref.team, { onProblem: () => { complete = false; } });
+        snapshot.ids = new Set(records.map((record) => record.id));
+        snapshot.complete = complete;
+      } catch { /* A ledger fact survives an unavailable clone. */ }
+    }
+  }
+  const stateOf = (entry: LocalEntry): string => {
+    const states = entry.shared.map((ref) => {
+      const snapshot = snapshots.get(ref.team)!;
+      let status = 'repository status unknown';
+      if (snapshot.complete && snapshot.ids && snapshot.teamJson) {
+        if (!snapshot.ids.has(ref.id)) status = 'repository copy missing from local clone';
+        else {
+          // skillEndorsement prioritizes global over the sorted project list.
+          const badge = skillEndorsement(snapshot.teamJson, ref.id);
+          status = badge === '—' ? 'not endorsed in local clone' : `endorsed (${badge})`;
+        }
+      }
+      return `shared source for ${ref.team}; ${status}`;
+    });
+    if (entry.placement) states.push(`placement recorded from ${entry.placement.team}${entry.placement.version === null ? '' : ` @${entry.placement.version.slice(0, 8)}`}`);
+    return states.length > 1 ? `conflicting tracking: ${states.join('; ')}` : states[0] ?? 'untracked locally';
+  };
+  for (const entry of inventory.entries) {
+    const tracked = entry.shared.length > 0 || entry.placement !== undefined;
+    const inspection = entry.inspection;
+    if (tracked || inspection.kind === 'candidate') {
+      const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (share needs --allow-privileged)' : undefined;
+      local.rows.push({ name: entry.name, path: entry.path, state: stateOf(entry), ...(problem === undefined ? {} : { problem }) });
+    } else if (inspection.kind === 'rejected') local.notOffered.push({ name: entry.name, path: entry.path, reason: inspection.detail });
+    if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
+  }
+  for (const row of local.rows) io.print(`  ${printable(row.name)} — ${printable(row.state)}${row.problem === undefined ? '' : `; source problem: ${printable(row.problem)}`}; path: ${printable(row.path)}`);
+  if (local.notOffered.length) {
+    io.print('Not offered for sharing:');
+    for (const entry of local.notOffered) io.print(`  ${printable(entry.name)} — ${printable(entry.reason)}; path: ${printable(entry.path)}`);
+  }
+  if (inventory.rootState === 'absent') io.print(`  none (${printable(inventory.root)} does not exist)`);
+  else if (inventory.rootState === 'scanned' && !inventory.entries.length) io.print('  none');
+  for (const problem of local.problems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
+  io.print('Team status is from local clones and may be stale; open endorsement requests are not checked.');
+  return success({ roster: [], skills: [], local });
+}

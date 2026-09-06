@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { COMMUNITY_URL } from '../../lib/community.js';
 import { createConfigStore } from '../../lib/config.js';
+import { failure, success } from '../../lib/result.js';
 import { offerHook } from '../../lib/hook.js';
 import { bareTeam, cloneWithIdentity, exists, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
 import { Prompter, PromptClosedError } from '../../lib/prompt.js';
@@ -19,7 +20,7 @@ async function skillUnder(home: string, name = 'starter'): Promise<void> {
 
 class AnsweringPrompter implements Prompter {
   readonly events: string[] = [];
-  readonly interactive = false;
+  readonly interactive = true; // share's picker only prompts on an interactive channel (issue 9)
   constructor(private readonly answers: Record<string, string>, private readonly confirms: Record<string, boolean>) {}
   private answer(question: string): string {
     if (/invite/i.test(question)) return this.answers.invite ?? '';
@@ -110,7 +111,7 @@ describe('setup (§6.1)', () => {
   it('asks for teammates right after the team exists, prints the block the owner sends, and only then offers a skill and the hints', async () => {
     const args = await freshCreator();
     const io = new AnsweringPrompter(
-      { 'Create a team or join one?': 'Create a new team', 'Team name': 'alpha', 'GitHub login': '', 'Team handle': '', 'Your name': 'Alice', 'Your email': 'alice@example.com', 'GitHub repository name': 'alpha-repo', invite: 'bob', 'Share a skill with the team?': 'starter' },
+      { 'Create a team or join one?': 'Create a new team', 'Team name': 'alpha', 'GitHub login': '', 'Team handle': '', 'Your name': 'Alice', 'Your email': 'alice@example.com', 'GitHub repository name': 'alpha-repo', invite: 'bob', 'Share a local skill with team alpha?': 'Share starter' },
       { 'Share starter?': true, 'Install the Claude Code session-start hook': false },
     );
     const result = await run(args, io);
@@ -119,7 +120,7 @@ describe('setup (§6.1)', () => {
     const asked = io.at((e) => e.startsWith('ask:') && /invite/i.test(e));
     const invited = io.at((e) => e === 'print:Invited @bob.');
     const block = io.at((e) => e.includes('npx -y terum-skills@latest setup alice/alpha-repo'));
-    const share = io.at((e) => e === 'ask:Share a skill with the team?');
+    const share = io.at((e) => e === 'ask:Share a local skill with team alpha?');
     const hints = io.at((e) => e === 'print:Next, from any terminal:');
     const order = [created, asked, invited, block, share, hints];
     for (const index of order) expect(index).toBeGreaterThan(-1);
@@ -129,7 +130,7 @@ describe('setup (§6.1)', () => {
 
   it('uses the agreed invitation wording and no longer the old one', async () => {
     const args = await freshCreator();
-    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob', 'starter'], [true, false]);
+    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob', 'Share starter'], [true, false], true);
     const result = await run(args, io);
     expect.soft(io.asked).toContain('Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)');
     expect.soft(io.askedAbout('GitHub logins to invite')).toBe(false);
@@ -338,14 +339,14 @@ describe('setup (§6.1)', () => {
       'api -X PUT --include repos/alice/alpha-repo/collaborators/bob': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' },
       'api -X PUT --include repos/alice/alpha-repo/collaborators/carol': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' },
     }));
-    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob carol', 'starter'], [true, true]);
+    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob carol', 'Share starter'], [true, true], true);
     const result = await run({ config: store, home, runner, hook: hookFor(root), communityUrl: 'https://example.test/community' }, io);
     if (!result.ok) throw new Error(result.error);
 
     expect(result.value).toMatchObject({ role: 'creator', team: 'alpha', remote, steps: { welcome: 'printed', github: 'done', team: 'done', actions: 'done', invite: 'done', community: 'printed', hook: 'done', done: 'printed' } });
     expect(io.asked).toEqual([
       'Create a team or join one?', 'Team name', 'GitHub login (- for none)', 'Team handle', 'Your name', 'Your email', 'GitHub repository name',
-      'Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', 'Share a skill with the team?', 'Share starter?',
+      'Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', 'Share a local skill with team alpha?', 'Share starter?',
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(root).settingsFile})`,
     ]);
     expect(io.lines).toEqual(expect.arrayContaining([
@@ -354,10 +355,10 @@ describe('setup (§6.1)', () => {
       'Creating a new team creates a private GitHub repository under your account.',
       'GitHub: gh is logged in.', 'Next, from any terminal:',
       '  terum-skills install alpha/<skill>   — install a shared skill (add @<version> to pin it)',
-      '  terum-skills ls                       — list members and shared skills',
+      '  terum-skills ls [--local]             — list members and shared skills; --local lists your own',
       '  terum-skills search <term>            — find a skill by name, description, or category',
       '  terum-skills sync                     — pull updates and finish pending work',
-      expect.stringMatching(/^  npx -y terum-skills@\S+ publish <skill> — endorse a skill already shared with the team$/),
+      '  npx -y terum-skills@latest publish <skill> — endorse a skill already shared with the team',
       'Feedback and requests: https://example.test/community', 'Members:', '  @alice — Alice',
       'Repository: https://github.com/alice/alpha-repo', 'README: https://github.com/alice/alpha-repo/blob/main/README.md',
     ]));
@@ -380,7 +381,7 @@ describe('setup (§6.1)', () => {
     const first = new ScriptedPrompter(['Create a new team', 'resume', '', '', 'Alice', 'alice@example.com', 'resume-repo', 'bob']);
     const interrupted = await run({ config: store, home, runner, hook: hookFor(root), verbs: { invite: async () => { throw new Error('stop after team'); } } }, first);
     expect(interrupted).toMatchObject({ ok: false, error: 'stop after team', value: { steps: { team: 'done' } } });
-    const second = new ScriptedPrompter(['bob', 'starter'], [true, true]);
+    const second = new ScriptedPrompter(['bob', 'Share starter'], [true, true], true);
     const resumed = await run({ config: store, home, runner, hook: hookFor(root) }, second);
     if (!resumed.ok) throw new Error(resumed.error);
     expect(second.askedAbout('Create a team or join one?')).toBe(false);
@@ -427,7 +428,7 @@ describe('setup (§6.1)', () => {
   it('keeps setup as an orchestrator: real verbs ask every consent question themselves', async () => {
     const source = await readFile(new URL('../setup.ts', import.meta.url), 'utf8');
     expect(source).not.toContain('io.confirm(');
-    expect([...source.matchAll(/io\.(?:confirm|select|text)\(/g)].map((match) => match[0])).toEqual(['io.select(', 'io.text(', 'io.select(']);
+    expect([...source.matchAll(/io\.(?:confirm|select|text)\(/g)].map((match) => match[0])).toEqual(['io.select(', 'io.text(']);
 
     const fixture = await bareTeam(); const root = join(fixture.root, 'real'); const home = join(root, 'home'); await skillUnder(home);
     const bare = join(fixture.root, 'empty.git'); await git(['init', '-q', '--bare', bare]);
@@ -436,7 +437,7 @@ describe('setup (§6.1)', () => {
       'repo create questions --private': { code: 0, stdout: '', stderr: '' },
       'repo view questions --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/questions\n', stderr: '' },
     }));
-    const io = new ScriptedPrompter(['Create a new team', 'questions', '', '', 'Alice', 'alice@example.com', 'questions', '', 'starter'], [true, false]);
+    const io = new ScriptedPrompter(['Create a new team', 'questions', '', '', 'Alice', 'alice@example.com', 'questions', '', 'Share starter'], [true, false], true);
     const created = await run({ config: createConfigStore(join(root, 'state')), home, runner, hook: hookFor(root), communityUrl: '' }, io);
     if (!created.ok) throw new Error(created.error);
     const joinFixture = await bareTeam();
@@ -448,7 +449,7 @@ describe('setup (§6.1)', () => {
     const joined = await run({ target: 'https://git.example/team.git', config: createConfigStore(join(joinRoot, 'state')), home: joinHome, runner: mappedRunner('https://git.example/team.git', joinFixture.bare, fakeGh('bob')), hook: hookFor(joinRoot), communityUrl: '' }, joinedIo);
     if (!joined.ok) throw new Error(joined.error);
     expect([...io.asked, ...joinedIo.asked]).toEqual(expect.arrayContaining([
-      'Share a skill with the team?', 'Share starter?', 'Install 1 team-endorsed skill(s)?', 'Approve these tools for tool?',
+      'Share a local skill with team questions?', 'Share starter?', 'Install 1 team-endorsed skill(s)?', 'Approve these tools for tool?',
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(root).settingsFile})`,
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(joinRoot).settingsFile})`,
     ]));
@@ -507,14 +508,6 @@ it('setup prints roster in handle order and diagnoses a filename mismatch instea
   expect(io.lines).toContain(`README: ${fixture.bare}`);
 });
 
-class RecordingPrompter extends ScriptedPrompter {
-  choices: string[][] = [];
-  override select(q: string, c: readonly string[]) {
-    this.choices.push([...c]);
-    return super.select(q, c);
-  }
-}
-
 it('the creator picker omits name-mismatched folders and reports the skipped count', async () => {
   const fixture = await bareTeam();
   const bare = join(fixture.root, 'empty.git');
@@ -522,18 +515,55 @@ it('the creator picker omits name-mismatched folders and reports the skipped cou
   const root = join(fixture.root, 'creator');
   const home = join(root, 'home');
   await skillUnder(home);
+  await skillUnder(home, 'skip');
+  await skillUnder(home, 'placed');
   await skillUnder(home, 'gsd-x');
   await writeFile(join(home, '.claude', 'skills', 'gsd-x', 'SKILL.md'), '---\nname: gsd:x\ndescription: GSD skill\n---\n');
   const store = createConfigStore(join(root, 'state'));
+  await store.update((config) => { config.placements[join(home, '.claude', 'skills', 'placed')] = { id: '33333333-3333-4333-8333-333333333333', team: 'other', version: null, scope: { kind: 'global' }, fingerprint: '', placed_at: '' }; });
   const remote = githubRemote('alice', 'alpha-repo');
   const runner = mappedRunner(remote, bare, fakeGh('alice', {
     'repo create alpha-repo --private': { code: 0, stdout: '', stderr: '' },
     'repo view alpha-repo --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/alpha-repo\n', stderr: '' },
   }));
-  // Post-#13 prompt order: role question, team create identity, repository name, invite (blank skips), then the share picker.
-  const io = new RecordingPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', '', 'starter'], [true, false]);
+  const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', '', 'Share starter'], [true, false], true);
   const result = await run({ config: store, home, runner, hook: hookFor(root), communityUrl: '' }, io);
   if (!result.ok) throw new Error(result.error);
-  expect(io.choices).toEqual([['Create a new team', 'Join an existing team'], ['starter', 'skip']]);
-  expect(io.lines).toContain('Skipped 1 local folders that fail share validation.');
+  expect(io.offered).toEqual([['Create a new team', 'Join an existing team'], ['Share skip', 'Share starter', 'Skip']]);
+  expect(io.lines).toContain('Skipped 1 local folders that cannot be offered for sharing. Run `npx -y terum-skills@latest ls --local` for paths and reasons.');
+});
+
+
+describe('issue 9 setup delegation', () => {
+  it.each(['skipped', 'done', 'failed'] as const)('forwards the same io and home and records %s', async (outcome) => {
+    const fixture = await bareTeam(); const home = join(fixture.root, 'home');
+    const store = createConfigStore(join(fixture.root, 'state')); const remote = githubRemote('alice', 'team');
+    const runner = mappedRunner(remote, fixture.bare, fakeGh('alice'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote, handle: 'seed' }; });
+    const io = new ScriptedPrompter([''], [], true); let calls = 0;
+    const result = await run({ config: store, home, runner, communityUrl: '', verbs: {
+      share: async (args, received) => {
+        calls += 1; expect(received).toBe(io); expect(args).toEqual({ team: 'team', home, config: store, runner });
+        return outcome === 'failed' ? failure('share failed') : success(outcome === 'done' ? { id: 'id', name: 'sample' } : undefined);
+      }, offerHook: async () => 'present',
+    } }, io);
+    expect(calls).toBe(1);
+    if (outcome === 'failed') { expect(result).toMatchObject({ ok: false, error: 'share failed' }); expect(result.value?.steps.actions).toBeUndefined(); expect(io.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)']); }
+    else { expect(result).toMatchObject({ ok: true, value: { steps: { actions: outcome, invite: 'skipped', done: 'printed' } } }); expect(io.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)']); }
+  });
+
+  it.each([false, true])('continues to invite after empty inventory or Skip (candidate: %s)', async (hasCandidate) => {
+    const fixture = await bareTeam(); const home = join(fixture.root, 'home');
+    if (hasCandidate) await skillUnder(home);
+    const store = createConfigStore(join(fixture.root, 'state')); const remote = githubRemote('alice', 'team');
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote, handle: 'seed' }; });
+    const io = new ScriptedPrompter(hasCandidate ? ['', 'Skip'] : [''], [], true);
+    const result = await run({ config: store, home, runner: mappedRunner(remote, fixture.bare, fakeGh('alice')), communityUrl: '', verbs: { offerHook: async () => 'present' } }, io);
+    expect(result).toMatchObject({ ok: true, value: { steps: { actions: 'skipped', invite: 'skipped', done: 'printed' } } });
+    expect(io.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', ...(hasCandidate ? ['Share a local skill with team team?'] : [])]);
+    expect(io.lines).toContain(hasCandidate ? 'Nothing shared.' : `No local candidates to share under ${join(home, '.claude', 'skills')}. Skills elsewhere can be shared by passing their folder path.`);
+    expect(io.lines).toContain('  npx -y terum-skills@latest share      — share one of your local skills (asks which)');
+  });
 });
