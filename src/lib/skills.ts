@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { readdir, readFile } from 'node:fs/promises';
+import { join, sep } from 'node:path';
 import YAML from 'yaml';
 import { allowedTools, parseJson, parseSkillFrontmatter, Person, SkillFrontmatter, Team, personSchema, teamSchema } from './schema.js';
 
@@ -122,17 +122,12 @@ async function walk(root: string, base = root): Promise<string[]> {
   for (const entry of entries) {
     const absolute = join(root, entry.name);
     if (entry.isDirectory()) result.push(...await walk(absolute, base));
-    else if (entry.isFile()) result.push(absolute.slice(base.length + 1).split('\\').join('/'));
+    // Separators are rewritten to '/' only on Windows: on POSIX a backslash is a legal filename
+    // character, and folding it would give `docs\readme.md` and `docs/readme.md` one digest key
+    // (the rule the vendored fingerprint walker already follows).
+    else if (entry.isFile()) { const relative = absolute.slice(base.length + 1); result.push(sep === '\\' ? relative.split('\\').join('/') : relative); }
   }
   return result.sort();
 }
 
-export function isInside(child: string, parent: string): boolean {
-  const relative = resolve(child).slice(resolve(parent).length + 1);
-  return relative !== '' && !relative.startsWith('..');
-}
-
-export async function existsDirectory(path: string): Promise<boolean> {
-  try { return (await stat(path)).isDirectory(); } catch (error) { if (isMissing(error)) return false; throw error; }
-}
 function isMissing(error: unknown): boolean { return error instanceof Error && 'code' in error && error.code === 'ENOENT'; }

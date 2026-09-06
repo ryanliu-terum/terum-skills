@@ -1,5 +1,5 @@
 import { basename, dirname, join } from 'node:path';
-import { ConfigStore, createConfigStore } from '../lib/config.js';
+import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
 import { lockTarget, remove } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
@@ -19,18 +19,20 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const parsedRef = args.ref && !args.kind && !args.member && !args.project ? parseRef(args.ref) : undefined;
-    const team = parsedRef ? await teamForReference(config, args.team ?? parsedRef.team, parsedRef.remote, parsedRef.name) : args.team ?? (Object.keys(config.teams).length === 1 ? Object.keys(config.teams)[0] : undefined);
-    if (!team || !config.teams[team]) throw new Error('Select a configured team with --team or a qualified ref.');
+    const team = parsedRef ? await teamForReference(config, args.team ?? parsedRef.team, parsedRef.remote, parsedRef.name) : selectTeam(config.teams, args.team)[0];
     if (args.kind === 'member' || args.member) {
-      const member = await readPerson(store.teamClone(team), args.member ?? args.ref ?? '');
+      const handle = args.member ?? args.ref;
+      if (!handle) throw new Error('Provide a member handle: `uninstall member <handle>`.');
+      const member = await readPerson(store.teamClone(team), handle);
       const targets: UninstallTarget[] = [];
       for (const item of member.installed) for (const scope of await ledgerScopes(store, team, item.id, [item.scope])) targets.push({ id: item.id, scope });
       return success(await uninstallMany({ team, targets, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
     }
     if (args.kind === 'project' || args.project) {
-      const project = args.project ?? args.ref ?? '';
+      const project = args.project ?? args.ref;
+      if (!project) throw new Error('Provide a project name: `uninstall project <name>`.');
       const teamJson = await readTeam(store.teamClone(team));
-      const listed = teamJson.projects[project];
+      const listed = Object.hasOwn(teamJson.projects, project) ? teamJson.projects[project] : undefined;
       if (!listed) throw new Error(`Unknown project ${project}.`);
       const targets: UninstallTarget[] = [];
       // `uninstall project` is the exact inverse of `install project`, which always places at that

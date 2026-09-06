@@ -45,6 +45,8 @@ describe('Prompter boundary (§3, §12 "prompter")', () => {
       'export async function f() { const c = await import("console"); return c; }',
       'process.exit(1);',
       'export function f() { process.exit(0); }',
+      'process.exitCode = 1;',
+      'export function f() { process.exitCode = 1; }',
     ];
     for (const code of vectors) {
       expect(await flagged(code), code).not.toEqual([]);

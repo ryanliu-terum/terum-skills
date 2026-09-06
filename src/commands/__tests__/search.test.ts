@@ -102,6 +102,23 @@ describe('search (§6)', () => {
     expect(io.lines.join('\n')).toContain('team/broken:');
   });
 
+  it('reports one malformed member file and still returns the team\'s matches, counting installs from the files that parse', async () => {
+    const { store, clone } = await searchFixture('team', [{ name: 'healthy', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
+    await freshStamp(store, 'team');
+    await writeFile(join(clone, 'people', 'broken.json'), '{ "handle": "broken" }');
+    const io = new ScriptedPrompter();
+    expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'healthy', installs: 0 })] });
+    expect(io.lines.join('\n')).toContain('team/people/broken.json: Invalid people/broken.json');
+  });
+
+  it('does not take an inherited object key for a project filter', async () => {
+    const { store } = await searchFixture('team', [{ name: 'sample', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
+    await freshStamp(store, 'team');
+    const io = new ScriptedPrompter();
+    expect(await run({ term: 'needle', project: 'constructor', config: store }, io)).toMatchObject({ ok: true, value: [] });
+    expect(io.lines).toEqual(['No skills found.']);
+  });
+
   it('continues after an unreadable team and fails only when every team is unreadable', async () => {
     const first = await searchFixture('healthy', [{ name: 'sample', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
     const second = await searchFixture('broken', [], undefined, first.store);

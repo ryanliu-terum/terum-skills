@@ -22,6 +22,7 @@ const PROMPTER_BOUNDARY = {
       { object: 'process', property: 'stdout', message: 'Use the Prompter instead.' },
       { object: 'process', property: 'stderr', message: 'Use the Prompter instead.' },
       { object: 'process', property: 'exit', message: 'Verbs return a Result; only src/index.ts sets process.exitCode.' },
+      { object: 'process', property: 'exitCode', message: 'Verbs return a Result; only src/index.ts sets process.exitCode.' },
       { object: 'globalThis', property: 'console', message: 'Use Prompter.print instead.' },
       { object: 'globalThis', property: 'process', message: 'Use the Prompter instead.' },
     ],

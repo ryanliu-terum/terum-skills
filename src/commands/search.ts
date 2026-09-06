@@ -26,11 +26,12 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         const clone = store.teamClone(team);
         const teamJson = await readTeam(clone);
         const records = await skillRecords(clone, team, { onProblem: (problem) => io.print(`${team}/${problem.name}: ${problem.message}`) });
-        const people = await Promise.all((await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).map((file) => readPerson(clone, file.slice(0, -5))));
+        // The roster feeds only the cosmetic install count: one unreadable member file is reported and skipped, never fatal for the team.
+        const people = (await Promise.all((await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).map((file) => readPerson(clone, file.slice(0, -5)).catch((error: unknown) => { io.print(`${team}/people/${file}: ${error instanceof Error ? error.message : String(error)}`); return undefined; })))).filter((person) => person !== undefined);
       const filtered = records.filter((skill) => {
         const category = skill.frontmatter.metadata['terum-category'];
         const author = skill.frontmatter.metadata.author;
-        const inProject = !args.project || teamJson.projects[args.project]?.skills.includes(skill.id);
+        const inProject = !args.project || (Object.hasOwn(teamJson.projects, args.project) && teamJson.projects[args.project]!.skills.includes(skill.id));
         return (!term || [skill.name, skill.frontmatter.description, category].some((value) => value.toLowerCase().includes(term)))
           && (!args.category || category.toLowerCase().includes(args.category.toLowerCase()))
           && (!args.author || author.toLowerCase().includes(args.author.toLowerCase())) && Boolean(inProject);

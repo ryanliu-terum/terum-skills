@@ -53,6 +53,10 @@ export class SafeWriteExhausted extends Error {
 export class PushRefused extends Error {
   constructor(message: string) { super(message); this.name = 'PushRefused'; }
 }
+/** Another terum-skills process holds this clone's writer lock. A per-team caller (sync) skips the team and continues; a single-clone verb (publish) fails. */
+export class CloneBusy extends Error {
+  constructor(message: string) { super(message); this.name = 'CloneBusy'; }
+}
 
 export const DEFAULT_DEADLINE_MS = 30_000;
 const defaultBackoff = (attempt: number): number => Math.floor(Math.random() * Math.min(1_000, 25 * 2 ** attempt));
@@ -184,7 +188,7 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<voi
  * terminal and carries git's own message. Invariant the CALLER owns: both `<branch>` and
  * `<branch>-2` are force-replaced under a lease read AFTER this write's own fetch, so the lease
  * never protects a branch that existed before the write began — a non-`main` caller must vet BOTH
- * names before safeWrite (publish's assertBranchReusable does).
+ * names before safeWrite (publish's assertBranchesReusable does).
  */
 async function push(git: Git, branch: string, leases: Map<string, string>): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
   if (branch === 'main') {
@@ -341,19 +345,22 @@ export async function cloneOrigin(root: string, runner: Runner = systemRunner): 
  * failure. Verb preflights (`publish`, `sync`) share this; `pull --ff-only` is never the right
  * refresh for a clone we own (D5b, 2026-09-05 close-out walk).
  */
-export async function refreshClone(runner: Runner, clone: string, options: { label?: string; env?: NodeJS.ProcessEnv } = {}): Promise<void> {
+export async function refreshClone(runner: Runner, clone: string, options: { label?: string; env?: NodeJS.ProcessEnv; lockStale?: number } = {}): Promise<void> {
   // Under the same writer lock safeWrite and `team leave` hold: a hard reset while another process
   // sits between its commit and its push would rewind that commit, and its `push HEAD` would then
-  // report "everything up-to-date" for a write that never left the machine.
+  // report "everything up-to-date" for a write that never left the machine. The lock is re-checked
+  // before the reset: a fetch that outlives the stale window can lose the lock to a second writer,
+  // whose commit the reset would otherwise rewind.
   try {
-    await withCloneLock(clone, async () => {
+    await withCloneLock(clone, async (assertHeld) => {
       for (const args of [['fetch', 'origin'], ['reset', '--hard', 'origin/main']]) {
+        assertHeld();
         const result = await runner.run('git', args, { cwd: clone, env: options.env });
         if (result.code !== 0) throw new Error(`Could not refresh ${options.label ?? clone}: ${(result.stderr || result.stdout).trim()}`);
       }
-    });
+    }, options);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ELOCKED') throw new Error(`Another terum-skills operation holds the write lock on ${options.label ?? clone}; retry when it finishes.`);
+    if ((error as NodeJS.ErrnoException).code === 'ELOCKED') throw new CloneBusy(`Another terum-skills operation holds the write lock on ${options.label ?? clone}; retry when it finishes.`);
     throw error;
   }
 }
@@ -362,8 +369,15 @@ export function cloneLockPath(root: string): string {
   return join(dirname(root), `.${basename(root)}.safewrite.lock`);
 }
 
-/** Hold the per-clone writer lock while `action` runs; a second writer waits briefly, then fails rather than racing. */
-export async function withCloneLock<T>(root: string, action: () => Promise<T>): Promise<T> {
-  const release = await lockfile.lock(root, { lockfilePath: cloneLockPath(root), realpath: false, stale: 60_000, retries: { retries: 10, minTimeout: 50, maxTimeout: 500 }, onCompromised: () => undefined });
-  try { return await action(); } finally { await release().catch(() => undefined); }
+/**
+ * Hold the per-clone writer lock while `action` runs; a second writer waits briefly, then fails
+ * rather than racing. A lock lost after the stale window is recorded, never thrown from a timer
+ * (proper-lockfile's default would crash the CLI): `action` calls `assertHeld` before each step
+ * that must not run on a clone another process now owns.
+ */
+export async function withCloneLock<T>(root: string, action: (assertHeld: () => void) => Promise<T>, options: { lockStale?: number } = {}): Promise<T> {
+  let compromised = false;
+  const release = await lockfile.lock(root, { lockfilePath: cloneLockPath(root), realpath: false, stale: options.lockStale ?? 60_000, retries: { retries: 10, minTimeout: 50, maxTimeout: 500 }, onCompromised: () => { compromised = true; } });
+  const assertHeld = (): void => { if (compromised) throw new Error(lostLock(root)); };
+  try { return await action(assertHeld); } finally { await release().catch(() => undefined); }
 }

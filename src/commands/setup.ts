@@ -168,13 +168,20 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     steps.hook = hookOutcome === 'installed' || hookOutcome === 'replaced' ? 'done' : 'skipped';
 
     const clone = store.teamClone(teamName);
-    const document = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
-    io.print('Members:');
-    for (const person of activePeople(await readPeople(clone), document.archived)) io.print(`  @${person.handle} — ${person.display_name}`);
-    const ownerRepo = githubOwnerRepo(remote);
-    const repositoryUrl = ownerRepo ? `https://github.com/${ownerRepo}` : stripRemoteCredentials(remote);
-    io.print(`Repository: ${repositoryUrl}`);
-    io.print(`README: ${ownerRepo ? `${repositoryUrl}/blob/main/README.md` : repositoryUrl}`);
+    // Every step above is durable by here; this closing summary reads the disposable clone (§4.2),
+    // so a read-back problem must not turn a finished wizard into a failure (the rule team join and
+    // team leave already follow).
+    try {
+      const document = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
+      io.print('Members:');
+      for (const person of activePeople(await readPeople(clone), document.archived)) io.print(`  @${person.handle} — ${person.display_name}`);
+      const ownerRepo = githubOwnerRepo(remote);
+      const repositoryUrl = ownerRepo ? `https://github.com/${ownerRepo}` : stripRemoteCredentials(remote);
+      io.print(`Repository: ${repositoryUrl}`);
+      io.print(`README: ${ownerRepo ? `${repositoryUrl}/blob/main/README.md` : repositoryUrl}`);
+    } catch (error) {
+      io.print(`Set up, but the team details could not be read from ${clone}: ${error instanceof Error ? error.message : String(error)}`);
+    }
     steps.done = 'printed';
     return success({ role, team: teamName, remote, steps });
   } catch (error) { return failed(error, role, teamName, remote, steps); }

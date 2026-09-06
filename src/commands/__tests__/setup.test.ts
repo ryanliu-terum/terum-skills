@@ -35,6 +35,21 @@ describe('setup (§6.1)', () => {
     expect(io.lines).toContain(`Team team is already configured on this machine.`);
   });
 
+  it('reports a degraded summary instead of failing when the configured clone is missing', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    // No clone on disk: it is disposable state, and every step before the summary still completes.
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+      offerHook: async () => 'present',
+    } }, io);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.steps).toMatchObject({ team: 'skipped', hook: 'skipped', done: 'printed' });
+    expect(io.lines.join('\n')).toContain('the team details could not be read');
+    expect(io.lines).not.toContain('Members:');
+  });
+
   it('onboards a GitHub creator end to end without taking any credential input', async () => {
     const fixture = await bareTeam();
     // The creator path needs an empty remote; the bare fixture is reset here solely as its host.

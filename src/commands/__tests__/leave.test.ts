@@ -1,11 +1,10 @@
 import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import lockfile from 'proper-lockfile';
 import { cloneLockPath } from '../../lib/teamRepo.js';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { place } from '../../lib/placer.js';
-import { bareTeam, cloneWithIdentity, git, originSha, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, holdCloneLock, originSha, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
 import { run } from '../leave.js';
 import { installHook } from '../../lib/hook.js';
 
@@ -117,7 +116,7 @@ describe('team leave (§6)', () => {
 
   it('waits for, then refuses, a clone another operation is writing to, and removes nothing meanwhile', async () => {
     const { store, clone, placed } = await prepared();
-    const release = await lockfile.lock(clone, { lockfilePath: cloneLockPath(clone), realpath: false, stale: 60_000 });
+    const release = await holdCloneLock(clone);
     try {
       await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/lock/i) });
       await expect(access(clone)).resolves.toBeUndefined();

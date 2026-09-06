@@ -7,6 +7,9 @@ import { acquireSkillTargetLock } from './placer/vendor/skillhub/skill-target-lo
 import { SkillSnapshot, snapshotSkillDirectory } from './placer/vendor/skillhub/skill-fingerprint.js';
 import { Runner, systemRunner } from './runner.js';
 
+/** The one seam placer.test.ts needs to make a rename fail between the two moves of a replace, or cross a volume (mirrors hook.ts). */
+export const fsForTests = { rename };
+
 export type PlacementScope = { kind: 'global' } | { kind: 'project'; project: string };
 export type Inspection = { kind: 'absent'; path: string } | { kind: 'ours'; path: string } | { kind: 'foreign'; path: string };
 
@@ -53,11 +56,11 @@ export async function place(source: string, targetRoot: string, name: string, op
     await assertNoSymlinks(source);
     await cp(source, temporary, { recursive: true, errorOnExist: true, force: false });
     try {
-      await rename(temporary, destination);
+      await fsForTests.rename(temporary, destination);
     } catch (error) {
       if (!options.replace || !isExistingDestination(error)) throw error;
-      await rename(destination, displaced);
-      await rename(temporary, destination);
+      await fsForTests.rename(destination, displaced);
+      await fsForTests.rename(temporary, destination);
       await rm(displaced, { recursive: true, force: true });
     }
     const result = { path: destination, snapshot: await snapshotSkillDirectory(destination), notices: [] as string[] };
@@ -70,7 +73,7 @@ export async function place(source: string, targetRoot: string, name: string, op
     // A failure after moving the existing target back into staging must not orphan it.
     try { await lstat(destination); } catch (missing) {
       if (isMissing(missing)) {
-        try { await lstat(displaced); await rename(displaced, destination); } catch (displacedMissing) { if (!isMissing(displacedMissing)) throw displacedMissing; }
+        try { await lstat(displaced); await fsForTests.rename(displaced, destination); } catch (displacedMissing) { if (!isMissing(displacedMissing)) throw displacedMissing; }
       }
     }
     throw error;
@@ -118,16 +121,24 @@ export async function moveToQuarantine(path: string, quarantineRoot: string, nam
   const directory = join(quarantineRoot, new Date().toISOString().replace(/[:.]/g, '-'));
   const destination = join(directory, name);
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  try {
-    await rename(path, destination);
-  } catch (error) {
-    // The folder lives on another volume than ~/.terum (an authoring folder outside HOME): the
-    // copy must exist in quarantine before the original is removed.
-    if (!(error instanceof Error && 'code' in error && error.code === 'EXDEV')) throw error;
-    await cp(path, destination, { recursive: true, errorOnExist: true, force: false });
-    await rm(path, { recursive: true, force: true });
-  }
+  await moveDirectory(path, destination);
   return destination;
+}
+
+/**
+ * Move a directory: a rename, or — across volumes (an authoring folder outside HOME, a checkout on
+ * another disk) — a copy that must exist in full at the destination before the original is removed.
+ * The only place that deletes a user-owned directory after a copy; the quarantine move and share's
+ * restore of a displaced folder both go through it.
+ */
+export async function moveDirectory(from: string, to: string): Promise<void> {
+  try {
+    await fsForTests.rename(from, to);
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EXDEV')) throw error;
+    await cp(from, to, { recursive: true, errorOnExist: true, force: false });
+    await rm(from, { recursive: true, force: true });
+  }
 }
 
 export async function appendExclude(projectRoot: string, entry: string, runner: Runner = systemRunner): Promise<void> {

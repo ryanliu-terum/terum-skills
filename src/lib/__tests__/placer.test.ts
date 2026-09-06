@@ -1,7 +1,7 @@
-import { lstat, mkdir, readFile, readdir, symlink, utimes, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { inspect, lockTarget, place, remove, resolveTarget } from '../placer.js';
+import { fsForTests, inspect, lockTarget, place, remove, resolveTarget } from '../placer.js';
 import { skillTargetLockPath } from '../placer/vendor/skillhub/skill-target-lock.js';
 import { bareTeam, cloneWithIdentity, git, temporaryDirectory } from './fixtures.js';
 import { diffSkillFiles, snapshotSkillDirectory } from '../placer/vendor/skillhub/skill-fingerprint.js';
@@ -111,6 +111,49 @@ describe('native Placer (§7)', () => {
     await expect(readFile(second.path)).rejects.toMatchObject({ code: 'ENOENT' });
     await symlink(join(source, 'SKILL.md'), join(source, 'linked-file'));
     await expect(place(source, target, 'link')).rejects.toThrow('symlink');
+  });
+
+  it('replaces an owned placement in place with no staging residue, and rolls the previous copy back when the swap fails midway', async () => {
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'v1'); await writeFile(join(source, 'only-in-v1.md'), 'gone later');
+    const first = await place(source, target, 'sample');
+    await writeFile(join(source, 'SKILL.md'), 'v2'); await rm(join(source, 'only-in-v1.md'));
+    const second = await place(source, target, 'sample', { replace: true });
+    expect(second.path).toBe(first.path);
+    expect(await readFile(join(first.path, 'SKILL.md'), 'utf8')).toBe('v2');
+    await expect(readFile(join(first.path, 'only-in-v1.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
+    // The second rename onto the destination — after the installed copy was moved aside — fails: the
+    // user's copy must come back byte for byte, and nothing may be left beside it.
+    await writeFile(join(source, 'SKILL.md'), 'v3');
+    const realRename = fsForTests.rename;
+    let attemptsAtDestination = 0;
+    fsForTests.rename = async (from, to) => {
+      if (String(to) === first.path && ++attemptsAtDestination === 2) throw new Error('simulated crash after displacement');
+      return realRename(from, to);
+    };
+    try { await expect(place(source, target, 'sample', { replace: true })).rejects.toThrow('simulated crash'); }
+    finally { fsForTests.rename = realRename; }
+    expect(await readFile(join(first.path, 'SKILL.md'), 'utf8')).toBe('v2');
+    expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
+  });
+
+  it('moves an edited placement to quarantine by copy-then-remove when the rename crosses a volume', async () => {
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'original');
+    const placed = await place(source, target, 'edited');
+    await writeFile(join(placed.path, 'SKILL.md'), 'edited by user');
+    const realRename = fsForTests.rename;
+    fsForTests.rename = async (from, to) => {
+      if (String(to).includes('quarantine')) throw Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' });
+      return realRename(from, to);
+    };
+    let outcome: { quarantined?: string };
+    try { outcome = await remove(target, placed.path, placed.snapshot.fingerprint, join(root, 'quarantine')); }
+    finally { fsForTests.rename = realRename; }
+    expect(outcome.quarantined).toBeDefined();
+    expect(await readFile(join(outcome.quarantined!, 'SKILL.md'), 'utf8')).toBe('edited by user');
+    await expect(readFile(join(placed.path, 'SKILL.md'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('preserves a completed placement when the project exclude update fails and surfaces the real copy errno', async () => {

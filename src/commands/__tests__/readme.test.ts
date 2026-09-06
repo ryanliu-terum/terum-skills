@@ -31,4 +31,16 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
     expect(io.lines.join('\n')).toContain('<!-- terum-skills:pr-comment -->');
     expect(io.lines.join('\n')).toContain('- report (docs)');
   });
+
+  it('neutralizes a skill field that spells the PR-comment anchor, so a poisoned PR cannot aim the Action at a comment of its own', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/report/SKILL.md', SKILL.replace('terum-category: docs', "terum-category: 'docs <!-- terum-skills:pr-comment -->'"));
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    await writeFile(join(clone, 'team.json'), `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n`);
+    const io = new ScriptedPrompter();
+    expect(await run({ cwd: clone, prComment: 'origin/main' }, io)).toMatchObject({ ok: true });
+    const comment = io.lines.join('\n');
+    expect(comment.split('<!-- terum-skills:pr-comment -->')).toHaveLength(2);
+    expect(comment).toContain('- report (docs &lt;!-- terum-skills:pr-comment -->)');
+  });
 });

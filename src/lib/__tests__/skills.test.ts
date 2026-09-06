@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { canonicalDigest, findSkill, injectManagedFields } from '../skills.js';
 import { temporaryDirectory } from './fixtures.js';
@@ -26,5 +26,13 @@ describe('skills (§5.3 canonical frontmatter)', () => {
       await writeFile(join(clone, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`);
     }
     await expect(findSkill(clone, 'team', 'deadbeef')).rejects.toThrow('ambiguous');
+  });
+
+  it.skipIf(sep === '\\')('keeps a POSIX backslash in a filename as its own digest key instead of folding it into a path separator', async () => {
+    const root = await temporaryDirectory();
+    const flat = join(root, 'flat'); const nested = join(root, 'nested');
+    await mkdir(flat); await writeFile(join(flat, 'docs\\readme.md'), 'same bytes');
+    await mkdir(join(nested, 'docs'), { recursive: true }); await writeFile(join(nested, 'docs', 'readme.md'), 'same bytes');
+    expect(await canonicalDigest(flat)).not.toBe(await canonicalDigest(nested));
   });
 });

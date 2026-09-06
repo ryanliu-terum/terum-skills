@@ -1,17 +1,16 @@
 import { expectTypeOf, describe, expect, it } from 'vitest';
-import { access, cp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { run } from '../sync.js';
 import { run as install } from '../install.js';
 import { NonInteractivePrompter } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, holdCloneLock, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { systemRunner } from '../../lib/runner.js';
-import lockfile from 'proper-lockfile';
-import { cloneLockPath } from '../../lib/teamRepo.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
+const SECOND_ID = '22222222-2222-4222-8222-222222222222';
 const skill = (description: string) => `---\nname: sample\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${description}\n`;
 const toolSkill = (description: string, tools: string[]) => `---\nname: sample\ndescription: ${description}\nlicense: UNLICENSED\nallowed-tools:\n${tools.map((tool) => `  - ${tool}`).join('\n')}\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${description}\n`;
 
@@ -68,17 +67,45 @@ describe('sync --hook (§3, §6)', () => {
     void fixture;
   });
 
-  it('refuses to refresh a clone another operation is writing to, and leaves that clone untouched', async () => {
+  it('skips a team whose clone another operation is writing to — reported, untouched, not stamped — and still syncs every other team', async () => {
     const { fixture, store, clone } = await configuredSkill();
+    const other = await bareTeam();
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team').replace('name: sample', 'name: elsewhere'));
+    const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team moved').replace('name: sample', 'name: elsewhere'));
     const head = (await git(['rev-parse', 'HEAD'], clone)).trim();
-    const release = await lockfile.lock(clone, { lockfilePath: cloneLockPath(clone), realpath: false, stale: 60_000 });
+    const otherHead = (await git(['rev-parse', 'HEAD'], otherClone)).trim();
+    const release = await holdCloneLock(clone);
     try {
-      expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringMatching(/write lock/i) });
+      expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: ['team'], notices: [expect.stringMatching(/write lock on team/)] } });
       expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
+      expect((await git(['rev-parse', 'HEAD'], otherClone)).trim()).not.toBe(otherHead);
+      await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(join(store.root, 'run', 'other.stamp'))).resolves.toBeUndefined();
     } finally { await release(); }
     expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
     expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe(head);
+    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('reports one unreadable placement as blocked and still refreshes the others and writes the stamp', async () => {
+    const { fixture, store } = await configuredSkill();
+    const home = join(fixture.root, 'home');
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await install({ ref: 'second', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const broken = join(home, '.claude', 'skills', 'sample'); const healthy = join(home, '.claude', 'skills', 'second');
+    await chmod(join(broken, 'SKILL.md'), 0o000);
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second updated').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    await rm(join(store.root, 'run'), { recursive: true, force: true });
+    const io = new ScriptedPrompter();
+    try { expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 1, deferred: ['sample'] } }); }
+    finally { await chmod(join(broken, 'SKILL.md'), 0o644); }
+    expect(io.lines.filter((line) => line.startsWith(`Blocked ${broken}: `))).toHaveLength(1);
+    expect(await readFile(join(healthy, 'SKILL.md'), 'utf8')).toContain('description: second updated');
+    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
   });
 
   it('heals a clone whose local main drifted instead of failing to fast-forward', async () => {
@@ -181,6 +208,29 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(join(oldPath, 'SKILL.md'), 'utf8')).toContain('description: old');
     expect(Object.keys((await store.read()).placements)).toEqual([oldPath]);
     expect(io.lines.filter((line) => line.startsWith(`Blocked ${oldPath}: ${stranger} already exists`))).toHaveLength(1);
+  });
+
+  it('refuses a rename onto a stranger before anything moves: a hand-edited old placement stays put, unquarantined, and the ledger still keys it', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const oldPath = join(home, '.claude', 'skills', 'sample'); const stranger = join(home, '.claude', 'skills', 'renamed');
+    await mkdir(stranger, { recursive: true }); await writeFile(join(stranger, 'SKILL.md'), 'user-owned, not a placement');
+    await writeFile(join(oldPath, 'SKILL.md'), skill('hand edit'));
+    await git(['fetch', '-q', 'origin'], fixture.seed); await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
+    await cp(join(fixture.seed, 'skills', 'sample'), join(fixture.seed, 'skills', 'renamed'), { recursive: true });
+    await rm(join(fixture.seed, 'skills', 'sample'), { recursive: true });
+    await writeFile(join(fixture.seed, 'skills', 'renamed', 'SKILL.md'), skill('renamed').replace('name: sample', 'name: renamed'));
+    await git(['add', '--all'], fixture.seed); await git(['commit', '-q', '-m', 'rename sample'], fixture.seed); await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
+    // Twice: the second run must find the same state and report the same block, not a wedged ledger.
+    for (const attempt of [1, 2]) {
+      const io = new ScriptedPrompter();
+      expect(await run({ config: store }, io), `attempt ${attempt}`).toMatchObject({ ok: true, value: { placed: 0 } });
+      expect(io.lines.filter((line) => line.startsWith(`Blocked ${oldPath}: ${stranger} already exists`)), `attempt ${attempt}`).toHaveLength(1);
+      expect(await readFile(join(oldPath, 'SKILL.md'), 'utf8')).toContain('description: hand edit');
+      expect(await readFile(join(stranger, 'SKILL.md'), 'utf8')).toBe('user-owned, not a placement');
+      await expect(access(join(store.root, 'quarantine'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(Object.keys((await store.read()).placements)).toEqual([oldPath]);
+    }
   });
 
   it('defers consent for a noninteractive-shaped interactive call without emitting hook stdout', async () => {

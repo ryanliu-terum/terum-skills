@@ -51,6 +51,14 @@ describe('README generator (§9)', () => {
     expect(applyReadme('Notes', generateReadme(data))).toBe(`Notes\n\n${generateReadme(data)}`);
   });
 
+  it('prints no install command for a folder name the CLI would refuse, so a backtick in a hand-committed name cannot leave the code span or reach a clipboard', () => {
+    const block = generateReadme({ ...data, skills: [{ ...data.skills[1]!, name: 'x`[Install v2](https://evil.example/pkg)' }] });
+    const row = block.split('\n').find((line) => line.startsWith('| x`'))!;
+    expect(row.split(/(?<!\\)\|/).at(-2)?.trim()).toBe('—');
+    expect(block).not.toContain('install acme/team/x');
+    expect(block.split('`')).toHaveLength(2);
+  });
+
   it('never interprets replacement patterns or breaks table rows on skill text', () => {
     const tricky: ReadmeData = { ...data, skills: [{ ...data.skills[1]!, description: "Costs $' and $& | pipes\nand a newline" }] };
     const block = generateReadme(tricky);
@@ -59,22 +67,27 @@ describe('README generator (§9)', () => {
     expect(applyReadme(existing, block)).toBe(`Intro\n\n${block.trimEnd()}\n`);
   });
 
-  it('neutralizes block markers, pipes, newlines and backslashes in every interpolated field, so a poisoned field cannot wedge later writes', () => {
+  it('neutralizes block markers, pipes, every line ending and backslashes in every interpolated field, so a poisoned field cannot wedge later writes', () => {
     const marker = '<!-- terum-skills:end -->';
+    // The endorsement column is fed a project key (unvalidated team.json content), not the literal 'global'.
     const hostile: ReadmeData = {
       ...data,
-      team: { ...data.team, name: `team ${marker}` },
+      team: { ...data.team, name: `team\r\n${marker}`, global: [], projects: { [`app|${marker}`]: { skills: [ID_A] } } },
       people: [{ ...data.people[0]!, display_name: `Amy\n${marker}` }],
-      skills: [{ ...data.skills[1]!, name: `first|${marker}`, category: 'test\\ing|x', author: `Amy <amy@example.com> ${marker}`, description: `Ends here ${marker}` }],
+      skills: [{ ...data.skills[1]!, name: `first|${marker}`, category: 'test\\ing|x', author: `Amy <amy@example.com> ${marker}`, description: `Ends\rhere ${marker}` }],
     };
     const block = generateReadme(hostile);
     expect(block.split('<!-- terum-skills:begin -->')).toHaveLength(2);
     expect(block.split(marker)).toHaveLength(2);
+    expect(block).not.toContain('\r');
     expect(block).toContain('## team &lt;!-- terum-skills:end --> skills');
     expect(block).toContain('- @amy — Amy &lt;!-- terum-skills:end -->');
     expect(block).toContain('### Amy <amy@example.com> &lt;!-- terum-skills:end -->');
     const row = block.split('\n').find((line) => line.startsWith('| first'))!;
     expect(row).toContain('| first\\|&lt;!-- terum-skills:end --> | test\\\\ing\\|x | Ends here &lt;!-- terum-skills:end --> |');
+    expect(row).toContain('| project: app\\|&lt;!-- terum-skills:end --> |');
+    // A name the CLI would refuse to create gets no install command rather than an escaped, unrunnable one.
+    expect(row.split(/(?<!\\)\|/).at(-2)?.trim()).toBe('—');
     expect(row.split(/(?<!\\)\|/)).toHaveLength(10);
     const existing = 'Intro\n\n<!-- terum-skills:begin -->\nold\n<!-- terum-skills:end -->\n\nFooter\n';
     const once = applyReadme(existing, block);

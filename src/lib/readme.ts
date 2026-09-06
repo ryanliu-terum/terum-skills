@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Person, parseJson, parseSkillFrontmatter, personSchema, teamSchema } from './schema.js';
+import { isSkillName, Person, parseJson, parseSkillFrontmatter, personSchema, teamSchema } from './schema.js';
 import { githubOwnerRepo } from './remote.js';
 import { Runner, systemRunner } from './runner.js';
 import type { MutableTree } from './teamRepo.js';
@@ -69,7 +69,9 @@ export function generateReadme(data: ReadmeData): string {
     lines.push('', '| Skill | Category | Description | Installs | Endorsed | Latest | Eval | Install |', '| --- | --- | --- | ---: | --- | --- | --- | --- |');
     for (const skill of skills.slice().sort((a, b) => a.name.localeCompare(b.name))) {
       const endorsement = skillEndorsement(data.team, skill.id);
-      const command = repo ? `\`npx -y terum-skills@latest install ${repo}/${cell(skill.name)}\`` : '—';
+      // A code span's only delimiter is a backtick, which cell() cannot escape, and this column is a
+      // command a reader copies: a folder name the CLI itself would refuse to create gets no command.
+      const command = repo && isSkillName(skill.name) ? `\`npx -y terum-skills@latest install ${repo}/${skill.name}\`` : '—';
       lines.push(`| ${cell(skill.name)} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | — | ${command} |`);
     }
   }
@@ -156,11 +158,12 @@ export async function regenerateReadmeInTree(tree: MutableTree, remote: string, 
 
 /**
  * Free repo text rendered inside a generated, marker-delimited artifact (team name, display names,
- * authors, skill fields, PR-comment lines): one line, and never a comment opener — `<!--` becomes
+ * authors, skill fields, PR-comment lines): one line — CommonMark ends a line at LF, CRLF *or* a
+ * bare CR, so all three collapse to a space — and never a comment opener — `<!--` becomes
  * `&lt;!--`, which Markdown renders identically but can no longer spell README_BEGIN/README_END or
  * the PR-comment anchor.
  */
-export function inlineText(value: string): string { return value.replace(/\r?\n/g, ' ').replace(/<!--/g, '&lt;!--'); }
+export function inlineText(value: string): string { return value.replace(/\r\n|[\r\n]/g, ' ').replace(/<!--/g, '&lt;!--'); }
 /** Markdown table cells: inlineText() plus the pipe, and the backslash that could un-escape it. */
 function cell(value: string): string { return inlineText(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|'); }
 

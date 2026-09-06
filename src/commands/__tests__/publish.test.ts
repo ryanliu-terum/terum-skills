@@ -2,13 +2,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, originSha, pushFromSeed, ScriptedPrompter, TEAM_JSON, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, fakeGh, git, holdCloneLock, mappedRunner, originSha, pushFromSeed, ScriptedPrompter, TEAM_JSON, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { run } from '../publish.js';
-import lockfile from 'proper-lockfile';
-import { cloneLockPath } from '../../lib/teamRepo.js';
 
 const REMOTE = 'https://github.com/acme/team.git';
 const ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_ID = '22222222-2222-4222-8222-222222222222';
 const skill = (name = 'sample') => `---\nname: ${name}\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\nallowed-tools: Bash(git status)\n---\n`;
 
 /** Commit files from the seed clone and push them to a branch only — main stays where it is; the seed is reset afterwards. */
@@ -130,15 +129,17 @@ describe('publish (§6)', () => {
     expect(await originSha(abandoned.fixture.bare)).toBe(mainMoved);
     void mainBefore;
     // A branch of that name holding anything else — an unrelated commit; someone else's project
-    // endorsement; THIS endorsement plus a review fixup (membership alone is not identity) — is never replaced.
+    // endorsement; THIS endorsement plus a second one squashed into team.json (only the byte compare
+    // refuses it); THIS endorsement plus a review fixup (membership alone is not identity) — is never replaced.
     const projectEndorsement = { ...TEAM_JSON, projects: { product: { remotes: ['x'], skills: [ID] } } };
     const exactEndorsement = `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n`;
-    for (const theirsOnBranch of [
+    for (const [index, theirsOnBranch] of [
       [{ path: 'unrelated.txt', content: 'someone else' }],
       [{ path: 'team.json', content: `${JSON.stringify(projectEndorsement)}\n` }],
+      [{ path: 'team.json', content: `${JSON.stringify({ ...TEAM_JSON, global: [ID, OTHER_ID] }, null, 2)}\n` }],
       [{ path: 'team.json', content: exactEndorsement }, { path: 'skills/sample/SKILL.md', content: skill().replace('useful skill', 'reviewed on the branch') }],
-    ]) {
-      const label = theirsOnBranch.map((file) => file.path).join('+');
+    ].entries()) {
+      const label = `${index}: ${theirsOnBranch.map((file) => file.path).join('+')}`;
       const other = await prepared();
       const theirs = await pushBranchFromSeed(other.fixture.seed, theirsOnBranch, 'publish/sample');
       const otherMain = await originSha(other.fixture.bare);
@@ -174,7 +175,7 @@ describe('publish (§6)', () => {
     const { fixture, store } = await prepared();
     const runner = mappedRunner(REMOTE, fixture.bare);
     const clone = store.teamClone('team');
-    const release = await lockfile.lock(clone, { lockfilePath: cloneLockPath(clone), realpath: false, stale: 60_000 });
+    const release = await holdCloneLock(clone);
     try {
       await expect(run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/write lock/i) });
       expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
@@ -193,6 +194,10 @@ describe('publish (§6)', () => {
     expect(await originSha(fixture.bare)).toBe(main);
     expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
     expect((await git(['branch', '--list', 'publish/sample'], fixture.bare)).trim()).toBe('');
+    // Both names are asked of the remote in ONE round trip.
+    const probes = runner.calls.filter((call) => call.command === 'git' && call.args[0] === 'ls-remote');
+    expect(probes).toHaveLength(1);
+    expect(probes[0]!.args).toEqual(expect.arrayContaining(['refs/heads/publish/sample', 'refs/heads/publish/sample-2']));
   });
 
   it('rejects unknown names and resolves an ambiguous bare ref only with --team', async () => {

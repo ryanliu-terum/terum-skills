@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { systemRunner } from '../runner.js';
 import { temporaryDirectory } from './fixtures.js';
@@ -18,6 +20,21 @@ describe('systemRunner', () => {
     try {
       const prompt = await systemRunner.run('git', ['-c', 'alias.p=!printf "%s" "$GIT_TERMINAL_PROMPT"', 'p'], { cwd });
       expect(prompt.stdout).toBe('0');
+    } finally {
+      if (ambient === undefined) delete process.env.GIT_TERMINAL_PROMPT; else process.env.GIT_TERMINAL_PROMPT = ambient;
+    }
+  });
+
+  it('hands the terminal to the child on an inherited run: nothing is captured and git may prompt', async () => {
+    const cwd = await temporaryDirectory();
+    await systemRunner.run('git', ['init', '-q'], { cwd });
+    const ambient = process.env.GIT_TERMINAL_PROMPT;
+    process.env.GIT_TERMINAL_PROMPT = '1';
+    try {
+      // The alias writes its answer to a file instead of the (inherited) terminal, so the suite stays silent.
+      const result = await systemRunner.run('git', ['-c', 'alias.p=!printf "%s" "$GIT_TERMINAL_PROMPT" > probe.txt', 'p'], { cwd, stdio: 'inherit' });
+      expect(result).toEqual({ code: 0, stdout: '', stderr: '' });
+      expect(await readFile(join(cwd, 'probe.txt'), 'utf8')).toBe('1');
     } finally {
       if (ambient === undefined) delete process.env.GIT_TERMINAL_PROMPT; else process.env.GIT_TERMINAL_PROMPT = ambient;
     }

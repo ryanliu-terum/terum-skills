@@ -23,8 +23,10 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     const people = await readPeople(clone);
     const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived) }));
     const skills = await listSkills(team, people, clone, runner);
-    if (args.kind === 'member') return showMember(args.value, people, skills, io, roster);
-    if (args.kind === 'project') return showProject(args.value, team, skills, io, roster);
+    // `return await`: a returned promise leaves the try block before it settles, so a throw inside
+    // showMember/showProject would reject run() instead of becoming the failure Result every verb returns.
+    if (args.kind === 'member') return await showMember(args.value, people, skills, io, roster);
+    if (args.kind === 'project') return await showProject(args.value, team, skills, io, roster);
     io.print('Members:');
     for (const member of roster) io.print(`  ${member.handle}${member.active ? '' : ' (inactive)'}`);
     io.print('Skills:');
@@ -56,7 +58,7 @@ async function showMember(handle: string | undefined, people: Awaited<ReturnType
   return success({ roster, skills: authored });
 }
 async function showProject(projectName: string | undefined, team: ReturnType<typeof teamSchema.parse>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster']): Promise<Result<LsResult>> {
-  if (!projectName || !team.projects[projectName]) throw new Error(`No project named ${projectName ?? ''}.`);
+  if (!projectName || !Object.hasOwn(team.projects, projectName)) throw new Error(`No project named ${projectName ?? ''}.`);
   const projectIds = new Set(team.projects[projectName]!.skills);
   const selected = skills.filter((skill) => projectIds.has(skill.id));
   io.print(`Project ${projectName}:`);

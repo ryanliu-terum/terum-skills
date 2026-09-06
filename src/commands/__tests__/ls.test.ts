@@ -48,4 +48,12 @@ describe('ls (§6)', () => {
     expect(member).toMatchObject({ ok: true, value: { skills: [{ name: 'report', installs: 1, endorsement: 'project: app' }] } });
     expect(project).toMatchObject({ ok: true, value: { skills: [{ name: 'report', installs: 1, endorsement: 'project: app' }] } });
   });
+
+  it('returns a failure Result — never a rejection — for an unknown member, and does not take an inherited object key for a project', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'local')); await store.ensureRoot(); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    await expect(run({ kind: 'member', value: 'nobody', config: store }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: 'No member named nobody.' });
+    await expect(run({ kind: 'project', value: 'constructor', config: store }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: 'No project named constructor.' });
+  });
 });

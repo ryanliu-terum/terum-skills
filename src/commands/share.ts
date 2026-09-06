@@ -2,15 +2,15 @@ import { cp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/prom
 import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import YAML from 'yaml';
-import { ConfigStore, createConfigStore } from '../lib/config.js';
+import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { allowedTools, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
-import { moveToQuarantine } from '../lib/placer.js';
+import { allowedTools, describeRaw, isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
+import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
 import { canonicalDigest, injectManagedFields, skillRecords } from '../lib/skills.js';
-import { MutableTree, openTeamRepo } from '../lib/teamRepo.js';
+import { MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 
 export interface ShareArgs {
   path?: string;
@@ -34,14 +34,13 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
     if (args.keepSource || args.keepRepo) return success(await resolveDivergence(store, runner, args.team, args.keepSource ?? args.keepRepo!, Boolean(args.keepSource), Boolean(args.allowPrivileged), io));
     if (!args.path) throw new Error('Provide a skill folder path.');
     const config = await store.read();
-    const team = selectTeam(config.teams, args.team);
-    const binding = config.teams[team]!;
+    const [team, binding] = selectTeam(config.teams, args.team);
     if (!binding.handle || !config.email || !config.display_name) throw new Error('Share needs your joined team identity, name, and email.');
     const source = resolve(args.path);
     const name = basename(source);
     if (!(await exists(join(source, 'SKILL.md')))) throw new Error(`${source} has no SKILL.md.`);
     await assertSkillDirectory(source);
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name.length > 64) throw new Error(`Skill name ${name} must be 1–64 lowercase alphanumerics or single hyphens.`);
+    if (!isSkillName(name)) throw new Error(`Skill name ${name} must be 1–64 lowercase alphanumerics or single hyphens.`);
     if (!args.allowPrivileged && await hasPrivilegedContent(source)) throw new Error(`${name} contains plugin or hook definitions; retry with --allow-privileged after reviewing them.`);
     const raw = await readFile(join(source, 'SKILL.md'), 'utf8');
     const description = inspectSource(raw, name);
@@ -72,10 +71,11 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
 }
 
-/** §5.3 three-way reconciler, called by sync after its pending replay. */
-export async function reconcileShared(store: ConfigStore, runner: Runner, io: Prompter): Promise<void> {
+/** §5.3 three-way reconciler, called by sync after its pending replay; `skipTeams` are the clones sync could not refresh this run. */
+export async function reconcileShared(store: ConfigStore, runner: Runner, io: Prompter, skipTeams: ReadonlySet<string> = new Set()): Promise<void> {
   const config = await store.read();
   for (const [id, tracked] of Object.entries(config.shared)) {
+    if (skipTeams.has(tracked.team)) continue;
     try {
       const clone = store.teamClone(tracked.team);
       if (!(await exists(tracked.source))) { io.print(`Shared source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use share --relocate or --forget.`); continue; }
@@ -101,7 +101,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const declared = parseSkillFrontmatter(repaired);
     const targetName = declared.ok ? declared.data.name : record.name;
     if (targetName !== record.name) {
-      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(targetName) || targetName.length > 64) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); continue; }
+      if (!isSkillName(targetName)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); continue; }
       if ((await skillRecords(clone, tracked.team)).some((item) => item.name === targetName && item.id !== id)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; another skill already uses that name.`); continue; }
     }
     const sourceDigest = await canonicalDigest(tracked.source);
@@ -112,13 +112,17 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
       continue;
     }
     const binding = fresh.teams[tracked.team];
-    const refreshRepo = async (content: string): Promise<void> => {
-      if (content === repoContents) return;
+    // The clone copy read above is a preflight: safeWrite fetches and resets before the mutation
+    // runs, so the repair is re-derived from the fresh pre-image inside it (as every other mutation
+    // in this tree does), never written from bytes that may already be behind the remote. The
+    // preflight comparison only skips the write when nothing is due locally.
+    const refreshRepo = async (): Promise<void> => {
+      if (repairedRepo === repoContents) return;
       if (!binding?.handle) throw new Error(`Team ${tracked.team} has no joined handle.`);
-      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => tree.set(`skills/${record!.name}/SKILL.md`, content), { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: `${binding.handle}: update ${record!.name}` });
+      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => refreshManagedFieldsInTree(tree, `skills/${record!.name}/SKILL.md`, { license: team.license, id, author }), { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: `${binding.handle}: update ${record!.name}` });
     };
       if (sourceDigest === baseline && repoDigest === baseline) {
-        await refreshRepo(repairedRepo);
+        await refreshRepo();
         continue;
       }
       if (sourceDigest !== baseline) {
@@ -129,7 +133,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
         if (await hasPrivilegedContent(tracked.source) && !(await hasPrivilegedContent(record.directory))) { io.print(`Shared skill ${record.name} now contains plugin or hook definitions; run share --keep-source ${id} --allow-privileged after reviewing them.`); continue; }
       // A pre-image with the prior author can only receive a managed-field refresh. Land that
       // narrow write first, then the normal author-owned content mirror on the replayed tree.
-      await refreshRepo(repairedRepo);
+      await refreshRepo();
       const files = await sourceFiles(tracked.source);
       await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => {
         if (targetName !== record!.name) {
@@ -147,7 +151,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
         const copiedSource = await readFile(sourceSkill, 'utf8');
         const refreshedSource = injectManagedFields(copiedSource, { license: team.license, id, author });
         if (refreshedSource !== copiedSource) await writeFile(sourceSkill, refreshedSource, 'utf8');
-        await refreshRepo(repairedRepo);
+        await refreshRepo();
         await store.update((next) => { if (next.shared[id]) next.shared[id].baseline = repoDigest; });
       }
     } catch (error) {
@@ -166,6 +170,10 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
   if (keepSource) {
     const binding = config.teams[tracked.team];
     if (!binding?.handle) throw new Error(`Team ${tracked.team} has no joined handle.`);
+    // Same gate as the first share and the sync reconciler: privileged content the repository copy
+    // does not already carry needs the explicit flag. It runs before every write this branch makes —
+    // the source managed-field repair and the managed-field commit included — so a refusal is no-write.
+    if (!allowPrivileged && await hasPrivilegedContent(tracked.source) && !(await hasPrivilegedContent(record.directory))) throw new Error(`${record.name} contains plugin or hook definitions; retry with --allow-privileged after reviewing them.`);
     const team = await readTeamPolicy(clone);
     const author = `${config.display_name ?? ''} <${config.email ?? ''}>`;
     const sourceSkill = join(tracked.source, 'SKILL.md');
@@ -177,11 +185,8 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
     const repairedRepo = injectManagedFields(repoContents, { license: team.license, id, author });
     const repo = openTeamRepo(clone, binding.remote, runner);
     if (repairedRepo !== repoContents) {
-      await repo.safeWrite((tree) => tree.set(`skills/${record.name}/SKILL.md`, repairedRepo), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
+      await repo.safeWrite((tree) => refreshManagedFieldsInTree(tree, `skills/${record.name}/SKILL.md`, { license: team.license, id, author }), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
     }
-    // Same gate as the first share and the sync reconciler: privileged content the repository copy
-    // does not already carry needs the explicit flag.
-    if (!allowPrivileged && await hasPrivilegedContent(tracked.source) && !(await hasPrivilegedContent(record.directory))) throw new Error(`${record.name} contains plugin or hook definitions; retry with --allow-privileged after reviewing them.`);
     const files = await sourceFiles(tracked.source);
     await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
     const digest = await canonicalDigest(tracked.source);
@@ -207,7 +212,6 @@ async function relocate(store: ConfigStore, value: { id: string; path: string } 
   return undefined;
 }
 function splitRelocate(value: string): { id: string; path: string } { const index = value.indexOf(':'); if (index < 1) throw new Error('Use --relocate <id>:<path>.'); return { id: value.slice(0, index), path: value.slice(index + 1) }; }
-function selectTeam(teams: Record<string, unknown>, explicit?: string): string { if (explicit) { if (!teams[explicit]) throw new Error(`Team ${explicit} is not configured.`); return explicit; } const names = Object.keys(teams); if (names.length !== 1) throw new Error('Select a team with --team.'); return names[0]!; }
 function inspectSource(raw: string, name: string): string {
   const match = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(raw); if (!match) throw new Error('SKILL.md has no YAML frontmatter.');
   const parsed = YAML.parse(match[1]!) as Record<string, unknown>;
@@ -217,7 +221,7 @@ function inspectSource(raw: string, name: string): string {
   const grants = allowedTools(parsed['allowed-tools']);
   if (!grants.ok) {
     const line = raw.split(/\r?\n/).findIndex((text) => /^allowed-tools\s*:/.test(text)) + 1;
-    throw new Error(`${name}: allowed-tools is malformed${line ? ` (SKILL.md line ${line})` : ''}: ${JSON.stringify(grants.raw)}. Use a YAML list of tool patterns, or one comma-separated string.`);
+    throw new Error(`${name}: allowed-tools is malformed${line ? ` (SKILL.md line ${line})` : ''}: ${describeRaw(grants.raw)}. Use a YAML list of tool patterns, or one comma-separated string.`);
   }
   return parsed.description;
 }
@@ -236,6 +240,14 @@ async function hasPrivilegedContent(root: string): Promise<boolean> {
 }
 async function sourceFiles(root: string): Promise<Map<string, Buffer>> { const result = new Map<string, Buffer>(); async function walk(current: string, relative = ''): Promise<void> { for (const entry of await readdir(current, { withFileTypes: true })) { const next = join(current, entry.name); const key = relative ? `${relative}/${entry.name}` : entry.name; if (entry.isDirectory()) await walk(next, key); else if (entry.isFile()) result.set(key, await readFile(next)); } } await walk(root); return result; }
 function mirrorToTree(tree: MutableTree, destination: string, files: Map<string, Buffer>): void { for (const path of tree.paths(`${destination}/`)) if (!files.has(path.slice(destination.length + 1))) tree.remove(path); for (const [path, content] of files) tree.set(`${destination}/${path}`, content); }
+/** The managed-field refresh as a mutation: re-derived from the fresh pre-image safeWrite hands it, so it can only ever change the three managed lines of whatever is actually upstream. */
+function refreshManagedFieldsInTree(tree: MutableTree, path: string, values: { license: string; id: string; author: string }): void {
+  const current = tree.before(path);
+  if (current === undefined) return;
+  const text = treeText(current);
+  const repaired = injectManagedFields(text, values);
+  if (repaired !== text) tree.set(path, repaired);
+}
 /**
  * Replace the author's folder `to` with the repository copy `from`. `to` is the user's own authoring
  * tree — possibly holding edits no commit has — so the displaced folder goes to quarantine, never to
@@ -254,19 +266,11 @@ async function replaceDirectory(from: string, to: string, quarantineRoot: string
     await rename(temporary, to);
     return displaced;
   } catch (error) {
-    if (displaced !== undefined) await restoreDirectory(displaced, to);
+    // Undo the move-aside the way it went: back across the volume if that is where it came from.
+    if (displaced !== undefined) await moveDirectory(displaced, to);
     throw error;
   } finally {
     await rm(temporary, { recursive: true, force: true });
-  }
-}
-/** Undo a move-aside after a failed replace; across volumes the way it went: copy back, then remove. */
-async function restoreDirectory(displaced: string, to: string): Promise<void> {
-  try { await rename(displaced, to); }
-  catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'EXDEV')) throw error;
-    await cp(displaced, to, { recursive: true, errorOnExist: true, force: false });
-    await rm(displaced, { recursive: true, force: true });
   }
 }
 async function readTeamPolicy(clone: string): Promise<{ license: string }> { const team = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json'); return { license: team.policy.skill_license }; }
