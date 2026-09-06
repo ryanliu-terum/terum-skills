@@ -1,9 +1,13 @@
 {
   "name": "terum-skills",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Share private Claude Code skills across a team through one private git repo. No server.",
   "license": "Apache-2.0",
   "type": "module",
+  "repository": { "type": "git", "url": "git+https://github.com/ryanliu-terum/terum-skills.git" },
+  "bugs": { "url": "https://github.com/ryanliu-terum/terum-skills/issues" },
+  "homepage": "https://github.com/ryanliu-terum/terum-skills#readme",
+  "keywords": ["claude-code", "skills", "team", "git"],
   "engines": {
     "node": ">=22.12.0"
   },

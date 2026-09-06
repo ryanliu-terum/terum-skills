@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
+import type { HookOptions } from '../lib/hook.js';
 import { inspect, lockTarget, moveToQuarantine, place, quarantineDrift, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
@@ -22,6 +23,8 @@ export interface InstallArgs {
   runner?: Runner;
   cwd?: string;
   home?: string;
+  /** Where the §8 hook offer writes when a three-part ref bootstraps a fresh machine (test knob). */
+  hook?: HookOptions;
   /** Injectable retry clock for deterministic recovery tests; authorization remains command-owned. */
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
 }
@@ -53,7 +56,18 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       return success(results);
     }
     const reference = parseRef(operation.ref);
-    const team = await teamForReference(config, reference.team ?? args.team, reference.remote, reference.name);
+    const team = await teamForReference(config, reference.team ?? args.team, reference.remote, reference.name).catch(async (error: unknown) => {
+      // §6: a three-part ref on a machine that has joined nothing performs the bootstrap first —
+      // `setup <org>/<repo>` with its print-only steps suppressed — and then installs: one code
+      // path, not two. A machine that already has teams keeps the message: joining a second team
+      // is `team join`'s explicit, prompt-heavy flow. The import is deferred because setup is
+      // built on team, which is built on this module.
+      if (!(error instanceof NotJoinedError) || Object.keys(config.teams).length > 0) throw error;
+      const { run: setup } = await import('./setup.js');
+      const bootstrapped = await setup({ target: error.remote.replace(/^github\.com\//, ''), quiet: true, config: store, runner, home: args.home, hook: args.hook }, io);
+      if (!bootstrapped.ok) throw new Error(bootstrapped.error);
+      return bootstrapped.value.team;
+    });
     return success([await installOne({ team, reference: reference.name, version: reference.version, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
 }
@@ -180,10 +194,14 @@ export function parseRef(value: string): { team?: string; remote?: string; name:
   if (segments.length === 3) return { remote: `github.com/${segments[0]}/${segments[1]}`, name: segments[2]!, version };
   throw new Error(`Invalid skill ref ${value}.`);
 }
+/** A three-part ref names a repository this machine has not joined: `install` answers it with the §6 bootstrap, every other verb with the message. */
+export class NotJoinedError extends Error {
+  constructor(readonly remote: string, message: string) { super(message); this.name = 'NotJoinedError'; }
+}
 export async function teamForReference(config: Config, explicit: string | undefined, remote: string | undefined, name?: string): Promise<string> {
   if (remote) {
     const found = Object.entries(config.teams).find(([, entry]) => normalizeRemote(entry.remote) === normalizeRemote(remote));
-    if (!found) throw new Error(`This machine has not joined ${remote}; run \`team join ${remote.replace(/^github\.com\//, '')}\` first.`);
+    if (!found) throw new NotJoinedError(remote, `This machine has not joined ${remote}; run \`team join ${remote.replace(/^github\.com\//, '')}\` first.`);
     return found[0];
   }
   // Only the genuinely ambiguous bare ref is answered here, because only a ref-taking verb can name

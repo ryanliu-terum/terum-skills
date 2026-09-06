@@ -180,6 +180,20 @@ describe('setup (§6.1)', () => {
     expect(first.countAsked('Install the Claude Code session-start hook') + second.countAsked('Install the Claude Code session-start hook')).toBe(1);
   });
 
+  it('quiet mode (the §6 install bootstrap) suppresses every print-only step and keeps every prompt', async () => {
+    const fixture = await bareTeam();
+    const root = join(fixture.root, 'quiet'); const store = createConfigStore(join(root, 'state'));
+    const remote = 'https://git.example/team.git'; const runner = mappedRunner(remote, fixture.bare, fakeGh('bob'));
+    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [true]);
+    const result = await run({ target: remote, quiet: true, config: store, runner, hook: hookFor(root), communityUrl: 'https://example.test/community' }, io);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.steps).toEqual({ welcome: 'skipped', github: 'done', team: 'done', actions: 'skipped', invite: 'skipped', community: 'skipped', hook: 'done', done: 'skipped' });
+    expect(io.countAsked('Install the Claude Code session-start hook')).toBe(1);
+    const printed = io.lines.join('\n');
+    for (const line of ['Welcome to terum-skills', 'GitHub: gh', 'Next, from any terminal', 'Feedback and requests', 'Repository:', 'README:']) expect(printed, line).not.toContain(line);
+    expect(JSON.parse(await git(['show', 'main:people/bob.json'], fixture.bare)).email).toBe('bob@example.com');
+  });
+
   it('keeps setup as an orchestrator: real verbs ask every consent question themselves', async () => {
     const source = await readFile(new URL('../setup.ts', import.meta.url), 'utf8');
     expect(source).not.toContain('io.confirm(');

@@ -46,6 +46,39 @@ export function guard(tree: GuardTree, rawContext: GuardContext): void {
   }
 }
 
+/**
+ * D12's clone-local half, run by the pre-push hook. A raw `git push` cannot say which verb it
+ * is, so every row any verb could take stands open to the pusher's own identity — README (f),
+ * their own people file (b), a team.json change shaped like publish (c), team remove (d) or a
+ * rejoin (e), and skill folders they author (a). Nothing else. Accidents, not abuse: the hook is
+ * bypassable and the bypass is attributed.
+ */
+export function guardRawPush(tree: GuardTree, identity: { handle: string; author?: string }): void {
+  const handle = normalizeHandle(identity.handle);
+  for (const path of tree.changedPaths) {
+    if (path === 'README.md') continue;
+    if (path === `people/${handle}.json`) continue;
+    if (path === 'team.json') {
+      if (teamChangeOpenToRawPush(tree, handle)) continue;
+      throw new GuardError('Push guard refused team.json: only the skill lists (publish), an archive of someone else (team remove), or your own rejoin may change it');
+    }
+    const skill = /^skills\/([^/]+)\/.+$/.exec(path);
+    // Ownership is an author comparison (§5.3): with no local identity there is nothing to compare, and
+    // saying so beats reading every skill path as someone else's.
+    if (skill && !identity.author) throw new GuardError(`Push guard cannot check ${path}: this machine has no name and email to match a skill's author against. Run \`terum-skills login\`, then retry (or bypass with \`git push --no-verify\`, attributed to you).`);
+    if (skill && ownsSkill(tree, skill[1]!, { action: 'share', handle, author: identity.author })) continue;
+    throw new GuardError(`Push guard refused ${path}: not yours as ${handle} (D12: only your own skills, your own people file, and the team lists through publish; \`git push --no-verify\` bypasses this and is attributed to you)`);
+  }
+}
+
+function teamChangeOpenToRawPush(tree: GuardTree, handle: string): boolean {
+  let before: Team; let after: Team;
+  try { before = parseTeam(tree.before('team.json')); after = parseTeam(tree.after('team.json')); } catch { return false; }
+  if (onlySkillListsChanged(before, after) || archivedRemovedOnly(before, after, handle)) return true;
+  const appended = after.archived.filter((item) => !before.archived.includes(item));
+  return appended.length === 1 && appended[0] !== handle && archivedAppendedOnly(before, after, appended[0]!);
+}
+
 function normalizeHandle(handle: string): string {
   const parsed = handleSchema.safeParse(handle);
   if (!parsed.success) throw new GuardError(`Write guard refused an invalid handle ${JSON.stringify(handle)}`);

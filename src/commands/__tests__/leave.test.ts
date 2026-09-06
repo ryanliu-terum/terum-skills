@@ -1,4 +1,5 @@
-import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { cloneLockPath } from '../../lib/teamRepo.js';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,7 +7,7 @@ import { createConfigStore } from '../../lib/config.js';
 import { place } from '../../lib/placer.js';
 import { bareTeam, cloneWithIdentity, git, holdCloneLock, originSha, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run } from '../leave.js';
-import { installHook } from '../../lib/hook.js';
+import { installHook, lockPath } from '../../lib/hook.js';
 
 async function prepared() {
   const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -22,12 +23,34 @@ describe('team leave (§6)', () => {
     const personBefore = await git(['show', 'main:people/seed.json'], fixture.bare);
     const cache = join(store.root, 'cache', 'team', 'cached-version'); const stamp = join(store.root, 'run', 'team.stamp');
     await mkdir(cache, { recursive: true }); await mkdir(join(store.root, 'run'), { recursive: true }); await writeFile(stamp, 'stamp');
+    // A hook killed mid-sync leaves a stale §8 mutex (and, killed mid-reclaim, an aside copy) behind; leave reclaims the one and sweeps the other, so the next join of this name starts clean.
+    const lock = lockPath(store.root, 'team');
+    await writeFile(lock, `${JSON.stringify({ pid: process.pid, host: 'this-host', started: new Date(Date.now() - 20 * 60_000).toISOString() })}\n`);
+    await writeFile(`${lock}.stale-00000000-0000-4000-8000-000000000000`, 'abandoned mid-reclaim');
+    // `team.lock.stale-neighbour` is itself a legal team name: its live mutex and stamp begin with this team's aside prefix and are not ours to sweep.
+    await writeFile(`${lock}.stale-neighbour.lock`, 'another team holds this');
+    await writeFile(`${lock}.stale-neighbour.stamp`, 'another team synced');
     await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { removed: 1, cloneRemoved: true } });
     await expect(access(placed.path)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(cache)).rejects.toMatchObject({ code: 'ENOENT' }); await expect(access(stamp)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(lock)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readdir(join(store.root, 'run'))).filter((name) => name.startsWith('team.')).sort()).toEqual(['team.lock.stale-neighbour.lock', 'team.lock.stale-neighbour.stamp']);
     const config = await store.read(); expect(config.teams).toEqual({}); expect(config.placements).toEqual({}); expect(config.pending).toEqual([]); expect(config.shared).toEqual({}); expect(config.approvals.keep).toBeDefined();
     expect(await originSha(fixture.bare)).toBe(before);
     expect(await git(['show', 'main:people/seed.json'], fixture.bare)).toBe(personBefore);
+  });
+
+  it('refuses to tear down a team whose §8 mutex another sync holds, and removes nothing', async () => {
+    const { store, placed } = await prepared();
+    const lock = lockPath(store.root, 'team');
+    await mkdir(join(store.root, 'run'), { recursive: true });
+    const record = `${JSON.stringify({ pid: process.pid, host: hostname(), token: 'live', started: new Date().toISOString() })}\n`;
+    await writeFile(lock, record);
+    await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/holds the session lock on team/) });
+    await expect(access(placed.path)).resolves.toBeUndefined();
+    await expect(access(store.teamClone('team'))).resolves.toBeUndefined();
+    expect(Object.keys((await store.read()).teams)).toEqual(['team']);
+    expect(await readFile(lock, 'utf8')).toBe(record);
   });
 
   it('does nothing when declined, quarantines edits, and then becomes idempotently unconfigured', async () => {

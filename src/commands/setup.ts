@@ -25,6 +25,8 @@ export interface SetupVerbs {
 }
 export interface SetupArgs {
   target?: string;
+  /** §6 install bootstrap: the print-only steps (welcome, hints, community, closing summary) are suppressed; every prompt still happens. */
+  quiet?: boolean;
   config?: ConfigStore;
   runner?: Runner;
   home?: string;
@@ -77,18 +79,19 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   let teamName = '';
   let remote = '';
 
+  const say = (line: string): void => { if (!args.quiet) io.print(line); };
   try {
-    for (const line of WELCOME) io.print(line);
-    steps.welcome = 'printed';
+    for (const line of WELCOME) say(line);
+    steps.welcome = args.quiet ? 'skipped' : 'printed';
 
     const gh = await detectOrOfferGh(io, runner);
     if (role === 'creator') {
       const error = creatorAuthenticationError(gh);
       if (error) return failed(error, role, teamName, remote, steps);
-      io.print('GitHub: gh is logged in.');
-    } else if (gh.authenticated) io.print('GitHub: gh is logged in; the invitation will be accepted for you.');
-    else if (gh.installed) io.print('GitHub: gh is installed but logged out; you will be asked to accept the invitation in your browser.');
-    else io.print('GitHub: gh is not installed; you will be asked to accept the invitation in your browser.');
+      say('GitHub: gh is logged in.');
+    } else if (gh.authenticated) say('GitHub: gh is logged in; the invitation will be accepted for you.');
+    else if (gh.installed) say('GitHub: gh is installed but logged out; you will be asked to accept the invitation in your browser.');
+    else say('GitHub: gh is not installed; you will be asked to accept the invitation in your browser.');
     steps.github = 'done';
 
     const before = await store.read();
@@ -96,7 +99,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       const configured = Object.entries(before.teams)[0];
       if (configured) {
         teamName = configured[0]; remote = configured[1].remote;
-        io.print(`Team ${teamName} is already configured on this machine.`);
+        say(`Team ${teamName} is already configured on this machine.`);
         steps.team = 'skipped';
       } else {
         const result = await verbs.team({ kind: 'create', offerHook: false, config: store, runner }, io);
@@ -110,7 +113,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       const configured = teamByRemote(before, target.remote);
       if (configured?.[1].handle) {
         teamName = configured[0]; remote = configured[1].remote;
-        io.print(`Team ${teamName} is already configured on this machine.`);
+        say(`Team ${teamName} is already configured on this machine.`);
         steps.team = 'skipped';
       } else {
         const result = await verbs.team({ kind: 'join', target: args.target!, offerHook: false, config: store, runner }, io);
@@ -150,12 +153,12 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         }
       }
     } else steps.actions = 'skipped';
-    io.print('Next, from any terminal:');
-    io.print(`  terum-skills install ${teamName}/<skill>   — install a shared skill (add @<version> to pin it)`);
-    io.print('  terum-skills ls                       — list members and shared skills');
-    io.print('  terum-skills search <term>            — find a skill by name, description, or category');
-    io.print('  terum-skills sync                     — pull updates and finish pending work');
-    io.print('  terum-skills publish <skill>          — endorse a skill for the whole team');
+    say('Next, from any terminal:');
+    say(`  terum-skills install ${teamName}/<skill>   — install a shared skill (add @<version> to pin it)`);
+    say('  terum-skills ls                       — list members and shared skills');
+    say('  terum-skills search <term>            — find a skill by name, description, or category');
+    say('  terum-skills sync                     — pull updates and finish pending work');
+    say('  terum-skills publish <skill>          — endorse a skill for the whole team');
 
     if (role === 'joiner') steps.invite = 'skipped';
     else if (isGitHubRemote(remote)) {
@@ -174,30 +177,33 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     }
 
     const communityUrl = args.communityUrl ?? COMMUNITY_URL;
-    if (communityUrl === '') steps.community = 'skipped';
+    if (communityUrl === '' || args.quiet) steps.community = 'skipped';
     else { io.print(`Feedback and requests: ${communityUrl}`); steps.community = 'printed'; }
 
     const hookOutcome = await verbs.offerHook(io, resolvedHook(store, args.home, args.hook));
     steps.hook = hookOutcome === 'installed' || hookOutcome === 'replaced' ? 'done' : 'skipped';
 
-    // Every step above is durable by here; this closing summary reads the disposable clone (§4.2),
-    // so a read-back problem must not turn a finished wizard into a failure (the rule team join and
-    // team leave already follow). Only the clone reads sit inside the try, and the roster is read
-    // before its header prints. The repository links come from the remote already in hand — they
-    // are the payload the user sends teammates — so an unreadable clone must not take them with it.
-    try {
-      const document = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
-      const roster = activePeople(await readPeople(clone), document.archived);
-      io.print('Members:');
-      for (const person of roster) io.print(`  @${person.handle} — ${person.display_name}`);
-    } catch (error) {
-      io.print(`Set up, but the team details could not be read from ${clone}: ${error instanceof Error ? error.message : String(error)}`);
+    if (args.quiet) steps.done = 'skipped';
+    else {
+      // Every step above is durable by here; this closing summary reads the disposable clone (§4.2),
+      // so a read-back problem must not turn a finished wizard into a failure (the rule team join and
+      // team leave already follow). Only the clone reads sit inside the try, and the roster is read
+      // before its header prints. The repository links come from the remote already in hand — they
+      // are the payload the user sends teammates — so an unreadable clone must not take them with it.
+      try {
+        const document = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
+        const roster = activePeople(await readPeople(clone), document.archived);
+        io.print('Members:');
+        for (const person of roster) io.print(`  @${person.handle} — ${person.display_name}`);
+      } catch (error) {
+        io.print(`Set up, but the team details could not be read from ${clone}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const ownerRepo = githubOwnerRepo(remote);
+      const repositoryUrl = ownerRepo ? `https://github.com/${ownerRepo}` : stripRemoteCredentials(remote);
+      io.print(`Repository: ${repositoryUrl}`);
+      io.print(`README: ${ownerRepo ? `${repositoryUrl}/blob/main/README.md` : repositoryUrl}`);
+      steps.done = 'printed';
     }
-    const ownerRepo = githubOwnerRepo(remote);
-    const repositoryUrl = ownerRepo ? `https://github.com/${ownerRepo}` : stripRemoteCredentials(remote);
-    io.print(`Repository: ${repositoryUrl}`);
-    io.print(`README: ${ownerRepo ? `${repositoryUrl}/blob/main/README.md` : repositoryUrl}`);
-    steps.done = 'printed';
     return success({ role, team: teamName, remote, steps });
   } catch (error) { return failed(error, role, teamName, remote, steps); }
 }

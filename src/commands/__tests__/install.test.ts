@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { run } from '../install.js';
 import { run as sync } from '../sync.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { allowedTools } from '../../lib/schema.js';
 
@@ -20,6 +20,32 @@ describe('install (§6 refs)', () => {
     expect(traversal.ok ? '' : traversal.error).not.toContain('config.json');
     // An inherited object key is not a configured team either.
     expect(await run({ ref: 'sample', team: 'constructor', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Team constructor is not configured.' });
+  });
+
+  it('a three-part ref on a machine that never joined bootstraps through setup — quiet, every prompt still asked — and then installs: one command (§6, M4 exit)', async () => {
+    const fixture = await bareTeam();
+    const id = '31313131-3131-4131-8131-313131313131';
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    const root = join(fixture.root, 'fresh'); const store = createConfigStore(join(root, 'state')); const home = join(root, 'home');
+    const remote = 'https://github.com/acme/team.git';
+    const runner = mappedRunner(remote, fixture.bare, fakeGh('bob', { 'api user/repository_invitations': { code: 0, stdout: '[]\n', stderr: '' } }));
+    // Identity: GitHub login and handle default to gh's login, then name and email; the §8 hook offer is declined.
+    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [false]);
+    const result = await run({ ref: 'acme/team/sample', config: store, home, runner, hook: { settingsFile: join(root, 'settings.json'), backupDir: join(root, 'backups') } }, io);
+    expect(result).toMatchObject({ ok: true, value: [{ id, team: 'team', path: join(home, '.claude', 'skills', 'sample') }] });
+    expect((await store.read()).teams.team).toMatchObject({ handle: 'bob' });
+    expect(await readFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('name: sample');
+    expect(JSON.parse(await git(['show', 'main:people/bob.json'], fixture.bare)).installed).toHaveLength(1);
+    expect(io.countAsked('Install the Claude Code session-start hook')).toBe(1);
+    const printed = io.lines.join('\n');
+    expect(printed).not.toContain('Welcome to terum-skills');
+    expect(printed).not.toContain('Next, from any terminal');
+    expect(printed).not.toContain('Feedback and requests');
+    expect(printed).not.toContain('Repository:');
+    // A machine that already has a team keeps the message: a second team is `team join`'s explicit flow.
+    const second = createConfigStore(join(root, 'second-state'));
+    await second.update((config) => { config.teams.other = { remote: 'github.com/other/repo', handle: 'bob' }; });
+    expect(await run({ ref: 'acme/team/sample', config: second, home: join(root, 'second-home'), runner }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('team join acme/team') });
   });
 
   it('an inherited object key is not a project', async () => {

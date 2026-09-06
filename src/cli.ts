@@ -12,6 +12,7 @@ import { run as readme } from './commands/readme.js';
 import { run as runLeave } from './commands/leave.js';
 import { run as runPublish } from './commands/publish.js';
 import { run as runSetup } from './commands/setup.js';
+import { run as runGuardPush } from './commands/guardPush.js';
 import { Prompter } from './lib/prompt.js';
 import { Result } from './lib/result.js';
 
@@ -20,10 +21,10 @@ import { Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>) => Promise<void>;
-export interface CliVerbs { login: typeof login; team: typeof runTeam; setup?: typeof runSetup; share?: typeof share; install?: typeof install; uninstall?: typeof uninstall; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; }
+export interface CliVerbs { login: typeof login; team: typeof runTeam; setup?: typeof runSetup; share?: typeof share; install?: typeof install; uninstall?: typeof uninstall; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }): Command {
-  const active: Required<CliVerbs> = { login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, share: verbs.share ?? share, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave };
+  const active: Required<CliVerbs> = { login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, share: verbs.share ?? share, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush };
   const program = new Command();
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
 
@@ -74,6 +75,10 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .command('readme', { hidden: true })
     .option('--pr-comment <base-ref>', 'render the publish preview comment')
     .action(async (options: { prComment?: string }) => execute((io) => active.readme(options, io)));
+  // The clone-local pre-push hook (D12): `guard-push <remote> <url> [<local ref> <local sha> <remote ref> <remote sha>]...`.
+  program
+    .command('guard-push <remote> <url> [refs...]', { hidden: true })
+    .action(async (remote: string, url: string, refs: string[]) => execute((io) => active.guardPush({ remote, url, refs }, io)));
 
   program
     .command('publish <ref>')

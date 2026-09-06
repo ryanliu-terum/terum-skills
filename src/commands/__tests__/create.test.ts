@@ -345,3 +345,16 @@ describe('team create (§6)', () => {
   });
 
 });
+
+describe('team create arms the push guard (D12)', () => {
+  it('a failure arming the guard leaves no clone and no staging directory behind, and binds nothing', async () => {
+    const { root, bare } = await emptyBare();
+    const publicRemote = 'https://git.example/guarded.git';
+    const store = createConfigStore(pathJoin(root, 'local'));
+    const runner = wrapRunner(mappedRunner(publicRemote, bare), async (command, args, _options, next) => (command === 'git' && args[0] === 'config' && args[1] === 'core.hooksPath' ? { code: 1, stdout: '', stderr: 'config write failed' } : next()));
+    const result = await create({ name: 'guarded', remote: publicRemote, config: store, runner }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Could not arm the push guard') });
+    expect(await readdir(pathJoin(store.root, 'teams'))).toEqual([]);
+    expect((await store.read()).teams).toEqual({});
+  });
+});

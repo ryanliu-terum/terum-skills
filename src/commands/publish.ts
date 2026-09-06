@@ -170,7 +170,7 @@ async function assertBranchesReusable(runner: Runner, clone: string, branches: r
     if (!sha) continue;
     if (await isExactlyThisEndorsement(runner, clone, sha, id, scope, remote)) continue;
     const where = compare(remote, branch) ?? `${stripRemoteCredentials(remote)} — branch ${branch}`;
-    throw new Error(`${branch} already exists on the remote with a different endorsement (${where}). Merge or close its pull request, or delete the branch with \`git push origin --delete ${branch}\`, then retry.`);
+    throw new Error(`${branch} already exists on the remote with a different endorsement (${where}). Merge or close its pull request, or delete the branch on the host — or with \`git -C ${clone} push --no-verify origin --delete ${branch}\`, since the push guard refuses an unattributed deletion (D12) — then retry.`);
   }
 }
 

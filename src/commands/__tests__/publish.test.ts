@@ -145,7 +145,9 @@ describe('publish (§6)', () => {
       const otherMain = await originSha(other.fixture.bare);
       const theirRunner = mappedRunner(REMOTE, other.fixture.bare);
       const refused = await run({ ref: 'sample', config: other.store, runner: theirRunner }, new ScriptedPrompter());
-      expect(refused, label).toMatchObject({ ok: false, error: expect.stringMatching(/publish\/sample already exists on the remote with a different endorsement[\s\S]*compare\/main\.\.\.publish\/sample[\s\S]*--delete publish\/sample/) });
+      expect(refused, label).toMatchObject({ ok: false, error: expect.stringMatching(/publish\/sample already exists on the remote with a different endorsement[\s\S]*compare\/main\.\.\.publish\/sample/) });
+      // The delete remedy names the tool's own clone: only there is `origin` the team remote and the D12 guard the only pre-push hook.
+      expect(refused, label).toMatchObject({ ok: false, error: expect.stringContaining(`git -C ${other.store.teamClone('team')} push --no-verify origin --delete publish/sample`) });
       expect(await originSha(other.fixture.bare, 'publish/sample')).toBe(theirs);
       expect(await originSha(other.fixture.bare)).toBe(otherMain);
       expect(theirRunner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
@@ -189,7 +191,8 @@ describe('publish (§6)', () => {
     const main = await originSha(fixture.bare);
     const runner = mappedRunner(REMOTE, fixture.bare);
     const refused = await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter());
-    expect(refused).toMatchObject({ ok: false, error: expect.stringMatching(/publish\/sample-2 already exists on the remote with a different endorsement[\s\S]*--delete publish\/sample-2/) });
+    expect(refused).toMatchObject({ ok: false, error: expect.stringMatching(/publish\/sample-2 already exists on the remote with a different endorsement/) });
+    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining(`git -C ${store.teamClone('team')} push --no-verify origin --delete publish/sample-2`) });
     expect(await originSha(fixture.bare, 'publish/sample-2')).toBe(theirs);
     expect(await originSha(fixture.bare)).toBe(main);
     expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);

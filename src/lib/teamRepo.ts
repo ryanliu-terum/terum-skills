@@ -1,6 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { lstat, mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { chmod, lstat, mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import lockfile from 'proper-lockfile';
 import { mkdirPrivate } from './fs.js';
 import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
@@ -181,7 +183,9 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<voi
 }
 
 /**
- * Push to exactly the named ref. `main` is a plain push. A derived branch (`publish/<name>`) is
+ * Push to exactly the named ref — with `--no-verify`, because the guard above has already run on
+ * the exact tree being committed and the clone's own pre-push hook (installPushGuard) would only
+ * repeat it through an npx round trip. `main` is a plain push. A derived branch (`publish/<name>`) is
  * replaced under a lease PINNED to the ref as it stood when this write first tried that target, so
  * a retry after ref-lock contention can never overwrite a commit someone pushed in between: git
  * reports that as stale and the write moves on to `<branch>-2`, once. Any other refusal is
@@ -192,7 +196,7 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<voi
  */
 async function push(git: Git, branch: string, leases: Map<string, string>): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
   if (branch === 'main') {
-    const result = await git(['push', '-q', 'origin', 'HEAD:refs/heads/main']);
+    const result = await git(['push', '-q', '--no-verify', 'origin', 'HEAD:refs/heads/main']);
     if (result.code === 0) return { ok: true, pushedTo: 'main' };
     const error = result.stderr || result.stdout || 'push rejected';
     return { ok: false, retryable: RETRYABLE.test(error), error };
@@ -203,7 +207,7 @@ async function push(git: Git, branch: string, leases: Map<string, string>): Prom
       const seen = await git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${target}`]);
       leases.set(target, seen.code === 0 ? seen.stdout.trim() : '');
     }
-    const result = await git(['push', '-q', `--force-with-lease=refs/heads/${target}:${leases.get(target)}`, 'origin', `HEAD:refs/heads/${target}`]);
+    const result = await git(['push', '-q', '--no-verify', `--force-with-lease=refs/heads/${target}:${leases.get(target)}`, 'origin', `HEAD:refs/heads/${target}`]);
     if (result.code === 0) return { ok: true, pushedTo: target };
     lastError = result.stderr || result.stdout || 'push rejected';
     if (!STALE_LEASE.test(lastError)) return { ok: false, retryable: REF_LOCK.test(lastError), error: lastError };
@@ -320,11 +324,82 @@ async function removeCreated(root: string, realRoot: string, path: string): Prom
   }
 }
 
-/** Clone a team repo into a private directory, checking out `main` explicitly so a bare remote whose HEAD points elsewhere still yields a working tree. */
+/** Clone a team repo into a private directory, checking out `main` explicitly so a bare remote whose HEAD points elsewhere still yields a working tree, and arm the clone-local push guard. */
 export async function cloneTeam(remote: string, destination: string, runner: Runner = systemRunner): Promise<void> {
   await mkdirPrivate(dirname(destination));
   const clone = await runner.run('git', ['clone', '-q', '--branch', 'main', '--', remoteToGitUrl(remote), destination]);
   if (clone.code !== 0) throw new Error(`Could not clone ${stripRemoteCredentials(remote)}: ${(clone.stderr || clone.stdout).trim()}`);
+  await installPushGuard(destination, runner);
+}
+
+/** How the clone-local hook launches the guard: the node binary and the CLI entry that armed the clone. */
+export interface PushGuardLauncher { node: string; entry: string; }
+
+/**
+ * The CLI that is arming the clone, when it runs from a built package (`dist/index.js` beside
+ * `dist/lib/`, which is also how `npx` unpacks it); null under the TypeScript sources. A hook
+ * armed with an absolute path needs no registry on git's blocking path and runs the rules that
+ * armed it, not whatever was published last.
+ */
+export function localPushGuardLauncher(): PushGuardLauncher | null {
+  const entry = fileURLToPath(new URL('../index.js', import.meta.url));
+  return existsSync(entry) ? { node: process.execPath, entry } : null;
+}
+
+/** POSIX-shell single quoting: a HOME with a space or a quote is still one word. */
+function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
+
+/** This package's version, for the pinned `npx` fallback; null when package.json is out of reach (an unusual bundle). */
+function packageVersion(): string | null {
+  try { return (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? null; } catch { return null; }
+}
+
+/**
+ * The pre-push hook body. It checks that its launcher still exists before running it, and exits 0
+ * with one warning line when it does not (an npx cache pruned, a node upgraded away): the guard
+ * prevents accidents, not abuse, and `--no-verify` bypasses it anyway, so a push blocked by
+ * infrastructure would buy no safety — but a push that was NOT checked must say so. Once the CLI
+ * itself is entered, a non-zero exit is always the guard speaking — a refusal, or its declining to
+ * permit what it could not evaluate — never a bare internal error: guardPush.run re-voices anything
+ * else and names the same attributed bypass. git hands the pushed refs to the hook on stdin, and
+ * the CLI reads stdin nowhere outside the Prompter (§3), so the hook turns them into arguments.
+ * Without a built entry the fallback is `npx` pinned to this package's version — never `@latest`.
+ * That fallback is the one exception to the invariant above: it `exec`s npx, so a version npx
+ * cannot resolve (offline, a proxy, a registry outage) exits as npm, not as the guard, and blocks
+ * the push. Only a source run arms it: a built install ships dist/index.js, this package's `bin`.
+ */
+export function pushGuardHook(launcher: PushGuardLauncher | null): string {
+  const check = launcher ? `[ -x ${shellQuote(launcher.node)} ] && [ -f ${shellQuote(launcher.entry)} ]` : 'command -v npx >/dev/null 2>&1';
+  const launch = launcher ? `${shellQuote(launcher.node)} ${shellQuote(launcher.entry)} guard-push` : `npx -y ${shellQuote(`terum-skills@${packageVersion() ?? 'latest'}`)} guard-push`;
+  const warning = `terum-skills push guard: ${launcher ? launcher.entry : 'npx'} is gone, so this push was NOT checked. Re-run \`terum-skills team join <remote>\` to re-arm it.`;
+  return [
+    '#!/bin/sh',
+    '# terum-skills: the D12 ownership guard for a raw push from this clone. Regenerated on every join; do not edit.',
+    `if ! { ${check}; }; then`,
+    `  echo ${shellQuote(warning)} >&2`,
+    '  exit 0',
+    'fi',
+    'set -- "$1" "$2" $(cat)',
+    `exec ${launch} "$@"`,
+    '',
+  ].join('\n');
+}
+
+/**
+ * D12's clone-local half: a raw `git push` from a team clone runs the CLI's ownership rules
+ * through the hidden `guard-push` verb. Accidents, not abuse — `--no-verify` bypasses it and is
+ * attributed. Idempotent, and run on every clone AND every join of an existing clone, so an
+ * arming that never finished is repaired by the command the failure advice names.
+ */
+export async function installPushGuard(clone: string, runner: Runner = systemRunner, launcher: PushGuardLauncher | null = localPushGuardLauncher()): Promise<void> {
+  const hooks = join(clone, '.git', 'hooks');
+  await mkdir(hooks, { recursive: true });
+  const hook = join(hooks, 'pre-push');
+  await writeFile(hook, pushGuardHook(launcher), { encoding: 'utf8', mode: 0o700 });
+  await chmod(hook, 0o700);
+  // A machine-wide core.hooksPath (a repo-hooks convention on this machine) would hide .git/hooks; this clone is ours.
+  const configured = await runner.run('git', ['config', 'core.hooksPath', '.git/hooks'], { cwd: clone });
+  if (configured.code !== 0) throw new Error(`Could not arm the push guard in ${clone}: ${(configured.stderr || configured.stdout).trim()}`);
 }
 
 /** The normalized origin of an existing clone, or null when the directory is not a clone. */
