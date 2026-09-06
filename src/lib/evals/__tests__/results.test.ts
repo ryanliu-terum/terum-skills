@@ -45,6 +45,15 @@ describe('aggregation (§5.3)', () => {
     expect(aggregate([row('tie', 'both-arms-failed')], [], 1).execution_status).toBe('failed');
     expect(aggregate([], [], 0)).toMatchObject({ verdict: 'NEUTRAL', execution_status: 'complete', attribution: 'no execution comparisons ran' });
   });
+
+  it('environment skips grey the verdict and print in the report (§7.1 rev 8)', () => {
+    const out = aggregate([row('win')], [sample('candidate', 1)], 3, { xlsx: ['python3:openpyxl'] });
+    expect(out.execution_status).toBe('partial'); // skipped case's rows are unscored holes
+    expect(out.environment_skips).toEqual({ xlsx: ['python3:openpyxl'] });
+    const text = renderReport(out, null);
+    expect(text).toContain('skipped (environment): xlsx — missing python3:openpyxl');
+    expect(text).toContain('[partial — 1/3 scored]');
+  });
 });
 
 describe('run tree (§4.2)', () => {

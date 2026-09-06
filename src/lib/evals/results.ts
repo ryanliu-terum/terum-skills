@@ -46,13 +46,15 @@ export interface Aggregate {
   comparisons: Record<string, ComparisonSummary>;
   arm_scores: Record<string, number | null>;
   efficiency: Record<string, EfficiencySummary>;
+  /** Rev 8: cases skipped for missing host tools, case → missing requirements. Never scored, always visible. */
+  environment_skips: Record<string, string[]>;
 }
 
 /**
  * Roll rows and arm samples up into receipt numbers. `expectedRows` is k × opponents × cases;
  * a row decided by `both-arms-failed` is an unscored hole, and holes grey the verdict (§5.4).
  */
-export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSample[], expectedRows: number): Aggregate {
+export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSample[], expectedRows: number, environmentSkips: Record<string, string[]> = {}): Aggregate {
   const comparisons: Record<string, ComparisonSummary> = {};
   const counts = new Map<string, { win: number; loss: number; tie: number }>();
   for (const row of rows) {
@@ -90,6 +92,7 @@ export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSamp
     comparisons,
     arm_scores: armScores,
     efficiency,
+    environment_skips: environmentSkips,
   };
 }
 
@@ -122,6 +125,9 @@ export function renderReport(aggregateResult: Aggregate, triggers: TriggerSummar
   const grey = aggregateResult.execution_status !== 'complete' ? ` [${aggregateResult.execution_status} — ${aggregateResult.scored_rows}/${aggregateResult.expected_rows} scored]` : '';
   lines.push(`verdict: ${aggregateResult.verdict}${grey}`);
   lines.push(`why: ${aggregateResult.attribution}`);
+  for (const [caseName, missing] of Object.entries(aggregateResult.environment_skips)) {
+    lines.push(`skipped (environment): ${caseName} — missing ${missing.join(', ')}`);
+  }
   for (const [comparison, summary] of Object.entries(aggregateResult.comparisons)) {
     lines.push(`${comparison}: ${summarize(summary.win, summary.loss, summary.tie)}`);
   }

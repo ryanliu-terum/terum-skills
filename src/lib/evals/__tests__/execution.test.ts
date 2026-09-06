@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AgentRunError, Transcript, type AgentApi } from '../agent.js';
-import { ContaminationError, decide, loadCase, runCase, seedSandbox, type EvalCase } from '../execution.js';
+import { ContaminationError, decide, loadCase, missingRequirements, runCase, seedSandbox, type EvalCase } from '../execution.js';
 
 let scratch: string;
 beforeEach(async () => { scratch = await mkdtemp(join(tmpdir(), 'exec-')); });
 
-const caseOf = (extra: Partial<EvalCase> = {}): EvalCase => ({ name: 'c', task: 'do the thing', files: {}, checks: [], ...extra });
+const caseOf = (extra: Partial<EvalCase> = {}): EvalCase => ({ name: 'c', task: 'do the thing', files: {}, checks: [], requires: [], ...extra });
 
 const transcriptWith = (text: string, extras: Record<string, unknown>[] = []): Transcript =>
   Transcript.fromStream([
@@ -26,6 +26,31 @@ describe('case loading (§5.1)', () => {
     expect(loadCase('task: x\nbucket: sneaky\n', 'a').ok).toBe(false);
     expect(loadCase('task: x\nfiles: [nope]\n', 'a').ok).toBe(false);
     expect(loadCase('task: x\nchecks:\n  - file_exists: out.txt\n', 'a')).toMatchObject({ ok: true, value: { checks: [{ file_exists: 'out.txt' }] } });
+  });
+});
+
+describe('environment requirements (§7.1 rev 8)', () => {
+  it('parses requires, probes binaries and python modules', async () => {
+    expect(loadCase('task: x\nrequires:\n  - ffmpeg\n  - python3:openpyxl\n', 'a')).toMatchObject({ ok: true, value: { requires: ['ffmpeg', 'python3:openpyxl'] } });
+    expect(await missingRequirements(['sh'])).toEqual([]);
+    expect(await missingRequirements(['definitely-not-a-real-binary-xq7'])).toEqual(['definitely-not-a-real-binary-xq7']);
+    expect(await missingRequirements(['python3:sys'])).toEqual([]);
+    expect(await missingRequirements(['python3:definitely_not_a_module_xq7'])).toEqual(['python3:definitely_not_a_module_xq7']);
+  });
+
+  it('a case with missing requirements runs nothing and returns skipped — never a false tie', async () => {
+    const untouchable: AgentApi = {
+      runAgent: () => { throw new Error('must not run'); },
+      askJson: () => { throw new Error('must not run'); },
+    };
+    const { rows, arms, skipped } = await runCase(
+      { agent: untouchable, rng: () => 0.9 },
+      caseOf({ requires: ['definitely-not-a-real-binary-xq7'] }),
+      { k: 2, skillName: 's', caseDir: scratch, arms: { candidate: scratch }, scratch, transcriptDir: scratch },
+    );
+    expect(rows).toEqual([]);
+    expect(arms).toEqual([]);
+    expect(skipped).toEqual(['definitely-not-a-real-binary-xq7']);
   });
 });
 

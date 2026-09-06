@@ -59,6 +59,9 @@ export const receiptSchema = z.object({
   scored_rows: z.number().int().min(0),
   comparisons: z.record(z.string(), comparisonSchema),
   arm_scores: z.record(z.string(), z.number().nullable()),
+  // Rev 8: cases skipped for missing host tools (case → missing requirements). Optional for
+  // forward-compat with receipts written before rev 8.
+  environment_skips: z.record(z.string(), z.array(z.string())).optional(),
   triggers: z.object({
     recall: z.number().nullable(),
     precision: z.number().nullable(),

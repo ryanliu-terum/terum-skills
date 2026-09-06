@@ -38,6 +38,8 @@ export interface EvalCase {
   checks: CheckSpec[];
   judge?: string;
   bucket?: (typeof BUCKETS)[number];
+  /** Rev 8: host tools this case needs — `ffmpeg` (PATH probe) or `python3:openpyxl` (import probe). */
+  requires: string[];
 }
 
 /** Parse one `evals/cases/<case>.yaml` (§5.1); the stem is the case name. */
@@ -62,7 +64,31 @@ export function loadCase(source: string, name: string): Result<EvalCase> {
     checks: Array.isArray(record['checks']) ? (record['checks'] as CheckSpec[]) : [],
     judge: record['judge'] === undefined ? undefined : String(record['judge']),
     bucket: bucket as EvalCase['bucket'],
+    requires: Array.isArray(record['requires']) ? record['requires'].map(String) : [],
   });
+}
+
+/**
+ * §7.1 rev 8 (option 1, Ajay 2026-09-06): probe a case's host requirements BEFORE spending any
+ * agent runs. A missing toolchain must surface as a visible environment skip, never as the false
+ * NEUTRAL that both-arms-flail ties produce. Entries: a binary name (PATH probe via `command -v`)
+ * or `python3:<module>` (import probe). Probes pass values as argv, never interpolated into shell.
+ */
+export async function missingRequirements(requires: readonly string[]): Promise<string[]> {
+  const missing: string[] = [];
+  for (const requirement of requires) {
+    const [file, args] = requirement.startsWith('python3:')
+      ? ['python3', ['-c', 'import importlib, sys; importlib.import_module(sys.argv[1])', requirement.slice('python3:'.length)]]
+      : ['/bin/sh', ['-c', 'command -v -- "$1"', 'probe', requirement]] as const;
+    const present = await new Promise<boolean>((resolvePromise) => {
+      const child = spawn(file, args as string[], { stdio: 'ignore' });
+      const timer = setTimeout(() => { child.kill('SIGKILL'); }, 10_000);
+      child.on('error', () => { clearTimeout(timer); resolvePromise(false); });
+      child.on('close', (code) => { clearTimeout(timer); resolvePromise(code === 0); });
+    });
+    if (!present) missing.push(requirement);
+  }
+  return missing;
 }
 
 export interface SeedOptions {
@@ -180,9 +206,18 @@ export interface RunCaseOptions {
   transcriptDir: string;
 }
 
-/** Run one case, k reps × available arms. Returns one row per (rep × opponent) plus per-arm samples. */
-export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: RunCaseOptions): Promise<{ rows: ComparisonRow[]; arms: ArmSample[] }> {
+/**
+ * Run one case, k reps × available arms. Returns one row per (rep × opponent) plus per-arm
+ * samples; a case whose host requirements are missing runs nothing and returns `skipped` with
+ * the missing entries (rev 8) — its absent rows grey the verdict as unscored holes.
+ */
+export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: RunCaseOptions): Promise<{ rows: ComparisonRow[]; arms: ArmSample[]; skipped?: string[] }> {
   const log = deps.log ?? (() => undefined);
+  const missing = await missingRequirements(evalCase.requires);
+  if (missing.length) {
+    log(`  ${evalCase.name}: SKIPPED (environment) — missing ${missing.join(', ')}`);
+    return { rows: [], arms: [], skipped: missing };
+  }
   const armDirs: Array<[Arm, string | null]> = [['baseline', null], ['candidate', options.arms.candidate]];
   if (options.arms.incumbent !== undefined) armDirs.push(['incumbent', options.arms.incumbent]);
 
