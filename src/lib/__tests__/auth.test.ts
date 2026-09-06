@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { askUntilValid, assertBindable, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, identityForJoiner, teamByRemote } from '../auth.js';
 import { ConfigStore } from '../config.js';
 import { emptyConfig } from '../schema.js';
+import { Runner } from '../runner.js';
 import { fakeGh, ghOnlyRunner, noGhRunner, ScriptedPrompter } from './fixtures.js';
 
 const memoryStore = (seed = emptyConfig()): ConfigStore => ({ root: '', read: async () => seed, update: async (mutate) => { await mutate(seed); return seed; }, ensureRoot: async () => undefined, teamClone: (team) => team });
@@ -76,7 +77,8 @@ describe('identity (§5.4)', () => {
     const quiet = ghOnlyRunner(fakeGh('octocat'));
     const known = await collectIdentity(new ScriptedPrompter(['', '', 'Me', 'me@x.test']), { ...emptyConfig(), github: 'known' }, quiet, { gh: { installed: true, authenticated: true } });
     expect(known).toMatchObject({ github: 'known', handle: 'known' });
-    expect(quiet.calls).toEqual([]);
+    // Name and email are looked up in git's global config when config lacks them (A2); gh itself stays uncalled.
+    expect(quiet.calls.filter((call) => call.command === 'gh')).toEqual([]);
   });
 });
 
@@ -138,4 +140,83 @@ describe('explainGhFailure', () => {
   });
 });
 
+});
+
+describe('one-line identity confirmation (acceptance A2, 2026-09-06)', () => {
+  const known = { ...emptyConfig(), default_handle: 'me', display_name: 'Me', email: 'me@x.test', github: 'octocat' };
+  /** gh answers as `octocat`; `git config --global --get <key>` answers from `values`; every other git call succeeds silently. */
+  const identityRunner = (values: Record<string, string>): Runner & { calls: { command: string; args: string[] }[] } => {
+    const calls: { command: string; args: string[] }[] = [];
+    const gh = fakeGh('octocat');
+    return {
+      calls,
+      async run(command, args, options) {
+        calls.push({ command, args: [...args] });
+        if (command === 'gh') return gh(args, options);
+        if (args[0] === 'config' && args[1] === '--global' && args[2] === '--get') {
+          const value = values[args[3]!];
+          return value === undefined ? { code: 1, stdout: '', stderr: '' } : { code: 0, stdout: `${value}\n`, stderr: '' };
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      },
+    };
+  };
+
+  it('shows the known identity on one line and asks one y/N instead of four questions', async () => {
+    const io = new ScriptedPrompter([], [true]);
+    const identity = await collectIdentity(io, known, noGhRunner);
+    expect(identity).toEqual({ handle: 'me', displayName: 'Me', email: 'me@x.test', github: 'octocat' });
+    expect(io.asked).toEqual(['Use this identity?']);
+    expect(io.lines).toEqual(['Identity: @me — Me <me@x.test> (GitHub: octocat)']);
+  });
+
+  it('n re-asks every value with the same defaults, so one field can change without retyping the rest', async () => {
+    const io = new ScriptedPrompter(['', '', 'New Me', ''], [false]);
+    const identity = await collectIdentity(io, known, noGhRunner);
+    expect(identity).toEqual({ handle: 'me', displayName: 'New Me', email: 'me@x.test', github: 'octocat' });
+    expect(io.asked).toEqual(['Use this identity?', 'GitHub login (- for none)', 'Team handle', 'Your name', 'Your email']);
+  });
+
+  it('a first run with gh logged in and a global git identity is one question: login from gh, handle from the login, name and email from git', async () => {
+    const runner = identityRunner({ 'user.name': 'Octo Cat', 'user.email': 'octo@x.test' });
+    const io = new ScriptedPrompter([], [true]);
+    const identity = await collectIdentity(io, emptyConfig(), runner, { gh: { installed: true, authenticated: true } });
+    expect(identity).toEqual({ handle: 'octocat', displayName: 'Octo Cat', email: 'octo@x.test', github: 'octocat' });
+    expect(io.asked).toEqual(['Use this identity?']);
+    expect(runner.calls.filter((call) => call.command === 'git').map((call) => call.args)).toEqual([['config', '--global', '--get', 'user.name'], ['config', '--global', '--get', 'user.email']]);
+  });
+
+  it('config wins over git for name and email, and git is not consulted for a value config already has', async () => {
+    const runner = identityRunner({ 'user.name': 'Git Name', 'user.email': 'git@x.test' });
+    const identity = await collectIdentity(new ScriptedPrompter([], [true]), known, runner);
+    expect(identity).toMatchObject({ displayName: 'Me', email: 'me@x.test' });
+    expect(runner.calls.filter((call) => call.command === 'git')).toEqual([]);
+  });
+
+  it('any unknown value keeps the four questions, and a git email that is not an email is no default', async () => {
+    const io = new ScriptedPrompter(['', '', '', 'me@x.test']);
+    const identity = await collectIdentity(io, { ...known, email: undefined }, noGhRunner);
+    expect(identity.email).toBe('me@x.test');
+    expect(io.asked).toEqual(['GitHub login (- for none)', 'Team handle', 'Your name', 'Your email']);
+    const runner = identityRunner({ 'user.name': 'Octo Cat', 'user.email': 'not-an-email' });
+    const again = new ScriptedPrompter(['', '', '', 'octo@x.test']);
+    const fromPrompt = await collectIdentity(again, emptyConfig(), runner, { gh: { installed: true, authenticated: true } });
+    expect(fromPrompt).toEqual({ handle: 'octocat', displayName: 'Octo Cat', email: 'octo@x.test', github: 'octocat' });
+    expect(again.asked).toEqual(['GitHub login (- for none)', 'Team handle', 'Your name', 'Your email']);
+  });
+
+  it('a bound per-team handle is shown, confirmed, and still never asked on n', async () => {
+    const io = new ScriptedPrompter(['', 'Me', 'me@x.test'], [false]);
+    const identity = await collectIdentity(io, known, noGhRunner, { fixedHandle: 'bound' });
+    expect(identity.handle).toBe('bound');
+    expect(io.lines[0]).toBe('Identity: @bound — Me <me@x.test> (GitHub: octocat)');
+    expect(io.asked).toEqual(['Use this identity?', 'GitHub login (- for none)', 'Your name', 'Your email']);
+  });
+
+  it('a recorded "no GitHub login" is a known answer, not a missing one', async () => {
+    const io = new ScriptedPrompter([], [true]);
+    const identity = await collectIdentity(io, { ...known, github: '' }, noGhRunner);
+    expect(identity.github).toBe('');
+    expect(io.lines).toEqual(['Identity: @me — Me <me@x.test> (no GitHub login)']);
+  });
 });

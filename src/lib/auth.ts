@@ -55,6 +55,12 @@ export interface IdentityOptions {
  * The login is optional (a generic-git member may have none) but, when given, must be a real
  * GitHub login: it is identity evidence at `team join` (the §5.4 reclaim rule) and a REST path
  * segment at `team remove`, so it is validated and re-asked like the handle.
+ *
+ * Every value is a default the person confirms rather than types: the login from config or gh,
+ * the handle from config or the login, the name and email from config or git's global identity.
+ * When all four are known they are shown on one line and confirmed with one y/N; `n` re-asks
+ * each with the same defaults (acceptance A2, 2026-09-06). A machine that knows less asks the
+ * questions it needs, as before — the confirmation collapses questions, it never skips one.
  */
 export async function collectIdentity(io: Prompter, existing: Config, runner: Runner = systemRunner, options: IdentityOptions = {}): Promise<Identity> {
   // A persisted value that is not a login (written before this validation existed) is no default: it would be re-offered forever.
@@ -62,6 +68,19 @@ export async function collectIdentity(io: Prompter, existing: Config, runner: Ru
   if (!suggested && options.gh?.authenticated) {
     const login = await runner.run('gh', ['api', 'user', '-q', '.login']);
     if (login.code === 0 && githubLoginSchema.safeParse(login.stdout.trim()).success) suggested = login.stdout.trim();
+  }
+  const handleDefault = options.fixedHandle ?? existing.default_handle ?? (suggested || undefined);
+  const nameDefault = existing.display_name ?? (await gitGlobalIdentity(runner, 'user.name'));
+  // Only a well-formed email is offered: an invalid default would be re-offered on every Enter.
+  const gitEmail = existing.email === undefined ? await gitGlobalIdentity(runner, 'user.email') : '';
+  const emailDefault = existing.email ?? (emailSchema.safeParse(gitEmail).success ? gitEmail : undefined);
+  const handleKnown = handleDefault === undefined ? undefined : handleSchema.safeParse(handleDefault);
+  // A `-` answered before is stored as '' and is an answer; an absent key is not.
+  const githubKnown = suggested !== '' || existing.github === '';
+  if (githubKnown && handleKnown?.success && nameDefault && emailDefault) {
+    const known: Identity = { handle: handleKnown.data, displayName: nameDefault, email: emailDefault, github: suggested };
+    io.print(`Identity: @${known.handle} — ${known.displayName} <${known.email}>${known.github ? ` (GitHub: ${known.github})` : ' (no GitHub login)'}`);
+    if (await io.confirm('Use this identity?')) return known;
   }
   // Enter takes the suggestion, so `-` is the way to say "none" once one is offered.
   const github = await askUntilValid(io, suggested ? 'GitHub login (- for none)' : 'GitHub login', suggested, (value) => {
@@ -71,9 +90,19 @@ export async function collectIdentity(io: Prompter, existing: Config, runner: Ru
     return parsed.success ? { ok: true, value: parsed.data } : { ok: false, rule: GITHUB_LOGIN_RULE };
   });
   const handle = options.fixedHandle ?? (await askHandle(io, existing.default_handle ?? (github || undefined)));
-  const displayName = await askUntilValid(io, 'Your name', existing.display_name, (value) => (value.trim() ? { ok: true, value: value.trim() } : { ok: false, rule: 'a name is required' }));
-  const email = await askUntilValid(io, 'Your email', existing.email, (value) => (emailSchema.safeParse(value.trim()).success ? { ok: true, value: value.trim() } : { ok: false, rule: 'enter a valid email address' }));
+  const displayName = await askUntilValid(io, 'Your name', nameDefault || undefined, (value) => (value.trim() ? { ok: true, value: value.trim() } : { ok: false, rule: 'a name is required' }));
+  const email = await askUntilValid(io, 'Your email', emailDefault, (value) => (emailSchema.safeParse(value.trim()).success ? { ok: true, value: value.trim() } : { ok: false, rule: 'enter a valid email address' }));
   return { handle, displayName, email, github };
+}
+
+/** git's global identity (`git config --global user.name` / `user.email`): what a commit on this machine would carry, offered as a default and confirmed like every other; absent, unreadable, or no git at all is simply no default. */
+async function gitGlobalIdentity(runner: Runner, key: 'user.name' | 'user.email'): Promise<string> {
+  try {
+    const result = await runner.run('git', ['config', '--global', '--get', key]);
+    return result.code === 0 ? result.stdout.trim() : '';
+  } catch {
+    return '';
+  }
 }
 
 /** The one handle prompt: validated against §5.4 syntax, re-asked with the rule. */
