@@ -104,7 +104,7 @@ Rules for `install` (load-bearing for the share flow in 3.8):
 
 Rules for `setup` (normative text is build spec §6.1; added 2026-09-03 to match Ryan's eight-step onboarding flow):
 - It sequences the verbs above and owns no write path and no consent prompt of its own; each y/N (hook, endorsed set, `allowed-tools`, `share` frontmatter) is asked by the verb that defines it.
-- The team name is collected before any skill action because the repo must exist first; invites come after the first actions; the hook offer is the second-to-last step; a community link is printed, never opened.
+- The team name is collected before any skill action because the repo must exist first; invites come directly after the team exists (amended 2026-09-06; the build spec is authoritative); the hook offer is the second-to-last step; a community link is printed, never opened.
 - Steps that belong to the local UI (phase 2: the wizard ends by opening it) and to eval (phase 3) are absent from the phase-1 wizard, not stubbed. The phase gates from walk Decision 2 stand.
 - Re-running it resumes at the first unfinished step by detecting outcomes (config, remote people file, settings entry) — it keeps no state file and never creates a second repo, people file, or hook entry.
 - Joiners are never asked for a token (D8); the invite block now prints `setup <org>/<repo>`, with `team join` as the bare equivalent.
@@ -229,7 +229,7 @@ First person:
 ```
 npx -y terum-skills@latest setup
 ```
-walks the eight steps: welcome → GitHub (gh, or gh's own login, or a token) → team name → share a first skill and see the five one-liners → invite teddy ajay → community link → hook y/N → done (roster, repo URL, README URL). The bare verbs it sequences remain usable on their own:
+answers `Create a new team` and walks the eight steps: welcome → GitHub (gh, or gh's own login, or a token) → team name → invite teddy ajay → share a first skill and see the five one-liners → community link → hook y/N → done (roster, repo URL, README URL). The bare verbs it sequences remain usable on their own:
 ```
 terum-skills login
 terum-skills team create acme

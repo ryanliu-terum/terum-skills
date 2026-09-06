@@ -6,7 +6,7 @@ Share private Claude Code skills across a team through one private git repo. No 
 
 Requires Node 22.12 or newer and `git`. Creating a GitHub team requires an authenticated GitHub CLI (`gh`). Joiners can accept an invitation in their browser and use their configured git credentials.
 
-Create a team (first person):
+Create a team (first person) — on a new machine the wizard asks whether you are creating a team or joining one; re-run it to resume:
 
 ```sh
 npx -y terum-skills@latest setup
@@ -39,3 +39,7 @@ Already ran `npm install terum-skills` without `-g`? npm links the command under
 ### `terum-skills: command not found` after `npm install -g`
 
 If a global command is not found, check `npm prefix -g`. On macOS/Linux, add that prefix's `bin` directory to PATH; on Windows, add the prefix itself. If the launcher is missing from that directory, check whether npm's `bin-links` setting is disabled: `npm config get bin-links` should print `true`.
+
+## Troubleshooting
+
+Created a team by mistake? Join the right one with the command its owner sent you (`npx -y terum-skills@latest setup <org>/<repo>`); if its repository name matches a team you already have locally, run `terum-skills team join <org>/<repo> --as <other-name>` instead. Optional cleanup: `terum-skills team leave <accidental-name>` removes it from this machine (your membership is unchanged); delete the repository on GitHub yourself if you do not want it.
