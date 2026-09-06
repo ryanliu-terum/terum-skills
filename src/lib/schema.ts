@@ -144,7 +144,7 @@ function hashed(normalized: string): AllowedTools & { ok: true } {
   return { ok: true, normalized, hash: `sha256:${createHash('sha256').update(normalized).digest('hex')}` };
 }
 
-const FRONTMATTER = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+export const FRONTMATTER = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
 /** Parse a whole SKILL.md: the YAML block between the first two `---` lines, then the schema. */
 export function parseSkillFrontmatter(source: string): { ok: true; data: SkillFrontmatter; grants: AllowedTools } | { ok: false; error: string } {

@@ -1,51 +1,83 @@
-import { access, readdir, readFile } from 'node:fs/promises';
+import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import YAML from 'yaml';
-import { exists } from './fs.js';
-import { isSkillName, type Config } from './schema.js';
+import type { Config } from './schema.js';
+import { inspectSkillSource, scanSkillFolder, type SourceProblem } from './skill-source.js';
 
+export interface SharedRef { id: string; team: string; }
+export interface PlacementRef { id: string; team: string; version: string | null; }
+export type Inspection =
+  | { kind: 'candidate'; description: string; privileged: boolean }
+  | { kind: 'rejected'; reason: SourceProblem; detail: string }
+  | { kind: 'failed'; reason: string };
+export interface LocalEntry { name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; inspection: Inspection; }
+export interface LocalInventory {
+  root: string;
+  scope: 'global';
+  rootState: 'scanned' | 'absent' | 'unreadable';
+  entries: LocalEntry[];
+  problems: { path: string; reason: string }[];
+}
 export interface LocalCandidates { names: string[]; omitted: { name: string; reason: string }[]; unreadable: number; }
 
-/**
- * Directories directly under one agent skills root (`AGENT_PATHS['claude-code'].global(home)` — the only
- * root shipped; a project root needs an injected repo-root resolver, cf. install.ts:224-226) that carry
- * a SKILL.md, are not a `config.shared[*].source` and not a `config.placements` key (setup-hook spec
- * step 4; the exclusions setup.ts:64 used), and pass the one check share's inspectSource makes on the
- * name: frontmatter `name` equals the folder and is a legal skill name (share.ts:43, 229). Passing is
- * candidacy, not shareability — share still checks description, grants, privileged content, symlinks.
- * One unreadable folder is counted, never fatal; nothing is ever written.
- */
-export async function localSkillCandidates(root: string, config: Pick<Config, 'shared' | 'placements'>): Promise<LocalCandidates> {
-  const result: LocalCandidates = { names: [], omitted: [], unreadable: 0 };
-  if (!(await exists(root))) return result;
-  const excluded = new Set([...Object.values(config.shared).map((entry) => resolve(entry.source)), ...Object.keys(config.placements).map((path) => resolve(path))]);
-  let entries;
-  try { entries = await readdir(root, { withFileTypes: true }); } catch { result.unreadable += 1; return result; }
-  for (const entry of entries) {
-    const path = join(root, entry.name);
-    try {
-      if (!entry.isDirectory() || excluded.has(resolve(path))) continue;
-      const skillPath = join(path, 'SKILL.md');
-      try { await access(skillPath); } catch (error) {
-        // Absence is not a candidate; all other probe failures count as unreadable below.
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'ENOTDIR') continue;
-        throw error;
-      }
-      const reason = nameProblem(entry.name, await readFile(skillPath, 'utf8'));
-      if (reason) result.omitted.push({ name: entry.name, reason }); else result.names.push(entry.name);
-    } catch { result.unreadable += 1; }
+/** Direct entries only. Provenance is ledger evidence, independent of inspection success. */
+export async function localSkills(root: string, config: Pick<Config, 'shared' | 'placements'>): Promise<LocalInventory> {
+  root = resolve(root);
+  const inventory: LocalInventory = { root, scope: 'global', rootState: 'scanned', entries: [], problems: [] };
+  let names: string[];
+  try { names = (await readdir(root)).sort(); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') inventory.rootState = 'absent';
+    else { inventory.rootState = 'unreadable'; inventory.problems.push({ path: root, reason: error instanceof Error ? error.message : String(error) }); }
+    return inventory;
   }
-  result.names.sort();
-  return result;
+  for (const name of names) {
+    const path = join(root, name);
+    const shared = Object.entries(config.shared).filter(([, ref]) => resolve(ref.source) === path).map(([id, ref]) => ({ id, team: ref.team }));
+    const placement = Object.entries(config.placements).find(([target]) => resolve(target) === path)?.[1];
+    const tracked = shared.length > 0 || placement !== undefined;
+    const entry: LocalEntry = { name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version } } : {}), inspection: { kind: 'failed', reason: '' } };
+    const reject = (reason: SourceProblem, detail: string): void => { entry.inspection = { kind: 'rejected', reason, detail }; };
+    try {
+      const details = await lstat(path);
+      if (details.isSymbolicLink()) reject('symlink', 'symbolic link');
+      else if (!details.isDirectory()) {
+        if (!tracked) continue;
+        reject('not-a-directory', 'not a directory');
+      } else {
+        let skill;
+        try { skill = await stat(join(path, 'SKILL.md')); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        if (!skill) {
+          if (!tracked) continue;
+          reject('skill-md-missing', 'SKILL.md missing');
+        } else if (!skill.isFile()) reject('skill-md-not-a-file', 'SKILL.md is not a regular file');
+        else {
+          const inspection = inspectSkillSource(await readFile(join(path, 'SKILL.md'), 'utf8'), tracked ? undefined : name);
+          if (!inspection.ok) reject(inspection.reason, inspection.detail);
+          else {
+            const scan = await scanSkillFolder(path);
+            if (scan.symlink) reject('nested-symlink', `contains symlink ${scan.symlink}`);
+            else entry.inspection = { kind: 'candidate', description: inspection.description, privileged: scan.privileged };
+          }
+        }
+      }
+    } catch (error) { entry.inspection = { kind: 'failed', reason: error instanceof Error ? error.message : String(error) }; }
+    inventory.entries.push(entry);
+  }
+  return inventory;
 }
 
-/** The name half of share's inspectSource (share.ts:226-229), as a reason string or undefined. */
-function nameProblem(folder: string, source: string): string | undefined {
-  if (!isSkillName(folder)) return 'folder name is not a legal skill name';
-  const match = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(source);
-  if (!match) return 'SKILL.md has no YAML frontmatter';
-  let declared: unknown;
-  try { declared = (YAML.parse(match[1]!) as { name?: unknown } | null)?.name; } catch { return 'SKILL.md frontmatter is not valid YAML'; }
-  return declared === folder ? undefined : `SKILL.md name ${String(declared)} does not equal folder ${folder}`;
+/** The picker offers untracked candidates; privileged content needs explicit opt-in. */
+export function candidatesOf(inventory: LocalInventory, allowPrivileged = false): LocalEntry[] {
+  return inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && entry.inspection.kind === 'candidate' && (allowPrivileged || !entry.inspection.privileged));
+}
+
+/** Issue 7's API remains a projection of the same inspection and provenance. */
+export async function localSkillCandidates(root: string, config: Pick<Config, 'shared' | 'placements'>): Promise<LocalCandidates> {
+  const inventory = await localSkills(root, config);
+  return {
+    names: candidatesOf(inventory).map((entry) => entry.name),
+    omitted: inventory.entries.flatMap((entry) => !entry.shared.length && !entry.placement && entry.inspection.kind === 'rejected' ? [{ name: entry.name, reason: entry.inspection.detail }] : []),
+    unreadable: inventory.problems.length + inventory.entries.filter((entry) => entry.inspection.kind === 'failed').length,
+  };
 }
