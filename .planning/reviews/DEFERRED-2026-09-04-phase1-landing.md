@@ -6,6 +6,8 @@ Everything built for phase 1 was merged to `main` on Ryan's instruction to ship 
 >
 > **Update 2026-09-06:** the D9 sweep (PR #4, `fde2613`), `setup` + the §8 hook installer (PR #5, `988f26d`), the close-out walk follow-ups (PR #3, `d26925f`) and the Astra harden loop over all of it (PR #6, `81bf9a6`: 17 high fixes, two passes, converged — `.planning/harden/phase1-harden.md`) are open and mergeable; the close-out that fixes every medium, gap and contested item the loop left is PR #7 (`.planning/harden/phase1-closeout.md`). Section B is CLOSED below; E is reduced to M4 and the acceptance run. Still Ryan's: the two harden forks, the contested `publish/<name>-2` vet (all three in `.planning/debug/harden/phase1-harden.deferred.md` and the harden end state), the merges, and the npm placeholder.
 
+> **Update 2026-09-06 (evening):** PRs #3–#9 are on `main` (`d294401`; #7 and #8 had merged into their stacked bases and were re-landed by #9). The fourteen rulings the harden loops left for Ryan were walked — `.planning/decisions/2026-09-06-phase1-rulings-decision-walk.md`: 12 LOCK, 1 GATE, 1 DEFER — and the locked set is applied on `fix/phase1-rulings` (R1–R9, R11, R12, R14). Section C is CLOSED below; E is reduced to the acceptance run and the Windows pass.
+
 ## A. Security carve-out (`d219e0a`) — CLOSED 2026-09-05: all seven landed in PR #1 (`af0bce8`; local-path remotes keep `.git`, §5.1 rev 9)
 Report: `hybrid-working-2026-09-04-carve-out-pass2.review.md` (dispositions + recommended fixes at the top).
 - **HIGH** `redact()` cannot cross a `/`, so a pasted password containing `/` is echoed in the "Unsupported remote" error. One-line greedy-regex fix + a `/`-bearing secret in the test `SECRETS`.
@@ -23,10 +25,10 @@ Report: `hybrid-working-2026-09-04-m2-loop.review.md` + `.triage.md`. All 11 cri
 - ~~Author-side rename of a shared skill is not propagated (§5.3); the "blocked: placed version newer than the clone's" sub-case is unclassified (§6)~~ (PR #4; PR #7 orders the rename's foreign-destination check before quarantine).
 - ~~`placer.remove()` root guard is tautological at `uninstall.ts` / `sync.ts`~~ (CLOSED: `remove()` refuses any root that is not a skills directory, PR #2 `c09fdb4`, D5a); ~~`search.test.ts` asserts neither installs nor endorsed~~ (PR #4); ~~private-lock-dir helpers untested~~ (PR #7: `skill-target-lock.test.ts`); ~~`install.ts` compares scope by `JSON.stringify` once~~ (PR #4: `sameScope`).
 
-## C. M3 team layer (`83c430d`) — residuals
+## C. M3 team layer (`83c430d`) — CLOSED 2026-09-06: the host caveat is in the spec's `team remove` line; the invite block's `setup` exists since PR #5
 Report: `hybrid-working-2026-09-04-m3-team-layer.review.md` (pre-fix snapshot; fixes verified in code, but the report has no relayFailures/panelValid line).
 - **CRITICAL sub-case — CLOSED in PR #1 (`assertLoginUnclaimed` inside the archive write; its placement after the y/N is D4c, kept):** `team remove` revokes GitHub access using the target's self-declared `github` login without checking that another ACTIVE member does not claim the same login (`assertLoginUnclaimed` from the review's patch #1c is absent). Today only the y/N that names `@login` stands in the way.
-- "Org base permissions can still grant read" is undocumented (§6 `team remove`); the invite block advertises `setup`, which does not exist yet.
+- ~~"Org base permissions can still grant read" is undocumented (§6 `team remove`); the invite block advertises `setup`, which does not exist yet.~~ (spec §6 `team remove` carries the caveat; `setup` landed in PR #5 and the invite block's command is real.)
 
 ## D. Unreviewed merges
 `2ede68c` (M3 into M2), `62c05d5` (sync hook-stdout fix), and the landing merge itself resolved conflicts by hand in `cli.ts`, `cli.test.ts`, `team.ts`, `teamRepo.ts`, `remote.test.ts` with no review pass. Gates were green at every step.
