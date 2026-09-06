@@ -176,7 +176,7 @@ describe('native Placer (§7)', () => {
     expect(await readFile(join(root, 'quarantine', quarantined[0]!), 'utf8')).toBe('v1');
   });
 
-  it('a displaced copy whose removal fails after the swap landed goes to quarantine, never stays hidden beside the new copy', async () => {
+  it('a displaced copy whose removal fails after the swap landed goes to quarantine, and the placement is a success with a notice — never a failure, never hidden beside the new copy', async () => {
     const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
     await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'v1');
     await place(source, target, 'sample');
@@ -184,11 +184,13 @@ describe('native Placer (§7)', () => {
     // The swap succeeds; only the removal of the displaced copy fails (an immutable file, a busy handle).
     const realRm = fsForTests.rm;
     fsForTests.rm = async (path, options) => { if (String(path).includes('.terum-') && String(path).endsWith('.old')) throw new Error('simulated cleanup failure'); return realRm(path, options); };
-    let failure: Error | undefined;
-    try { await place(source, target, 'sample', { replace: true, quarantineRoot: join(root, 'quarantine') }).catch((error: Error) => { failure = error; }); }
+    let placed: Awaited<ReturnType<typeof place>> | undefined;
+    try { placed = await place(source, target, 'sample', { replace: true, quarantineRoot: join(root, 'quarantine') }); }
     finally { fsForTests.rm = realRm; }
-    expect(failure?.message).toContain('simulated cleanup failure');
-    expect(failure?.message).toContain('could not be restored');
+    // The new copy is in place and the ledger gets its fingerprint; the one warning says where the old copy went.
+    expect(placed?.path).toBe(join(target, 'sample'));
+    expect(placed?.snapshot.fingerprint).toBe((await snapshotSkillDirectory(join(target, 'sample'))).fingerprint);
+    expect(placed?.notices).toEqual([expect.stringMatching(/^Placed .*sample but the previous sample could not be removed; it is at .*quarantine/)]);
     expect(await readFile(join(target, 'sample', 'SKILL.md'), 'utf8')).toBe('v2');
     expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
     const quarantined = (await readdir(join(root, 'quarantine'), { recursive: true })).map(String).filter((entry) => entry.endsWith(join('sample', 'SKILL.md')));
@@ -196,23 +198,27 @@ describe('native Placer (§7)', () => {
     expect(await readFile(join(root, 'quarantine', quarantined[0]!), 'utf8')).toBe('v1');
   });
 
-  it('a staging cleanup that fails as well keeps the recovery message: the finally never replaces it', async () => {
+  it('a staging cleanup that fails as well keeps the recovery message of a swap that did not land: the finally never replaces it', async () => {
     const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
     await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'v1');
-    await place(source, target, 'sample');
+    const first = await place(source, target, 'sample');
     await writeFile(join(source, 'SKILL.md'), 'v2');
-    // Every cleanup of a hidden `.terum-` folder fails — the persistent EACCES/EBUSY case — so the
-    // staging folder's removal in the finally fails exactly like the displaced copy's did; the
-    // composed message, and where the previous copy went, must survive it.
-    const realRm = fsForTests.rm;
+    // The swap AND the restore fail (every rename onto the destination after the natural first attempt),
+    // and every cleanup of a hidden `.terum-` folder fails too — the persistent EACCES/EBUSY case — so
+    // the staging folder's removal in the finally fails; the composed message, and where the previous
+    // copy went, must survive it.
+    const realRename = fsForTests.rename; const realRm = fsForTests.rm;
+    let attemptsAtDestination = 0;
+    fsForTests.rename = async (from, to) => { if (String(to) === first.path && ++attemptsAtDestination >= 2) throw new Error('simulated crash after displacement'); return realRename(from, to); };
     fsForTests.rm = async (path, options) => { if (String(path).includes('.terum-')) throw new Error('simulated cleanup failure'); return realRm(path, options); };
     let failure: Error | undefined;
     try { await place(source, target, 'sample', { replace: true, quarantineRoot: join(root, 'quarantine') }).catch((error: Error) => { failure = error; }); }
-    finally { fsForTests.rm = realRm; }
-    expect(failure?.message).toContain('simulated cleanup failure');
+    finally { fsForTests.rename = realRename; fsForTests.rm = realRm; }
+    expect(failure?.message).toContain('simulated crash after displacement');
     expect(failure?.message).toContain('could not be restored');
     expect(failure?.message).toContain(join(root, 'quarantine'));
-    expect(await readFile(join(target, 'sample', 'SKILL.md'), 'utf8')).toBe('v2');
+    // The swap never landed and the restore failed too: the destination is empty, the previous copy is in quarantine.
+    await expect(readFile(join(target, 'sample', 'SKILL.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
     const quarantined = (await readdir(join(root, 'quarantine'), { recursive: true })).map(String).filter((entry) => entry.endsWith(join('sample', 'SKILL.md')));
     expect(quarantined).toHaveLength(1);
