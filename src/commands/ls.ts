@@ -22,7 +22,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     const team = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
     const people = await readPeople(clone);
     const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived) }));
-    const skills = await listSkills(team, people, clone, runner);
+    const skills = await listSkills(team, people, clone, runner, io);
     // `return await`: a returned promise leaves the try block before it settles, so a throw inside
     // showMember/showProject would reject run() instead of becoming the failure Result every verb returns.
     if (args.kind === 'member') return await showMember(args.value, people, skills, io, roster);
@@ -35,14 +35,18 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
 }
 
-async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awaited<ReturnType<typeof readPeople>>, clone: string, runner: Runner): Promise<LsSkill[]> {
+async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awaited<ReturnType<typeof readPeople>>, clone: string, runner: Runner, io: Prompter): Promise<LsSkill[]> {
   const names = (await readdir(join(clone, 'skills'), { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   const counts = installCounts(people);
   return Promise.all(names.map(async (name) => {
     const parsed = parseSkillFrontmatter(await readFile(join(clone, 'skills', name, 'SKILL.md'), 'utf8'));
     if (!parsed.ok) throw new Error(`Invalid skills/${name}/SKILL.md: ${parsed.error}`);
     const id = parsed.data.metadata.id;
-    return { id, name, author: parsed.data.metadata.author, category: parsed.data.metadata['terum-category'], installs: counts.get(id) ?? 0, latest: shortHash(await latestTree(runner, clone, name)), endorsement: skillEndorsement(team, id) };
+    // One folder git cannot resolve — present on disk but not in HEAD, the leftover of an interrupted
+    // write — costs one row's version and one reported line, never the roster or the other rows
+    // (rulings walk R11, 2026-09-06; search degrades the same way).
+    const latest = await latestTree(runner, clone, name).catch((error: unknown) => { io.print(`${name}: ${error instanceof Error ? error.message : String(error)}`); return '—'; });
+    return { id, name, author: parsed.data.metadata.author, category: parsed.data.metadata['terum-category'], installs: counts.get(id) ?? 0, latest: shortHash(latest), endorsement: skillEndorsement(team, id) };
   }));
 }
 async function showMember(handle: string | undefined, people: Awaited<ReturnType<typeof readPeople>>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster']): Promise<Result<LsResult>> {

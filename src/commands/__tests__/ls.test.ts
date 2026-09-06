@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, person, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
 import { run } from '../ls.js';
 
 const ID = '33333333-3333-4333-8333-333333333333';
@@ -31,6 +31,24 @@ describe('ls (§6)', () => {
     expect(io.lines).toContain('  old (inactive)');
     expect(await git(['rev-parse', 'HEAD'], store.teamClone('team'))).toBe(before);
     expect((await git(['status', '--porcelain'], store.teamClone('team'))).trim()).toBe('');
+  });
+
+  it('one folder git cannot resolve — present on disk but not in HEAD — costs one row\'s version and one reported line, never the roster or the other rows', async () => {
+    const skillFile = (name: string, id: string) => `---\nname: ${name}\ndescription: ${name} skill\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`;
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/healthy/SKILL.md', skillFile('healthy', '11111111-1111-4111-8111-111111111111'));
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    // A safeWrite that lost its clone lock skips its cleanup, and `reset --hard` never removes an untracked folder.
+    await mkdir(join(clone, 'skills', 'ghost')); await writeFile(join(clone, 'skills', 'ghost', 'SKILL.md'), skillFile('ghost', '33333333-3333-4333-8333-333333333333'));
+    const io = new ScriptedPrompter();
+    const result = await run({ config: store }, io);
+    const tree = (await git(['rev-parse', 'HEAD:skills/healthy'], clone)).trim().slice(0, 8);
+    expect(result).toMatchObject({ ok: true, value: { skills: [expect.objectContaining({ name: 'ghost', latest: '—' }), expect.objectContaining({ name: 'healthy', latest: tree })] } });
+    expect(io.lines.filter((line) => line.startsWith('ghost: Could not resolve the latest version of ghost'))).toHaveLength(1);
+    expect(io.lines).toContain('Members:');
+    expect(io.lines).toContain(`  healthy — Seed <seed@example.com>; testing; 0 installs; ${tree}; —`);
   });
 
   it('supports member and project forms', async () => {
