@@ -128,3 +128,43 @@ Verdict semantics now have empirical backing on all three verdict bands plus
 triggers. Remaining untested for real: partial/timeout greying (unit-covered
 only), redaction at the sharing boundary (unit-covered only), and everything
 CLI-side.
+
+## Probe #4 — real SkillsBench/skilldeck skills (2026-09-06)
+
+First run on non-toy skills: the four skilldeck skills at 42084dc, their case
+files, fixtures, setup hooks, and trigger files consumed by our engine **byte-for-
+byte unmodified** — the §5.1 "verbatim skilldeck format" claim is empirically true.
+Sonnet, k=2, baseline+candidate; 32 arm runs + 30 trigger prompts; zero retries,
+zero contamination refusals.
+
+| skill | cases | verdict | record | net | note |
+|---|---|---|---|---|---|
+| deploy-preflight | 5 | **PASS** | 6W/2L/2T | **+0.40** | skilldeck's own harness recorded +0.60 (haiku, k=1) — directionally consistent |
+| incident-rollback | 1 | PASS | 1W/0T/1T | +0.50 | judge-decided |
+| secrets-hygiene | 1 | NEUTRAL | 1W/1L | 0.00 | skilldeck recorded +1.00 on haiku — sonnet's baseline is already competent (arm score 0.83), so the skill adds less on a stronger model |
+| commit-style | 1 | FAIL | 0W/1L/1T | −0.50 | see fragility note |
+| triggers ×4 | 30 prompts | — | 15/15 fire · 15/15 quiet | — | recall 1.00 / precision 1.00 on the real 4-skill catalog |
+
+Findings worth keeping:
+
+1. **The double-ask judge earned its keep in the wild:** `missing-env` produced
+   two `judge-split` ties — one ordering said candidate, the other said tie — a
+   position-sensitive verdict that rev 6 would have recorded as a win on a coin
+   flip.
+2. **Verdicts are model-relative, measurably.** secrets-hygiene dropped from
+   +1.00 (haiku) to 0.00 (sonnet): a strong baseline model already does what the
+   skill teaches. The §16.9 same-model comparability rule is not pedantry — cross-
+   model numbers genuinely disagree.
+3. **One-case suites are under-powered.** commit-style's FAIL rests on a 2-row
+   sample where a single row swings net lift by ±0.5. The verdict may be real
+   (candidate arm did score below baseline) but the sample cannot support the
+   band. Strengthens the earlier recommendation: hygiene-tier *warning* for
+   suites with very few cases.
+4. **happy-path measured a real skill effect in the wrong direction:** with the
+   preflight skill staged, the candidate sometimes refuses a deploy that is
+   configured correctly (rep0 loss: baseline deployed, candidate blocked). An
+   over-cautious skill is a measurable regression — exactly what the engine is
+   for.
+
+Raw outputs in the session scratchpad (`sb-*.json`); transcripts in temp dirs,
+uncommitted by design.
