@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describeLaunch } from './lib/launch.js';
 import { CommanderError } from 'commander';
 import { buildProgram } from './cli.js';
 import { createExecute } from './lib/execute.js';
@@ -27,7 +30,8 @@ const execute = createExecute({
 });
 
 try {
-  await buildProgram(execute).parseAsync();
+  await buildProgram(execute, undefined, { launch: describeLaunch({ // The loader realpaths the entry module; process.argv[1] is the bin symlink (`<prefix>/bin/terum-skills`), which says nothing about where the copy lives.
+    argv1: fileURLToPath(import.meta.url), env: process.env, cwd: process.cwd(), sep }) }).parseAsync();
 } catch (error) {
   // commander's own exits (help, version, usage errors) — it has already printed; keep its code.
   process.exitCode = error instanceof CommanderError ? error.exitCode : 1;

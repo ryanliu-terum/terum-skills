@@ -1,7 +1,9 @@
-import { access, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { access, mkdir, rm } from 'node:fs/promises';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { acquireTeamLock, defaultHookOptions, HookOptions, lockPath, removeHook, removeRunArtifacts } from '../lib/hook.js';
+import { moveDirectory } from '../lib/placer.js';
+import { Runner, systemRunner } from '../lib/runner.js';
 import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
@@ -9,10 +11,10 @@ import { parseOrExplain, teamNameSchema } from '../lib/schema.js';
 import { withCloneLock } from '../lib/teamRepo.js';
 import { removePlacements } from './uninstall.js';
 
-export interface LeaveArgs { name: string; config?: ConfigStore; hook?: HookOptions; }
-export interface LeaveResult { team: string; remote: string; handle: string | null; removed: number; cloneRemoved: boolean; }
+export interface LeaveArgs { name: string; config?: ConfigStore; hook?: HookOptions; runner?: Runner; }
+export interface LeaveResult { team: string; remote: string; handle: string | null; removed: number; cloneRemoved: boolean; kept: string[]; }
 
-/** Leave only this machine: no team-repository mutation and no git invocation. */
+/** Leave only this machine: no team-repository mutation; git only inventories local work. */
 export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveResult>> {
   try {
     const name = parseOrExplain(teamNameSchema, args.name, 'team name');
@@ -25,9 +27,9 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
     const shared = Object.values(config.shared).filter((entry) => entry.team === name);
     const pending = config.pending.filter((entry) => entry.team === name);
     const clone = store.teamClone(name);
-    const cloneRemoved = await access(clone).then(() => true, () => false);
+    const clonePresent = await access(clone).then(() => true, () => false);
     if (matching.length) io.print(`${matching.length} placed skill(s) will be removed.`);
-    if (cloneRemoved) io.print(`Local clone at ${clone} will be removed.`);
+    if (clonePresent) io.print(`Local clone at ${clone} will be removed.`);
     if (shared.length) io.print(`${shared.length} shared skill record(s) will be removed.`);
     if (pending.length) io.print(`${pending.length} pending operation(s) will be removed.`);
     const remote = stripRemoteCredentials(binding.remote);
@@ -35,37 +37,8 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
       throw new Error('Leave was cancelled.');
     }
 
-    // Teardown holds the §8 team mutex the way it holds the clone's writer lock below: a hook sync
-    // mid-run keeps its claim and leave says so, rather than freeing a mutex it never held — a third
-    // hook could then pull into the clone being dismantled, and the running sync could place a folder
-    // back after it was removed. A lock a killed hook left behind is reclaimed by the acquire itself.
-    const releaseTeam = await acquireTeamLock(store.root, name);
-    if (!releaseTeam) throw new Error(`Another terum-skills sync holds the session lock on ${name} (${lockPath(store.root, name)}); retry when it finishes, or remove that file if no session is syncing.`);
-    let removedPaths: string[] = [];
-    let lastTeam = false;
-    try {
-      // The list shown before the prompt was a summary; the removal works from a fresh read, because a
-      // hook sync may have renamed or added a placement while the question waited.
-      const current = Object.entries((await store.read()).placements).filter(([, entry]) => entry.team === name);
-      removedPaths = await removePlacements(store, current, io);
-      // The clone goes under the same lock safeWrite holds, so a sync mid-write is refused rather than
-      // having its working tree deleted underneath it; releasing the lock removes the lock directory.
-      await withCloneLock(clone, async () => {
-        await Promise.all([
-          rm(clone, { recursive: true, force: true }),
-          rm(join(store.root, 'cache', name), { recursive: true, force: true }),
-          // The stamp and any aside a killed reclaim left; the mutex itself is released below, by its holder.
-          removeRunArtifacts(store.root, name),
-        ]);
-      });
-      await store.update((fresh) => {
-        delete fresh.teams[name];
-        for (const [id, entry] of Object.entries(fresh.shared)) if (entry.team === name) delete fresh.shared[id];
-        fresh.pending = fresh.pending.filter((entry) => entry.team !== name);
-        for (const path of removedPaths) delete fresh.placements[path];
-        lastTeam = Object.keys(fresh.teams).length === 0;
-      });
-    } finally { await releaseTeam().catch(() => undefined); } // a lock that could not be removed is reclaimed by the next acquire; it must never replace the real outcome
+    const { removedPaths, cloneRemoved, kept } = await teardownTeam(store, name, io, args.runner);
+    const lastTeam = Object.keys((await store.read()).teams).length === 0;
     if (lastTeam) {
       const options = { ...defaultHookOptions(store.root), ...args.hook };
       // The local cleanup above already happened; an unreadable settings.json must not turn it into a failure.
@@ -74,6 +47,74 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
     }
     const removed = removedPaths.length;
     io.print(`Left ${name}. You are still an active member of ${remote}; an admin archives membership with team remove ${binding.handle ?? '<handle>'}.`);
-    return success({ team: name, remote, handle: binding.handle, removed, cloneRemoved });
+    return success({ team: name, remote, handle: binding.handle, removed, cloneRemoved, kept });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+}
+
+
+/**
+ * Shared, machine-local teardown. Refusals propagate so callers can report partial cleanup.
+ * `protectedSources` lets a caller that tears down several teams keep every authoring source safe
+ * for the whole run: this team's teardown drops its own `shared` records, so a later team's
+ * placement at one of those paths would otherwise no longer be recognised as a source.
+ */
+export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Prompter, 'print'>, runner: Runner = systemRunner, protectedSources?: readonly string[]): Promise<{ removedPaths: string[]; cloneRemoved: boolean; kept: string[] }> {
+  const releaseTeam = await acquireTeamLock(store.root, name);
+  if (!releaseTeam) throw new Error(`Another terum-skills sync holds the session lock on ${name} (${lockPath(store.root, name)}); retry when it finishes, or remove that file if no session is syncing.`);
+  const kept: string[] = [];
+  const removedPaths: string[] = [];
+  let cloneRemoved = false;
+  try {
+    // The confirmation is an inventory, not authority to delete stale paths: re-read under the mutex.
+    const config = await store.read();
+    const current = Object.entries(config.placements).filter(([, entry]) => entry.team === name);
+    const remaining: typeof current = [];
+    const sources = protectedSources ?? Object.values(config.shared).map((entry) => entry.source);
+    for (const [path, entry] of current) {
+      const placement = resolve(path);
+      const shared = sources.find((source) => {
+        const authoring = resolve(source);
+        return placement === authoring || placement.startsWith(authoring + sep) || authoring.startsWith(placement + sep);
+      });
+      if (shared === undefined) { remaining.push([path, entry]); continue; }
+      await store.update((fresh) => { delete fresh.placements[path]; });
+      io.print(`${path} is also the authoring source of ${basename(shared)}; left in place.`);
+      kept.push(path); removedPaths.push(path);
+    }
+    removedPaths.push(...await removePlacements(store, remaining, io));
+    const clone = store.teamClone(name);
+    await withCloneLock(clone, async (assertHeld) => {
+      const present = await access(clone).then(() => true, () => false);
+      if (present) {
+        // A failed read is not evidence of a clean clone. Preserve it even when git is unavailable.
+        const [status, ahead] = await Promise.all([
+          runner.run('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: clone }).catch(() => null),
+          runner.run('git', ['rev-list', '--count', 'origin/main..HEAD'], { cwd: clone }).catch(() => null),
+        ]);
+        assertHeld();
+        if (status?.code === 0 && !status.stdout.trim() && ahead?.code === 0 && ahead.stdout.trim() === '0') {
+          await rm(clone, { recursive: true, force: true });
+          cloneRemoved = true;
+        } else {
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+          const destination = join(store.root, 'quarantine', stamp, `teams-${name}`);
+          await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+          await moveDirectory(clone, destination);
+          io.print(`Local clone ${clone} has uncommitted or unpushed work; moved to ${destination}.`);
+          kept.push(destination);
+        }
+      }
+      await Promise.all([
+        rm(join(store.root, 'cache', name), { recursive: true, force: true }),
+        removeRunArtifacts(store.root, name),
+      ]);
+    });
+    await store.update((fresh) => {
+      delete fresh.teams[name];
+      for (const [id, entry] of Object.entries(fresh.shared)) if (entry.team === name) delete fresh.shared[id];
+      fresh.pending = fresh.pending.filter((entry) => entry.team !== name);
+      for (const path of removedPaths) delete fresh.placements[path];
+    });
+    return { removedPaths, cloneRemoved, kept };
+  } finally { await releaseTeam().catch(() => undefined); } // Preserve the original refusal if release fails.
 }

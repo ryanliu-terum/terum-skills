@@ -5,7 +5,7 @@ import { emptyConfig } from '../schema.js';
 import { Runner } from '../runner.js';
 import { fakeGh, ghOnlyRunner, noGhRunner, ScriptedPrompter } from './fixtures.js';
 
-const memoryStore = (seed = emptyConfig()): ConfigStore => ({ root: '', read: async () => seed, update: async (mutate) => { await mutate(seed); return seed; }, ensureRoot: async () => undefined, teamClone: (team) => team });
+const memoryStore = (seed = emptyConfig()): ConfigStore => ({ root: '', read: async () => seed, update: async (mutate) => { await mutate(seed); return seed; }, remove: async () => 'absent', ensureRoot: async () => undefined, teamClone: (team) => team });
 
 describe('gh detection and the login offer (§6 login)', () => {
   it('offers gh auth login only on an interactive channel, with inherited stdio, then re-checks auth status only', async () => {

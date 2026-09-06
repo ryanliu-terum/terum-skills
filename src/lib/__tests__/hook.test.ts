@@ -89,3 +89,26 @@ it('staleLine shares the freshness predicate and runnable sync spelling', async 
   expect(await staleLine(root, 'team')).toBeNull();
   expect(await staleLine(root, 'team', () => Date.now() + 7_200_000)).toBe(line);
 });
+
+describe('mixed session hook groups', () => {
+  const unrelated = { type: 'command', command: 'echo unrelated' };
+  const old = { type: 'command', command: 'npx terum-skills sync --hook' };
+  it('removes only our command, preserving the matcher and extra fields', async () => {
+    const target = await options();
+    await writeFile(target.settingsFile, JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', extra: 'keep', hooks: [old, unrelated] }] } }));
+    expect(await removeHook(target)).toBe('removed');
+    expect(JSON.parse(await readFile(target.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [{ matcher: 'startup', extra: 'keep', hooks: [unrelated] }] } });
+  });
+  it('replaces our object in place inside a mixed startup group', async () => {
+    const target = await options();
+    await writeFile(target.settingsFile, JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', extra: 'keep', hooks: [unrelated, old] }] } }));
+    expect(await installHook(target)).toBe('replaced');
+    expect(JSON.parse(await readFile(target.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [{ matcher: 'startup', extra: 'keep', hooks: [unrelated, HOOK_ENTRY.hooks[0]] }] } });
+  });
+  it('moves our command out of a mixed non-startup group into the canonical group and strips later duplicates across groups', async () => {
+    const target = await options();
+    await writeFile(target.settingsFile, JSON.stringify({ hooks: { SessionStart: [{ matcher: 'other', extra: 'keep', hooks: [old, unrelated, old] }, { matcher: 'startup', hooks: [old, unrelated] }, { matcher: 'old', hooks: [old] }] } }));
+    expect(await installHook(target)).toBe('replaced');
+    expect(JSON.parse(await readFile(target.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [{ matcher: 'other', extra: 'keep', hooks: [unrelated] }, { matcher: 'startup', hooks: [unrelated] }, HOOK_ENTRY] } });
+  });
+});

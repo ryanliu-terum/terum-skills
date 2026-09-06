@@ -156,3 +156,27 @@ describe('team leave (§6)', () => {
   });
 
 });
+
+
+it('a clone with an untracked file is moved to quarantine, not deleted', async () => {
+  const { fixture, store, clone } = await prepared();
+  await writeFile(join(clone, 'untracked.txt'), 'local work');
+  const io = new ScriptedPrompter([], [true]);
+  const result = await run({ name: 'team', config: store, hook: { settingsFile: join(fixture.root, 'settings.json'), backupDir: join(store.root, 'backups') } }, io);
+  expect(result).toMatchObject({ ok: true, value: { cloneRemoved: false } });
+  if (!result.ok) throw new Error(result.error);
+  expect(result.value.kept).toHaveLength(1);
+  expect(await readFile(join(result.value.kept[0]!, 'untracked.txt'), 'utf8')).toBe('local work');
+  await expect(access(clone)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+it('a placement that is also a shared source is dropped from the ledger and left on disk', async () => {
+  const { fixture, store, placed } = await prepared();
+  await store.update((c) => { c.shared.sample!.source = placed.path; });
+  const io = new ScriptedPrompter([], [true]);
+  const result = await run({ name: 'team', config: store, hook: { settingsFile: join(fixture.root, 'settings.json'), backupDir: join(store.root, 'backups') } }, io);
+  expect(result).toMatchObject({ ok: true, value: { removed: 1, kept: [placed.path] } });
+  await expect(access(join(placed.path, 'SKILL.md'))).resolves.toBeUndefined();
+  expect((await store.read()).placements).toEqual({});
+  expect(io.lines).toContain(`${placed.path} is also the authoring source of sample; left in place.`);
+});

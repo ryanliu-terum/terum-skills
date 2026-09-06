@@ -29,6 +29,14 @@ function matchingEntry(value: unknown): boolean {
   });
 }
 
+/** Strip only this tool's commands; mixed groups belong to their other commands too. */
+function stripOwnHooks(entry: unknown): unknown | null {
+  if (!matchingEntry(entry)) return entry;
+  const group = entry as Settings;
+  const hooks = (group.hooks as unknown[]).filter((hook) => !matchingEntry({ hooks: [hook] }));
+  return hooks.length ? { ...group, hooks } : null;
+}
+
 function parseSettings(source: string, path: string): Settings {
   let parsed: unknown;
   try { parsed = JSON.parse(source); } catch { throw invalidSettings(path); }
@@ -85,9 +93,19 @@ export async function installHook(options: Required<HookOptions>): Promise<'inst
   const outcome = index < 0 ? 'installed' : 'replaced';
   if (index < 0) sessionStart.push(HOOK_ENTRY);
   else {
-    // Replace the first match in place; every further match (a hand-edited duplicate, an older
-    // install under another spelling) goes, so the file never carries two of our entries.
-    hooks.SessionStart = sessionStart.flatMap((element, position) => (position === index ? [HOOK_ENTRY] : matchingEntry(element) ? [] : [element]));
+    // Entry-level: our command leaves every group it is in (a hand-edited duplicate, an older
+    // install under another spelling), so the file never carries two of ours. A group that held
+    // nothing else is dropped and the canonical group takes its position; a mixed group keeps its
+    // other commands and its matcher — under `startup` our object goes back where it was, under any
+    // other matcher the canonical group is appended, so the command runs at startup whatever it shared.
+    const first = sessionStart[index] as Settings;
+    const position = (first.hooks as unknown[]).findIndex((hook) => matchingEntry({ hooks: [hook] }));
+    const stripped = sessionStart.map(stripOwnHooks);
+    const survivor = stripped[index] as Settings | null;
+    if (survivor === null) stripped[index] = HOOK_ENTRY;
+    else if (survivor.matcher === HOOK_ENTRY.matcher) { const remaining = [...(survivor.hooks as unknown[])]; remaining.splice(position, 0, HOOK_ENTRY.hooks[0]); survivor.hooks = remaining; }
+    else stripped.push(HOOK_ENTRY);
+    hooks.SessionStart = stripped.filter((entry) => entry !== null);
   }
   await backupOnce(options, source);
   await writeAtomically(options.settingsFile, value, source !== undefined);
@@ -100,7 +118,7 @@ export async function removeHook(options: Required<HookOptions>): Promise<'remov
   const hooks = value.hooks as Settings | undefined;
   const sessionStart = hooks?.SessionStart;
   if (!Array.isArray(sessionStart) || !sessionStart.some(matchingEntry)) return 'absent';
-  hooks!.SessionStart = sessionStart.filter((entry) => !matchingEntry(entry));
+  hooks!.SessionStart = sessionStart.map(stripOwnHooks).filter((entry) => entry !== null);
   if ((hooks!.SessionStart as unknown[]).length === 0) delete hooks!.SessionStart;
   if (Object.keys(hooks!).length === 0) delete value.hooks;
   await backupOnce(options, source);

@@ -111,3 +111,33 @@ describe('config store (§5.4)', () => {
   });
 
 });
+
+
+describe('guarded config removal', () => {
+  it('keeps a configured team byte-identically when the guard refuses', async () => {
+    const store = createConfigStore(join(await temporaryDirectory(), 'state'));
+    await store.update((c) => { c.teams.t = { remote: 'github.com/a/t', handle: 'me' }; });
+    const path = join(store.root, 'config.json'); const before = await readFile(path, 'utf8');
+    expect(await store.remove((c) => Object.keys(c.teams).length === 0)).toBe('kept');
+    expect(await readFile(path, 'utf8')).toBe(before);
+    await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('removes an empty config under its lock and leaves no lock behind', async () => {
+    const store = createConfigStore(join(await temporaryDirectory(), 'state'));
+    await store.update(() => undefined);
+    expect(await store.remove(() => true)).toBe('removed');
+    await expect(stat(join(store.root, 'config.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(join(store.root, 'config.json.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('returns absent without creating a root or calling the guard', async () => {
+    const store = createConfigStore(join(await temporaryDirectory(), 'state'));
+    expect(await store.remove(() => { throw new Error('must not run'); })).toBe('absent');
+    await expect(stat(store.root)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('recreates config through update after removal', async () => {
+    const store = createConfigStore(join(await temporaryDirectory(), 'state'));
+    await store.update(() => undefined); await store.remove(() => true);
+    await store.update((c) => { c.teams.new = { remote: 'github.com/a/new', handle: 'me' }; });
+    expect((await store.read()).teams.new).toEqual({ remote: 'github.com/a/new', handle: 'me' });
+  });
+});
