@@ -1,0 +1,275 @@
+name: Release
+
+# terum-skills release: ONE explicit dispatch per intentional release, on main, for a named version at a
+# named merged commit. Order: validate → build/test/pack (read-only) → publish + verify (npm environment,
+# OIDC) → tag + GitHub Release (contents: write) → audit. The tag is created only after the registry
+# serves the exact bytes we packed, with a provenance attestation. Nothing here bumps versions.
+#
+# Recovery: re-dispatch with the SAME expected_version and expected_sha; scripts/release-plan.mjs
+# decides which of publish / tag / release is still missing (see its recovery table) and the jobs skip
+# the rest. Dry run (default) stops after packaging: it proves gates, the tarball, the environment
+# approval, and permission declarations — NOT the npm or GitHub writes.
+#
+# One-time setup (Ryan): npm Trusted Publisher (ryanliu-terum / terum-skills / release.yml / env npm);
+# GitHub environment `npm` restricted to main with a required reviewer; branch protection on main.
+# Trusted publishing needs npm >= 11.5.1 on Node >= 22.14 (docs.npmjs.com/trusted-publishers).
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: 'Version to release; must equal package.json "version" at expected_sha (e.g. 0.1.1)'
+        required: true
+        type: string
+      expected_sha:
+        description: 'Full 40-hex SHA of the merged commit on main to release; must equal the dispatch SHA'
+        required: true
+        type: string
+      dry_run:
+        description: 'Gates + pack + smoke only. No publish, no tag, no Release.'
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  PACKAGE: terum-skills
+  NPM_CLI_VERSION: 11.11.1   # >= 11.5.1; the version exercised for 0.1.0; bump deliberately
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      state: ${{ steps.plan.outputs.state }}
+      reason: ${{ steps.plan.outputs.reason }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      dist_tag: ${{ steps.plan.outputs.dist_tag }}
+      previous_tag: ${{ steps.plan.outputs.previous_tag }}
+      mark_latest: ${{ steps.plan.outputs.mark_latest }}
+    steps:
+      - name: Dispatch must target main at the SHA being released
+        env:
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          [ "$REF" = "refs/heads/main" ] || { echo "::error::dispatch ref is $REF, not refs/heads/main"; exit 1; }
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::expected_sha must be a full 40-hex SHA"; exit 1; }
+          [ "$EXPECTED_SHA" = "$SHA" ] || { echo "::error::expected_sha $EXPECTED_SHA != dispatch sha $SHA (main moved; re-dispatch on the intended commit)"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Merged-PR evidence and main ancestry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          git merge-base --is-ancestor "$SHA" origin/main || { echo "::error::$SHA is not on origin/main (force-push?)"; exit 1; }
+          merged=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls" --jq '[.[] | select(.merged_at != null)] | length')
+          parents=$(git rev-list --parents -n 1 "$SHA" | wc -w)
+          if [ "$merged" = "0" ] && [ "$parents" -lt 3 ]; then
+            echo "::error::$SHA is neither a merged PR's commit nor a merge commit; release from a reviewed merge"; exit 1
+          fi
+      - id: plan
+        name: Plan (live observations of git tags, registry, Releases)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          SHA: ${{ github.sha }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: node scripts/release-plan.mjs --plan --version "$EXPECTED_VERSION" --sha "$SHA" --github-output >> "$GITHUB_OUTPUT"
+      - name: Report the plan
+        env:
+          STATE: ${{ steps.plan.outputs.state }}
+          REASON: ${{ steps.plan.outputs.reason }}
+        run: |
+          echo "state=$STATE"; echo "$REASON"
+          case "$STATE" in
+            refuse|observation-error) echo "::error::$REASON"; exit 1 ;;
+            noop) echo "::notice::$REASON" ;;
+          esac
+
+  build:
+    needs: validate
+    if: needs.validate.outputs.state == 'publish'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      integrity: ${{ steps.pack.outputs.integrity }}
+      filename: ${{ steps.pack.outputs.filename }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - id: pack
+        name: Pack once (prepack builds dist/) and retain the digest
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          npm pack --json --pack-destination release > release/pack.json
+          # shellcheck disable=SC2016 # the single-quoted block is JavaScript handed to node -e, not shell
+          node -e '
+            const [p] = JSON.parse(require("fs").readFileSync("release/pack.json","utf8"));
+            const out = `integrity=${p.integrity}\nfilename=${p.filename}\n`;
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, out);
+            const files = p.files.map(f => f.path);
+            for (const must of ["package.json","README.md","LICENSE","NOTICE","dist/index.js"])
+              if (!files.includes(must)) { console.error(`tarball lacks ${must}`); process.exit(1); }
+            if (files.some(f => f.includes("__tests__") || f.startsWith("src/"))) { console.error("tarball ships sources/tests"); process.exit(1); }
+          '
+      - name: Smoke-test the packed tarball from a foreign directory
+        env:
+          FILENAME: ${{ steps.pack.outputs.filename }}
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          cp "release/$FILENAME" "$tmp/"
+          (cd "$tmp" && npm init -y >/dev/null && npm install --no-audit --no-fund "./$FILENAME" >/dev/null)
+          (cd /tmp && HOME="$tmp/home" "$tmp/node_modules/.bin/terum-skills" --help | grep -q 'npx -y terum-skills@latest setup')
+          (cd /tmp && HOME="$tmp/home" node "$tmp/node_modules/terum-skills/dist/index.js" --help >/dev/null)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-tarball
+          path: release/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: [validate, build]
+    if: needs.validate.outputs.state == 'publish' && inputs.dry_run == false
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write   # OIDC → npm trusted publishing; provenance is automatic
+      contents: read
+    steps:
+      - uses: actions/checkout@v4   # the verify step needs scripts/release-plan.mjs, package.json and the git remote; before download so checkout's clean cannot remove release/
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-tarball
+          path: release/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g "npm@${NPM_CLI_VERSION}" && npm --version
+      - name: Publish the retained tarball
+        env:
+          FILENAME: ${{ needs.build.outputs.filename }}
+          DIST_TAG: ${{ needs.validate.outputs.dist_tag }}
+        # If the first real run shows no attestation for a tarball spec, switch to `npm publish --provenance`
+        # from a checkout at github.sha in this job and keep the integrity comparison below as the artifact check.
+        run: npm publish "./release/$FILENAME" --provenance --access public --tag "$DIST_TAG"
+      - name: Verify the registry serves these bytes, with provenance
+        env:
+          V: ${{ needs.validate.outputs.version }}
+          EXPECTED_INTEGRITY: ${{ needs.build.outputs.integrity }}
+          SHA: ${{ github.sha }}
+        run: node scripts/release-plan.mjs --verify-publication --version "$V" --sha "$SHA" --integrity "$EXPECTED_INTEGRITY"
+
+  finalize:
+    needs: [validate, build, publish]
+    # Runs for a fresh publish, and for the two recovery states that need no publish. `always()` lets the
+    # skipped build/publish jobs pass through; the explicit state test keeps refusals and dry runs out.
+    if: >-
+      always() && inputs.dry_run == false &&
+      (needs.validate.outputs.state == 'tag-only' || needs.validate.outputs.state == 'release-only' ||
+       (needs.validate.outputs.state == 'publish' && needs.publish.result == 'success'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Re-verify publication before writing anything
+        env:
+          V: ${{ needs.validate.outputs.version }}
+          SHA: ${{ github.sha }}
+        run: node scripts/release-plan.mjs --verify-publication --version "$V" --sha "$SHA"
+      - name: Annotated tag at the released commit (no force; re-read on error)
+        env:
+          V: ${{ needs.validate.outputs.version }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          existing=$(git ls-remote --tags origin "refs/tags/$TAG^{}" | cut -f1)
+          if [ -z "$existing" ]; then
+            git tag -a "$TAG" "$SHA" -m "terum-skills $V — published to npm from $SHA by release.yml run $GITHUB_RUN_ID"
+            if ! git push origin "refs/tags/$TAG"; then
+              existing=$(git ls-remote --tags origin "refs/tags/$TAG^{}" | cut -f1)
+              [ "$existing" = "$SHA" ] || { echo "::error::tag push failed and remote $TAG is '${existing:-absent}'"; exit 1; }
+            fi
+          else
+            [ "$existing" = "$SHA" ] || { echo "::error::remote $TAG already points at $existing, not $SHA; never moved"; exit 1; }
+          fi
+      - name: GitHub Release (created only if missing; never re-marked Latest on retry)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.validate.outputs.version }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          PREVIOUS: ${{ needs.validate.outputs.previous_tag }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+          MARK_LATEST: ${{ needs.validate.outputs.mark_latest }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then echo "Release $TAG exists; left untouched"; exit 0; fi
+          args=(--verify-tag --title "terum-skills $V" --generate-notes --latest="$MARK_LATEST")
+          [ -n "$PREVIOUS" ] && args+=(--notes-start-tag "$PREVIOUS")
+          [ "$PRERELEASE" = "true" ] && args+=(--prerelease)
+          gh release create "$TAG" "${args[@]}"
+
+  audit:
+    needs: [validate, build, publish, finalize]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Drift audit after this run (fails the run on an incomplete release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-plan.mjs --drift
