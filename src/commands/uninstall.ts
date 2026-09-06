@@ -5,7 +5,7 @@ import { lockTarget, remove } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { parseJson, personSchema, sameScope, teamSchema } from '../lib/schema.js';
+import { handleSchema, parseJson, parseOrExplain, personSchema, sameScope, teamSchema } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
@@ -19,11 +19,14 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const parsedRef = args.ref && !args.kind && !args.member && !args.project ? parseRef(args.ref) : undefined;
-    const team = parsedRef ? await teamForReference(config, args.team ?? parsedRef.team, parsedRef.remote, parsedRef.name) : selectTeam(config.teams, args.team)[0];
+    // The rule install and publish already use: a qualified ref names the team and `--team` only
+    // answers a bare one. The destructive verb must not resolve the same two arguments to a
+    // different team than the verb it undoes.
+    const team = parsedRef ? await teamForReference(config, parsedRef.team ?? args.team, parsedRef.remote, parsedRef.name) : selectTeam(config.teams, args.team)[0];
     if (args.kind === 'member' || args.member) {
       const handle = args.member ?? args.ref;
       if (!handle) throw new Error('Provide a member handle: `uninstall member <handle>`.');
-      const member = await readPerson(store.teamClone(team), handle);
+      const member = await readPerson(store.teamClone(team), parseOrExplain(handleSchema, handle, 'member handle'));
       const targets: UninstallTarget[] = [];
       for (const item of member.installed) for (const scope of await ledgerScopes(store, team, item.id, [item.scope])) targets.push({ id: item.id, scope });
       return success(await uninstallMany({ team, targets, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));

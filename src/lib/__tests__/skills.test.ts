@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -34,5 +35,13 @@ describe('skills (§5.3 canonical frontmatter)', () => {
     await mkdir(flat); await writeFile(join(flat, 'docs\\readme.md'), 'same bytes');
     await mkdir(join(nested, 'docs'), { recursive: true }); await writeFile(join(nested, 'docs', 'readme.md'), 'same bytes');
     expect(await canonicalDigest(flat)).not.toBe(await canonicalDigest(nested));
+  });
+
+  it.skipIf(sep === '\\')('gives two files and one file whose name spells their digest records different digests (the record stream is prefix-free)', async () => {
+    const root = await temporaryDirectory();
+    const two = join(root, 'two'); const one = join(root, 'one');
+    await mkdir(two); await writeFile(join(two, 'x'), 'C1'); await writeFile(join(two, 'y'), 'C2');
+    await mkdir(one); await writeFile(join(one, `x:${createHash('sha256').update('C1').digest('hex')}\ny`), 'C2');
+    expect(await canonicalDigest(two)).not.toBe(await canonicalDigest(one));
   });
 });

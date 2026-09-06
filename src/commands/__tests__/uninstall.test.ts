@@ -16,8 +16,27 @@ describe('uninstall (§6 pending)', () => {
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect(await run({ kind: 'member', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a member handle: `uninstall member <handle>`.' });
+    const traversal = await run({ kind: 'member', member: '../../../../etc/hostname', config: store }, new ScriptedPrompter());
+    expect(traversal).toMatchObject({ ok: false, error: expect.stringContaining('Invalid member handle') });
+    expect(traversal.ok ? '' : traversal.error).not.toContain('hostname.json');
     expect(await run({ kind: 'project', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a project name: `uninstall project <name>`.' });
     expect(await run({ kind: 'project', project: 'constructor', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Unknown project constructor.' });
+  });
+
+  it('lets a qualified ref decide the team when --team names a different one, exactly as install does', async () => {
+    const fixture = await bareTeam(); const id = 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc';
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('other'));
+    await store.update((config) => {
+      config.teams.team = { remote: fixture.bare, handle: 'seed' };
+      config.teams.other = { remote: fixture.bare, handle: 'seed' };
+    });
+    expect((await install({ ref: 'team/sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    // `install team/sample --team other` installs team's copy; the inverse must not delete other's.
+    expect(await run({ ref: 'team/sample', team: 'other', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: true, value: [{ id, team: 'team', removed: 1 }] });
+    expect((await store.read()).placements).toEqual({});
   });
 
   it('uninstalls all of a member\'s skills with one team-repo write', async () => {

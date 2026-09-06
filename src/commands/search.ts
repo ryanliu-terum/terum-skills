@@ -4,7 +4,7 @@ import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
-import { latestTree, shortHash, skillEndorsement } from '../lib/readme.js';
+import { installCounts, latestTree, shortHash, skillEndorsement } from '../lib/readme.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { format as formatSkill } from './ls.js';
 
@@ -37,9 +37,12 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
           && (!args.author || author.toLowerCase().includes(args.author.toLowerCase())) && Boolean(inProject);
       });
         if (many && filtered.length) io.print(`${team}:`);
-        for (const skill of filtered) {
+        // One git child per hit, all at once (ls does the same); the print order is the filter order.
+        const latest = await Promise.all(filtered.map((skill) => latestTree(runner, clone, skill.name)));
+        const counts = installCounts(people);
+        for (const [index, skill] of filtered.entries()) {
         const endorsed = skillEndorsement(teamJson, skill.id);
-        const hit = { team, id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: people.reduce((count, person) => count + Number(person.installed.some((item) => item.id === skill.id)), 0), latest: shortHash(await latestTree(runner, clone, skill.name)), endorsed };
+        const hit = { team, id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: shortHash(latest[index]!), endorsed };
         hits.push(hit);
         io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed }));
         }

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { place } from '../../lib/placer.js';
-import { bareTeam, cloneWithIdentity, git, holdCloneLock, originSha, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, holdCloneLock, originSha, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run } from '../leave.js';
 import { installHook } from '../../lib/hook.js';
 
@@ -112,6 +112,10 @@ describe('team leave (§6)', () => {
     await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { removed: 1 } });
     await expect(access(parent)).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await store.read()).placements).toEqual({});
+  });
+
+  it('an inherited object key is not a configured team', async () => {
+    await expect(run({ name: 'constructor', config: createConfigStore(await temporaryDirectory()) }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: 'Team constructor is not configured.' });
   });
 
   it('waits for, then refuses, a clone another operation is writing to, and removes nothing meanwhile', async () => {

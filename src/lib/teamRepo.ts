@@ -378,6 +378,8 @@ export function cloneLockPath(root: string): string {
 export async function withCloneLock<T>(root: string, action: (assertHeld: () => void) => Promise<T>, options: { lockStale?: number } = {}): Promise<T> {
   let compromised = false;
   const release = await lockfile.lock(root, { lockfilePath: cloneLockPath(root), realpath: false, stale: options.lockStale ?? 60_000, retries: { retries: 10, minTimeout: 50, maxTimeout: 500 }, onCompromised: () => { compromised = true; } });
-  const assertHeld = (): void => { if (compromised) throw new Error(lostLock(root)); };
+  // The same situation as never acquiring it — another process owns this clone now — so it is the
+  // same class: a per-team caller (sync) skips the team, a single-clone verb fails with the message.
+  const assertHeld = (): void => { if (compromised) throw new CloneBusy(lostLock(root)); };
   try { return await action(assertHeld); } finally { await release().catch(() => undefined); }
 }

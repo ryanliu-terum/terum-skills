@@ -19,7 +19,8 @@ export interface ConfigStore {
 
 /** Resolve the configured team in one place so verbs cannot drift on ambiguity handling. */
 export function selectTeam<T extends { remote: string }>(teams: Record<string, T>, requested?: string): [string, T] {
-  if (requested) { const value = teams[requested]; if (!value) throw new Error(`Team ${requested} is not configured.`); return [requested, value]; }
+  // An own key only: the record inherits Object.prototype, and `constructor` is a legal team name.
+  if (requested) { if (!Object.hasOwn(teams, requested)) throw new Error(`Team ${requested} is not configured.`); return [requested, teams[requested]!]; }
   const entries = Object.entries(teams);
   if (entries.length === 1) return entries[0]!;
   if (entries.length === 0) throw new Error('No team is configured. Run `team join` first.');

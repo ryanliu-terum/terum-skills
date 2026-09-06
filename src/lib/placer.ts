@@ -47,7 +47,7 @@ export async function lockTarget(targetRoot: string, name: string): Promise<() =
  * after the caller verified ledger ownership; the displaced generated copy is removed after the
  * new copy has become visible, so no partial source is ever exposed.
  */
-export async function place(source: string, targetRoot: string, name: string, options: { replace?: boolean; projectRoot?: string; runner?: Runner } = {}): Promise<{ path: string; snapshot: SkillSnapshot; notices: string[] }> {
+export async function place(source: string, targetRoot: string, name: string, options: { replace?: boolean; projectRoot?: string; runner?: Runner; quarantineRoot?: string } = {}): Promise<{ path: string; snapshot: SkillSnapshot; notices: string[] }> {
   const destination = join(targetRoot, name);
   const temporary = join(targetRoot, `.${name}.terum-${randomUUID()}.tmp`);
   const displaced = join(targetRoot, `.${name}.terum-${randomUUID()}.old`);
@@ -70,16 +70,29 @@ export async function place(source: string, targetRoot: string, name: string, op
     return result;
   } catch (error) {
     await rm(temporary, { recursive: true, force: true });
-    // A failure after moving the existing target back into staging must not orphan it.
-    try { await lstat(destination); } catch (missing) {
-      if (isMissing(missing)) {
-        try { await lstat(displaced); await fsForTests.rename(displaced, destination); } catch (displacedMissing) { if (!isMissing(displacedMissing)) throw displacedMissing; }
-      }
-    }
+    // A failure after the existing target was moved aside must not orphan it: the copy goes back, or —
+    // when it cannot — to quarantine (spec invariant 34: never left inside the skills root), or at the
+    // least its location is named. The placement failure stays the message and the cause.
+    const stranded = await restoreDisplaced(destination, displaced, name, options.quarantineRoot).catch(() => displaced);
+    if (stranded !== undefined) throw new Error(`${error instanceof Error ? error.message : String(error)} — the previous ${name} could not be restored to ${destination}; it is at ${stranded}`, { cause: error });
     throw error;
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+}
+
+/** After a failed replace: put the displaced copy back when the destination is empty. Returns where the copy is when it could not be restored, undefined when it was (or nothing was displaced). */
+async function restoreDisplaced(destination: string, displaced: string, name: string, quarantineRoot: string | undefined): Promise<string | undefined> {
+  if (!(await isAbsent(destination)) || await isAbsent(displaced)) return undefined;
+  try { await fsForTests.rename(displaced, destination); return undefined; }
+  catch {
+    if (quarantineRoot !== undefined) { try { return await moveToQuarantine(displaced, quarantineRoot, name); } catch { /* fall through: name the hidden path */ } }
+    return displaced;
+  }
+}
+
+async function isAbsent(path: string): Promise<boolean> {
+  try { await lstat(path); return false; } catch (error) { if (isMissing(error)) return true; throw error; }
 }
 
 /**

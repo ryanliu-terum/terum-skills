@@ -25,12 +25,14 @@ export interface NonInteractivePrompter {
   print(line: string): void;
 }
 
-/** Thrown when a question cannot be answered: the channel is not interactive, or input ended first. */
+/** Thrown when a question cannot be answered: the channel is not interactive, input ended first, or the output the question would go to is gone. */
 export class PromptClosedError extends Error {
-  constructor(question: string, reason: 'not-interactive' | 'closed') {
+  constructor(question: string, reason: 'not-interactive' | 'closed' | 'output-closed') {
     super(reason === 'not-interactive'
       ? `Cannot ask "${question}": this command needs an interactive terminal (stdin is not a TTY).`
-      : `Input ended before "${question}" was answered.`);
+      : reason === 'output-closed'
+        ? `Output closed before "${question}" could be asked: the reader went away.`
+        : `Input ended before "${question}" was answered.`);
     this.name = 'PromptClosedError';
   }
 }
@@ -42,6 +44,8 @@ export interface TerminalStreams {
   output?: NodeJS.WritableStream;
   /** Override TTY detection (tests). Defaults to `input.isTTY`. */
   interactive?: boolean;
+  /** Settles when the output stream broke (a reader that went away): a pending or later question fails closed instead of hanging. */
+  outputClosed?: Promise<void>;
 }
 
 /**
@@ -55,13 +59,19 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
   const input = streams.input ?? processStdin;
   const output = streams.output ?? processStdout;
   const interactive = streams.interactive ?? Boolean(input.isTTY);
+  let outputBroken = false;
+  void streams.outputClosed?.then(() => { outputBroken = true; });
 
   async function ask(question: string): Promise<string> {
     if (!interactive) throw new PromptClosedError(question.trim(), 'not-interactive');
+    if (outputBroken) throw new PromptClosedError(question.trim(), 'output-closed');
     const rl = createInterface({ input, output, terminal: true });
     const closed = new Promise<never>((_, reject) => rl.once('close', () => reject(new PromptClosedError(question.trim(), 'closed'))));
+    // A pending question also loses to the output breaking under it: the broken-pipe signal arrives
+    // from the event loop, after the question was already written, so a pre-check alone is not enough.
+    const broken = streams.outputClosed?.then<never>(() => { throw new PromptClosedError(question.trim(), 'output-closed'); });
     try {
-      return await Promise.race([rl.question(question), closed]);
+      return await Promise.race(broken ? [rl.question(question), closed, broken] : [rl.question(question), closed]);
     } finally {
       rl.close();
     }

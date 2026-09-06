@@ -103,11 +103,15 @@ describe('search (§6)', () => {
   });
 
   it('reports one malformed member file and still returns the team\'s matches, counting installs from the files that parse', async () => {
-    const { store, clone } = await searchFixture('team', [{ name: 'healthy', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
+    const id = '11111111-1111-4111-8111-111111111111';
+    const { store, clone } = await searchFixture('team', [{ name: 'healthy', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id }]);
     await freshStamp(store, 'team');
+    // The surviving member must own an install of the match, or `installs` would read 0 whether the
+    // roster skipped one file or was discarded whole — and the test could not tell those apart.
+    await writeFile(join(clone, 'people', 'seed.json'), `${JSON.stringify(person('seed', { installed: [{ id, version: null, scope: { kind: 'global' }, since: '2026-09-04' }] }), null, 2)}\n`);
     await writeFile(join(clone, 'people', 'broken.json'), '{ "handle": "broken" }');
     const io = new ScriptedPrompter();
-    expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'healthy', installs: 0 })] });
+    expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'healthy', installs: 1 })] });
     expect(io.lines.join('\n')).toContain('team/people/broken.json: Invalid people/broken.json');
   });
 

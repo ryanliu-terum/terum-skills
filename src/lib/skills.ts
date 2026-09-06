@@ -70,9 +70,18 @@ export async function canonicalDigest(root: string): Promise<string> {
   for (const relative of files) {
     let content = await readFile(join(root, relative));
     if (relative === 'SKILL.md') content = Buffer.from(canonicalSkillMd(content.toString('utf8')));
-    aggregate.update(`${relative}:${createHash('sha256').update(content).digest('hex')}\n`);
+    aggregate.update(`${digestKey(relative)}:${createHash('sha256').update(content).digest('hex')}\n`);
   }
   return `sha256:${aggregate.digest('hex')}`;
+}
+
+/**
+ * The digest record's path field with the record's own separators escaped (`\`, `:`, newline), so
+ * the record stream is prefix-free and no two file lists share a digest. Every path a real skill
+ * uses contains none of them and hashes to exactly the bytes it did before.
+ */
+function digestKey(relative: string): string {
+  return relative.replace(/[\\:\n]/g, (char) => (char === '\n' ? '\\n' : `\\${char}`));
 }
 
 /** Canonical digest for a single SKILL.md, used to authorize a managed-field-only refresh. */

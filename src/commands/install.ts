@@ -6,7 +6,7 @@ import { Prompter } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { Config, Team, describeRaw, parseJson, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
+import { Config, Team, describeRaw, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { materializeVersion, resolveVersion } from '../lib/version.js';
@@ -102,7 +102,7 @@ export async function installOne(input: { team: string; reference?: string; id?:
       const drift = await quarantineDrift(destination, entry.fingerprint, join(input.store.root, 'quarantine'));
       if (drift.quarantined) io.print(`Local changes at ${destination} moved to ${drift.quarantined}.`);
     }
-    placed = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot: repoRoot, runner: input.runner });
+    placed = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot: repoRoot, runner: input.runner, quarantineRoot: join(input.store.root, 'quarantine') });
     await input.store.update((fresh) => {
       fresh.placements[placed.path] = { id: skill.id, team: input.team, version: latest, scope, placed_at: new Date().toISOString().slice(0, 10), fingerprint: placed.snapshot.fingerprint };
     });
@@ -153,12 +153,13 @@ async function resolveSkill(clone: string, team: string, ref: string): Promise<S
 type ParsedOperation = { kind: 'skill'; ref: string } | { kind: 'member'; member: string } | { kind: 'project'; project: string };
 function parseOperation(args: InstallArgs): ParsedOperation {
   // A missing selector is a usage error here, for every caller of run() — never an empty handle
-  // that reaches the filesystem as people/.json.
+  // that reaches the filesystem as people/.json — and a present one is held to the handle rule
+  // before it can become a path segment (ls and team remove do the same).
   if (args.kind === 'member' || args.member) {
     const member = args.member ?? args.ref;
     if (!member) throw new Error('Provide a member handle: `install member <handle>`.');
     if (member.includes('@')) throw new Error('Version pins are supported for single-skill installs only.');
-    return { kind: 'member', member };
+    return { kind: 'member', member: parseOrExplain(handleSchema, member, 'member handle') };
   }
   if (args.kind === 'project' || args.project) {
     const project = args.project ?? args.ref;

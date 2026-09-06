@@ -14,6 +14,12 @@ describe('install (§6 refs)', () => {
     expect(await run({ ref: 'sample', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No team is configured. Run `team join` first.' });
     expect(await run({ kind: 'member', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a member handle: `install member <handle>`.' });
     expect(await run({ kind: 'project', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a project name: `install project <name>`.' });
+    // A handle is held to the handle rule before it can become a path segment: no traversal, and no path echoed back.
+    const traversal = await run({ kind: 'member', member: '../../../config', config: store }, new ScriptedPrompter());
+    expect(traversal).toMatchObject({ ok: false, error: expect.stringContaining('Invalid member handle') });
+    expect(traversal.ok ? '' : traversal.error).not.toContain('config.json');
+    // An inherited object key is not a configured team either.
+    expect(await run({ ref: 'sample', team: 'constructor', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Team constructor is not configured.' });
   });
 
   it('an inherited object key is not a project', async () => {

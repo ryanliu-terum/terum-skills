@@ -6,8 +6,10 @@ import { run as install } from '../install.js';
 import { NonInteractivePrompter } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, git, holdCloneLock, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { lockTarget } from '../../lib/placer.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { systemRunner } from '../../lib/runner.js';
+import { cloneLockPath } from '../../lib/teamRepo.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const SECOND_ID = '22222222-2222-4222-8222-222222222222';
@@ -67,8 +69,21 @@ describe('sync --hook (§3, §6)', () => {
     void fixture;
   });
 
-  it('skips a team whose clone another operation is writing to — reported, untouched, not stamped — and still syncs every other team', async () => {
-    const { fixture, store, clone } = await configuredSkill();
+  it('skips a team whose clone another operation is writing to — not refreshed, not read, not stamped, no pass touches its placements, shares, endorsements or orphans — and still syncs every other team', async () => {
+    const { fixture, store, clone } = await configuredSkill(); const home = join(fixture.root, 'home');
+    // Give every busy-skip guard something to skip: a drifted placement, a shared source, an endorsed
+    // candidate, and an orphaned placement — each of which would prompt, move or write if it ran.
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [SECOND_ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const placedPath = join(home, '.claude', 'skills', 'sample');
+    await writeFile(join(placedPath, 'SKILL.md'), skill('hand edit'));
+    const orphan = join(home, '.claude', 'skills', 'second');
+    await cp(join(clone, 'skills', 'second'), orphan, { recursive: true });
+    await store.update((config) => {
+      config.placements[orphan] = { id: SECOND_ID, team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:orphan' };
+      config.shared[ID] = { source: join(fixture.root, 'gone'), team: 'team', baseline: 'sha256:0' };
+    });
     const other = await bareTeam();
     await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team').replace('name: sample', 'name: elsewhere'));
     const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
@@ -79,7 +94,13 @@ describe('sync --hook (§3, §6)', () => {
     const otherHead = (await git(['rev-parse', 'HEAD'], otherClone)).trim();
     const release = await holdCloneLock(clone);
     try {
-      expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: ['team'], notices: [expect.stringMatching(/write lock on team/)] } });
+      // Interactive with nothing scripted: any pass that reached a prompt for the busy team would close the channel and fail the run.
+      const io = new ScriptedPrompter([], [], true);
+      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [], notices: [expect.stringMatching(/write lock on team/)] } });
+      expect(io.asked).toEqual([]);
+      expect(await readFile(join(placedPath, 'SKILL.md'), 'utf8')).toContain('description: hand edit');
+      await expect(access(join(store.root, 'quarantine'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(join(orphan, 'SKILL.md'), 'utf8')).toContain('description: second');
       expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
       expect((await git(['rev-parse', 'HEAD'], otherClone)).trim()).not.toBe(otherHead);
       await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -88,6 +109,71 @@ describe('sync --hook (§3, §6)', () => {
     expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
     expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe(head);
     await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
+  });
+
+  it('a clone lock lost mid-fetch costs exactly that team as well: the sync continues and the other team lands', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    const other = await bareTeam();
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team').replace('name: sample', 'name: elsewhere'));
+    const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team moved').replace('name: sample', 'name: elsewhere'));
+    const head = (await git(['rev-parse', 'HEAD'], clone)).trim();
+    const otherHead = (await git(['rev-parse', 'HEAD'], otherClone)).trim();
+    const lock = cloneLockPath(clone);
+    // Steal team's lock during its fetch; proper-lockfile notices on its next 1000 ms tick (its floor), so the wait clears a full tick plus slack.
+    const stealing = wrapRunner(systemRunner, async (command, args, options, next) => {
+      const result = await next();
+      if (command === 'git' && args[0] === 'fetch' && options?.cwd === clone) { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 3_000)); }
+      return result;
+    });
+    expect(await run({ config: store, runner: stealing, lockStale: 2_000 }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: [], notices: [expect.stringMatching(/Lost the safeWrite lock/)] } });
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
+    expect((await git(['rev-parse', 'HEAD'], otherClone)).trim()).not.toBe(otherHead);
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(join(store.root, 'run', 'other.stamp'))).resolves.toBeUndefined();
+  });
+
+  it('reports a placement whose target lock another process holds as blocked and leaves it untouched', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(home, '.claude', 'skills', 'sample');
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    const release = await lockTarget(join(home, '.claude', 'skills'), 'sample');
+    try {
+      const io = new ScriptedPrompter();
+      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+      expect(io.lines.filter((line) => line.startsWith(`Blocked ${path}: `) && line.includes('busy'))).toHaveLength(1);
+      expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: old');
+    } finally { await release(); }
+    expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { placed: 1 } });
+    expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: new');
+  });
+
+  it('defers one endorsed candidate that cannot be placed, still installs the rest, and still stamps', async () => {
+    const { fixture, store } = await configuredSkill();
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID, SECOND_ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    // sync's endorsed batch places under the store's own home; a stranger's folder sits at the first candidate's target.
+    const stranger = join(store.root, '.claude', 'skills', 'sample');
+    await mkdir(stranger, { recursive: true }); await writeFile(join(stranger, 'SKILL.md'), 'user-owned, not a placement');
+    const io = new ScriptedPrompter([], [true], true);
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 1, deferred: ['sample'] } });
+    expect(io.lines.filter((line) => line.startsWith('Deferred endorsed sample: '))).toHaveLength(1);
+    expect(await readFile(join(store.root, '.claude', 'skills', 'second', 'SKILL.md'), 'utf8')).toContain('description: second');
+    expect(await readFile(join(stranger, 'SKILL.md'), 'utf8')).toBe('user-owned, not a placement');
+    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
+  });
+
+  it('a closed prompt channel is one failure, never a damaged placement per remaining entry', async () => {
+    const setup = await configuredToolSkill();
+    await pushFromSeed(setup.fixture.seed, 'skills/sample/SKILL.md', toolSkill('widened', ['Bash(*)']));
+    // Interactive, but nothing scripted: the channel closes at the first consent question.
+    const io = new ScriptedPrompter([], [], true);
+    expect(await run({ config: setup.store }, io)).toMatchObject({ ok: false, error: expect.stringMatching(/Input ended before/) });
+    expect(io.lines.filter((line) => line.startsWith('Blocked '))).toEqual([]);
+    expect(await readFile(join(setup.home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
   });
 
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('reports one unreadable placement as blocked and still refreshes the others and writes the stamp', async () => {

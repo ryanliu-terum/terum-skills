@@ -11,6 +11,8 @@ export default defineConfig({
     include: ['src/**/__tests__/**/*.test.ts'],
     setupFiles: ['src/lib/__tests__/setup.ts'],
     testTimeout: 120_000,
+    // Hooks get their own budget in vitest (default 10 s), so it must be set explicitly: bin.test.ts builds the package in beforeAll.
+    hookTimeout: 120_000,
     env: {
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_CONFIG_NOSYSTEM: '1',

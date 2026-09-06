@@ -138,6 +138,29 @@ describe('native Placer (§7)', () => {
     expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
   });
 
+  it('keeps the placement failure as the message and moves a copy it cannot restore to quarantine, never leaving it hidden in the skills root', async () => {
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'v1');
+    const first = await place(source, target, 'sample');
+    await writeFile(join(source, 'SKILL.md'), 'v2');
+    // Every rename onto the destination after the natural first attempt fails: the swap AND the restore.
+    const realRename = fsForTests.rename;
+    let attemptsAtDestination = 0;
+    fsForTests.rename = async (from, to) => {
+      if (String(to) === first.path && ++attemptsAtDestination >= 2) throw new Error('simulated crash after displacement');
+      return realRename(from, to);
+    };
+    let failure: Error | undefined;
+    try { await place(source, target, 'sample', { replace: true, quarantineRoot: join(root, 'quarantine') }).catch((error: Error) => { failure = error; }); }
+    finally { fsForTests.rename = realRename; }
+    expect(failure?.message).toContain('simulated crash after displacement');
+    expect(failure?.message).toContain('could not be restored');
+    expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
+    const quarantined = (await readdir(join(root, 'quarantine'), { recursive: true })).map(String).filter((entry) => entry.endsWith('sample/SKILL.md'));
+    expect(quarantined).toHaveLength(1);
+    expect(await readFile(join(root, 'quarantine', quarantined[0]!), 'utf8')).toBe('v1');
+  });
+
   it('moves an edited placement to quarantine by copy-then-remove when the rename crosses a volume', async () => {
     const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
     await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'original');

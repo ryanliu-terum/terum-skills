@@ -2,7 +2,7 @@ import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { inspect, lockTarget, place, quarantineDrift, remove } from '../lib/placer.js';
-import { NonInteractivePrompter, Prompter } from '../lib/prompt.js';
+import { NonInteractivePrompter, Prompter, PromptClosedError } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
@@ -15,7 +15,11 @@ import { reconcileShared } from './share.js';
 import { installOne, skillAtSource } from './install.js';
 import { uninstallOne } from './uninstall.js';
 
-export interface SyncArgs { hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string; }
+export interface SyncArgs {
+  hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string;
+  /** Test knob: the clone lock's stale window for refreshClone. */
+  lockStale?: number;
+}
 export interface SyncResult { placed: number; deferred: string[]; notices: string[]; changed: boolean; hook: boolean; }
 
 /** Overloads keep the hook caller compiler-restricted to print-only I/O (§3). */
@@ -54,10 +58,12 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
     for (const team of Object.keys(config.teams)) {
       const clone = store.teamClone(team);
       try {
-        await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {} });
+        await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {}, lockStale: args.lockStale });
       } catch (error) {
         if (!(error instanceof CloneBusy)) throw error;
-        notice(error.message); deferred.push(team); busy.add(team); continue;
+        // Reported through `notices` alone, which the hook already writes to stderr: `deferred` is
+        // rendered as a count of SKILLS needing review (execute.ts), so a team never belongs on it.
+        notice(error.message); busy.add(team); continue;
       }
       await skillRecords(clone, team, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
       // Pending is intent, never inferred from the filesystem. A replay uses the same command
@@ -77,6 +83,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
           await installOne({ team, id: pending.id, scope: pending.scope, version, store, runner, cwd: args.cwd }, childIo);
           placed++; changed = true;
         } catch (error) {
+          if (error instanceof PromptClosedError) throw error; // the channel is gone, not this entry
           const message = error instanceof Error ? error.message : String(error);
           deferred.push(pending.scope.kind === 'project' && message.includes('no matching project context') ? `${pending.id.slice(0, 8)} needs a checkout for project ${pending.scope.project}` : pending.id.slice(0, 8));
           notice(`Deferred pending ${pending.op} for ${pending.id.slice(0, 8)}: ${message}`);
@@ -122,23 +129,26 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         // The ledger is provenance for the exact placement, including a particular project checkout.
         // Re-resolving a global path would use this process's HOME and can update the wrong machine.
         const root = dirname(path);
-        // After an upstream rename the destination is not the ledger key: `replace` is authorized by
-        // what sits AT the destination (a ledger-owned placement, or nothing), never by the old path —
-        // D16, the check install.ts runs. A stranger's folder at the new name is reported, and it is
-        // decided BEFORE anything moves: a blocked placement is touched by nothing, quarantine included.
-        const destination = join(root, skill.name);
-        const collision = await inspect(destination, (await store.read()).placements[destination]?.id === skill.id);
-        if (collision.kind === 'foreign') { notice(`Blocked ${path}: ${destination} already exists and is not a placement this tool owns; leaving both untouched.`); continue; }
-        // A placed copy that no longer matches its ledger fingerprint is moved to quarantine, never
-        // deleted — the same helper install uses when it re-places over an owned target.
-        const drift = await quarantineDrift(path, entry.fingerprint, join(store.root, 'quarantine'));
-        const current = drift.current;
-        if (drift.quarantined) { notice(`Local changes at ${path} moved to ${drift.quarantined}.`); changed = true; }
-        const repoSnapshot = await snapshotSkillDirectory(source);
-        if (current?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
+        // The target lock is taken before anything about the destination is decided and held across
+        // the collision check, the quarantine move and the placement — install's shape — so the
+        // ownership reading that authorizes a destructive `replace` cannot go stale under it.
         const release = await lockTarget(root, skill.name);
         try {
-          const result = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot, runner });
+          // After an upstream rename the destination is not the ledger key: `replace` is authorized by
+          // what sits AT the destination (a ledger-owned placement, or nothing), never by the old path —
+          // D16, the check install.ts runs. A stranger's folder at the new name is reported, and it is
+          // decided BEFORE anything moves: a blocked placement is touched by nothing, quarantine included.
+          const destination = join(root, skill.name);
+          const collision = await inspect(destination, (await store.read()).placements[destination]?.id === skill.id);
+          if (collision.kind === 'foreign') { notice(`Blocked ${path}: ${destination} already exists and is not a placement this tool owns; leaving both untouched.`); continue; }
+          // A placed copy that no longer matches its ledger fingerprint is moved to quarantine, never
+          // deleted — the same helper install uses when it re-places over an owned target.
+          const drift = await quarantineDrift(path, entry.fingerprint, join(store.root, 'quarantine'));
+          const current = drift.current;
+          if (drift.quarantined) { notice(`Local changes at ${path} moved to ${drift.quarantined}.`); changed = true; }
+          const repoSnapshot = await snapshotSkillDirectory(source);
+          if (current?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
+          const result = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot, runner, quarantineRoot: join(store.root, 'quarantine') });
           const renamed = basename(path) !== skill.name;
           await store.update((fresh) => {
             const placement = fresh.placements[path];
@@ -154,6 +164,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         } finally { await release(); }
         placed++; changed = true;
       } catch (error) {
+        if (error instanceof PromptClosedError) throw error; // the channel is gone, not this placement
         notice(`Blocked ${path}: ${error instanceof Error ? error.message : String(error)}`);
         deferred.push(basename(path));
       }
@@ -174,12 +185,15 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
           // deferred by name; the others still land, and the orphan pass and the stamps still run.
           for (const skill of candidates) {
             try { await installOne({ team, id: skill.id, store, runner, cwd: args.cwd }, childIo); placed++; changed = true; }
-            catch (error) { deferred.push(skill.name); notice(`Deferred endorsed ${skill.name}: ${error instanceof Error ? error.message : String(error)}`); }
+            catch (error) {
+              if (error instanceof PromptClosedError) throw error; // the channel is gone, not this candidate
+              deferred.push(skill.name); notice(`Deferred endorsed ${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
+            }
           }
         }
       }
     }
-    await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, deferred, notice);
+    await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, deferred, notice, busy);
     if (changed && !args.hook) (io as { print(line: string): void }).print('Skills synchronized.');
     if (args.hook && placed) (io as { print(line: string): void }).print('{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}');
     for (const team of Object.keys((await store.read()).teams)) if (!busy.has(team)) await writeStamp(store, team);
@@ -190,9 +204,12 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
 function approved(config: Awaited<ReturnType<ConfigStore['read']>>, id: string, grants: ReturnType<typeof allowedTools>): boolean {
   return grants.ok && (grants.normalized === 'none' || config.approvals[id]?.grants === grants.hash);
 }
-async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, deferred: string[], notice: (line: string) => void): Promise<void> {
+async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, deferred: string[], notice: (line: string) => void, skipTeams: ReadonlySet<string>): Promise<void> {
   const config = await store.read();
   for (const [path, placement] of Object.entries(config.placements)) {
+    // A clone this run could not refresh may be mid-write by the process that holds it: its roster
+    // is not evidence of an orphan, and a decline written against it would be wrong.
+    if (skipTeams.has(placement.team)) continue;
     if (config.pending.some((entry) => entry.id === placement.id && entry.team === placement.team && sameScope(entry.scope, placement.scope))) continue;
     const binding = config.teams[placement.team];
     if (!binding?.handle) continue;

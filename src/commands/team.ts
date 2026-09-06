@@ -181,7 +181,7 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const clone = store.teamClone(name);
-    if (config.teams[name]) throw new Error(`Team ${name} is already configured for ${config.teams[name].remote}; run \`team join\` for it or pick another name.`);
+    if (Object.hasOwn(config.teams, name)) throw new Error(`Team ${name} is already configured for ${config.teams[name]!.remote}; run \`team join\` for it or pick another name.`);
     if (await exists(clone)) throw new Error(`A clone already exists at ${clone}; run \`team join\` for that team or pick another name.`);
 
     let remote: string;
@@ -237,7 +237,7 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       throw new Error(`${reason}\n${advice}`);
     }
     await store.update((fresh) => {
-      if (fresh.teams[name]) throw new Error(`Team ${name} was configured by another process while this create ran; the repository ${remote} is scaffolded, run \`team join ${remote} --as <other-name>\` to use it.`);
+      if (Object.hasOwn(fresh.teams, name)) throw new Error(`Team ${name} was configured by another process while this create ran; the repository ${remote} is scaffolded, run \`team join ${remote} --as <other-name>\` to use it.`);
       assertBindable(fresh, name, remote);
       setIdentity(fresh, identity);
       bindTeam(fresh, name, { remote, handle: identity.handle });
@@ -265,8 +265,8 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     const existing = teamByRemote(configBefore, normalized);
     if (existing && args.as && args.as !== existing[0]) io.print(`This remote is already configured as team ${existing[0]}; ignoring --as ${args.as}.`);
     const team = parseOrExplain(teamNameSchema, existing?.[0] ?? args.as ?? remoteName(target.remote), 'team name');
-    if (!existing && configBefore.teams[team]) {
-      throw new Error(`Team name ${team} is already used for ${configBefore.teams[team].remote}; pass --as <other-name>.`);
+    if (!existing && Object.hasOwn(configBefore.teams, team)) {
+      throw new Error(`Team name ${team} is already used for ${configBefore.teams[team]!.remote}; pass --as <other-name>.`);
     }
     // §5.4: the per-team handle is immutable once its people file exists — and only join/create bind it.
     const boundHandle = existing?.[1].handle;

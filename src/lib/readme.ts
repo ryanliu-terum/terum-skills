@@ -72,7 +72,11 @@ export function generateReadme(data: ReadmeData): string {
       // A code span's only delimiter is a backtick, which cell() cannot escape, and this column is a
       // command a reader copies: a folder name the CLI itself would refuse to create gets no command.
       const command = repo && isSkillName(skill.name) ? `\`npx -y terum-skills@latest install ${repo}/${skill.name}\`` : '—';
-      lines.push(`| ${cell(skill.name)} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | — | ${command} |`);
+      // The Skill column shows the folder name as data even when the CLI would refuse it: a bracket
+      // pair there could otherwise label a link. A no-op for every name the CLI accepts. (Whether the
+      // free-text columns may render Markdown at all is a product call, recorded in the close-out.)
+      const shownName = cell(skill.name).replace(/[[\]]/g, '\\$&');
+      lines.push(`| ${shownName} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | — | ${command} |`);
     }
   }
   if (byAuthor.size === 0) lines.push('', '### Skills', '', 'No shared skills yet.');

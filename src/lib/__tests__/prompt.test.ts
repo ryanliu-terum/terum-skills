@@ -88,6 +88,18 @@ describe('terminalPrompter behaviour', () => {
     await expect(io.text('Name')).rejects.toThrow(/Input ended before "Name:"/);
   });
 
+  it('a question pending when the output breaks (the reader went away) fails closed instead of waiting for an answer nobody was shown, and so does every later one', async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let breakOutput: () => void = () => undefined;
+    const outputClosed = new Promise<void>((resolve) => { breakOutput = resolve; });
+    const io = terminalPrompter({ input: Object.assign(input, { isTTY: true }), output, interactive: true, outputClosed });
+    const pending = io.confirm('Delete 3 quarantined item(s)?');
+    breakOutput();
+    await expect(pending).rejects.toThrow('Output closed before "Delete 3 quarantined item(s)? [y/N]" could be asked');
+    await expect(io.text('Name')).rejects.toThrow(PromptClosedError);
+  });
+
   it('confirm is y/N: only y or yes (any case) is true', async () => {
     const answers = ['y', 'YES', 'n', '', 'ye', 'yup'];
     const { io } = channel(answers);

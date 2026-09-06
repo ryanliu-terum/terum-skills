@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { COMMUNITY_URL } from '../../lib/community.js';
@@ -35,19 +35,37 @@ describe('setup (§6.1)', () => {
     expect(io.lines).toContain(`Team team is already configured on this machine.`);
   });
 
-  it('reports a degraded summary instead of failing when the configured clone is missing', async () => {
+  it('refuses a configured team whose clone is missing, naming the repair, instead of confirming a machine every verb would fail on', async () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
-    // No clone on disk: it is disposable state, and every step before the summary still completes.
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+      offerHook: async () => 'present',
+    } }, io);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`team join ${fixture.bare}`), value: { steps: { team: 'skipped', hook: 'skipped' } } });
+    expect(result.ok ? '' : result.error).toContain('clone at');
+    expect(io.lines).not.toContain('Members:');
+  });
+
+  it('prints no member header and keeps the repository links when only the roster cannot be read', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    // team.json still parses; only the roster read fails, so the header must not print alone.
+    await rm(join(clone, 'people'), { recursive: true, force: true });
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter();
     const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
       offerHook: async () => 'present',
     } }, io);
     if (!result.ok) throw new Error(result.error);
-    expect(result.value.steps).toMatchObject({ team: 'skipped', hook: 'skipped', done: 'printed' });
-    expect(io.lines.join('\n')).toContain('the team details could not be read');
+    expect(result.value.steps).toMatchObject({ team: 'skipped', done: 'printed' });
     expect(io.lines).not.toContain('Members:');
+    expect(io.lines.join('\n')).toContain('the team details could not be read');
+    // The repository links come from the configured remote, not the clone, so they survive.
+    expect(io.lines).toContain(`Repository: ${fixture.bare}`);
+    expect(io.lines).toContain(`README: ${fixture.bare}`);
   });
 
   it('onboards a GitHub creator end to end without taking any credential input', async () => {

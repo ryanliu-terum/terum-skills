@@ -57,6 +57,9 @@ describe('README generator (§9)', () => {
     expect(row.split(/(?<!\\)\|/).at(-2)?.trim()).toBe('—');
     expect(block).not.toContain('install acme/team/x');
     expect(block.split('`')).toHaveLength(2);
+    // ...and the name does not render as a link labelled by the attacker either.
+    expect(block).not.toMatch(/(?<!\\)\]\(https:\/\/evil\.example/);
+    expect(row).toContain('x`\\[Install v2\\](https://evil.example/pkg)');
   });
 
   it('never interprets replacement patterns or breaks table rows on skill text', () => {
