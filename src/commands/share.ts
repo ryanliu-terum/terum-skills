@@ -9,7 +9,7 @@ import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { allowedTools, describeRaw, isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
 import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
-import { canonicalDigest, injectManagedFields, skillRecords } from '../lib/skills.js';
+import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedFields, skillRecords } from '../lib/skills.js';
 import { MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 
 export interface ShareArgs {
@@ -55,7 +55,10 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
     const id = randomUUID(); // minted before safeWrite, never inside its re-applied mutation
     const teamDoc = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
     const updated = injectManagedFields(raw, { license: teamDoc.policy.skill_license, id, author });
-    io.print(`Will add:\nlicense: ${teamDoc.policy.skill_license}\nmetadata.id: ${id}\nmetadata.author: ${author}`);
+    // Every field the tool writes is shown before the y/N — the category too, on the one kind of file
+    // that has none (every off-the-shelf skill): it is generated, not asked for, and edited any time.
+    const categoryLine = declaredCategory(raw) === undefined ? `\nmetadata.terum-category: ${DEFAULT_CATEGORY} (no category was set; edit SKILL.md any time)` : '';
+    io.print(`Will add:\nlicense: ${teamDoc.policy.skill_license}\nmetadata.id: ${id}\nmetadata.author: ${author}${categoryLine}`);
     if (!(await io.confirm(`Share ${name}?`))) throw new Error('Share was declined.');
     await writeFile(join(source, 'SKILL.md'), updated, 'utf8');
     const files = await sourceFiles(source);
@@ -240,7 +243,7 @@ async function hasPrivilegedContent(root: string): Promise<boolean> {
 }
 async function sourceFiles(root: string): Promise<Map<string, Buffer>> { const result = new Map<string, Buffer>(); async function walk(current: string, relative = ''): Promise<void> { for (const entry of await readdir(current, { withFileTypes: true })) { const next = join(current, entry.name); const key = relative ? `${relative}/${entry.name}` : entry.name; if (entry.isDirectory()) await walk(next, key); else if (entry.isFile()) result.set(key, await readFile(next)); } } await walk(root); return result; }
 function mirrorToTree(tree: MutableTree, destination: string, files: Map<string, Buffer>): void { for (const path of tree.paths(`${destination}/`)) if (!files.has(path.slice(destination.length + 1))) tree.remove(path); for (const [path, content] of files) tree.set(`${destination}/${path}`, content); }
-/** The managed-field refresh as a mutation: re-derived from the fresh pre-image safeWrite hands it, so it can only ever change the three managed lines of whatever is actually upstream. */
+/** The managed-field refresh as a mutation: re-derived from the fresh pre-image safeWrite hands it, so it can only ever change the managed lines of whatever is actually upstream (and restore a missing category, as injectManagedFields does everywhere). */
 function refreshManagedFieldsInTree(tree: MutableTree, path: string, values: { license: string; id: string; author: string }): void {
   const current = tree.before(path);
   if (current === undefined) return;

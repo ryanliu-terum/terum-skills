@@ -94,8 +94,29 @@ export function canonicalSkillDigest(source: string | Buffer): string {
   return `sha256:${createHash('sha256').update(canonicalSkillMd(Buffer.isBuffer(source) ? source.toString('utf8') : source)).digest('hex')}`;
 }
 
-/** Insert/refresh only the managed legal frontmatter fields while retaining body text. */
-export function injectManagedFields(source: string, values: { license: string; id: string; author: string }): string {
+/** The category written when a SKILL.md carries none: the starter list's catch-all (rulings walk R1, 2026-09-06). */
+export const DEFAULT_CATEGORY = 'misc';
+
+/** The `metadata.terum-category` a frontmatter declares, or undefined when it is absent, empty, or not a string. */
+export function declaredCategory(source: string): string | undefined {
+  const match = /^---\s*\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(source);
+  if (!match) return undefined;
+  try { return categoryOf((YAML.parse(match[1]!) as Record<string, unknown> | null)?.metadata); } catch { return undefined; }
+}
+
+function categoryOf(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
+  const value = (metadata as Record<string, unknown>)['terum-category'];
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+/**
+ * Insert/refresh the managed legal frontmatter fields while retaining body text: `license`,
+ * `metadata.id`, `metadata.author`, and — only when the file declares none — `metadata.terum-category`
+ * as DEFAULT_CATEGORY, so every off-the-shelf SKILL.md (no `metadata:` block at all) becomes a
+ * complete Terum skill without a hand edit; a declared category is never overwritten.
+ */
+export function injectManagedFields(source: string, values: { license: string; id: string; author: string; category?: string }): string {
   const match = /^---\s*\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(source);
   if (!match) throw new Error('SKILL.md has no YAML frontmatter');
   const document = YAML.parseDocument(match[1]!);
@@ -104,9 +125,12 @@ export function injectManagedFields(source: string, values: { license: string; i
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('SKILL.md frontmatter must be a mapping');
   document.set('license', values.license);
   const metadata = (raw as Record<string, unknown>).metadata;
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) document.set('metadata', {});
+  // A real YAML map, never a plain `{}`: `setIn` below walks YAML nodes and treats a plain object as a
+  // scalar, which is exactly how a file with no `metadata:` block used to crash the share.
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) document.set('metadata', document.createNode({}));
   document.setIn(['metadata', 'id'], values.id);
   document.setIn(['metadata', 'author'], values.author);
+  if (categoryOf(metadata) === undefined) document.setIn(['metadata', 'terum-category'], values.category ?? DEFAULT_CATEGORY);
   // Mutate the parsed document so comments, quoting, ordering, and untouched source lines survive.
   return `---\n${document.toString()}---${match[2] || '\n'}${source.slice(match[0].length)}`;
 }

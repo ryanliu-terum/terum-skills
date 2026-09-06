@@ -2,10 +2,36 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { canonicalDigest, findSkill, injectManagedFields } from '../skills.js';
+import { canonicalDigest, declaredCategory, findSkill, injectManagedFields } from '../skills.js';
+import { parseSkillFrontmatter } from '../schema.js';
 import { temporaryDirectory } from './fixtures.js';
 
 describe('skills (§5.3 canonical frontmatter)', () => {
+  it('generates the whole metadata block for an off-the-shelf SKILL.md — id, author, license, and misc as the category — and never overwrites a declared category', () => {
+    const values = { license: 'UNLICENSED', id: '11111111-1111-4111-8111-111111111111', author: 'Me <me@example.com>' };
+    // No `metadata:` block at all (what every stock Claude skill looks like), a bare `metadata:` (YAML
+    // reads it as null), a scalar where the map should be, and a category key with no value.
+    for (const [label, source] of [
+      ['no block', '---\nname: sample\ndescription: stock skill\n---\nbody\n'],
+      ['bare key', '---\nname: sample\ndescription: stock skill\nmetadata:\n---\nbody\n'],
+      ['scalar', '---\nname: sample\ndescription: stock skill\nmetadata: nope\n---\nbody\n'],
+      ['empty category', '---\nname: sample\ndescription: stock skill\nmetadata:\n  terum-category:\n---\nbody\n'],
+    ] as const) {
+      const injected = injectManagedFields(source, values);
+      const parsed = parseSkillFrontmatter(injected);
+      expect(parsed.ok, label).toBe(true);
+      if (parsed.ok) expect(parsed.data.metadata, label).toMatchObject({ id: values.id, author: values.author, 'terum-category': 'misc' });
+      expect(injected, label).toMatch(/\n---\nbody\n$/);
+      expect(declaredCategory(source), label).toBeUndefined();
+      expect(declaredCategory(injected), label).toBe('misc');
+    }
+    const declared = '---\nname: sample\ndescription: stock skill\nmetadata:\n  terum-category: testing\n---\n';
+    expect(declaredCategory(declared)).toBe('testing');
+    expect(injectManagedFields(declared, values)).toContain('terum-category: testing');
+    expect(injectManagedFields(declared, values)).not.toContain('misc');
+    expect(injectManagedFields(declared, { ...values, category: 'docs' })).toContain('terum-category: testing');
+  });
+
   it('ignores managed fields, retains YAML presentation, and rejects ambiguous ID prefixes', async () => {
     const root = await temporaryDirectory();
     const skill = join(root, 'skill');

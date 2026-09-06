@@ -24,6 +24,31 @@ describe('share (§5.3)', () => {
     expect(Object.keys((await store.read()).shared)).toHaveLength(1);
   });
 
+  it('shares an off-the-shelf SKILL.md with no metadata block: the tool generates all four fields, shows the category default before the y/N, and the repository copy parses', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const source = join(fixture.root, 'stock'); await mkdir(source);
+    await writeFile(join(source, 'SKILL.md'), '---\nname: stock\ndescription: a skill exactly as it ships\n---\nUse it.\n');
+    const io = new ScriptedPrompter([], [true]);
+    const result = await run({ path: source, team: 'team', config: store }, io);
+    expect(result).toMatchObject({ ok: true, value: { name: 'stock' } });
+    const written = await readFile(join(source, 'SKILL.md'), 'utf8');
+    expect(written).toContain('terum-category: misc');
+    expect(written).toMatch(/\n---\nUse it\.\n$/);
+    expect(io.lines.join('\n')).toContain('Will add:\nlicense: UNLICENSED\nmetadata.id: ');
+    expect(io.lines.join('\n')).toContain('metadata.terum-category: misc (no category was set; edit SKILL.md any time)');
+    expect(await git(['show', 'main:skills/stock/SKILL.md'], fixture.bare)).toBe(written);
+    // A file that declares its category is shown three lines and keeps the category it declared.
+    const declared = join(fixture.root, 'declared'); await mkdir(declared);
+    await writeFile(join(declared, 'SKILL.md'), '---\nname: declared\ndescription: x\nmetadata:\n  terum-category: testing\n---\n');
+    const declaredIo = new ScriptedPrompter([], [true]);
+    expect((await run({ path: declared, team: 'team', config: store }, declaredIo)).ok).toBe(true);
+    expect(declaredIo.lines.join('\n')).not.toContain('terum-category');
+    expect(await readFile(join(declared, 'SKILL.md'), 'utf8')).toContain('terum-category: testing');
+  });
+
   it('rejects a malformed allowed-tools value at share time, names the line, and writes nothing', async () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
