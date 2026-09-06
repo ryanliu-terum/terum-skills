@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
-import { assertSafePath, cloneTeam, openTeamRepo, PushRefused, SafeWriteExhausted, treeText } from '../teamRepo.js';
+import { assertSafePath, CloneBusy, cloneTeam, openTeamRepo, PushRefused, refreshClone, SafeWriteExhausted, treeText } from '../teamRepo.js';
 import { createConfigStore } from '../config.js';
 import { run as share } from '../../commands/share.js';
 import { ScriptedPrompter } from './fixtures.js';
@@ -346,14 +346,37 @@ describe('safeWrite (§6.0)', () => {
     expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/seed.json', tree.before('people/seed.json')!), { action: 'join', handle: 'seed' })).toEqual({ changed: false, pushedTo: 'main' });
   });
 
+  it('refreshClone re-checks its lock before the reset: a fetch that outlives the stale window does not rewind the writer that took the lock', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    await writeFile(join(clone, 'stray.txt'), 'local'); await git(['add', '--all'], clone); await git(['commit', '-q', '-m', 'local-only'], clone);
+    const head = (await git(['rev-parse', 'HEAD'], clone)).trim();
+    const lock = join(fixture.root, '.clone.safewrite.lock');
+    // The lock is stolen during the fetch. proper-lockfile refreshes on a tick clamped to
+    // max(min(update, stale/2), 1000) = 1000 ms here and records the loss only in that tick's async
+    // stat callback, so the wait must clear one full tick plus slack for a busy event loop.
+    const slow = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      const result = await next();
+      if (command === 'git' && args[0] === 'fetch') { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 3_000)); }
+      return result;
+    });
+    const lost = refreshClone(slow, clone, { lockStale: 2_000 });
+    await expect(lost).rejects.toThrow(/Lost the safeWrite lock/);
+    await expect(lost).rejects.toBeInstanceOf(CloneBusy);
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
+    await refreshClone(systemRunner, clone);
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe(head);
+  });
+
   it('a lock lost to another process aborts before the push and does NOT reset the clone, which that process now owns', async () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     const lock = join(fixture.root, '.clone.safewrite.lock');
-    // Steal the lock while our commit is being made; proper-lockfile notices at its next check (half the stale window).
+    // Steal the lock while our commit is being made; proper-lockfile notices on its next 1000 ms tick
+    // (its floor), in that tick's async stat callback, so the wait clears a full tick plus slack.
     const stolen = wrapRunner(systemRunner, async (command, args, _options, next) => {
       const result = await next();
-      if (command === 'git' && args[0] === 'commit') { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 1_500)); }
+      if (command === 'git' && args[0] === 'commit') { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 3_000)); }
       return result;
     });
     const before = await originSha(fixture.bare);

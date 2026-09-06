@@ -18,7 +18,7 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
     const name = parseOrExplain(teamNameSchema, args.name, 'team name');
     const store = args.config ?? createConfigStore();
     const config = await store.read();
-    const binding = config.teams[name];
+    const binding = Object.hasOwn(config.teams, name) ? config.teams[name] : undefined;
     if (!binding) throw new Error(`Team ${name} is not configured.`);
 
     const matching = Object.entries(config.placements).filter(([, entry]) => entry.team === name);

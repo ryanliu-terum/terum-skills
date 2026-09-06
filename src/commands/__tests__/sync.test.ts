@@ -1,17 +1,18 @@
 import { expectTypeOf, describe, expect, it } from 'vitest';
-import { access, cp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { run } from '../sync.js';
 import { run as install } from '../install.js';
 import { NonInteractivePrompter } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, holdCloneLock, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { lockTarget } from '../../lib/placer.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { systemRunner } from '../../lib/runner.js';
-import lockfile from 'proper-lockfile';
 import { cloneLockPath } from '../../lib/teamRepo.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
+const SECOND_ID = '22222222-2222-4222-8222-222222222222';
 const skill = (description: string) => `---\nname: sample\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${description}\n`;
 const toolSkill = (description: string, tools: string[]) => `---\nname: sample\ndescription: ${description}\nlicense: UNLICENSED\nallowed-tools:\n${tools.map((tool) => `  - ${tool}`).join('\n')}\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${description}\n`;
 
@@ -68,17 +69,162 @@ describe('sync --hook (§3, §6)', () => {
     void fixture;
   });
 
-  it('refuses to refresh a clone another operation is writing to, and leaves that clone untouched', async () => {
-    const { fixture, store, clone } = await configuredSkill();
+  it('skips a team whose clone another operation is writing to — not refreshed, not read, not stamped, no pass touches its placements, shares, endorsements or orphans — and still syncs every other team', async () => {
+    const { fixture, store, clone } = await configuredSkill(); const home = join(fixture.root, 'home');
+    // Give every busy-skip guard something to skip: a drifted placement, a shared source, an endorsed
+    // candidate, and an orphaned placement — each of which would prompt, move or write if it ran.
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [SECOND_ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const placedPath = join(home, '.claude', 'skills', 'sample');
+    await writeFile(join(placedPath, 'SKILL.md'), skill('hand edit'));
+    const orphan = join(home, '.claude', 'skills', 'second');
+    await cp(join(clone, 'skills', 'second'), orphan, { recursive: true });
+    await store.update((config) => {
+      config.placements[orphan] = { id: SECOND_ID, team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:orphan' };
+      config.shared[ID] = { source: join(fixture.root, 'gone'), team: 'team', baseline: 'sha256:0' };
+    });
+    const other = await bareTeam();
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team').replace('name: sample', 'name: elsewhere'));
+    const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team moved').replace('name: sample', 'name: elsewhere'));
     const head = (await git(['rev-parse', 'HEAD'], clone)).trim();
-    const release = await lockfile.lock(clone, { lockfilePath: cloneLockPath(clone), realpath: false, stale: 60_000 });
+    const otherHead = (await git(['rev-parse', 'HEAD'], otherClone)).trim();
+    const release = await holdCloneLock(clone);
     try {
-      expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringMatching(/write lock/i) });
+      // Interactive with nothing scripted: any pass that reached a prompt for the busy team would close the channel and fail the run.
+      const io = new ScriptedPrompter([], [], true);
+      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [], notices: [expect.stringMatching(/write lock on team/)] } });
+      expect(io.asked).toEqual([]);
+      expect(await readFile(join(placedPath, 'SKILL.md'), 'utf8')).toContain('description: hand edit');
+      await expect(access(join(store.root, 'quarantine'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(join(orphan, 'SKILL.md'), 'utf8')).toContain('description: second');
       expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
+      expect((await git(['rev-parse', 'HEAD'], otherClone)).trim()).not.toBe(otherHead);
+      await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(join(store.root, 'run', 'other.stamp'))).resolves.toBeUndefined();
     } finally { await release(); }
     expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
     expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe(head);
+    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
+  });
+
+  it('a clone lock lost mid-fetch costs exactly that team as well: the sync continues and the other team lands', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    const other = await bareTeam();
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team').replace('name: sample', 'name: elsewhere'));
+    const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team moved').replace('name: sample', 'name: elsewhere'));
+    const head = (await git(['rev-parse', 'HEAD'], clone)).trim();
+    const otherHead = (await git(['rev-parse', 'HEAD'], otherClone)).trim();
+    const lock = cloneLockPath(clone);
+    // Steal team's lock during its fetch; proper-lockfile notices on its next 1000 ms tick (its floor), so the wait clears a full tick plus slack.
+    const stealing = wrapRunner(systemRunner, async (command, args, options, next) => {
+      const result = await next();
+      if (command === 'git' && args[0] === 'fetch' && options?.cwd === clone) { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 3_000)); }
+      return result;
+    });
+    expect(await run({ config: store, runner: stealing, lockStale: 2_000 }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: [], notices: [expect.stringMatching(/Lost the safeWrite lock/)] } });
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
+    expect((await git(['rev-parse', 'HEAD'], otherClone)).trim()).not.toBe(otherHead);
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(join(store.root, 'run', 'other.stamp'))).resolves.toBeUndefined();
+  });
+
+  it('an up-to-date placement never contends: a held target lock over it is neither a block nor a review count', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const release = await lockTarget(join(home, '.claude', 'skills'), 'sample');
+    try {
+      const io = new ScriptedPrompter();
+      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+      expect(io.lines.filter((line) => line.startsWith('Blocked'))).toEqual([]);
+    } finally { await release(); }
+  });
+
+  it('a plain file at the ledger path is still the foreign collision the lock reports, not a read that fails', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(home, '.claude', 'skills', 'sample');
+    await rm(path, { recursive: true, force: true }); await writeFile(path, 'user-owned, not a placement');
+    const io = new ScriptedPrompter();
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+    expect(io.lines.filter((line) => line === `Blocked ${path}: ${path} already exists and is not a placement this tool owns; leaving both untouched.`)).toHaveLength(1);
+    expect(await readFile(path, 'utf8')).toBe('user-owned, not a placement');
+  });
+
+  it('a symlink at the ledger path is refused, never followed, even when it points at an identical tree', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(home, '.claude', 'skills', 'sample'); const mirror = join(home, 'mirror');
+    await cp(path, mirror, { recursive: true }); await rm(path, { recursive: true, force: true }); await symlink(mirror, path);
+    const io = new ScriptedPrompter();
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+    expect(io.lines.filter((line) => line === `Blocked ${path}: ${path} already exists and is not a placement this tool owns; leaving both untouched.`)).toHaveLength(1);
+    expect(await readFile(join(mirror, 'SKILL.md'), 'utf8')).toContain('description: old');
+  });
+
+  it('reports a placement whose target lock another process holds as blocked and leaves it untouched', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(home, '.claude', 'skills', 'sample');
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    const release = await lockTarget(join(home, '.claude', 'skills'), 'sample');
+    try {
+      const io = new ScriptedPrompter();
+      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+      expect(io.lines.filter((line) => line.startsWith(`Blocked ${path}: `) && line.includes('busy'))).toHaveLength(1);
+      expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: old');
+    } finally { await release(); }
+    expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { placed: 1 } });
+    expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: new');
+  });
+
+  it('defers one endorsed candidate that cannot be placed, still installs the rest, and still stamps', async () => {
+    const { fixture, store } = await configuredSkill();
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID, SECOND_ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    // sync's endorsed batch places under the store's own home; a stranger's folder sits at the first candidate's target.
+    const stranger = join(store.root, '.claude', 'skills', 'sample');
+    await mkdir(stranger, { recursive: true }); await writeFile(join(stranger, 'SKILL.md'), 'user-owned, not a placement');
+    const io = new ScriptedPrompter([], [true], true);
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 1, deferred: ['sample'] } });
+    expect(io.lines.filter((line) => line.startsWith('Deferred endorsed sample: '))).toHaveLength(1);
+    expect(await readFile(join(store.root, '.claude', 'skills', 'second', 'SKILL.md'), 'utf8')).toContain('description: second');
+    expect(await readFile(join(stranger, 'SKILL.md'), 'utf8')).toBe('user-owned, not a placement');
+    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
+  });
+
+  it('a closed prompt channel is one failure, never a damaged placement per remaining entry', async () => {
+    const setup = await configuredToolSkill();
+    await pushFromSeed(setup.fixture.seed, 'skills/sample/SKILL.md', toolSkill('widened', ['Bash(*)']));
+    // Interactive, but nothing scripted: the channel closes at the first consent question.
+    const io = new ScriptedPrompter([], [], true);
+    expect(await run({ config: setup.store }, io)).toMatchObject({ ok: false, error: expect.stringMatching(/Input ended before/) });
+    expect(io.lines.filter((line) => line.startsWith('Blocked '))).toEqual([]);
+    expect(await readFile(join(setup.home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('reports one unreadable placement as blocked and still refreshes the others and writes the stamp', async () => {
+    const { fixture, store } = await configuredSkill();
+    const home = join(fixture.root, 'home');
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await install({ ref: 'second', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const broken = join(home, '.claude', 'skills', 'sample'); const healthy = join(home, '.claude', 'skills', 'second');
+    await chmod(join(broken, 'SKILL.md'), 0o000);
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second updated').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    await rm(join(store.root, 'run'), { recursive: true, force: true });
+    const io = new ScriptedPrompter();
+    try { expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 1, deferred: ['sample'] } }); }
+    finally { await chmod(join(broken, 'SKILL.md'), 0o644); }
+    expect(io.lines.filter((line) => line.startsWith(`Blocked ${broken}: `))).toHaveLength(1);
+    expect(await readFile(join(healthy, 'SKILL.md'), 'utf8')).toContain('description: second updated');
+    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
   });
 
   it('heals a clone whose local main drifted instead of failing to fast-forward', async () => {
@@ -181,6 +327,29 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(join(oldPath, 'SKILL.md'), 'utf8')).toContain('description: old');
     expect(Object.keys((await store.read()).placements)).toEqual([oldPath]);
     expect(io.lines.filter((line) => line.startsWith(`Blocked ${oldPath}: ${stranger} already exists`))).toHaveLength(1);
+  });
+
+  it('refuses a rename onto a stranger before anything moves: a hand-edited old placement stays put, unquarantined, and the ledger still keys it', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const oldPath = join(home, '.claude', 'skills', 'sample'); const stranger = join(home, '.claude', 'skills', 'renamed');
+    await mkdir(stranger, { recursive: true }); await writeFile(join(stranger, 'SKILL.md'), 'user-owned, not a placement');
+    await writeFile(join(oldPath, 'SKILL.md'), skill('hand edit'));
+    await git(['fetch', '-q', 'origin'], fixture.seed); await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
+    await cp(join(fixture.seed, 'skills', 'sample'), join(fixture.seed, 'skills', 'renamed'), { recursive: true });
+    await rm(join(fixture.seed, 'skills', 'sample'), { recursive: true });
+    await writeFile(join(fixture.seed, 'skills', 'renamed', 'SKILL.md'), skill('renamed').replace('name: sample', 'name: renamed'));
+    await git(['add', '--all'], fixture.seed); await git(['commit', '-q', '-m', 'rename sample'], fixture.seed); await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
+    // Twice: the second run must find the same state and report the same block, not a wedged ledger.
+    for (const attempt of [1, 2]) {
+      const io = new ScriptedPrompter();
+      expect(await run({ config: store }, io), `attempt ${attempt}`).toMatchObject({ ok: true, value: { placed: 0 } });
+      expect(io.lines.filter((line) => line.startsWith(`Blocked ${oldPath}: ${stranger} already exists`)), `attempt ${attempt}`).toHaveLength(1);
+      expect(await readFile(join(oldPath, 'SKILL.md'), 'utf8')).toContain('description: hand edit');
+      expect(await readFile(join(stranger, 'SKILL.md'), 'utf8')).toBe('user-owned, not a placement');
+      await expect(access(join(store.root, 'quarantine'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(Object.keys((await store.read()).placements)).toEqual([oldPath]);
+    }
   });
 
   it('defers consent for a noninteractive-shaped interactive call without emitting hook stdout', async () => {

@@ -1,12 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { ConfigStore, createConfigStore } from '../lib/config.js';
+import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { inspect, lockTarget, moveToQuarantine, place, quarantineDrift, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { Config, Team, parseJson, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
+import { Config, Team, describeRaw, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { materializeVersion, resolveVersion } from '../lib/version.js';
@@ -34,7 +34,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
     const config = await store.read();
     const operation = parseOperation(args);
     if (operation.kind === 'member') {
-      const team = await selectTeam(config, args.team);
+      const [team] = selectTeam(config.teams, args.team);
       const person = await readPerson(store.teamClone(team), operation.member);
       const results: InstalledResult[] = [];
       for (const item of person.installed) {
@@ -44,9 +44,9 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       return success(results);
     }
     if (operation.kind === 'project') {
-      const team = await selectTeam(config, args.team);
+      const [team] = selectTeam(config.teams, args.team);
       const teamJson = await readTeam(store.teamClone(team));
-      const project = teamJson.projects[operation.project];
+      const project = Object.hasOwn(teamJson.projects, operation.project) ? teamJson.projects[operation.project] : undefined;
       if (!project) throw new Error(`Unknown project ${operation.project}.`);
       const results: InstalledResult[] = [];
       for (const id of project.skills) results.push(await installOne({ team, id, project: operation.project, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
@@ -102,7 +102,7 @@ export async function installOne(input: { team: string; reference?: string; id?:
       const drift = await quarantineDrift(destination, entry.fingerprint, join(input.store.root, 'quarantine'));
       if (drift.quarantined) io.print(`Local changes at ${destination} moved to ${drift.quarantined}.`);
     }
-    placed = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot: repoRoot, runner: input.runner });
+    placed = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot: repoRoot, runner: input.runner, quarantineRoot: join(input.store.root, 'quarantine') });
     await input.store.update((fresh) => {
       fresh.placements[placed.path] = { id: skill.id, team: input.team, version: latest, scope, placed_at: new Date().toISOString().slice(0, 10), fingerprint: placed.snapshot.fingerprint };
     });
@@ -125,7 +125,7 @@ export async function installOne(input: { team: string; reference?: string; id?:
 
 async function ensureConsent(store: ConfigStore, skill: SkillRecord, io: Prompter): Promise<void> {
   if (!skill.grants.ok) {
-    io.print(`allowed-tools for ${skill.name} could not be parsed: ${JSON.stringify(skill.grants.raw)}`);
+    io.print(`allowed-tools for ${skill.name} could not be parsed: ${describeRaw(skill.grants.raw)}`);
     if (!(await io.confirm(`Install ${skill.name} despite malformed allowed-tools?`))) throw new Error(`Consent was declined for malformed allowed-tools on ${skill.name}.`);
     return;
   }
@@ -152,13 +152,18 @@ async function resolveSkill(clone: string, team: string, ref: string): Promise<S
 
 type ParsedOperation = { kind: 'skill'; ref: string } | { kind: 'member'; member: string } | { kind: 'project'; project: string };
 function parseOperation(args: InstallArgs): ParsedOperation {
+  // A missing selector is a usage error here, for every caller of run() — never an empty handle
+  // that reaches the filesystem as people/.json — and a present one is held to the handle rule
+  // before it can become a path segment (ls and team remove do the same).
   if (args.kind === 'member' || args.member) {
-    const member = args.member ?? args.ref ?? '';
+    const member = args.member ?? args.ref;
+    if (!member) throw new Error('Provide a member handle: `install member <handle>`.');
     if (member.includes('@')) throw new Error('Version pins are supported for single-skill installs only.');
-    return { kind: 'member', member };
+    return { kind: 'member', member: parseOrExplain(handleSchema, member, 'member handle') };
   }
   if (args.kind === 'project' || args.project) {
-    const project = args.project ?? args.ref ?? '';
+    const project = args.project ?? args.ref;
+    if (!project) throw new Error('Provide a project name: `install project <name>`.');
     if (project.includes('@')) throw new Error('Version pins are supported for single-skill installs only.');
     return { kind: 'project', project };
   }
@@ -181,13 +186,16 @@ export async function teamForReference(config: Config, explicit: string | undefi
     if (!found) throw new Error(`This machine has not joined ${remote}; run \`team join ${remote.replace(/^github\.com\//, '')}\` first.`);
     return found[0];
   }
-  if (explicit) { if (!config.teams[explicit]) throw new Error(`Team ${explicit} is not configured.`); return explicit; }
+  // Only the genuinely ambiguous bare ref is answered here, because only a ref-taking verb can name
+  // the qualified refs that would settle it; the zero-team, one-team and unknown `--team` answers
+  // come from the one resolver every other verb uses, so they cannot drift again.
   const teams = Object.keys(config.teams);
-  if (teams.length === 1) return teams[0]!;
-  const qualified = name ? ` Matching refs: ${teams.map((team) => `${team}/${name}`).join(', ')}.` : '';
-  throw new Error(`A bare skill ref is ambiguous across configured teams; use <team>/<skill> or --team.${qualified}`);
+  if (!explicit && teams.length > 1) {
+    const qualified = name ? ` Matching refs: ${teams.map((team) => `${team}/${name}`).join(', ')}.` : '';
+    throw new Error(`A bare skill ref is ambiguous across configured teams; use <team>/<skill> or --team.${qualified}`);
+  }
+  return selectTeam(config.teams, explicit)[0];
 }
-async function selectTeam(config: Config, explicit?: string): Promise<string> { return teamForReference(config, explicit, undefined); }
 async function matchingProject(team: Team, runner: Runner, cwd?: string): Promise<string | undefined> {
   const root = await currentRepoRoot(runner, cwd).catch(() => undefined);
   if (!root) return undefined;
@@ -201,8 +209,9 @@ async function currentRepoRoot(runner: Runner, cwd?: string): Promise<string> {
   return answer.stdout.trim();
 }
 function selectScope(team: Team, id: string, matching: string | undefined, explicit: string | undefined): { kind: 'global' } | { kind: 'project'; project: string } {
-  const project = explicit ?? (matching && team.projects[matching]?.skills.includes(id) ? matching : undefined);
-  if (project && team.projects[project]?.skills.includes(id)) return { kind: 'project', project };
+  const endorses = (name: string): boolean => Object.hasOwn(team.projects, name) && team.projects[name]!.skills.includes(id);
+  const project = explicit ?? (matching && endorses(matching) ? matching : undefined);
+  if (project && endorses(project)) return { kind: 'project', project };
   return { kind: 'global' };
 }
 function samePending(a: { op: string; id: string; team: string; scope: unknown }, b: { op: string; id: string; team: string; scope: unknown }): boolean { return a.op === b.op && a.id === b.id && a.team === b.team && sameScope(a.scope, b.scope); }

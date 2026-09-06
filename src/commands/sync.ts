@@ -1,21 +1,25 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { inspect, lockTarget, place, quarantineDrift, remove } from '../lib/placer.js';
-import { NonInteractivePrompter, Prompter } from '../lib/prompt.js';
+import { inspect, lockTarget, place, quarantineDrift, remove, snapshotIfPresent } from '../lib/placer.js';
+import { NonInteractivePrompter, Prompter, PromptClosedError } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { allowedTools, parseJson, personSchema, sameScope } from '../lib/schema.js';
 import { endorsedCandidates, findSkill, readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
-import { openTeamRepo, refreshClone, treeText } from '../lib/teamRepo.js';
+import { CloneBusy, openTeamRepo, refreshClone, treeText } from '../lib/teamRepo.js';
 import { materializeVersion } from '../lib/version.js';
 import { reconcileShared } from './share.js';
 import { installOne, skillAtSource } from './install.js';
 import { uninstallOne } from './uninstall.js';
 
-export interface SyncArgs { hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string; }
+export interface SyncArgs {
+  hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string;
+  /** Test knob: the clone lock's stale window for refreshClone. */
+  lockStale?: number;
+}
 export interface SyncResult { placed: number; deferred: string[]; notices: string[]; changed: boolean; hook: boolean; }
 
 /** Overloads keep the hook caller compiler-restricted to print-only I/O (§3). */
@@ -47,9 +51,20 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       return success({ placed: 0, deferred: [], notices: [], changed: true, hook: false });
     }
     const config = await store.read();
+    // A team whose clone another process is writing costs exactly that team, this run: it is
+    // reported and left alone — not refreshed, not read, not stamped fresh — and every other team
+    // still syncs, so the SessionStart hook still exits 0.
+    const busy = new Set<string>();
     for (const team of Object.keys(config.teams)) {
       const clone = store.teamClone(team);
-      await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {} });
+      try {
+        await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {}, lockStale: args.lockStale });
+      } catch (error) {
+        if (!(error instanceof CloneBusy)) throw error;
+        // Reported through `notices` alone, which the hook already writes to stderr: `deferred` is
+        // rendered as a count of SKILLS needing review (execute.ts), so a team never belongs on it.
+        notice(error.message); busy.add(team); continue;
+      }
       await skillRecords(clone, team, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
       // Pending is intent, never inferred from the filesystem. A replay uses the same command
       // primitive; an unapproved hook replay is deferred rather than silently completed.
@@ -68,6 +83,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
           await installOne({ team, id: pending.id, scope: pending.scope, version, store, runner, cwd: args.cwd }, childIo);
           placed++; changed = true;
         } catch (error) {
+          if (error instanceof PromptClosedError) throw error; // the channel is gone, not this entry
           const message = error instanceof Error ? error.message : String(error);
           deferred.push(pending.scope.kind === 'project' && message.includes('no matching project context') ? `${pending.id.slice(0, 8)} needs a checkout for project ${pending.scope.project}` : pending.id.slice(0, 8));
           notice(`Deferred pending ${pending.op} for ${pending.id.slice(0, 8)}: ${message}`);
@@ -75,76 +91,102 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       }
     }
     // Reconciliation never prompts, but it reports — through the same notice channel.
-    await reconcileShared(store, runner, childIo);
+    await reconcileShared(store, runner, childIo, busy);
     // Existing ledger paths drive every later decision. A folder merely present on disk is never
     // adopted, quarantined, or deleted without a ledger entry.
     const currentConfig = await store.read();
     for (const [path, entry] of Object.entries(currentConfig.placements)) {
-      const clone = store.teamClone(entry.team);
-      const projectRoot = entry.scope.kind === 'project' ? await matchingProjectRoot(clone, entry.scope.project, runner, args.cwd) : undefined;
-      // Project placement is worktree-local. An unrelated session never even inspects another
-      // checkout's placement, so it cannot quarantine or overwrite it.
-      if (entry.scope.kind === 'project' && !projectRoot) continue;
-      const binding = (await store.read()).teams[entry.team];
-      const person = binding?.handle ? await actorPerson(store, entry.team, binding.handle) : undefined;
-      if (person && !person.installed.some((item) => item.id === entry.id && sameScope(item.scope, entry.scope)) && !currentConfig.pending.some((pending) => pending.id === entry.id && pending.team === entry.team && sameScope(pending.scope, entry.scope))) continue;
-      if (person?.declined.includes(entry.id)) continue;
-      const skill = await findSkill(clone, entry.team, entry.id);
-      if (!skill) { notice(`Blocked ${path}: its skill is no longer in the repository.`); continue; }
-      // §6 blocked, second sub-case: the ledger pins a tree the clone does not have (placed from a
-      // newer or rewritten history). The tool must not resolve that alone: report, touch nothing.
-      if (entry.version && (await runner.run('git', ['cat-file', '-e', `${entry.version}^{tree}`], { cwd: clone })).code !== 0) {
-        notice(`Blocked ${path}: pinned version ${entry.version.slice(0, 8)} is not in the team repository (newer than this clone, or rewritten); leaving it untouched.`);
-        continue;
-      }
-      const source = entry.version ? await materializeVersion(store, entry.team, clone, skill.name, entry.version, runner) : skill.directory;
-      const grants = (await skillAtSource(source, skill)).grants;
-      if (!approved((await store.read()), skill.id, grants)) {
-        if (!grants.ok) { notice(`Blocked ${skill.name}: allowed-tools is malformed.`); continue; }
-        if (!interactive) { deferred.push(skill.name); continue; }
-        (io as Prompter).print(`allowed-tools changed for ${skill.name}:\n${grants.normalized}`);
-        if (!(await (io as Prompter).confirm(`Approve updated tools for ${skill.name}?`))) { deferred.push(skill.name); continue; }
-        await store.update((fresh) => { fresh.approvals[skill.id] = { grants: grants.hash, approved_at: new Date().toISOString().slice(0, 10) }; });
-      }
-      // A placed copy that no longer matches its ledger fingerprint is moved to quarantine, never
-      // deleted — the same helper install uses when it re-places over an owned target.
-      const drift = await quarantineDrift(path, entry.fingerprint, join(store.root, 'quarantine'));
-      const current = drift.current;
-      if (drift.quarantined) { notice(`Local changes at ${path} moved to ${drift.quarantined}.`); changed = true; }
-      const repoSnapshot = await snapshotSkillDirectory(source);
-      if (current?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
-      // The ledger is provenance for the exact placement, including a particular project checkout.
-      // Re-resolving a global path would use this process's HOME and can update the wrong machine.
-      const root = dirname(path);
-      const release = await lockTarget(root, skill.name);
+      // One damaged placement (an unreadable folder, a busy target lock, a failed copy) is reported
+      // and skipped, and the rest of the run proceeds — the shape the pending loop above already has.
       try {
-        // After an upstream rename the destination is not the ledger key: `replace` is authorized
-        // by what sits AT the destination (a ledger-owned placement, or nothing), never by the old
-        // path — D16, the check install.ts runs. A stranger's folder at the new name is reported.
-        const destination = join(root, skill.name);
-        const collision = await inspect(destination, (await store.read()).placements[destination]?.id === skill.id);
-        if (collision.kind === 'foreign') { notice(`Blocked ${path}: ${destination} already exists and is not a placement this tool owns; leaving both untouched.`); continue; }
-        const result = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot, runner });
-        const renamed = basename(path) !== skill.name;
-        await store.update((fresh) => {
-          const placement = fresh.placements[path];
-          if (!placement) return;
-          if (renamed) { delete fresh.placements[path]; fresh.placements[result.path] = { ...placement, fingerprint: result.snapshot.fingerprint }; }
-          else placement.fingerprint = result.snapshot.fingerprint;
-        });
-        if (renamed) {
-          await remove(root, path, entry.fingerprint, join(store.root, 'quarantine'));
-          notice(`Renamed placed skill ${basename(path)} to ${skill.name}.`);
+        if (busy.has(entry.team)) continue;
+        const clone = store.teamClone(entry.team);
+        const projectRoot = entry.scope.kind === 'project' ? await matchingProjectRoot(clone, entry.scope.project, runner, args.cwd) : undefined;
+        // Project placement is worktree-local. An unrelated session never even inspects another
+        // checkout's placement, so it cannot quarantine or overwrite it.
+        if (entry.scope.kind === 'project' && !projectRoot) continue;
+        const binding = (await store.read()).teams[entry.team];
+        const person = binding?.handle ? await actorPerson(store, entry.team, binding.handle) : undefined;
+        if (person && !person.installed.some((item) => item.id === entry.id && sameScope(item.scope, entry.scope)) && !currentConfig.pending.some((pending) => pending.id === entry.id && pending.team === entry.team && sameScope(pending.scope, entry.scope))) continue;
+        if (person?.declined.includes(entry.id)) continue;
+        const skill = await findSkill(clone, entry.team, entry.id);
+        if (!skill) { notice(`Blocked ${path}: its skill is no longer in the repository.`); continue; }
+        // §6 blocked, second sub-case: the ledger pins a tree the clone does not have (placed from a
+        // newer or rewritten history). The tool must not resolve that alone: report, touch nothing.
+        if (entry.version && (await runner.run('git', ['cat-file', '-e', `${entry.version}^{tree}`], { cwd: clone })).code !== 0) {
+          notice(`Blocked ${path}: pinned version ${entry.version.slice(0, 8)} is not in the team repository (newer than this clone, or rewritten); leaving it untouched.`);
+          continue;
         }
-        for (const line of result.notices) notice(line);
-      } finally { await release(); }
-      placed++; changed = true;
+        const source = entry.version ? await materializeVersion(store, entry.team, clone, skill.name, entry.version, runner) : skill.directory;
+        const grants = (await skillAtSource(source, skill)).grants;
+        if (!approved((await store.read()), skill.id, grants)) {
+          if (!grants.ok) { notice(`Blocked ${skill.name}: allowed-tools is malformed.`); continue; }
+          if (!interactive) { deferred.push(skill.name); continue; }
+          (io as Prompter).print(`allowed-tools changed for ${skill.name}:\n${grants.normalized}`);
+          if (!(await (io as Prompter).confirm(`Approve updated tools for ${skill.name}?`))) { deferred.push(skill.name); continue; }
+          await store.update((fresh) => { fresh.approvals[skill.id] = { grants: grants.hash, approved_at: new Date().toISOString().slice(0, 10) }; });
+        }
+        // The ledger is provenance for the exact placement, including a particular project checkout.
+        // Re-resolving a global path would use this process's HOME and can update the wrong machine.
+        const root = dirname(path);
+        // The read-only "nothing to do" decision comes first, outside the lock: an up-to-date placement —
+        // the steady state of every session-start sync — never contends for a target another run holds,
+        // and never reports that run as a block. The full decision is re-taken under the lock below.
+        // Two rules for that unlocked probe. Its shape is judged by the classifier the locked pass uses
+        // (`true` asks about shape alone; ownership is read, and acted on, under the lock): a file or a
+        // symlink at the ledger path stays the foreign collision reported below — the repo's rule for
+        // symlinks everywhere is refuse, never follow — never a "nothing to do". And it is advisory: it
+        // races a concurrent place()'s rename pair, so snapshotIfPresent's "an ENOENT mid-scan is an
+        // error, not gone" rule does not hold here; any read failure means "undecided" and falls through
+        // to the lock, where quarantineDrift re-takes the decision under that rule and a genuine failure
+        // still surfaces as Blocked.
+        const repoSnapshot = await snapshotSkillDirectory(source);
+        const placedNow = await inspect(path, true).then((shape) => (shape.kind === 'ours' ? snapshotIfPresent(path) : undefined)).catch(() => undefined);
+        if (placedNow?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
+        // The target lock is taken before anything about the destination is decided and held across
+        // the collision check, the quarantine move and the placement — install's shape — so the
+        // ownership reading that authorizes a destructive `replace` cannot go stale under it.
+        const release = await lockTarget(root, skill.name);
+        try {
+          // After an upstream rename the destination is not the ledger key: `replace` is authorized by
+          // what sits AT the destination (a ledger-owned placement, or nothing), never by the old path —
+          // D16, the check install.ts runs. A stranger's folder at the new name is reported, and it is
+          // decided BEFORE anything moves: a blocked placement is touched by nothing, quarantine included.
+          const destination = join(root, skill.name);
+          const collision = await inspect(destination, (await store.read()).placements[destination]?.id === skill.id);
+          if (collision.kind === 'foreign') { notice(`Blocked ${path}: ${destination} already exists and is not a placement this tool owns; leaving both untouched.`); continue; }
+          // A placed copy that no longer matches its ledger fingerprint is moved to quarantine, never
+          // deleted — the same helper install uses when it re-places over an owned target.
+          const drift = await quarantineDrift(path, entry.fingerprint, join(store.root, 'quarantine'));
+          const current = drift.current;
+          if (drift.quarantined) { notice(`Local changes at ${path} moved to ${drift.quarantined}.`); changed = true; }
+          if (current?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
+          const result = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot, runner, quarantineRoot: join(store.root, 'quarantine') });
+          const renamed = basename(path) !== skill.name;
+          await store.update((fresh) => {
+            const placement = fresh.placements[path];
+            if (!placement) return;
+            if (renamed) { delete fresh.placements[path]; fresh.placements[result.path] = { ...placement, fingerprint: result.snapshot.fingerprint }; }
+            else placement.fingerprint = result.snapshot.fingerprint;
+          });
+          if (renamed) {
+            await remove(root, path, entry.fingerprint, join(store.root, 'quarantine'));
+            notice(`Renamed placed skill ${basename(path)} to ${skill.name}.`);
+          }
+          for (const line of result.notices) notice(line);
+        } finally { await release(); }
+        placed++; changed = true;
+      } catch (error) {
+        if (error instanceof PromptClosedError) throw error; // the channel is gone, not this placement
+        notice(`Blocked ${path}: ${error instanceof Error ? error.message : String(error)}`);
+        deferred.push(basename(path));
+      }
     }
     {
       // Newly endorsed global skills are an opt-in batch. Per-skill tool approval remains inside
       // installOne, so the batch question cannot answer a consent prompt on the user's behalf.
       for (const [team, binding] of Object.entries((await store.read()).teams)) {
-        if (!binding.handle) continue;
+        if (!binding.handle || busy.has(team)) continue;
         const candidates = await endorsedCandidates(store.teamClone(team), team, binding.handle, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
         if (!candidates.length) continue;
         if (!interactive) {
@@ -152,14 +194,22 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
           continue;
         }
         if (await (io as Prompter).confirm(`Install ${candidates.length} newly endorsed skill(s) from ${team}?`)) {
-          for (const skill of candidates) { await installOne({ team, id: skill.id, store, runner, cwd: args.cwd }, childIo); placed++; changed = true; }
+          // One candidate that cannot be placed (a foreign folder at its target, a busy lock) is
+          // deferred by name; the others still land, and the orphan pass and the stamps still run.
+          for (const skill of candidates) {
+            try { await installOne({ team, id: skill.id, store, runner, cwd: args.cwd }, childIo); placed++; changed = true; }
+            catch (error) {
+              if (error instanceof PromptClosedError) throw error; // the channel is gone, not this candidate
+              deferred.push(skill.name); notice(`Deferred endorsed ${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
         }
       }
     }
-    await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, deferred, notice);
+    await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, deferred, notice, busy);
     if (changed && !args.hook) (io as { print(line: string): void }).print('Skills synchronized.');
     if (args.hook && placed) (io as { print(line: string): void }).print('{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}');
-    for (const team of Object.keys((await store.read()).teams)) await writeStamp(store, team);
+    for (const team of Object.keys((await store.read()).teams)) if (!busy.has(team)) await writeStamp(store, team);
     return success({ placed, deferred, notices, changed, hook: Boolean(args.hook) });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error), args.hook ? { placed, deferred, notices, changed, hook: true } : undefined); }
 }
@@ -167,9 +217,12 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
 function approved(config: Awaited<ReturnType<ConfigStore['read']>>, id: string, grants: ReturnType<typeof allowedTools>): boolean {
   return grants.ok && (grants.normalized === 'none' || config.approvals[id]?.grants === grants.hash);
 }
-async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, deferred: string[], notice: (line: string) => void): Promise<void> {
+async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, deferred: string[], notice: (line: string) => void, skipTeams: ReadonlySet<string>): Promise<void> {
   const config = await store.read();
   for (const [path, placement] of Object.entries(config.placements)) {
+    // A clone this run could not refresh may be mid-write by the process that holds it: its roster
+    // is not evidence of an orphan, and a decline written against it would be wrong.
+    if (skipTeams.has(placement.team)) continue;
     if (config.pending.some((entry) => entry.id === placement.id && entry.team === placement.team && sameScope(entry.scope, placement.scope))) continue;
     const binding = config.teams[placement.team];
     if (!binding?.handle) continue;
@@ -215,7 +268,8 @@ async function matchingProjectRoot(clone: string, project: string, runner: Runne
   if (root.code !== 0 || !root.stdout.trim()) return undefined;
   const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: root.stdout.trim() });
   if (origin.code !== 0) return undefined;
-  const listed = (await readTeam(clone)).projects[project];
+  const projects = (await readTeam(clone)).projects;
+  const listed = Object.hasOwn(projects, project) ? projects[project] : undefined;
   return listed?.remotes.some((remote) => normalizeRemote(remote) === normalizeRemote(origin.stdout.trim())) ? root.stdout.trim() : undefined;
 }
 

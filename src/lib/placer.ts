@@ -7,6 +7,10 @@ import { acquireSkillTargetLock } from './placer/vendor/skillhub/skill-target-lo
 import { SkillSnapshot, snapshotSkillDirectory } from './placer/vendor/skillhub/skill-fingerprint.js';
 import { Runner, systemRunner } from './runner.js';
 
+/** The one seam placer.test.ts needs to make a rename fail between the two moves of a replace, cross a volume (mirrors hook.ts), fail the removal of a displaced copy or of the staging folder, or fail the probe for a displaced copy with something other than ENOENT. */
+// `lstat` is wrapped rather than passed through raw: its overloads make the bare binding awkward to restub from a test.
+export const fsForTests = { rename, rm, lstat: (path: string) => lstat(path) };
+
 export type PlacementScope = { kind: 'global' } | { kind: 'project'; project: string };
 export type Inspection = { kind: 'absent'; path: string } | { kind: 'ours'; path: string } | { kind: 'foreign'; path: string };
 
@@ -44,21 +48,26 @@ export async function lockTarget(targetRoot: string, name: string): Promise<() =
  * after the caller verified ledger ownership; the displaced generated copy is removed after the
  * new copy has become visible, so no partial source is ever exposed.
  */
-export async function place(source: string, targetRoot: string, name: string, options: { replace?: boolean; projectRoot?: string; runner?: Runner } = {}): Promise<{ path: string; snapshot: SkillSnapshot; notices: string[] }> {
+export async function place(source: string, targetRoot: string, name: string, options: { replace?: boolean; projectRoot?: string; runner?: Runner; quarantineRoot?: string } = {}): Promise<{ path: string; snapshot: SkillSnapshot; notices: string[] }> {
   const destination = join(targetRoot, name);
   const temporary = join(targetRoot, `.${name}.terum-${randomUUID()}.tmp`);
   const displaced = join(targetRoot, `.${name}.terum-${randomUUID()}.old`);
+  // Only a successful move-aside puts a copy at `displaced`, and the rm below takes it away again:
+  // no failure path may claim a stranded copy the run never created (spec invariant 34).
+  let displacedExists = false;
   await mkdir(targetRoot, { recursive: true });
   try {
     await assertNoSymlinks(source);
     await cp(source, temporary, { recursive: true, errorOnExist: true, force: false });
     try {
-      await rename(temporary, destination);
+      await fsForTests.rename(temporary, destination);
     } catch (error) {
       if (!options.replace || !isExistingDestination(error)) throw error;
-      await rename(destination, displaced);
-      await rename(temporary, destination);
-      await rm(displaced, { recursive: true, force: true });
+      await fsForTests.rename(destination, displaced);
+      displacedExists = true;
+      await fsForTests.rename(temporary, destination);
+      await fsForTests.rm(displaced, { recursive: true, force: true });
+      displacedExists = false;
     }
     const result = { path: destination, snapshot: await snapshotSkillDirectory(destination), notices: [] as string[] };
     if (options.projectRoot) await appendExclude(options.projectRoot, `.claude/skills/${name}`, options.runner).catch((error: unknown) => {
@@ -66,17 +75,39 @@ export async function place(source: string, targetRoot: string, name: string, op
     });
     return result;
   } catch (error) {
-    await rm(temporary, { recursive: true, force: true });
-    // A failure after moving the existing target back into staging must not orphan it.
-    try { await lstat(destination); } catch (missing) {
-      if (isMissing(missing)) {
-        try { await lstat(displaced); await rename(displaced, destination); } catch (displacedMissing) { if (!isMissing(displacedMissing)) throw displacedMissing; }
-      }
-    }
+    // Both staging cleanups are best-effort: this one must not abort the recovery below, and the one
+    // in the finally must not replace what the recovery throws (a throw from a finally supersedes the
+    // pending one) — a leftover hidden `.tmp` folder is strictly cheaper than a lost stranded-copy report.
+    await rm(temporary, { recursive: true, force: true }).catch(() => undefined);
+    // A failure after the existing target was moved aside must not orphan it: the copy goes back, or —
+    // when it cannot (the destination is occupied by the new copy, or the restore failed) — to
+    // quarantine (spec invariant 34: never left inside the skills root), or at the least its location
+    // is named. The placement failure stays the message and the cause.
+    const stranded = displacedExists ? await restoreDisplaced(destination, displaced, name, options.quarantineRoot).catch(() => displaced) : undefined;
+    if (stranded !== undefined) throw new Error(`${error instanceof Error ? error.message : String(error)} — the previous ${name} could not be restored to ${destination}; it is at ${stranded}`, { cause: error });
     throw error;
   } finally {
-    await rm(temporary, { recursive: true, force: true });
+    await fsForTests.rm(temporary, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+/**
+ * After a failed replace: put the displaced copy back when the destination is empty; when it is not
+ * (the new copy landed and only the cleanup failed) or the restore fails, move the copy to quarantine.
+ * Returns where the copy is when it was not restored, undefined when it was (or nothing was displaced).
+ */
+async function restoreDisplaced(destination: string, displaced: string, name: string, quarantineRoot: string | undefined): Promise<string | undefined> {
+  if (await isAbsent(displaced)) return undefined;
+  if (await isAbsent(destination)) {
+    try { await fsForTests.rename(displaced, destination); return undefined; }
+    catch { /* fall through: quarantine, or name the hidden path */ }
+  }
+  if (quarantineRoot !== undefined) { try { return await moveToQuarantine(displaced, quarantineRoot, name); } catch { /* fall through: name the hidden path */ } }
+  return displaced;
+}
+
+async function isAbsent(path: string): Promise<boolean> {
+  try { await fsForTests.lstat(path); return false; } catch (error) { if (isMissing(error)) return true; throw error; }
 }
 
 /**
@@ -108,26 +139,40 @@ export async function remove(targetRoot: string, path: string, expectedFingerpri
  * path itself is gone — decided by one lstat, so an ENOENT raised mid-scan is an error, not "gone".
  */
 export async function quarantineDrift(path: string, expectedFingerprint: string, quarantineRoot: string): Promise<{ current?: SkillSnapshot; quarantined?: string }> {
-  try { await lstat(path); } catch (error) { if (isMissing(error)) return {}; throw error; }
-  const current = await snapshotSkillDirectory(path);
+  const current = await snapshotIfPresent(path);
+  if (current === undefined) return {};
   if (current.fingerprint === expectedFingerprint) return { current };
   return { current, quarantined: await moveToQuarantine(path, quarantineRoot, basename(path)) };
+}
+
+/** quarantineDrift's read-only half: a placed copy's snapshot, or undefined when the path itself is gone — one lstat decides that, so an ENOENT raised mid-scan is an error, not "gone". */
+export async function snapshotIfPresent(path: string): Promise<SkillSnapshot | undefined> {
+  try { await lstat(path); } catch (error) { if (isMissing(error)) return undefined; throw error; }
+  return snapshotSkillDirectory(path);
 }
 
 export async function moveToQuarantine(path: string, quarantineRoot: string, name: string): Promise<string> {
   const directory = join(quarantineRoot, new Date().toISOString().replace(/[:.]/g, '-'));
   const destination = join(directory, name);
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  try {
-    await rename(path, destination);
-  } catch (error) {
-    // The folder lives on another volume than ~/.terum (an authoring folder outside HOME): the
-    // copy must exist in quarantine before the original is removed.
-    if (!(error instanceof Error && 'code' in error && error.code === 'EXDEV')) throw error;
-    await cp(path, destination, { recursive: true, errorOnExist: true, force: false });
-    await rm(path, { recursive: true, force: true });
-  }
+  await moveDirectory(path, destination);
   return destination;
+}
+
+/**
+ * Move a directory: a rename, or — across volumes (an authoring folder outside HOME, a checkout on
+ * another disk) — a copy that must exist in full at the destination before the original is removed.
+ * The only place that deletes a user-owned directory after a copy; the quarantine move and share's
+ * restore of a displaced folder both go through it.
+ */
+export async function moveDirectory(from: string, to: string): Promise<void> {
+  try {
+    await fsForTests.rename(from, to);
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EXDEV')) throw error;
+    await cp(from, to, { recursive: true, errorOnExist: true, force: false });
+    await rm(from, { recursive: true, force: true });
+  }
 }
 
 export async function appendExclude(projectRoot: string, entry: string, runner: Runner = systemRunner): Promise<void> {

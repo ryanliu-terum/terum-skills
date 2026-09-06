@@ -45,6 +45,8 @@ describe('Prompter boundary (§3, §12 "prompter")', () => {
       'export async function f() { const c = await import("console"); return c; }',
       'process.exit(1);',
       'export function f() { process.exit(0); }',
+      'process.exitCode = 1;',
+      'export function f() { process.exitCode = 1; }',
     ];
     for (const code of vectors) {
       expect(await flagged(code), code).not.toEqual([]);
@@ -84,6 +86,35 @@ describe('terminalPrompter behaviour', () => {
   it('input ending before an answer settles as PromptClosedError, never as a hang or a silent success', async () => {
     const { io } = channel([]);
     await expect(io.text('Name')).rejects.toThrow(/Input ended before "Name:"/);
+  });
+
+  it('a question pending when the output breaks (the reader went away) fails closed instead of waiting for an answer nobody was shown, and so does every later one', async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let written = '';
+    output.on('data', (chunk: Buffer) => { written += chunk.toString(); });
+    let breakOutput: () => void = () => undefined;
+    const outputClosed = new Promise<void>((resolve) => { breakOutput = resolve; });
+    const io = terminalPrompter({ input: Object.assign(input, { isTTY: true }), output, interactive: true, outputClosed });
+    const pending = io.confirm('Delete 3 quarantined item(s)?');
+    breakOutput();
+    await expect(pending).rejects.toThrow('Output closed before "Delete 3 quarantined item(s)? [y/N]" could be asked');
+    await expect(io.text('Name')).rejects.toThrow('Output closed before "Name:" could be asked');
+    // The pre-ask guard and the race throw the same error with the same message, so only "the dead
+    // output was never written to" tells them apart: this line is what pins the pre-check.
+    expect(written).not.toContain('Name:');
+  });
+
+  it('an outputClosed that REJECTS is settlement too: the question fails closed as PromptClosedError, and the rejection never escapes unhandled', async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let breakOutput: (error: Error) => void = () => undefined;
+    const outputClosed = new Promise<void>((_, reject) => { breakOutput = reject; });
+    const io = terminalPrompter({ input: Object.assign(input, { isTTY: true }), output, interactive: true, outputClosed });
+    const pending = io.confirm('Delete 3 quarantined item(s)?');
+    breakOutput(new Error('EPIPE: broken pipe, write'));
+    await expect(pending).rejects.toThrow(PromptClosedError);
+    await expect(io.text('Name')).rejects.toThrow(/Output closed before "Name:"/);
   });
 
   it('confirm is y/N: only y or yes (any case) is true', async () => {

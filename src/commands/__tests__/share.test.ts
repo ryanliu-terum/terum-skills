@@ -198,6 +198,18 @@ describe('share (§5.3)', () => {
     expect((await git(['log', '--format=%s', 'main'], fixture.bare)).split('\n').filter((message) => message === 'seed: update sample')).toHaveLength(1);
   });
 
+  it('applies a managed-field refresh to the bytes actually upstream, not the stale preflight copy, when another machine moved the repository ahead', async () => {
+    const { fixture, store } = await sharedFixture();
+    await store.update((config) => { config.email = 'changed@example.com'; });
+    const remoteCopy = (await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).replace('description: x', 'description: other machine');
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', remoteCopy);
+    // Called directly: sync's own refreshClone would close the window this test is about.
+    await reconcileShared(store, systemRunner, new ScriptedPrompter());
+    const upstream = await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare);
+    expect(upstream).toContain('description: other machine');
+    expect(upstream).toContain('author: Me <changed@example.com>');
+  });
+
   it('resolves a refused divergence with --keep-source and replaces the repository loser', async () => {
     const { fixture, store } = await sharedFixture();
     const id = Object.keys((await store.read()).shared)[0]!;
@@ -401,8 +413,13 @@ describe('share (§5.3)', () => {
     expect(await originSha(fixture.bare)).toBe(sha);
     expect(await git(['ls-tree', '-r', '--name-only', 'main', 'skills/sample/'], fixture.bare)).not.toContain('hooks/');
     expect((await store.read()).shared[id]!.baseline).toBe(baseline);
+    // A managed-field repair is pending — this user renamed themselves since the share — so the
+    // refusal is only write-free if the gate runs before that repair reaches the source or the remote.
+    await store.update((config) => { config.display_name = 'Me Renamed'; });
+    const sourceBefore = await readFile(join(source, 'SKILL.md'), 'utf8');
     await expect(run({ keepSource: id, config: store }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('--allow-privileged') });
     expect(await originSha(fixture.bare)).toBe(sha);
+    expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(sourceBefore);
     expect((await run({ keepSource: id, allowPrivileged: true, config: store }, new ScriptedPrompter())).ok).toBe(true);
     expect(await git(['ls-tree', '-r', '--name-only', 'main', 'skills/sample/'], fixture.bare)).toContain('skills/sample/hooks/session-start.sh');
     // Once the repository copy carries the hooks, later edits publish normally again.

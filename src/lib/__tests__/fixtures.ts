@@ -1,8 +1,10 @@
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import lockfile from 'proper-lockfile';
 import { CommandResult, Runner, RunOptions, systemRunner } from '../runner.js';
 import { Prompter, PromptClosedError } from '../prompt.js';
+import { cloneLockPath } from '../teamRepo.js';
 
 /** Every temp dir created through `temporaryDirectory` — removed by setup.ts after each test. */
 export const TEMP_DIRS: string[] = [];
@@ -92,12 +94,21 @@ export async function cloneWithIdentity(bare: string, destination: string, name 
   return destination;
 }
 
+/**
+ * Hold a clone's safeWrite writer lock the way another terum-skills process would; the returned
+ * function releases it. A verb that then contends pays withCloneLock's full retry backoff (~3.75 s)
+ * before it sees ELOCKED — that is the real contended path, not a test artefact.
+ */
+export async function holdCloneLock(clone: string): Promise<() => Promise<void>> {
+  return lockfile.lock(clone, { lockfilePath: cloneLockPath(clone), realpath: false, stale: 60_000 });
+}
+
 export async function originSha(bare: string, ref = 'main'): Promise<string> {
   return (await git(['rev-parse', ref], bare)).trim();
 }
 
 export type GhHandler = (args: readonly string[], options?: RunOptions) => CommandResult | Promise<CommandResult>;
-export interface RecordedCall { command: 'git' | 'gh'; args: string[]; env?: NodeJS.ProcessEnv; cwd?: string; }
+export interface RecordedCall { command: 'git' | 'gh'; args: string[]; env?: NodeJS.ProcessEnv; cwd?: string; stdio?: 'inherit'; }
 
 /**
  * Maps a public-looking remote to a local bare fixture in both directions (arguments in, stdout
@@ -108,7 +119,7 @@ export function mappedRunner(publicRemote: string, bare: string, gh?: GhHandler)
   return {
     calls,
     async run(command, args, options) {
-      calls.push({ command, args: [...args], env: options?.env, cwd: options?.cwd });
+      calls.push({ command, args: [...args], env: options?.env, cwd: options?.cwd, stdio: options?.stdio });
       if (command === 'gh') {
         if (!gh) throw Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' });
         return gh(args, options);
@@ -147,7 +158,7 @@ export function fakeGh(login: string, api: Record<string, CommandResult> = {}, a
 /** A runner that answers gh through `handler` and every git call with success; records calls. */
 export function ghOnlyRunner(handler: GhHandler): Runner & { calls: RecordedCall[] } {
   const calls: RecordedCall[] = [];
-  return { calls, async run(command, args, options) { calls.push({ command, args: [...args], env: options?.env, cwd: options?.cwd }); return command === 'gh' ? handler(args, options) : { code: 0, stdout: '', stderr: '' }; } };
+  return { calls, async run(command, args, options) { calls.push({ command, args: [...args], env: options?.env, cwd: options?.cwd, stdio: options?.stdio }); return command === 'gh' ? handler(args, options) : { code: 0, stdout: '', stderr: '' }; } };
 }
 
 /** A runner on a machine with no gh at all (spawn ENOENT); git succeeds trivially. */

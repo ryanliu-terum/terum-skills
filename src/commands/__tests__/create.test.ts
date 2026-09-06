@@ -57,6 +57,17 @@ describe('team create (§6)', () => {
     expect(await git(['ls-remote', '--heads', bare])).toContain('refs/heads/main');
   });
 
+  it('accepts a prototype-named team (`constructor`) end to end: every guard and the binding read own keys, so nothing fails after the scaffold is pushed', async () => {
+    const { root, bare } = await emptyBare();
+    const publicRemote = 'https://git.example/constructor.git';
+    const store = createConfigStore(pathJoin(root, 'local'));
+    const result = await create({ name: 'constructor', remote: publicRemote, config: store, runner: mappedRunner(publicRemote, bare) }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    if (!result.ok) throw new Error(result.error);
+    const teams = (await store.read()).teams;
+    expect(Object.hasOwn(teams, 'constructor')).toBe(true);
+    expect(teams.constructor).toMatchObject({ handle: 'me' });
+  });
+
   it('scaffolds the §4.1 tree into an empty generic-git remote, records the team, and leaves the clone ready', async () => {
     const { root, bare } = await emptyBare();
     const publicRemote = 'https://git.example/new-team.git';

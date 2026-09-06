@@ -1,0 +1,93 @@
+{
+  "slug": "phase1-closeout",
+  "lane": "code",
+  "shape": "two-pass",
+  "cap": 3,
+  "mode": "unattended",
+  "base": "81bf9a6",
+  "args": "",
+  "startedAt": "2026-09-06T09:38:57.181Z",
+  "finishedAt": "2026-09-06T11:26:11.958Z",
+  "status": "converged",
+  "verdict": "stop: converged — the full pass confirmed no critical + high findings",
+  "startRound": 1,
+  "nextRound": 2,
+  "rounds": [
+    {
+      "round": 1,
+      "kind": "full",
+      "report": ".planning/reviews/phase1-closeout.hybrid.r1.review.md",
+      "at": "2026-09-06T11:26:11.957Z",
+      "counts": {
+        "critical": 0,
+        "high": 0,
+        "medium": 12,
+        "low": 11
+      },
+      "confirmed": 23,
+      "top": 0,
+      "regression": false,
+      "triage": {
+        "mechanical": 7,
+        "clear": 13,
+        "fork": 3,
+        "declined": 0,
+        "untriaged": 0
+      },
+      "contested": 3,
+      "unverified": 5,
+      "applied": {
+        "mechanical": 7,
+        "clear": 13
+      },
+      "gates": "pass",
+      "commit": "775e2230456c8ac38aafd806e9b92f6c62aabd5a",
+      "confirmBase": "0e0c1500b9a7702c2f43e69e449a7684d2c0a800",
+      "human": {
+        "mediums": [],
+        "forks": [
+          {
+            "title": "setup now reports success on a machine whose team clone is gone, and never re-clones it",
+            "location": "src/commands/setup.ts:183",
+            "why": "Fork - a product call, not a code call. Everyone agrees the current behaviour is wrong: the wizard says it finished on a machine where the team folder is gone, and sync, ls, install and publish then all fail. The question is what setup should do instead. Option 1: quietly re-download the team folder from the address it already has on file, so the machine works after that one command (a little network work in a step the wizard calls \"skipped\", and it must also restore the name/email git needs for later writes). Option 2: stop and say \"your team folder is missing - run team join <remote> to restore it\"; smallest change, simply puts back the old non-zero exit, but leaves the user to run a second command. Option 3: hand the repair to the existing join command, reusing one blessed path but re-asking the login/name/email questions. Pick Option 1 if setup is the \"fix my machine\" wizard; pick Op"
+          },
+          {
+            "title": "canonicalDigest still concatenates path and hash without domain separation, so the collision class the new test targets is only half-closed",
+            "location": "src/lib/skills.ts:73",
+            "why": "Fixing the in-repo digest (option 1) is uncontroversial and nearly free — a few lines, and every ordinary skill folder keeps exactly the digest it has today. The open question is whether to also patch the copied-in file borrowed from another project (option 2). That same one-line record format lives there too, and there it guards the check that catches a hand-edited installed copy, so patching it closes the same hole in a second place. The price is that our copy of the borrowed file drifts further from the original, which means updating the attribution notes and the spec sentence that still calls it a verbatim copy, and a little more friction the next time that file is re-copied from upstream. That is a project-policy call about how much divergence from borrowed code is acceptable — the code cannot settle it — and there is precedent both ways, since the file already carries one documente"
+          },
+          {
+            "title": "Hardened install cell blocks the backtick but the same hostile name still renders as a live link in the Skill cell",
+            "location": "src/lib/readme.ts:74",
+            "why": "This hinges on a product call the code cannot settle, and the previous review already flagged it without deciding: should text that someone commits into a team repo (a skill's description, category, author, or folder name) be allowed to show up as a clickable link in the README the tool generates? If the answer is no, option 1 is the cheap and complete answer — it costs about five lines, normal text looks exactly the same to a reader, and it also covers the bot comment the Action posts on publish PRs, which this commit left alone. If the answer is yes (someone may legitimately want \"see [our docs](…)\" in a skill description), then option 3 is right: defang only the folder name the CLI itself would refuse to create, and leave the free-text columns as the earlier review deliberately left them. Option 2 is the strongest treatment of the single cell in the finding — a refused name is printed"
+          }
+        ],
+        "notApplied": [],
+        "contested": [
+          {
+            "title": "reconcileOrphans is not gated by the new `busy` set: a busy team's stale clone yields false orphans, and answering the prompt can write a bogus `declined` (or fail the whole run)",
+            "location": "src/commands/sync.ts:182"
+          },
+          {
+            "title": "Hoisting the foreign-collision inspect() moves a full config.json read + lstat into the no-op fast path of every sync",
+            "location": "/Users/ryanliu/Documents/Terum/terum-codex/phase1-closeout/src/commands/sync.ts:130"
+          },
+          {
+            "title": "search.ts recomputes the install count with a full roster scan per hit while `installCounts()` builds the map once",
+            "location": "src/commands/search.ts:42"
+          }
+        ],
+        "declinedByTriage": [],
+        "declinedByLoop": [
+          {
+            "title": "Hoisting the foreign-collision inspect() moves a full config.json read + lstat into the no-op fast path of every sync",
+            "location": "src/commands/sync.ts:130",
+            "reason": "contested 2-1; the collision reading must precede quarantineDrift and now sits inside the target lock; the per-placement config read is what the rename re-key needs; one lstat + one small parse per placement"
+          }
+        ],
+        "untriaged": []
+      }
+    }
+  ],
+  "invalidAttempts": []
+}

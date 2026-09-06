@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { readdir, readFile } from 'node:fs/promises';
+import { join, sep } from 'node:path';
 import YAML from 'yaml';
 import { allowedTools, parseJson, parseSkillFrontmatter, Person, SkillFrontmatter, Team, personSchema, teamSchema } from './schema.js';
 
@@ -70,9 +70,23 @@ export async function canonicalDigest(root: string): Promise<string> {
   for (const relative of files) {
     let content = await readFile(join(root, relative));
     if (relative === 'SKILL.md') content = Buffer.from(canonicalSkillMd(content.toString('utf8')));
-    aggregate.update(`${relative}:${createHash('sha256').update(content).digest('hex')}\n`);
+    aggregate.update(`${digestKey(relative)}:${createHash('sha256').update(content).digest('hex')}\n`);
   }
   return `sha256:${aggregate.digest('hex')}`;
+}
+
+/**
+ * The digest record's path field with `\` and newline escaped, so the record stream is prefix-free
+ * and no two file lists share a digest. A record is `key:<64 hex>\n`: the hash field is fixed-width,
+ * so the record's final `:` is always the separator and a `:` inside a path needs no escape — and
+ * must not get one, because `config.shared[].baseline` persists this digest with no version field
+ * and a `:`-bearing filename is legal on POSIX. Every path that can reach a stored baseline therefore
+ * hashes to exactly the bytes it did before, except one carrying a literal newline (the ambiguity the
+ * escape exists to close); a backslash path never reaches one, because `assertSafePath` refuses it
+ * in the mirror before a baseline is recorded.
+ */
+function digestKey(relative: string): string {
+  return relative.replace(/[\\\n]/g, (char) => (char === '\n' ? '\\n' : `\\${char}`));
 }
 
 /** Canonical digest for a single SKILL.md, used to authorize a managed-field-only refresh. */
@@ -122,17 +136,12 @@ async function walk(root: string, base = root): Promise<string[]> {
   for (const entry of entries) {
     const absolute = join(root, entry.name);
     if (entry.isDirectory()) result.push(...await walk(absolute, base));
-    else if (entry.isFile()) result.push(absolute.slice(base.length + 1).split('\\').join('/'));
+    // Separators are rewritten to '/' only on Windows: on POSIX a backslash is a legal filename
+    // character, and folding it would give `docs\readme.md` and `docs/readme.md` one digest key
+    // (the rule the vendored fingerprint walker already follows).
+    else if (entry.isFile()) { const relative = absolute.slice(base.length + 1); result.push(sep === '\\' ? relative.split('\\').join('/') : relative); }
   }
   return result.sort();
 }
 
-export function isInside(child: string, parent: string): boolean {
-  const relative = resolve(child).slice(resolve(parent).length + 1);
-  return relative !== '' && !relative.startsWith('..');
-}
-
-export async function existsDirectory(path: string): Promise<boolean> {
-  try { return (await stat(path)).isDirectory(); } catch (error) { if (isMissing(error)) return false; throw error; }
-}
 function isMissing(error: unknown): boolean { return error instanceof Error && 'code' in error && error.code === 'ENOENT'; }

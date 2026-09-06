@@ -15,6 +15,7 @@ describe('gh detection and the login offer (§6 login)', () => {
     const login = runner.calls.find((call) => call.args.join(' ') === 'auth login');
     expect(login).toBeDefined();
     expect(login?.args.includes('--with-token')).toBe(false);
+    expect(login?.stdio).toBe('inherit');
     expect(runner.calls.filter((call) => call.args[0] === '--version')).toHaveLength(1);
   });
 
