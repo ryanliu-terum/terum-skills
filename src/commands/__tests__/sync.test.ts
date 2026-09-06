@@ -146,6 +146,28 @@ describe('sync --hook (§3, §6)', () => {
     } finally { await release(); }
   });
 
+  it('a plain file at the ledger path is still the foreign collision the lock reports, not a read that fails', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(home, '.claude', 'skills', 'sample');
+    await rm(path, { recursive: true, force: true }); await writeFile(path, 'user-owned, not a placement');
+    const io = new ScriptedPrompter();
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+    expect(io.lines.filter((line) => line === `Blocked ${path}: ${path} already exists and is not a placement this tool owns; leaving both untouched.`)).toHaveLength(1);
+    expect(await readFile(path, 'utf8')).toBe('user-owned, not a placement');
+  });
+
+  it('a symlink at the ledger path is refused, never followed, even when it points at an identical tree', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(home, '.claude', 'skills', 'sample'); const mirror = join(home, 'mirror');
+    await cp(path, mirror, { recursive: true }); await rm(path, { recursive: true, force: true }); await symlink(mirror, path);
+    const io = new ScriptedPrompter();
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+    expect(io.lines.filter((line) => line === `Blocked ${path}: ${path} already exists and is not a placement this tool owns; leaving both untouched.`)).toHaveLength(1);
+    expect(await readFile(join(mirror, 'SKILL.md'), 'utf8')).toContain('description: old');
+  });
+
   it('reports a placement whose target lock another process holds as blocked and leaves it untouched', async () => {
     const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);

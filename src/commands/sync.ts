@@ -132,8 +132,16 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         // The read-only "nothing to do" decision comes first, outside the lock: an up-to-date placement —
         // the steady state of every session-start sync — never contends for a target another run holds,
         // and never reports that run as a block. The full decision is re-taken under the lock below.
+        // Two rules for that unlocked probe. Its shape is judged by the classifier the locked pass uses
+        // (`true` asks about shape alone; ownership is read, and acted on, under the lock): a file or a
+        // symlink at the ledger path stays the foreign collision reported below — the repo's rule for
+        // symlinks everywhere is refuse, never follow — never a "nothing to do". And it is advisory: it
+        // races a concurrent place()'s rename pair, so snapshotIfPresent's "an ENOENT mid-scan is an
+        // error, not gone" rule does not hold here; any read failure means "undecided" and falls through
+        // to the lock, where quarantineDrift re-takes the decision under that rule and a genuine failure
+        // still surfaces as Blocked.
         const repoSnapshot = await snapshotSkillDirectory(source);
-        const placedNow = await snapshotIfPresent(path);
+        const placedNow = await inspect(path, true).then((shape) => (shape.kind === 'ours' ? snapshotIfPresent(path) : undefined)).catch(() => undefined);
         if (placedNow?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
         // The target lock is taken before anything about the destination is decided and held across
         // the collision check, the quarantine move and the placement — install's shape — so the

@@ -7,8 +7,9 @@ import { acquireSkillTargetLock } from './placer/vendor/skillhub/skill-target-lo
 import { SkillSnapshot, snapshotSkillDirectory } from './placer/vendor/skillhub/skill-fingerprint.js';
 import { Runner, systemRunner } from './runner.js';
 
-/** The one seam placer.test.ts needs to make a rename fail between the two moves of a replace, cross a volume (mirrors hook.ts), or fail the removal of a displaced copy after the swap. */
-export const fsForTests = { rename, rm };
+/** The one seam placer.test.ts needs to make a rename fail between the two moves of a replace, cross a volume (mirrors hook.ts), fail the removal of a displaced copy or of the staging folder, or fail the probe for a displaced copy with something other than ENOENT. */
+// `lstat` is wrapped rather than passed through raw: its overloads make the bare binding awkward to restub from a test.
+export const fsForTests = { rename, rm, lstat: (path: string) => lstat(path) };
 
 export type PlacementScope = { kind: 'global' } | { kind: 'project'; project: string };
 export type Inspection = { kind: 'absent'; path: string } | { kind: 'ours'; path: string } | { kind: 'foreign'; path: string };
@@ -74,7 +75,10 @@ export async function place(source: string, targetRoot: string, name: string, op
     });
     return result;
   } catch (error) {
-    await rm(temporary, { recursive: true, force: true }).catch(() => undefined); // the finally repeats it; it must not abort the recovery below
+    // Both staging cleanups are best-effort: this one must not abort the recovery below, and the one
+    // in the finally must not replace what the recovery throws (a throw from a finally supersedes the
+    // pending one) — a leftover hidden `.tmp` folder is strictly cheaper than a lost stranded-copy report.
+    await rm(temporary, { recursive: true, force: true }).catch(() => undefined);
     // A failure after the existing target was moved aside must not orphan it: the copy goes back, or —
     // when it cannot (the destination is occupied by the new copy, or the restore failed) — to
     // quarantine (spec invariant 34: never left inside the skills root), or at the least its location
@@ -83,7 +87,7 @@ export async function place(source: string, targetRoot: string, name: string, op
     if (stranded !== undefined) throw new Error(`${error instanceof Error ? error.message : String(error)} — the previous ${name} could not be restored to ${destination}; it is at ${stranded}`, { cause: error });
     throw error;
   } finally {
-    await rm(temporary, { recursive: true, force: true });
+    await fsForTests.rm(temporary, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
@@ -103,7 +107,7 @@ async function restoreDisplaced(destination: string, displaced: string, name: st
 }
 
 async function isAbsent(path: string): Promise<boolean> {
-  try { await lstat(path); return false; } catch (error) { if (isMissing(error)) return true; throw error; }
+  try { await fsForTests.lstat(path); return false; } catch (error) { if (isMissing(error)) return true; throw error; }
 }
 
 /**

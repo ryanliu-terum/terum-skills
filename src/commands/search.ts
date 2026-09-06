@@ -53,6 +53,11 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed }));
         }
         await staleNotice(store, team, io, args.now ?? Date.now);
+        // Per-row degradation covers ONE unresolvable folder. When every hit in the team failed to
+        // resolve, the git side itself is unusable — git not on PATH, an unborn HEAD, a corrupt object
+        // store — and the team is as unsearched as the catch below would have called it, so the exit
+        // gate must still see it rather than exiting 0 on a page of '—' rows.
+        if (filtered.length && latest.every((settled) => settled.status === 'rejected')) failures.push(`${team}: no skill version could be read; see the per-skill reasons above.`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         failures.push(`${team}: ${message}`);

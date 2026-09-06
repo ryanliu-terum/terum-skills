@@ -181,10 +181,42 @@ describe('native Placer (§7)', () => {
     expect(await readFile(join(root, 'quarantine', quarantined[0]!), 'utf8')).toBe('v1');
   });
 
-  it('a failure before anything was displaced rethrows the placement error itself, naming no copy that was never made', async () => {
+  it('a staging cleanup that fails as well keeps the recovery message: the finally never replaces it', async () => {
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'v1');
+    await place(source, target, 'sample');
+    await writeFile(join(source, 'SKILL.md'), 'v2');
+    // Every cleanup of a hidden `.terum-` folder fails — the persistent EACCES/EBUSY case — so the
+    // staging folder's removal in the finally fails exactly like the displaced copy's did; the
+    // composed message, and where the previous copy went, must survive it.
+    const realRm = fsForTests.rm;
+    fsForTests.rm = async (path, options) => { if (String(path).includes('.terum-')) throw new Error('simulated cleanup failure'); return realRm(path, options); };
+    let failure: Error | undefined;
+    try { await place(source, target, 'sample', { replace: true, quarantineRoot: join(root, 'quarantine') }).catch((error: Error) => { failure = error; }); }
+    finally { fsForTests.rm = realRm; }
+    expect(failure?.message).toContain('simulated cleanup failure');
+    expect(failure?.message).toContain('could not be restored');
+    expect(failure?.message).toContain(join(root, 'quarantine'));
+    expect(await readFile(join(target, 'sample', 'SKILL.md'), 'utf8')).toBe('v2');
+    expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
+    const quarantined = (await readdir(join(root, 'quarantine'), { recursive: true })).map(String).filter((entry) => entry.endsWith(join('sample', 'SKILL.md')));
+    expect(quarantined).toHaveLength(1);
+    expect(await readFile(join(root, 'quarantine', quarantined[0]!), 'utf8')).toBe('v1');
+  });
+
+  it('a failure before anything was displaced rethrows the placement error itself, even when the probe for the displaced copy fails', async () => {
     const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills');
-    await expect(place(join(root, 'no-such-source'), target, 'sample', { quarantineRoot: join(root, 'quarantine') })).rejects.toThrow(/ENOENT/);
-    await expect(place(join(root, 'no-such-source'), target, 'sample', { quarantineRoot: join(root, 'quarantine') })).rejects.not.toThrow(/could not be restored/);
+    // The probe for the `.old` path fails with something other than ENOENT (a locked-down skills root):
+    // a run that displaced nothing must still rethrow its own error and name no copy it never made.
+    const realLstat = fsForTests.lstat;
+    fsForTests.lstat = async (path) => {
+      if (path.endsWith('.old')) throw Object.assign(new Error('EACCES: simulated probe failure'), { code: 'EACCES' });
+      return realLstat(path);
+    };
+    try {
+      await expect(place(join(root, 'no-such-source'), target, 'sample', { quarantineRoot: join(root, 'quarantine') })).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(place(join(root, 'no-such-source'), target, 'sample', { quarantineRoot: join(root, 'quarantine') })).rejects.not.toThrow(/could not be restored/);
+    } finally { fsForTests.lstat = realLstat; }
   });
 
   it('moves an edited placement to quarantine by copy-then-remove when the rename crosses a volume', async () => {
