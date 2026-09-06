@@ -84,18 +84,12 @@ safe to delete. Unknown schemas or identities are ignored and left untouched.
 
 ## Releasing
 
-The repo's release workflow **advertises only verified publications**: a `v<version>` tag exists only
-for a version that is actually on npm. That workflow is
-[issue 10's release workflow](https://github.com/ryanliu-terum/terum-skills/issues/10), **PR pending**;
-this change does not install it, it only consumes the tags it keeps truthful.
+A release is one deliberate action. A maintainer bumps `version` in `package.json` and both `version` fields in `package-lock.json` in a reviewed PR (README changes are shipped changes — the tarball includes it). After that PR is on `main`, run Actions → Release with the version and the full merged commit SHA; the workflow runs the gates, packs once, publishes that tarball to npm with provenance, verifies the registry serves those exact bytes, and only then creates the annotated `v<version>` tag on that commit and a GitHub Release whose notes list the PRs since the previous tag. The controlled workflow advertises only verified publications; tags are immutable release history, not a mirror of npm's `latest` dist-tag. A failed run is re-dispatched with the same version and SHA — the planner finishes whatever step is missing. Tags are never deleted or moved by automation; a wrong tag is an incident decision. Daily, `release-drift.yml` checks every tag against the registry and the Releases. Prerelease versions (`0.2.0-rc.1`) publish under the `next` dist-tag and are marked pre-release. 0.1.0 predates this workflow: it was published by hand, has no provenance, and is recorded as a legacy exception.
 
-Release order: publish → verify `npm view terum-skills dist-tags` → create `v<version>` on the
-published commit → push the tag. This is maintainer release work; the CLI never runs those
-commands. A tag may be deleted or moved only together with the corresponding npm deprecate or
-unpublish decision. Pre-release tags such as `v0.2.0-rc.1` are legal and ignored by stable discovery.
+### What the tags mean
+
+The `v<x.y.z>` tags on the tool's public repository are release *advertisements*: the controlled release workflow (`release.yml`) creates a tag only after the registry serves that version with a verified digest and provenance, and `release-drift.yml` reports daily any tag without a publication, publication without a tag, or `latest` dist-tag that differs from the highest stable tag. A tag is immutable history and does not follow a later `latest` rollback (product fork 3); the notice therefore says *advertised*, never *published* or *latest*, and `update` prints `npm availability was not checked`. Manual tags, unpublication, and dist-tag changes are outside the workflow's guarantee and are detected, not prevented.
 The gate must use the single `PACKAGE_NAME` / `APPROVED_UPSTREAM` pair in `src/lib/package.ts`.
-Tags are release advertisements, not a live check of npm availability; a publication without a
-stable tag is not discoverable through this channel.
 
 ## Troubleshooting
 

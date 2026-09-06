@@ -1,0 +1,34 @@
+name: Release drift
+
+# Detection, separate from authorization (Terum-MVP capture-version-sync precedent, but DAILY: a broken
+# release advertisement is what issue 8's update notice reads, and seven days of it is too long).
+# States reported (exit 1 on any): published-untagged, tagged-unpublished, source-mismatch,
+# source-unverified, release-missing, channel-mismatch; malformed v* refs are flagged separately;
+# a registry/API failure is an observation error (exit 2), never "absent".
+# Unreleased development on main is pending work and is reported, not failed.
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # daily 07:00 UTC
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-plan.mjs --drift
