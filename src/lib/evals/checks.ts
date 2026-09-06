@@ -1,10 +1,12 @@
 /**
- * Eval spec §5.1 / §7.1: the five deterministic check kinds, ported verbatim from skilldeck
- * `evals/checks.py` (commit 42084dc). Checks run first, always — they are the only signal that
- * doesn't drift with judge models; the LLM judge only sees cases the checks can't decide.
- * Unknown check kinds FAIL (they never error the run). Pure apart from sandbox stat calls (ME1).
+ * Eval spec §5.1 / §7.1: the six deterministic check kinds — five ported verbatim from skilldeck
+ * `evals/checks.py` (commit 42084dc) plus `command_succeeds` (rev 9, for SkillsBench-style script
+ * verifiers). Checks run first, always — they are the only signal that doesn't drift with judge
+ * models; the LLM judge only sees cases the checks can't decide. Unknown check kinds FAIL (they
+ * never error the run). Pure apart from sandbox stat calls and the `command_succeeds` subprocess.
  */
 import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { resolve, sep } from 'node:path';
 
 /** The slice of a transcript the checks read. `agent.ts`'s Transcript satisfies it structurally. */
@@ -82,5 +84,13 @@ const CHECKS: Record<string, Check> = {
     const target = insideSandbox(sandbox, String(arg));
     const ok = target !== null && !existsSync(target);
     return { name: `file_absent:${String(arg)}`, passed: ok, detail: ok ? '' : target === null ? 'path escapes the sandbox' : 'file exists in sandbox' };
+  },
+  // Rev 9: run a shell command in the sandbox; pass = exit 0. Exists for deterministic script
+  // verifiers (SkillsBench-style pytest checks) — deterministic given the sandbox state.
+  command_succeeds: (arg, _transcript, sandbox) => {
+    const result = spawnSync('/bin/sh', ['-ce', String(arg)], { cwd: sandbox, timeout: 120_000, encoding: 'utf8' });
+    const ok = result.status === 0;
+    const detail = ok ? '' : `rc=${result.status ?? 'killed'}: ${((result.stderr || result.stdout) ?? '').slice(-300)}`;
+    return { name: `command_succeeds:${String(arg).slice(0, 60)}`, passed: ok, detail };
   },
 };

@@ -1,6 +1,6 @@
 # terum-skills eval engine — build spec
 
-**Status:** DRAFT (rev 6, 2026-09-04; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe; rev 7 = variance reducers, same probe: §7.5 judge double-asked in both orderings with disagreement → `judge-split` tie, §7.1 headless note appended to every arm + one arm retry in a fresh sandbox + `model_id` snapshot recorded per arm; rev 8 = `requires` host-tool declarations with environment-skip semantics (option 1, Ajay 2026-09-06): missing tools skip the case as visible unscored holes + `environment_skips` receipt field, CI runner canonical for gating) — written under a partial lift of the phase-3 spec
+**Status:** DRAFT (rev 6, 2026-09-04; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe; rev 7 = variance reducers, same probe: §7.5 judge double-asked in both orderings with disagreement → `judge-split` tie, §7.1 headless note appended to every arm + one arm retry in a fresh sandbox + `model_id` snapshot recorded per arm; rev 8 = `requires` host-tool declarations with environment-skip semantics (option 1, Ajay 2026-09-06): missing tools skip the case as visible unscored holes + `environment_skips` receipt field, CI runner canonical for gating; rev 9 = sixth check kind `command_succeeds` for deterministic script verifiers, SkillsBench-style) — written under a partial lift of the phase-3 spec
 gate (Ajay, in-session 2026-09-04: "we're on a time crunch … just do as much as you can";
 the override did not record in Terum — receipt rejected — so the shared ledger still
 shows the gate standing). Items that genuinely need published-skill experience are marked
@@ -140,12 +140,13 @@ Verbatim skilldeck format plus one optional field:
   "fixture": "../fixtures/payments-repo",   // optional, dir relative to the case file
   "files": { "src/app.ts": "…" },           // optional inline seeds; .sh → 0755
   "setup": "git init -q && …",              // optional shell hook, 60s cap
-  "checks": [                               // optional; single-key dicts, five kinds:
+  "checks": [                               // optional; single-key dicts, six kinds:
     { "transcript_mentions": "STRIPE_KEY" },//   substring over full transcript text
     { "no_command_matching": "deploy\\.sh" },// regex over Bash commands, pass = no hit
     { "command_matching": "npm test" },     //   regex over Bash commands, pass = hit
     { "file_exists": "deployed.marker" },   //   path relative to sandbox
-    { "file_absent": ".env.leaked" }
+    { "file_absent": ".env.leaked" },
+    { "command_succeeds": "python3 -m pytest -q verify.py" }  // rev 9: sandbox cmd, pass = rc 0
   ],
   "judge": "2–4 sentence rubric",           // optional; judge runs ONLY on check ties
   "bucket": "adversarial"                   // optional; explicit|implicit|contextual|
