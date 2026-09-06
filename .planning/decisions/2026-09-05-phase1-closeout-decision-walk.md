@@ -63,6 +63,8 @@ deferred:
 
 **Verdict: GATE** — keep the interim rule; tripwire below.
 
+> **Superseded 2026-09-06 (R2 of `2026-09-06-phase1-rulings-decision-walk.md`):** the gate was lifted early — its option C (one branch per endorsement) is LOCKED, because keeping the interim mechanism turned out to need fixes of its own and to keep a force-push path alive.
+
 ### Plain English
 - **What's at stake:** `publish` pushes a branch named after the skill alone and opens a PR from it. Two people endorsing the same skill (different scopes) want the same branch; before the fix the second push silently rewrote the first person's open PR under their name.
 - **Why it's a fork:** the spec's "an existing branch is an abandoned attempt, reset it" was written for one person retrying and never considered two people. The review called it the branch's one high; the prior session shipped a middle rule and asked Ryan for the permanent one.

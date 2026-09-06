@@ -7,6 +7,8 @@ north_star_proposed: fastest path to a shippable 0.1.0; a documented rough edge 
 
 # Phase-1 hardening rulings — batch for `/decision-walk`
 
+> **Walked 2026-09-06.** Every ruling is resolved in `2026-09-06-phase1-rulings-decision-walk.md`; this file is the input it consumed.
+
 **Run it:** `/decision-walk .planning/decisions/2026-09-06-phase1-rulings-batch.md` from a checkout of `docs/phase1-rulings-walk` (worktree `../terum-codex/rulings-walk`, off `main` @ `d294401`, everything from PRs #3–#9 landed). The walk ratifies the North Star first, then takes the rulings one at a time in the order below, and writes `.planning/decisions/2026-09-06-phase1-rulings-decision-walk.md`.
 
 **North Star to ratify:** carried unchanged from the 2026-09-04 and 2026-09-05 walks — *fastest path to a shippable 0.1.0; a documented rough edge is acceptable unless it loses data, takes over someone's identity, or leaks a token.* Every recommendation below is measured against that sentence; where the review loop's recommendation and the North Star pull apart, both are stated.
