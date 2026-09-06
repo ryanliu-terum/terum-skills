@@ -1,10 +1,11 @@
 import { execFile, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { delimiter, dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConfigStore } from '../lib/config.js';
 import { systemRunner } from '../lib/runner.js';
@@ -45,10 +46,60 @@ describe('the built bin (dist/index.js)', () => {
     const help = await run(process.execPath, [bin, '--help'], { cwd: root, env });
     expect(help.stdout).toContain('terum-skills');
     expect(help.stdout).toContain('team');
+    expect(help.stdout).toContain('Get started:');
+    expect(help.stdout).toContain('npx -y terum-skills@latest setup');
+    expect(help.stdout).toContain('npx -y terum-skills@latest setup <org>/<repo>');
+    expect(help.stderr).toBe('');
     const failed = await run(process.execPath, [bin, 'team', 'join', 'not a remote'], { cwd: root, env }).then(() => { throw new Error('expected a non-zero exit'); }, (error: { code?: number; stdout: string; stderr: string }) => error);
     expect(failed.code).toBe(1);
     expect(failed.stderr.trim().split('\n').at(-1)).toBe('Unsupported remote: not a remote');
     expect(failed.stdout).toBe('');
+  });
+
+  it('publishes what `npm install -g` links: `bin` names the file tsconfig.build.json emits for src/index.ts, the manifest is ESM, and prepack still builds it', async () => {
+    const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { type?: string; bin?: Record<string, string>; files?: string[]; scripts?: Record<string, string> };
+    // The effective emit config with `extends` resolved: the file beforeAll compiled (outDir overridden there) and the one `npm run build` uses unmodified.
+    const { config, error } = ts.readConfigFile(resolve(root, 'tsconfig.build.json'), ts.sys.readFile);
+    expect(error).toBeUndefined();
+    const parsed = ts.parseJsonConfigFileContent(config, ts.sys, root);
+    expect(parsed.errors).toEqual([]);
+    expect(resolve(parsed.options.outDir ?? '')).toBe(resolve(root, 'dist'));
+    expect(resolve(parsed.options.rootDir ?? '')).toBe(resolve(root, 'src'));
+    expect(parsed.fileNames.map((f) => resolve(f))).toContain(resolve(root, 'src', 'index.ts'));
+    // Where src/index.ts lands relative to the package root, from the config — the bin entry must name exactly that.
+    const emitted = relative(root, resolve(parsed.options.outDir ?? '', 'index.js')).split(sep).join('/');
+    expect(manifest.bin).toEqual({ 'terum-skills': `./${emitted}` });
+    expect(manifest.files).toContain(emitted.split('/')[0]);
+    // ESM: the built file uses import/export, so the shipped manifest must say so (the fixture's own manifest above merely mirrors this).
+    expect(manifest.type).toBe('module');
+    // The lifecycle that produces dist/ on `npm publish`: prepack runs the build, the build compiles this config.
+    expect(manifest.scripts?.build).toBe('tsc -p tsconfig.build.json');
+    expect(manifest.scripts?.prepack).toBe('npm run build');
+  });
+
+  it.skipIf(process.platform === 'win32')('POSIX launcher smoke test: the built file runs through a bin-directory symlink found by PATH lookup from a foreign cwd', async () => {
+    const prefixBin = resolve(out, 'prefix', 'bin');
+    await mkdir(prefixBin, { recursive: true });
+    await symlink(relative(prefixBin, bin), resolve(prefixBin, 'terum-skills'));
+    await chmod(bin, 0o755);
+    // The shebang's `env node` needs the running node's directory on PATH as well.
+    const pathEnv = { ...env, PATH: [prefixBin, dirname(process.execPath), env.PATH].join(delimiter) };
+    const help = await run('terum-skills', ['--help'], { cwd: tmpdir(), env: pathEnv });
+    expect(help.stdout).toContain('terum-skills');
+    expect(help.stdout).toContain('team');
+    expect(help.stderr).toBe('');
+  });
+
+  it('bare invocation: usage and the get-started hint on stderr, empty stdout, exit 1', async () => {
+    const bare = await run(process.execPath, [bin], { cwd: root, env }).then(
+      () => { throw new Error('expected exit 1'); },
+      (error: { code?: number; stdout: string; stderr: string }) => error,
+    );
+    expect(bare.code).toBe(1);
+    expect(bare.stdout).toBe('');
+    expect(bare.stderr).toContain('Usage: terum-skills');
+    expect(bare.stderr).toContain('Get started:');
+    expect(bare.stderr).toContain('npx -y terum-skills@latest setup <org>/<repo>');
   });
 
   it('exits 0 with no stack trace when the reader closes the pipe before the output is written (`terum-skills … | head`)', async () => {

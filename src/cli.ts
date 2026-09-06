@@ -27,6 +27,15 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   const active: Required<CliVerbs> = { login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, share: verbs.share ?? share, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush };
   const program = new Command();
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
+  // Root help gives first-time users a runnable next step, including after a local npm install.
+  program.addHelpText('after', [
+    '',
+    'Get started:',
+    '  Create a team: npx -y terum-skills@latest setup',
+    '  Join a team:   npx -y terum-skills@latest setup <org>/<repo>',
+    '  Have a skill install command? Run it directly.',
+    '  If no teams are configured, it guides you through setup first.',
+  ].join('\n'));
 
   program
     .command('login')
