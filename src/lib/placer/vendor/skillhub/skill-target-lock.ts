@@ -14,22 +14,40 @@ export class TargetBusyError extends Error {
   constructor(message: string, readonly path: string) { super(message); this.name = 'TargetBusyError' }
 }
 
-/** Serializes every local lifecycle mutation for one Skill target directory. */
-export async function acquireSkillTargetLock(rootDir: string, slug: string): Promise<() => Promise<void>> {
+/** The dead man's switch: a lock untouched this long may be reclaimed. Upstream used 10 s; a holder that sleeps or copies for ten seconds is not dead, so this matches the clone lock's minute (rulings walk R3, 2026-09-06). */
+export const TARGET_LOCK_STALE_MS = 60_000
+
+/**
+ * Serializes every local lifecycle mutation for one Skill target directory. Modified from upstream
+ * (R3): the stale window is TARGET_LOCK_STALE_MS, and a lock the library judges compromised —
+ * another process reclaimed it — is recorded and reported from the returned release as a
+ * TargetBusyError, instead of thrown from the library's refresh timer, which killed the CLI
+ * mid-command. `options.stale` is a test knob (proper-lockfile floors it at 2 s).
+ */
+export async function acquireSkillTargetLock(rootDir: string, slug: string, options: { stale?: number } = {}): Promise<() => Promise<void>> {
   const lockPath = await skillTargetLockPath(rootDir, slug)
+  let compromised = false
+  let release: () => Promise<void>
   try {
-    return await lock(lockPath, {
+    release = await lock(lockPath, {
       lockfilePath: lockPath,
       realpath: false,
-      stale: 10_000,
-      update: 3_000,
-      retries: 0
+      stale: options.stale ?? TARGET_LOCK_STALE_MS,
+      retries: 0,
+      onCompromised: () => { compromised = true }
     })
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ELOCKED') {
       throw targetBusyError(rootDir, slug)
     }
     throw error
+  }
+  return async () => {
+    // A compromised lock's own release rejects (the library already forgot it): the theft is the
+    // message, never that rejection. When both the work and the lock failed, this replaces the
+    // work's error — accepted in R3 as rare enough under a one-minute window.
+    await release().catch(() => undefined)
+    if (compromised) throw new TargetBusyError(`Lost the lock on ${join(rootDir, slug)} to another process; its changes may not be complete — retry the command.`, join(rootDir, slug))
   }
 }
 

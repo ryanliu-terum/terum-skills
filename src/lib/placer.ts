@@ -37,10 +37,10 @@ export async function inspect(dir: string, owned: boolean): Promise<Inspection> 
   }
 }
 
-/** Acquire one non-waiting lock per target skills root; callers own the returned release. */
-export async function lockTarget(targetRoot: string, name: string): Promise<() => Promise<void>> {
+/** Acquire one non-waiting lock per target skills root; callers own the returned release, which reports a lock another process reclaimed (R3). `options.stale` is a test knob. */
+export async function lockTarget(targetRoot: string, name: string, options: { stale?: number } = {}): Promise<() => Promise<void>> {
   await mkdir(targetRoot, { recursive: true });
-  return acquireSkillTargetLock(targetRoot, name);
+  return acquireSkillTargetLock(targetRoot, name, options);
 }
 
 /**
