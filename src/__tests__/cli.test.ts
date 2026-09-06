@@ -13,6 +13,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       team: async (args) => { calls.push({ verb: 'team', ...args }); return args.kind === 'join' && args.target === 'fail/fail' ? failure('nope') : success({ team: 't', remote: 'r' }); },
       setup: async (args) => { calls.push({ verb: 'setup', ...args }); return success({ role: args.target ? 'joiner' : 'creator', team: 't', remote: 'r', steps: {} as never }); },
       invite: async (args) => { calls.push({ verb: 'invite', ...args }); return success({ team: 't', invited: [], already: [] }); },
+      status: async (args) => { calls.push({ verb: 'status', ...args }); return success({ version: '0.1.1', teams: [] }); },
       ls: async (args) => { calls.push({ verb: 'ls', ...args }); return success({ roster: [], skills: [] }); },
       readme: async (args) => { calls.push({ verb: 'readme', ...args }); return success({ changed: false }); },
       publish: async (args) => { calls.push({ verb: 'publish', ...args }); return args.ref === 'fail' ? failure('nope') : success({ team: 't', id: 'id', name: args.ref, scope: { kind: 'global' as const }, policy: 'pr' as const, changed: false, branch: null, prUrl: null, compareUrl: null }); },
@@ -21,6 +22,16 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     return { program, calls, outcomes };
   };
+
+  it('wires status, limits selection to --team, and exposes its query semantics in help', async () => {
+    const { program, calls } = harness();
+    await program.parseAsync(['status'], { from: 'user' });
+    await program.parseAsync(['status', '--team', 't'], { from: 'user' });
+    expect(calls).toEqual([{ verb: 'status' }, { verb: 'status', team: 't' }]);
+    expect(program.helpInformation()).toContain('status');
+    expect(program.commands.find((command) => command.name() === 'status')?.description()).toContain('not a setup-readiness or membership test');
+    await expect(program.parseAsync(['status', 'foo'], { from: 'user' })).rejects.toMatchObject({ code: 'commander.excessArguments' });
+  });
 
   it('maps every flag onto the verb arguments', async () => {
     const { program, calls } = harness();
