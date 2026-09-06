@@ -23,7 +23,8 @@ describe('team join (§6, §5.4 identity)', () => {
   it('a live collision re-prompts, the per-team handle diverges, and team one is untouched', async () => {
     const { fixture, store, runner } = await setup({ people: { ajay: person('ajay', { display_name: 'Existing' }) } });
     await store.update((config) => { config.default_handle = 'ajay'; config.github = 'me'; config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.first = { remote: 'github.com/example/first', handle: 'ajay' }; });
-    const io = new ScriptedPrompter(['me', 'ajay', 'Ajay Two', 'ajay.two@example.com', 'ajay-t']);
+    // The machine already knows an identity (A2): n to the one-line confirmation, then the four questions as before.
+    const io = new ScriptedPrompter(['me', 'ajay', 'Ajay Two', 'ajay.two@example.com', 'ajay-t'], [false]);
     const result = await join({ target: REMOTE, config: store, runner }, io);
     if (!result.ok) throw new Error(result.error);
     expect(result.value).toMatchObject({ team: 'team', handle: 'ajay-t', rejoined: false });
@@ -97,7 +98,7 @@ describe('team join (§6, §5.4 identity)', () => {
     const hook = pathJoin(store.teamClone('team'), '.git', 'hooks', 'pre-push');
     await rm(hook);
     await git(['config', '--unset', 'core.hooksPath'], store.teamClone('team'));
-    const io = new ScriptedPrompter(['me', 'Me Again', 'me@example.com']);
+    const io = new ScriptedPrompter(['me', 'Me Again', 'me@example.com'], [false]);
     const again = await join({ target: REMOTE, config: store, runner, as: 'other' }, io);
     if (!again.ok) throw new Error(again.error);
     expect(again.value.handle).toBe('me');
@@ -224,7 +225,7 @@ describe('team join (§6, §5.4 identity)', () => {
     const other = await bareTeam();
     const otherRemote = 'https://git.example/other/team.git';
     expect(await join({ target: otherRemote, config: store, runner: mappedRunner(otherRemote, other.bare) }, new ScriptedPrompter(answers()))).toMatchObject({ ok: false, error: expect.stringContaining('--as') });
-    const result = await join({ target: otherRemote, config: store, runner: mappedRunner(otherRemote, other.bare), as: 'team-two' }, new ScriptedPrompter(answers()));
+    const result = await join({ target: otherRemote, config: store, runner: mappedRunner(otherRemote, other.bare), as: 'team-two' }, new ScriptedPrompter(answers(), [false]));
     if (!result.ok) throw new Error(result.error);
     expect(result.value.team).toBe('team-two');
     expect((await store.read()).teams).toEqual({ team: { remote: 'git.example/team', handle: 'me' }, 'team-two': { remote: 'git.example/other/team', handle: 'me' } });
@@ -266,7 +267,7 @@ describe('team join (§6, §5.4 identity)', () => {
     const store = createConfigStore(pathJoin(fixture.root, 'local'));
     const first = await join({ target: 'https://github.com/Acme/Team.git', config: store, runner: mappedRunner('https://github.com/Acme/Team.git', fixture.bare) }, new ScriptedPrompter(answers()));
     if (!first.ok) throw new Error(first.error);
-    const again = await join({ target: 'https://github.com/acme/team.git', config: store, runner: mappedRunner('https://github.com/acme/team.git', fixture.bare) }, new ScriptedPrompter(['me', 'Me', 'me@example.com']));
+    const again = await join({ target: 'https://github.com/acme/team.git', config: store, runner: mappedRunner('https://github.com/acme/team.git', fixture.bare) }, new ScriptedPrompter(['me', 'Me', 'me@example.com'], [false]));
     if (!again.ok) throw new Error(again.error);
     expect(Object.keys((await store.read()).teams)).toEqual(['team']);
   });
@@ -329,7 +330,7 @@ describe('team join (§6, §5.4 identity)', () => {
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [id], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
     expect((await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers(), [false]))).ok).toBe(true);
     await pushFromSeed(fixture.seed, 'people/me.json', `${JSON.stringify(person('me', { display_name: 'Me', declined: [id] }), null, 2)}\n`);
-    const io = new ScriptedPrompter(['me', 'Me', 'me@example.com']);
+    const io = new ScriptedPrompter(['me', 'Me', 'me@example.com'], [false]);
     expect((await join({ target: REMOTE, config: store, runner }, io)).ok).toBe(true);
     expect(io.askedAbout('team-endorsed')).toBe(false);
   });

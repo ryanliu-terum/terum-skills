@@ -263,7 +263,8 @@ describe('team create (§6)', () => {
     expect(failed).toMatchObject({ ok: false, error: expect.stringContaining('already exists') });
     expect(always.calls.filter((call) => call.command === 'gh' && call.args[0] === 'repo' && call.args[1] === 'create')).toHaveLength(3);
     expect(always.calls.some((call) => call.args[1] === 'view')).toBe(false);
-    expect(always.calls.filter((call) => call.command === 'git')).toEqual([]);
+    // Identity may read git's global config (A2); nothing else — no init, no clone, no push.
+    expect(always.calls.filter((call) => call.command === 'git' && call.args[0] !== 'config')).toEqual([]);
     expect((await exhausted.read()).teams).toEqual({});
     expect(await exists(exhausted.teamClone('never'))).toBe(false);
     // Any other gh failure is terminal on the first try.
