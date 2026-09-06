@@ -6,7 +6,7 @@ import { bareTeam, cloneWithIdentity, fakeGh, git, holdCloneLock, mappedRunner, 
 import { run } from '../publish.js';
 import { CommandResult } from '../../lib/runner.js';
 
-const V = `npx -y terum-skills@${JSON.parse(await readFile(new URL('../../../package.json', import.meta.url), 'utf8')).version}`;
+const V = 'npx -y terum-skills@latest';
 
 async function localSkill(home: string, name: string, frontmatterName = name): Promise<string> {
   const directory = join(home, '.claude', 'skills', name);
