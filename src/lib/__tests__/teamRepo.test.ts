@@ -202,7 +202,7 @@ describe('safeWrite (§6.0)', () => {
     expect((await git(['log', '-1', '--format=%s', 'main'], fixture.bare)).trim()).toBe('admin: team-remove');
   });
 
-  it('a non-main branch is pushed under a lease and origin/main is byte-identical; a stale lease falls back to -2', async () => {
+  it('a non-main branch is created, never replaced: origin/main is byte-identical, a name already on the remote is refused with nothing overwritten, and a branch that appears mid-write survives with no fallback name', async () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     const mainBefore = await originSha(fixture.bare);
@@ -210,19 +210,24 @@ describe('safeWrite (§6.0)', () => {
     expect(first.pushedTo).toBe('publish/x');
     expect(await originSha(fixture.bare)).toBe(mainBefore);
     expect(await git(['ls-tree', '--name-only', 'publish/x:people'], fixture.bare)).toContain('me.json');
-    const second = await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v2"')), { action: 'join', handle: 'me', branch: 'publish/x' });
-    expect(second.pushedTo).toBe('publish/x');
+    const firstSha = await originSha(fixture.bare, 'publish/x');
+    // The same name again — even by the same writer — is a refusal, not a refresh (R2: one fresh branch per publish).
+    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v2"')), { action: 'join', handle: 'me', branch: 'publish/x' })).rejects.toBeInstanceOf(PushRefused);
+    expect(await originSha(fixture.bare, 'publish/x')).toBe(firstSha);
+    expect((await git(['branch', '--list', 'publish/x-2'], fixture.bare)).trim()).toBe('');
+    // Someone creates the name after our fetch and before our push: theirs stands, ours is refused, no fallback name.
     let injected = false;
     const racing = wrapRunner(systemRunner, async (command, args, _options, next) => {
       if (command === 'git' && args[0] === 'push' && !injected) {
         injected = true;
-        await git(['push', '-q', '-f', 'origin', 'HEAD:refs/heads/publish/x'], fixture.seed); // someone else moved the branch after our fetch
+        await git(['push', '-q', 'origin', 'HEAD:refs/heads/publish/y'], fixture.seed);
       }
       return next();
     });
-    const third = await openTeamRepo(clone, fixture.bare, racing).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v3"')), { action: 'join', handle: 'me', branch: 'publish/x' });
-    expect(third.pushedTo).toBe('publish/x-2');
-    expect(await git(['ls-tree', '--name-only', 'publish/x-2:people'], fixture.bare)).toContain('me.json');
+    const theirs = (await git(['rev-parse', 'HEAD'], fixture.seed)).trim();
+    await expect(openTeamRepo(clone, fixture.bare, racing).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v3"')), { action: 'join', handle: 'me', branch: 'publish/y' })).rejects.toBeInstanceOf(PushRefused);
+    expect(await originSha(fixture.bare, 'publish/y')).toBe(theirs);
+    expect((await git(['branch', '--list', 'publish/y*'], fixture.bare)).trim()).toBe('publish/y');
     expect(await originSha(fixture.bare)).toBe(mainBefore);
     expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
   });
@@ -303,7 +308,7 @@ describe('safeWrite (§6.0)', () => {
     expect(failed).not.toContain('tok');
     expect(failed).not.toContain('@');
   });
-  it('retries ref-lock contention on a derived branch under the SAME pinned lease, so a commit pushed in between survives on `-2`; a protected-branch refusal is one push and a PushRefused', async () => {
+  it('retries ref-lock contention on a derived branch; a commit pushed in between is never overwritten and gets no fallback name; a protected-branch refusal is one push and a PushRefused', async () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     let pushes = 0;
@@ -314,7 +319,7 @@ describe('safeWrite (§6.0)', () => {
     const result = await openTeamRepo(clone, fixture.bare, contended).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', branch: 'publish/x', deadlineMs: 5_000 });
     expect(result.pushedTo).toBe('publish/x');
     expect(pushes).toBe(2);
-    // Contention, and someone lands on publish/y before our retry: the pinned lease refuses to overwrite them.
+    // Contention, and someone lands on publish/y before our retry: the name now exists, so the retry is refused and theirs stands — no fallback name.
     let racing = 0;
     const raced = wrapRunner(systemRunner, async (command, args, _options, next) => {
       if (command === 'git' && args[0] === 'push' && racing++ === 0) {
@@ -324,9 +329,9 @@ describe('safeWrite (§6.0)', () => {
       return next();
     });
     const theirs = (await git(['rev-parse', 'HEAD'], fixture.seed)).trim();
-    const dodged = await openTeamRepo(clone, fixture.bare, raced).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"y"')), { action: 'join', handle: 'me', branch: 'publish/y', deadlineMs: 5_000 });
-    expect(dodged.pushedTo).toBe('publish/y-2');
+    await expect(openTeamRepo(clone, fixture.bare, raced).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"y"')), { action: 'join', handle: 'me', branch: 'publish/y', deadlineMs: 5_000 })).rejects.toBeInstanceOf(PushRefused);
     expect(await originSha(fixture.bare, 'publish/y')).toBe(theirs);
+    expect((await git(['branch', '--list', 'publish/y-2'], fixture.bare)).trim()).toBe('');
     let refused = 0;
     const protectedBranch: Runner = { run(command, args, options) { if (command === 'git' && args[0] === 'push') { refused++; return Promise.resolve({ code: 1, stdout: '', stderr: ' ! [remote rejected] HEAD -> publish/z (protected branch hook declined)' }); } return systemRunner.run(command, args, options); } };
     await expect(openTeamRepo(clone, fixture.bare, protectedBranch).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v2"')), { action: 'join', handle: 'me', branch: 'publish/z' })).rejects.toBeInstanceOf(PushRefused);

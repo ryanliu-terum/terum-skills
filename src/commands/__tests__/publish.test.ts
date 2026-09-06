@@ -4,10 +4,17 @@ import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, fakeGh, git, holdCloneLock, mappedRunner, originSha, pushFromSeed, ScriptedPrompter, TEAM_JSON, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { run } from '../publish.js';
+import { CommandResult } from '../../lib/runner.js';
 
 const REMOTE = 'https://github.com/acme/team.git';
 const ID = '11111111-1111-4111-8111-111111111111';
-const OTHER_ID = '22222222-2222-4222-8222-222222222222';
+/** The branch a publish of `sample` by `seed` mints: fresh every run (R2), so tests match the shape, never a literal. */
+const FRESH = /^publish\/sample-seed-[0-9a-f]{8}$/;
+/** A gh that answers `pr create` for ANY head — the head is minted per run — and everything else through fakeGh. */
+function ghCreating(reply: CommandResult, api: Record<string, CommandResult> = {}): ReturnType<typeof fakeGh> {
+  const base = fakeGh('seed', api);
+  return (args, options) => (args[0] === 'pr' && args[1] === 'create' ? reply : base(args, options));
+}
 const skill = (name = 'sample') => `---\nname: ${name}\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\nallowed-tools: Bash(git status)\n---\n`;
 
 /** Commit files from the seed clone and push them to a branch only — main stays where it is; the seed is reset afterwards. */
@@ -36,12 +43,14 @@ async function prepared(policy: 'pr' | 'push' = 'pr') {
 describe('publish (§6)', () => {
   it('pushes a PR branch only and opens a GitHub pull request', async () => {
     const { fixture, store } = await prepared();
-    const runner = mappedRunner(REMOTE, fixture.bare, fakeGh('seed', { 'pr create -R acme/team --base main --head publish/sample --title seed: publish sample --body Endorse sample (11111111) for team: global.\n\nOpened by terum-skills publish; merge to endorse.': { code: 0, stdout: 'https://github.com/acme/team/pull/1\n', stderr: '' } }));
+    const runner = mappedRunner(REMOTE, fixture.bare, ghCreating({ code: 0, stdout: 'https://github.com/acme/team/pull/1\n', stderr: '' }));
     const before = await originSha(fixture.bare);
     const result = await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter());
-    expect(result).toMatchObject({ ok: true, value: { branch: 'publish/sample', prUrl: 'https://github.com/acme/team/pull/1' } });
+    expect(result).toMatchObject({ ok: true, value: { branch: expect.stringMatching(FRESH), prUrl: 'https://github.com/acme/team/pull/1' } });
+    const branch = result.ok ? result.value.branch! : '';
     expect(await originSha(fixture.bare)).toBe(before);
-    expect(JSON.parse(await git(['show', 'publish/sample:team.json'], fixture.bare)).global).toContain(ID);
+    expect(JSON.parse(await git(['show', `${branch}:team.json`], fixture.bare)).global).toContain(ID);
+    expect(runner.calls.filter((call) => call.command === 'gh' && call.args[0] === 'pr' && call.args[1] === 'create').map((call) => call.args[call.args.indexOf('--head') + 1])).toEqual([branch]);
     expect(runner.calls.some((call) => call.command === 'git' && call.args.includes('HEAD:refs/heads/main'))).toBe(false);
   });
 
@@ -51,7 +60,7 @@ describe('publish (§6)', () => {
     await writeFile(join(clone, 'stray.txt'), 'local'); await git(['add', '--all'], clone); await git(['commit', '-q', '-m', 'local-only'], clone);
     const before = await originSha(fixture.bare);
     const result = await run({ ref: 'sample', config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
-    expect(result).toMatchObject({ ok: true, value: { branch: 'publish/sample' } });
+    expect(result).toMatchObject({ ok: true, value: { branch: expect.stringMatching(FRESH) } });
     expect(await originSha(fixture.bare)).toBe(before);
   });
 
@@ -61,8 +70,8 @@ describe('publish (§6)', () => {
       const runner = mappedRunner(REMOTE, fixture.bare, gh);
       const io = new ScriptedPrompter();
       const result = await run({ ref: 'sample', config: store, runner }, io);
-      expect(result).toMatchObject({ ok: true, value: { branch: 'publish/sample', prUrl: null } });
-      expect(io.lines.join('\n')).toContain('https://github.com/acme/team/compare/main...publish/sample?expand=1');
+      expect(result).toMatchObject({ ok: true, value: { branch: expect.stringMatching(FRESH), prUrl: null } });
+      expect(io.lines.join('\n')).toContain(`https://github.com/acme/team/compare/main...${result.ok ? result.value.branch : ''}?expand=1`);
       expect(runner.calls.some((call) => call.command === 'git' && call.args.includes('HEAD:refs/heads/main'))).toBe(false);
       expect(runner.calls.filter((call) => call.command === 'gh' && call.args[0] === 'pr')).toHaveLength(0);
     }
@@ -88,8 +97,9 @@ describe('publish (§6)', () => {
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: ['x'], skills: [] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
     await git(['pull', '--ff-only'], store.teamClone('team'));
     const runner = mappedRunner(REMOTE, fixture.bare);
-    await expect(run({ ref: 'team/sample', project: 'product', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: true, value: { scope: { kind: 'project', project: 'product' } } });
-    const branchTeam = JSON.parse(await git(['show', 'publish/sample:team.json'], fixture.bare));
+    const projectResult = await run({ ref: 'team/sample', project: 'product', config: store, runner }, new ScriptedPrompter());
+    expect(projectResult).toMatchObject({ ok: true, value: { scope: { kind: 'project', project: 'product' } } });
+    const branchTeam = JSON.parse(await git(['show', `${projectResult.ok ? projectResult.value.branch : ''}:team.json`], fixture.bare));
     expect(branchTeam.projects.product.skills).toEqual([ID]);
     expect(branchTeam.global).toEqual([]);
     await expect(run({ ref: 'sample@deadbeef', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: 'publish endorses a skill by ID, not a version; drop @<version>.' });
@@ -111,66 +121,49 @@ describe('publish (§6)', () => {
     expect(await readFile(join(store.teamClone('team'), 'team.json'), 'utf8')).toContain('team');
   });
 
-  it('reuses an abandoned attempt of the SAME endorsement, refuses a branch carrying anything else, and falls back to -2 on a stale lease', async () => {
-    const abandoned = await prepared();
-    const mainBefore = await originSha(abandoned.fixture.bare);
-    const abandonedRunner = mappedRunner(REMOTE, abandoned.fixture.bare);
-    const first = await run({ ref: 'sample', config: abandoned.store, runner: abandonedRunner }, new ScriptedPrompter());
-    expect(first).toMatchObject({ ok: true, value: { branch: 'publish/sample' } });
-    const abandonedBefore = await originSha(abandoned.fixture.bare, 'publish/sample');
-    // main moves on; the same endorsement again refreshes the abandoned branch onto the new base under its lease, main untouched by the publish.
-    await pushFromSeed(abandoned.fixture.seed, 'note.txt', 'main moved on');
-    const mainMoved = await originSha(abandoned.fixture.bare);
-    const again = await run({ ref: 'sample', config: abandoned.store, runner: abandonedRunner }, new ScriptedPrompter());
-    expect(again).toMatchObject({ ok: true, value: { branch: 'publish/sample' } });
-    expect(await originSha(abandoned.fixture.bare, 'publish/sample')).not.toBe(abandonedBefore);
-    expect((await git(['rev-parse', 'publish/sample^'], abandoned.fixture.bare)).trim()).toBe(mainMoved);
-    expect(JSON.parse(await git(['show', 'publish/sample:team.json'], abandoned.fixture.bare)).global).toContain(ID);
-    expect(await originSha(abandoned.fixture.bare)).toBe(mainMoved);
-    void mainBefore;
-    // A branch of that name holding anything else — an unrelated commit; someone else's project
-    // endorsement; THIS endorsement plus a second one squashed into team.json (only the byte compare
-    // refuses it); THIS endorsement plus a review fixup (membership alone is not identity) — is never replaced.
-    const projectEndorsement = { ...TEAM_JSON, projects: { product: { remotes: ['x'], skills: [ID] } } };
-    const exactEndorsement = `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n`;
-    for (const [index, theirsOnBranch] of [
-      [{ path: 'unrelated.txt', content: 'someone else' }],
-      [{ path: 'team.json', content: `${JSON.stringify(projectEndorsement)}\n` }],
-      [{ path: 'team.json', content: `${JSON.stringify({ ...TEAM_JSON, global: [ID, OTHER_ID] }, null, 2)}\n` }],
-      [{ path: 'team.json', content: exactEndorsement }, { path: 'skills/sample/SKILL.md', content: skill().replace('useful skill', 'reviewed on the branch') }],
-    ].entries()) {
-      const label = `${index}: ${theirsOnBranch.map((file) => file.path).join('+')}`;
-      const other = await prepared();
-      const theirs = await pushBranchFromSeed(other.fixture.seed, theirsOnBranch, 'publish/sample');
-      const otherMain = await originSha(other.fixture.bare);
-      const theirRunner = mappedRunner(REMOTE, other.fixture.bare);
-      const refused = await run({ ref: 'sample', config: other.store, runner: theirRunner }, new ScriptedPrompter());
-      expect(refused, label).toMatchObject({ ok: false, error: expect.stringMatching(/publish\/sample already exists on the remote with a different endorsement[\s\S]*compare\/main\.\.\.publish\/sample/) });
-      // The delete remedy names the tool's own clone: only there is `origin` the team remote and the D12 guard the only pre-push hook.
-      expect(refused, label).toMatchObject({ ok: false, error: expect.stringContaining(`git -C ${other.store.teamClone('team')} push --no-verify origin --delete publish/sample`) });
-      expect(await originSha(other.fixture.bare, 'publish/sample')).toBe(theirs);
-      expect(await originSha(other.fixture.bare)).toBe(otherMain);
-      expect(theirRunner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
-    }
-
-    const stale = await prepared();
-    expect((await run({ ref: 'sample', config: stale.store, runner: mappedRunner(REMOTE, stale.fixture.bare) }, new ScriptedPrompter())).ok).toBe(true);
-    await pushFromSeed(stale.fixture.seed, 'racer.txt', 'new attempt');
-    const seedCommit = (await git(['rev-parse', 'HEAD'], stale.fixture.seed)).trim();
-    const staleMain = await originSha(stale.fixture.bare);
-    let moved = false;
-    const base = mappedRunner(REMOTE, stale.fixture.bare);
-    const runner = wrapRunner(base, async (command, args, _options, next) => {
-      if (command === 'git' && args[0] === 'push' && !moved) {
-        moved = true;
-        await git(['push', '-q', '--force', 'origin', 'HEAD:refs/heads/publish/sample'], stale.fixture.seed);
-      }
-      return next();
-    });
-    const second = await run({ ref: 'sample', config: stale.store, runner }, new ScriptedPrompter());
-    expect(second).toMatchObject({ ok: true, value: { branch: 'publish/sample-2' } });
-    expect(await originSha(stale.fixture.bare, 'publish/sample')).toBe(seedCommit);
-    expect(await originSha(stale.fixture.bare)).toBe(staleMain);
+  it('every publish creates a fresh branch and a fresh PR and never touches an existing one; a second publish of the same skill is noted and declined by default', async () => {
+    const { fixture, store } = await prepared();
+    const mainBefore = await originSha(fixture.bare);
+    const runner = mappedRunner(REMOTE, fixture.bare);
+    const first = await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter());
+    expect(first).toMatchObject({ ok: true, value: { changed: true, branch: expect.stringMatching(FRESH) } });
+    const firstBranch = first.ok ? first.value.branch! : '';
+    const firstSha = await originSha(fixture.bare, firstBranch);
+    expect(JSON.parse(await git(['show', `${firstBranch}:team.json`], fixture.bare)).global).toContain(ID);
+    expect(await originSha(fixture.bare)).toBe(mainBefore);
+    // One remote probe per publish, asking for every form of the name at once; the push is create-only.
+    const probes = runner.calls.filter((call) => call.command === 'git' && call.args[0] === 'ls-remote');
+    expect(probes).toHaveLength(1);
+    expect(probes[0]!.args).toEqual(expect.arrayContaining(['refs/heads/publish/sample', 'refs/heads/publish/sample-*']));
+    const pushes = runner.calls.filter((call) => call.command === 'git' && call.args[0] === 'push');
+    expect(pushes).toHaveLength(1);
+    expect(pushes[0]!.args).toContain(`--force-with-lease=refs/heads/${firstBranch}:`);
+    // main moves on; publishing again is a note and a y/N. Declined: nothing pushed, the first branch untouched.
+    await pushFromSeed(fixture.seed, 'note.txt', 'main moved on');
+    const mainMoved = await originSha(fixture.bare);
+    const declinedIo = new ScriptedPrompter([], [false]);
+    expect(await run({ ref: 'sample', config: store, runner }, declinedIo)).toMatchObject({ ok: true, value: { changed: false, branch: null, prUrl: null } });
+    expect(declinedIo.lines).toEqual(expect.arrayContaining([`An endorsement of sample is already open: ${firstBranch} (by seed).`, 'Nothing pushed; sample keeps its open endorsement.']));
+    expect(declinedIo.asked).toEqual(['Open another pull request for sample? If both merge, GitHub will flag the second as conflicting.']);
+    expect(await originSha(fixture.bare, firstBranch)).toBe(firstSha);
+    expect((await git(['branch', '--list', 'publish/sample-*'], fixture.bare)).trim().split('\n')).toHaveLength(1);
+    // Accepted: a second fresh branch on the new base; the first still points where it did.
+    const again = await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter([], [true]));
+    expect(again).toMatchObject({ ok: true, value: { changed: true, branch: expect.stringMatching(FRESH) } });
+    const secondBranch = again.ok ? again.value.branch! : '';
+    expect(secondBranch).not.toBe(firstBranch);
+    expect((await git(['rev-parse', `${secondBranch}^`], fixture.bare)).trim()).toBe(mainMoved);
+    expect(await originSha(fixture.bare, firstBranch)).toBe(firstSha);
+    expect(await originSha(fixture.bare)).toBe(mainMoved);
+    // The pre-R2 names a team may still carry are noted too — and never written to.
+    const legacy = await prepared();
+    const theirs = await pushBranchFromSeed(legacy.fixture.seed, [{ path: 'unrelated.txt', content: 'someone else' }], 'publish/sample');
+    const legacyIo = new ScriptedPrompter([], [true]);
+    const legacyRunner = mappedRunner(REMOTE, legacy.fixture.bare);
+    expect(await run({ ref: 'sample', config: legacy.store, runner: legacyRunner }, legacyIo)).toMatchObject({ ok: true, value: { branch: expect.stringMatching(FRESH) } });
+    expect(legacyIo.lines).toContain('An endorsement of sample is already open: publish/sample.');
+    expect(await originSha(legacy.fixture.bare, 'publish/sample')).toBe(theirs);
+    expect(legacyRunner.calls.filter((call) => call.command === 'git' && call.args[0] === 'push').every((call) => call.args.some((arg) => /^--force-with-lease=refs\/heads\/publish\/sample-seed-[0-9a-f]{8}:$/.test(arg)))).toBe(true);
   });
 
   it('refuses to refresh a clone another operation is writing to, and pushes nothing', async () => {
@@ -183,24 +176,6 @@ describe('publish (§6)', () => {
       expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
     } finally { await release(); }
     expect((await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).ok).toBe(true);
-  });
-
-  it('vets the -2 fallback too: a foreign publish/<name>-2 refuses the publish before anything is pushed', async () => {
-    const { fixture, store } = await prepared();
-    const theirs = await pushBranchFromSeed(fixture.seed, [{ path: 'unrelated.txt', content: 'another skill, another PR' }], 'publish/sample-2');
-    const main = await originSha(fixture.bare);
-    const runner = mappedRunner(REMOTE, fixture.bare);
-    const refused = await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter());
-    expect(refused).toMatchObject({ ok: false, error: expect.stringMatching(/publish\/sample-2 already exists on the remote with a different endorsement/) });
-    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining(`git -C ${store.teamClone('team')} push --no-verify origin --delete publish/sample-2`) });
-    expect(await originSha(fixture.bare, 'publish/sample-2')).toBe(theirs);
-    expect(await originSha(fixture.bare)).toBe(main);
-    expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
-    expect((await git(['branch', '--list', 'publish/sample'], fixture.bare)).trim()).toBe('');
-    // Both names are asked of the remote in ONE round trip.
-    const probes = runner.calls.filter((call) => call.command === 'git' && call.args[0] === 'ls-remote');
-    expect(probes).toHaveLength(1);
-    expect(probes[0]!.args).toEqual(expect.arrayContaining(['refs/heads/publish/sample', 'refs/heads/publish/sample-2']));
   });
 
   it('rejects unknown names and resolves an ambiguous bare ref only with --team', async () => {
@@ -235,26 +210,40 @@ describe('publish (§6)', () => {
 
   it('reports gh failure after pushing the endorsement branch exactly once', async () => {
     const { fixture, store } = await prepared();
-    const runner = mappedRunner(REMOTE, fixture.bare, fakeGh('seed', {
-      'pr create -R acme/team --base main --head publish/sample --title seed: publish sample --body Endorse sample (11111111) for team: global.\n\nOpened by terum-skills publish; merge to endorse.': { code: 1, stdout: '', stderr: 'gh could not create it' },
-    }));
+    const runner = mappedRunner(REMOTE, fixture.bare, ghCreating({ code: 1, stdout: '', stderr: 'gh could not create it' }));
     const before = await originSha(fixture.bare);
     const result = await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('gh could not create it') });
-    expect(result.ok ? '' : result.error).toContain('https://github.com/acme/team/compare/main...publish/sample?expand=1');
-    expect(JSON.parse(await git(['show', 'publish/sample:team.json'], fixture.bare)).global).toContain(ID);
+    const message = result.ok ? '' : result.error;
+    const branch = /publish\/sample-seed-[0-9a-f]{8}/.exec(message)?.[0] ?? '';
+    expect(branch).toMatch(FRESH);
+    expect(message).toContain(`https://github.com/acme/team/compare/main...${branch}?expand=1`);
+    expect(JSON.parse(await git(['show', `${branch}:team.json`], fixture.bare)).global).toContain(ID);
     expect(await originSha(fixture.bare)).toBe(before);
     expect(runner.calls.filter((call) => call.command === 'gh' && call.args[0] === 'pr' && call.args[1] === 'create')).toHaveLength(1);
   });
-  it('re-running while the pull request is still open refreshes the branch and reports the existing PR as success', async () => {
+
+  it('with gh, an open PR for the skill is named by URL before the y/N, a fresh PR is opened on yes, and a branch whose PR is closed is a leftover nobody is asked about', async () => {
     const { fixture, store } = await prepared();
-    const runner = mappedRunner(REMOTE, fixture.bare, fakeGh('seed', {
-      'pr create -R acme/team --base main --head publish/sample --title seed: publish sample --body Endorse sample (11111111) for team: global.\n\nOpened by terum-skills publish; merge to endorse.': { code: 1, stdout: '', stderr: 'a pull request for branch "publish/sample" into branch "main" already exists:\nhttps://github.com/acme/team/pull/7' },
-    }));
-    const io = new ScriptedPrompter();
+    const existing = await pushBranchFromSeed(fixture.seed, [{ path: 'team.json', content: `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n` }], 'publish/sample-alice-deadbeef');
+    let created: string[] = [];
+    const noting = ghCreating({ code: 0, stdout: 'https://github.com/acme/team/pull/9\n', stderr: '' }, {
+      'pr list -R acme/team --head publish/sample-alice-deadbeef --state open --json url -q .[0].url': { code: 0, stdout: 'https://github.com/acme/team/pull/7\n', stderr: '' },
+    });
+    const runner = mappedRunner(REMOTE, fixture.bare, (args, options) => { if (args[0] === 'pr' && args[1] === 'create') created = [...args]; return noting(args, options); });
+    const io = new ScriptedPrompter([], [true]);
     const result = await run({ ref: 'sample', config: store, runner }, io);
-    expect(result).toMatchObject({ ok: true, value: { branch: 'publish/sample', prUrl: 'https://github.com/acme/team/pull/7', compareUrl: null } });
-    expect(io.lines).toContain('https://github.com/acme/team/pull/7');
+    expect(io.lines).toContain('An endorsement of sample is already open: https://github.com/acme/team/pull/7 (by alice).');
+    expect(result).toMatchObject({ ok: true, value: { changed: true, prUrl: 'https://github.com/acme/team/pull/9', branch: expect.stringMatching(FRESH) } });
+    expect(created).toEqual(expect.arrayContaining(['--head', result.ok ? result.value.branch : '']));
+    expect(await originSha(fixture.bare, 'publish/sample-alice-deadbeef')).toBe(existing);
+    // Every PR closed: the branches are leftovers, nothing is noted, nothing is asked.
+    const quiet = fakeGh('seed');
+    const quietRunner = mappedRunner(REMOTE, fixture.bare, (args, options) => (args[0] === 'pr' && args[1] === 'list' ? { code: 0, stdout: '', stderr: '' } : args[0] === 'pr' && args[1] === 'create' ? { code: 0, stdout: 'https://github.com/acme/team/pull/10\n', stderr: '' } : quiet(args, options)));
+    const quietIo = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', config: store, runner: quietRunner }, quietIo)).toMatchObject({ ok: true, value: { changed: true, prUrl: 'https://github.com/acme/team/pull/10' } });
+    expect(quietIo.asked).toEqual([]);
+    expect(quietIo.lines.filter((line) => line.startsWith('An endorsement of'))).toEqual([]);
   });
 
   it('re-reads the publish policy on the reset tree: a policy flipped from push to pr mid-write is refused, nothing lands on main', async () => {

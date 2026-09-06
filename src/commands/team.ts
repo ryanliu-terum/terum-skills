@@ -219,6 +219,9 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       const view = await runner.run('gh', ['repo', 'view', spec, '--json', 'nameWithOwner', '-q', '.nameWithOwner']);
       if (view.code !== 0 || !view.stdout.trim()) throw new Error(`Created ${spec} but could not resolve its owner: ${(view.stderr || view.stdout).trim()}`);
       remote = `https://github.com/${view.stdout.trim()}.git`;
+      // Endorsement branches are one per publish (R2), so let GitHub delete each after its PR merges
+      // rather than let them pile up. A repository setting, cosmetic: a refusal changes nothing.
+      await runner.run('gh', ['repo', 'edit', view.stdout.trim(), '--delete-branch-on-merge']);
     }
 
     await store.ensureRoot();

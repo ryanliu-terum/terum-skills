@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { ghState } from '../lib/auth.js';
 import { Prompter } from '../lib/prompt.js';
@@ -47,10 +48,21 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const list = scope.kind === 'global' ? teamJson.global : teamJson.projects[scope.project]!.skills;
     const base: Omit<PublishResult, 'changed' | 'branch' | 'prUrl' | 'compareUrl'> = { team, id: record.id, name: record.name, scope, policy: teamJson.policy.publish };
     if (list.includes(record.id)) return alreadyEndorsed(base, scopeLabel, io);
-    const destination = teamJson.policy.publish === 'pr' ? `publish/${record.name}` : null;
-    // safeWrite retargets a stale-lease push to `<branch>-2` (teamRepo.ts push()), and `foo-2` is a
-    // legal skill name with an endorsement branch of its own, so BOTH names are held to the reuse rule.
-    if (destination !== null) await assertBranchesReusable(runner, clone, [destination, `${destination}-2`], record.id, scope, binding.remote);
+    // One fresh branch and one fresh PR per publish (rulings walk R2, 2026-09-06): the name is unique,
+    // the push is create-only (teamRepo.ts push()), and an endorsement already open for this skill is a
+    // note and a y/N — never a refusal, never a force-push. Two competing PRs are two PRs; GitHub flags
+    // the second as conflicting once the first merges.
+    const destination = teamJson.policy.publish === 'pr' ? `publish/${record.name}-${binding.handle}-${randomUUID().slice(0, 8)}` : null;
+    if (destination !== null) {
+      const open = await openEndorsements(runner, clone, record.name, binding.remote);
+      if (open.length) {
+        for (const entry of open) io.print(`An endorsement of ${record.name} is already open: ${entry.url ?? entry.branch}${entry.by ? ` (by ${entry.by})` : ''}.`);
+        if (!(await io.confirm(`Open another pull request for ${record.name}? If both merge, GitHub will flag the second as conflicting.`))) {
+          io.print(`Nothing pushed; ${record.name} keeps its open endorsement.`);
+          return success({ ...base, changed: false, branch: null, prUrl: open[0]!.url, compareUrl: null });
+        }
+      }
+    }
 
     if (teamJson.policy.publish === 'push') {
       printCard(record, scopeLabel, io);
@@ -98,13 +110,6 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
         io.print(prUrl);
         return success({ ...base, changed: true, branch, prUrl, compareUrl: null });
       }
-      // Re-running while the pull request is still open is not a failure: the branch was refreshed and the PR stands.
-      const reason = commandMessage(created.stderr, created.stdout);
-      if (/already exists/i.test(reason)) {
-        const existing = /https?:\/\/\S+/.exec(reason)?.[0] ?? null;
-        io.print(existing ?? `A pull request for ${branch} is already open.`);
-        return success({ ...base, changed: true, branch, prUrl: existing, compareUrl: existing ? null : compareUrl });
-      }
       io.print(compareUrl!);
       return failure(`The endorsement branch ${branch} was pushed but gh could not open the pull request: ${commandMessage(created.stderr, created.stdout)}. Open it at ${compareUrl}.`, { ...base, changed: true, branch, prUrl: null, compareUrl });
     }
@@ -144,50 +149,33 @@ function endorse(fresh: Team, id: string, scope: PublishScope): string | undefin
   return `${JSON.stringify(fresh, null, 2)}\n`;
 }
 
-/**
- * A pre-existing `publish/<name>` — or the `<name>-2` fallback safeWrite may retarget a stale-lease
- * push to — is reused (the lease then refreshes it) only when it is EXACTLY an abandoned attempt of
- * this same publish (D2, 2026-09-05 close-out walk): its tip forks from main, the fork touches only
- * team.json (plus the derived README.md on a generic remote), and that team.json is byte-for-byte
- * what this publish writes over the fork point's copy. Anything else — a review fixup on the
- * branch, a second endorsement squashed into the file, a project scope, someone else's branch,
- * unreadable content — is refused before anything is committed, because force-replacing it would
- * silently rewrite whoever's pull request is built on it. The lease cannot do this job: safeWrite
- * re-reads it after its own fetch, so it guards a move DURING the write, never a branch that
- * existed before it (§6.0). Existence is checked live on the remote; content from the fetched objects.
- */
-async function assertBranchesReusable(runner: Runner, clone: string, branches: readonly string[], id: string, scope: PublishScope, remote: string): Promise<void> {
-  // One round trip for every candidate name; each tip that exists is then vetted, in order, from the fetched objects.
-  const heads = await runner.run('git', ['ls-remote', '--heads', 'origin', ...branches.map((branch) => `refs/heads/${branch}`)], { cwd: clone });
-  if (heads.code !== 0) throw new Error(`Could not check the remote for ${branches.join(', ')}: ${commandMessage(heads.stderr, heads.stdout)}`);
-  const tips = new Map<string, string>();
-  for (const line of heads.stdout.split('\n')) {
-    const [sha, ref] = line.trim().split(/\s+/);
-    if (sha && ref) tips.set(ref, sha);
-  }
-  for (const branch of branches) {
-    const sha = tips.get(`refs/heads/${branch}`);
-    if (!sha) continue;
-    if (await isExactlyThisEndorsement(runner, clone, sha, id, scope, remote)) continue;
-    const where = compare(remote, branch) ?? `${stripRemoteCredentials(remote)} — branch ${branch}`;
-    throw new Error(`${branch} already exists on the remote with a different endorsement (${where}). Merge or close its pull request, or delete the branch on the host — or with \`git -C ${clone} push --no-verify origin --delete ${branch}\`, since the push guard refuses an unattributed deletion (D12) — then retry.`);
-  }
-}
+interface OpenEndorsement { branch: string; by: string | null; url: string | null; }
 
-async function isExactlyThisEndorsement(runner: Runner, clone: string, sha: string, id: string, scope: PublishScope, remote: string): Promise<boolean> {
-  const git = (args: string[]) => runner.run('git', args, { cwd: clone });
-  const fork = await git(['merge-base', sha, 'origin/main']);
-  const forkPoint = fork.stdout.trim();
-  if (fork.code !== 0 || !forkPoint) return false;
-  const touched = await git(['diff', '--name-only', forkPoint, sha]);
-  if (touched.code !== 0) return false;
-  const paths = touched.stdout.split('\n').filter(Boolean);
-  const allowed = new Set(isGitHubRemote(remote) ? ['team.json'] : ['team.json', 'README.md']);
-  if (!paths.includes('team.json') || paths.some((path) => !allowed.has(path))) return false;
-  const [theirs, base] = await Promise.all([git(['show', `${sha}:team.json`]), git(['show', `${forkPoint}:team.json`])]);
-  if (theirs.code !== 0 || base.code !== 0) return false;
-  try { return theirs.stdout === endorse(parseJson(teamSchema, base.stdout, `${forkPoint}:team.json`), id, scope); }
-  catch { return false; }
+/**
+ * Endorsement branches already on the remote for this skill: the fresh form `publish/<name>-<handle>-<id8>`
+ * plus the pre-R2 forms `publish/<name>` and `publish/<name>-2` a team may still carry — one `ls-remote`
+ * round trip, before anything is committed. With gh on a GitHub remote, each branch's open PR URL is
+ * looked up and a branch whose PR is no longer open is dropped as a leftover; without gh every match is
+ * listed. A sibling skill named `<name>-<x>` can match the glob: the list feeds a note and a y/N, never
+ * a refusal, so a false match costs one line.
+ */
+async function openEndorsements(runner: Runner, clone: string, name: string, remote: string): Promise<OpenEndorsement[]> {
+  const heads = await runner.run('git', ['ls-remote', '--heads', 'origin', `refs/heads/publish/${name}`, `refs/heads/publish/${name}-*`], { cwd: clone });
+  if (heads.code !== 0) throw new Error(`Could not check the remote for open endorsements of ${name}: ${commandMessage(heads.stderr, heads.stdout)}`);
+  const branches = heads.stdout.split('\n').map((line) => line.trim().split(/\s+/)[1]).filter((ref): ref is string => Boolean(ref)).map((ref) => ref.replace(/^refs\/heads\//, ''));
+  const ownerRepo = isGitHubRemote(remote) && (await ghState(runner)).authenticated ? githubOwnerRepo(remote) : null;
+  const open: OpenEndorsement[] = [];
+  for (const branch of branches) {
+    const fresh = branch.startsWith(`publish/${name}-`) && /-[0-9a-f]{8}$/.test(branch);
+    const by = fresh ? branch.slice(`publish/${name}-`.length, -9) : null;
+    let url: string | null = null;
+    if (ownerRepo) {
+      const listed = await runner.run('gh', ['pr', 'list', '-R', ownerRepo, '--head', branch, '--state', 'open', '--json', 'url', '-q', '.[0].url']);
+      if (listed.code === 0) { url = listed.stdout.trim() || null; if (!url) continue; }
+    }
+    open.push({ branch, by: by || null, url });
+  }
+  return open;
 }
 function printCard(record: Awaited<ReturnType<typeof findSkill>> & {}, scopeLabel: string, io: Prompter): void {
   if (!record) return;
