@@ -81,8 +81,10 @@ export async function missingRequirements(requires: readonly string[]): Promise<
       ? ['python3', ['-c', 'import importlib, sys; importlib.import_module(sys.argv[1])', requirement.slice('python3:'.length)]]
       : ['/bin/sh', ['-c', 'command -v -- "$1"', 'probe', requirement]] as const;
     const present = await new Promise<boolean>((resolvePromise) => {
+      // 30s: generous enough that concurrent-startup disk contention can't fake a missing tool
+      // (measured: pandas probed as missing under a 14-process wave with a 10s cap).
       const child = spawn(file, args as string[], { stdio: 'ignore' });
-      const timer = setTimeout(() => { child.kill('SIGKILL'); }, 10_000);
+      const timer = setTimeout(() => { child.kill('SIGKILL'); }, 30_000);
       child.on('error', () => { clearTimeout(timer); resolvePromise(false); });
       child.on('close', (code) => { clearTimeout(timer); resolvePromise(code === 0); });
     });
