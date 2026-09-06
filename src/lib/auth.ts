@@ -154,7 +154,7 @@ export function setIdentity(config: Config, identity: Identity): void {
  * `token` from before Decision 2, which is dropped rather than carried forward.
  */
 export function bindTeam(config: Config, name: string, entry: { remote: string; handle: string }): TeamConfig {
-  const current: Record<string, unknown> = { ...(config.teams[name] ?? {}) };
+  const current: Record<string, unknown> = { ...(Object.hasOwn(config.teams, name) ? config.teams[name] : {}) };
   delete current.token;
   const bound: TeamConfig = { ...current, remote: normalizeRemote(entry.remote), handle: entry.handle };
   config.teams[name] = bound;
@@ -176,6 +176,8 @@ export function assertBindable(config: Config, team: string, remote: string): vo
   const normalized = normalizeRemote(remote);
   const byRemote = teamByRemote(config, normalized);
   if (byRemote && byRemote[0] !== team) throw new Error(`${normalized} is already configured as team ${byRemote[0]}.`);
-  const existing = config.teams[team];
+  // An own key only: the teams record inherits Object.prototype, so `constructor` or `toString` would
+  // otherwise read as a configured team — after the GitHub repo exists or the roster entry is pushed.
+  const existing = Object.hasOwn(config.teams, team) ? config.teams[team] : undefined;
   if (existing && existing.remote !== normalized) throw new Error(`Team ${team} is configured for ${existing.remote}, not ${normalized}; pass --as <other-name>.`);
 }

@@ -121,6 +121,19 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       }
     }
 
+    const clone = store.teamClone(teamName);
+    // A configured team whose clone is gone or incomplete (an interrupted `team leave`, a wiped
+    // directory) is not set up: every later verb fails on it, and the resumed step above never
+    // re-clones. The wizard says so HERE — before it prompts for a skill, invites anyone or writes
+    // the hook — and names the repair that actually works: `team join` re-clones an absent directory
+    // but refuses one that is present and incomplete, which must be moved aside first. (Interim:
+    // whether setup should re-clone by itself is a product call recorded in the close-out.)
+    if (steps.team === 'skipped') {
+      const repair = `\`terum-skills team join ${stripRemoteCredentials(remote)}\``;
+      if (!(await exists(clone))) return failed(new Error(`Team ${teamName} is configured but its clone at ${clone} is missing; run ${repair} to restore it, then re-run setup.`), role, teamName, remote, steps);
+      if (!(await exists(join(clone, 'team.json')))) return failed(new Error(`Team ${teamName} is configured, but ${clone} exists and is not a complete clone of ${stripRemoteCredentials(remote)}; move it aside, run ${repair} to restore it, then re-run setup.`), role, teamName, remote, steps);
+    }
+
     if (role === 'creator') {
       const root = AGENT_PATHS['claude-code'].global(args.home ?? homedir());
       const available = await unsharedSkills(root, await store.read());
@@ -167,12 +180,6 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     const hookOutcome = await verbs.offerHook(io, resolvedHook(store, args.home, args.hook));
     steps.hook = hookOutcome === 'installed' || hookOutcome === 'replaced' ? 'done' : 'skipped';
 
-    const clone = store.teamClone(teamName);
-    // A configured team whose clone is gone (an interrupted `team leave`, a wiped directory) is not
-    // set up: every later verb fails on it, and the resumed step above never re-clones. The wizard
-    // says so and names the repair rather than confirming a broken machine. (Interim: whether setup
-    // should re-clone by itself is a product call recorded in the close-out.)
-    if (steps.team === 'skipped' && !(await exists(join(clone, 'team.json')))) return failed(new Error(`Team ${teamName} is configured but its clone at ${clone} is missing; run \`terum-skills team join ${stripRemoteCredentials(remote)}\` to restore it, then re-run setup.`), role, teamName, remote, steps);
     // Every step above is durable by here; this closing summary reads the disposable clone (§4.2),
     // so a read-back problem must not turn a finished wizard into a failure (the rule team join and
     // team leave already follow). Only the clone reads sit inside the try, and the roster is read

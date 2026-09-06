@@ -37,6 +37,19 @@ describe('skills (§5.3 canonical frontmatter)', () => {
     expect(await canonicalDigest(flat)).not.toBe(await canonicalDigest(nested));
   });
 
+  it.skipIf(sep === '\\')('pins the digest wire format: the persisted `config.shared[].baseline` is sha256 over sorted `path:<sha256>\\n` records, with a `:` in a filename left as it is', async () => {
+    const root = await temporaryDirectory();
+    const dir = join(root, 'skill');
+    await mkdir(join(dir, 'docs'), { recursive: true });
+    await writeFile(join(dir, 'a.md'), 'A\n'); await writeFile(join(dir, 'docs', 'b.md'), 'B\n');
+    // This constant IS the on-disk record format of config.shared[].baseline: changing it moves every
+    // stored baseline and needs a migration, so a red line here is not fixed by pasting the new hex.
+    expect(await canonicalDigest(dir)).toBe('sha256:bfb8b2671c85b3fd72fc32d22dc345b5f09c3590e8cb996a6a89b6d884fdb3eb');
+    await writeFile(join(dir, 'notes:2026-09.md'), 'N\n');
+    const records = [['a.md', 'A\n'], ['docs/b.md', 'B\n'], ['notes:2026-09.md', 'N\n']].map(([path, content]) => `${path}:${createHash('sha256').update(content!).digest('hex')}\n`).join('');
+    expect(await canonicalDigest(dir)).toBe(`sha256:${createHash('sha256').update(records).digest('hex')}`);
+  });
+
   it.skipIf(sep === '\\')('gives two files and one file whose name spells their digest records different digests (the record stream is prefix-free)', async () => {
     const root = await temporaryDirectory();
     const two = join(root, 'two'); const one = join(root, 'one');

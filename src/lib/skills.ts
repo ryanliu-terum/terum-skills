@@ -76,12 +76,17 @@ export async function canonicalDigest(root: string): Promise<string> {
 }
 
 /**
- * The digest record's path field with the record's own separators escaped (`\`, `:`, newline), so
- * the record stream is prefix-free and no two file lists share a digest. Every path a real skill
- * uses contains none of them and hashes to exactly the bytes it did before.
+ * The digest record's path field with `\` and newline escaped, so the record stream is prefix-free
+ * and no two file lists share a digest. A record is `key:<64 hex>\n`: the hash field is fixed-width,
+ * so the record's final `:` is always the separator and a `:` inside a path needs no escape — and
+ * must not get one, because `config.shared[].baseline` persists this digest with no version field
+ * and a `:`-bearing filename is legal on POSIX. Every path that can reach a stored baseline therefore
+ * hashes to exactly the bytes it did before, except one carrying a literal newline (the ambiguity the
+ * escape exists to close); a backslash path never reaches one, because `assertSafePath` refuses it
+ * in the mirror before a baseline is recorded.
  */
 function digestKey(relative: string): string {
-  return relative.replace(/[\\:\n]/g, (char) => (char === '\n' ? '\\n' : `\\${char}`));
+  return relative.replace(/[\\\n]/g, (char) => (char === '\n' ? '\\n' : `\\${char}`));
 }
 
 /** Canonical digest for a single SKILL.md, used to authorize a managed-field-only refresh. */

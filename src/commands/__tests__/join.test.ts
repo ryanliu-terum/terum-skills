@@ -36,6 +36,17 @@ describe('team join (§6, §5.4 identity)', () => {
     expect((await git(['log', '-1', '--format=%s', 'main'], fixture.bare)).trim()).toBe('ajay-t: join');
   });
 
+  it('a prototype-named local team (`--as toString`) joins and binds: the binding check reads own keys, so the roster push is not followed by a refusal', async () => {
+    const { fixture, store, runner } = await setup();
+    const result = await join({ target: REMOTE, config: store, runner, as: 'toString' }, new ScriptedPrompter(answers()));
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value).toMatchObject({ team: 'toString', handle: 'me' });
+    const teams = (await store.read()).teams;
+    expect(Object.hasOwn(teams, 'toString')).toBe(true);
+    expect(teams.toString).toMatchObject({ handle: 'me' });
+    expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare)).handle).toBe('me');
+  });
+
   it('a completed join survives an unreadable settings.json: ok, one skipped-hook line, roster entry pushed, settings bytes untouched', async () => {
     const { fixture, store, runner } = await setup();
     const settingsFile = pathJoin(fixture.root, 'settings.json');

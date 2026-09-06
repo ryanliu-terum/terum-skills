@@ -25,6 +25,23 @@ describe('README generator (§9)', () => {
     expect(first).not.toContain('- @bea — Bea');
   });
 
+  it('counts a teammate once per skill even when they hold it at two scopes (D38 counts people, not placements)', () => {
+    const twoScopes = generateReadme({
+      ...data,
+      people: [{ ...data.people[0]!, installed: [
+        { id: ID_A, version: null, scope: { kind: 'global' }, since: '2026-09-04' },
+        { id: ID_A, version: null, scope: { kind: 'project', project: 'app' }, since: '2026-09-04' },
+      ] }],
+    });
+    expect(twoScopes).toContain('| first | testing | First skill | 1 | global | aaaaaaaa |');
+  });
+
+  it('shows a crafted folder name as data in the Skill cell: neither a Markdown link nor an HTML anchor renders', () => {
+    const hostile = generateReadme({ ...data, skills: [{ ...data.skills[1]!, name: '<a href="https://evil.example">[click]</a>' }] });
+    expect(hostile).not.toContain('<a href');
+    expect(hostile).toContain('&lt;a href="https://evil.example"&gt;\\[click\\]&lt;/a&gt;');
+  });
+
   it('rejects malformed marker layouts without changing the input', () => {
     for (const malformed of [
       `Intro\n${'<!-- terum-skills:begin -->'}\n`,
@@ -87,7 +104,8 @@ describe('README generator (§9)', () => {
     expect(block).toContain('- @amy — Amy &lt;!-- terum-skills:end -->');
     expect(block).toContain('### Amy <amy@example.com> &lt;!-- terum-skills:end -->');
     const row = block.split('\n').find((line) => line.startsWith('| first'))!;
-    expect(row).toContain('| first\\|&lt;!-- terum-skills:end --> | test\\\\ing\\|x | Ends here &lt;!-- terum-skills:end --> |');
+    // The Skill cell alone also neutralizes angle brackets (an HTML anchor vector); the free-text cells keep `-->` as text.
+    expect(row).toContain('| first\\|&lt;!-- terum-skills:end --&gt; | test\\\\ing\\|x | Ends here &lt;!-- terum-skills:end --> |');
     expect(row).toContain('| project: app\\|&lt;!-- terum-skills:end --> |');
     // A name the CLI would refuse to create gets no install command rather than an escaped, unrunnable one.
     expect(row.split(/(?<!\\)\|/).at(-2)?.trim()).toBe('—');

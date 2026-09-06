@@ -135,6 +135,17 @@ describe('sync --hook (§3, §6)', () => {
     await expect(access(join(store.root, 'run', 'other.stamp'))).resolves.toBeUndefined();
   });
 
+  it('an up-to-date placement never contends: a held target lock over it is neither a block nor a review count', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const release = await lockTarget(join(home, '.claude', 'skills'), 'sample');
+    try {
+      const io = new ScriptedPrompter();
+      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+      expect(io.lines.filter((line) => line.startsWith('Blocked'))).toEqual([]);
+    } finally { await release(); }
+  });
+
   it('reports a placement whose target lock another process holds as blocked and leaves it untouched', async () => {
     const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);

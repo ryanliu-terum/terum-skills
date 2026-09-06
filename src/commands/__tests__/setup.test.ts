@@ -35,16 +35,43 @@ describe('setup (§6.1)', () => {
     expect(io.lines).toContain(`Team team is already configured on this machine.`);
   });
 
-  it('refuses a configured team whose clone is missing, naming the repair, instead of confirming a machine every verb would fail on', async () => {
+  it('refuses a configured team whose clone is missing before it prompts for or writes anything else, naming the repair', async () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
+    const home = join(fixture.root, 'home');
+    // A shareable skill and a hook offer both sit after the team step; neither may run on a machine
+    // the wizard is about to refuse, so the repair message is what the user gets, not a share ENOENT.
+    await skillUnder(home);
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    let hookOffers = 0;
+    const result = await run({ config: store, home, runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+      offerHook: async () => { hookOffers += 1; return 'present'; },
+    } }, io);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`team join ${fixture.bare}`), value: { steps: { team: 'skipped' } } });
+    expect(result.ok ? '' : result.error).toContain('clone at');
+    expect(hookOffers).toBe(0);
+    expect(result.ok ? undefined : result.value?.steps.hook).toBeUndefined();
+    expect(io.asked).toEqual([]);
+    expect(io.lines).not.toContain('Next, from any terminal:');
+    expect(io.lines).not.toContain('Members:');
+  });
+
+  it('names the move-aside repair when the clone directory survives without team.json', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    // An interrupted `team leave` dies inside its rm -rf, so the directory survives; ensureClone
+    // refuses that state, so setup must not name a bare `team join` as the whole repair.
+    await rm(join(clone, 'team.json'), { force: true });
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter();
     const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
       offerHook: async () => 'present',
     } }, io);
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`team join ${fixture.bare}`), value: { steps: { team: 'skipped', hook: 'skipped' } } });
-    expect(result.ok ? '' : result.error).toContain('clone at');
+    expect(result.ok).toBe(false);
+    expect(result.ok ? '' : result.error).toContain(`${clone} exists and is not a complete clone`);
+    expect(result.ok ? '' : result.error).toContain('move it aside');
     expect(io.lines).not.toContain('Members:');
   });
 

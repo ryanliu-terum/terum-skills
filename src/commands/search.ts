@@ -37,12 +37,18 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
           && (!args.author || author.toLowerCase().includes(args.author.toLowerCase())) && Boolean(inProject);
       });
         if (many && filtered.length) io.print(`${team}:`);
-        // One git child per hit, all at once (ls does the same); the print order is the filter order.
-        const latest = await Promise.all(filtered.map((skill) => latestTree(runner, clone, skill.name)));
+        // Each hit's latest tree, eight at a time (the fan-out is the size of the match list, so it is
+        // bounded rather than one child per hit at once); one unresolvable folder — present on disk but
+        // not in HEAD — costs one row and one reported line, never the team's other hits. The print
+        // order is the filter order.
+        const latest: PromiseSettledResult<string>[] = [];
+        for (let index = 0; index < filtered.length; index += 8) latest.push(...await Promise.allSettled(filtered.slice(index, index + 8).map((skill) => latestTree(runner, clone, skill.name))));
         const counts = installCounts(people);
         for (const [index, skill] of filtered.entries()) {
         const endorsed = skillEndorsement(teamJson, skill.id);
-        const hit = { team, id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: shortHash(latest[index]!), endorsed };
+        const settled = latest[index]!;
+        if (settled.status === 'rejected') io.print(`${team}/${skill.name}: ${settled.reason instanceof Error ? settled.reason.message : String(settled.reason)}`);
+        const hit = { team, id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: settled.status === 'fulfilled' ? shortHash(settled.value) : '—', endorsed };
         hits.push(hit);
         io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed }));
         }

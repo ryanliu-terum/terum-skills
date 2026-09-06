@@ -28,10 +28,15 @@ export interface ReadmeData {
 
 type EndorsementTeam = Pick<ReadmeData['team'], 'global' | 'projects'>;
 
-/** Install totals include archived people: they are historical installs, not active membership. */
+/**
+ * Install totals include archived people: they are historical installs, not active membership.
+ * D38: the number is how many TEAMMATES hold the skill, not how many placements they hold — install
+ * dedupes `installed` on (id, scope), so one person who installed the same id globally and again
+ * into a project legitimately carries two entries and must still count once.
+ */
 export function installCounts(people: readonly Person[]): Map<string, number> {
   const installs = new Map<string, number>();
-  for (const person of people) for (const item of person.installed) installs.set(item.id, (installs.get(item.id) ?? 0) + 1);
+  for (const person of people) for (const id of new Set(person.installed.map((item) => item.id))) installs.set(id, (installs.get(id) ?? 0) + 1);
   return installs;
 }
 
@@ -73,9 +78,10 @@ export function generateReadme(data: ReadmeData): string {
       // command a reader copies: a folder name the CLI itself would refuse to create gets no command.
       const command = repo && isSkillName(skill.name) ? `\`npx -y terum-skills@latest install ${repo}/${skill.name}\`` : '—';
       // The Skill column shows the folder name as data even when the CLI would refuse it: a bracket
-      // pair there could otherwise label a link. A no-op for every name the CLI accepts. (Whether the
-      // free-text columns may render Markdown at all is a product call, recorded in the close-out.)
-      const shownName = cell(skill.name).replace(/[[\]]/g, '\\$&');
+      // pair there could otherwise label a link, and an angle bracket an HTML anchor. A no-op for every
+      // name the CLI accepts. (Whether the free-text columns may render Markdown at all is a product
+      // call, recorded in the close-out.)
+      const shownName = cell(skill.name).replace(/[[\]]/g, '\\$&').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       lines.push(`| ${shownName} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | — | ${command} |`);
     }
   }

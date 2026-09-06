@@ -1,7 +1,7 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { inspect, lockTarget, place, quarantineDrift, remove } from '../lib/placer.js';
+import { inspect, lockTarget, place, quarantineDrift, remove, snapshotIfPresent } from '../lib/placer.js';
 import { NonInteractivePrompter, Prompter, PromptClosedError } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
@@ -129,6 +129,12 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
         // The ledger is provenance for the exact placement, including a particular project checkout.
         // Re-resolving a global path would use this process's HOME and can update the wrong machine.
         const root = dirname(path);
+        // The read-only "nothing to do" decision comes first, outside the lock: an up-to-date placement —
+        // the steady state of every session-start sync — never contends for a target another run holds,
+        // and never reports that run as a block. The full decision is re-taken under the lock below.
+        const repoSnapshot = await snapshotSkillDirectory(source);
+        const placedNow = await snapshotIfPresent(path);
+        if (placedNow?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
         // The target lock is taken before anything about the destination is decided and held across
         // the collision check, the quarantine move and the placement — install's shape — so the
         // ownership reading that authorizes a destructive `replace` cannot go stale under it.
@@ -146,7 +152,6 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
           const drift = await quarantineDrift(path, entry.fingerprint, join(store.root, 'quarantine'));
           const current = drift.current;
           if (drift.quarantined) { notice(`Local changes at ${path} moved to ${drift.quarantined}.`); changed = true; }
-          const repoSnapshot = await snapshotSkillDirectory(source);
           if (current?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
           const result = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot, runner, quarantineRoot: join(store.root, 'quarantine') });
           const renamed = basename(path) !== skill.name;

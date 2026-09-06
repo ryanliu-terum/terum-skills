@@ -94,6 +94,15 @@ describe('search (§6)', () => {
     expect(await run({ term: 'description needle', config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'sample' })] });
   });
 
+  it('a skill folder present on disk but not in HEAD costs one row and one reported line, never the team\'s other hits', async () => {
+    const { store, clone } = await searchFixture('team', [{ name: 'healthy', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
+    // A safeWrite that lost its clone lock skips its cleanup, and `reset --hard` never removes an untracked folder.
+    await mkdir(join(clone, 'skills', 'ghost')); await writeFile(join(clone, 'skills', 'ghost', 'SKILL.md'), skillFile({ name: 'ghost', description: 'needle too', category: 'testing', author: 'Seed <seed@example.com>', id: '33333333-3333-4333-8333-333333333333' }));
+    const io = new ScriptedPrompter();
+    expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: expect.arrayContaining([expect.objectContaining({ name: 'healthy', latest: expect.not.stringMatching(/^—$/) }), expect.objectContaining({ name: 'ghost', latest: '—' })]) });
+    expect(io.lines.join('\n')).toContain('team/ghost: Could not resolve the latest version of ghost');
+  });
+
   it('skips and reports a malformed skill folder while returning healthy matches', async () => {
     const { store, clone } = await searchFixture('team', [{ name: 'healthy', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
     await mkdir(join(clone, 'skills', 'broken')); await writeFile(join(clone, 'skills', 'broken', 'README.md'), 'no skill frontmatter');

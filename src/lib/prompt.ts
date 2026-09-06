@@ -60,7 +60,11 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
   const output = streams.output ?? processStdout;
   const interactive = streams.interactive ?? Boolean(input.isTTY);
   let outputBroken = false;
-  void streams.outputClosed?.then(() => { outputBroken = true; });
+  // Settlement, not fulfilment, is the signal (the field's doc comment says so): a producer that
+  // reports the broken output by REJECTING has lost it just as surely, and a fulfilment-only handler
+  // would leave that rejection unhandled on a promise nobody subscribes to — process-fatal.
+  const markBroken = () => { outputBroken = true; };
+  void streams.outputClosed?.then(markBroken, markBroken);
 
   async function ask(question: string): Promise<string> {
     if (!interactive) throw new PromptClosedError(question.trim(), 'not-interactive');
@@ -69,7 +73,8 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
     const closed = new Promise<never>((_, reject) => rl.once('close', () => reject(new PromptClosedError(question.trim(), 'closed'))));
     // A pending question also loses to the output breaking under it: the broken-pipe signal arrives
     // from the event loop, after the question was already written, so a pre-check alone is not enough.
-    const broken = streams.outputClosed?.then<never>(() => { throw new PromptClosedError(question.trim(), 'output-closed'); });
+    const failClosed = (): never => { throw new PromptClosedError(question.trim(), 'output-closed'); };
+    const broken = streams.outputClosed?.then<never>(failClosed, failClosed);
     try {
       return await Promise.race(broken ? [rl.question(question), closed, broken] : [rl.question(question), closed]);
     } finally {
