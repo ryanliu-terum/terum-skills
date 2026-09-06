@@ -172,3 +172,48 @@ Findings worth keeping:
 
 Raw outputs in the session scratchpad (`sb-*.json`); transcripts in temp dirs,
 uncommitted by design.
+
+## Probe #5 — the SkillsBench corpus (2026-09-06)
+
+Ran our engine over the real 14-skill SkillsBench control corpus from
+`~/skill-eval-comparison/corpus`, with cases generated mechanically from each
+source task: instruction body → `task`, environment files → fixture, and the
+task's own **pytest verifier as a `command_succeeds` check** (rev 9) invoked from
+outside the sandbox so the agent can't read the answer key. `requires` (rev 8)
+declared per case from verifier imports; python deps served from a dedicated
+venv on PATH (`~/skill-eval-comparison/.venv-terum-evals`). Sonnet, 2×k=1 waves,
+agent budget 200→270s.
+
+Headline, in native metrics per the 2026-09-02 decision:
+
+- **Corpus direction agrees:** our mean lift **+0.17** (win=+1 scale, 9 scored
+  skills) vs SkillsBench's **+14pp** — both positive, same story.
+- **Per-skill ranking does not:** Spearman ρ **−0.07** vs SkillsBench all-harness,
+  **−0.22** vs its claude-code harness column (n=9) — sitting right beside
+  SkillEvaluator's ρ −0.11 from the 2026-09-03 rerun. **Our engine replicates the
+  cross-framework finding with itself as the fifth framework**: frameworks agree
+  a skill corpus helps overall and scramble the per-skill order. This is the
+  strongest empirical backing yet for the recorded product rules — band verdicts
+  with attribution, never lift leaderboards (D29).
+
+Per-skill (w1/w2 outcomes; SB lift_pp all-harness / claude-code):
+
+| skill | ours | SB | note |
+|---|---|---|---|
+| docx | win, tie → +0.5 | +38.9 / +33.3 | genuine verifier-decided win in w1 |
+| lab-unit-harmonization | skip→fix→win → +1.0 | +7.4 / 0.0 | candidate passed verifier; baseline run died |
+| pdf, xlsx | tie, win → +0.5 | +22.2, +5.6 | w2 wins via baseline run-failure, not verifier — weak evidence |
+| pptx | loss, loss → −1.0 | +13.0 / +33.3 | genuine disagreement: baseline passed verifier, candidate timed out/failed |
+| mesh, timeseries | both-pass ties → 0.0 | +40.7, −5.6 | ceiling: sonnet baseline clears them skill-less |
+| geospatial, jax | both-fail ties → 0.0 | +64.8, +5.6 | floor: neither arm clears the verifier under our budget |
+| d3, pid-controller | both-arms-failed holes | +9.3, −5.6 | 270s/25-turn budget too tight; excluded, greyed |
+| suricata, lean4, ffmpeg | environment_skips | — | rev 8 skips (suricata/lean binaries, torch) — visible, never fake NEUTRALs |
+
+Fidelity limits, honestly: k=1×2 with a 270 s / 25-turn budget vs SkillsBench's
+long-budget Docker trials (its verifier timeouts run to 22 min); several "wins"
+came from baseline infra failures rather than verifier differentiation; ceiling
+(strong sonnet baseline) and floor (budget) effects compress everything toward
+ties — the same compression the §5b rerun saw. Engine-side, the run banked two
+fixes: the 30 s requirement-probe timeout (10 s faked a missing pandas under
+14-process contention) and field experience for `requires`/`command_succeeds`
+(rev 8/9), which consumed a foreign benchmark's verifiers unmodified.
