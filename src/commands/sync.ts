@@ -120,7 +120,7 @@ export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter)
       }
     }
     // Reconciliation never prompts, but it reports — through the same notice channel.
-    await reconcileShared(store, runner, childIo, skipped);
+    await reconcileShared(store, runner, childIo, skipped, defer);
     // Existing ledger paths drive every later decision. A folder merely present on disk is never
     // adopted, quarantined, or deleted without a ledger entry.
     const currentConfig = await store.read();

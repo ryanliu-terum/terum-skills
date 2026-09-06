@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { reconcileShared, run } from '../share.js';
@@ -183,6 +183,22 @@ describe('share (§5.3)', () => {
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(local);
     expect((await store.read()).shared[id]!.baseline).toBe(baseline);
     expect(io.lines.join('\n')).toMatch(/diverged \(source sha256:.*repo sha256:/);
+  });
+
+  it('a diverged shared skill is undone work: sync defers it and withholds the team stamp instead of silencing the notice for an hour', async () => {
+    const { fixture, store } = await sharedFixture();
+    const id = Object.keys((await store.read()).shared)[0]!;
+    const source = (await store.read()).shared[id]!.source;
+    await writeFile(join(source, 'SKILL.md'), (await readFile(join(source, 'SKILL.md'), 'utf8')).replace('description: x', 'description: local'));
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', (await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).replace('description: x', 'description: remote'));
+    const io = new ScriptedPrompter();
+    expect(await sync({ config: store }, io)).toMatchObject({ ok: true, value: { deferred: ['sample'] } });
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(io.lines.join('\n')).toMatch(/diverged/);
+    // Resolved, the next sync completes and stamps the team.
+    expect((await run({ keepSource: id, config: store }, new ScriptedPrompter())).ok).toBe(true);
+    expect(await sync({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: [] } });
+    await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
   });
 
   it('treats a missing baseline as divergence without changing either copy or restoring the baseline', async () => {

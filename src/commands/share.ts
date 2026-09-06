@@ -74,18 +74,24 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
 }
 
-/** §5.3 three-way reconciler, called by sync after its pending replay; `skipTeams` are the clones sync could not refresh this run. */
-export async function reconcileShared(store: ConfigStore, runner: Runner, io: Prompter, skipTeams: ReadonlySet<string> = new Set()): Promise<void> {
+/**
+ * §5.3 three-way reconciler, called by sync after its pending replay; `skipTeams` are the clones sync
+ * could not refresh this run. Every report-and-continue exit is undone work: it is handed to `defer`
+ * with its team and the skill's label, so the team is not stamped "fully synced" and the hook's review
+ * count includes it — the same rule the placement loop follows (rulings walk R6, 2026-09-06). Before,
+ * a diverged shared skill printed its remedy once and the hourly stamp silenced it.
+ */
+export async function reconcileShared(store: ConfigStore, runner: Runner, io: Prompter, skipTeams: ReadonlySet<string> = new Set(), defer: (team: string, label: string) => void = () => undefined): Promise<void> {
   const config = await store.read();
   for (const [id, tracked] of Object.entries(config.shared)) {
     if (skipTeams.has(tracked.team)) continue;
     try {
       const clone = store.teamClone(tracked.team);
-      if (!(await exists(tracked.source))) { io.print(`Shared source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use share --relocate or --forget.`); continue; }
+      if (!(await exists(tracked.source))) { io.print(`Shared source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use share --relocate or --forget.`); defer(tracked.team, id.slice(0, 8)); continue; }
       let record;
       try { record = (await skillRecords(clone, tracked.team)).find((item) => item.id === id); }
-      catch (error) { io.print(`Could not read shared ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`); continue; }
-      if (!record) { io.print(`Repository copy for shared ${id.slice(0, 8)} is missing; run share again to restore it.`); continue; }
+      catch (error) { io.print(`Could not read shared ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, id.slice(0, 8)); continue; }
+      if (!record) { io.print(`Repository copy for shared ${id.slice(0, 8)} is missing; run share again to restore it.`); defer(tracked.team, id.slice(0, 8)); continue; }
       const team = await readTeamPolicy(clone);
       const fresh = await store.read();
       const author = `${fresh.display_name ?? ''} <${fresh.email ?? ''}>`;
@@ -104,14 +110,15 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const declared = parseSkillFrontmatter(repaired);
     const targetName = declared.ok ? declared.data.name : record.name;
     if (targetName !== record.name) {
-      if (!isSkillName(targetName)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); continue; }
-      if ((await skillRecords(clone, tracked.team)).some((item) => item.name === targetName && item.id !== id)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; another skill already uses that name.`); continue; }
+      if (!isSkillName(targetName)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); defer(tracked.team, record.name); continue; }
+      if ((await skillRecords(clone, tracked.team)).some((item) => item.name === targetName && item.id !== id)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; another skill already uses that name.`); defer(tracked.team, record.name); continue; }
     }
     const sourceDigest = await canonicalDigest(tracked.source);
     const repoDigest = await canonicalDigest(record.directory);
     const baseline = tracked.baseline;
     if (!baseline || (sourceDigest !== baseline && repoDigest !== baseline)) {
       io.print(`Shared skill ${record.name} diverged (source ${sourceDigest}, repo ${repoDigest}); choose share --keep-source ${id} or --keep-repo ${id}.`);
+      defer(tracked.team, record.name);
       continue;
     }
     const binding = fresh.teams[tracked.team];
@@ -133,7 +140,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
         // The --allow-privileged gate is a property of publishing a source tree, not of the first
         // share: hooks/ or .claude-plugin/ that appeared since are held back — baseline untouched, so
         // the notice repeats every sync — until the author re-consents with --keep-source --allow-privileged.
-        if (await hasPrivilegedContent(tracked.source) && !(await hasPrivilegedContent(record.directory))) { io.print(`Shared skill ${record.name} now contains plugin or hook definitions; run share --keep-source ${id} --allow-privileged after reviewing them.`); continue; }
+        if (await hasPrivilegedContent(tracked.source) && !(await hasPrivilegedContent(record.directory))) { io.print(`Shared skill ${record.name} now contains plugin or hook definitions; run share --keep-source ${id} --allow-privileged after reviewing them.`); defer(tracked.team, record.name); continue; }
       // A pre-image with the prior author can only receive a managed-field refresh. Land that
       // narrow write first, then the normal author-owned content mirror on the replayed tree.
       await refreshRepo();
@@ -159,6 +166,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
       }
     } catch (error) {
       io.print(`Could not reconcile shared ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`);
+      defer(tracked.team, id.slice(0, 8));
     }
   }
 }
