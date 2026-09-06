@@ -202,7 +202,9 @@ describe('sync --hook (§3, §6)', () => {
     const path = join(home, '.claude', 'skills', 'sample');
     await rm(path, { recursive: true, force: true }); await writeFile(path, 'user-owned, not a placement');
     const io = new ScriptedPrompter();
-    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+    // Under §8's completeness rule a foreign collision is undone work — deferred, and the team's stamp
+    // withheld — so the load-bearing assertion is the exact line: the collision notice, not a read error.
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
     expect(io.lines.filter((line) => line === `Blocked ${path}: ${path} already exists and is not a placement this tool owns; leaving both untouched.`)).toHaveLength(1);
     expect(await readFile(path, 'utf8')).toBe('user-owned, not a placement');
   });
@@ -213,7 +215,8 @@ describe('sync --hook (§3, §6)', () => {
     const path = join(home, '.claude', 'skills', 'sample'); const mirror = join(home, 'mirror');
     await cp(path, mirror, { recursive: true }); await rm(path, { recursive: true, force: true }); await symlink(mirror, path);
     const io = new ScriptedPrompter();
-    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+    // Deferred under §8's completeness rule (see the plain-file case above); the exact line is the assertion.
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
     expect(io.lines.filter((line) => line === `Blocked ${path}: ${path} already exists and is not a placement this tool owns; leaving both untouched.`)).toHaveLength(1);
     expect(await readFile(join(mirror, 'SKILL.md'), 'utf8')).toContain('description: old');
   });
