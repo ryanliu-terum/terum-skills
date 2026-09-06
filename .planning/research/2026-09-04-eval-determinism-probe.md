@@ -91,3 +91,39 @@ band-edge skill will still wobble. And the headless note is a measurement
 trade-off recorded deliberately: arms no longer measure whether an agent would
 stop to ask a human, because in this harness there is no human — both arms get
 the note identically, so the *comparison* stays fair.
+
+## Probe #3 — validity battery (2026-09-06, engine at d294401)
+
+Reliability was measured; this battery measured **validity**: does the verdict land
+where it should for skills of known character, and do the two previously
+unexercised paths (incumbent arm, trigger evals) work for real? Four experiments,
+run concurrently on the same harness (model `claude-sonnet-5` recorded per arm,
+zero retries used):
+
+| experiment | design | expected | got |
+|---|---|---|---|
+| E1 irrelevant skill | cooking conventions staged on deploy tasks, k=3 | NEUTRAL, ≈0 lift | **NEUTRAL**, −0.17 (0W/1L/5T) |
+| E2 harmful skill | "never persist deploy artifacts" compliance rule, k=3 | FAIL | **FAIL**, −0.67 (0W/4L/2T), arm score 0.33 vs 1.00 |
+| E3 real incumbent | det-skill v1 (no convention) vs v2 (convention), k=2 | PASS, candidate beats both arms | **PASS**, 4W/0L/0T vs baseline AND vs incumbent |
+| E4 trigger evals | 4-skill catalog, 3 should-fire + 3 near-miss prompts | high recall/precision | **recall 1.00, precision 1.00** (3/3 tp, 3/3 tn) |
+
+Notes:
+
+- E1's single judge loss (both orderings agreed the baseline note was marginally
+  better) sits comfortably inside the neutral dead zone — the band absorbed it,
+  which is the band doing its job.
+- E2 shows the harmful-skill path honestly: the candidate only partially obeyed
+  the bad policy (2 ties where it wrote the file anyway), and the verdict still
+  reached FAIL on the 4 compliant-and-harmful rows.
+- E3 is the first real exercise of a three-arm matrix: the incumbent arm staged
+  under the same skill name passes the rev-6 membership contamination check, and
+  the candidate-vs-incumbent comparison — the publish regression gate's signal —
+  read +1.00 as designed.
+- Engine-level §15 adversarial coverage was audited the same day: 62 unit tests
+  across the 8 modules cover every engine-side entry; guard-eval and
+  `--working --commit` refusal belong to the unbuilt CLI layer (ME2/ME3).
+
+Verdict semantics now have empirical backing on all three verdict bands plus
+triggers. Remaining untested for real: partial/timeout greying (unit-covered
+only), redaction at the sharing boundary (unit-covered only), and everything
+CLI-side.
