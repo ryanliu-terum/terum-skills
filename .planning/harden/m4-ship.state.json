@@ -1,0 +1,203 @@
+{
+  "slug": "m4-ship",
+  "lane": "code",
+  "shape": "two-pass",
+  "cap": 3,
+  "mode": "unattended",
+  "base": "0e0c150",
+  "args": "",
+  "startedAt": "2026-09-06T11:14:27.698Z",
+  "finishedAt": "2026-09-06T15:24:28.080Z",
+  "status": "converged",
+  "verdict": "stop: converged — the confirm pass confirmed no critical + high findings",
+  "startRound": 1,
+  "nextRound": 4,
+  "rounds": [
+    {
+      "round": 1,
+      "kind": "full",
+      "report": ".planning/reviews/m4-ship.hybrid.r1.review.md",
+      "at": "2026-09-06T12:54:45.509Z",
+      "counts": {
+        "critical": 0,
+        "high": 4,
+        "medium": 11,
+        "low": 7
+      },
+      "confirmed": 22,
+      "top": 4,
+      "regression": false,
+      "triage": {
+        "mechanical": 11,
+        "clear": 10,
+        "fork": 1,
+        "declined": 0,
+        "untriaged": 0
+      },
+      "contested": 1,
+      "unverified": 0,
+      "applied": {
+        "mechanical": 11,
+        "clear": 10
+      },
+      "gates": "pass",
+      "commit": "b2ec5727074b6c7a8d8894ce8c01b829f1f8d7f8",
+      "confirmBase": "8cd84b3c1cf30ccd93fd593a6f37bd8cf99168e5",
+      "human": {
+        "mediums": [],
+        "forks": [
+          {
+            "title": "The hourly stamp is written after a partial (deferred) hook run, rate-limiting the deferred work into an hour of silence — contrary to §8",
+            "location": "src/commands/sync.ts:201",
+            "why": "What run/<team>.stamp is allowed to mean: the spec says \"this team is fully synced\"; two close-out tests and search.ts's \"may be stale\" line read it as \"the clone was refreshed\". Option 1 (applied as the interim, recommended): per-team completion gate on the one file — a team with undone work is not stamped, so it fetches at every session start until an interactive sync clears the item, and search nags \"may be stale\" meanwhile. Option 2: a second, completion-only marker (run/<team>.synced) keeps both meanings, at the cost of one more run/ artifact, a leave cleanup line and a §8 sentence. Option 3: a whole-run gate on deferred.length lets one team's deferral withhold another's stamp."
+          }
+        ],
+        "notApplied": [],
+        "contested": [
+          {
+            "title": "installPushGuard overwrites .git/hooks/pre-push and forces core.hooksPath, silently disabling machine-wide hooks in the clone",
+            "location": "src/lib/teamRepo.ts:349"
+          }
+        ],
+        "declinedByTriage": [],
+        "declinedByLoop": [
+          {
+            "title": "installPushGuard overwrites .git/hooks/pre-push and forces core.hooksPath, silently disabling machine-wide hooks in the clone",
+            "location": "src/lib/teamRepo.ts:349",
+            "reason": "contested 2-1 low; the clone is the tool's own private directory and a global core.hooksPath would otherwise silently disable the D12 guard; chaining to a global hooks directory is a later enhancement"
+          }
+        ],
+        "untriaged": []
+      }
+    },
+    {
+      "round": 2,
+      "kind": "confirm",
+      "report": ".planning/reviews/m4-ship.hybrid.r2.review.md",
+      "at": "2026-09-06T14:08:39.039Z",
+      "counts": {
+        "critical": 0,
+        "high": 1,
+        "medium": 9,
+        "low": 9
+      },
+      "confirmed": 19,
+      "top": 1,
+      "regression": false,
+      "triage": {
+        "mechanical": 9,
+        "clear": 10,
+        "fork": 0,
+        "declined": 0,
+        "untriaged": 0
+      },
+      "contested": 1,
+      "unverified": 0,
+      "applied": {
+        "mechanical": 9,
+        "clear": 10
+      },
+      "gates": "pass",
+      "commit": "67cee35559ab734335648ce69835b556f54513d0",
+      "confirmBase": "b2ec5727074b6c7a8d8894ce8c01b829f1f8d7f8",
+      "human": {
+        "mediums": [],
+        "forks": [],
+        "notApplied": [],
+        "contested": [
+          {
+            "title": "cli.test.ts asserts the guard-push verb exists but never that it is hidden, despite the test name and an in-file pattern for it",
+            "location": "src/__tests__/cli.test.ts:136"
+          }
+        ],
+        "declinedByTriage": [],
+        "declinedByLoop": [],
+        "untriaged": []
+      }
+    },
+    {
+      "round": 3,
+      "kind": "confirm",
+      "report": ".planning/reviews/m4-ship.hybrid.r3.review.md",
+      "at": "2026-09-06T15:24:28.079Z",
+      "counts": {
+        "critical": 0,
+        "high": 0,
+        "medium": 7,
+        "low": 7
+      },
+      "confirmed": 14,
+      "top": 0,
+      "regression": false,
+      "triage": {
+        "mechanical": 7,
+        "clear": 7,
+        "fork": 1,
+        "declined": 0,
+        "untriaged": 0
+      },
+      "contested": 4,
+      "unverified": 0,
+      "applied": {
+        "mechanical": 7,
+        "clear": 5
+      },
+      "gates": "pass",
+      "commit": "2ce4687e0c2c239da44d98a3adbd421c76cc5136",
+      "confirmBase": "67cee35559ab734335648ce69835b556f54513d0",
+      "human": {
+        "mediums": [
+          {
+            "title": "`team leave`'s new §8 mutex only excludes hook syncs; an interactive `sync` still runs teardown over",
+            "location": "src/commands/leave.ts:42"
+          },
+          {
+            "title": "The `blocked()` completeness rule was applied to the placement loop only; `reconcileShared`'s six undone-work exits still let the team be stamped \"fully synced\"",
+            "location": "src/commands/sync.ts:48"
+          }
+        ],
+        "forks": [
+          {
+            "title": "`treeBetween`'s new one-pass read spawns one `git show` per changed skill folder with no concurrency bound, on git's blocking pre-push path",
+            "location": "src/commands/guardPush.ts:110",
+            "why": "A scope call: bound the fan-out in the one confirmed place (option 1, applied as the interim: slices of eight), add a shared mapLimit and sweep ls/search's one-git-per-skill fan-outs too (option 2), or revert to the sequential loop (option 3). ls and search have the same shape at lower stakes."
+          }
+        ],
+        "notApplied": [
+          {
+            "title": "`team leave`'s new §8 mutex only excludes hook syncs; an interactive `sync` still runs teardown over",
+            "location": "src/commands/leave.ts:42",
+            "reason": "behaviour change for every interactive sync (a second concurrent sync skips the team with a notice); left for Ryan with option 1 recommended"
+          },
+          {
+            "title": "The `blocked()` completeness rule was applied to the placement loop only; `reconcileShared`'s six undone-work exits still let the team be stamped \"fully synced\"",
+            "location": "src/commands/sync.ts:48",
+            "reason": "threads the run's recorder into reconcileShared's eight exits — new behaviour in share.ts after the last panel; left for Ryan with option 1 recommended"
+          }
+        ],
+        "contested": [
+          {
+            "title": "Credential-scrub test only pins the message, not the git argv the r2 high was about",
+            "location": "src/commands/__tests__/guard-push.test.ts:97"
+          },
+          {
+            "title": "Credential assertion in the guard-push refusal test is negative-only and does not pin which refusal ran",
+            "location": "src/commands/__tests__/guard-push.test.ts:97"
+          },
+          {
+            "title": "Credential-scrub test covers only one of the three remoteLabel interpolation sites in the guard",
+            "location": "src/commands/__tests__/guard-push.test.ts:97"
+          },
+          {
+            "title": "Mid-run mutation test keys off a global fetch counter instead of the file's existing cwd-keyed runner idiom",
+            "location": "src/commands/__tests__/sync.test.ts:701"
+          }
+        ],
+        "declinedByTriage": [],
+        "declinedByLoop": [],
+        "untriaged": []
+      }
+    }
+  ],
+  "invalidAttempts": []
+}

@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Person, parseJson, parseSkillFrontmatter, personSchema, teamSchema } from './schema.js';
+import { isSkillName, Person, parseJson, parseSkillFrontmatter, personSchema, teamSchema } from './schema.js';
 import { githubOwnerRepo } from './remote.js';
 import { Runner, systemRunner } from './runner.js';
 import type { MutableTree } from './teamRepo.js';
@@ -28,10 +28,15 @@ export interface ReadmeData {
 
 type EndorsementTeam = Pick<ReadmeData['team'], 'global' | 'projects'>;
 
-/** Install totals include archived people: they are historical installs, not active membership. */
+/**
+ * Install totals include archived people: they are historical installs, not active membership.
+ * D38: the number is how many TEAMMATES hold the skill, not how many placements they hold — install
+ * dedupes `installed` on (id, scope), so one person who installed the same id globally and again
+ * into a project legitimately carries two entries and must still count once.
+ */
 export function installCounts(people: readonly Person[]): Map<string, number> {
   const installs = new Map<string, number>();
-  for (const person of people) for (const item of person.installed) installs.set(item.id, (installs.get(item.id) ?? 0) + 1);
+  for (const person of people) for (const id of new Set(person.installed.map((item) => item.id))) installs.set(id, (installs.get(id) ?? 0) + 1);
   return installs;
 }
 
@@ -69,8 +74,15 @@ export function generateReadme(data: ReadmeData): string {
     lines.push('', '| Skill | Category | Description | Installs | Endorsed | Latest | Eval | Install |', '| --- | --- | --- | ---: | --- | --- | --- | --- |');
     for (const skill of skills.slice().sort((a, b) => a.name.localeCompare(b.name))) {
       const endorsement = skillEndorsement(data.team, skill.id);
-      const command = repo ? `\`npx -y terum-skills@latest install ${repo}/${cell(skill.name)}\`` : '—';
-      lines.push(`| ${cell(skill.name)} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | — | ${command} |`);
+      // A code span's only delimiter is a backtick, which cell() cannot escape, and this column is a
+      // command a reader copies: a folder name the CLI itself would refuse to create gets no command.
+      const command = repo && isSkillName(skill.name) ? `\`npx -y terum-skills@latest install ${repo}/${skill.name}\`` : '—';
+      // The Skill column shows the folder name as data even when the CLI would refuse it: a bracket
+      // pair there could otherwise label a link, and an angle bracket an HTML anchor. A no-op for every
+      // name the CLI accepts. (Whether the free-text columns may render Markdown at all is a product
+      // call, recorded in the close-out.)
+      const shownName = cell(skill.name).replace(/[[\]]/g, '\\$&').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      lines.push(`| ${shownName} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | — | ${command} |`);
     }
   }
   if (byAuthor.size === 0) lines.push('', '### Skills', '', 'No shared skills yet.');
@@ -156,11 +168,12 @@ export async function regenerateReadmeInTree(tree: MutableTree, remote: string, 
 
 /**
  * Free repo text rendered inside a generated, marker-delimited artifact (team name, display names,
- * authors, skill fields, PR-comment lines): one line, and never a comment opener — `<!--` becomes
+ * authors, skill fields, PR-comment lines): one line — CommonMark ends a line at LF, CRLF *or* a
+ * bare CR, so all three collapse to a space — and never a comment opener — `<!--` becomes
  * `&lt;!--`, which Markdown renders identically but can no longer spell README_BEGIN/README_END or
  * the PR-comment anchor.
  */
-export function inlineText(value: string): string { return value.replace(/\r?\n/g, ' ').replace(/<!--/g, '&lt;!--'); }
+export function inlineText(value: string): string { return value.replace(/\r\n|[\r\n]/g, ' ').replace(/<!--/g, '&lt;!--'); }
 /** Markdown table cells: inlineText() plus the pipe, and the backslash that could un-escape it. */
 function cell(value: string): string { return inlineText(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|'); }
 

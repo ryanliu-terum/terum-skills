@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { canonicalDigest, findSkill, injectManagedFields } from '../skills.js';
 import { temporaryDirectory } from './fixtures.js';
@@ -26,5 +27,34 @@ describe('skills (§5.3 canonical frontmatter)', () => {
       await writeFile(join(clone, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`);
     }
     await expect(findSkill(clone, 'team', 'deadbeef')).rejects.toThrow('ambiguous');
+  });
+
+  it.skipIf(sep === '\\')('keeps a POSIX backslash in a filename as its own digest key instead of folding it into a path separator', async () => {
+    const root = await temporaryDirectory();
+    const flat = join(root, 'flat'); const nested = join(root, 'nested');
+    await mkdir(flat); await writeFile(join(flat, 'docs\\readme.md'), 'same bytes');
+    await mkdir(join(nested, 'docs'), { recursive: true }); await writeFile(join(nested, 'docs', 'readme.md'), 'same bytes');
+    expect(await canonicalDigest(flat)).not.toBe(await canonicalDigest(nested));
+  });
+
+  it.skipIf(sep === '\\')('pins the digest wire format: the persisted `config.shared[].baseline` is sha256 over sorted `path:<sha256>\\n` records, with a `:` in a filename left as it is', async () => {
+    const root = await temporaryDirectory();
+    const dir = join(root, 'skill');
+    await mkdir(join(dir, 'docs'), { recursive: true });
+    await writeFile(join(dir, 'a.md'), 'A\n'); await writeFile(join(dir, 'docs', 'b.md'), 'B\n');
+    // This constant IS the on-disk record format of config.shared[].baseline: changing it moves every
+    // stored baseline and needs a migration, so a red line here is not fixed by pasting the new hex.
+    expect(await canonicalDigest(dir)).toBe('sha256:bfb8b2671c85b3fd72fc32d22dc345b5f09c3590e8cb996a6a89b6d884fdb3eb');
+    await writeFile(join(dir, 'notes:2026-09.md'), 'N\n');
+    const records = [['a.md', 'A\n'], ['docs/b.md', 'B\n'], ['notes:2026-09.md', 'N\n']].map(([path, content]) => `${path}:${createHash('sha256').update(content!).digest('hex')}\n`).join('');
+    expect(await canonicalDigest(dir)).toBe(`sha256:${createHash('sha256').update(records).digest('hex')}`);
+  });
+
+  it.skipIf(sep === '\\')('gives two files and one file whose name spells their digest records different digests (the record stream is prefix-free)', async () => {
+    const root = await temporaryDirectory();
+    const two = join(root, 'two'); const one = join(root, 'one');
+    await mkdir(two); await writeFile(join(two, 'x'), 'C1'); await writeFile(join(two, 'y'), 'C2');
+    await mkdir(one); await writeFile(join(one, `x:${createHash('sha256').update('C1').digest('hex')}\ny`), 'C2');
+    expect(await canonicalDigest(two)).not.toBe(await canonicalDigest(one));
   });
 });

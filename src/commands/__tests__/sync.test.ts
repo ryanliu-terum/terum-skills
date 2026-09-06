@@ -1,17 +1,23 @@
 import { expectTypeOf, describe, expect, it } from 'vitest';
-import { access, cp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { acquireTeamLock, lockPath, removeRunArtifacts, stampPath } from '../../lib/hook.js';
 import { run } from '../sync.js';
 import { run as install } from '../install.js';
 import { NonInteractivePrompter } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, holdCloneLock, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { lockTarget } from '../../lib/placer.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { systemRunner } from '../../lib/runner.js';
-import lockfile from 'proper-lockfile';
 import { cloneLockPath } from '../../lib/teamRepo.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
+const SECOND_ID = '22222222-2222-4222-8222-222222222222';
+/** §8: a hook run within an hour of a successful sync is a no-op, so a hook run that follows an interactive sync in one test is clocked past the hour. */
+const later = () => Date.now() + 2 * 3_600_000;
 const skill = (description: string) => `---\nname: sample\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${description}\n`;
 const toolSkill = (description: string, tools: string[]) => `---\nname: sample\ndescription: ${description}\nlicense: UNLICENSED\nallowed-tools:\n${tools.map((tool) => `  - ${tool}`).join('\n')}\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${description}\n`;
 
@@ -56,6 +62,49 @@ describe('sync --hook (§3, §6)', () => {
     void fixture;
   });
 
+  it('a clone removed mid-run costs that team\'s endorsed batch alone: the run still succeeds and every other team is stamped', async () => {
+    const { fixture, store } = await configuredSkill();
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    // `team leave team` in another window: it removes the clone before it deletes the ledger entry, so
+    // the endorsed batch — which walks the start-of-run snapshot — can reach a clone that is gone.
+    let fetches = 0;
+    const midRun = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) await rm(store.teamClone('team'), { recursive: true, force: true });
+      return next();
+    });
+    const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    expect(await run({ hook: true, config: store, runner: midRun }, io)).toMatchObject({ ok: true, value: { deferred: [], notices: expect.arrayContaining([expect.stringContaining('Skipping endorsed batch for team')]) } });
+    await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('a malformed allowed-tools value blocks the placement, is counted for review, and leaves the stamp unwritten', async () => {
+    const { fixture, store, home } = await configuredToolSkill();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: broken grants\nlicense: UNLICENSED\nallowed-tools:\n  a: 1\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nbroken grants\n`);
+    const io = new ScriptedPrompter();
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+    expect(io.lines).toContain('Blocked sample: allowed-tools is malformed.');
+    expect(await readFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('stamps every team the run did complete: one team\'s deferral never withholds another\'s stamp (§8)', async () => {
+    const { fixture, store } = await configuredSkill();
+    // `team` has an endorsed candidate this hook run cannot ask about, so it defers; `other` has nothing to do.
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    expect(await run({ hook: true, config: store }, io)).toMatchObject({ ok: true, value: { deferred: ['sample'] } });
+    // Neither stamp existed before this run, so `other`'s can only have been written by it.
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+  });
+
   it('writes a stamp after interactive success but leaves an old stamp after a failed pull', async () => {
     const { fixture, store } = await configuredSkill();
     expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
@@ -68,17 +117,167 @@ describe('sync --hook (§3, §6)', () => {
     void fixture;
   });
 
-  it('refuses to refresh a clone another operation is writing to, and leaves that clone untouched', async () => {
-    const { fixture, store, clone } = await configuredSkill();
+  it('skips a team whose clone another operation is writing to — not refreshed, not read, not stamped, no pass touches its placements, shares, endorsements or orphans — and still syncs every other team', async () => {
+    const { fixture, store, clone } = await configuredSkill(); const home = join(fixture.root, 'home');
+    // Give every busy-skip guard something to skip: a drifted placement, a shared source, an endorsed
+    // candidate, and an orphaned placement — each of which would prompt, move or write if it ran.
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [SECOND_ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const placedPath = join(home, '.claude', 'skills', 'sample');
+    await writeFile(join(placedPath, 'SKILL.md'), skill('hand edit'));
+    const orphan = join(home, '.claude', 'skills', 'second');
+    await cp(join(clone, 'skills', 'second'), orphan, { recursive: true });
+    await store.update((config) => {
+      config.placements[orphan] = { id: SECOND_ID, team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:orphan' };
+      config.shared[ID] = { source: join(fixture.root, 'gone'), team: 'team', baseline: 'sha256:0' };
+    });
+    const other = await bareTeam();
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team').replace('name: sample', 'name: elsewhere'));
+    const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team moved').replace('name: sample', 'name: elsewhere'));
     const head = (await git(['rev-parse', 'HEAD'], clone)).trim();
-    const release = await lockfile.lock(clone, { lockfilePath: cloneLockPath(clone), realpath: false, stale: 60_000 });
+    const otherHead = (await git(['rev-parse', 'HEAD'], otherClone)).trim();
+    const release = await holdCloneLock(clone);
     try {
-      expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringMatching(/write lock/i) });
+      // Interactive with nothing scripted: any pass that reached a prompt for the busy team would close the channel and fail the run.
+      const io = new ScriptedPrompter([], [], true);
+      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [], notices: [expect.stringMatching(/write lock on team/)] } });
+      expect(io.asked).toEqual([]);
+      expect(await readFile(join(placedPath, 'SKILL.md'), 'utf8')).toContain('description: hand edit');
+      await expect(access(join(store.root, 'quarantine'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(join(orphan, 'SKILL.md'), 'utf8')).toContain('description: second');
       expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
+      expect((await git(['rev-parse', 'HEAD'], otherClone)).trim()).not.toBe(otherHead);
+      await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(join(store.root, 'run', 'other.stamp'))).resolves.toBeUndefined();
     } finally { await release(); }
-    expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
+    // Once the clone is free the team syncs; what this noninteractive-shaped run cannot ask about (the
+    // endorsed candidate, the orphan) is deferred, and a deferral leaves the stamp for the next session (§8).
+    expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: expect.arrayContaining(['second']) } });
     expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe(head);
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('a clone lock lost mid-fetch costs exactly that team as well: the sync continues and the other team lands', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    const other = await bareTeam();
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team').replace('name: sample', 'name: elsewhere'));
+    const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team moved').replace('name: sample', 'name: elsewhere'));
+    const head = (await git(['rev-parse', 'HEAD'], clone)).trim();
+    const otherHead = (await git(['rev-parse', 'HEAD'], otherClone)).trim();
+    const lock = cloneLockPath(clone);
+    // Steal team's lock during its fetch; proper-lockfile notices on its next 1000 ms tick (its floor), so the wait clears a full tick plus slack.
+    const stealing = wrapRunner(systemRunner, async (command, args, options, next) => {
+      const result = await next();
+      if (command === 'git' && args[0] === 'fetch' && options?.cwd === clone) { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 3_000)); }
+      return result;
+    });
+    expect(await run({ config: store, runner: stealing, lockStale: 2_000 }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: [], notices: [expect.stringMatching(/Lost the safeWrite lock/)] } });
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
+    expect((await git(['rev-parse', 'HEAD'], otherClone)).trim()).not.toBe(otherHead);
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(join(store.root, 'run', 'other.stamp'))).resolves.toBeUndefined();
+  });
+
+  it('an up-to-date placement never contends: a held target lock over it is neither a block nor a review count', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const release = await lockTarget(join(home, '.claude', 'skills'), 'sample');
+    try {
+      const io = new ScriptedPrompter();
+      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+      expect(io.lines.filter((line) => line.startsWith('Blocked'))).toEqual([]);
+    } finally { await release(); }
+  });
+
+  it('a plain file at the ledger path is still the foreign collision the lock reports, not a read that fails', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(home, '.claude', 'skills', 'sample');
+    await rm(path, { recursive: true, force: true }); await writeFile(path, 'user-owned, not a placement');
+    const io = new ScriptedPrompter();
+    // Under §8's completeness rule a foreign collision is undone work — deferred, and the team's stamp
+    // withheld — so the load-bearing assertion is the exact line: the collision notice, not a read error.
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+    expect(io.lines.filter((line) => line === `Blocked ${path}: ${path} already exists and is not a placement this tool owns; leaving both untouched.`)).toHaveLength(1);
+    expect(await readFile(path, 'utf8')).toBe('user-owned, not a placement');
+  });
+
+  it('a symlink at the ledger path is refused, never followed, even when it points at an identical tree', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(home, '.claude', 'skills', 'sample'); const mirror = join(home, 'mirror');
+    await cp(path, mirror, { recursive: true }); await rm(path, { recursive: true, force: true }); await symlink(mirror, path);
+    const io = new ScriptedPrompter();
+    // Deferred under §8's completeness rule (see the plain-file case above); the exact line is the assertion.
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+    expect(io.lines.filter((line) => line === `Blocked ${path}: ${path} already exists and is not a placement this tool owns; leaving both untouched.`)).toHaveLength(1);
+    expect(await readFile(join(mirror, 'SKILL.md'), 'utf8')).toContain('description: old');
+  });
+
+  it('reports a placement whose target lock another process holds as blocked and leaves it untouched', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(home, '.claude', 'skills', 'sample');
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    const release = await lockTarget(join(home, '.claude', 'skills'), 'sample');
+    try {
+      const io = new ScriptedPrompter();
+      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+      expect(io.lines.filter((line) => line.startsWith(`Blocked ${path}: `) && line.includes('busy'))).toHaveLength(1);
+      expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: old');
+    } finally { await release(); }
+    expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { placed: 1 } });
+    expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: new');
+  });
+
+  it('defers one endorsed candidate that cannot be placed, still installs the rest, and leaves the stamp unwritten so the next session retries', async () => {
+    const { fixture, store } = await configuredSkill();
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID, SECOND_ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    // sync's endorsed batch places under the store's own home; a stranger's folder sits at the first candidate's target.
+    const stranger = join(store.root, '.claude', 'skills', 'sample');
+    await mkdir(stranger, { recursive: true }); await writeFile(join(stranger, 'SKILL.md'), 'user-owned, not a placement');
+    const io = new ScriptedPrompter([], [true], true);
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 1, deferred: ['sample'] } });
+    expect(io.lines.filter((line) => line.startsWith('Deferred endorsed sample: '))).toHaveLength(1);
+    expect(await readFile(join(store.root, '.claude', 'skills', 'second', 'SKILL.md'), 'utf8')).toContain('description: second');
+    expect(await readFile(join(stranger, 'SKILL.md'), 'utf8')).toBe('user-owned, not a placement');
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('a closed prompt channel is one failure, never a damaged placement per remaining entry', async () => {
+    const setup = await configuredToolSkill();
+    await pushFromSeed(setup.fixture.seed, 'skills/sample/SKILL.md', toolSkill('widened', ['Bash(*)']));
+    // Interactive, but nothing scripted: the channel closes at the first consent question.
+    const io = new ScriptedPrompter([], [], true);
+    expect(await run({ config: setup.store }, io)).toMatchObject({ ok: false, error: expect.stringMatching(/Input ended before/) });
+    expect(io.lines.filter((line) => line.startsWith('Blocked '))).toEqual([]);
+    expect(await readFile(join(setup.home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('reports one unreadable placement as blocked, still refreshes the others, and leaves the stamp unwritten (§8: a partial run is retried next session)', async () => {
+    const { fixture, store } = await configuredSkill();
+    const home = join(fixture.root, 'home');
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await install({ ref: 'second', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const broken = join(home, '.claude', 'skills', 'sample'); const healthy = join(home, '.claude', 'skills', 'second');
+    await chmod(join(broken, 'SKILL.md'), 0o000);
+    await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second updated').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    await rm(join(store.root, 'run'), { recursive: true, force: true });
+    const io = new ScriptedPrompter();
+    try { expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 1, deferred: ['sample'] } }); }
+    finally { await chmod(join(broken, 'SKILL.md'), 0o644); }
+    expect(io.lines.filter((line) => line.startsWith(`Blocked ${broken}: `))).toHaveLength(1);
+    expect(await readFile(join(healthy, 'SKILL.md'), 'utf8')).toContain('description: second updated');
+    await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('heals a clone whose local main drifted instead of failing to fast-forward', async () => {
@@ -101,6 +300,8 @@ describe('sync --hook (§3, §6)', () => {
     expect(io.lines.join('\n')).toContain(`Blocked ${path}: pinned version 01234567`);
     expect((await snapshotSkillDirectory(path!)).fingerprint).toBe(before.fingerprint);
     expect((await store.read()).placements[path!]!.version).toBe(unknown);
+    // A blocked placement is undone work: the team is not stamped as fully synced (§8).
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('adopts or declines orphans interactively and only defers them in hook mode', async () => {
@@ -120,7 +321,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(await run({ config: decline.store }, interactive)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
     expect(interactive.asked).toEqual([]);
     const declinedHook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await run({ hook: true, config: decline.store }, declinedHook)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
+    expect(await run({ hook: true, config: decline.store, now: later }, declinedHook)).toMatchObject({ ok: true, value: { placed: 0, deferred: [] } });
     expect(declinedHook.lines).toEqual([]);
     expect(await readFile(join(decline.path, 'SKILL.md'), 'utf8')).toBe(declinedBefore);
     expect(JSON.stringify((await decline.store.read()).placements)).toBe(ledgerBefore);
@@ -181,6 +382,30 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(join(oldPath, 'SKILL.md'), 'utf8')).toContain('description: old');
     expect(Object.keys((await store.read()).placements)).toEqual([oldPath]);
     expect(io.lines.filter((line) => line.startsWith(`Blocked ${oldPath}: ${stranger} already exists`))).toHaveLength(1);
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses a rename onto a stranger before anything moves: a hand-edited old placement stays put, unquarantined, and the ledger still keys it', async () => {
+    const { fixture, store } = await configuredSkill(); const home = join(fixture.root, 'home');
+    expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    const oldPath = join(home, '.claude', 'skills', 'sample'); const stranger = join(home, '.claude', 'skills', 'renamed');
+    await mkdir(stranger, { recursive: true }); await writeFile(join(stranger, 'SKILL.md'), 'user-owned, not a placement');
+    await writeFile(join(oldPath, 'SKILL.md'), skill('hand edit'));
+    await git(['fetch', '-q', 'origin'], fixture.seed); await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
+    await cp(join(fixture.seed, 'skills', 'sample'), join(fixture.seed, 'skills', 'renamed'), { recursive: true });
+    await rm(join(fixture.seed, 'skills', 'sample'), { recursive: true });
+    await writeFile(join(fixture.seed, 'skills', 'renamed', 'SKILL.md'), skill('renamed').replace('name: sample', 'name: renamed'));
+    await git(['add', '--all'], fixture.seed); await git(['commit', '-q', '-m', 'rename sample'], fixture.seed); await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
+    // Twice: the second run must find the same state and report the same block, not a wedged ledger.
+    for (const attempt of [1, 2]) {
+      const io = new ScriptedPrompter();
+      expect(await run({ config: store }, io), `attempt ${attempt}`).toMatchObject({ ok: true, value: { placed: 0 } });
+      expect(io.lines.filter((line) => line.startsWith(`Blocked ${oldPath}: ${stranger} already exists`)), `attempt ${attempt}`).toHaveLength(1);
+      expect(await readFile(join(oldPath, 'SKILL.md'), 'utf8')).toContain('description: hand edit');
+      expect(await readFile(join(stranger, 'SKILL.md'), 'utf8')).toBe('user-owned, not a placement');
+      await expect(access(join(store.root, 'quarantine'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(Object.keys((await store.read()).placements)).toEqual([oldPath]);
+    }
   });
 
   it('defers consent for a noninteractive-shaped interactive call without emitting hook stdout', async () => {
@@ -231,16 +456,21 @@ describe('sync --hook (§3, §6)', () => {
     expect((await store.read()).pending).toHaveLength(0);
   });
 
-  it('leaves a project pending install deferred outside its worktree and replays it inside', async () => {
+  it('leaves a project pending install deferred outside its worktree — without stamping, so the next session inside the checkout is not rate-limited — and replays it inside', async () => {
     const { fixture, store, clone } = await configuredSkill();
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { project: { remotes: [fixture.bare], skills: [ID] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
     await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'project', project: 'project' }, started: '2026-09-04T00:00:00Z' }); });
     const outside = await temporaryDirectory();
-    expect(await run({ config: store, cwd: outside }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: [expect.stringContaining('project')] } });
+    const hook: NonInteractivePrompter = { interactive: false, print: () => undefined };
+    expect(await run({ hook: true, config: store, cwd: outside }, hook)).toMatchObject({ ok: true, value: { deferred: [expect.stringContaining('project')] } });
     expect((await store.read()).pending).toHaveLength(1);
-    expect((await run({ config: store, cwd: clone }, new ScriptedPrompter())).ok).toBe(true);
+    // §8: the deferral left the stamp unwritten, so the hook run five minutes later — in the checkout the
+    // deferral was waiting for — really runs instead of being an hourly no-op.
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await run({ hook: true, config: store, cwd: clone }, hook)).toMatchObject({ ok: true, value: { placed: 1, deferred: [] } });
     expect((await store.read()).pending).toHaveLength(0);
     expect(await readFile(join(clone, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
   });
 
   it('classifies an update as available and re-places into the ledger-recorded target', async () => {
@@ -280,11 +510,14 @@ describe('sync --hook (§3, §6)', () => {
     await git(['fetch', '-q', 'origin'], fixture.seed); await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
     await git(['rm', '-qr', 'skills/sample'], fixture.seed); await git(['commit', '-q', '-m', 'remove sample'], fixture.seed); await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
     const interactive = new ScriptedPrompter();
-    expect(await run({ config: store }, interactive)).toMatchObject({ ok: true, value: { placed: 0, notices: [expect.stringContaining('Blocked')] } });
+    expect(await run({ config: store }, interactive)).toMatchObject({ ok: true, value: { placed: 0, deferred: [], notices: [expect.stringContaining('Blocked')] } });
     expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toBe(before);
     expect(JSON.stringify((await store.read()).placements)).toBe(ledger);
+    // Reported, not counted: nothing a later run does can clear a skill deleted upstream, so the team is
+    // not held unsynced forever and no `run sync` that cannot help is advertised.
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
     const hook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await run({ hook: true, config: store }, hook)).toMatchObject({ ok: true, value: { notices: [expect.stringContaining('Blocked')] } });
+    expect(await run({ hook: true, config: store, now: later }, hook)).toMatchObject({ ok: true, value: { deferred: [], notices: [expect.stringContaining('Blocked')] } });
     expect(hook.lines).toEqual([]);
   });
 
@@ -348,7 +581,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(path, 'utf8')).toContain('description: reordered');
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('widened', ['Bash(*)', 'Read(*)']));
     const hook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await run({ hook: true, config: store }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+    expect(await run({ hook: true, config: store, now: later }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
     expect(hook.lines).toEqual([]);
     expect(await readFile(path, 'utf8')).toContain('description: reordered');
   });
@@ -368,7 +601,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(await readFile(join(declined.home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
     expect((await declined.store.read()).approvals[ID]!.grants).toBe(declined.oldApproval);
     const hook: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await run({ hook: true, config: declined.store }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+    expect(await run({ hook: true, config: declined.store, now: later }, hook)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
     expect(hook.lines).toEqual([]);
   });
 
@@ -411,6 +644,174 @@ async function configuredToolSkill() {
   expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
   return { fixture, store, home, oldApproval: (await store.read()).approvals[ID]!.grants };
 }
+
+describe('sync --hook mutex and rate limit (§8, §12 "hook mutex")', () => {
+  const hookIo = (): NonInteractivePrompter & { lines: string[] } => ({ interactive: false, lines: [], print(line) { this.lines.push(line); } });
+  const head = async (clone: string) => (await git(['rev-parse', 'HEAD'], clone)).trim();
+  async function deadPid(): Promise<number> {
+    const child = spawn(process.execPath, ['-e', '0'], { stdio: 'ignore' });
+    const pid = child.pid!;
+    await new Promise((done) => child.on('close', done));
+    return pid;
+  }
+
+  it('a second hook racing on the same team exits 0 in silence and touches nothing; another host\'s lock is respected; a dead pid\'s lock is recovered and the sync proceeds', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    const before = await head(clone);
+    const release = await acquireTeamLock(store.root, 'team');
+    expect(release).not.toBeNull();
+    try {
+      const io = hookIo();
+      expect(await run({ hook: true, config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [], notices: [] } });
+      expect(io.lines).toEqual([]);
+      expect(await head(clone)).toBe(before);
+      await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(lockPath(store.root, 'team'))).resolves.toBeUndefined();
+    } finally { await release!(); }
+    await writeFile(lockPath(store.root, 'team'), JSON.stringify({ pid: process.pid, host: 'another-machine', started: new Date().toISOString() }));
+    expect(await run({ hook: true, config: store }, hookIo())).toMatchObject({ ok: true, value: { placed: 0, notices: [] } });
+    expect(await head(clone)).toBe(before);
+    await writeFile(lockPath(store.root, 'team'), JSON.stringify({ pid: await deadPid(), host: hostname(), started: new Date().toISOString() }));
+    expect(await run({ hook: true, config: store }, hookIo())).toMatchObject({ ok: true });
+    expect(await head(clone)).not.toBe(before);
+    await expect(access(lockPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
+  });
+
+  it('two teams do not serialize: a held lock on one team leaves the other fully synced and stamped', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    const other = await bareTeam();
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team').replace('name: sample', 'name: elsewhere'));
+    const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team moved').replace('name: sample', 'name: elsewhere'));
+    const before = await head(clone); const otherBefore = await head(otherClone);
+    const release = await acquireTeamLock(store.root, 'team');
+    try {
+      expect(await run({ hook: true, config: store }, hookIo())).toMatchObject({ ok: true, value: { notices: [] } });
+      expect(await head(clone)).toBe(before);
+      expect(await head(otherClone)).not.toBe(otherBefore);
+      await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+      await expect(access(lockPath(store.root, 'other'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally { await release!(); }
+  });
+
+  it('is a silent no-op within an hour of the last successful sync, never rate-limits an interactive sync, and runs again after the hour', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    expect(await run({ hook: true, config: store }, hookIo())).toMatchObject({ ok: true });
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    const before = await head(clone);
+    let fetches = 0;
+    const counting = wrapRunner(systemRunner, async (command, args, _options, next) => { if (command === 'git' && args[0] === 'fetch') fetches++; return next(); });
+    const io = hookIo();
+    expect(await run({ hook: true, config: store, runner: counting }, io)).toMatchObject({ ok: true, value: { placed: 0, notices: [] } });
+    expect(io.lines).toEqual([]);
+    expect(fetches).toBe(0);
+    expect(await head(clone)).toBe(before);
+    expect((await run({ config: store, runner: counting }, new ScriptedPrompter())).ok).toBe(true);
+    expect(fetches).toBe(1);
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('newer'));
+    expect(await run({ hook: true, config: store, runner: counting, now: () => Date.now() + 2 * 3_600_000 }, hookIo())).toMatchObject({ ok: true });
+    expect(fetches).toBe(2);
+    expect(await head(clone)).not.toBe(before);
+  });
+
+  it('leaves a skipped team\'s orphans alone: neither the hourly no-op nor a held mutex reads its clone or defers', async () => {
+    const orphan = await orphanedPlacement();
+    expect(await run({ hook: true, config: orphan.store }, hookIo())).toMatchObject({ ok: true, value: { deferred: ['sample'] } });
+    // The deferral left no stamp (§8); a stamp from a run that did finish makes the next hour a no-op —
+    // the orphan pass included, so nothing is deferred and createExecute prints no "needs review" line.
+    await writeFile(stampPath(orphan.store.root, 'team'), new Date().toISOString());
+    expect(await run({ hook: true, config: orphan.store }, hookIo())).toMatchObject({ ok: true, value: { deferred: [], notices: [] } });
+    const release = await acquireTeamLock(orphan.store.root, 'team');
+    try {
+      expect(await run({ hook: true, config: orphan.store, now: later }, hookIo())).toMatchObject({ ok: true, value: { deferred: [], notices: [] } });
+    } finally { await release!(); }
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('a lock file this process cannot read costs exactly that team, reported, and the other team still syncs and stamps', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    const other = await bareTeam();
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team').replace('name: sample', 'name: elsewhere'));
+    const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', skill('other team moved').replace('name: sample', 'name: elsewhere'));
+    const before = await head(clone); const otherBefore = await head(otherClone);
+    await mkdir(join(store.root, 'run'), { recursive: true });
+    await writeFile(lockPath(store.root, 'team'), JSON.stringify({ pid: process.pid, host: hostname(), started: new Date().toISOString() }));
+    await chmod(lockPath(store.root, 'team'), 0o000);
+    try {
+      const io = hookIo();
+      expect(await run({ hook: true, config: store }, io)).toMatchObject({ ok: true, value: { notices: [expect.stringMatching(/^Skipping team: /)] } });
+      expect(io.lines).toEqual([]);
+      expect(await head(clone)).toBe(before);
+      expect(await head(otherClone)).not.toBe(otherBefore);
+      await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+    } finally { await chmod(lockPath(store.root, 'team'), 0o600); }
+  });
+
+  it('stamps only what this run saw finish: a team bound mid-run is not stamped, and a pending entry recorded after a team\'s replay withholds its stamp', async () => {
+    const { store } = await configuredSkill();
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    const late = await bareTeam();
+    await cloneWithIdentity(late.bare, store.teamClone('late'));
+    let fetches = 0;
+    const midRun = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'fetch') {
+        fetches++;
+        // During team's fetch a third team is bound; during other's fetch — team's replay is already done — an install is recorded for team.
+        if (fetches === 1) await store.update((config) => { config.teams.late = { remote: late.bare, handle: 'seed' }; });
+        if (fetches === 2) await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'global' }, started: new Date().toISOString() }); });
+      }
+      return next();
+    });
+    expect(await run({ hook: true, config: store, runner: midRun }, hookIo())).toMatchObject({ ok: true, value: { notices: [] } });
+    await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(stampPath(store.root, 'late'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('never stamps a team removed mid-run: the stamp a concurrent teardown swept is not re-created (§8)', async () => {
+    const { store } = await configuredSkill();
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    await mkdir(join(store.root, 'run'), { recursive: true });
+    await writeFile(stampPath(store.root, 'team'), new Date().toISOString());
+    let fetches = 0;
+    // A teardown that lands while the run walks its snapshot — during other's fetch, team's walk already
+    // done — unbinds team and sweeps run/team.stamp. Re-creating that stamp would rate-limit the first
+    // hook sync after a `team join team` into a silent no-op for the rest of the hour.
+    const midRun = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) { await store.update((config) => { delete config.teams.team; }); await removeRunArtifacts(store.root, 'team'); }
+      return next();
+    });
+    expect((await run({ config: store, runner: midRun }, new ScriptedPrompter())).ok).toBe(true);
+    await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('a failed hook sync releases the mutex and leaves the old stamp, so the next session retries', async () => {
+    const { store } = await configuredSkill();
+    expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
+    const stamp = stampPath(store.root, 'team');
+    await writeFile(stamp, 'old');
+    const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000);
+    await utimes(stamp, twoHoursAgo, twoHoursAgo);
+    const failing = wrapRunner(systemRunner, async (command, args, _options, next) => (command === 'git' && args[0] === 'fetch' ? { code: 1, stdout: '', stderr: 'failed' } : next()));
+    expect((await run({ hook: true, config: store, runner: failing }, hookIo())).ok).toBe(false);
+    expect(await readFile(stamp, 'utf8')).toBe('old');
+    await expect(access(lockPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
 
 describe('sync --hook keeps shared-source reconciliation off stdout (§8)', () => {
   it('reports a missing shared source through notices, never through the hook stdout', async () => {

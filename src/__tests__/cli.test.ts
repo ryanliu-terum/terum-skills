@@ -51,13 +51,13 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     await expect(program.parseAsync(['login', '--team', 'alpha'], { from: 'user' })).rejects.toMatchObject({ code: 'commander.unknownOption' });
   });
 
-  it('wires every M2 verb and passes a missing install member value through as a clear command failure', async () => {
+  it('wires every M2 verb and hands a missing install member value to the verb as undefined (the verb owns the usage error)', async () => {
     const calls: unknown[] = []; const outcomes: boolean[] = [];
     const execute: Execute = async (invoke) => { outcomes.push((await invoke(new ScriptedPrompter())).ok); };
     const program = buildProgram(execute, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
       share: async (args) => { calls.push(['share', args]); return success(undefined); },
-      install: async (args) => { calls.push(['install', args]); return args.kind === 'member' && !args.member ? failure('Provide a member handle.') : success([]); },
+      install: async (args) => { calls.push(['install', args]); return success([]); },
       uninstall: async (args) => { calls.push(['uninstall', args]); return success([]); },
       sync: async (args) => { calls.push(['sync', args]); return success({ placed: 0, deferred: [], notices: [], changed: false, hook: Boolean(args.hook) }); },
       search: async (args) => { calls.push(['search', args]); return success([]); },
@@ -74,7 +74,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       ['install', expect.objectContaining({ kind: 'member', member: undefined })], ['uninstall', expect.objectContaining({ ref: 'sample', team: 'team' })],
       ['sync', { hook: true, prune: undefined }], ['search', { term: 'term', category: 'testing' }],
     ]));
-    expect(outcomes).toEqual([true, true, false, true, true, true]);
+    expect(outcomes).toEqual([true, true, true, true, true, true]);
   });
 
   it('wires the M3 team-layer commands, keeping readme hidden from help', async () => {
@@ -119,5 +119,21 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     ]);
     expect(Object.keys(calls[0] as object)).toEqual(['verb', 'ref']);
     expect(outcomes).toEqual([true, true, true, false, false]);
+  });
+});
+
+describe('the pre-push hook\'s verb (D12)', () => {
+  it('wires the hidden guard-push verb with the refs passed through as one flat list', async () => {
+    const calls: unknown[] = [];
+    const execute: Execute = async (invoke) => { await invoke(new ScriptedPrompter()); };
+    const program = buildProgram(execute, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+      guardPush: async (args) => { calls.push(args); return success({ team: 't', checked: 0 }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['guard-push', 'origin', 'https://x/y.git', 'refs/heads/main', 'a', 'refs/heads/main', 'b'], { from: 'user' });
+    expect(calls).toEqual([{ remote: 'origin', url: 'https://x/y.git', refs: ['refs/heads/main', 'a', 'refs/heads/main', 'b'] }]);
+    // Hidden: an internal hook verb has no place in `terum-skills --help` (the same rule `readme` follows above).
+    expect(program.helpInformation()).not.toContain('guard-push');
   });
 });

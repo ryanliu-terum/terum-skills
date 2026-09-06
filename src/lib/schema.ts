@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { inspect } from 'node:util';
 import { z } from 'zod';
 import YAML from 'yaml';
 
@@ -12,6 +13,10 @@ export const handleSchema = z
 /** Team names double as directory names under ~/.terum/skills/teams and as GitHub repo names. */
 export const TEAM_NAME_RULE = 'a team name is 1-100 characters: letters, digits, dot, underscore, or hyphen, and cannot start with a dot';
 export const teamNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/, TEAM_NAME_RULE);
+
+/** §5.3: a skill name is its folder name — 1–64 lowercase alphanumerics or single internal hyphens. The one rule `share` enforces and the README trusts. */
+export const SKILL_NAME_RULE = 'a skill name is 1–64 lowercase alphanumerics or single hyphens';
+export function isSkillName(value: string): boolean { return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 64; }
 
 export const skillIdSchema = z.uuid();
 export const emailSchema = z.email();
@@ -124,6 +129,15 @@ export function allowedTools(value: unknown): AllowedTools {
   else return { ok: false, raw: value };
   const normalized = [...new Set(pieces.map((part) => part.trim()).filter(Boolean))].sort().join('\n') || 'none';
   return hashed(normalized);
+}
+
+/**
+ * Render a value that never validated (a malformed `allowed-tools`) without the message itself
+ * throwing: JSON when it serializes, util.inspect for what does not (a YAML anchor that refers to
+ * itself parses cleanly into a cycle). Every site that shows a rejected grant goes through here.
+ */
+export function describeRaw(value: unknown): string {
+  try { return JSON.stringify(value) ?? String(value); } catch { return inspect(value, { depth: 2, breakLength: Infinity }); }
 }
 
 function hashed(normalized: string): AllowedTools & { ok: true } {

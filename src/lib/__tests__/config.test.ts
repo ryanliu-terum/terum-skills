@@ -1,4 +1,4 @@
-import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../config.js';
@@ -24,6 +24,24 @@ describe('config store (§5.4)', () => {
     expect(((await stat(join(root, 'teams'))).mode & 0o777).toString(8)).toBe('700');
     expect((await readdir(root)).filter((name) => name.includes('.tmp'))).toEqual([]);
     expect((await store.read()).teams.t?.handle).toBe('me');
+  });
+
+  it.skipIf(process.platform === 'win32')('tightens a pre-existing world-readable root and teams directory back to 0700 on ensureRoot', async () => {
+    const root = join(await temporaryDirectory(), 'skills');
+    await mkdir(join(root, 'teams'), { recursive: true });
+    // Explicit chmods: mkdir's mode is umask-masked, so it cannot stage the loose case reliably.
+    await chmod(root, 0o755); await chmod(join(root, 'teams'), 0o755);
+    await createConfigStore(root).ensureRoot();
+    expect(((await stat(root)).mode & 0o777).toString(8)).toBe('700');
+    expect(((await stat(join(root, 'teams'))).mode & 0o777).toString(8)).toBe('700');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a root that is a symlink instead of tightening whatever it points at', async () => {
+    const base = await temporaryDirectory();
+    const elsewhere = join(base, 'elsewhere'); await mkdir(elsewhere); await chmod(elsewhere, 0o755);
+    const root = join(base, 'skills'); await symlink(elsewhere, root);
+    await expect(createConfigStore(root).ensureRoot()).rejects.toThrow('not a plain directory');
+    expect(((await stat(elsewhere)).mode & 0o777).toString(8)).toBe('755');
   });
 
   it('migrates a pre-rev-9 config on read: a handle-less entry is dropped, a retired token is dropped, and the next write leaves neither on disk', async () => {
@@ -83,7 +101,8 @@ describe('config store (§5.4)', () => {
     const before = await readFile(join(root, 'config.json'), 'utf8');
     await expect(store.update(async (config) => {
       await rm(join(root, 'config.json.lock'), { recursive: true, force: true });
-      await new Promise((done) => setTimeout(done, 1_500));
+      // proper-lockfile notices on its next 1000 ms tick (its floor), in that tick's async stat callback.
+      await new Promise((done) => setTimeout(done, 3_000));
       config.default_handle = 'stale-snapshot';
     })).rejects.toThrow(/Lost the lock/);
     expect(await readFile(join(root, 'config.json'), 'utf8')).toBe(before);

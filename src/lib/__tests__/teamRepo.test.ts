@@ -1,9 +1,11 @@
-import { access, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { access, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
-import { assertSafePath, cloneTeam, openTeamRepo, PushRefused, SafeWriteExhausted, treeText } from '../teamRepo.js';
+import { assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText } from '../teamRepo.js';
 import { createConfigStore } from '../config.js';
 import { run as share } from '../../commands/share.js';
 import { ScriptedPrompter } from './fixtures.js';
@@ -346,14 +348,37 @@ describe('safeWrite (§6.0)', () => {
     expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/seed.json', tree.before('people/seed.json')!), { action: 'join', handle: 'seed' })).toEqual({ changed: false, pushedTo: 'main' });
   });
 
+  it('refreshClone re-checks its lock before the reset: a fetch that outlives the stale window does not rewind the writer that took the lock', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    await writeFile(join(clone, 'stray.txt'), 'local'); await git(['add', '--all'], clone); await git(['commit', '-q', '-m', 'local-only'], clone);
+    const head = (await git(['rev-parse', 'HEAD'], clone)).trim();
+    const lock = join(fixture.root, '.clone.safewrite.lock');
+    // The lock is stolen during the fetch. proper-lockfile refreshes on a tick clamped to
+    // max(min(update, stale/2), 1000) = 1000 ms here and records the loss only in that tick's async
+    // stat callback, so the wait must clear one full tick plus slack for a busy event loop.
+    const slow = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      const result = await next();
+      if (command === 'git' && args[0] === 'fetch') { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 3_000)); }
+      return result;
+    });
+    const lost = refreshClone(slow, clone, { lockStale: 2_000 });
+    await expect(lost).rejects.toThrow(/Lost the safeWrite lock/);
+    await expect(lost).rejects.toBeInstanceOf(CloneBusy);
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
+    await refreshClone(systemRunner, clone);
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe(head);
+  });
+
   it('a lock lost to another process aborts before the push and does NOT reset the clone, which that process now owns', async () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     const lock = join(fixture.root, '.clone.safewrite.lock');
-    // Steal the lock while our commit is being made; proper-lockfile notices at its next check (half the stale window).
+    // Steal the lock while our commit is being made; proper-lockfile notices on its next 1000 ms tick
+    // (its floor), in that tick's async stat callback, so the wait clears a full tick plus slack.
     const stolen = wrapRunner(systemRunner, async (command, args, _options, next) => {
       const result = await next();
-      if (command === 'git' && args[0] === 'commit') { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 1_500)); }
+      if (command === 'git' && args[0] === 'commit') { await rm(lock, { recursive: true, force: true }); await new Promise((done) => setTimeout(done, 3_000)); }
       return result;
     });
     const before = await originSha(fixture.bare);
@@ -364,4 +389,63 @@ describe('safeWrite (§6.0)', () => {
     expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' })).toEqual({ changed: true, pushedTo: 'main' });
   });
 
+});
+
+describe('the clone-local push guard arming (D12)', () => {
+  /**
+   * Drive a hook the way git does: arguments plus the ref lines on stdin. An absolute `/bin/sh`, because the
+   * npx-fallback case strips PATH and a PATH-resolved shell would then fail to spawn at all; and an explicit
+   * child env, as in bin.test.ts — no inherited NODE_OPTIONS and no node warnings, either of which would
+   * break the exact `stderr: ''` below for reasons unrelated to the guard. PATH stays: the hook body runs `cat`.
+   */
+  const sh = (script: string, args: string[], stdin: string, env: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? '', NODE_NO_WARNINGS: '1' }) => new Promise<{ code: number | null; stdout: string; stderr: string }>((done) => {
+    const child = spawn('/bin/sh', [script, ...args], { stdio: ['pipe', 'pipe', 'pipe'], env });
+    const out: Buffer[] = []; const err: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
+    child.on('close', (code) => done({ code, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') }));
+    child.stdin.end(stdin);
+  });
+
+  // POSIX-only: the case drives the generated `#!/bin/sh` hook through `sh`, which Windows has no portable path to.
+  it.skipIf(process.platform === 'win32')('cloneTeam arms the guard: the hook at 0700 with core.hooksPath pinned to the clone; the hook turns git\'s stdin lines into arguments, quotes its launcher, fails open when its launcher is gone, and never falls back to `@latest`', async () => {
+    const fixture = await bareTeam();
+    const clone = join(fixture.root, 'armed');
+    await cloneTeam(fixture.bare, clone);
+    const hook = join(clone, '.git', 'hooks', 'pre-push');
+    expect((await stat(hook)).mode & 0o777).toBe(0o700);
+    // Under the TypeScript sources there is no built entry, so the arming falls back to npx pinned to this package's version.
+    const { version } = createRequire(import.meta.url)('../../../package.json') as { version: string };
+    expect(await readFile(hook, 'utf8')).toContain(`terum-skills@${version}' guard-push`);
+    expect((await git(['config', '--local', 'core.hooksPath'], clone)).trim()).toBe('.git/hooks');
+    // The body, driven the way git drives it, with a stub launcher that echoes its arguments and exits 3: two stdin lines become one flat argument list, and the launcher's exit status is the hook's.
+    const stub = join(fixture.root, 'stub.js');
+    await writeFile(stub, 'console.log(process.argv.slice(2).join(" ")); process.exit(3);\n');
+    const armed = join(fixture.root, 'armed.sh');
+    await writeFile(armed, pushGuardHook({ node: process.execPath, entry: stub }));
+    const ran = await sh(armed, ['origin', 'https://x/y.git'], 'refs/heads/main a1 refs/heads/main b2\nrefs/heads/x c3 refs/heads/publish/x 00\n');
+    expect(ran).toEqual({ code: 3, stdout: 'guard-push origin https://x/y.git refs/heads/main a1 refs/heads/main b2 refs/heads/x c3 refs/heads/publish/x 00\n', stderr: '' });
+    const gone = join(fixture.root, 'gone.sh');
+    await writeFile(gone, pushGuardHook({ node: process.execPath, entry: join(fixture.root, 'missing.js') }));
+    const skipped = await sh(gone, ['origin', 'https://x/y.git'], 'refs/heads/main a1 refs/heads/main b2\n');
+    expect(skipped.code).toBe(0);
+    expect(skipped.stdout).toBe('');
+    expect(skipped.stderr).toContain('NOT checked');
+    // The launcher is quoted, not merely interpolated: a directory with a space and a quote in its name is still one word to the shell.
+    const awkward = join(fixture.root, "a dir's name");
+    await mkdir(awkward, { recursive: true });
+    const awkwardStub = join(awkward, 'stub.js');
+    await writeFile(awkwardStub, 'console.log(process.argv.slice(2).join(" ")); process.exit(3);\n');
+    const quoted = join(fixture.root, 'quoted.sh');
+    await writeFile(quoted, pushGuardHook({ node: process.execPath, entry: awkwardStub }));
+    expect(await sh(quoted, ['origin', 'https://x/y.git'], 'refs/heads/main a1 refs/heads/main b2\n')).toEqual({ code: 3, stdout: 'guard-push origin https://x/y.git refs/heads/main a1 refs/heads/main b2\n', stderr: '' });
+    // The npx fallback's fail-open, run rather than read: with no npx on PATH the hook warns and exits 0 instead of blocking the push.
+    const fallback = join(fixture.root, 'fallback.sh');
+    await writeFile(fallback, pushGuardHook(null));
+    const withoutNpx = await sh(fallback, ['origin', 'https://x/y.git'], 'refs/heads/main a1 refs/heads/main b2\n', { PATH: join(fixture.root, 'no-npx'), NODE_NO_WARNINGS: '1' });
+    expect(withoutNpx.code).toBe(0);
+    expect(withoutNpx.stderr).toContain('NOT checked');
+    expect(pushGuardHook(null)).toContain(`terum-skills@${version}`);
+    expect(pushGuardHook(null)).not.toContain('@latest');
+  });
 });

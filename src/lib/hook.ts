@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { chmod, link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir, hostname } from 'node:os';
 import { dirname, join } from 'node:path';
+import { mkdirPrivate } from './fs.js';
 import { Prompter } from './prompt.js';
 
 /** The one seam hook.test.ts needs to simulate a crash between the temp write and the rename. */
@@ -121,4 +122,126 @@ export async function offerHook(io: Prompter, options: Required<HookOptions>): P
 
 async function existsFile(path: string): Promise<boolean> {
   try { await stat(path); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+}
+
+// --- §8 mutex and rate limit (`sync --hook` only) -------------------------------------------
+
+/** §8: a hook run within an hour of the team's last fully successful sync is a no-op. */
+export const STAMP_FRESH_MS = 60 * 60_000;
+/** How far in the future a stamp may be dated and still count as just written: filesystem timestamp granularity and rounding, not a clock step. */
+const STAMP_SKEW_MS = 60_000;
+/** §8: a lock older than this is stale whoever holds it — a crashed process must not disable sync forever. */
+export const LOCK_STALE_MS = 10 * 60_000;
+
+export interface TeamLockOptions { now?: () => number; host?: string; pidAlive?: (pid: number) => boolean; }
+
+export function stampPath(storeRoot: string, team: string): string { return join(storeRoot, 'run', `${team}.stamp`); }
+export function lockPath(storeRoot: string, team: string): string { return join(storeRoot, 'run', `${team}.lock`); }
+
+/**
+ * True when `run/<team>.stamp` was written within the last hour. Only `sync --hook` consults it; an
+ * interactive sync always runs. A stamp dated well into the future (a clock stepped back, a `run/`
+ * copied from another machine) is not evidence of a recent sync: the hook runs and rewrites it.
+ */
+export async function stampIsFresh(storeRoot: string, team: string, now: () => number = Date.now): Promise<boolean> {
+  try { const age = now() - (await stat(stampPath(storeRoot, team))).mtimeMs; return age > -STAMP_SKEW_MS && age < STAMP_FRESH_MS; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+}
+
+/**
+ * §8 mutex: one lock per team — so unrelated teams never serialize — created with O_CREAT|O_EXCL
+ * (atomic on every platform we target) and holding `{pid, host, token, started}`. Returns the
+ * release function, or null when another live holder has it: the caller exits 0 in silence, because
+ * another window is already doing the work and a queue of blocked startup hooks is the failure
+ * this lock exists to prevent. A stale lock — started more than ten minutes ago, or held by a dead
+ * pid on this host — is reclaimed and the acquire retried exactly once; a live lock from another
+ * host is always respected. Release in a `finally`, on every exit path. The release and the reclaim
+ * act only on the exact record they hold or judged: a lock reclaimed as stale mid-run stays with
+ * its new holder instead of being freed for a third process, and two reclaimers of one stale lock
+ * cannot both end up holding it.
+ */
+export async function acquireTeamLock(storeRoot: string, team: string, options: TeamLockOptions = {}): Promise<(() => Promise<void>) | null> {
+  const now = options.now ?? Date.now;
+  const host = options.host ?? hostname();
+  const pidAlive = options.pidAlive ?? isPidAlive;
+  const path = lockPath(storeRoot, team);
+  await mkdirPrivate(dirname(path));
+  // The token makes the record unmistakably this acquire's: a pid and a host recur.
+  const record = `${JSON.stringify({ pid: process.pid, host, token: randomUUID(), started: new Date(now()).toISOString() })}\n`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const handle = await open(path, 'wx', 0o600);
+      try { await handle.writeFile(record, 'utf8'); }
+      finally { await handle.close(); }
+      return async () => { if ((await readFile(path, 'utf8').catch(() => '')) === record) await rm(path, { force: true }); };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (attempt > 0) return null;
+      const judged = await judgeLock(path, host, now, pidAlive);
+      if (judged.kind === 'live' || (judged.kind === 'stale' && !(await reclaimStaleLock(path, judged.raw)))) return null;
+    }
+  }
+  return null;
+}
+
+type LockJudgement = { kind: 'live' } | { kind: 'vanished' } | { kind: 'stale'; raw: string };
+
+/** Stale (with the exact bytes judged, so the reclaim can prove it removes what it judged), live, or vanished — gone already, so the retry finds it free or loses the create. */
+async function judgeLock(path: string, host: string, now: () => number, pidAlive: (pid: number) => boolean): Promise<LockJudgement> {
+  let raw: string; let details: { mtimeMs: number };
+  try { [raw, details] = await Promise.all([readFile(path, 'utf8'), stat(path)]); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'vanished' }; throw error; }
+  let record: { pid?: unknown; host?: unknown; started?: unknown } = {};
+  try { record = JSON.parse(raw) as typeof record; } catch { /* judged by age below */ }
+  // A record that cannot be read — a holder caught between its open and its write, or a crash
+  // mid-write — is judged by the file's age alone, so a racing holder is never mistaken for a crash.
+  const started = typeof record.started === 'string' ? Date.parse(record.started) : Number.NaN;
+  if (now() - (Number.isFinite(started) ? started : details.mtimeMs) > LOCK_STALE_MS) return { kind: 'stale', raw };
+  if (record.host !== host) return { kind: 'live' };
+  return typeof record.pid === 'number' && !pidAlive(record.pid) ? { kind: 'stale', raw } : { kind: 'live' };
+}
+
+/**
+ * Reclaim a lock judged stale. The file is moved aside atomically first — one reclaimer wins the
+ * rename and any other sees ENOENT — and removed only once its content proves it is still the
+ * record that was judged. A fresh holder's record that arrived in between is put back by a hard
+ * link: atomic, needs no readable content, keeps the record's bytes and mtime, and fails EEXIST
+ * exactly when a process took the freed path meanwhile — that process owns the mutex now, and the
+ * displaced copy is dropped, never written over it. The aside is removed only on those settled
+ * outcomes; any other failure rethrows and leaves `<team>.lock.stale-<uuid>` holding the displaced
+ * record, an artifact removeRunArtifacts sweeps, so a live holder's record is never destroyed.
+ * Exported for the mutex test alone.
+ */
+export async function reclaimStaleLock(path: string, judged: string): Promise<boolean> {
+  const aside = `${path}.stale-${randomUUID()}`;
+  try { await fsForTests.rename(path, aside); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true; throw error; }
+  if ((await readFile(aside, 'utf8').catch(() => null)) === judged) { await rm(aside, { force: true }); return true; }
+  try { await link(aside, path); }
+  catch (error) { const code = (error as NodeJS.ErrnoException).code; if (code !== 'EEXIST' && code !== 'ENOENT') throw error; }
+  await rm(aside, { force: true });
+  return false;
+}
+
+/**
+ * Every `run/` artifact of one team that no live process owns — its stamp, and any `.lock.stale-*`
+ * copy a reclaim killed mid-move left behind. The lock itself is not listed: only its holder's
+ * release removes it, and `team leave` holds it while it tears the team down.
+ */
+export async function removeRunArtifacts(storeRoot: string, team: string): Promise<void> {
+  const run = join(storeRoot, 'run');
+  // Matched by the reclaim's exact shape, never by a bare prefix: a team name may legally contain
+  // dots and hyphens, so a longer team's live mutex (`<team>.lock.stale-x.lock`) begins with this
+  // team's aside prefix, and sweeping it would free a mutex a running hook still holds.
+  const asidePrefix = `${team}.lock.stale-`;
+  const isAside = (name: string): boolean => name.startsWith(asidePrefix) && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(name.slice(asidePrefix.length));
+  let entries: string[];
+  try { entries = await readdir(run); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  await Promise.all(entries.filter((name) => name === `${team}.stamp` || isAside(name)).map((name) => rm(join(run, name), { force: true })));
+}
+
+function isPidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; } // alive but not ours; ESRCH is dead
 }

@@ -4,14 +4,56 @@ import { describe, expect, it } from 'vitest';
 import { run } from '../install.js';
 import { run as sync } from '../sync.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { allowedTools } from '../../lib/schema.js';
 
 describe('install (§6 refs)', () => {
-  it('refuses a bare ref when no configured team can resolve it', async () => {
-    const result = await run({ ref: 'sample', config: createConfigStore(await temporaryDirectory()) }, new ScriptedPrompter());
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('ambiguous') });
+  it('says no team is configured — the one sentence every verb uses — for a bare ref on an unjoined machine, and refuses a missing member or project selector as a usage error', async () => {
+    const store = createConfigStore(await temporaryDirectory());
+    expect(await run({ ref: 'sample', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No team is configured. Run `team join` first.' });
+    expect(await run({ kind: 'member', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a member handle: `install member <handle>`.' });
+    expect(await run({ kind: 'project', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a project name: `install project <name>`.' });
+    // A handle is held to the handle rule before it can become a path segment: no traversal, and no path echoed back.
+    const traversal = await run({ kind: 'member', member: '../../../config', config: store }, new ScriptedPrompter());
+    expect(traversal).toMatchObject({ ok: false, error: expect.stringContaining('Invalid member handle') });
+    expect(traversal.ok ? '' : traversal.error).not.toContain('config.json');
+    // An inherited object key is not a configured team either.
+    expect(await run({ ref: 'sample', team: 'constructor', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Team constructor is not configured.' });
+  });
+
+  it('a three-part ref on a machine that never joined bootstraps through setup — quiet, every prompt still asked — and then installs: one command (§6, M4 exit)', async () => {
+    const fixture = await bareTeam();
+    const id = '31313131-3131-4131-8131-313131313131';
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    const root = join(fixture.root, 'fresh'); const store = createConfigStore(join(root, 'state')); const home = join(root, 'home');
+    const remote = 'https://github.com/acme/team.git';
+    const runner = mappedRunner(remote, fixture.bare, fakeGh('bob', { 'api user/repository_invitations': { code: 0, stdout: '[]\n', stderr: '' } }));
+    // Identity: GitHub login and handle default to gh's login, then name and email; the §8 hook offer is declined.
+    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [false]);
+    const result = await run({ ref: 'acme/team/sample', config: store, home, runner, hook: { settingsFile: join(root, 'settings.json'), backupDir: join(root, 'backups') } }, io);
+    expect(result).toMatchObject({ ok: true, value: [{ id, team: 'team', path: join(home, '.claude', 'skills', 'sample') }] });
+    expect((await store.read()).teams.team).toMatchObject({ handle: 'bob' });
+    expect(await readFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('name: sample');
+    expect(JSON.parse(await git(['show', 'main:people/bob.json'], fixture.bare)).installed).toHaveLength(1);
+    expect(io.countAsked('Install the Claude Code session-start hook')).toBe(1);
+    const printed = io.lines.join('\n');
+    expect(printed).not.toContain('Welcome to terum-skills');
+    expect(printed).not.toContain('Next, from any terminal');
+    expect(printed).not.toContain('Feedback and requests');
+    expect(printed).not.toContain('Repository:');
+    // A machine that already has a team keeps the message: a second team is `team join`'s explicit flow.
+    const second = createConfigStore(join(root, 'second-state'));
+    await second.update((config) => { config.teams.other = { remote: 'github.com/other/repo', handle: 'bob' }; });
+    expect(await run({ ref: 'acme/team/sample', config: second, home: join(root, 'second-home'), runner }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('team join acme/team') });
+  });
+
+  it('an inherited object key is not a project', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    expect(await run({ kind: 'project', project: 'constructor', config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Unknown project constructor.' });
   });
 
   it('records a short requested version as its resolved full tree hash', async () => {
@@ -93,6 +135,19 @@ describe('install (§6 refs)', () => {
     expect((await store.read()).approvals).toEqual({});
     expect((await store.read()).pending).toEqual([]);
     expect((await store.read()).placements).toEqual({});
+  });
+
+  it('keeps the malformed-allowed-tools consent prompt when the YAML value cannot be serialized (a self-referencing anchor)', async () => {
+    const fixture = await bareTeam();
+    const id = '46464646-4646-4646-8646-464646464646';
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools: &a [*a]\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter([], [false]);
+    expect(await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, io)).toMatchObject({ ok: false, error: expect.stringContaining('malformed allowed-tools') });
+    expect(io.askedAbout('despite malformed')).toBe(true);
+    expect(io.lines.join('\n')).toContain('allowed-tools for sample could not be parsed: ');
   });
 
   it('keeps an earlier matching pending install when this attempt declines consent', async () => {

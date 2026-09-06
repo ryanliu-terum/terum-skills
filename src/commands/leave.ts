@@ -1,7 +1,7 @@
 import { access, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { defaultHookOptions, HookOptions, removeHook } from '../lib/hook.js';
+import { acquireTeamLock, defaultHookOptions, HookOptions, lockPath, removeHook, removeRunArtifacts } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
@@ -18,7 +18,7 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
     const name = parseOrExplain(teamNameSchema, args.name, 'team name');
     const store = args.config ?? createConfigStore();
     const config = await store.read();
-    const binding = config.teams[name];
+    const binding = Object.hasOwn(config.teams, name) ? config.teams[name] : undefined;
     if (!binding) throw new Error(`Team ${name} is not configured.`);
 
     const matching = Object.entries(config.placements).filter(([, entry]) => entry.team === name);
@@ -35,27 +35,37 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
       throw new Error('Leave was cancelled.');
     }
 
-    // The list shown before the prompt was a summary; the removal works from a fresh read, because a
-    // hook sync may have renamed or added a placement while the question waited.
-    const current = Object.entries((await store.read()).placements).filter(([, entry]) => entry.team === name);
-    const removedPaths = await removePlacements(store, current, io);
-    // The clone goes under the same lock safeWrite holds, so a sync mid-write is refused rather than
-    // having its working tree deleted underneath it; releasing the lock removes the lock directory.
-    await withCloneLock(clone, async () => {
-      await Promise.all([
-        rm(clone, { recursive: true, force: true }),
-        rm(join(store.root, 'cache', name), { recursive: true, force: true }),
-        rm(join(store.root, 'run', `${name}.stamp`), { force: true }),
-      ]);
-    });
+    // Teardown holds the §8 team mutex the way it holds the clone's writer lock below: a hook sync
+    // mid-run keeps its claim and leave says so, rather than freeing a mutex it never held — a third
+    // hook could then pull into the clone being dismantled, and the running sync could place a folder
+    // back after it was removed. A lock a killed hook left behind is reclaimed by the acquire itself.
+    const releaseTeam = await acquireTeamLock(store.root, name);
+    if (!releaseTeam) throw new Error(`Another terum-skills sync holds the session lock on ${name} (${lockPath(store.root, name)}); retry when it finishes, or remove that file if no session is syncing.`);
+    let removedPaths: string[] = [];
     let lastTeam = false;
-    await store.update((fresh) => {
-      delete fresh.teams[name];
-      for (const [id, entry] of Object.entries(fresh.shared)) if (entry.team === name) delete fresh.shared[id];
-      fresh.pending = fresh.pending.filter((entry) => entry.team !== name);
-      for (const path of removedPaths) delete fresh.placements[path];
-      lastTeam = Object.keys(fresh.teams).length === 0;
-    });
+    try {
+      // The list shown before the prompt was a summary; the removal works from a fresh read, because a
+      // hook sync may have renamed or added a placement while the question waited.
+      const current = Object.entries((await store.read()).placements).filter(([, entry]) => entry.team === name);
+      removedPaths = await removePlacements(store, current, io);
+      // The clone goes under the same lock safeWrite holds, so a sync mid-write is refused rather than
+      // having its working tree deleted underneath it; releasing the lock removes the lock directory.
+      await withCloneLock(clone, async () => {
+        await Promise.all([
+          rm(clone, { recursive: true, force: true }),
+          rm(join(store.root, 'cache', name), { recursive: true, force: true }),
+          // The stamp and any aside a killed reclaim left; the mutex itself is released below, by its holder.
+          removeRunArtifacts(store.root, name),
+        ]);
+      });
+      await store.update((fresh) => {
+        delete fresh.teams[name];
+        for (const [id, entry] of Object.entries(fresh.shared)) if (entry.team === name) delete fresh.shared[id];
+        fresh.pending = fresh.pending.filter((entry) => entry.team !== name);
+        for (const path of removedPaths) delete fresh.placements[path];
+        lastTeam = Object.keys(fresh.teams).length === 0;
+      });
+    } finally { await releaseTeam().catch(() => undefined); } // a lock that could not be removed is reclaimed by the next acquire; it must never replace the real outcome
     if (lastTeam) {
       const options = { ...defaultHookOptions(store.root), ...args.hook };
       // The local cleanup above already happened; an unreadable settings.json must not turn it into a failure.

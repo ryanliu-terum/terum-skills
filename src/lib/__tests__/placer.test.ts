@@ -1,7 +1,7 @@
-import { lstat, mkdir, readFile, readdir, symlink, utimes, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { inspect, lockTarget, place, remove, resolveTarget } from '../placer.js';
+import { fsForTests, inspect, lockTarget, place, remove, resolveTarget } from '../placer.js';
 import { skillTargetLockPath } from '../placer/vendor/skillhub/skill-target-lock.js';
 import { bareTeam, cloneWithIdentity, git, temporaryDirectory } from './fixtures.js';
 import { diffSkillFiles, snapshotSkillDirectory } from '../placer/vendor/skillhub/skill-fingerprint.js';
@@ -111,6 +111,130 @@ describe('native Placer (§7)', () => {
     await expect(readFile(second.path)).rejects.toMatchObject({ code: 'ENOENT' });
     await symlink(join(source, 'SKILL.md'), join(source, 'linked-file'));
     await expect(place(source, target, 'link')).rejects.toThrow('symlink');
+  });
+
+  it('replaces an owned placement in place with no staging residue, and rolls the previous copy back when the swap fails midway', async () => {
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'v1'); await writeFile(join(source, 'only-in-v1.md'), 'gone later');
+    const first = await place(source, target, 'sample');
+    await writeFile(join(source, 'SKILL.md'), 'v2'); await rm(join(source, 'only-in-v1.md'));
+    const second = await place(source, target, 'sample', { replace: true });
+    expect(second.path).toBe(first.path);
+    expect(await readFile(join(first.path, 'SKILL.md'), 'utf8')).toBe('v2');
+    await expect(readFile(join(first.path, 'only-in-v1.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
+    // The second rename onto the destination — after the installed copy was moved aside — fails: the
+    // user's copy must come back byte for byte, and nothing may be left beside it.
+    await writeFile(join(source, 'SKILL.md'), 'v3');
+    const realRename = fsForTests.rename;
+    let attemptsAtDestination = 0;
+    fsForTests.rename = async (from, to) => {
+      if (String(to) === first.path && ++attemptsAtDestination === 2) throw new Error('simulated crash after displacement');
+      return realRename(from, to);
+    };
+    try { await expect(place(source, target, 'sample', { replace: true })).rejects.toThrow('simulated crash'); }
+    finally { fsForTests.rename = realRename; }
+    expect(await readFile(join(first.path, 'SKILL.md'), 'utf8')).toBe('v2');
+    expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
+  });
+
+  it('keeps the placement failure as the message and moves a copy it cannot restore to quarantine, never leaving it hidden in the skills root', async () => {
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'v1');
+    const first = await place(source, target, 'sample');
+    await writeFile(join(source, 'SKILL.md'), 'v2');
+    // Every rename onto the destination after the natural first attempt fails: the swap AND the restore.
+    const realRename = fsForTests.rename;
+    let attemptsAtDestination = 0;
+    fsForTests.rename = async (from, to) => {
+      if (String(to) === first.path && ++attemptsAtDestination >= 2) throw new Error('simulated crash after displacement');
+      return realRename(from, to);
+    };
+    let failure: Error | undefined;
+    try { await place(source, target, 'sample', { replace: true, quarantineRoot: join(root, 'quarantine') }).catch((error: Error) => { failure = error; }); }
+    finally { fsForTests.rename = realRename; }
+    expect(failure?.message).toContain('simulated crash after displacement');
+    expect(failure?.message).toContain('could not be restored');
+    expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
+    const quarantined = (await readdir(join(root, 'quarantine'), { recursive: true })).map(String).filter((entry) => entry.endsWith(join('sample', 'SKILL.md')));
+    expect(quarantined).toHaveLength(1);
+    expect(await readFile(join(root, 'quarantine', quarantined[0]!), 'utf8')).toBe('v1');
+  });
+
+  it('a displaced copy whose removal fails after the swap landed goes to quarantine, never stays hidden beside the new copy', async () => {
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'v1');
+    await place(source, target, 'sample');
+    await writeFile(join(source, 'SKILL.md'), 'v2');
+    // The swap succeeds; only the removal of the displaced copy fails (an immutable file, a busy handle).
+    const realRm = fsForTests.rm;
+    fsForTests.rm = async (path, options) => { if (String(path).includes('.terum-') && String(path).endsWith('.old')) throw new Error('simulated cleanup failure'); return realRm(path, options); };
+    let failure: Error | undefined;
+    try { await place(source, target, 'sample', { replace: true, quarantineRoot: join(root, 'quarantine') }).catch((error: Error) => { failure = error; }); }
+    finally { fsForTests.rm = realRm; }
+    expect(failure?.message).toContain('simulated cleanup failure');
+    expect(failure?.message).toContain('could not be restored');
+    expect(await readFile(join(target, 'sample', 'SKILL.md'), 'utf8')).toBe('v2');
+    expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
+    const quarantined = (await readdir(join(root, 'quarantine'), { recursive: true })).map(String).filter((entry) => entry.endsWith(join('sample', 'SKILL.md')));
+    expect(quarantined).toHaveLength(1);
+    expect(await readFile(join(root, 'quarantine', quarantined[0]!), 'utf8')).toBe('v1');
+  });
+
+  it('a staging cleanup that fails as well keeps the recovery message: the finally never replaces it', async () => {
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'v1');
+    await place(source, target, 'sample');
+    await writeFile(join(source, 'SKILL.md'), 'v2');
+    // Every cleanup of a hidden `.terum-` folder fails — the persistent EACCES/EBUSY case — so the
+    // staging folder's removal in the finally fails exactly like the displaced copy's did; the
+    // composed message, and where the previous copy went, must survive it.
+    const realRm = fsForTests.rm;
+    fsForTests.rm = async (path, options) => { if (String(path).includes('.terum-')) throw new Error('simulated cleanup failure'); return realRm(path, options); };
+    let failure: Error | undefined;
+    try { await place(source, target, 'sample', { replace: true, quarantineRoot: join(root, 'quarantine') }).catch((error: Error) => { failure = error; }); }
+    finally { fsForTests.rm = realRm; }
+    expect(failure?.message).toContain('simulated cleanup failure');
+    expect(failure?.message).toContain('could not be restored');
+    expect(failure?.message).toContain(join(root, 'quarantine'));
+    expect(await readFile(join(target, 'sample', 'SKILL.md'), 'utf8')).toBe('v2');
+    expect((await readdir(target)).filter((name) => name.includes('.terum-'))).toEqual([]);
+    const quarantined = (await readdir(join(root, 'quarantine'), { recursive: true })).map(String).filter((entry) => entry.endsWith(join('sample', 'SKILL.md')));
+    expect(quarantined).toHaveLength(1);
+    expect(await readFile(join(root, 'quarantine', quarantined[0]!), 'utf8')).toBe('v1');
+  });
+
+  it('a failure before anything was displaced rethrows the placement error itself, even when the probe for the displaced copy fails', async () => {
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills');
+    // The probe for the `.old` path fails with something other than ENOENT (a locked-down skills root):
+    // a run that displaced nothing must still rethrow its own error and name no copy it never made.
+    const realLstat = fsForTests.lstat;
+    fsForTests.lstat = async (path) => {
+      if (path.endsWith('.old')) throw Object.assign(new Error('EACCES: simulated probe failure'), { code: 'EACCES' });
+      return realLstat(path);
+    };
+    try {
+      await expect(place(join(root, 'no-such-source'), target, 'sample', { quarantineRoot: join(root, 'quarantine') })).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(place(join(root, 'no-such-source'), target, 'sample', { quarantineRoot: join(root, 'quarantine') })).rejects.not.toThrow(/could not be restored/);
+    } finally { fsForTests.lstat = realLstat; }
+  });
+
+  it('moves an edited placement to quarantine by copy-then-remove when the rename crosses a volume', async () => {
+    const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'original');
+    const placed = await place(source, target, 'edited');
+    await writeFile(join(placed.path, 'SKILL.md'), 'edited by user');
+    const realRename = fsForTests.rename;
+    fsForTests.rename = async (from, to) => {
+      if (String(to).includes('quarantine')) throw Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' });
+      return realRename(from, to);
+    };
+    let outcome: { quarantined?: string };
+    try { outcome = await remove(target, placed.path, placed.snapshot.fingerprint, join(root, 'quarantine')); }
+    finally { fsForTests.rename = realRename; }
+    expect(outcome.quarantined).toBeDefined();
+    expect(await readFile(join(outcome.quarantined!, 'SKILL.md'), 'utf8')).toBe('edited by user');
+    await expect(readFile(join(placed.path, 'SKILL.md'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('preserves a completed placement when the project exclude update fails and surfaces the real copy errno', async () => {

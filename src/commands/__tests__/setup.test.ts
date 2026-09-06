@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { COMMUNITY_URL } from '../../lib/community.js';
@@ -33,6 +33,66 @@ describe('setup (§6.1)', () => {
     expect(io.lines.join('\n')).not.toMatch(/\b(eval|ui)\b/i);
     expect(io.lines.join('\n')).not.toContain('Feedback and requests:');
     expect(io.lines).toContain(`Team team is already configured on this machine.`);
+  });
+
+  it('refuses a configured team whose clone is missing before it prompts for or writes anything else, naming the repair', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const home = join(fixture.root, 'home');
+    // A shareable skill and a hook offer both sit after the team step; neither may run on a machine
+    // the wizard is about to refuse, so the repair message is what the user gets, not a share ENOENT.
+    await skillUnder(home);
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    let hookOffers = 0;
+    const result = await run({ config: store, home, runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+      offerHook: async () => { hookOffers += 1; return 'present'; },
+    } }, io);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`team join ${fixture.bare}`), value: { steps: { team: 'skipped' } } });
+    expect(result.ok ? '' : result.error).toContain('clone at');
+    expect(hookOffers).toBe(0);
+    expect(result.ok ? undefined : result.value?.steps.hook).toBeUndefined();
+    expect(io.asked).toEqual([]);
+    expect(io.lines).not.toContain('Next, from any terminal:');
+    expect(io.lines).not.toContain('Members:');
+  });
+
+  it('names the move-aside repair when the clone directory survives without team.json', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    // An interrupted `team leave` dies inside its rm -rf, so the directory survives; ensureClone
+    // refuses that state, so setup must not name a bare `team join` as the whole repair.
+    await rm(join(clone, 'team.json'), { force: true });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+      offerHook: async () => 'present',
+    } }, io);
+    expect(result.ok).toBe(false);
+    expect(result.ok ? '' : result.error).toContain(`${clone} exists and is not a complete clone`);
+    expect(result.ok ? '' : result.error).toContain('move it aside');
+    expect(io.lines).not.toContain('Members:');
+  });
+
+  it('prints no member header and keeps the repository links when only the roster cannot be read', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    // team.json still parses; only the roster read fails, so the header must not print alone.
+    await rm(join(clone, 'people'), { recursive: true, force: true });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+      offerHook: async () => 'present',
+    } }, io);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.steps).toMatchObject({ team: 'skipped', done: 'printed' });
+    expect(io.lines).not.toContain('Members:');
+    expect(io.lines.join('\n')).toContain('the team details could not be read');
+    // The repository links come from the configured remote, not the clone, so they survive.
+    expect(io.lines).toContain(`Repository: ${fixture.bare}`);
+    expect(io.lines).toContain(`README: ${fixture.bare}`);
   });
 
   it('onboards a GitHub creator end to end without taking any credential input', async () => {
@@ -118,6 +178,20 @@ describe('setup (§6.1)', () => {
     expect(resumed.value.steps).toMatchObject({ team: 'skipped', invite: 'skipped', hook: 'done', done: 'printed' });
     expect((await git(['ls-tree', '--name-only', 'main:people'], fixture.bare)).split('\n').filter(Boolean).sort()).toEqual(['bob.json', 'seed.json']);
     expect(first.countAsked('Install the Claude Code session-start hook') + second.countAsked('Install the Claude Code session-start hook')).toBe(1);
+  });
+
+  it('quiet mode (the §6 install bootstrap) suppresses every print-only step and keeps every prompt', async () => {
+    const fixture = await bareTeam();
+    const root = join(fixture.root, 'quiet'); const store = createConfigStore(join(root, 'state'));
+    const remote = 'https://git.example/team.git'; const runner = mappedRunner(remote, fixture.bare, fakeGh('bob'));
+    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [true]);
+    const result = await run({ target: remote, quiet: true, config: store, runner, hook: hookFor(root), communityUrl: 'https://example.test/community' }, io);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.steps).toEqual({ welcome: 'skipped', github: 'done', team: 'done', actions: 'skipped', invite: 'skipped', community: 'skipped', hook: 'done', done: 'skipped' });
+    expect(io.countAsked('Install the Claude Code session-start hook')).toBe(1);
+    const printed = io.lines.join('\n');
+    for (const line of ['Welcome to terum-skills', 'GitHub: gh', 'Next, from any terminal', 'Feedback and requests', 'Repository:', 'README:']) expect(printed, line).not.toContain(line);
+    expect(JSON.parse(await git(['show', 'main:people/bob.json'], fixture.bare)).email).toBe('bob@example.com');
   });
 
   it('keeps setup as an orchestrator: real verbs ask every consent question themselves', async () => {

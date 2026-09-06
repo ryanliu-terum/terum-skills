@@ -50,7 +50,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const destination = teamJson.policy.publish === 'pr' ? `publish/${record.name}` : null;
     // safeWrite retargets a stale-lease push to `<branch>-2` (teamRepo.ts push()), and `foo-2` is a
     // legal skill name with an endorsement branch of its own, so BOTH names are held to the reuse rule.
-    if (destination !== null) for (const candidate of [destination, `${destination}-2`]) await assertBranchReusable(runner, clone, candidate, record.id, scope, binding.remote);
+    if (destination !== null) await assertBranchesReusable(runner, clone, [destination, `${destination}-2`], record.id, scope, binding.remote);
 
     if (teamJson.policy.publish === 'push') {
       printCard(record, scopeLabel, io);
@@ -156,14 +156,22 @@ function endorse(fresh: Team, id: string, scope: PublishScope): string | undefin
  * re-reads it after its own fetch, so it guards a move DURING the write, never a branch that
  * existed before it (§6.0). Existence is checked live on the remote; content from the fetched objects.
  */
-async function assertBranchReusable(runner: Runner, clone: string, branch: string, id: string, scope: PublishScope, remote: string): Promise<void> {
-  const heads = await runner.run('git', ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], { cwd: clone });
-  if (heads.code !== 0) throw new Error(`Could not check the remote for ${branch}: ${commandMessage(heads.stderr, heads.stdout)}`);
-  const sha = heads.stdout.trim().split(/\s+/)[0];
-  if (!sha) return;
-  if (await isExactlyThisEndorsement(runner, clone, sha, id, scope, remote)) return;
-  const where = compare(remote, branch) ?? `${stripRemoteCredentials(remote)} — branch ${branch}`;
-  throw new Error(`${branch} already exists on the remote with a different endorsement (${where}). Merge or close its pull request, or delete the branch with \`git push origin --delete ${branch}\`, then retry.`);
+async function assertBranchesReusable(runner: Runner, clone: string, branches: readonly string[], id: string, scope: PublishScope, remote: string): Promise<void> {
+  // One round trip for every candidate name; each tip that exists is then vetted, in order, from the fetched objects.
+  const heads = await runner.run('git', ['ls-remote', '--heads', 'origin', ...branches.map((branch) => `refs/heads/${branch}`)], { cwd: clone });
+  if (heads.code !== 0) throw new Error(`Could not check the remote for ${branches.join(', ')}: ${commandMessage(heads.stderr, heads.stdout)}`);
+  const tips = new Map<string, string>();
+  for (const line of heads.stdout.split('\n')) {
+    const [sha, ref] = line.trim().split(/\s+/);
+    if (sha && ref) tips.set(ref, sha);
+  }
+  for (const branch of branches) {
+    const sha = tips.get(`refs/heads/${branch}`);
+    if (!sha) continue;
+    if (await isExactlyThisEndorsement(runner, clone, sha, id, scope, remote)) continue;
+    const where = compare(remote, branch) ?? `${stripRemoteCredentials(remote)} — branch ${branch}`;
+    throw new Error(`${branch} already exists on the remote with a different endorsement (${where}). Merge or close its pull request, or delete the branch on the host — or with \`git -C ${clone} push --no-verify origin --delete ${branch}\`, since the push guard refuses an unattributed deletion (D12) — then retry.`);
+  }
 }
 
 async function isExactlyThisEndorsement(runner: Runner, clone: string, sha: string, id: string, scope: PublishScope, remote: string): Promise<boolean> {

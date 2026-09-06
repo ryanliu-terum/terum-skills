@@ -57,6 +57,17 @@ describe('team create (§6)', () => {
     expect(await git(['ls-remote', '--heads', bare])).toContain('refs/heads/main');
   });
 
+  it('accepts a prototype-named team (`constructor`) end to end: every guard and the binding read own keys, so nothing fails after the scaffold is pushed', async () => {
+    const { root, bare } = await emptyBare();
+    const publicRemote = 'https://git.example/constructor.git';
+    const store = createConfigStore(pathJoin(root, 'local'));
+    const result = await create({ name: 'constructor', remote: publicRemote, config: store, runner: mappedRunner(publicRemote, bare) }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    if (!result.ok) throw new Error(result.error);
+    const teams = (await store.read()).teams;
+    expect(Object.hasOwn(teams, 'constructor')).toBe(true);
+    expect(teams.constructor).toMatchObject({ handle: 'me' });
+  });
+
   it('scaffolds the §4.1 tree into an empty generic-git remote, records the team, and leaves the clone ready', async () => {
     const { root, bare } = await emptyBare();
     const publicRemote = 'https://git.example/new-team.git';
@@ -333,4 +344,17 @@ describe('team create (§6)', () => {
     expect(await readdir(pathJoin(store.root, 'teams'))).toEqual([]);
   });
 
+});
+
+describe('team create arms the push guard (D12)', () => {
+  it('a failure arming the guard leaves no clone and no staging directory behind, and binds nothing', async () => {
+    const { root, bare } = await emptyBare();
+    const publicRemote = 'https://git.example/guarded.git';
+    const store = createConfigStore(pathJoin(root, 'local'));
+    const runner = wrapRunner(mappedRunner(publicRemote, bare), async (command, args, _options, next) => (command === 'git' && args[0] === 'config' && args[1] === 'core.hooksPath' ? { code: 1, stdout: '', stderr: 'config write failed' } : next()));
+    const result = await create({ name: 'guarded', remote: publicRemote, config: store, runner }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Could not arm the push guard') });
+    expect(await readdir(pathJoin(store.root, 'teams'))).toEqual([]);
+    expect((await store.read()).teams).toEqual({});
+  });
 });

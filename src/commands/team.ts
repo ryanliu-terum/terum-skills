@@ -11,7 +11,7 @@ import { activePeople, readPeople } from '../lib/readme.js';
 import { Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
-import { cloneOrigin, cloneTeam, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
+import { cloneOrigin, cloneTeam, installPushGuard, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 import { endorsedCandidates } from '../lib/skills.js';
 import { installOne } from './install.js';
 
@@ -181,7 +181,7 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const clone = store.teamClone(name);
-    if (config.teams[name]) throw new Error(`Team ${name} is already configured for ${config.teams[name].remote}; run \`team join\` for it or pick another name.`);
+    if (Object.hasOwn(config.teams, name)) throw new Error(`Team ${name} is already configured for ${config.teams[name]!.remote}; run \`team join\` for it or pick another name.`);
     if (await exists(clone)) throw new Error(`A clone already exists at ${clone}; run \`team join\` for that team or pick another name.`);
 
     let remote: string;
@@ -237,7 +237,7 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       throw new Error(`${reason}\n${advice}`);
     }
     await store.update((fresh) => {
-      if (fresh.teams[name]) throw new Error(`Team ${name} was configured by another process while this create ran; the repository ${remote} is scaffolded, run \`team join ${remote} --as <other-name>\` to use it.`);
+      if (Object.hasOwn(fresh.teams, name)) throw new Error(`Team ${name} was configured by another process while this create ran; the repository ${remote} is scaffolded, run \`team join ${remote} --as <other-name>\` to use it.`);
       assertBindable(fresh, name, remote);
       setIdentity(fresh, identity);
       bindTeam(fresh, name, { remote, handle: identity.handle });
@@ -265,8 +265,8 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     const existing = teamByRemote(configBefore, normalized);
     if (existing && args.as && args.as !== existing[0]) io.print(`This remote is already configured as team ${existing[0]}; ignoring --as ${args.as}.`);
     const team = parseOrExplain(teamNameSchema, existing?.[0] ?? args.as ?? remoteName(target.remote), 'team name');
-    if (!existing && configBefore.teams[team]) {
-      throw new Error(`Team name ${team} is already used for ${configBefore.teams[team].remote}; pass --as <other-name>.`);
+    if (!existing && Object.hasOwn(configBefore.teams, team)) {
+      throw new Error(`Team name ${team} is already used for ${configBefore.teams[team]!.remote}; pass --as <other-name>.`);
     }
     // §5.4: the per-team handle is immutable once its people file exists — and only join/create bind it.
     const boundHandle = existing?.[1].handle;
@@ -388,6 +388,11 @@ async function ensureClone(clone: string, remote: string, normalized: string, ru
     throw new Error(`${clone} exists but is not a complete clone of ${remote}; move it aside and retry.`);
   }
   if (origin !== normalized) throw new Error(`${clone} is a clone of ${origin}, not ${normalized}; pass --as <other-name> to keep both teams.`);
+  // Arming is idempotent, so it belongs on every join, not only on a fresh clone: a clone that exists
+  // but was never armed — an interrupted create or join, an arming that failed after the clone landed
+  // — is exactly the state whose printed advice is `team join <remote>`. After the origin checks, so
+  // another team's clone is never written into.
+  await installPushGuard(clone, runner);
 }
 
 async function readRoster(clone: string): Promise<RosterEntry[]> {
@@ -486,7 +491,11 @@ async function bootstrap(remote: string, clone: string, teamName: string, identi
     await writeFile(pathJoin(staging, '.github', 'workflows', 'terum-skills.yml'), WORKFLOW);
     await git('add', '--all');
     await git('commit', '-q', '-m', `${identity.handle}: create team ${teamName}`);
-    await git('push', '-q', '-u', 'origin', 'main');
+    await git('push', '-q', '--no-verify', '-u', 'origin', 'main');
+    // Armed on `staging`, before the rename: the hook file and the relative `core.hooksPath` both live
+    // inside the repo and survive the move, and the rename stays the last statement of the try, so
+    // every failure path leaves exactly `staging` for the catch below to delete.
+    await installPushGuard(staging, runner);
     await rename(staging, clone);
   } catch (error) {
     await rm(staging, { recursive: true, force: true });
