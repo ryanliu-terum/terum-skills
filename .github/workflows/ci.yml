@@ -1,0 +1,77 @@
+name: CI
+
+# First CI this repo has had: the gates that until now ran only on laptops (AGENTS.md "Gates"), plus a
+# packed-artifact smoke test (bin.test.ts compiles a fixture and deliberately never touches dist/ —
+# the real tarball is checked here instead), plus pinned actionlint over the workflows. Hermetic:
+# no secrets; the only network use is npm's registry for `npm ci` and the smoke install.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Pack, inspect, install into a foreign project, run
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          npm pack --json --pack-destination release > release/pack.json
+          # shellcheck disable=SC2016 # the single-quoted block is JavaScript handed to node -e, not shell
+          node -e '
+            const [p] = JSON.parse(require("fs").readFileSync("release/pack.json","utf8"));
+            const files = p.files.map(f => f.path);
+            for (const must of ["package.json","README.md","LICENSE","NOTICE","dist/index.js"])
+              if (!files.includes(must)) { console.error(`tarball lacks ${must}`); process.exit(1); }
+            if (files.some(f => f.includes("__tests__") || f.startsWith("src/"))) { console.error("tarball ships sources/tests"); process.exit(1); }
+            console.log(`${p.name}@${p.version} ${p.entryCount} files ${p.integrity}`);
+          '
+          f=$(node -p 'JSON.parse(require("fs").readFileSync("release/pack.json","utf8"))[0].filename')
+          tmp=$(mktemp -d); cp "release/$f" "$tmp/"
+          (cd "$tmp" && npm init -y >/dev/null && npm install --no-audit --no-fund "./$f" >/dev/null)
+          (cd /tmp && HOME="$tmp/home" "$tmp/node_modules/.bin/terum-skills" --help | grep -q 'npx -y terum-skills@latest setup')
+
+  actionlint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: docker run --rm -v "${PWD}:/repo" --workdir /repo rhysd/actionlint:1.7.7 -color
