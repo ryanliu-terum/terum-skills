@@ -100,7 +100,7 @@ never widen permissions** — see § Safety.
 | --- | --- | --- | --- | --- |
 | `--routine` | `--light` | `gpt-5.6-luna` | `medium` | Mechanical, fully-specified, **short-context** work: renames, boilerplate, docstrings, test scaffolding. See the Luna caveat below — this preset has a sharp edge. |
 | `--standard` | `--normal` | `gpt-5.6-terra` | `high` | **Default.** Everyday feature work: a new route, a new lib module, a contract change with SPA follow-through |
-| `--deep` | `--heavy` | `gpt-5.6-sol` | `max` | Multi-file refactors, hard debugging, migration-adjacent work, anything touching auth/privacy predicates |
+| `--deep` | `--heavy` | `gpt-5.6-sol` | `max` | Multi-file refactors, hard debugging, migration-adjacent work, anything on the write path (safeWrite, guard, placer) where a wrong step loses a teammate's files |
 
 Default when no preset is given: **`--standard`**.
 
@@ -431,7 +431,7 @@ Then, in order:
 4. **Cross-model review** — `codex exec review --base main` from inside the worktree, for a
    second opinion from a different model family.
 5. **`/ultrareview --working`** for the full four-dimension pass — or **`/hybrid-review --working`**
-   on a `--deep` run or anything touching auth/RLS/contracts, which runs the same four dimensions
+   on a `--deep` run or anything touching the write path or a spec contract, which runs the same four dimensions
    with the *verify* panel on Codex instead of Claude. That is the direct fix for the correlated-
    verifier error our own `/ultrareview` post-mortem found: a Claude finder plus a Claude verifier
    can share one misreading and pass a false positive through; a cross-vendor panel cannot.

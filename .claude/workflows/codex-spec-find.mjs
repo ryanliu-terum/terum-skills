@@ -200,7 +200,7 @@ const READINESS_PROMPT = (n, of) =>
   `- missing or hand-wavy test strategy (this repo mandates Vitest + adversarial inputs + collocated __tests__)\n` +
   `- unclear sequencing or unstated dependencies between steps\n` +
   `- steps that assume undocumented behavior\n` +
-  `- a security-relevant contract left to implementer discretion: an authorization or ownership check, a privacy predicate, a replay/idempotency rule. If you would have to invent it to build the step, that is a BLOCKER — someone less careful ships it open.\n\n` +
+  `- a data-integrity contract left to implementer discretion: what is written, in what order, what survives a crash mid-way, whether a step can be re-run. If you would have to invent it to build the step, that is a GAP (BLOCKER only if another step assumes it or a well-meaning user loses data without it). Authorization, ownership, privacy and anti-abuse contracts are GAP at most — no threat model is adopted yet (Ryan, 2026-09-06); do not model a hostile caller.\n\n` +
   `Quote the vague step and say exactly what is missing to build it. If build-ready, return findings: [].`
 
 // --- run --------------------------------------------------------------------

@@ -28,6 +28,30 @@ live in git so a teammate inherits them on clone. Only machine-specific paths, p
 
 `/ultraspec` (command only) runs `workflows/ultraspec.js`, the Claude-only spec auditor.
 
+## Scoring and review posture (Ryan, 2026-09-06)
+
+Every fix-option list in these tools (single-fix, parallel-fix, the ultrareview / hybrid-review /
+codex-spec triage stages, harden's apply wave) rates options on two numbers, never summed:
+
+- **Fit (0-4)** — how exactly the fixed behaviour is the behaviour the governing spec describes and
+  the ratified North Star asks for. Cited by section and sentence; a Fit without a citation reads
+  as 1. The spec is the latest `.planning/specs/*.md` covering the area (its "North Star check"
+  line counts); the North Star is the `north_star:` frontmatter of the newest
+  `.planning/decisions/*-decision-walk.md` for that area.
+- **Depth (0-4)** — how much of the cause the fix removes (unchanged from the 2026-07-30 trial).
+- **Effort** — one line of fact per option (hours, files, migrations, revert path). Reported so the
+  reader knows what they are buying. It never decides: highest Fit wins, then highest Depth, and
+  only a tie on both lets effort break it, out loud. Until 2026-09-06 the second axis was Cost;
+  it let the model prefer the cheaper fix over the one the spec describes.
+
+Review posture: the released tools are open source and there is no external-attacker model yet.
+Reviewers and spec auditors judge what a well-meaning user experiences — data loss, crashes,
+behaviour that differs from the spec or North Star. Hostile-caller findings (attacker, privilege
+escalation, cross-tenant, malicious input, unspecified authorization contracts) are out of scope
+until a threat model is adopted; ordinary input that breaks a step is still a bug. The canonical
+wording lives in root `CLAUDE.md`; the engines carry it as `POSTURE` in `ultrareview.js`, refute
+rule 5 in `codex-verify-rules.md`, and the Posture paragraph in `codex-spec-find-rules.md`.
+
 ## Conventions these tools assume (not yet created here)
 
 The fix/review tools were written against MVP's planning layout. Create these as the project needs them:

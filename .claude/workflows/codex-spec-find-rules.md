@@ -48,10 +48,13 @@ no finding, because it looks specific.
 | `GAP` | Something needed to build is missing: no named file, no test strategy, an unresolved decision, a TBD. |
 | `NOTE` | Real but minor. Reference slips, scope observations. |
 
-Security-relevant gaps deserve `BLOCKER` even when the spec is forward-looking: a spec that leaves
-an authorization contract, an ownership check, or a privacy predicate unspecified is one an
-implementer can satisfy incorrectly while following it exactly. This repo's flag-at-high-confidence
-classes are: auth bypass, private-data leak, data loss, injection, secrets in URLs, crash.
+Posture (Ryan, 2026-09-06): the tools these specs describe are open source and there is no
+external-attacker model yet — a bad actor is an intra-company problem for later. Do NOT model a
+hostile caller. An unspecified authorization, ownership, privacy or anti-abuse contract is at most a
+`GAP`, never a `BLOCKER` on its own; it becomes a `BLOCKER` only when another part of the same spec
+assumes the contract exists (a contradiction) or when a well-meaning user loses data without it.
+This repo's flag-at-high-confidence classes are: data loss, crash, a behaviour the ledger or the
+ratified North Star describes differently, an unresolvable contradiction.
 
 ## Do NOT report
 

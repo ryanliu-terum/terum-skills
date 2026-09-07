@@ -28,13 +28,13 @@ const FINDINGS = [
   f('cross-spec drift', 'DRIFT', 'badidx-one'),
 ]
 
-const opt = (name, depth, cost) => ({ name, change: 'change for ' + name, depth, cost, winsIf: 'wins if ' + name })
+const opt = (name, depth, fit) => ({ name, change: 'change for ' + name, depth, fit, fitCitation: fit >= 3 ? 'ledger D3: "does X"' : 'silent', effort: 'a paragraph', winsIf: 'wins if ' + name })
 const base = { rootCause: 'rc', rootCauseLocation: '§1 line 1', disposition: 'fix', options: [opt('A', 2, 0)], recommended: 0, oneClearlyWins: true, whyOneOrFork: 'one sensible edit', difficulty: 'trivial', risk: 'low', scope: 'isolated', patch: '' }
 const PATCH = '--- a/spec.md\n+++ b/spec.md\n@@ -1 +1 @@\n-rev 3\n+rev 4'
 const TRIAGE = {
   'mech-one':     { ...base, patch: PATCH },
-  'clear-one':    { ...base, options: [opt('A', 3, 2), opt('B', 1, 1)], difficulty: 'moderate', scope: 'pattern', patternDetail: '§5.4, §6' },
-  'fork-one':     { ...base, options: [opt('A', 4, 4), opt('B', 2, 1)], oneClearlyWins: false, whyOneOrFork: 'depends on which orphan predicate the product wants' },
+  'clear-one':    { ...base, options: [opt('A', 3, 3), opt('B', 1, 1)], difficulty: 'moderate', scope: 'pattern', patternDetail: '§5.4, §6' },
+  'fork-one':     { ...base, options: [opt('A', 4, 1), opt('B', 2, 1)], oneClearlyWins: false, whyOneOrFork: 'depends on which orphan predicate the product wants' },
   'declined-one': { ...base, disposition: 'decline', declineReason: 'ledger D12 already settles this' },
   'dead-one':     null,
   'badidx-one':   { ...base, recommended: 7 },

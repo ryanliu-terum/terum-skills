@@ -1,6 +1,6 @@
 ---
 name: hybrid-review
-description: Cross-model code-diff reviewer. Same 4-dimension review as /ultrareview, but the adversarial verify panel runs on OpenAI Codex instead of Claude, so the verifiers do not share the finders' blind spots. Use when a diff matters enough that a false positive surviving verification would cost real time — live auth/RLS/contract changes, pre-merge gates, or any batch where /ultrareview's findings felt over-confident. Args: same as /ultrareview — [<PR#>] [--working] [--no-triage] [--no-logs] + knobs/presets (--quick|--balanced|--in-depth|--max; --model/--review-model; --efficient/--verify) — except --verify-model, which here selects the Codex tier (astra|sol|terra|luna) rather than a Claude model. Plus --fast (hybrid-only) for Codex Fast mode — a no-op as of 2026-09-04 (no measured speedup on exec or on the interactive app-server path; openai/codex#32191); same model, effort, and panel. The default flow ends in a triage: every confirmed finding is investigated and sorted into mechanical / clear / fork / declined, with a patch for the mechanical ones — nothing is applied without your confirmation.
+description: Cross-model code-diff reviewer. Same 4-dimension review as /ultrareview, but the adversarial verify panel runs on OpenAI Codex instead of Claude, so the verifiers do not share the finders' blind spots. Use when a diff matters enough that a false positive surviving verification would cost real time — the write path (safeWrite, guard, placer), spec-contract changes, pre-merge gates, or any batch where /ultrareview's findings felt over-confident. Args: same as /ultrareview — [<PR#>] [--working] [--no-triage] [--no-logs] + knobs/presets (--quick|--balanced|--in-depth|--max; --model/--review-model; --efficient/--verify) — except --verify-model, which here selects the Codex tier (astra|sol|terra|luna) rather than a Claude model. Plus --fast (hybrid-only) for Codex Fast mode — a no-op as of 2026-09-04 (no measured speedup on exec or on the interactive app-server path; openai/codex#32191); same model, effort, and panel. The default flow ends in a triage: every confirmed finding is investigated and sorted into mechanical / clear / fork / declined, with a patch for the mechanical ones — nothing is applied without your confirmation.
 ---
 
 Run the multi-agent code-diff reviewer with a **cross-model verify panel**: Claude finds, Codex verifies.
@@ -21,11 +21,11 @@ severity rubric, same report. Only the voters change.
 | | `/ultrareview` | `/hybrid-review` |
 | --- | --- | --- |
 | Verify panel | 3× Claude | 3× Codex (`gpt-6-astra` @ `high`) |
-| Best for | most diffs; fast iteration | diffs where a surviving FP costs real time — live RLS/auth/contract changes, pre-merge gates, big unreviewed batches |
+| Best for | most diffs; fast iteration | diffs where a surviving FP costs real time — the write path (safeWrite, guard, placer), spec-contract changes, pre-merge gates, big unreviewed batches |
 | Requires | nothing | `codex login status` authenticated |
 
-Reach for `/hybrid-review` when a surviving false positive would cost real time — live
-auth/RLS/contract changes, pre-merge gates, or a batch big enough that you would otherwise run
+Reach for `/hybrid-review` when a surviving false positive would cost real time — the write
+path, spec-contract changes, pre-merge gates, or a batch big enough that you would otherwise run
 `/ultrareview --in-depth`.
 
 ## The standard panel (do not run a thinner one without saying so)
@@ -183,7 +183,7 @@ decision to keep that preamble byte-identical across reviewer scripts is why).
 
 **Identical to `/ultrareview` steps 1-7** (report to `.planning/reviews/<target>.review.md`,
 inline summary, adjudicate from the Triage buckets with the standalone test, auto bug-logs for
-confirmed **critical/high/security** findings, then act on the buckets — mechanical patches
+confirmed **critical/high/data-loss** findings, then act on the buckets — mechanical patches
 batch-applied only on your explicit confirmation, clear fixes confirmed one by one, forks handed to
 `/decision-walk`). Follow `.claude/skills/ultrareview/SKILL.md` for those steps verbatim — do not
 re-derive them; the auto-log threshold, the bucket rules and the apply gate live there and must
@@ -193,7 +193,7 @@ Defaults worth stating because they are opt-OUT, not opt-in: **triage runs by de
 (`--no-triage` skips; it investigates every confirmed finding, supplies a patch only for the
 trivial + low-risk + isolated ones, and never applies anything — and it is skipped automatically on
 an un-checked-out PR and on an invalid panel), and **auto bug-logs run by default** for confirmed
-critical/high/security findings (`--no-logs` skips). Confirmed medium/low findings are
+critical/high/data-loss findings (`--no-logs` skips). Confirmed medium/low findings are
 deliberately not logged — hand one to `/single-fix` and it writes its own log on demand.
 
 The triage agents run on **Claude** (the review model), not on Codex. That is deliberate: the

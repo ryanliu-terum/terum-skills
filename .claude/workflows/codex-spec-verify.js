@@ -152,7 +152,7 @@ const VERIFY_PROMPT = (f, v) =>
   '4. Real problem, or a stylistic nitpick?\n' +
   '5. A settled deferral (PRODUCT-CONCERNS.md, .planning/debug/**/*.deferred.md) or a choice the spec already justifies? Read the lines around the citation.\n' +
   '6. Is the severity inflated or deflated? Set correctedSeverity if so.\n\n' +
-  'Note: a spec that leaves a security-relevant contract (authorization, ownership, privacy predicate, replay) to implementer discretion IS a real finding — do not refute it on the grounds that a careful implementer would add it.\n\n' +
+  'Posture (Ryan, 2026-09-06): the tools these specs describe are open source with no external-attacker model yet; a bad actor is an intra-company problem for later. A finding whose substance is an unspecified authorization, ownership, privacy or anti-abuse contract is NOT a BLOCKER — refute it at that severity; keep it only if another part of the spec assumes the contract exists (then it is a contradiction) or if a well-meaning user loses data without it (then it is a data-loss GAP). Crash and data-loss gaps for an ordinary user remain real findings.\n\n' +
   'refuted=true if: misread, not actually a conflict, nitpick, settled deferral, already addressed, or merely-unbuilt. refuted=false ONLY if real, specific, and actionable. Default to refuted=true when you cannot verify the evidence. Reason MUST quote what you actually found.\n\nStructured output only.'
 
 // Contested deliberately catches BOTH (refute - 1) and (refute) refutations: landing exactly
@@ -190,7 +190,7 @@ log('Verify: ' + confirmed.length + ' confirmed, ' + contested.length + ' contes
 
 // --- Phase 2: Triage (investigate each CONFIRMED finding; sort into mechanical / clear / fork / declined) ---
 // Same design as ultrareview.js's Triage stage (2026-09-04, Ryan): the agent investigates, lists
-// resolution options with Depth/Cost/Wins-if, and RATES the recommended one; the bucket is
+// resolution options with Fit/Depth/Wins-if (effort is a footnote, never a score -- Ryan 2026-09-06), and RATES the recommended one; the bucket is
 // derived HERE from the ratings, never chosen by the agent (single-fix Phase 2: commit to the
 // ratings, then evaluate the gate). What the split means for a SPEC:
 //
@@ -229,8 +229,8 @@ const TRIAGE_SCHEMA = {
     disposition: { enum: ['fix', 'decline'] },
     declineReason: { type: 'string' },
     options: { type: 'array', items: {
-      type: 'object', required: ['name', 'change', 'depth', 'cost', 'winsIf'],
-      properties: { name: { type: 'string' }, change: { type: 'string' }, depth: { type: 'number' }, cost: { type: 'number' }, winsIf: { type: 'string' } },
+      type: 'object', required: ['name', 'change', 'depth', 'fit', 'effort', 'winsIf'],
+      properties: { name: { type: 'string' }, change: { type: 'string' }, depth: { type: 'number' }, fit: { type: 'number' }, fitCitation: { type: 'string' }, effort: { type: 'string' }, winsIf: { type: 'string' } },
     }},
     recommended: { type: 'number' },
     oneClearlyWins: { type: 'boolean' },
@@ -253,8 +253,8 @@ const TRIAGE_PROMPT = (f) =>
   '## Step 3 — disposition\n' +
   'Default `fix`. Set `decline` ONLY for: (a) a settled deferral explicitly recorded in PRODUCT-CONCERNS.md, a `.planning/decisions/*` ledger row, or a `.planning/debug/**/*.deferred.md` entry — cite which; (b) a choice the spec already justifies — quote the justification; (c) on inspection it is not a defect — quote what you found. "Not built yet" is never a defect in a forward-looking spec, but a finding the panel confirmed is presumed to be more than that — re-check before declining on those grounds. Put the citation in declineReason; a decline without one is discarded.\n\n' +
   '## Step 4 — options (1-3, best first; do NOT manufacture alternatives — one sensible resolution means one option)\n' +
-  'Each option: name; change (what text changes, in which sections, concretely); depth 0-4 = how much of the problem it removes (0 papers over the wording, 2 fixes this section, 4 fixes the rule everywhere it is stated and in the ledger); cost 0-4 (0 a wording edit; 1 a paragraph or a table row; 2 a new sub-section, or a rule restated in several places; 3 a contract change a sibling spec or ledger row depends on; 4 a product decision that reopens locked decisions); winsIf = the specific condition under which THIS option beats the recommended one. Never add or average depth and cost.\n' +
-  '`recommended` = 0-based index. `oneClearlyWins` = true when the recommended option dominates. false when a real trade-off remains OR the right resolution hinges on a product/design decision the spec and its ledger have NOT made (which predicate defines "orphaned", whether a feature stays, who is allowed to do what) — those go to a human decision walk, not to you. Say which in whyOneOrFork, in plain English a non-engineer could decide from.\n\n' +
+  'Each option: name; change (what text changes, in which sections, concretely); fit 0-4 = how exactly the resolved text is what the decision ledger and the ratified North Star (the `north_star:` frontmatter of the newest .planning/decisions/*-decision-walk.md for this spec, or the spec\'s own "North Star check" line) already ask for (0 contradicts a ledger row or the North Star — cite it; 1 neither decides it and the option guesses; 2 the North Star implies it — cite it; 3 matches a cited ledger row or locked decision; 4 matches a cited row AND it is a behaviour the North Star names as the point); fitCitation = the row/section + quoted sentence, or "silent" — a fit without a citation reads as 1; depth 0-4 = how much of the problem it removes (0 papers over the wording, 2 fixes this section, 4 fixes the rule everywhere it is stated and in the ledger); effort = ONE line of fact (a wording edit, a new sub-section, a contract change a sibling spec depends on) — reported, never a reason to prefer a less correct resolution (Ryan, 2026-09-06); winsIf = the specific condition under which THIS option beats the recommended one. Never add or average fit and depth.\n' +
+  '`recommended` = 0-based index: the highest fit; at equal fit the highest depth; at equal both say so and let effort break the tie out loud in whyOneOrFork. `oneClearlyWins` = true when the recommended option has the highest fit and no alternative beats it on depth at equal fit. false when the ledger and North Star are silent and the options differ in what the product does (which predicate defines "orphaned", whether a feature stays, who is allowed to do what), or when more depth is only available at lower fit — those go to a human decision walk, not to you. Effort differences NEVER make a fork. Say which in whyOneOrFork, in plain English a non-engineer could decide from.\n\n' +
   '## Step 5 — rate the RECOMMENDED option (spec analogues of .claude/skills/single-fix/SKILL.md Phase 1 Q2-Q4)\n' +
   'difficulty: trivial = one obvious edit of ~1-10 lines in ONE place whose content is fully determined by the finding (a stale revision number, a cross-reference, a rule restated inconsistently where one side is plainly the current one); moderate = new text must be authored (a sub-section, a set of rows, a test list) but its content is determined by the finding; hard = the content depends on a decision not yet made, or the fix boundary is unclear.\n' +
   'risk: low = no other section\'s meaning changes; medium = other sections restate the rule and must be edited together to stay consistent; high = changes a contract that a sibling spec, an implementer, or a decision-ledger row depends on.\n' +
@@ -346,7 +346,7 @@ const stats = {
 // Never handed to the synthesizer (it drops lines it was told to echo -- see the banner
 // re-insertion below). The Forks section is written in /decision-walk's input shape.
 const tLoc = (f) => 'findings[' + f.i + ']' + (nonEmpty(f.triage.rootCauseLocation) ? ' · ' + f.triage.rootCauseLocation : '')
-const optLine = (o, i, rec) => '  - ' + (i === rec ? '**' : '') + 'Option ' + (i + 1) + ': ' + o.name + (i === rec ? ' (recommended)**' : '') + ' — Depth ' + o.depth + '/4 · Cost ' + o.cost + '/4. ' + o.change + ' *Wins if:* ' + o.winsIf
+const optLine = (o, i, rec) => '  - ' + (i === rec ? '**' : '') + 'Option ' + (i + 1) + ': ' + o.name + (i === rec ? ' (recommended)**' : '') + ' — Fit ' + o.fit + '/4' + (nonEmpty(o.fitCitation) ? ' (' + o.fitCitation + ')' : '') + ' · Depth ' + o.depth + '/4. ' + o.change + (nonEmpty(o.effort) ? ' *Effort (not a score):* ' + o.effort : '') + ' *Wins if:* ' + o.winsIf
 const item = (f) => '- **' + f.severity + ' — ' + f.title + '** — ' + tLoc(f) + '\n  - Root cause: ' + (f.triage.rootCause || '?')
 const ratings = (t) => t.difficulty + ' / ' + t.risk + ' risk / ' + t.scope + (t.scope === 'pattern' && nonEmpty(t.patternDetail) ? ' — also stated at: ' + t.patternDetail : '')
 const section = (title, list, body) => '\n### ' + title + ' (' + list.length + ')\n\n' + (list.length ? list.map(body).join('\n') + '\n' : '_none_\n')

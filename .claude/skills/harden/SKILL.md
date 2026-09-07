@@ -165,7 +165,8 @@ the human lists in 2e, whatever its bucket.
    `--confirm`: ask ONE question first — "Apply all N mechanical patches?" listing titles; a
    subset is fine.
 2. **Clear, one at a time, highest severity first.** Read the finding's triage: root cause,
-   the **recommended** option (Depth/Cost/Wins-if), ratings, and `patternDetail` — that list is
+   the **recommended** option (Fit/Depth/Wins-if; effort is a footnote, never a reason to
+   substitute a cheaper fix), ratings, and `patternDetail` — that list is
    the sweep worklist; every location in it is part of this fix. Author exactly the recommended
    option (tests included when it names them). Gates after each; a failure reverts that item's
    files and records it. If, while authoring, the recommended option turns out not to hold, do

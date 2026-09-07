@@ -475,8 +475,8 @@ BRIEFING_{BUG_ID}:
 
 ### What's broken
 
-{Plain-English: "When you do X, Y happens instead of Z." If security,
-explain what an attacker could do.}
+{Plain-English: "When you do X, Y happens instead of Z." If data is lost
+or corrupted, say whose and how; no attacker framing (no threat model yet).}
 
 ### Why it's broken
 
@@ -518,34 +518,46 @@ picking the most defensible option, because nothing made it ask whether the fix 
 cause — that question is what the Depth axis exists to force. Caution: it also wrote the
 BEST prose in the study while making the worst calls; fluency is not a quality signal.
 
+*Amendment 2026-09-06 (Ryan): the trial ran with Cost as the second axis; it validated
+scoring and never-summing, not Cost itself (7/8/9 within noise). Cost let the model prefer the
+cheaper fix over the one the spec describes, so it is now Fit, with effort as a footnote.*
+
+- **Fit (0-4)**: how exactly the fixed behaviour is what the governing spec describes and
+  the ratified North Star asks for — 0 contradicts a spec sentence or the North Star (cite) ·
+  1 both silent, the option guesses · 2 spec silent but the North Star or a root CLAUDE.md
+  invariant implies it (cite) · 3 matches a cited spec sentence · 4 matches a cited sentence
+  AND the North Star names that behaviour as the point. Spec = latest `.planning/specs/*.md`
+  for the area; North Star = `north_star:` of the newest `.planning/decisions/*-decision-walk.md`.
+  A Fit without a citation reads as 1.
 - **Depth (0-4)**: 0 masks the symptom · 1 buys headroom (bigger cap/timeout/retries),
   same bug recurs · 2 removes the coupling here · 3 removes it here + sweeps siblings ·
   4 makes the class unrepresentable (lint rule, gate, type, schema constraint, wrapper)
-- **Cost (0-4, higher = more expensive)**: 0 minutes, code-only, plain revert · 1 an hour,
-  few callers · 2 needs a migration or prod apply · 3 migration + backfill, or many
-  writers newly throwable · 4 multi-repo, or only confirmable against real prod data
+- **Effort** (one line, never a score): hours, files, migrations, revert path. Reported, never
+  deciding — highest Fit wins, then highest Depth; only a tie on both lets effort break it.
 
 Do not pad to three options: if an option is Depth 0 and you can't state its "Wins if",
 delete it.
 
-| Option | Depth | Cost | Hinges on |
+| Option | Fit | Depth | Hinges on |
 |---|---|---|---|
-| 1. {name} | {0-4} | {0-4} | {U1 — or "nothing; right in every world"} |
+| 1. {name} | {0-4} ({§} / silent) | {0-4} | {U1 — or "nothing; right in every world"} |
 
-**Option 1: {name} — Depth {d}/4 · Cost {c}/4**
+**Option 1: {name} — Fit {f}/4 · Depth {d}/4**
 - What it does (plain English): {what the fix does and how that removes the symptom —
   the mechanism and resulting behavior, not just the files}
 - What to change: {files and changes}
-- Effort: {estimate}
+- Fit rests on: {section + quoted sentence, or "silent"}
+- Effort (not a score): {hours, files, revert path}
 - Risk: {what could go wrong}
 - **Wins if**: {the specific condition under which this beats the recommended option — a
   fact about the world, tied to a numbered uncertainty where possible, not "you want
   something simpler". For the recommended option, state what would make it lose instead.}
 
-{1-3 options total. End with the trade sentence — "paying {cost} to buy {depth}, worth it
-here because ___" — then a one-line Recommendation naming the option + its Depth·Cost pair
-+ the single deciding reason. If a cheap observation would flip the recommendation, say
-that INSTEAD of picking.}
+{1-3 options total. End with the conformance sentence — "Option N implements {spec §X:
+'quoted'} (or: the spec is silent and {North Star: 'quoted'} implies it) and beats Option M
+because ___" — then a one-line Recommendation naming the option + its Fit·Depth pair + the
+single deciding reason. Never pick the less-conformant or shallower option because it is
+cheaper. If a cheap observation would flip the recommendation, say that INSTEAD of picking.}
 ```
 
 ### After triage agents complete

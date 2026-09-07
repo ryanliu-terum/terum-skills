@@ -25,8 +25,8 @@ export const meta = {
 const FILES_PER_BATCH = 6
 const DIMENSIONS = [
   { key: 'correctness', label: 'Correctness & tests' },
-  { key: 'security', label: 'Security & data-loss' },
-  { key: 'invariants', label: 'Terum invariants' },
+  { key: 'security', label: 'Data-loss & integrity' },        // key kept (dedup tests, auto-log rule); the attacker lens is out -- see POSTURE
+  { key: 'invariants', label: 'Spec conformance & invariants' },
   { key: 'reuse', label: 'Reuse, simplify, perf' },
 ]
 const sevRank = { critical: 0, high: 1, medium: 2, low: 3 }
@@ -319,8 +319,8 @@ const TRIAGE_SCHEMA = {
     disposition: { enum: ['fix', 'decline'] },
     declineReason: { type: 'string' },
     options: { type: 'array', items: {
-      type: 'object', required: ['name', 'change', 'depth', 'cost', 'winsIf'],
-      properties: { name: { type: 'string' }, change: { type: 'string' }, depth: { type: 'number' }, cost: { type: 'number' }, winsIf: { type: 'string' } },
+      type: 'object', required: ['name', 'change', 'depth', 'fit', 'effort', 'winsIf'],
+      properties: { name: { type: 'string' }, change: { type: 'string' }, depth: { type: 'number' }, fit: { type: 'number' }, fitCitation: { type: 'string' }, effort: { type: 'string' }, winsIf: { type: 'string' } },
     }},
     recommended: { type: 'number' },
     oneClearlyWins: { type: 'boolean' },
@@ -369,10 +369,16 @@ if (PR && WORKING) log('NOTE: both PR# and --working given; reviewing PR #' + PR
 
 // --- Phase 2: Review (parallel fan-out: dimension x file-batch) ---
 phase('Review')
+// Posture (Ryan, 2026-09-06): the released tools are open source and there is no external-attacker
+// model yet -- a bad actor is an intra-company problem for later. Reviews judge what a well-meaning
+// user experiences: data loss, crashes, and behaviour that differs from the governing spec / North Star.
+const POSTURE =
+  '## Posture (Ryan, 2026-09-06)\n' +
+  'The tools under review are open source with no external-attacker model yet; a bad actor is an intra-company problem for later. Do NOT model a hostile caller: no attacker, privilege-escalation, cross-tenant, or malicious-input findings. An input-handling defect counts only when a well-meaning user\'s ordinary input triggers it (a skill name with a space, a path with unicode, a symlinked folder) -- write it up as a correctness or data-loss bug for that user, never as an exploit. Correctness means the behaviour the governing spec describes and the ratified North Star asks for; when a finding turns on either, cite the sentence.\n'
 const RUBRIC =
   '## Severity rubric (assign exactly one per finding)\n' +
-  '- critical: crashes the process, data loss, a security hole (auth bypass, cross-user/team private leak, injection, secret-in-URL), or a confirmed prod-breaking bug.\n' +
-  '- high: a real functional bug -- wrong behavior, an unhandled error path, a Terum-invariant violation in a user-facing path, or contract drift that will break the SPA.\n' +
+  '- critical: crashes the process, loses or corrupts user data or the shared team repo (a silent drop, a partial multi-write with no rollback, a wipe outside the sanctioned command), or a confirmed prod-breaking bug.\n' +
+  '- high: a real functional bug -- wrong behavior, an unhandled error path, a changed behaviour the governing spec describes differently (quote both), or contract drift that will break a consumer.\n' +
   '- medium: edge-case bug, missing/weak test, reuse-dedup across 3+ sites or a 50+-line duplication, a notable inefficiency.\n' +
   '- low: minor cleanup, small duplication (<3 sites), style/altitude nit.\n'
 const fileList = (batch) => batch.map(f => '- [' + f.status + '] ' + f.path + (f.summary ? '  -- ' + f.summary : '')).join('\n')
@@ -385,8 +391,8 @@ const DIFF_HOWTO = () =>
     : '. Files are NOT on disk (un-checked-out PR) -- review from the diff text alone.')
 const CHECKLISTS = {
   correctness: 'logic/control-flow bugs, off-by-one, unhandled throws / process-killing crashes, races, wrong async ordering; AND test gaps: a changed behaviour with no collocated __tests__/{domain}/{name}.test.ts, or weak/non-adversarial test inputs (a regex or keyword lookup that would pass every current test = too weak).',
-  security: 'auth-matches-caller (cookie-only requireAuth() on a non-browser/SPA/extension route = bug), a cross-user/team read on the ADMIN/service-role client missing a `private = false` predicate IN THE QUERY, SQL/command injection (incl. unescaped % _ \\\\ in a PostgREST .like()), a secret in a URL query string (CWE-598), path traversal; AND data-loss: silent drops, a missing rollback on a partial multi-write, a sync/backfill that reports complete while skipping items.',
-  invariants: 'Terum CLAUDE.md invariants on the CHANGED lines: an unchecked Supabase `error` (EVERY .from()/.rpc()/storage result, incl. Promise.all elements and the extension capture chain), a route catch that returns 200 with an empty/different shape (must be 5xx), fire-and-forget in serverless (a bare fetch().catch() before return -- must be after()/await), persisting progress BEFORE the work succeeds, Zod .optional() where .nullish() is required (or .min(1) on a response array), comparing against magic enum literals instead of the shared contract, placeholder/mock data in shipped UI, a contract change not mirrored in the SPA copy.',
+  security: 'data loss and integrity for a WELL-MEANING user: silent drops, a missing rollback on a partial multi-write, a sync/publish/backfill that reports complete while skipping items, a write that clobbers uncommitted or unrelated user files, a destructive step with no confirmation or outside the sanctioned command, progress persisted BEFORE the work succeeds, an operation that cannot be safely re-run after a crash mid-way. Input handling ONLY where ordinary input breaks it (an unescaped % or _ in a LIKE, a path with spaces or unicode, a symlink in a skills folder). No attacker model -- see Posture.',
+  invariants: 'spec conformance FIRST: locate the governing spec (the latest .planning/specs/*.md covering the changed area; its own "North Star check" line counts) and the ratified North Star (`north_star:` frontmatter of the newest .planning/decisions/*-decision-walk.md for that area). A changed behaviour the spec describes DIFFERENTLY = high (quote the spec sentence and the code). A changed behaviour neither the spec nor the North Star covers = medium, written up as "unspecified", not as wrong. THEN this repo\'s root CLAUDE.md invariants on the CHANGED lines (a new function/route that duplicates an existing one, two active paths doing the same thing). No spec covering the area at all: say so in one finding at most, severity low.',
   reuse: 'duplicate logic that should extend existing code (search the repo first -- the "Before implementing" rule), dead or parallel code paths left behind, premature abstraction (<3 uses), oversized files doing too much, needless inefficiency (serial awaits that could parallelize, N+1 queries).',
 }
 const WIDER = (key) => (key === 'invariants' || key === 'reuse')
@@ -395,7 +401,7 @@ const WIDER = (key) => (key === 'invariants' || key === 'reuse')
 const REVIEW_PROMPT = (dim, batch, bi) =>
   '## ' + dim.label + ' Reviewer (batch ' + (bi + 1) + ')\n\n' +
   'Review target: ' + manifest.target + ' (mode ' + MODE_KIND + ', base ' + manifest.baseRef + ').\n\n' +
-  RUBRIC + '\n' +
+  RUBRIC + '\n' + POSTURE + '\n' +
   '## Files in this batch\n' + fileList(batch) + '\n\n' +
   '## How to read them\n' + DIFF_HOWTO() + WIDER(dim.key) + '\n\n' +
   '## Hunt for (' + dim.label + ')\n' + CHECKLISTS[dim.key] + '\n\n' +
@@ -541,7 +547,7 @@ if (findings.length === 0) {
     target: manifest.target, mode: MODE_KIND, modeDetail: MODE, baseRef: manifest.baseRef, triageMode: TRIAGE, noLogs: NO_LOGS,
     summary: 'Clean: ' + manifest.target + ' raised no findings across ' + reviewResults.length + ' reviewers (' + changedFiles.length + ' files).',
     triage: emptyTriage('no findings'),
-    reportMarkdown: '# ultrareview: ' + manifest.target + '\n\n**Verdict:** clean. No correctness, security, invariant, or reuse findings across ' + changedFiles.length + ' changed files.\n',
+    reportMarkdown: '# ultrareview: ' + manifest.target + '\n\n**Verdict:** clean. No correctness, data-loss, spec-conformance, or reuse findings across ' + changedFiles.length + ' changed files.\n',
     counts: { critical: 0, high: 0, medium: 0, low: 0 },
     topFindings: [], confirmedFindings: [], contestedFindings: [], droppedFindings: [], unverifiedFindings: [],
     stats: { ...emptyStats, verified: 0, confirmed: 0, contested: 0, dropped: 0, unverified: 0 },
@@ -559,7 +565,8 @@ const VERIFY_PROMPT = (f, v) =>
   '1. the cited line/code does not exist or the finding misquotes it;\n' +
   '2. the concern is already handled nearby (the error IS checked / the value IS awaited a few lines away; the predicate IS present);\n' +
   '3. it is a settled deferral EXPLICITLY recorded in PRODUCT-CONCERNS.md or a `.planning/debug` `.deferred.md` entry (cite which), OR an intentional choice justified by a concrete LOAD-BEARING reason you can CITE such that deviating would itself be a bug;\n' +
-  '4. it is a stylistic opinion, not a functional defect.\n' +
+  '4. it is a stylistic opinion, not a functional defect;\n' +
+  '5. its only harm needs a hostile caller (an attacker, privilege escalation, cross-tenant abuse, malicious input). No threat model is adopted yet (Ryan, 2026-09-06) -- refute it as out of scope, UNLESS a well-meaning user\'s ordinary input triggers the same defect, in which case keep it as the correctness/data-loss bug it is and say so in the reason.\n' +
   '## Convention is NOT a refutation. "It matches the other call-sites / it is how this repo does it / it is pre-existing" does NOT refute a real fragility. Apply the standalone test: would this code be correct and non-fragile as the ONLY place doing it, given just the invariants it actually relies on? If NO, keep it real (refuted=false), note it is repo-wide, and name the sibling call-sites (the sweep worklist).\n' +
   'refuted=false ONLY if the finding is real, specific, and actionable. Default to refuted=true when you cannot verify the evidence. Set correctedSeverity if the severity is wrong (advisory). Reason MUST quote what you found.\n\nStructured output only.'
 
@@ -727,8 +734,9 @@ log('Verify: ' + confirmed.length + ' confirmed, ' + contested.length + ' contes
 //               inspection. Surfaced WITH the citation; the human can overrule. A decline with
 //               no reason is not a decline -- it lands untriaged. Convention alone ("matches the
 //               siblings / pre-existing") is never a reason: the standalone test applies.
-//   fork        no single fix clearly wins: a real depth-vs-cost trade-off, or it hinges on a
-//               product/design decision the code cannot settle. Goes to /decision-walk with its
+//   fork        no single fix clearly wins: the spec is silent and the options differ in
+//               behaviour (a product/design decision the code cannot settle), or more Depth is
+//               only available at lower Fit. Effort NEVER makes a fork. Goes to /decision-walk with its
 //               options; never decided here (2026-09-03 lesson: autonomous batch decisions in
 //               place of the human walk was the failure pattern). A fork stays a fork even when
 //               the recommended option happens to be trivial and comes with a patch.
@@ -764,12 +772,12 @@ const TRIAGE_PROMPT = (f) =>
   'Review target: ' + manifest.target + ' (mode ' + MODE_KIND + ', base ' + manifest.baseRef + ').\n' +
   'This finding SURVIVED ' + vp.votes + '-vote adversarial verification (' + (CODEX_VERIFY ? 'Codex' : 'Claude') + ' panel, vote ' + (f.validVotes - f.refutedVotes) + '-' + f.refutedVotes + '). Do not re-litigate whether it is real. Investigate HOW to fix it and whether one fix clearly wins. Read-only: do NOT edit anything.\n\n' +
   '## Finding\nDimension: ' + f.dimension + '\nSeverity: ' + f.severity + '\nFile: ' + f.file + (f.line ? ':' + f.line : '') + '\nTitle: ' + f.title + '\nEvidence: ' + f.evidence + '\n' + (f.suggestion ? 'Reviewer suggestion (a hypothesis, not the answer): ' + f.suggestion + '\n' : '') + '\n' +
-  '## Step 1 -- investigate\n' + DIFF_HOWTO() + ' Read the cited file at the cited line plus enough context (callers, callees, the collocated test) to name the root cause as file:line and say WHY the code produces the defect. Grep for sibling call-sites that share the pattern.\n\n' +
+  '## Step 1 -- investigate\n' + DIFF_HOWTO() + ' Read the cited file at the cited line plus enough context (callers, callees, the collocated test) to name the root cause as file:line and say WHY the code produces the defect. Grep for sibling call-sites that share the pattern. Then locate what "correct" means here: the governing spec (the latest .planning/specs/*.md covering this area; its "North Star check" line counts) and the ratified North Star (`north_star:` frontmatter of the newest .planning/decisions/*-decision-walk.md for the area). Quote the sentence(s) that describe this behaviour, or state that both are silent.\n\n' +
   '## Step 2 -- disposition\n' +
   'Default `fix`. Set `decline` ONLY for: (a) a settled deferral explicitly recorded in PRODUCT-CONCERNS.md or a `.planning/debug/**/*.deferred.md` entry -- cite which; (b) an intentional choice with a concrete LOAD-BEARING reason you can cite, such that deviating would itself be a bug (a code comment explaining why counts -- read above and below the line); (c) on inspection it is not a defect -- quote exactly what you found. "It matches the other call-sites / it is pre-existing" is NOT a reason: apply the standalone test (would this be wrong or fragile as the ONLY place doing it?) -- if yes, it is a fix with scope=pattern, not a decline. Put the citation in declineReason; a decline without one is discarded.\n\n' +
   '## Step 3 -- options (1-3, best first; do NOT manufacture alternatives -- one sensible fix means one option)\n' +
-  'Each option: name; change (what and where, concretely); depth 0-4 = how much of the problem it removes (0 hides the symptom, 2 fixes this site, 4 removes the cause everywhere); cost 0-4 (0 minutes, code-only, plain revert; 1 an hour, few callers, revert-safe; 2 shared code, a migration, or a prod apply; 3 migration plus backfill, or many callers newly able to throw; 4 multi-repo, or only confirmable against prod data); winsIf = the specific condition under which THIS option beats the recommended one (for the recommended option itself: the condition under which it wins, one line). Never add or average depth and cost.\n' +
-  '`recommended` = 0-based index into options. `oneClearlyWins` = true when the recommended option dominates: no alternative beats it on an axis that matters here, or every alternative is strictly worse. false when a real trade-off remains (more depth only at real cost, with no obvious answer) OR the right choice hinges on a product/design decision the code cannot settle. Say which in whyOneOrFork, in plain English a non-engineer could decide from.\n\n' +
+  'Each option: name; change (what and where, concretely); fit 0-4 = how exactly the fixed behaviour is the behaviour the governing spec describes and the North Star asks for (0 contradicts a spec sentence or the North Star -- cite it; 1 both are silent and the option guesses at intent; 2 the spec is silent but the North Star or a root CLAUDE.md invariant implies this behaviour -- cite it; 3 matches a cited spec sentence; 4 matches a cited spec sentence AND it is a behaviour the North Star names as the point); fitCitation = the section + quoted sentence the fit score rests on, or "silent" -- a fit without a citation reads as 1; depth 0-4 = how much of the problem it removes (0 hides the symptom, 2 fixes this site, 4 removes the cause everywhere); effort = ONE line of fact (hours, files, migration or multi-repo coordination, revert path) -- reported so the reader knows what they are buying, never a reason to prefer a less correct option (Ryan, 2026-09-06: implementation time and rework surface do not outrank correctness); winsIf = the specific condition under which THIS option beats the recommended one (for the recommended option itself: the condition under which it wins, one line). Never add or average fit and depth.\n' +
+  '`recommended` = 0-based index into options: the highest fit; at equal fit the highest depth; at equal both, say so and let effort break the tie out loud in whyOneOrFork. `oneClearlyWins` = true when the recommended option has the highest fit and no alternative beats it on depth at equal fit (or every alternative is strictly worse). false when (a) the spec and North Star are silent and the options differ in user-visible behaviour -- a product/design decision the code cannot settle -- or (b) more depth is only available at lower fit (the spec describes the shallower behaviour). Effort differences NEVER make a fork. Say which in whyOneOrFork, in plain English a non-engineer could decide from.\n\n' +
   '## Step 4 -- rate the RECOMMENDED option (definitions mirror .claude/skills/single-fix/SKILL.md Phase 1 Q2-Q4; keep them in sync)\n' +
   'difficulty: trivial = ~1-10 line mechanical change (wrong field name, missing null check, wrong boolean/enum, off-by-one, missing await, swapped args, typo in a string key); moderate = 10-50 lines, needs design thought, or coordinated changes across functions/files; hard = architectural, unclear fix boundary, new abstraction, or the right fix is debatable.\n' +
   'risk: low = one expression changed or a check added, no callers affected, no behavior change for non-buggy inputs; medium = few callers that need verification, additive but touches shared code; high = many callers, shared state, removes/restructures paths, or ordering/timing invariants.\n' +
@@ -835,7 +843,7 @@ const report = await agent(
   '## Unverified findings (efficient mode skipped adversarial verification for these)\n' + (unverifiedBlock || '(none)') + '\n\n' +
   '## Instructions\n' +
   '1. Cross-dimension duplicates were ALREADY merged before verification (a "Merged: N reviewer reports" tag shows how many each represents). Merge only RESIDUAL near-duplicates -- same root cause at a different file/line (combine evidence; keep the highest severity). When a finding carries a Merged tag, state it in the finding line (e.g. "merges 4 reports across Correctness/Security") -- independent rediscovery is a signal worth showing the reader.\n' +
-  '2. Group by dimension (Correctness & tests / Security & data-loss / Terum invariants / Reuse, simplify, perf); within each, order critical -> high -> medium -> low.\n' +
+  '2. Group by dimension (' + DIMENSIONS.map(d => d.label).join(' / ') + '); within each, order critical -> high -> medium -> low.\n' +
   '3. reportMarkdown: titled "# ultrareview: ' + manifest.target + '"' + (banner ? ', with the banner as the first line under the title,' : ',') + ' then a one-paragraph verdict and a severity-count table, then grouped CONFIRMED findings (file:line, evidence, suggested fix) as checkbox items.\n' +
   '4. counts: CONFIRMED findings per severity (exclude contested + unverified).\n' +
   '5. topFindings: the confirmed critical and high items (severity, dimension, title, file, line).\n' +
@@ -857,7 +865,7 @@ const stats = { ...emptyStats, verified: verified.length, confirmed: confirmed.l
 // re-insertion above), and a dropped patch or a dropped fork is exactly the kind of silent loss
 // this stage exists to prevent. The Forks section is written in /decision-walk's input shape.
 const loc = (f) => '`' + f.file + (f.line ? ':' + f.line : '') + '`'
-const optLine = (o, i, rec) => '  - ' + (i === rec ? '**' : '') + 'Option ' + (i + 1) + ': ' + o.name + (i === rec ? ' (recommended)**' : '') + ' — Depth ' + o.depth + '/4 · Cost ' + o.cost + '/4. ' + o.change + ' *Wins if:* ' + o.winsIf
+const optLine = (o, i, rec) => '  - ' + (i === rec ? '**' : '') + 'Option ' + (i + 1) + ': ' + o.name + (i === rec ? ' (recommended)**' : '') + ' — Fit ' + o.fit + '/4' + (nonEmpty(o.fitCitation) ? ' (' + o.fitCitation + ')' : '') + ' · Depth ' + o.depth + '/4. ' + o.change + (nonEmpty(o.effort) ? ' *Effort (not a score):* ' + o.effort : '') + ' *Wins if:* ' + o.winsIf
 const item = (f) => '- **' + f.severity + ' — ' + f.title + '** — ' + loc(f) + '\n  - Root cause: ' + (f.triage.rootCause || '?') + ' (' + (f.triage.rootCauseLocation || '?') + ')'
 const ratings = (t) => t.difficulty + ' / ' + t.risk + ' risk / ' + t.scope + (t.scope === 'pattern' && nonEmpty(t.patternDetail) ? ' — siblings: ' + t.patternDetail : '')
 const section = (title, list, body) => '\n### ' + title + ' (' + list.length + ')\n\n' + (list.length ? list.map(body).join('\n') + '\n' : '_none_\n')

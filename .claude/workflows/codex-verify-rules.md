@@ -34,6 +34,11 @@ that claim — an assertion of absence is the single most common way these findi
    itself be a bug. A comment in the code explaining *why* counts; read the lines above and
    below the cited line before concluding the code is unintentional.
 4. **It is a stylistic opinion**, not a functional defect.
+5. **Its only harm needs a hostile caller** — an attacker, privilege escalation, cross-tenant
+   abuse, malicious input. No threat model is adopted yet (Ryan, 2026-09-06: the released tools
+   are open source; a bad actor is an intra-company problem for later), so refute it as out of
+   scope — UNLESS a well-meaning user's ordinary input triggers the same defect, in which case
+   keep it as the correctness/data-loss bug it is and say so in the reason.
 
 ## Convention is NOT a refutation
 
