@@ -1,5 +1,5 @@
 ---
-title: eval-integration workflow-migration decision walk
+title: eval-integration CI and workflow-migration decision walk
 date: 2026-09-06
 north_star: Nothing — not even our own tool — can change what runs with the team's API key unless the guard has checked it; existing teams still get the new CI via a one-time step.
 status: complete
@@ -24,6 +24,7 @@ two dimensions; contested finding 21 dissolves with the same call.
 | # | Decision | Verdict | Rationale (plain) | Trigger / Pointer |
 |---|---|---|---|---|
 | 1 | How existing team repos get the new CI workflow file | GATE | The tool never writes CI config — a human migrates each existing repo once by hand; the guard's refusal stays absolute with zero new machinery | Build the guarded verb only if the template needs a second team-wide bump or repo count outgrows hand-migration (~>10) |
+| 2 | Whether CI runs model evals at all | LOCK | No — CI never runs a model and never holds an API key; every eval token anywhere is a member's own `claude -p` subscription. Hygiene stays blocking; the publish gate becomes a deterministic receipt check | — |
 
 ---
 
@@ -83,3 +84,49 @@ outside `safeWrite`) is rejected outright and is not the gated path.
 - **Grounding findings:** none run — the audit's triage (2-vote confirmed, both
   forks) had already grounded the guard behavior (`src/lib/guard.ts:59-73`, guard
   test at `guard.test.ts:98`, §6.0 line 276, ledger Decision 3).
+
+---
+
+## Decision 2 — Whether CI runs model evals at all
+
+**Verdict: LOCK** — the CI eval job is removed from the design. CI never runs a
+model and never holds an API key.
+
+### Plain English
+- **What's at stake:** the planned CI had two robots — a free one that scans skill
+  changes for dangerous content (secrets, hidden characters, bad licenses), and a
+  paid one that ran full AI evaluations on every skill PR using an API key stored in
+  the repo.
+- **Why it's a fork:** the paid robot contradicted the project's own founding call.
+  The eval engine was chosen precisely because it needs no raw API key — everyone
+  runs evals through their own logged-in `claude -p` subscription. CI was the one
+  place a raw key crept back in, because a CI robot has no personal login. Worse,
+  the engine's own provenance rules (only same-model, same-CLI, same-environment
+  numbers compare) mean CI verdicts would not be comparable to the locally-committed
+  receipts everyone actually trusts — paid noise, structurally.
+- **Options:** kill the eval job and keep hygiene (A); same, plus keep the publish
+  regression gate as a deterministic receipt check (B); keep the design as specced (C).
+- **Recommendation given:** B.
+- **The call (Ryan):** "leave the hygiene check and take out the full eval." Recorded
+  as: eval job removed; hygiene job stays blocking; **[default — veto cheap]** the
+  publish gate survives as a receipt check — publish PRs must carry a fresh committed
+  receipt (produced locally, candidate-vs-incumbent) that CI verifies exists, parses,
+  and matches the skill's current version. Deterministic, key-free.
+- **Zoom-out:** strengthens the North Star — the file that runs with the team's API
+  key now never contains a key-bearing job at all.
+
+### Technical
+- **Specs touched:** `2026-09-04-eval-integration.md` §0 row 7 + §1 IE4 (eval job
+  bullet removed, receipt check added, §3 Ryan column); `2026-09-04-eval-engine.md`
+  §11 rewritten (rev 10) — the `ANTHROPIC_API_KEY`-from-repo-secrets path and the
+  "neutral skip [provisional policy]" are deleted.
+- **Supersedes:** the eval-job half of the CI-split decision (ajay, 2026-09-05); the
+  skilldeck carry-over rule "CI runs on a repo-secret key"; eval spec §11's
+  provisional skip policy. The hygiene-job half of the 2026-09-05 decision stands.
+- **Dissolves:** contested audit finding 8 (whether CI commits receipts — CI no
+  longer runs evals, so it commits nothing); shrinks finding 13's attack surface
+  (raw finding, dropped by the panel) to nil — no key in CI to exfiltrate.
+- **Effort / risk:** negative effort — deletes a job, a secret, and a skip-state
+  from IE4's scope. The receipt check is a small deterministic script.
+- **Grounding:** conceptual — grounded in the recorded engine decision (no raw key),
+  the provenance comparability rules (eval spec §7/§12), and phase-2 OAuth findings.

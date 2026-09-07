@@ -1,6 +1,6 @@
 # terum-skills eval engine — build spec
 
-**Status:** DRAFT (rev 6, 2026-09-04; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe; rev 7 = variance reducers, same probe: §7.5 judge double-asked in both orderings with disagreement → `judge-split` tie, §7.1 headless note appended to every arm + one arm retry in a fresh sandbox + `model_id` snapshot recorded per arm; rev 8 = `requires` host-tool declarations with environment-skip semantics (option 1, Ajay 2026-09-06): missing tools skip the case as visible unscored holes + `environment_skips` receipt field, CI runner canonical for gating; rev 9 = sixth check kind `command_succeeds` for deterministic script verifiers, SkillsBench-style) — written under a partial lift of the phase-3 spec
+**Status:** DRAFT (rev 10, 2026-09-06; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe; rev 7 = variance reducers, same probe: §7.5 judge double-asked in both orderings with disagreement → `judge-split` tie, §7.1 headless note appended to every arm + one arm retry in a fresh sandbox + `model_id` snapshot recorded per arm; rev 8 = `requires` host-tool declarations with environment-skip semantics (option 1, Ajay 2026-09-06): missing tools skip the case as visible unscored holes + `environment_skips` receipt field, CI runner canonical for gating; rev 9 = sixth check kind `command_succeeds` for deterministic script verifiers, SkillsBench-style; rev 10 = §11 rewritten (Ryan, 2026-09-06 walk D2): CI never runs a model or holds an API key — the eval job and its `ANTHROPIC_API_KEY` repo secret are removed, the publish gate becomes a deterministic receipt check, and rev 8's "CI runner canonical for gating" clause is superseded — gating receipts are produced locally, with `environment_skips` greying verdicts as before) — written under a partial lift of the phase-3 spec
 gate (Ajay, in-session 2026-09-04: "we're on a time crunch … just do as much as you can";
 the override did not record in Terum — receipt rejected — so the shared ledger still
 shows the gate standing). Items that genuinely need published-skill experience are marked
@@ -273,7 +273,7 @@ row (append-only — an existing receipt path is never rewritten). It never touc
 | Stage | Requirement |
 |---|---|
 | `share` | No eval requirement. Hygiene tier must pass (extends phase-1 V5 gate). |
-| `publish` PR | CI runs `eval --k 3` : candidate-vs-**incumbent** must not be FAIL (regression gate), and trigger evals run **report-only** (comment, no block) **[provisional — flip to blocking once false-positive rate is known]**. |
+| `publish` PR | The PR must carry a **locally-produced committed receipt** at the skill's current version whose candidate-vs-**incumbent** comparison is not FAIL (regression gate); CI verifies the receipt deterministically (§11, rev 10) and runs no evals of its own. |
 
 There is no tier above `publish` — the verified badge was scrapped (rev 4, Ajay). The
 sign test is decoration at k=3 (a 3/3 sweep is p = 0.25 two-sided — it cannot gate);
@@ -404,12 +404,20 @@ gated. Checks, all fail-closed:
 
 ## 11. CI (publish PRs)
 
-The phase-1 M3 workflow placeholder grows an `eval` job: on PRs touching `skills/**`,
-for each changed skill run `terum-skills eval <name> --k 3 --commit` with
-`ANTHROPIC_API_KEY` from repo secrets (raw-key path is CI-only; laptops ride
-subscription auth). If the secret is unconfigured the job emits a neutral "evals
-skipped — no key" status and the PR relies on a locally-committed receipt
-**[provisional policy]**.
+**CI never runs a model and never holds an API key** (rev 10 — walk D2, Ryan
+2026-09-06, `.planning/decisions/2026-09-06-workflow-migration-decision-walk.md`,
+superseding the rev-6 eval job and its provisional skip policy). Every eval token
+spent anywhere is a member's own `claude -p` subscription. The workflow carries two
+deterministic jobs:
+
+- **Hygiene** — blocking, key-free: on PRs touching `skills/**`, `terum-skills
+  validate` per changed skill (§9).
+- **Receipt check [default — veto cheap]** — on `publish/`-prefixed PRs, verify a
+  committed receipt exists for the endorsed skill at its current tree-hash version,
+  parses against `receiptSchema`, and includes a candidate-vs-incumbent comparison;
+  missing or stale receipt blocks (§6.1's regression gate, in evidence form). The
+  receipt is produced locally by the publisher; CI validates evidence, it never
+  generates it.
 
 ## 12. UI contract (Teddy)
 
@@ -512,7 +520,8 @@ skipped), **triggers** (errored selection call counts in neither tn nor fp),
    re-runs accumulate rather than overwrite.
 7. Regression gate for publish is candidate-vs-**incumbent** not-FAIL; baseline
    comparison is informational at PR time.
-8. Trigger CI is report-only at first **[provisional]**.
+8. Superseded (rev 10): CI runs no evals of any kind — trigger or execution; the
+   deterministic receipt check is the only publish gate.
 9. Default model `sonnet` for arms and judge; escalation judge `opus`
    **[provisional]**. Only same-model, same-cc-version numbers ever share a surface.
 10. Anyone may evaluate any skill (`eval` guard row has no ownership check);
