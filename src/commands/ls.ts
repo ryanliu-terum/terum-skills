@@ -101,7 +101,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
           status = badge === '—' ? 'not endorsed in local clone' : `endorsed (${badge})`;
         }
       }
-      return `shared source for ${ref.team}; ${status}`;
+      return `connected source for ${ref.team}; ${status}`;
     });
     if (entry.placement) states.push(`placement recorded from ${entry.placement.team}${entry.placement.version === null ? '' : ` @${entry.placement.version.slice(0, 8)}`}`);
     return states.length > 1 ? `conflicting tracking: ${states.join('; ')}` : states[0] ?? 'untracked locally';
@@ -129,14 +129,14 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
       const tracked = entry.shared.length > 0 || entry.placement !== undefined;
       const inspection = entry.inspection;
       if (tracked || inspection.kind === 'candidate') {
-        const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (share needs --allow-privileged)' : undefined;
+        const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (connect needs --allow-privileged)' : undefined;
         local.rows.push({ name: entry.name, path: entry.path, state: stateOf(entry), ...(problem === undefined ? {} : { problem }) });
       } else if (inspection.kind === 'rejected') local.notOffered.push({ name: entry.name, path: entry.path, reason: inspection.detail });
       if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
     }
     for (const row of local.rows) io.print(`  ${printable(row.name)} — ${printable(row.state)}${row.problem === undefined ? '' : `; source problem: ${printable(row.problem)}`}; path: ${printable(row.path)}`);
     if (local.notOffered.length) {
-      io.print('Not offered for sharing:');
+      io.print('Cannot be connected:');
       for (const entry of local.notOffered) io.print(`  ${printable(entry.name)} — ${printable(entry.reason)}; path: ${printable(entry.path)}`);
     }
     if (inventory.rootState === 'absent') io.print(`  none (${printable(inventory.root)} does not exist)`);

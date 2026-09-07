@@ -50,7 +50,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     io.print(`Kept: ${quarantineCount ? `${quarantine} (${quarantineCount} items), ` : ''}${backups} (settings backups and a record of this uninstall)`);
     if (quarantineCount) kept.push(quarantine);
     kept.push(backups);
-    if (shared.length) io.print(`Shared-skill sources stay where they are: ${shared.map(({ source }) => `${basename(source)}: ${source}`).join(', ')}`);
+    if (shared.length) io.print(`Connected-skill sources stay where they are: ${shared.map(({ source }) => `${basename(source)}: ${source}`).join(', ')}`);
     io.print('Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `terum-skills install member <handle>` does.');
     io.print('The package itself is not removed by this command; the last line tells you how.');
     if (!(await io.confirm('Remove terum-skills from this machine?'))) return failure('Uninstall was cancelled.');
@@ -107,7 +107,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
         Object.keys(fresh.teams).length ? `teams: ${Object.keys(fresh.teams).join(', ')}` : '',
         Object.keys(fresh.placements).length ? `placements: ${Object.keys(fresh.placements).length}` : '',
         fresh.pending.length ? `pending: ${fresh.pending.length}` : '',
-        Object.keys(fresh.shared).length ? `shared: ${Object.keys(fresh.shared).length}` : '',
+        Object.keys(fresh.shared).length ? `connected: ${Object.keys(fresh.shared).length}` : '',
       ].filter(Boolean).join(', ');
       return failure(`Kept ${configPath}: still configured — ${what}. Re-run \`terum-skills uninstall\` to continue.`);
     }

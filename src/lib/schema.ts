@@ -14,7 +14,7 @@ export const handleSchema = z
 export const TEAM_NAME_RULE = 'a team name is 1-100 characters: letters, digits, dot, underscore, or hyphen, and cannot start with a dot';
 export const teamNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/, TEAM_NAME_RULE);
 
-/** §5.3: a skill name is its folder name — 1–64 lowercase alphanumerics or single internal hyphens. The one rule `share` enforces and the README trusts. */
+/** §5.3: a skill name is its folder name — 1–64 lowercase alphanumerics or single internal hyphens. The one rule `connect` enforces and the README trusts. */
 export const SKILL_NAME_RULE = 'a skill name is 1–64 lowercase alphanumerics or single hyphens';
 export function isSkillName(value: string): boolean { return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 64; }
 

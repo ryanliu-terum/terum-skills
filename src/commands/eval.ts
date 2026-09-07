@@ -74,7 +74,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     let candidateDir: string;
     if (args.working) {
       const shared = config.shared[record.id];
-      if (!shared || shared.team !== teamName) return failure(`${record.name} is not a shared local source for team ${teamName}; --working is unavailable.`);
+      if (!shared || shared.team !== teamName) return failure(`${record.name} is not a connected local source for team ${teamName}; --working is unavailable.`);
       await assertSkillDirectory(shared.source);
       candidateDir = shared.source;
     } else {
@@ -90,7 +90,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       files: candidateFiles.files,
       executable: candidateFiles.executable,
       policy: { skill_license: team.policy.skill_license },
-      // A store copy passed share's consent gate. A working source remains subject to its own mode.
+      // A store copy passed connect's consent gate. A working source remains subject to its own mode.
       allowExecutable: !args.working,
     });
     if (hygiene.length) return failure(`Hygiene failed for ${record.name}:\n${formatHygieneFindings(hygiene)}`);

@@ -108,6 +108,7 @@ describe('machine uninstall', () => {
     await writeFile(join(store.teamClone('team'), 'untracked.txt'), 'local work');
     const io = new ScriptedPrompter([], [true]); const result = await run({ config: store, hook }, io);
     expect(result.ok).toBe(true); await expect(access(path)).resolves.toBeUndefined(); expect((await store.read()).placements).toEqual({});
+    expect(io.lines).toContain(`Connected-skill sources stay where they are: team: ${path}`);
     expect(io.lines).toContain(`${path} is also the authoring source of team; left in place.`);
     if (!result.ok) throw new Error(result.error);
     const destination = result.value.kept.find((item) => item.endsWith('teams-team'))!;
@@ -179,7 +180,7 @@ describe('machine uninstall', () => {
     const { root, store, hook } = await minimal(); const source = join(root, 'source'); await mkdir(source);
     await store.update((c) => { c.shared.sample = { source, team: 'gone' }; });
     const io = new ScriptedPrompter([], [true]);
-    expect(await run({ config: store, hook }, io)).toMatchObject({ ok: false, error: expect.stringContaining('still configured — shared: 1') });
+    expect(await run({ config: store, hook }, io)).toMatchObject({ ok: false, error: expect.stringContaining('still configured — connected: 1') });
     await expect(access(source)).resolves.toBeUndefined(); expect((await store.read()).shared.sample).toBeDefined(); expect(io.lines).not.toContain(complete);
   });
 });

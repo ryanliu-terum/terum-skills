@@ -151,7 +151,7 @@ function compare(remote: string, branch: string): string | null {
 function commandMessage(stderr: string, stdout: string): string { return (stderr || stdout).trim(); }
 function assertHygiene(name: string, input: Awaited<ReturnType<typeof sourceFiles>>, license: string): void {
   const skill = input.files.get('SKILL.md');
-  // allowExecutable: publish endorses content that entered the repo through share's consent gate,
+  // allowExecutable: publish endorses content that entered the repo through connect's consent gate,
   // so exec/shebang form was already reviewed there (walk D5); every other check still applies.
   const findings = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable: true });
   if (findings.length) throw new Error(formatHygieneFindings(findings));
@@ -228,7 +228,7 @@ async function notInTeam(args: PublishArgs, config: Config, team: string, name: 
   const retry = npxInvocation('publish', args.ref) + teamOption + (args.project === undefined ? '' : ` --project ${shellQuote(args.project)}`);
   const note = unreadable ? ` (${unreadable} local folder(s) under ${discovery.roots.map((root) => root.root).join(' or ')} could not be read.)` : '';
   if (found.length) {
-    return found.map(({ path, scope }) => `No skill ${args.ref} in team ${team}. Found a local folder at ${path}${found.length > 1 ? ` (${scope})` : ''} that is not tracked as a shared source or placement on this machine. To share it with ${team}, run \`${npxInvocation('share', path) + teamOption}\`, then retry \`${retry}\`.`).join('\n') + note;
+    return found.map(({ path, scope }) => `No skill ${args.ref} in team ${team}. Found a local folder at ${path}${found.length > 1 ? ` (${scope})` : ''} that is not tracked as a connected source or placement on this machine. To connect it to ${team}, run \`${npxInvocation('connect', path) + teamOption}\`, then retry \`${retry}\`.`).join('\n') + note;
   }
-  return `No skill ${args.ref} in team ${team}. Run \`${npxInvocation('ls') + teamOption}\` to check the team's skill names. To add a local skill, run \`npx -y terum-skills@latest share '<path-to-skill>' --team ${shellQuote(team)}\`, then publish its name.${note}`;
+  return `No skill ${args.ref} in team ${team}. Run \`${npxInvocation('ls') + teamOption}\` to check the team's skill names. To add a local skill, run \`npx -y terum-skills@latest connect '<path-to-skill>' --team ${shellQuote(team)}\`, then publish its name.${note}`;
 }

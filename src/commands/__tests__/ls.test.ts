@@ -97,7 +97,7 @@ describe('issue 9 local ls', () => {
     const io = new ScriptedPrompter();
     const result = await run({ local: true, home, config: store, runner: { run: async () => { throw new Error('must not run commands'); } } }, io);
     expect(result).toMatchObject({ ok: true, value: { local: [{ root: join(home, '.claude', 'skills'), scope: 'global', rows: [{ name: 'mine', path: mine, state: 'untracked locally' }, { name: 'placed', path: placed, state: 'placement recorded from team @aaaaaaaa' }], notOffered: [{ name: 'gsd-x', path: rejected, reason: 'SKILL.md name gsd:x does not equal folder gsd-x' }], problems: [] }] } });
-    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `  mine — untracked locally; path: ${mine}`, `  placed — placement recorded from team @aaaaaaaa; path: ${placed}`, 'Not offered for sharing:', `  gsd-x — SKILL.md name gsd:x does not equal folder gsd-x; path: ${rejected}`, FOOTER]);
+    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `  mine — untracked locally; path: ${mine}`, `  placed — placement recorded from team @aaaaaaaa; path: ${placed}`, 'Cannot be connected:', `  gsd-x — SKILL.md name gsd:x does not equal folder gsd-x; path: ${rejected}`, FOOTER]);
     expect(io.asked).toEqual([]);
   });
 
@@ -117,8 +117,8 @@ describe('issue 9 local ls', () => {
     const io = new ScriptedPrompter();
     const result = await run({ local: true, home, config: store, runner: { run: async () => { throw new Error('no git'); } } }, io);
     const suffix = mode === 'global' ? 'endorsed (global)' : mode === 'project' ? 'endorsed (project: a, b)' : mode === 'unendorsed' ? 'not endorsed in local clone' : mode === 'missing' ? 'repository copy missing from local clone' : 'repository status unknown';
-    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [{ name: 'relocated', state: `shared source for team; ${suffix}` }, { name: 'report', state: 'untracked locally' }] }] } });
-    expect(io.lines).toContain(`  relocated — shared source for team; ${suffix}; path: ${source}`);
+    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [{ name: 'relocated', state: `connected source for team; ${suffix}` }, { name: 'report', state: 'untracked locally' }] }] } });
+    expect(io.lines).toContain(`  relocated — connected source for team; ${suffix}; path: ${source}`);
     expect(io.asked).toEqual([]); expect(io.lines.at(-1)).toBe(FOOTER);
     expect(await readFile(join(store.root, 'config.json'), 'utf8')).toBe(configBefore);
     if (mode !== 'broken') { expect(await git(['rev-parse', 'HEAD'], clone)).toBe(before); expect(await git(['status', '--porcelain'], clone)).toBe(status); }
@@ -133,7 +133,7 @@ describe('issue 9 local ls', () => {
     });
     const calls: string[] = []; const wrapped = { ...store, teamClone: (team: string) => { calls.push(team); return store.teamClone(team); } };
     const io = new ScriptedPrompter(); const result = await run({ local: true, home, config: wrapped }, io);
-    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [expect.objectContaining({ name: 'missing', state: 'conflicting tracking: shared source for one; repository status unknown; shared source for two; repository status unknown; placement recorded from two', problem: 'SKILL.md missing' }), expect.objectContaining({ name: 'second' })] }] } });
+    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [expect.objectContaining({ name: 'missing', state: 'conflicting tracking: connected source for one; repository status unknown; connected source for two; repository status unknown; placement recorded from two', problem: 'SKILL.md missing' }), expect.objectContaining({ name: 'second' })] }] } });
     expect(calls.sort()).toEqual(['one', 'two']);
     expect(io.lines[1]).toContain('; source problem: SKILL.md missing; path: ');
   });
@@ -197,14 +197,14 @@ describe('global and project local sections', () => {
     const before = await readFile(join(store.root, 'config.json'));
     const result = await run({ local: true, home, cwd: repo, config: wrapped, runner }, io);
     expect(result).toMatchObject({ ok: true, value: { local: [
-      { root: join(home, '.claude', 'skills'), scope: 'global', rows: [{ name: 'global', state: 'shared source for team; endorsed (global)' }] },
+      { root: join(home, '.claude', 'skills'), scope: 'global', rows: [{ name: 'global', state: 'connected source for team; endorsed (global)' }] },
       { root: join(repo, '.claude', 'skills'), scope: 'project', repoRoot: repo, rows: [{ name: 'placed', state: 'placement recorded from team' }, { name: 'project' }], notOffered: [{ name: 'invalid', path: invalid, reason: expect.stringContaining('not valid YAML') }] },
     ] } });
     expect(io.lines.filter((line) => line.startsWith('Local Claude Code skills'))).toEqual([
       `Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `Local Claude Code skills (${join(repo, '.claude', 'skills')}; project):`,
     ]);
     expect(io.lines).toContain(`  placed — placement recorded from team; path: ${placed}`);
-    expect(io.lines).toContain('Not offered for sharing:');
+    expect(io.lines).toContain('Cannot be connected:');
     expect(io.lines.filter((line) => line === FOOTER)).toHaveLength(1); expect(io.lines.at(-1)).toBe(FOOTER);
     expect(teamCalls).toEqual(['team']); expect(runner.calls).toEqual([]); expect(io.asked).toEqual([]);
     expect(await readFile(join(store.root, 'config.json'))).toEqual(before);
@@ -248,4 +248,13 @@ describe('global and project local sections', () => {
       expect(io.lines.join('')).not.toContain('; project):');
     } finally { spy.mockRestore(); }
   });
+});
+
+it('issue 5 names connect in the privileged local-source guidance', async () => {
+  const home = await temporaryDirectory(); const source = await localSource(home, 'privileged');
+  await mkdir(join(source, 'hooks'));
+  const io = new ScriptedPrompter();
+  const result = await run({ local: true, home, config: createConfigStore(join(home, 'state')) }, io);
+  expect(result.ok).toBe(true);
+  expect(io.lines).toContain(`  privileged — untracked locally; source problem: contains plugin or hook definitions (connect needs --allow-privileged); path: ${source}`);
 });

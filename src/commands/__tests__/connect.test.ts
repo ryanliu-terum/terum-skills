@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { access, mkdir, readdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { reconcileShared, run } from '../share.js';
+import { reconcileShared, run } from '../connect.js';
 import { run as sync } from '../sync.js';
 import { run as install } from '../install.js';
 import { createConfigStore } from '../../lib/config.js';
@@ -11,7 +11,7 @@ import { systemRunner } from '../../lib/runner.js';
 import { canonicalDigest } from '../../lib/skills.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 
-describe('share (§5.3)', () => {
+describe('connect (§5.3)', () => {
   it('injects managed frontmatter into the approved source and records a baseline', async () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
@@ -49,7 +49,7 @@ describe('share (§5.3)', () => {
     expect(await readFile(join(declared, 'SKILL.md'), 'utf8')).toContain('terum-category: testing');
   });
 
-  it('rejects a malformed allowed-tools value at share time, names the line, and writes nothing', async () => {
+  it('rejects a malformed allowed-tools value at connect time, names the line, and writes nothing', async () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -145,6 +145,7 @@ describe('share (§5.3)', () => {
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(repoBefore);
     expect((await store.read()).shared[id]!.baseline).toBe(baseline);
     expect(io.lines.join('\n')).toContain('HYG3');
+    expect(io.lines).toContain('Connected skill sample failed hygiene:\nHYG3 SKILL.md:11: Contains a credential-shaped value.');
   });
 
   it('fast-forwards an unchanged authored source when another machine advances the repository copy', async () => {
@@ -176,7 +177,7 @@ describe('share (§5.3)', () => {
     await writeFile(join(source, 'SKILL.md'), (await readFile(join(source, 'SKILL.md'), 'utf8')).replace('description: x', 'description: healthy update'));
     const io = new ScriptedPrompter();
     expect((await sync({ config: store }, io)).ok).toBe(true);
-    expect(io.lines.join('\n')).toContain('Could not reconcile shared aaaaaaaa');
+    expect(io.lines).toContain('Could not reconcile connected aaaaaaaa: SKILL.md has no YAML frontmatter');
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toContain('description: healthy update');
   });
 
@@ -311,9 +312,9 @@ describe('share (§5.3)', () => {
     expect((await sync({ config: store }, first)).ok).toBe(true);
     expect((await sync({ config: store }, second)).ok).toBe(true);
     for (const io of [first, second]) {
-      const warnings = io.lines.filter((line) => line.includes('Shared source'));
+      const warnings = io.lines.filter((line) => line.includes('Connected source'));
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain('--relocate or --forget');
+      expect(warnings[0]).toBe(`Connected source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use connect --relocate or --forget.`);
     }
     expect(await originSha(fixture.bare)).toBe(sha);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toContain('name: sample');
@@ -341,7 +342,7 @@ describe('share (§5.3)', () => {
     await writeFile(join(renamed, 'SKILL.md'), (await readFile(join(renamed, 'SKILL.md'), 'utf8')).replace('name: sample', 'name: renamed'));
     const io = new ScriptedPrompter();
     expect((await sync({ config: store }, io)).ok).toBe(true);
-    expect(io.lines).toContain('Renamed shared skill sample to renamed.');
+    expect(io.lines).toContain('Renamed connected skill sample to renamed.');
     const tree = await git(['ls-tree', '--name-only', 'main', 'skills/'], fixture.bare);
     expect(tree).toContain('skills/renamed'); expect(tree).not.toContain('skills/sample');
     expect(await git(['show', 'main:skills/renamed/SKILL.md'], fixture.bare)).toContain(`id: ${id}`);
@@ -369,11 +370,11 @@ describe('share (§5.3)', () => {
     await writeFile(join(source, 'SKILL.md'), shared.replace('name: sample', 'name: taken'));
     const taken = new ScriptedPrompter();
     expect((await sync({ config: store }, taken)).ok).toBe(true);
-    expect(taken.lines.join('\n')).toContain('cannot rename to taken; another skill already uses that name');
+    expect(taken.lines).toContain('Connected skill sample: cannot rename to taken; another skill already uses that name.');
     await writeFile(join(source, 'SKILL.md'), shared.replace('name: sample', 'name: Bad_Name'));
     const invalid = new ScriptedPrompter();
     expect((await sync({ config: store }, invalid)).ok).toBe(true);
-    expect(invalid.lines.join('\n')).toContain('cannot rename to Bad_Name');
+    expect(invalid.lines).toContain('Connected skill sample: cannot rename to Bad_Name; a skill name is 1–64 lowercase alphanumerics or single hyphens.');
     expect(await originSha(fixture.bare)).toBe(before);
     expect((await store.read()).shared[id!]!.baseline).toBe(baseline);
     expect(await git(['ls-tree', '--name-only', 'main', 'skills/'], fixture.bare)).toContain('skills/sample');
@@ -432,7 +433,7 @@ describe('share (§5.3)', () => {
     const original = '---\nname: sample\ndescription: x\nmetadata:\n  terum-category: testing\n---\n';
     await writeFile(join(source, 'SKILL.md'), original);
     const sha = await originSha(fixture.bare);
-    expect(await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: false, error: 'Share was declined.' });
+    expect(await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: false, error: 'Connect was declined.' });
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(original);
     expect(await originSha(fixture.bare)).toBe(sha);
     expect((await store.read()).shared).toEqual({});
@@ -462,11 +463,11 @@ describe('share (§5.3)', () => {
     const sha = await originSha(fixture.bare);
     const io = new ScriptedPrompter();
     expect((await sync({ config: store }, io)).ok).toBe(true);
-    expect(io.lines.join('\n')).toContain(`Shared skill sample now contains plugin or hook definitions; run share --keep-source ${id} --allow-privileged`);
+    expect(io.lines).toContain(`Connected skill sample now contains plugin or hook definitions; run connect --keep-source ${id} --allow-privileged after reviewing them.`);
     expect(await originSha(fixture.bare)).toBe(sha);
     expect(await git(['ls-tree', '-r', '--name-only', 'main', 'skills/sample/'], fixture.bare)).not.toContain('hooks/');
     expect((await store.read()).shared[id]!.baseline).toBe(baseline);
-    // A managed-field repair is pending — this user renamed themselves since the share — so the
+    // A managed-field repair is pending — this user renamed themselves since the connect — so the
     // refusal is only write-free if the gate runs before that repair reaches the source or the remote.
     await store.update((config) => { config.display_name = 'Me Renamed'; });
     const sourceBefore = await readFile(join(source, 'SKILL.md'), 'utf8');
@@ -560,7 +561,7 @@ describe('share (§5.3)', () => {
     const sourceId = /id: ([0-9a-f-]{36})/.exec(await readFile(join(source, 'SKILL.md'), 'utf8'))?.[1];
     const repoId = /id: ([0-9a-f-]{36})/.exec(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare))?.[1];
     expect([sourceId, repoId, ...Object.keys((await store.read()).shared)]).toEqual([id, id, id]);
-    expect((await git(['log', '--format=%s', 'main'], fixture.bare)).split('\n').filter((message) => message === 'seed: share sample')).toHaveLength(1);
+    expect((await git(['log', '--format=%s', 'main'], fixture.bare)).split('\n').filter((message) => message === 'seed: connect sample')).toHaveLength(1);
   });
 });
 
@@ -621,14 +622,14 @@ async function pickerFixture(name = 'sample') {
   return { fixture, home, store, source, original };
 }
 
-describe('issue 9 share picker', () => {
+describe('issue 9 connect picker', () => {
   it.each(['sample', 'skip'])('shares %s through selection and a separate consent question', async (name) => {
     const { fixture, home, store, source } = await pickerFixture(name);
-    const io = new ScriptedPrompter([`Share ${name}`], [true], true);
+    const io = new ScriptedPrompter([`Connect ${name}`], [true], true);
     const result = await run({ home, config: store }, io);
     expect(result).toMatchObject({ ok: true, value: { name } });
-    expect(io.offered).toEqual([[`Share ${name}`, 'Skip']]);
-    expect(io.asked).toEqual(['Share a local skill with team team?', `Share ${name}?`]);
+    expect(io.offered).toEqual([[`Connect ${name}`, 'Skip']]);
+    expect(io.asked).toEqual(['Connect a local skill folder to team team?', `Connect ${name}?`]);
     expect(await git(['show', `main:skills/${name}/SKILL.md`], fixture.bare)).toBe(await readFile(join(source, 'SKILL.md'), 'utf8'));
     expect(Object.values((await store.read()).shared)).toEqual([expect.objectContaining({ source, team: 'team' })]);
   });
@@ -638,7 +639,7 @@ describe('issue 9 share picker', () => {
     const before = await originSha(fixture.bare); const config = await readFile(join(store.root, 'config.json'), 'utf8');
     const io = new ScriptedPrompter(['Skip'], [], true);
     expect(await run({ home, config: store }, io)).toEqual({ ok: true, value: undefined });
-    expect(io.lines).toEqual(['Nothing shared.']);
+    expect(io.lines).toEqual(['Nothing connected.']);
     expect(await originSha(fixture.bare)).toBe(before);
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(original);
     expect(await readFile(join(store.root, 'config.json'), 'utf8')).toBe(config);
@@ -649,7 +650,7 @@ describe('issue 9 share picker', () => {
     await store.update((config) => { delete config.email; delete config.display_name; });
     const io = new NonInteractivePrompter();
     expect(await run({ home, config: store }, io)).toEqual({ ok: true, value: undefined });
-    expect(io.lines).toEqual([`No local candidates to share under ${join(home, '.claude', 'skills')}. Skills elsewhere can be shared by passing their folder path.`]);
+    expect(io.lines).toEqual([`No local candidates to connect under ${join(home, '.claude', 'skills')}. Skills elsewhere can be connected by passing their folder path.`]);
     expect(io.asked).toEqual([]);
   });
 
@@ -657,7 +658,7 @@ describe('issue 9 share picker', () => {
     const { fixture, home, store, source, original } = await pickerFixture();
     const before = await originSha(fixture.bare); const config = await readFile(join(store.root, 'config.json'), 'utf8');
     const io = new NonInteractivePrompter();
-    expect(await run({ home, config: store }, io)).toEqual({ ok: false, error: "No skill selected. In an interactive terminal, run `npx -y terum-skills@latest share --team 'team'`, or pass an explicit skill folder path." });
+    expect(await run({ home, config: store }, io)).toEqual({ ok: false, error: "No skill selected. In an interactive terminal, run `npx -y terum-skills@latest connect --team 'team'`, or pass an explicit skill folder path." });
     expect(io.lines).toEqual([`Local candidates under ${join(home, '.claude', 'skills')}:`, `  ${source}`]);
     expect(io.asked).toEqual([]);
     expect(await originSha(fixture.bare)).toBe(before);
@@ -670,10 +671,10 @@ describe('issue 9 share picker', () => {
     await mkdir(join(source, 'hooks'));
     const ordinary = new ScriptedPrompter([], [], true);
     expect(await run({ home, config: store }, ordinary)).toEqual({ ok: true, value: undefined });
-    expect(ordinary.lines[0]).toBe('Skipped 1 local folders that cannot be offered for sharing. Run `npx -y terum-skills@latest ls --local` for paths and reasons.');
+    expect(ordinary.lines[0]).toBe('Skipped 1 local folders that cannot be connected. Run `npx -y terum-skills@latest ls --local` for paths and reasons.');
     const optedIn = new ScriptedPrompter(['Skip'], [], true);
     expect(await run({ home, config: store, allowPrivileged: true }, optedIn)).toEqual({ ok: true, value: undefined });
-    expect(optedIn.offered).toEqual([['Share sample', 'Skip']]);
+    expect(optedIn.offered).toEqual([['Connect sample', 'Skip']]);
   });
 
   it('rejects an unlisted answer without using it as a path', async () => {
@@ -703,15 +704,15 @@ describe('issue 9 share picker', () => {
 });
 
 
-describe('project share discovery', () => {
+describe('project connect discovery', () => {
   it('offers a project-only candidate with its unqualified name and keeps the separate confirmation', async () => {
     const { fixture, home, store, source } = await pickerFixture(); const cwd = join(fixture.root, 'project');
     const projectRoot = join(cwd, '.claude', 'skills'); await mkdir(projectRoot, { recursive: true }); await mkdir(join(cwd, '.git'));
     const projectSource = join(projectRoot, 'sample'); await rename(source, projectSource);
-    const io = new ScriptedPrompter(['Share sample'], [true], true);
+    const io = new ScriptedPrompter(['Connect sample'], [true], true);
     expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { name: 'sample' } });
-    expect(io.offered).toEqual([['Share sample', 'Skip']]);
-    expect(io.asked).toEqual(['Share a local skill with team team?', 'Share sample?']);
+    expect(io.offered).toEqual([['Connect sample', 'Skip']]);
+    expect(io.asked).toEqual(['Connect a local skill folder to team team?', 'Connect sample?']);
     expect(Object.values((await store.read()).shared)).toEqual([expect.objectContaining({ source: projectSource })]);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(await readFile(join(projectSource, 'SKILL.md'), 'utf8'));
   });
@@ -720,9 +721,9 @@ describe('project share discovery', () => {
     const { fixture, home, store, source, original } = await pickerFixture(); const cwd = join(fixture.root, 'project');
     const projectSource = join(cwd, '.claude', 'skills', 'sample'); await mkdir(projectSource, { recursive: true }); await mkdir(join(cwd, '.git'));
     const projectBytes = original.replace('stock source', 'project source'); await writeFile(join(projectSource, 'SKILL.md'), projectBytes);
-    const io = new ScriptedPrompter([`Share sample (${scope})`], [true], true);
+    const io = new ScriptedPrompter([`Connect sample (${scope})`], [true], true);
     expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { name: 'sample' } });
-    expect(io.offered).toEqual([['Share sample (global)', 'Share sample (project)', 'Skip']]);
+    expect(io.offered).toEqual([['Connect sample (global)', 'Connect sample (project)', 'Skip']]);
     const selected = scope === 'global' ? source : projectSource;
     expect(Object.values((await store.read()).shared)).toEqual([expect.objectContaining({ source: selected })]);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(await readFile(join(selected, 'SKILL.md'), 'utf8'));
@@ -733,7 +734,7 @@ describe('project share discovery', () => {
     const { fixture, store } = await pickerFixture(); const home = join(fixture.root, 'empty-home'); const cwd = join(fixture.root, 'project');
     await mkdir(join(cwd, '.git'), { recursive: true }); const io = new NonInteractivePrompter();
     expect(await run({ home, cwd, config: store }, io)).toEqual({ ok: true, value: undefined });
-    expect(io.lines).toEqual([`No local candidates to share under ${join(home, '.claude', 'skills')} or ${join(cwd, '.claude', 'skills')}. Skills elsewhere can be shared by passing their folder path.`]);
+    expect(io.lines).toEqual([`No local candidates to connect under ${join(home, '.claude', 'skills')} or ${join(cwd, '.claude', 'skills')}. Skills elsewhere can be connected by passing their folder path.`]);
   });
 
   it('prints one non-interactive candidates block per root and sums omission counts', async () => {
@@ -746,7 +747,7 @@ describe('project share discovery', () => {
     const runner = ghOnlyRunner(() => ({ code: 0, stdout: '', stderr: '' })); const io = new NonInteractivePrompter();
     expect(await run({ home, cwd, config: store, runner }, io)).toMatchObject({ ok: false, error: expect.stringContaining('No skill selected.') });
     expect(io.lines).toEqual([
-      'Skipped 2 local folders that cannot be offered for sharing. Run `npx -y terum-skills@latest ls --local` for paths and reasons.',
+      'Skipped 2 local folders that cannot be connected. Run `npx -y terum-skills@latest ls --local` for paths and reasons.',
       `Local candidates under ${join(home, '.claude', 'skills')}:`, `  ${source}`,
       `Local candidates under ${join(cwd, '.claude', 'skills')}:`, `  ${projectSource}`,
     ]);
@@ -762,9 +763,74 @@ describe('project share discovery', () => {
     const selected = aliased ? join(alias, 'inside') : source;
     const before = await originSha(fixture.bare); const configBefore = await readFile(join(store.root, 'config.json'));
     const runner = ghOnlyRunner(() => ({ code: 0, stdout: '', stderr: '' })); const io = new ScriptedPrompter([], [true], true);
-    expect(await run({ path: selected, config: store, runner }, io)).toEqual({ ok: false, error: `${selected} is inside the terum-skills state directory ${store.root}; move the folder elsewhere and share that path.` });
+    expect(await run({ path: selected, config: store, runner }, io)).toEqual({ ok: false, error: `${selected} is inside the terum-skills state directory ${store.root}; move the folder elsewhere and connect that path.` });
     expect(runner.calls).toEqual([]); expect(io.asked).toEqual([]);
     expect(await originSha(fixture.bare)).toBe(before); expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(original);
     expect(await readFile(join(source, 'asset.bin'))).toEqual(binary); expect(await readFile(join(store.root, 'config.json'))).toEqual(configBefore);
   });
+});
+
+describe('issue 5 connected-source contract', () => {
+  it('sends the exact divergence remedy through hook SyncResult.notices without prompting', async () => {
+    const { fixture, store } = await sharedFixture();
+    const [id, tracked] = Object.entries((await store.read()).shared)[0]!;
+    const skillPath = join(tracked.source, 'SKILL.md');
+    await writeFile(skillPath, (await readFile(skillPath, 'utf8')).replace('description: x', 'description: local'));
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', (await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).replace('description: x', 'description: remote'));
+    const io = new NonInteractivePrompter();
+    const result = await sync({ config: store, hook: true }, io);
+    expect(result.ok).toBe(true);
+    expect(result.value?.notices).toEqual([`Connected skill sample diverged (source ${await canonicalDigest(tracked.source)}, repo ${await canonicalDigest(join(store.teamClone('team'), 'skills', 'sample'))}); choose connect --keep-source ${id} or --keep-repo ${id}.`]);
+    expect(result.value?.deferred).toEqual(['sample']);
+    expect(io.lines).toEqual([]); expect(io.asked).toEqual([]);
+  });
+
+  it('reconciles a legacy config.shared entry without ever running the connect verb', async () => {
+    const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
+    const id = '11111111-1111-4111-8111-111111111111'; const source = join(fixture.root, 'sample');
+    const original = `---\nname: sample\ndescription: legacy\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`;
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', original);
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), original);
+    const baseline = await canonicalDigest(source);
+    await store.ensureRoot();
+    await writeFile(join(store.root, 'config.json'), JSON.stringify({ teams: { team: { remote: fixture.bare, handle: 'seed' } }, display_name: 'Me', email: 'me@example.com', shared: { [id]: { source, team: 'team', baseline } }, placements: {}, approvals: {}, pending: [] }));
+    const updated = original.replace('description: legacy', 'description: legacy edited');
+    await writeFile(join(source, 'SKILL.md'), updated);
+    const io = new ScriptedPrompter(); await reconcileShared(store, systemRunner, io);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(updated);
+    expect((await store.read()).shared).toEqual({ [id]: { source, team: 'team', baseline: await canonicalDigest(source) } });
+    expect(io.lines).toEqual([]); expect(io.asked).toEqual([]);
+  });
+});
+
+it('issue 5 refuses an explicit connection without joined identity with the exact message', async () => {
+  const { store, source } = await pickerFixture();
+  await store.update((config) => { delete config.email; });
+  expect(await run({ path: source, config: store }, new ScriptedPrompter())).toEqual({ ok: false, error: 'Connect needs your joined team identity, name, and email.' });
+});
+
+it.each(['keepSource', 'keepRepo', 'relocate'] as const)('issue 5 names an unknown connected record for %s', async (option) => {
+  const { store } = await sharedFixture();
+  const [id, tracked] = Object.entries((await store.read()).shared)[0]!;
+  await store.update((config) => { delete config.shared[id]; });
+  const args = option === 'relocate' ? { relocate: { id, path: tracked.source } } : { [option]: id };
+  expect(await run({ ...args, config: store }, new ScriptedPrompter())).toEqual({ ok: false, error: `No connected skill ${id}.` });
+});
+
+it('issue 5 reports a missing repository copy with the exact connect remedy', async () => {
+  const { store } = await sharedFixture(); const [id] = Object.keys((await store.read()).shared);
+  const directory = join(store.teamClone('team'), 'skills', 'sample'); await rename(directory, `${directory}-missing`);
+  const io = new ScriptedPrompter(); await reconcileShared(store, systemRunner, io);
+  expect(io.lines).toEqual([`Repository copy for connected ${id!.slice(0, 8)} is missing; run connect again to restore it.`]);
+});
+
+it('issue 5 reports an unreadable repository inventory using connected wording', async () => {
+  const { store } = await sharedFixture(); const [id] = Object.keys((await store.read()).shared);
+  const directory = join(store.teamClone('team'), 'skills'); await rename(directory, `${directory}-saved`); await writeFile(directory, 'not a directory');
+  let detail = '';
+  try { await readdir(directory); } catch (error) { detail = (error as Error).message; }
+  expect(detail).not.toBe('');
+  const io = new ScriptedPrompter(); await reconcileShared(store, systemRunner, io);
+  expect(io.lines).toEqual([`Could not read connected ${id!.slice(0, 8)}: ${detail}`]);
 });

@@ -178,7 +178,7 @@ export async function moveToQuarantine(path: string, quarantineRoot: string, nam
 /**
  * Move a directory: a rename, or — across volumes (an authoring folder outside HOME, a checkout on
  * another disk) — a copy that must exist in full at the destination before the original is removed.
- * The only place that deletes a user-owned directory after a copy; the quarantine move and share's
+ * The only place that deletes a user-owned directory after a copy; the quarantine move and connect's
  * restore of a displaced folder both go through it.
  */
 export async function moveDirectory(from: string, to: string): Promise<void> {

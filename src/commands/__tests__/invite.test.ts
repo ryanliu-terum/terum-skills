@@ -70,3 +70,12 @@ it.each([['new'], ['member'], ['bad', 'new']])('invitation block stays condition
   await run({ logins, config: store, runner }, io);
   expect(io.lines.join('\n')).toContain('```\nIf you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.');
 });
+
+it('issue 5 labels the teammate invitation as Send', async () => {
+  const store = createConfigStore(await temporaryDirectory());
+  await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'admin' }; });
+  const io = new ScriptedPrompter();
+  const result = await run({ logins: ['new'], config: store, runner: ghOnlyRunner(() => ({ code: 0, stdout: 'HTTP/2.0 201 Created\r\n', stderr: '' })) }, io);
+  expect(result.ok).toBe(true);
+  expect(io.lines.join('\n').split('\n')).toContain('Send this to your teammate:');
+});

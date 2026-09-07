@@ -59,13 +59,13 @@ after it, edits flow automatically. Build-order notes per site:
 - **`validate <path|name>`** — new verb, `commands/validate.ts`, registered in
   `cli.ts` like every other verb; runs hygiene alone, non-zero exit on any finding.
   Built by the **eval side** (Ajay's call, 2026-09-04, resolving the audit fork).
-- **`share`** — calls `inspectHygiene` on the **post-injection candidate assembled
+- **`connect`** — calls `inspectHygiene` on the **post-injection candidate assembled
   in memory** (frontmatter after `injectManagedFields`), **before** both the source
   write-back and `safeWrite` — so a first share is never rejected for the managed
   fields the tool is about to add, and a refusal leaves the author's SKILL.md
   byte-identical. Extends the existing privilege-rejection gate. The
   divergence-resolution writes (`resolveDivergence`, reached via
-  `share --keep-source`/`--keep-repo`, `action: 'sync'`) are part of the covered
+  `connect --keep-source`/`--keep-repo`, `action: 'sync'`) are part of the covered
   set: they too run hygiene before any team-repo write.
 - **`sync`'s reconcile path** — the automatic mirror of edited shared sources
   (`reconcileShared` in `src/commands/share.ts`, every `safeWrite` it issues with

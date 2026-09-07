@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { run as install } from '../commands/install.js';
-import { run as share } from '../commands/share.js';
+import { run as connect } from '../commands/connect.js';
 import { run as sync } from '../commands/sync.js';
 import { createConfigStore } from '../lib/config.js';
 import { NonInteractivePrompter } from '../lib/prompt.js';
@@ -20,7 +20,7 @@ describe('M2 walkthrough (§12)', () => {
     await cloneWithIdentity(fixture.bare, aStore.teamClone('team'), 'Alice', 'alice@example.com');
     await aStore.update((config) => { config.display_name = 'Alice'; config.email = 'alice@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const source = join(fixture.root, 'guarded'); await mkdir(source); await writeFile(join(source, 'SKILL.md'), firstSkill('first', 'Bash(ls)'));
-    const sharedFirst = await share({ path: source, team: 'team', config: aStore }, new ScriptedPrompter([], [true]));
+    const sharedFirst = await connect({ path: source, team: 'team', config: aStore }, new ScriptedPrompter([], [true]));
     if (!sharedFirst.ok) throw new Error(sharedFirst.error);
     const firstId = sharedFirst.value!.id;
     await pushFromSeed(fixture.seed, 'people/bob.json', `${JSON.stringify(person('bob', { display_name: 'Bob', email: 'bob@example.com', github: 'bob' }))}\n`);
@@ -35,7 +35,7 @@ describe('M2 walkthrough (§12)', () => {
     await writeFile(join(source, 'SKILL.md'), firstSkill('A edited', 'Bash(ls)'));
     expect((await sync({ config: aStore }, new ScriptedPrompter())).ok).toBe(true);
     const secondSource = join(fixture.root, 'plain'); await mkdir(secondSource); await writeFile(join(secondSource, 'SKILL.md'), secondSkill('plain'));
-    const sharedSecond = await share({ path: secondSource, team: 'team', config: aStore }, new ScriptedPrompter([], [true]));
+    const sharedSecond = await connect({ path: secondSource, team: 'team', config: aStore }, new ScriptedPrompter([], [true]));
     if (!sharedSecond.ok) throw new Error(sharedSecond.error);
     const secondId = sharedSecond.value!.id;
     expect((await sync({ config: bStore }, new ScriptedPrompter())).ok).toBe(true);

@@ -4,4 +4,4 @@ terminal because they ask a question. Pass through any arguments: $ARGUMENTS
 
 `$ARGUMENTS` may be empty (the skill asks which verb, default `status`), a verb with its
 arguments (`ls --local`, `validate /abs/path`, `publish my-skill`, `eval my-skill --triggers-only`),
-or a hand-off verb (`share /abs/path`, `setup`) that the skill prepares for a terminal.
+or a hand-off verb (`connect /abs/path`, `setup`) that the skill prepares for a terminal.

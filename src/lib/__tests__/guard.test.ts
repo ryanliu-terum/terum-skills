@@ -11,7 +11,7 @@ const tree = (changes: Changes, unchanged: Record<string, string> = {}) => ({
   changedPaths: Object.keys(changes),
 });
 const ME = 'Me <me@x.test>';
-const share: GuardContext = { action: 'share', handle: 'me', author: ME };
+const connect: GuardContext = { action: 'connect', handle: 'me', author: ME };
 const receiptPath = (id = ID, hash = 'a'.repeat(40), runId = '20260907T123456Z') => `evals/${id}/${hash}/${runId}.json`;
 const receiptTree = (changes: Changes) => ({
   ...tree(changes, { 'skills/x/SKILL.md': skill(ME) }),
@@ -21,38 +21,38 @@ const refuse = (t: ReturnType<typeof tree>, c: GuardContext, path: string) => ex
 
 describe('row a — skill folders, ownership by metadata.author', () => {
   it('allows the author to edit, add aux files to, and delete their own skill', () => {
-    expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME).replace('# x', '# y')] }), share)).not.toThrow();
-    expect(() => guard(tree({ 'skills/x/references/a.md': [undefined, 'aux'] }, { 'skills/x/SKILL.md': skill(ME) }), share)).not.toThrow();
-    expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), undefined] }), share)).not.toThrow();
-    expect(() => guard(tree({ 'skills/x/SKILL.md': [undefined, skill(ME)] }), { ...share, action: 'sync' })).not.toThrow();
+    expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME).replace('# x', '# y')] }), connect)).not.toThrow();
+    expect(() => guard(tree({ 'skills/x/references/a.md': [undefined, 'aux'] }, { 'skills/x/SKILL.md': skill(ME) }), connect)).not.toThrow();
+    expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), undefined] }), connect)).not.toThrow();
+    expect(() => guard(tree({ 'skills/x/SKILL.md': [undefined, skill(ME)] }), { ...connect, action: 'sync' })).not.toThrow();
   });
 
   it('compares authors after normalization: case, doubled and surrounding whitespace are not identity', () => {
     for (const spelling of ['me <ME@X.test>', '  Me  <me@x.test>  ', 'ME <ME@X.TEST>']) {
-      expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME).replace('# x', '# y')] }), { ...share, author: spelling }), spelling).not.toThrow();
-      expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(spelling), skill(spelling).replace('# x', '# y')] }), share), spelling).not.toThrow();
+      expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME).replace('# x', '# y')] }), { ...connect, author: spelling }), spelling).not.toThrow();
+      expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(spelling), skill(spelling).replace('# x', '# y')] }), connect), spelling).not.toThrow();
     }
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Me <me@x.test>'), skill('Me <me@x.test>')] }), { ...share, author: 'Me <me@y.test>' }, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Me <me@x.test>'), skill('Me <me@x.test>')] }), { ...share, author: 'Mel <me@x.test>' }, 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/x/SKILL.md': [skill('Me <me@x.test>'), skill('Me <me@x.test>')] }), { ...connect, author: 'Me <me@y.test>' }, 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/x/SKILL.md': [skill('Me <me@x.test>'), skill('Me <me@x.test>')] }), { ...connect, author: 'Mel <me@x.test>' }, 'skills/x/SKILL.md');
   });
 
   it("rejects another author's folder, including aux files and a folder with no SKILL.md", () => {
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Other <o@x.test>'), skill('Other <o@x.test>')] }), share, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/references/a.md': [undefined, 'aux'] }, { 'skills/x/SKILL.md': skill('Other <o@x.test>') }), share, 'skills/x/references/a.md');
-    refuse(tree({ 'skills/x/references/a.md': [undefined, 'aux'] }), share, 'skills/x/references/a.md');
+    refuse(tree({ 'skills/x/SKILL.md': [skill('Other <o@x.test>'), skill('Other <o@x.test>')] }), connect, 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/x/references/a.md': [undefined, 'aux'] }, { 'skills/x/SKILL.md': skill('Other <o@x.test>') }), connect, 'skills/x/references/a.md');
+    refuse(tree({ 'skills/x/references/a.md': [undefined, 'aux'] }), connect, 'skills/x/references/a.md');
   });
 
   it('reads ownership from the committed pre-image: a diff cannot grant itself authorship or hand the folder away', () => {
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Other <o@x.test>'), skill(ME)] }), share, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/SKILL.md': [skill(ME), skill('Other <o@x.test>')] }), share, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/SKILL.md': [undefined, skill('Other <o@x.test>')] }), share, 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/x/SKILL.md': [skill('Other <o@x.test>'), skill(ME)] }), connect, 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/x/SKILL.md': [skill(ME), skill('Other <o@x.test>')] }), connect, 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/x/SKILL.md': [undefined, skill('Other <o@x.test>')] }), connect, 'skills/x/SKILL.md');
     const bodyOnly = `# x\n\nauthor: ${ME}\n`;
-    refuse(tree({ 'skills/x/SKILL.md': [bodyOnly, bodyOnly] }), share, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME)] }), { action: 'share', handle: 'me' }, 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/x/SKILL.md': [bodyOnly, bodyOnly] }), connect, 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME)] }), { action: 'connect', handle: 'me' }, 'skills/x/SKILL.md');
   });
 
   it('a rename that moves a file out of an owned folder is refused, and skills are never writable from join/install', () => {
-    refuse(tree({ 'skills/x/notes.md': ['n', undefined], 'notes.md': [undefined, 'n'] }, { 'skills/x/SKILL.md': skill(ME) }), share, 'notes.md');
+    refuse(tree({ 'skills/x/notes.md': ['n', undefined], 'notes.md': [undefined, 'n'] }, { 'skills/x/SKILL.md': skill(ME) }), connect, 'notes.md');
     refuse(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME)] }), { action: 'join', handle: 'me', author: ME }, 'skills/x/SKILL.md');
   });
 });
@@ -61,7 +61,7 @@ describe('row b — people files', () => {
   it('only your own file, only from join/install/uninstall/sync', () => {
     for (const action of ['join', 'install', 'uninstall', 'sync'] as const) expect(() => guard(tree({ 'people/me.json': ['{}', '{"a":1}'] }), { action, handle: 'me' })).not.toThrow();
     refuse(tree({ 'people/other.json': ['{}', '{}'] }), { action: 'join', handle: 'me' }, 'people/other.json');
-    refuse(tree({ 'people/me.json': ['{}', '{}'] }), share, 'people/me.json');
+    refuse(tree({ 'people/me.json': ['{}', '{}'] }), connect, 'people/me.json');
     refuse(tree({ 'people/me.json': ['{}', '{}'] }), { action: 'publish', handle: 'me' }, 'people/me.json');
   });
 });
@@ -99,9 +99,9 @@ describe('rows c, d, e — team.json', () => {
 describe('row f and everything else', () => {
   it('README is regenerable from any action; any other path is refused', () => {
     expect(() => guard(tree({ 'README.md': ['a', 'b'] }), { action: 'install', handle: 'me' })).not.toThrow();
-    refuse(tree({ 'evals/x.json': [undefined, '{}'] }), share, 'evals/x.json');
+    refuse(tree({ 'evals/x.json': [undefined, '{}'] }), connect, 'evals/x.json');
     refuse(tree({ '.github/workflows/terum-skills.yml': ['a', 'b'] }), { action: 'publish', handle: 'me' }, '.github/workflows/terum-skills.yml');
-    expect(() => guard(tree({ 'outside.txt': [undefined, 'x'] }), share)).toThrow(GuardError);
+    expect(() => guard(tree({ 'outside.txt': [undefined, 'x'] }), connect)).toThrow(GuardError);
   });
 });
 
@@ -122,7 +122,7 @@ describe('row g — eval receipts are one-file, append-only testimony', () => {
       `evals/${ID}/../${'a'.repeat(40)}/20260907T123456Z.json`,
       receiptPath(ID, 'a'.repeat(40), 'not-a-run-id'),
     ]) refuse(receiptTree({ [path]: [undefined, '{}'] }), evalContext, path);
-    refuse(receiptTree({ [receiptPath()]: [undefined, '{}'] }), share, receiptPath());
+    refuse(receiptTree({ [receiptPath()]: [undefined, '{}'] }), connect, receiptPath());
   });
 
   it('refuses modifying, deleting, or combining receipts — previously committed evidence is immutable', () => {
@@ -159,8 +159,15 @@ describe('row a — previousAuthor is the §5.3 managed-field refresh, for sync 
     expect(() => guard(tree({ 'skills/x/SKILL.md': [skill('Me <new@x.test>'), skill('Me <new@x.test>').replace('# x', '# changed')] }), ctx('sync'))).not.toThrow();
     refuse(tree({ 'skills/x/SKILL.md': [skill('Me <old@x.test>'), skill('Me <new@x.test>').replace('# x', '# changed')] }), ctx('sync'), 'skills/x/SKILL.md');
     refuse(tree({ 'skills/x/SKILL.md': [skill('Me <old@x.test>'), skill('Me <new@x.test>')], 'skills/x/note.md': [undefined, 'extra'] }), ctx('sync'), 'skills/x/SKILL.md');
-    refuse(refresh('Me <old@x.test>', 'Me <new@x.test>'), ctx('share'), 'skills/x/SKILL.md');
+    refuse(refresh('Me <old@x.test>', 'Me <new@x.test>'), ctx('connect'), 'skills/x/SKILL.md');
     refuse(refresh('Them <them@x.test>', 'Me <new@x.test>'), ctx('sync'), 'skills/x/SKILL.md');
     refuse(refresh('Me <old@x.test>', 'Them <them@x.test>'), ctx('sync'), 'skills/x/SKILL.md');
   });
+});
+
+it('issue 5 connect authorizes owned skills and names connect in a non-owned refusal', () => {
+  const context: GuardContext = { action: 'connect', handle: 'me', author: ME };
+  expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME).replace('# x', '# edited')] }), context)).not.toThrow();
+  expect(() => guard(tree({ 'skills/x/SKILL.md': [skill('Other <other@x.test>'), skill(ME)] }), context))
+    .toThrow('Write guard refused skills/x/SKILL.md for connect by me');
 });

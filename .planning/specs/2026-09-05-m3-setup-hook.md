@@ -5,6 +5,8 @@
 
 **Amendment 2026-09-06 — issues 4 + 5 (Ryan).** The authoritative build spec §6.1 (rev 10) supersedes the following passages of this locked implementation snapshot; the original text below is retained as history. Inputs: “Ryan, 2026-09-06: setup asks create-or-join on a fresh machine” and “Ryan, 2026-09-06: invite immediately after team creation”.
 
+**Amendment 2026-09-07 — issue 5 (Ryan).** Build spec rev 13 renames the authorship verb `share` → `connect`. Every `share` below — the welcome line (:16, :90), step 5 (:17-21, :99-109), the scripted answers `Share sample`/`Share starter` and the sixth one-liner (:123-138) — reads `connect`/`Connect …`; wording is the build spec's. The original text is retained as history.
+
 - §1.1 `target` comment and §1.3 role rule (original lines 50, 61): a target joins directly; absent a target, a configured machine resumes its first team, otherwise ask `Create a team or join one?` with `Create a new team` / `Join an existing team`. Before the question print `Creating a new team creates a private GitHub repository under your account.` This defaultless select is the one exception to “a question with a default”; there is no extra creation confirmation. Read config and resolve this fork before probing gh. Configured bare setup prints `Resuming setup for team <name>. To join another team, run the setup command its owner sent you.` before gh. A target-less join returns success with empty team/remote and only the reached steps (`welcome`, `role`, `team`); no gh/git call, verb call or local write occurs. It prints exactly:
   ```text
   Ask the team owner to invite you, then run the command they send you.
@@ -61,7 +63,7 @@
 // src/commands/setup.ts
 export interface SetupVerbs {           // injection seam for tests; defaults are the real verbs
   team: typeof import('./team.js').run;
-  share: typeof import('./share.js').run;
+  connect: typeof import('./connect.js').run;
   invite: typeof import('./invite.js').run;
   offerHook: typeof import('../lib/hook.js').offerHook;
 }
@@ -97,7 +99,7 @@ Every line below goes through `io.print`. `Result.error` is what `src/index.ts` 
    - **Creator:** if `Object.keys(config.teams).length > 0` → print `Team <name> is already configured on this machine.` for the first configured team, record `skipped`, and carry that team forward. Otherwise `await verbs.team({ kind: 'create', offerHook: false, config, runner }, io)`; `team create` asks the team name and the repository name itself (Decision 5) and collects identity. A failure is this step's failure. On success carry `value.team`/`value.remote` forward (read the exact `CreateResult` shape from `team.ts`). The reading chosen for the parent's "and an optional org": **not asked in phase 1** — `team create --org` is the way to create under an organization; `setup` passes no `org`. Say so in the report.
    - **Joiner:** parse the target with `parseJoinTarget(target)` (throws on an invalid target — that is this step's failure). If `teamByRemote(config, normalizedRemote)` finds a configured team whose `handle` is set → print `Team <name> is already configured on this machine.`, record `skipped`, carry it forward. Otherwise `await verbs.team({ kind: 'join', target, offerHook: false, config, runner }, io)`; `team join` does the handle collision check, the invitation accept (with the browser URL and a y/N when gh is not logged in), the endorsed-set y/N, and the per-skill `allowed-tools` prompts — all on `io`, none of them `setup`'s.
 4. **First actions** (`done` | `skipped` for the share offer; the one-liners are always printed).
-   - **Creator:** calls `share` with no path and the wizard's prompter, forwarding `home`, `cwd`, team, config, and runner — the picker, its omission summary, and the `share` y/N are share's own. `share` inventories the global Claude Code root and the nearest repository’s project root when cwd is supplied (build spec §6, Ryan 2026-09-06), excludes sources recorded in either ledger, and offers `Share <name>` labels (scope-qualified for duplicate names) plus `Skip` after offline validation; privileged sources require `--allow-privileged`. The full paths and rejection reasons are available through `ls --local`. `success(undefined)` (no candidates, or Skip) records the step `skipped`, a shared result `done`, and failure stops this step. Setup owns no enumeration or select call.
+   - **Creator:** calls `connect` with no path and the wizard's prompter, forwarding `home`, `cwd`, team, config, and runner — the picker, its omission summary, and the `connect` y/N are connect's own. `connect` inventories the global Claude Code root and the nearest repository’s project root when cwd is supplied (build spec §6, Ryan 2026-09-06), excludes sources recorded in either ledger, and offers `Connect <name>` labels (scope-qualified for duplicate names) plus `Skip` after offline validation; privileged sources require `--allow-privileged`. The full paths and rejection reasons are available through `ls --local`. `success(undefined)` (no candidates, or Skip) records the step `skipped`, a shared result `done`, and failure stops this step. Setup owns no enumeration or select call.
    - **Both roles, always:** the `--local lists your own` one-liner includes global and project skills; keep its wording. Print exactly
      ```
      Next, from any terminal:
@@ -105,8 +107,8 @@ Every line below goes through `io.print`. `Result.error` is what `src/index.ts` 
        terum-skills ls [--local]             — list members and shared skills; --local lists your own
        terum-skills search <term>            — find a skill by name, description, or category
        terum-skills sync                     — pull updates and finish pending work
-       npx -y terum-skills@latest publish <skill> — endorse a skill already shared with the team
-       npx -y terum-skills@latest share      — share one of your local skills (asks which)
+       npx -y terum-skills@latest publish <skill> — endorse a skill already connected to the team
+       npx -y terum-skills@latest connect    — connect one of your local skills to the team; later edits sync automatically (asks which)
      ```
      with `<team>` replaced by the carried team name. **The strings `eval` and `ui` must not appear anywhere in the wizard's output** (§6.1: reserved steps are absent, not stubbed).
 5. **Invite** (`done` | `skipped`). Creator only; a joiner never sees this step (record `skipped`).

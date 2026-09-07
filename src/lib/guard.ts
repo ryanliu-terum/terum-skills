@@ -6,7 +6,7 @@ import { canonicalSkillDigest } from './skills.js';
  * nothing else is writable. It runs inside the safeWrite loop against the tree the mutation
  * actually produced; teamRepo additionally proves the staged diff equals that tree's changes.
  */
-export type GuardAction = 'share' | 'sync' | 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'eval';
+export type GuardAction = 'connect' | 'sync' | 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'eval';
 
 export interface GuardContext {
   action: GuardAction;
@@ -33,7 +33,7 @@ export class GuardError extends Error {
 }
 
 const PEOPLE_ACTIONS: readonly GuardAction[] = ['join', 'install', 'uninstall', 'sync'];
-const SKILL_ACTIONS: readonly GuardAction[] = ['share', 'sync'];
+const SKILL_ACTIONS: readonly GuardAction[] = ['connect', 'sync'];
 // Skill uuids are case-tolerant (z.uuid() admits both; callers pass metadata.id verbatim), but the
 // version segment is the receipt schema's 40-char LOWERCASE tree hash — an uppercase-hash directory
 // is one no reader (README lookup, incumbent selection) would ever resolve, so the guard refuses it.
@@ -92,7 +92,7 @@ export function guardRawPush(tree: GuardTree, identity: { handle: string; author
     // Ownership is an author comparison (§5.3): with no local identity there is nothing to compare, and
     // saying so beats reading every skill path as someone else's.
     if (skill && !identity.author) throw new GuardError(`Push guard cannot check ${path}: this machine has no name and email to match a skill's author against. Run \`terum-skills login\`, then retry (or bypass with \`git push --no-verify\`, attributed to you).`);
-    if (skill && ownsSkill(tree, skill[1]!, { action: 'share', handle, author: identity.author })) continue;
+    if (skill && ownsSkill(tree, skill[1]!, { action: 'connect', handle, author: identity.author })) continue;
     throw new GuardError(`Push guard refused ${path}: not yours as ${handle} (D12: only your own skills, your own people file, and the team lists through publish; \`git push --no-verify\` bypasses this and is attributed to you)`);
   }
 }

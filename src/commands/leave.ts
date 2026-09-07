@@ -30,7 +30,7 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
     const clonePresent = await access(clone).then(() => true, () => false);
     if (matching.length) io.print(`${matching.length} placed skill(s) will be removed.`);
     if (clonePresent) io.print(`Local clone at ${clone} will be removed.`);
-    if (shared.length) io.print(`${shared.length} shared skill record(s) will be removed.`);
+    if (shared.length) io.print(`${shared.length} connected skill record(s) will be removed.`);
     if (pending.length) io.print(`${pending.length} pending operation(s) will be removed.`);
     const remote = stripRemoteCredentials(binding.remote);
     if (!(await io.confirm(`Leave ${name}? This removes ${matching.length} placed skill(s) and the local clone; your membership in ${remote} is unchanged.`))) {

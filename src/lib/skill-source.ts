@@ -17,7 +17,7 @@ export function assertNotInsideStateRoot(source: string, stateRoot: string): voi
   try { canonicalSource = realpathSync(source); } catch { /* Retain lexical evidence. */ }
   try { canonicalState = realpathSync(stateRoot); } catch { /* Retain lexical evidence. */ }
   if (canonicalSource === canonicalState || canonicalSource.startsWith(canonicalState.endsWith(sep) ? canonicalState : `${canonicalState}${sep}`)) {
-    throw new Error(`${source} is inside the terum-skills state directory ${stateRoot}; move the folder elsewhere and share that path.`);
+    throw new Error(`${source} is inside the terum-skills state directory ${stateRoot}; move the folder elsewhere and connect that path.`);
   }
 }
 
@@ -28,7 +28,7 @@ export function inspectSkillSource(raw: string, folderName?: string): SourceInsp
   return { ok: false, reason: result.reason, detail: result.detail };
 }
 
-/** Share keeps its established refusal messages; discovery exposes the more precise reason. */
+/** Connect keeps its established refusal messages; discovery exposes the more precise reason. */
 export function assertSkillSource(raw: string, folderName: string): string {
   const result = inspect(raw, folderName);
   if (!result.ok) throw new Error(result.reason === 'unsupported-field' ? printable(result.shareMessage) : result.shareMessage);
@@ -52,7 +52,7 @@ function inspect(raw: string, folderName?: string): { ok: true; description: str
   for (const key of Object.keys(parsed)) {
     if (!['name', 'description', 'license', 'metadata', 'allowed-tools'].includes(key)) return reject('unsupported-field', `unsupported top-level field ${key} (only name, description, license, metadata, allowed-tools)`);
   }
-  // Discovery needs a candidate/omission reason. Share itself deliberately does not call this
+  // Discovery needs a candidate/omission reason. Connect itself deliberately does not call this
   // validator: its assembled post-injection candidate goes through the single HYG1 path instead.
   const grants = allowedTools(parsed['allowed-tools']);
   if (!grants.ok) {
@@ -97,7 +97,7 @@ export async function scanSkillFolder(path: string): Promise<{ symlink?: string;
   return result;
 }
 
-/** Explicit paths preserve share's stat-based top-level link policy and refusal text. */
+/** Explicit paths preserve connect's stat-based top-level link policy and refusal text. */
 export async function assertSkillDirectory(path: string): Promise<{ privileged: boolean }> {
   const scan = await scanSkillFolder(path);
   if (scan.symlink) throw new Error(`Skill folder contains symlink ${scan.symlink}.`);

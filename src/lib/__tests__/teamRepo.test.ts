@@ -8,7 +8,7 @@ import { Runner, systemRunner } from '../runner.js';
 import { packageVersion } from '../package.js';
 import { describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText } from '../teamRepo.js';
 import { createConfigStore } from '../config.js';
-import { run as share } from '../../commands/share.js';
+import { run as connect } from '../../commands/connect.js';
 import { ScriptedPrompter } from './fixtures.js';
 import { bareTeam, cloneWithIdentity, mappedRunner, git, originSha, person, pushFromSeed, temporaryDirectory, wrapRunner } from './fixtures.js';
 
@@ -52,7 +52,7 @@ describe('safeWrite (§6.0)', () => {
       return next();
     });
     const skill = '---\nname: new\ndescription: New\nlicense: UNLICENSED\nmetadata:\n  id: 55555555-5555-4555-8555-555555555555\n  author: Me <me@example.com>\n  terum-category: docs\n---\n';
-    await openTeamRepo(clone, fixture.bare, runner).safeWrite((tree) => tree.set('skills/new/SKILL.md', skill), { action: 'share', handle: 'me', author: 'Me <me@example.com>' });
+    await openTeamRepo(clone, fixture.bare, runner).safeWrite((tree) => tree.set('skills/new/SKILL.md', skill), { action: 'connect', handle: 'me', author: 'Me <me@example.com>' });
     await git(['fetch', '-q', 'origin'], fixture.seed);
     await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
     const latest = (await git(['rev-parse', 'main:skills/new'], fixture.bare)).trim();
@@ -284,7 +284,7 @@ describe('safeWrite (§6.0)', () => {
     }));
     let release!: () => void;
     const barrier = new Promise<void>((done) => { release = done; });
-    const writes = stores.map(async ({ store, source }) => { await barrier; return share({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true])); });
+    const writes = stores.map(async ({ store, source }) => { await barrier; return connect({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true])); });
     release();
     const results = await Promise.all(writes);
     expect(results.every((result) => result.ok)).toBe(true);

@@ -26,7 +26,7 @@ npx -y terum-skills@latest install <org>/<repo>/<skill>
 
 If no teams are configured, this guides you through setup before installing the skill. You will still be asked to confirm setup and permissions. Replace the angle-bracket placeholders with your team's values.
 
-Every step the wizard runs is also a plain verb — `login`, `team create|join`, `share`, `install`, `invite`, `ls`, `search`, `publish`, `sync`, `uninstall-skill`, `uninstall`, `team leave`. Run `npx -y terum-skills@latest --help` for the list.
+Every step the wizard runs is also a plain verb — `login`, `team create|join`, `connect`, `install`, `invite`, `ls`, `search`, `publish`, `sync`, `uninstall-skill`, `uninstall`, `team leave`. Run `npx -y terum-skills@latest --help` for the list.
 
 ## Install (optional)
 
