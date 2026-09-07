@@ -1,19 +1,23 @@
-import { cp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import YAML from 'yaml';
+import { homedir } from 'node:os';
+import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
+import { candidatesOf, localSkills } from '../lib/local-skills.js';
+import { assertSkillDirectory, assertSkillSource, printable, scanSkillFolder } from '../lib/skill-source.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { allowedTools, describeRaw, isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
+import { isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
 import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
 import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedFields, skillRecords } from '../lib/skills.js';
-import { MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
+import { MutableTree, openTeamRepo, shellQuote, treeText } from '../lib/teamRepo.js';
 
 export interface ShareArgs {
   path?: string;
+  home?: string;
   team?: string;
   keepSource?: string;
   keepRepo?: string;
@@ -32,18 +36,38 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
     if (args.forget) return success(await forget(store, args.forget, io));
     if (args.relocate) return success(await relocate(store, args.relocate));
     if (args.keepSource || args.keepRepo) return success(await resolveDivergence(store, runner, args.team, args.keepSource ?? args.keepRepo!, Boolean(args.keepSource), Boolean(args.allowPrivileged), io));
-    if (!args.path) throw new Error('Provide a skill folder path.');
     const config = await store.read();
     const [team, binding] = selectTeam(config.teams, args.team);
+    let selectedPath = args.path;
+    if (!selectedPath) {
+      const inventory = await localSkills(AGENT_PATHS['claude-code'].global(args.home ?? homedir()), config);
+      const candidates = candidatesOf(inventory, args.allowPrivileged);
+      const omitted = inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && !candidates.includes(entry));
+      if (omitted.length) io.print(`Skipped ${omitted.length} local folders that cannot be offered for sharing. Run \`npx -y terum-skills@latest ls --local\` for paths and reasons.`);
+      if (!candidates.length) {
+        io.print(`No local candidates to share under ${printable(inventory.root)}. Skills elsewhere can be shared by passing their folder path.`);
+        return success(undefined);
+      }
+      if (!io.interactive) {
+        io.print(`Local candidates under ${printable(inventory.root)}:`);
+        for (const candidate of candidates) io.print(`  ${printable(candidate.path)}`);
+        throw new Error(`No skill selected. In an interactive terminal, run \`npx -y terum-skills@latest share --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
+      }
+      const choices = new Map(candidates.map((candidate) => [`Share ${printable(candidate.name)}`, candidate.path]));
+      const choice = await io.select(`Share a local skill with team ${printable(team)}?`, [...choices.keys(), 'Skip']);
+      if (choice === 'Skip') { io.print('Nothing shared.'); return success(undefined); }
+      selectedPath = choices.get(choice);
+      if (selectedPath === undefined) throw new Error(`Unknown choice ${printable(choice)}.`);
+    }
     if (!binding.handle || !config.email || !config.display_name) throw new Error('Share needs your joined team identity, name, and email.');
-    const source = resolve(args.path);
+    const source = resolve(selectedPath);
     const name = basename(source);
     if (!(await exists(join(source, 'SKILL.md')))) throw new Error(`${source} has no SKILL.md.`);
-    await assertSkillDirectory(source);
+    const scan = await assertSkillDirectory(source);
     if (!isSkillName(name)) throw new Error(`Skill name ${name} must be 1–64 lowercase alphanumerics or single hyphens.`);
-    if (!args.allowPrivileged && await hasPrivilegedContent(source)) throw new Error(`${name} contains plugin or hook definitions; retry with --allow-privileged after reviewing them.`);
+    if (!args.allowPrivileged && scan.privileged) throw new Error(`${name} contains plugin or hook definitions; retry with --allow-privileged after reviewing them.`);
     const raw = await readFile(join(source, 'SKILL.md'), 'utf8');
-    const description = inspectSource(raw, name);
+    const description = assertSkillSource(raw, name);
     const clone = store.teamClone(team);
     const author = `${config.display_name} <${config.email}>`;
     const repo = openTeamRepo(clone, binding.remote, runner);
@@ -140,7 +164,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
         // The --allow-privileged gate is a property of publishing a source tree, not of the first
         // share: hooks/ or .claude-plugin/ that appeared since are held back — baseline untouched, so
         // the notice repeats every sync — until the author re-consents with --keep-source --allow-privileged.
-        if (await hasPrivilegedContent(tracked.source) && !(await hasPrivilegedContent(record.directory))) { io.print(`Shared skill ${record.name} now contains plugin or hook definitions; run share --keep-source ${id} --allow-privileged after reviewing them.`); defer(tracked.team, record.name); continue; }
+        if ((await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) { io.print(`Shared skill ${record.name} now contains plugin or hook definitions; run share --keep-source ${id} --allow-privileged after reviewing them.`); defer(tracked.team, record.name); continue; }
       // A pre-image with the prior author can only receive a managed-field refresh. Land that
       // narrow write first, then the normal author-owned content mirror on the replayed tree.
       await refreshRepo();
@@ -184,7 +208,7 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
     // Same gate as the first share and the sync reconciler: privileged content the repository copy
     // does not already carry needs the explicit flag. It runs before every write this branch makes —
     // the source managed-field repair and the managed-field commit included — so a refusal is no-write.
-    if (!allowPrivileged && await hasPrivilegedContent(tracked.source) && !(await hasPrivilegedContent(record.directory))) throw new Error(`${record.name} contains plugin or hook definitions; retry with --allow-privileged after reviewing them.`);
+    if (!allowPrivileged && (await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) throw new Error(`${record.name} contains plugin or hook definitions; retry with --allow-privileged after reviewing them.`);
     const team = await readTeamPolicy(clone);
     const author = `${config.display_name ?? ''} <${config.email ?? ''}>`;
     const sourceSkill = join(tracked.source, 'SKILL.md');
@@ -223,32 +247,6 @@ async function relocate(store: ConfigStore, value: { id: string; path: string } 
   return undefined;
 }
 function splitRelocate(value: string): { id: string; path: string } { const index = value.indexOf(':'); if (index < 1) throw new Error('Use --relocate <id>:<path>.'); return { id: value.slice(0, index), path: value.slice(index + 1) }; }
-function inspectSource(raw: string, name: string): string {
-  const match = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(raw); if (!match) throw new Error('SKILL.md has no YAML frontmatter.');
-  const parsed = YAML.parse(match[1]!) as Record<string, unknown>;
-  if (!parsed || typeof parsed !== 'object' || parsed.name !== name || typeof parsed.description !== 'string') throw new Error(`SKILL.md name must equal folder ${name} and description is required.`);
-  // §5.4: a malformed `allowed-tools` never normalizes and never auto-places, so share refuses it
-  // outright and names the line — the author learns now, not when a teammate's install is blocked.
-  const grants = allowedTools(parsed['allowed-tools']);
-  if (!grants.ok) {
-    const line = raw.split(/\r?\n/).findIndex((text) => /^allowed-tools\s*:/.test(text)) + 1;
-    throw new Error(`${name}: allowed-tools is malformed${line ? ` (SKILL.md line ${line})` : ''}: ${describeRaw(grants.raw)}. Use a YAML list of tool patterns, or one comma-separated string.`);
-  }
-  return parsed.description;
-}
-async function hasPrivilegedContent(root: string): Promise<boolean> {
-  async function visit(current: string, relative = ''): Promise<boolean> {
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const path = relative ? `${relative}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        if (entry.name === '.claude-plugin' || /^hooks?$/i.test(entry.name)) return true;
-        if (await visit(join(current, entry.name), path)) return true;
-      } else if (entry.isFile() && (path.split('/').includes('.claude-plugin') || /(^|\/)hooks?(\/|$)/i.test(path))) return true;
-    }
-    return false;
-  }
-  return visit(root);
-}
 async function sourceFiles(root: string): Promise<Map<string, Buffer>> { const result = new Map<string, Buffer>(); async function walk(current: string, relative = ''): Promise<void> { for (const entry of await readdir(current, { withFileTypes: true })) { const next = join(current, entry.name); const key = relative ? `${relative}/${entry.name}` : entry.name; if (entry.isDirectory()) await walk(next, key); else if (entry.isFile()) result.set(key, await readFile(next)); } } await walk(root); return result; }
 function mirrorToTree(tree: MutableTree, destination: string, files: Map<string, Buffer>): void { for (const path of tree.paths(`${destination}/`)) if (!files.has(path.slice(destination.length + 1))) tree.remove(path); for (const [path, content] of files) tree.set(`${destination}/${path}`, content); }
 /** The managed-field refresh as a mutation: re-derived from the fresh pre-image safeWrite hands it, so it can only ever change the managed lines of whatever is actually upstream (and restore a missing category, as injectManagedFields does everywhere). */
@@ -286,17 +284,6 @@ async function replaceDirectory(from: string, to: string, quarantineRoot: string
 }
 async function readTeamPolicy(clone: string): Promise<{ license: string }> { const team = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json'); return { license: team.policy.skill_license }; }
 
-async function assertSkillDirectory(path: string): Promise<void> {
-  let details;
-  try { details = await stat(path); } catch { throw new Error(`${path} is not a skill folder.`); }
-  if (!details.isDirectory()) throw new Error(`${path} is not a skill folder.`);
-  for (const entry of await readdir(path, { withFileTypes: true })) {
-    const next = join(path, entry.name);
-    if (entry.isSymbolicLink()) throw new Error(`Skill folder contains symlink ${next}.`);
-    if (entry.isDirectory()) await assertNoSymlink(next);
-  }
-}
-async function assertNoSymlink(path: string): Promise<void> { for (const entry of await readdir(path, { withFileTypes: true })) { const next = join(path, entry.name); if (entry.isSymbolicLink()) throw new Error(`Skill folder contains symlink ${next}.`); if (entry.isDirectory()) await assertNoSymlink(next); } }
 async function assertRelocation(path: string, id: string): Promise<void> {
   await assertSkillDirectory(path);
   const parsed = parseSkillFrontmatter(await readFile(join(path, 'SKILL.md'), 'utf8'));

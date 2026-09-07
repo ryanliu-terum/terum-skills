@@ -12,7 +12,6 @@ import { failure, Result, success } from '../lib/result.js';
 import { parseJson, parseSkillFrontmatter, Team, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { findSkill, readTeam } from '../lib/skills.js';
-import { packageVersion } from '../lib/package.js';
 import { openTeamRepo, refreshClone, SafeWriteOptions, shellQuote, treeText } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
 
@@ -197,8 +196,8 @@ function printCard(record: Awaited<ReturnType<typeof findSkill>> & {}, scopeLabe
 }
 
 
-/** A pasteable command pinned to the running package, with shell-quoted argument values. */
-function npxInvocation(verb: string, ...args: string[]): string { return [`npx -y terum-skills@${packageVersion() ?? 'latest'}`, verb, ...args.map(shellQuote)].join(' '); }
+/** A pasteable command using the latest package, with shell-quoted argument values. */
+function npxInvocation(verb: string, ...args: string[]): string { return [`npx -y terum-skills@latest`, verb, ...args.map(shellQuote)].join(' '); }
 
 /**
  * The miss, with its next step. Discovery is best-effort and read-only: one readdir of the global
@@ -216,5 +215,5 @@ async function notInTeam(args: PublishArgs, config: Config, team: string, name: 
     const path = join(root, name);
     return `No skill ${args.ref} in team ${team}. Found a local folder at ${path} that is not tracked as a shared source or placement on this machine. To share it with ${team}, run \`${npxInvocation('share', path) + teamOption}\`, then retry \`${retry}\`.${note}`;
   }
-  return `No skill ${args.ref} in team ${team}. Run \`${npxInvocation('ls') + teamOption}\` to check the team's skill names. To add a local skill, run \`npx -y terum-skills@${packageVersion() ?? 'latest'} share '<path-to-skill>' --team ${shellQuote(team)}\`, then publish its name.${note}`;
+  return `No skill ${args.ref} in team ${team}. Run \`${npxInvocation('ls') + teamOption}\` to check the team's skill names. To add a local skill, run \`npx -y terum-skills@latest share '<path-to-skill>' --team ${shellQuote(team)}\`, then publish its name.${note}`;
 }

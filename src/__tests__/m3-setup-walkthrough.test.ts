@@ -40,7 +40,8 @@ describe('M3 setup walkthrough', () => {
     const source = join(aliceHome, '.claude', 'skills', 'sample');
     await mkdir(source, { recursive: true });
     await writeFile(join(source, 'SKILL.md'), '---\nname: sample\ndescription: setup walkthrough skill\nmetadata:\n  terum-category: testing\n---\n');
-    const aliceIo = new ScriptedPrompter(['Create a new team', 'team', '', '', 'Alice', 'alice@example.com', 'team', 'bob', 'sample'], [true, true]);
+    // The share picker is share's own (issue 9): it offers `Share <name>` labels and only on an interactive channel.
+    const aliceIo = new ScriptedPrompter(['Create a new team', 'team', '', '', 'Alice', 'alice@example.com', 'team', 'bob', 'Share sample'], [true, true], true);
     const alice = await setup({ config: aliceStore, home: aliceHome, runner: aliceRunner, hook: hookFor(root, 'alice'), communityUrl: '' }, aliceIo);
     if (!alice.ok) throw new Error(alice.error);
     expect(alice.value.steps).toMatchObject({ team: 'done', actions: 'done', invite: 'done', hook: 'done', done: 'printed' });

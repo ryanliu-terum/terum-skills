@@ -18,6 +18,7 @@ export const TEMP_DIRS: string[] = [];
 export class ScriptedPrompter implements Prompter {
   readonly lines: string[] = [];
   readonly asked: string[] = [];
+  readonly offered: (readonly string[])[] = [];
   constructor(private readonly answers: string[] = [], private readonly confirms: boolean[] = [], readonly interactive = false) {}
   private next(question: string): string {
     this.asked.push(question);
@@ -32,10 +33,17 @@ export class ScriptedPrompter implements Prompter {
     return answer;
   }
   async text(question: string, defaultValue?: string): Promise<string> { return this.next(question) || (defaultValue ?? ''); }
-  async select(question: string, choices: readonly string[]): Promise<string> { return this.next(question) || choices[0] || ''; }
+  async select(question: string, choices: readonly string[]): Promise<string> { this.offered.push([...choices]); return this.next(question) || choices[0] || ''; }
   print(line: string): void { this.lines.push(line); }
   askedAbout(fragment: string): boolean { return this.asked.some((question) => question.includes(fragment)); }
   countAsked(fragment: string): number { return this.asked.filter((question) => question.includes(fragment)).length; }
+}
+
+/** A non-TTY channel: a prompt is always a test failure, never a scripted answer. */
+export class NonInteractivePrompter extends ScriptedPrompter {
+  override async confirm(question: string): Promise<boolean> { this.asked.push(question); throw new PromptClosedError(question, 'not-interactive'); }
+  override async text(question: string): Promise<string> { this.asked.push(question); throw new PromptClosedError(question, 'not-interactive'); }
+  override async select(question: string): Promise<string> { this.asked.push(question); throw new PromptClosedError(question, 'not-interactive'); }
 }
 
 export async function temporaryDirectory(prefix = 'terum-test-'): Promise<string> {

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { buildProgram, Execute } from '../cli.js';
 import { failure, success } from '../lib/result.js';
-import { ScriptedPrompter } from '../lib/__tests__/fixtures.js';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { createExecute } from '../lib/execute.js';
+import { createConfigStore } from '../lib/config.js';
+import { run as share } from '../commands/share.js';
+import { NonInteractivePrompter, temporaryDirectory, ScriptedPrompter } from '../lib/__tests__/fixtures.js';
 
 describe('CLI wiring (§3: commander wiring only)', () => {
   const harness = () => {
@@ -31,6 +36,12 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(program.helpInformation()).toContain('status');
     expect(program.commands.find((command) => command.name() === 'status')?.description()).toContain('not a setup-readiness or membership test');
     await expect(program.parseAsync(['status', 'foo'], { from: 'user' })).rejects.toMatchObject({ code: 'commander.excessArguments' });
+  });
+
+  it.each([['ls', '--local'], ['ls', '--local', 'member', 'amy'], ['ls', '--local', 'project', 'app']])('issue 9 wires %j', async (...argv) => {
+    const { program, calls } = harness();
+    await program.parseAsync(argv, { from: 'user' });
+    expect(calls).toEqual([{ verb: 'ls', kind: argv[2] ?? 'all', local: true, ...(argv[3] ? { value: argv[3], team: undefined } : {}) }]);
   });
 
   it('maps every flag onto the verb arguments', async () => {
@@ -219,4 +230,23 @@ describe('release command eligibility', () => {
       expect(executions).toBe(0); if (code === 'commander.version') expect(lines).toEqual([`${manifest.version}\n`]);
     }
   });
+});
+
+it('issue 9 bare share reaches the verb with an undefined path', async () => {
+  const calls: unknown[] = []; const io = new ScriptedPrompter();
+  const program = buildProgram(async (invoke) => { await invoke(io); }, {
+    login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+    share: async (args) => { calls.push(args); return success(undefined); },
+  });
+  await program.parseAsync(['share'], { from: 'user' });
+  expect(calls).toEqual([{ path: undefined }]);
+});
+
+it('issue 9 non-interactive bare share exits 1 through createExecute', async () => {
+  const home = await temporaryDirectory(); const root = join(home, '.claude', 'skills', 'sample'); await mkdir(root, { recursive: true }); await writeFile(join(root, 'SKILL.md'), '---\nname: sample\ndescription: x\n---\n');
+  const store = createConfigStore(join(home, 'state')); await store.update((config) => { config.teams.team = { remote: 'unused', handle: 'seed' }; });
+  const io = new NonInteractivePrompter(); const errors: string[] = []; const codes: number[] = [];
+  const execute = createExecute({ io, stderr: (line) => { errors.push(line); }, setExitCode: (code) => { codes.push(code); } });
+  await execute((received) => share({ config: store, home }, received), { verb: 'share', notices: false });
+  expect(codes).toEqual([1]); expect(errors).toEqual(["No skill selected. In an interactive terminal, run `npx -y terum-skills@latest share --team 'team'`, or pass an explicit skill folder path."]); expect(io.asked).toEqual([]);
 });

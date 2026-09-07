@@ -6,7 +6,7 @@ import { reconcileShared, run } from '../share.js';
 import { run as sync } from '../sync.js';
 import { run as install } from '../install.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, originSha, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, originSha, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { canonicalDigest } from '../../lib/skills.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
@@ -595,3 +595,94 @@ async function gitBytes(args: readonly string[], cwd: string): Promise<Buffer> {
     child.on('close', (code) => code === 0 ? resolve(Buffer.concat(stdout)) : reject(new Error(Buffer.concat(stderr).toString('utf8'))));
   });
 }
+
+
+async function pickerFixture(name = 'sample') {
+  const fixture = await bareTeam(); const home = join(fixture.root, 'home');
+  const store = createConfigStore(join(fixture.root, 'state'));
+  await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  const source = join(home, '.claude', 'skills', name); await mkdir(source, { recursive: true });
+  const original = `---\nname: ${name}\ndescription: stock source\n---\n`;
+  await writeFile(join(source, 'SKILL.md'), original);
+  return { fixture, home, store, source, original };
+}
+
+describe('issue 9 share picker', () => {
+  it.each(['sample', 'skip'])('shares %s through selection and a separate consent question', async (name) => {
+    const { fixture, home, store, source } = await pickerFixture(name);
+    const io = new ScriptedPrompter([`Share ${name}`], [true], true);
+    const result = await run({ home, config: store }, io);
+    expect(result).toMatchObject({ ok: true, value: { name } });
+    expect(io.offered).toEqual([[`Share ${name}`, 'Skip']]);
+    expect(io.asked).toEqual(['Share a local skill with team team?', `Share ${name}?`]);
+    expect(await git(['show', `main:skills/${name}/SKILL.md`], fixture.bare)).toBe(await readFile(join(source, 'SKILL.md'), 'utf8'));
+    expect(Object.values((await store.read()).shared)).toEqual([expect.objectContaining({ source, team: 'team' })]);
+  });
+
+  it('Skip changes no source, config, or remote', async () => {
+    const { fixture, home, store, source, original } = await pickerFixture();
+    const before = await originSha(fixture.bare); const config = await readFile(join(store.root, 'config.json'), 'utf8');
+    const io = new ScriptedPrompter(['Skip'], [], true);
+    expect(await run({ home, config: store }, io)).toEqual({ ok: true, value: undefined });
+    expect(io.lines).toEqual(['Nothing shared.']);
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(original);
+    expect(await readFile(join(store.root, 'config.json'), 'utf8')).toBe(config);
+  });
+
+  it('empty discovery succeeds before requiring identity', async () => {
+    const { fixture, store } = await pickerFixture(); const home = join(fixture.root, 'empty-home');
+    await store.update((config) => { delete config.email; delete config.display_name; });
+    const io = new NonInteractivePrompter();
+    expect(await run({ home, config: store }, io)).toEqual({ ok: true, value: undefined });
+    expect(io.lines).toEqual([`No local candidates to share under ${join(home, '.claude', 'skills')}. Skills elsewhere can be shared by passing their folder path.`]);
+    expect(io.asked).toEqual([]);
+  });
+
+  it('non-interactive discovery prints absolute paths, fails with guidance, and writes nothing', async () => {
+    const { fixture, home, store, source, original } = await pickerFixture();
+    const before = await originSha(fixture.bare); const config = await readFile(join(store.root, 'config.json'), 'utf8');
+    const io = new NonInteractivePrompter();
+    expect(await run({ home, config: store }, io)).toEqual({ ok: false, error: "No skill selected. In an interactive terminal, run `npx -y terum-skills@latest share --team 'team'`, or pass an explicit skill folder path." });
+    expect(io.lines).toEqual([`Local candidates under ${join(home, '.claude', 'skills')}:`, `  ${source}`]);
+    expect(io.asked).toEqual([]);
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(original);
+    expect(await readFile(join(store.root, 'config.json'), 'utf8')).toBe(config);
+  });
+
+  it('widens choices for --allow-privileged and reports omissions otherwise', async () => {
+    const { home, store, source } = await pickerFixture();
+    await mkdir(join(source, 'hooks'));
+    const ordinary = new ScriptedPrompter([], [], true);
+    expect(await run({ home, config: store }, ordinary)).toEqual({ ok: true, value: undefined });
+    expect(ordinary.lines[0]).toBe('Skipped 1 local folders that cannot be offered for sharing. Run `npx -y terum-skills@latest ls --local` for paths and reasons.');
+    const optedIn = new ScriptedPrompter(['Skip'], [], true);
+    expect(await run({ home, config: store, allowPrivileged: true }, optedIn)).toEqual({ ok: true, value: undefined });
+    expect(optedIn.offered).toEqual([['Share sample', 'Skip']]);
+  });
+
+  it('rejects an unlisted answer without using it as a path', async () => {
+    const { home, store } = await pickerFixture();
+    expect(await run({ home, config: store }, new ScriptedPrompter(['../outside'], [], true))).toEqual({ ok: false, error: 'Unknown choice ../outside.' });
+    expect((await store.read()).shared).toEqual({});
+  });
+
+  it('refuses unsupported source fields before any write or consent', async () => {
+    const { fixture, home, store, source, original } = await pickerFixture();
+    const bytes = original.replace('description: stock source', 'description: stock source\nargument-hint: example');
+    await writeFile(join(source, 'SKILL.md'), bytes); const before = await originSha(fixture.bare);
+    const io = new ScriptedPrompter([], [true]);
+    expect(await run({ path: source, home, config: store }, io)).toEqual({ ok: false, error: 'unsupported top-level field argument-hint (only name, description, license, metadata, allowed-tools)' });
+    expect(io.asked).toEqual([]);
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(bytes);
+    expect((await store.read()).shared).toEqual({});
+  });
+
+  it('explicit paths never inspect the injected home', async () => {
+    const { fixture, store, source } = await pickerFixture(); const home = join(fixture.root, 'not-a-directory'); await writeFile(home, 'file');
+    expect(await run({ path: source, home, config: store }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true, value: { name: 'sample' } });
+  });
+});
