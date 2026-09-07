@@ -1,0 +1,1 @@
+Invoke the `terum-skills` skill with the verb `ls`: run `npx -y terum-skills@latest ls …` from inside the session, following that skill's run-here / hand-off rules. Pass through any arguments after the verb: `ls $ARGUMENTS`

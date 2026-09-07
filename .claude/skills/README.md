@@ -9,7 +9,7 @@ bug-log history, Supabase prod state) and would mislead an agent here.
 live in git so a teammate inherits them on clone. Only machine-specific paths, personal cost/UX preferences
 (`model`, `effortLevel`, `theme`), and credentials stay in `~/.claude`.
 
-## The twelve tools
+## The thirteen tools
 
 | Skill | Invoke | What it does |
 |---|---|---|
@@ -25,6 +25,7 @@ live in git so a teammate inherits them on clone. Only machine-specific paths, p
 | handoff | skill | Snapshot working context into `.claude/handoff.md` before `/clear`; `hooks/handoff-resume-marker.js` stamps it on read. |
 | state | skill | Present-tense session state report: what changed, where it lives, what's decided, next steps. |
 | ui-ux-pro-max | skill | UI/UX design intelligence (styles, palettes, font pairings, stacks). Third-party content; no LICENSE file shipped with it. |
+| terum-skills | `/terum-skills` | Run a terum-skills CLI verb in-session (`npx -y terum-skills@latest …`) or hand the question-asking verbs to a terminal; the Bash tool has no TTY. Design: `.planning/reviews/2026-09-07-cli-skill-wrappers-feasibility.md`. |
 
 `/ultraspec` (command only) runs `workflows/ultraspec.js`, the Claude-only spec auditor.
 
