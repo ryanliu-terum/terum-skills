@@ -410,6 +410,9 @@ describe('the clone-local push guard arming (D12)', () => {
     child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
     child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
     child.on('close', (code) => done({ code, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') }));
+    // The fail-open case exits before reading its ref lines; on Linux that surfaces as EPIPE on our end of the pipe
+    // (git itself ignores SIGPIPE while feeding a hook). It is not a hook failure: swallow it, keep every other error.
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => { if (error.code !== 'EPIPE') throw error; });
     child.stdin.end(stdin);
   });
 
