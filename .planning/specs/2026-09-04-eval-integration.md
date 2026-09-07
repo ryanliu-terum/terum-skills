@@ -38,9 +38,10 @@ Both sides exist; **zero wiring exists.** Missing, in dependency order:
 
 ### IE1 — hygiene tier + `validate` (pure, lands first)
 
-`lib/evals/hygiene.ts` (pure, exit-code gated, no LLM, no network). **The check list
-and the caller list are eval spec §9's — authoritative as of its rev 11; this plan
-orders the work and does not restate the contract. On any divergence, §9 wins.**
+`lib/evals/hygiene.ts` (pure, exit-code gated, no LLM, no network). **The check
+table (HYG1–HYG6), the `inspectHygiene` API, and the caller list are eval spec
+§9's — authoritative as of its rev 12; this plan orders the work and does not
+restate the contract. On any divergence, §9 wins.**
 (One implementation note that is sequencing, not contract: the secret/PII scan
 shares `receipt.ts`'s credential patterns — export them as a named API rather than
 copying.) Wired into all of §9's call sites, because `share` is a one-time act —
@@ -49,10 +50,14 @@ after it, edits flow automatically. Build-order notes per site:
 - **`validate <path|name>`** — new verb, `commands/validate.ts`, registered in
   `cli.ts` like every other verb; runs hygiene alone, non-zero exit on any finding.
   Built by the **eval side** (Ajay's call, 2026-09-04, resolving the audit fork).
-- **`share`** — calls the same function before `safeWrite` (extends the existing
-  privilege-rejection gate). The divergence-resolution writes (`resolveDivergence`,
-  reached via `share --keep-source`/`--keep-repo`, `action: 'sync'`) are part of the
-  covered set: they too run hygiene before any team-repo write.
+- **`share`** — calls `inspectHygiene` on the **post-injection candidate assembled
+  in memory** (frontmatter after `injectManagedFields`), **before** both the source
+  write-back and `safeWrite` — so a first share is never rejected for the managed
+  fields the tool is about to add, and a refusal leaves the author's SKILL.md
+  byte-identical. Extends the existing privilege-rejection gate. The
+  divergence-resolution writes (`resolveDivergence`, reached via
+  `share --keep-source`/`--keep-repo`, `action: 'sync'`) are part of the covered
+  set: they too run hygiene before any team-repo write.
 - **`sync`'s reconcile path** — the automatic mirror of edited shared sources
   (`reconcileShared` in `src/commands/share.ts`, every `safeWrite` it issues with
   `action: 'sync'`; entered from `sync.ts`) runs hygiene on each changed skill
@@ -61,6 +66,8 @@ after it, edits flow automatically. Build-order notes per site:
   before the `shared[id].baseline` update. On failure that skill is skipped: no
   commit of any kind (a managed-field refresh included) is made, `baseline` is not
   advanced, the failure is reported per skill, and the rest of the sync proceeds.
+  As at `share`, the scan input is the post-injection content (the reconcile path's
+  `injectManagedFields` source repair), so managed fields never trip the gate.
   This closes the audit's sharpest hole: a secret pasted into a skill *after*
   initial sharing must never reach the repo.
 - **`publish`** — LANDED (PR #2 `765032c`). Its `safeWrite` writes only `team.json`,
@@ -88,7 +95,13 @@ path; regression tests: a secret introduced into an already-shared source is blo
 at `sync` with repo and baseline byte-identical afterward — a managed-field refresh
 commit also counts as a violation; hygiene refusal at `publish` under `push` policy
 leaves `team.json` byte-identical and prints no confirmation card, and under `pr`
-policy mints no `publish/` branch and opens no PR.
+policy mints no `publish/` branch and opens no PR. Per-code boundary fixtures
+(§9 rev 12): bidi / zero-width / confusable token (HYG2 hit) vs plain multilingual
+prose (no hit); allowlisted vs denied extension, and a shebang file with an
+allowlisted extension (HYG4 hit); `metadata.author` email (no hit) vs third-party
+email (HYG3 hit); license triple equal-after-normalization (no hit) vs pairwise
+conflict (HYG5 hit); SKILL.md at the HYG6 cap boundary (±1 char); one binary file
+(HYG4-only scope); and one "hygiene fails → author's SKILL.md byte-identical" case.
 
 ### IE2 — `eval` runs locally (no team-repo writes)
 
