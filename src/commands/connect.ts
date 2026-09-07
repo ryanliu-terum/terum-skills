@@ -149,7 +149,11 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
     }
     summarize();
     return success(batch.shared.length ? batch : undefined);
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) {
+    // `--keep-source` refusals surface here directly; connectOne reports its own before wrapping.
+    if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment);
+    return failure(error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectResult> {
