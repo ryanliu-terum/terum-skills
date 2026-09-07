@@ -168,9 +168,24 @@ const validateName = (value: string): Validation => {
 
 /**
  * §6 `team create` (rev 9, Decision 5): two questions. The team name (the argument, or a prompt)
- * names the config entry, the clone, and team.json; the GitHub repository name defaults to it and
- * is re-asked when GitHub says it is taken, so a collision on the host never renames the team.
+ * names the config entry, the clone, and team.json; the GitHub repository name is asked with
+ * `<team>-shared-skills` suggested (see suggestedRepoName) and is re-asked when GitHub says it is
+ * taken, so a collision on the host never renames the team.
  */
+/**
+ * The repository name suggested to a creator: `<team>-shared-skills`, so the GitHub repository says
+ * what it holds; the bare team name when the suffix would break the name rule (length).
+ */
+export function suggestedRepoName(team: string): string {
+  const candidate = `${team}-shared-skills`;
+  return teamNameSchema.safeParse(candidate).success ? candidate : team;
+}
+
+/** The line printed before the repository-name question so the creator knows what is being named and why a name is offered. */
+export function repoNameQuestion(team: string, suggested: string): string {
+  return `What should the GitHub repository name be for the team "${team}"? Suggested name: ${suggested}.`;
+}
+
 export async function create(args: CreateArgs, io: Prompter): Promise<Result<CreateResult>> {
   try {
     const name = args.name !== undefined ? parseOrExplain(teamNameSchema, args.name, 'team name') : await askUntilValid(io, 'Team name', undefined, validateName);
@@ -203,7 +218,13 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       // gh and identity first (the wizard's step 2), then the repository question (its step 3): a
       // machine without gh hears about gh before it is asked anything.
       identity = (await authenticateCreator(io, { config: store, runner })).identity;
-      let repo = args.repo !== undefined ? parseOrExplain(teamNameSchema, args.repo, 'repository name') : await askUntilValid(io, 'GitHub repository name', name, validateName);
+      let repo: string;
+      if (args.repo !== undefined) repo = parseOrExplain(teamNameSchema, args.repo, 'repository name');
+      else {
+        const suggested = suggestedRepoName(name);
+        io.print(repoNameQuestion(name, suggested));
+        repo = await askUntilValid(io, 'GitHub repository name', suggested, validateName);
+      }
       let spec = args.org ? `${args.org}/${repo}` : repo;
       for (let attempt = 1; ; attempt++) {
         const created = await runner.run('gh', ['repo', 'create', spec, '--private']);
