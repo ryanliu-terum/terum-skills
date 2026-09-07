@@ -12,6 +12,11 @@ const tree = (changes: Changes, unchanged: Record<string, string> = {}) => ({
 });
 const ME = 'Me <me@x.test>';
 const share: GuardContext = { action: 'share', handle: 'me', author: ME };
+const receiptPath = (id = ID, hash = 'a'.repeat(40), runId = '20260907T123456Z') => `evals/${id}/${hash}/${runId}.json`;
+const receiptTree = (changes: Changes) => ({
+  ...tree(changes, { 'skills/x/SKILL.md': skill(ME) }),
+  paths: (prefix = '') => ['skills/x/SKILL.md'].filter((path) => path.startsWith(prefix)),
+});
 const refuse = (t: ReturnType<typeof tree>, c: GuardContext, path: string) => expect(() => guard(t, c)).toThrow(new RegExp(`refused ${path.replace(/[.]/g, '\\.')}`));
 
 describe('row a — skill folders, ownership by metadata.author', () => {
@@ -97,6 +102,35 @@ describe('row f and everything else', () => {
     refuse(tree({ 'evals/x.json': [undefined, '{}'] }), share, 'evals/x.json');
     refuse(tree({ '.github/workflows/terum-skills.yml': ['a', 'b'] }), { action: 'publish', handle: 'me' }, '.github/workflows/terum-skills.yml');
     expect(() => guard(tree({ 'outside.txt': [undefined, 'x'] }), share)).toThrow(GuardError);
+  });
+});
+
+describe('row g — eval receipts are one-file, append-only testimony', () => {
+  const evalContext: GuardContext = { action: 'eval', handle: 'me' };
+
+  it('allows exactly one newly added, correctly keyed receipt for a post-image skill id', () => {
+    expect(() => guard(receiptTree({ [receiptPath()]: [undefined, '{}'] }), evalContext)).not.toThrow();
+  });
+
+  it('refuses malformed identity directories, hashes, absent ids, and non-eval actions (VE3)', () => {
+    for (const path of [
+      receiptPath('not-a-uuid'),
+      receiptPath(ID, 'a'.repeat(39)),
+      receiptPath(ID, 'a'.repeat(41)),
+      receiptPath(ID, 'A'.repeat(40)),
+      receiptPath('11111111-1111-4111-8111-111111111111'),
+      `evals/${ID}/../${'a'.repeat(40)}/20260907T123456Z.json`,
+      receiptPath(ID, 'a'.repeat(40), 'not-a-run-id'),
+    ]) refuse(receiptTree({ [path]: [undefined, '{}'] }), evalContext, path);
+    refuse(receiptTree({ [receiptPath()]: [undefined, '{}'] }), share, receiptPath());
+  });
+
+  it('refuses modifying, deleting, or combining receipts — previously committed evidence is immutable', () => {
+    const path = receiptPath();
+    refuse(receiptTree({ [path]: ['{}', '{"changed":true}'] }), evalContext, path);
+    refuse(receiptTree({ [path]: ['{}', undefined] }), evalContext, path);
+    const second = receiptPath(ID, 'b'.repeat(40));
+    refuse(receiptTree({ [path]: [undefined, '{}'], [second]: [undefined, '{}'] }), evalContext, path);
   });
 });
 

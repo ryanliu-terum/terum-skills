@@ -139,11 +139,13 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
       if (tree.changedPaths.length === 0) return { changed: false, pushedTo: branch };
       guard(tree, options);
       // §9: Actions own GitHub README commits; generic remotes regenerate as a derived safeWrite path.
+      // §6.0's eval exception is narrower: its receipt is immutable testimony and its commit must
+      // touch exactly that one new file. GitHub teams still regenerate on the existing Action.
       let changed = tree.changedPaths;
       for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
       await applyTree(root, realRoot, tree, changed);
       await requireGit(['add', '-A', '--', ...changed]);
-      if (!isGitHubRemote(remote)) {
+      if (!isGitHubRemote(remote) && options.action !== 'eval') {
         // The index is the exact tree about to be committed, including the caller's mutation.
         // Resolve every skill version from it in one git call before deriving README.md.
         const writtenTree = (await requireGit(['write-tree'])).stdout.trim();

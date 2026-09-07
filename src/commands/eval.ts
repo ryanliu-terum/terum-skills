@@ -1,12 +1,15 @@
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
 import { mkdir, readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
 import { formatHygieneFindings, hygieneFrontmatter, inspectHygiene } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
+import { buildReceipt, receiptPath } from '../lib/evals/receipt.js';
 import { aggregate, renderReport, runIdFrom, writeRunTree } from '../lib/evals/results.js';
+import { packageVersion } from '../lib/package.js';
 import { parseTriggers, runTriggerEvals, type TriggerSummary } from '../lib/evals/triggers.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, type Result, success } from '../lib/result.js';
@@ -14,7 +17,7 @@ import { normalizeRemote } from '../lib/remote.js';
 import { type Runner, systemRunner } from '../lib/runner.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { findSkill, readTeam, skillRecords } from '../lib/skills.js';
-import { refreshClone } from '../lib/teamRepo.js';
+import { openTeamRepo, refreshClone } from '../lib/teamRepo.js';
 import { materializeVersion, resolveVersion } from '../lib/version.js';
 
 export interface EvalArgs {
@@ -42,31 +45,40 @@ export interface EvalResult {
   runDir: string;
   ccVersion: string;
   executionStatus: 'complete' | 'partial' | 'failed';
+  receiptPath?: string;
 }
 
-/** §6: fetch/read only from the team clone; writes are confined to the local run tree. */
+/** §6: fetch/read only from the team clone; --commit adds exactly one immutable receipt via safeWrite. */
 export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResult>> {
   try {
-    if (args.commit) return failure('--commit is not available until receipt commits land; run without --commit.');
+    if (args.working && args.commit) return failure('--working --commit is refused: receipts pin committed skill trees only.');
     if (args.triggersOnly && args.executionOnly) return failure('--triggers-only and --execution-only cannot be used together.');
     const k = args.k ?? 3;
     if (!Number.isInteger(k) || k < 1) return failure('--k must be a positive integer.');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
-    const [teamName] = selectTeam(config.teams, args.team);
+    const [teamName, binding] = selectTeam(config.teams, args.team);
+    if (args.commit && !binding.handle) return failure(`Team ${teamName} has no joined handle; run \`team join\` before committing an eval receipt.`);
     const clone = store.teamClone(teamName);
     await refreshClone(runner, clone, { label: teamName });
     const team = await readTeam(clone);
     const record = await findSkill(clone, teamName, args.ref);
     if (!record) return failure(`No skill named or identified by ${args.ref} exists in team ${teamName}.`);
 
-    let candidateDir = record.directory;
+    // Pin the evaluated version and materialize its immutable snapshot BEFORE anything reads
+    // skill content: a concurrent sync can refresh the clone mid-run, and the receipt's tree
+    // hash must pin the exact skill text AND cases evaluated (§4.1; review P1). A concurrent
+    // update may make this an older (but still exact) historical receipt.
+    const version = await resolveVersion(clone, record.name, undefined, runner);
+    let candidateDir: string;
     if (args.working) {
       const shared = config.shared[record.id];
       if (!shared || shared.team !== teamName) return failure(`${record.name} is not a shared local source for team ${teamName}; --working is unavailable.`);
       await assertSkillDirectory(shared.source);
       candidateDir = shared.source;
+    } else {
+      candidateDir = await materializeVersion(store, teamName, clone, record.name, version, runner);
     }
 
     // This is intentionally before preflight, trigger selection, run-tree creation, or any agent call.
@@ -87,7 +99,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const preflight = await (args.preflight ?? systemPreflight)(model);
     if (!preflight.ok) return failure(preflight.error);
 
-    const runId = runIdFrom((args.now ?? (() => new Date()))());
+    const runAt = (args.now ?? (() => new Date()))();
+    const runId = runIdFrom(runAt);
     const runDir = join(store.root, 'evals', teamName, record.id, runId);
     const transcriptDir = join(runDir, 'transcripts');
     const scratch = join(runDir, 'sandboxes');
@@ -109,6 +122,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const rows: ComparisonRow[] = [];
     const arms: ArmSample[] = [];
     const environmentSkips: Record<string, string[]> = {};
+    const caseNames: string[] = [];
     const rng = makeRng(0);
     let expectedRows = 0;
     if (!args.triggersOnly) {
@@ -116,8 +130,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       const caseFiles = (await optionalDirectory(casesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
       const selected = args.case === undefined ? caseFiles : caseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
       if (args.case !== undefined && selected.length === 0) return failure(`No eval case named ${args.case} for ${record.name}.`);
-      const candidateTree = await resolveVersion(clone, record.name, undefined, runner);
-      const incumbent = await materializeIncumbent(store, teamName, clone, { name: record.name, id: record.id }, candidateTree, runner);
+      caseNames.push(...selected.map((file) => file.replace(/\.ya?ml$/i, '')));
+      const incumbent = await materializeIncumbent(store, teamName, clone, { name: record.name, id: record.id }, version, runner);
       const opponents = incumbent === undefined ? 1 : 2;
       // Includes every selected authored case before requirement probes or setup failures.
       expectedRows = selected.length * k * opponents;
@@ -142,8 +156,64 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       arm_skill_lists: Object.fromEntries([...new Set(arms.map((arm) => arm.arm))].map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null])),
     }, [...rows, ...arms, ...(triggers === null ? [] : [triggers])]);
     io.print(renderReport(summary, triggers));
-    return success({ team: teamName, id: record.id, name: record.name, runDir, ccVersion: preflight.value.ccVersion, executionStatus: summary.execution_status });
+    let committedPath: string | undefined;
+    if (args.commit) {
+      const armSkillLists = Object.fromEntries([...new Set(arms.map((arm) => arm.arm))]
+        .map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null]));
+      // Source checkouts record their running product commit. Published packages have no checkout;
+      // in that case the explicit unknown is more honest than a team-repo commit.
+      const engineCommit = await runningEngineCommit(runner);
+      const receipt = buildReceipt({
+        skill_id: record.id,
+        skill_name: record.name,
+        version,
+        run_id: runId,
+        verdict: summary.verdict,
+        attribution: summary.attribution,
+        execution_status: summary.execution_status,
+        expected_rows: summary.expected_rows,
+        scored_rows: summary.scored_rows,
+        comparisons: summary.comparisons,
+        arm_scores: summary.arm_scores,
+        environment_skips: summary.environment_skips,
+        triggers: triggers === null ? null : { recall: triggers.recall, precision: triggers.precision, tp: triggers.tp, fn: triggers.fn, fp: triggers.fp, tn: triggers.tn },
+        efficiency: summary.efficiency,
+        provenance: {
+          engine_version: packageVersion() ?? 'unknown',
+          engine_commit: engineCommit,
+          cc_version: preflight.value.ccVersion,
+          model,
+          judge_model: args.judgeModel ?? model,
+          k,
+          cases: caseNames,
+          arm_skill_lists: armSkillLists,
+          timestamp: runAt.toISOString(),
+          runner_handle: binding.handle,
+        },
+      });
+      if (!receipt.ok) return failure(receipt.error);
+      committedPath = receiptPath(record.id, version, runId);
+      const source = `${JSON.stringify(receipt.value, null, 2)}\n`;
+      await openTeamRepo(clone, binding.remote, runner).safeWrite(
+        (tree) => tree.set(committedPath!, source),
+        { action: 'eval', handle: binding.handle, message: `${binding.handle}: eval ${record.name}` },
+      );
+      io.print(`Committed eval receipt ${committedPath}.`);
+    }
+    return success({ team: teamName, id: record.id, name: record.name, runDir, ccVersion: preflight.value.ccVersion, executionStatus: summary.execution_status, ...(committedPath === undefined ? {} : { receiptPath: committedPath }) });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+}
+
+/** Product provenance is read-only and never falls back to the team clone's unrelated HEAD. */
+async function runningEngineCommit(runner: Runner): Promise<string> {
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  // An npm-installed package sits inside the CONSUMER's repository, and git walks upward — that
+  // HEAD is not engine provenance (§5.3: "terum-skills commit of the running CLI"; review P2).
+  const toplevel = await runner.run('git', ['rev-parse', '--show-toplevel'], { cwd: root });
+  if (toplevel.code !== 0 || resolve(toplevel.stdout.trim()) !== resolve(root)) return 'unknown';
+  const result = await runner.run('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: root });
+  const commit = result.code === 0 ? result.stdout.trim() : '';
+  return /^[0-9a-f]{12}$/i.test(commit) ? commit.toLowerCase() : 'unknown';
 }
 
 async function optionalText(path: string): Promise<string | undefined> {
