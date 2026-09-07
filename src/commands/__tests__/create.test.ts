@@ -133,23 +133,25 @@ describe('team create (§6)', () => {
 
   it('on GitHub, creates the repo through gh and resolves the owner from gh rather than guessing', async () => {
     const { root, bare } = await emptyBare();
-    const publicRemote = 'https://github.com/octocat/new-team.git';
+    const publicRemote = 'https://github.com/octocat/new-team-shared-skills.git';
     const store = createConfigStore(pathJoin(root, 'local'));
     const runner = mappedRunner(publicRemote, bare, fakeGh('octocat', {
-      'repo create new-team --private': { code: 0, stdout: 'https://github.com/octocat/new-team\n', stderr: '' },
-      'repo view new-team --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'octocat/new-team\n', stderr: '' },
-      'repo edit octocat/new-team --delete-branch-on-merge': { code: 0, stdout: '', stderr: '' },
+      'repo create new-team-shared-skills --private': { code: 0, stdout: 'https://github.com/octocat/new-team-shared-skills\n', stderr: '' },
+      'repo view new-team-shared-skills --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'octocat/new-team-shared-skills\n', stderr: '' },
+      'repo edit octocat/new-team-shared-skills --delete-branch-on-merge': { code: 0, stdout: '', stderr: '' },
     }));
     const io = new ScriptedPrompter(['', 'ryan', 'Ryan', 'ryan@example.com', '']);
     const result = await create({ name: 'new-team', config: store, runner }, io);
     if (!result.ok) throw new Error(result.error);
     expect(io.asked.at(-1)).toBe('GitHub repository name');
-    expect(result.value.remote).toBe('https://github.com/octocat/new-team.git');
-    expect((await store.read()).teams['new-team']).toEqual({ remote: 'github.com/octocat/new-team', handle: 'ryan' });
+    // Enter accepts the suggested `<team>-shared-skills`, announced on the line before the question.
+    expect(io.lines).toContain('What should the GitHub repository name be for the team "new-team"? Suggested name: new-team-shared-skills.');
+    expect(result.value.remote).toBe('https://github.com/octocat/new-team-shared-skills.git');
+    expect((await store.read()).teams['new-team']).toEqual({ remote: 'github.com/octocat/new-team-shared-skills', handle: 'ryan' });
     expect(await git(['ls-tree', '--name-only', 'main:people'], bare)).toContain('ryan.json');
     expect(runner.calls.some((call) => call.command === 'gh' && call.args.join(' ').startsWith('repo create'))).toBe(true);
     // Endorsement branches are one per publish (R2): the repository deletes each after its PR merges.
-    expect(runner.calls.some((call) => call.command === 'gh' && call.args.join(' ') === 'repo edit octocat/new-team --delete-branch-on-merge')).toBe(true);
+    expect(runner.calls.some((call) => call.command === 'gh' && call.args.join(' ') === 'repo edit octocat/new-team-shared-skills --delete-branch-on-merge')).toBe(true);
   });
 
   it('without gh, a GitHub create fails before creating anything and names the alternatives', async () => {
@@ -223,7 +225,7 @@ describe('team create (§6)', () => {
     expect(Object.keys((await store.read()).teams)).toEqual(['prompted-team']);
   });
 
-  it('the repository name defaults to the team name, --repo overrides it without a question, and team.json keeps the team name (Decision 5)', async () => {
+  it('the repository name suggests <team>-shared-skills, --repo overrides it without a question, and team.json keeps the team name (Decision 5)', async () => {
     const { root, bare } = await emptyBare();
     const store = createConfigStore(pathJoin(root, 'local'));
     const runner = mappedRunner('https://github.com/octocat/skills-repo.git', bare, fakeGh('octocat', {
@@ -268,7 +270,7 @@ describe('team create (§6)', () => {
     expect((await exhausted.read()).teams).toEqual({});
     expect(await exists(exhausted.teamClone('never'))).toBe(false);
     // Any other gh failure is terminal on the first try.
-    const other = mappedRunner('https://github.com/octocat/x.git', bare, fakeGh('octocat', { 'repo create x --private': { code: 1, stdout: '', stderr: 'HTTP 403: rate limited' } }));
+    const other = mappedRunner('https://github.com/octocat/x-shared-skills.git', bare, fakeGh('octocat', { 'repo create x-shared-skills --private': { code: 1, stdout: '', stderr: 'HTTP 403: rate limited' } }));
     const io3 = new ScriptedPrompter(['', 'ryan', 'Ryan', 'ryan@example.com', '']);
     expect(await create({ name: 'x', config: createConfigStore(pathJoin(root, 'local3')), runner: other }, io3)).toMatchObject({ ok: false, error: expect.stringContaining('rate limited') });
     expect(io3.countAsked('GitHub repository name')).toBe(1);

@@ -58,7 +58,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .command('create [name]')
     .description('Create a private team repository and become its first member (asks for the team name and the repository name when omitted)')
     .option('--org <org>', 'GitHub organization (default: your own account)')
-    .option('--repo <repo>', 'GitHub repository name (default: the team name)')
+    .option('--repo <repo>', 'GitHub repository name (default: <team name>-shared-skills)')
     .option('--remote <url>', 'push the scaffold to an existing EMPTY remote instead of creating one on GitHub')
     .action(async (name: string | undefined, options: { org?: string; repo?: string; remote?: string }) => execute((io) => active.team({ kind: 'create', name, ...options }, io), { verb: 'team create', notices: true }));
   team
