@@ -5,6 +5,7 @@ import type { Prompter } from './prompt.js';
 /** What the bin owns: where failure text goes and how the exit code is set. Injected so the contract is testable. */
 export interface ExecuteSink {
   io: Prompter;
+  afterVerb?(): Promise<void>;
   stderr(line: string): void;
   setExitCode(code: number): void;
 }
@@ -16,7 +17,7 @@ export interface ExecuteSink {
  * by the one-line review count, so the hook's stdout stays reserved for the reload directive (§8).
  */
 export function createExecute(sink: ExecuteSink): Execute {
-  return async (invoke) => {
+  return async (invoke, meta) => {
     try {
       const outcome = await invoke(sink.io);
       if (isHookSync(outcome.value)) writeHookNotices(outcome.value, sink);
@@ -27,6 +28,10 @@ export function createExecute(sink: ExecuteSink): Execute {
     } catch (error) {
       sink.stderr(error instanceof Error ? error.message : String(error));
       sink.setExitCode(1);
+    } finally {
+      if (meta.notices) {
+        try { await sink.afterVerb?.(); } catch { /* A notice must never replace the verb outcome. */ }
+      }
     }
   };
 }

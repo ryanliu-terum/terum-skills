@@ -187,3 +187,36 @@ describe('machine uninstall wiring', () => {
     await program.parseAsync(['uninstall'], { from: 'user' }); expect(calls).toEqual([{ launch }]);
   });
 });
+
+describe('release command eligibility', () => {
+  it.each([
+    [['update'], 'update', false], [['sync', '--hook'], 'sync', false], [['sync'], 'sync', true],
+    [['guard-push', 'origin', 'remote'], 'guard-push', false], [['readme'], 'readme', false], [['ls'], 'ls', true],
+  ] as const)('passes explicit notice metadata for %j', async (argv, verb, notices) => {
+    const calls: unknown[] = [];
+    const program = buildProgram(async (_invoke, meta) => { calls.push(meta); });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync([...argv], { from: 'user' }); expect(calls).toEqual([{ verb, notices }]);
+  });
+  it('passes launch and opt-out data through to sync and update', async () => {
+    const calls: unknown[] = []; const launch = { kind: 'unknown' as const, path: '/copy/index.js' };
+    const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+      sync: async (args) => { calls.push(args); return success({ placed: 0, deferred: [], notices: [], changed: false, hook: Boolean(args.hook) }); },
+      update: async (args) => { calls.push(args); return success(undefined); },
+    }, { launch, noUpdateCheck: true });
+    await program.parseAsync(['sync', '--hook'], { from: 'user' }); await program.parseAsync(['update'], { from: 'user' });
+    expect(calls).toEqual([{ hook: true, prune: undefined, launch, noUpdateCheck: true }, { launch, noUpdateCheck: true }]);
+  });
+  it('prints the reader version and never executes help/version/usage paths', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const manifest = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
+    for (const [argv, code] of [[['--version'], 'commander.version'], [['--help'], 'commander.helpDisplayed'], [['--bogus'], 'commander.unknownOption']] as const) {
+      let executions = 0; const lines: string[] = [];
+      const program = buildProgram(async () => { executions++; });
+      program.configureOutput({ writeOut: (line) => { lines.push(line); }, writeErr: () => undefined });
+      await expect(program.parseAsync([...argv], { from: 'user' })).rejects.toMatchObject({ code });
+      expect(executions).toBe(0); if (code === 'commander.version') expect(lines).toEqual([`${manifest.version}\n`]);
+    }
+  });
+});

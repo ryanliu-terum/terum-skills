@@ -841,3 +841,67 @@ describe('sync --hook keeps shared-source reconciliation off stdout (§8)', () =
     expect(io.lines).toEqual([]);
   });
 });
+
+describe('release maintenance after sync', () => {
+  async function releaseFixture(remote = 'https://github.com/acme/skills.git') {
+    const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote, handle: 'seed' }; });
+    const { denyingRunner } = await import('../../lib/__tests__/fixtures.js');
+    let probes = 0;
+    const runner = denyingRunner([
+      ...['fetch', 'reset', 'merge', 'rev-parse', 'status', 'config', 'ls-tree', 'show', 'diff', 'log', 'cat-file', 'symbolic-ref'].map((verb) => ({ command: 'git' as const, argsPrefix: [verb] })),
+      { command: 'git', argsPrefix: ['-c', `url.${fixture.bare}.insteadOf=${fixture.bare}`, 'ls-remote', '--tags', '--', fixture.bare], respond: async () => {
+        probes++; await expect(access(lockPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+        return { code: 0, stdout: `${'a'.repeat(40)}\trefs/tags/v0.1.2\n`, stderr: '' };
+      } },
+    ], systemRunner);
+    return { fixture, store, runner, probes: () => probes };
+  }
+  it('probes once per day for interactive GitHub teams, only after all team locks are released', async () => {
+    const f = await releaseFixture(); let now = Date.now();
+    const args = { config: f.store, runner: f.runner, upstream: f.fixture.bare, probe: 'github-teams' as const, now: () => now };
+    expect((await run(args, new ScriptedPrompter([], [], true))).ok).toBe(true);
+    expect((await run(args, new ScriptedPrompter([], [], true))).ok).toBe(true); expect(f.probes()).toBe(1);
+    now += 25 * 3600000; expect((await run(args, new ScriptedPrompter([], [], true))).ok).toBe(true); expect(f.probes()).toBe(2);
+  });
+  it('probes the approved upstream under the shipped default policy when no override is passed (RELEASE_PROBE_POLICY governs)', async () => {
+    const { denyingRunner } = await import('../../lib/__tests__/fixtures.js');
+    const { APPROVED_UPSTREAM } = await import('../../lib/package.js');
+    const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: 'https://github.com/acme/skills.git', handle: 'seed' }; });
+    let probes = 0;
+    const runner = denyingRunner([
+      ...['fetch', 'reset', 'merge', 'rev-parse', 'status', 'config', 'ls-tree', 'show', 'diff', 'log', 'cat-file', 'symbolic-ref'].map((verb) => ({ command: 'git' as const, argsPrefix: [verb] })),
+      { command: 'git', argsPrefix: ['-c', `url.${APPROVED_UPSTREAM}.insteadOf=${APPROVED_UPSTREAM}`, 'ls-remote', '--tags', '--', APPROVED_UPSTREAM], respond: async () => { probes++; return { code: 0, stdout: `${'a'.repeat(40)}\trefs/tags/v0.1.2\n`, stderr: '' }; } },
+    ], systemRunner);
+    expect((await run({ config: store, runner }, new ScriptedPrompter([], [], true))).ok).toBe(true);
+    expect(probes).toBe(1);
+    expect(JSON.parse(await readFile(join(store.root, 'run/latest-version.json'), 'utf8')).advertisement).toMatchObject({ version: '0.1.2', source: 'git-tags' });
+  });
+  it.each(['generic', 'nobody', 'hook', 'prune', 'noninteractive', 'opt-out'])('never probes %s but still records running', async (mode) => {
+    const f = await releaseFixture(mode === 'generic' ? 'https://git.example.com/acme/skills.git' : undefined);
+    const io = new ScriptedPrompter([], [], mode !== 'noninteractive');
+    expect((await run({ config: f.store, runner: f.runner, upstream: f.fixture.bare, hook: mode === 'hook', prune: mode === 'prune', noUpdateCheck: mode === 'opt-out', probe: mode === 'nobody' ? 'nobody' : 'github-teams' }, io)).ok).toBe(true);
+    expect(f.probes()).toBe(0);
+    const state = JSON.parse(await readFile(join(f.store.root, 'run/latest-version.json'), 'utf8'));
+    expect(state.running.version).toBeTruthy(); if (mode === 'hook') expect(io.lines).toEqual([]);
+  });
+  it('records hook npx-latest evidence locally and preserves empty stdout', async () => {
+    const { denyingRunner } = await import('../../lib/__tests__/fixtures.js');
+    const root = await temporaryDirectory(); const store = createConfigStore(join(root, 'state')); const cacheDir = join(root, '_npx/hash'); const manifest = join(cacheDir, 'node_modules/terum-skills/package.json');
+    await mkdir(join(manifest, '..'), { recursive: true }); await writeFile(manifest, JSON.stringify({ name: 'terum-skills', version: '0.1.1' }));
+    await writeFile(join(cacheDir, 'package.json'), JSON.stringify({ _npx: { packages: ['terum-skills@latest'] } }));
+    const lines: string[] = [];
+    expect((await run({ hook: true, config: store, runner: denyingRunner([]), launch: { kind: 'npx', path: join(cacheDir, 'node_modules/terum-skills/dist/index.js'), cacheDir, request: 'terum-skills@latest' } }, { interactive: false, print: (line) => { lines.push(line); } })).ok).toBe(true);
+    expect(lines).toEqual([]); expect(JSON.parse(await readFile(join(store.root, 'run/latest-version.json'), 'utf8')).registry.version).toBe('0.1.1');
+  });
+  it('keeps automatic probe failures silent and preserves the sync result', async () => {
+    const f = await releaseFixture(); const io = new ScriptedPrompter([], [], true);
+    const runner = wrapRunner(f.runner, async (_command, args, _options, next) => args.includes('ls-remote') ? { code: 1, stdout: '', stderr: 'offline' } : next());
+    expect((await run({ config: f.store, runner, upstream: f.fixture.bare, probe: 'github-teams' }, io)).ok).toBe(true);
+    expect(io.lines).toEqual([]);
+    expect(JSON.parse(await readFile(join(f.store.root, 'run/latest-version.json'), 'utf8')).attempt).toMatchObject({ ok: false, error: 'offline' });
+  });
+});

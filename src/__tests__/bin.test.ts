@@ -64,6 +64,31 @@ describe('the built bin (dist/index.js)', () => {
     expect(failed).toMatchObject({ code: 1, stdout: `terum-skills ${version}\n`, stderr: 'Team nope is not configured.\n' });
   });
 
+  it('prints the shipped package version and source-checkout update advice', async () => {
+    const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
+    const version = await run(process.execPath, [bin, '--version'], { cwd: root, env });
+    expect(version.stdout).toBe(`${manifest.version}\n`); expect(version.stderr).toBe('');
+    const update = await run(process.execPath, [bin, 'update'], { cwd: root, env: { ...env, TERUM_SKILLS_NO_UPDATE_NOTIFIER: '1' } });
+    expect(update.stdout).toContain(`terum-skills ${manifest.version}\nThis copy: ${bin}\n`);
+    expect(update.stdout).toContain('Running from a source checkout.'); expect(update.stderr).toBe('');
+  });
+
+  it('gates notices on stderr TTY, CI and both opt-outs, with a positive sibling that prints last', async () => {
+    const stateRoot = resolve(out, 'notice-home/.terum/skills'); const at = new Date().toISOString();
+    await mkdir(resolve(stateRoot, 'run'), { recursive: true });
+    const state = { schema: 1, package: 'terum-skills', upstream: 'https://github.com/ryanliu-terum/terum-skills.git', running: null, registry: null, advertisement: { version: '9.9.9', at, source: 'git-tags' }, attempt: null, ack: null };
+    const bootstrap = resolve(out, 'tty.mjs');
+    await writeFile(bootstrap, `Object.defineProperty(process.stderr, 'isTTY', { value: true }); process.argv = [process.execPath, ${JSON.stringify(bin)}, 'ls']; await import(${JSON.stringify(pathToFileURL(bin).href)});`);
+    for (const gate of ['piped', 'CI', 'NO_UPDATE_NOTIFIER', 'TERUM_SKILLS_NO_UPDATE_NOTIFIER', 'enabled']) {
+      await writeFile(resolve(stateRoot, 'run/latest-version.json'), JSON.stringify(state));
+      const childEnv = { ...env, HOME: resolve(out, 'notice-home'), USERPROFILE: resolve(out, 'notice-home'), ...(gate !== 'enabled' && gate !== 'piped' ? { [gate]: '1' } : {}) };
+      const result = await run(process.execPath, gate === 'piped' ? [bin, 'ls'] : [bootstrap], { cwd: root, env: childEnv }).catch((error: { stdout: string; stderr: string }) => error);
+      expect(result.stdout).not.toContain('Newer terum-skills');
+      if (gate === 'enabled') expect(result.stderr.trim().split('\n').at(-1)).toBe(`Newer terum-skills release advertised: 9.9.9 (running 0.1.1). This copy: ${bin}. Run the latest release with npx -y terum-skills@latest <command>.`);
+      else expect(result.stderr).not.toContain('Newer terum-skills');
+    }
+  });
+
   it('builds with a shebang, prints help with exit 0, and fails a verb with its message on stderr and exit 1', async () => {
     expect((await readFile(bin, 'utf8')).split('\n')[0]).toBe('#!/usr/bin/env node');
     const help = await run(process.execPath, [bin, '--help'], { cwd: root, env });

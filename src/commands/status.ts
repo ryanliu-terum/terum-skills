@@ -8,7 +8,8 @@ import { normalizeRemote, repositoryUrl } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { readRoster, readTeam, RosterEntry, SkillProblem, skillRecords } from '../lib/skills.js';
-import { CloneState, describeClone, packageVersion } from '../lib/teamRepo.js';
+import { packageVersion } from '../lib/package.js';
+import { CloneState, describeClone } from '../lib/teamRepo.js';
 
 export interface StatusArgs { team?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
 export interface TeamStatus {

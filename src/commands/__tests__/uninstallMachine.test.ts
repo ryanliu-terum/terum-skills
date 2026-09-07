@@ -183,3 +183,11 @@ describe('machine uninstall', () => {
     await expect(access(source)).resolves.toBeUndefined(); expect((await store.read()).shared.sample).toBeDefined(); expect(io.lines).not.toContain(complete);
   });
 });
+
+
+it('keeps local uninstall advice with the entry-based launch shape', async () => {
+  const { store, hook } = await minimal(); const io = new ScriptedPrompter([], [true]);
+  const launch = { kind: 'local' as const, path: '/work/app/node_modules/terum-skills/dist/index.js', root: '/work/app', dependencyKind: 'devDependencies' as const };
+  expect(await run({ config: store, hook, launch }, io)).toMatchObject({ ok: true, value: { launch } });
+  expect(io.lines.slice(-2)).toEqual([`This copy of terum-skills runs from ${launch.path}.`, 'It is a dependency of /work/app: run npm uninstall terum-skills there, or remove it from that package.json.']);
+});

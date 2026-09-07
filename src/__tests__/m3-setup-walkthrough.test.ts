@@ -71,7 +71,9 @@ describe('M3 setup walkthrough', () => {
     await git(['push', '--no-verify', 'origin', `refs/remotes/origin/${endorsementBranch}:main`], aliceStore.teamClone('team'));
 
     const syncIo = new ScriptedPrompter([], [true], true);
-    const synchronized = await sync({ config: bobStore, runner: bobRunner }, syncIo);
+    // Bob's team is GitHub-shaped and this sync is interactive, so release discovery would run here; it is
+    // covered in sync.test.ts through a denying runner and must never reach the real upstream from a walkthrough.
+    const synchronized = await sync({ config: bobStore, runner: bobRunner, noUpdateCheck: true }, syncIo);
     if (!synchronized.ok) throw new Error(synchronized.error);
     expect(syncIo.countAsked('Install 1 newly endorsed skill(s) from team?')).toBe(1);
     expect((await git(['ls-tree', '--name-only', 'main:people'], bare)).split('\n').filter(Boolean).sort()).toEqual(['alice.json', 'bob.json']);
