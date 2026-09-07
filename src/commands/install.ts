@@ -1,3 +1,5 @@
+import { invocation, type InvocationForm } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
@@ -12,7 +14,7 @@ import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { materializeVersion, resolveVersion } from '../lib/version.js';
 
-export interface InstallArgs {
+export interface InstallArgs extends WithForm {
   ref?: string;
   kind?: 'skill' | 'member' | 'project';
   member?: string;
@@ -37,7 +39,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
     const config = await store.read();
     const operation = parseOperation(args);
     if (operation.kind === 'member') {
-      const [team] = selectTeam(config.teams, args.team);
+      const [team] = selectTeam(config.teams, args.team, args.form);
       const person = await readPerson(store.teamClone(team), operation.member);
       const results: InstalledResult[] = [];
       for (const item of person.installed) {
@@ -47,7 +49,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       return success(results);
     }
     if (operation.kind === 'project') {
-      const [team] = selectTeam(config.teams, args.team);
+      const [team] = selectTeam(config.teams, args.team, args.form);
       const teamJson = await readTeam(store.teamClone(team));
       const project = Object.hasOwn(teamJson.projects, operation.project) ? teamJson.projects[operation.project] : undefined;
       if (!project) throw new Error(`Unknown project ${operation.project}.`);
@@ -56,7 +58,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       return success(results);
     }
     const reference = parseRef(operation.ref);
-    const team = await teamForReference(config, reference.team ?? args.team, reference.remote, reference.name).catch(async (error: unknown) => {
+    const team = await teamForReference(config, reference.team ?? args.team, reference.remote, reference.name, args.form).catch(async (error: unknown) => {
       // §6: a three-part ref on a machine that has joined nothing performs the bootstrap first —
       // `setup <org>/<repo>` with its print-only steps suppressed — and then installs: one code
       // path, not two. A machine that already has teams keeps the message: joining a second team
@@ -64,7 +66,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       // built on team, which is built on this module.
       if (!(error instanceof NotJoinedError) || Object.keys(config.teams).length > 0) throw error;
       const { run: setup } = await import('./setup.js');
-      const bootstrapped = await setup({ target: error.remote.replace(/^github\.com\//, ''), quiet: true, offerConnect: false, config: store, runner, home: args.home, hook: args.hook }, io);
+      const bootstrapped = await setup({ form: args.form, target: error.remote.replace(/^github\.com\//, ''), quiet: true, offerConnect: false, config: store, runner, home: args.home, hook: args.hook }, io);
       if (!bootstrapped.ok) throw new Error(bootstrapped.error);
       return bootstrapped.value.team;
     });
@@ -171,13 +173,13 @@ function parseOperation(args: InstallArgs): ParsedOperation {
   // before it can become a path segment (ls and team remove do the same).
   if (args.kind === 'member' || args.member) {
     const member = args.member ?? args.ref;
-    if (!member) throw new Error('Provide a member handle: `install member <handle>`.');
+    if (!member) throw new Error(`Provide a member handle: \`${invocation(args.form, 'install member <handle>')}\`.`);
     if (member.includes('@')) throw new Error('Version pins are supported for single-skill installs only.');
     return { kind: 'member', member: parseOrExplain(handleSchema, member, 'member handle') };
   }
   if (args.kind === 'project' || args.project) {
     const project = args.project ?? args.ref;
-    if (!project) throw new Error('Provide a project name: `install project <name>`.');
+    if (!project) throw new Error(`Provide a project name: \`${invocation(args.form, 'install project <name>')}\`.`);
     if (project.includes('@')) throw new Error('Version pins are supported for single-skill installs only.');
     return { kind: 'project', project };
   }
@@ -198,10 +200,10 @@ export function parseRef(value: string): { team?: string; remote?: string; name:
 export class NotJoinedError extends Error {
   constructor(readonly remote: string, message: string) { super(message); this.name = 'NotJoinedError'; }
 }
-export async function teamForReference(config: Config, explicit: string | undefined, remote: string | undefined, name?: string): Promise<string> {
+export async function teamForReference(config: Config, explicit: string | undefined, remote: string | undefined, name?: string, form?: InvocationForm): Promise<string> {
   if (remote) {
     const found = Object.entries(config.teams).find(([, entry]) => normalizeRemote(entry.remote) === normalizeRemote(remote));
-    if (!found) throw new NotJoinedError(remote, `This machine has not joined ${remote}; run \`team join ${remote.replace(/^github\.com\//, '')}\` first.`);
+    if (!found) throw new NotJoinedError(remote, `This machine has not joined ${remote}; run \`${invocation(form, 'team join', remote.replace(/^github\.com\//, ''))}\` first.`);
     return found[0];
   }
   // Only the genuinely ambiguous bare ref is answered here, because only a ref-taking verb can name
@@ -212,7 +214,7 @@ export async function teamForReference(config: Config, explicit: string | undefi
     const qualified = name ? ` Matching refs: ${teams.map((team) => `${team}/${name}`).join(', ')}.` : '';
     throw new Error(`A bare skill ref is ambiguous across configured teams; use <team>/<skill> or --team.${qualified}`);
   }
-  return selectTeam(config.teams, explicit)[0];
+  return selectTeam(config.teams, explicit, form)[0];
 }
 async function matchingProject(team: Team, runner: Runner, cwd?: string): Promise<string | undefined> {
   const root = await currentRepoRoot(runner, cwd).catch(() => undefined);

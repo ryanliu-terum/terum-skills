@@ -1,3 +1,6 @@
+import { shellQuote } from '../lib/teamRepo.js';
+import { invocation } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
@@ -22,7 +25,7 @@ export interface TeamDependencies extends AuthDependencies { config?: ConfigStor
 export interface CreateArgs extends TeamDependencies { name?: string; org?: string; remote?: string; repo?: string; offerHook?: boolean; }
 export interface JoinArgs extends TeamDependencies { target: string; as?: string; offerHook?: boolean; }
 export interface RemoveArgs extends TeamDependencies { handle: string; team?: string; archiveOnly?: boolean; }
-export interface WorkflowUpdateArgs { print?: boolean; }
+export interface WorkflowUpdateArgs extends WithForm { print?: boolean; }
 export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs) | ({ kind: 'workflow-update' } & WorkflowUpdateArgs);
 export type CreateResult = { team: string; remote: string };
 export type JoinResult = { team: string; handle: string; rejoined: boolean; roster: RosterEntry[] };
@@ -56,7 +59,7 @@ export async function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunR
 
 /** Existing teams migrate by an ordinary PR; this command deliberately has no write path. */
 export async function workflowUpdate(args: WorkflowUpdateArgs, io: Prompter): Promise<Result<WorkflowUpdateResult>> {
-  if (!args.print) return failure('`team workflow-update` is print-only; pass --print.');
+  if (!args.print) return failure(`\`${invocation(args.form, 'team workflow-update')}\` is print-only; pass --print.`);
   // `print` appends its own newline, so remove only the template terminator to make the emitted
   // YAML prefix byte-identical to WORKFLOW. The migration instruction is deliberately separate.
   io.print(WORKFLOW.endsWith('\n') ? WORKFLOW.slice(0, -1) : WORKFLOW);
@@ -70,8 +73,8 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
-    const [teamName, binding] = selectTeam(config.teams, args.team);
-    if (!binding.handle) throw new Error(`This machine has no member handle for ${teamName}; run team join first.`);
+    const [teamName, binding] = selectTeam(config.teams, args.team, args.form);
+    if (!binding.handle) throw new Error(`This machine has no member handle for ${teamName}; run ${invocation(args.form, 'team join')} first.`);
     const targetHandle = parseOrExplain(handleSchema, args.handle, 'member handle');
     if (targetHandle === binding.handle) throw new Error('You cannot remove yourself; run team leave <team> to leave this machine, or ask another admin to remove you.');
     const allowed = hostOperationAllowed(binding.remote, Boolean(args.archiveOnly));
@@ -215,8 +218,8 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const clone = store.teamClone(name);
-    if (Object.hasOwn(config.teams, name)) throw new Error(`Team ${name} is already configured for ${config.teams[name]!.remote}; run \`team join\` for it or pick another name.`);
-    if (await exists(clone)) throw new Error(`A clone already exists at ${clone}; run \`team join\` for that team or pick another name.`);
+    if (Object.hasOwn(config.teams, name)) throw new Error(`Team ${name} is already configured for ${config.teams[name]!.remote}; run \`${invocation(args.form, 'team join')}\` for it or pick another name.`);
+    if (await exists(clone)) throw new Error(`A clone already exists at ${clone}; run \`${invocation(args.form, 'team join')}\` for that team or pick another name.`);
 
     let remote: string;
     let identity: Identity;
@@ -233,11 +236,11 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       identity = await collectIdentity(io, config, runner, { gh: await ghState(runner) });
       const heads = await runner.run('git', ['ls-remote', '--heads', '--', remoteToGitUrl(remote)]);
       if (heads.code !== 0) throw new Error(`Cannot reach ${remote}: ${(heads.stderr || heads.stdout).trim()}`);
-      if (heads.stdout.trim()) throw new Error(`${remote} already has branches; \`team create --remote\` needs an empty repository. To join an existing team run \`team join ${remote}\`.`);
+      if (heads.stdout.trim()) throw new Error(`${remote} already has branches; \`${invocation(args.form, 'team create --remote')}\` needs an empty repository. To join an existing team run \`${invocation(args.form, 'team join', remote)}\`.`);
     } else {
       // gh and identity first (the wizard's step 2), then the repository question (its step 3): a
       // machine without gh hears about gh before it is asked anything.
-      identity = (await authenticateCreator(io, { config: store, runner })).identity;
+      identity = (await authenticateCreator(io, { form: args.form, config: store, runner })).identity;
       let repo: string;
       if (args.repo !== undefined) repo = parseOrExplain(teamNameSchema, args.repo, 'repository name');
       else {
@@ -273,14 +276,14 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       // `team join` can finish from, and a retry with `--remote` would only be refused as non-empty.
       const heads = await runner.run('git', ['ls-remote', '--heads', '--', remoteToGitUrl(remote)]);
       const advice = heads.code !== 0
-        ? `Could not determine whether the scaffold reached ${remote} (${(heads.stderr || heads.stdout).trim()}). Check the repository: if it has a main branch run \`team join ${remote}\`, otherwise retry with \`team create ${name} --remote ${remote}\`.`
+        ? `Could not determine whether the scaffold reached ${remote} (${(heads.stderr || heads.stdout).trim()}). Check the repository: if it has a main branch run \`${invocation(args.form, 'team join', remote)}\`, otherwise retry with \`${invocation(args.form, 'team create', name)} --remote ${shellQuote(remote)}\`.`
         : heads.stdout.trim() !== ''
-          ? `The scaffold was pushed to ${remote} but the local clone could not be completed; run \`team join ${remote}\` to finish, or delete the repository and retry.`
-          : `The repository ${remote} exists but holds no scaffold. Fix the cause and retry with \`team create ${name} --remote ${remote}\`, or delete the repository.`;
+          ? `The scaffold was pushed to ${remote} but the local clone could not be completed; run \`${invocation(args.form, 'team join', remote)}\` to finish, or delete the repository and retry.`
+          : `The repository ${remote} exists but holds no scaffold. Fix the cause and retry with \`${invocation(args.form, 'team create', name)} --remote ${shellQuote(remote)}\`, or delete the repository.`;
       throw new Error(`${reason}\n${advice}`);
     }
     await store.update((fresh) => {
-      if (Object.hasOwn(fresh.teams, name)) throw new Error(`Team ${name} was configured by another process while this create ran; the repository ${remote} is scaffolded, run \`team join ${remote} --as <other-name>\` to use it.`);
+      if (Object.hasOwn(fresh.teams, name)) throw new Error(`Team ${name} was configured by another process while this create ran; the repository ${remote} is scaffolded, run \`${invocation(args.form, 'team join', remote)} --as <other-name>\` to use it.`);
       assertBindable(fresh, name, remote);
       setIdentity(fresh, identity);
       bindTeam(fresh, name, { remote, handle: identity.handle });
@@ -342,7 +345,7 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
       // Re-check under the lock: another verb may have bound this remote or name while we prompted.
       // The roster write above is durable, so a refusal here says so and names the way forward.
       try { assertBindable(fresh, team, normalized); }
-      catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)} Your roster entry people/${identity.handle}.json was already pushed to ${normalized}; run \`team join ${args.target}\` again to continue under the existing entry, or ask an admin to \`team remove ${identity.handle}\` if you did not mean to join twice.`); }
+      catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)} Your roster entry people/${identity.handle}.json was already pushed to ${normalized}; run \`${invocation(args.form, 'team join', args.target)}\` again to continue under the existing entry, or ask an admin to \`team remove ${identity.handle}\` if you did not mean to join twice.`); }
       setIdentity(fresh, identity);
       bindTeam(fresh, team, { remote: normalized, handle: identity.handle });
     });

@@ -1,3 +1,5 @@
+import { invocation, type InvocationForm } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 import { cp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -15,7 +17,7 @@ import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedField
 import { MutableTree, openTeamRepo, shellQuote, treeText } from '../lib/teamRepo.js';
 import { formatHygieneFindings, hygieneFrontmatter, inspectHygiene } from '../lib/evals/hygiene.js';
 
-export interface ConnectArgs {
+export interface ConnectArgs extends WithForm {
   path?: string;
   home?: string;
   cwd?: string;
@@ -62,7 +64,7 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
     if (args.relocate) return success(await relocate(store, args.relocate));
     if (args.keepSource || args.keepRepo) return success(await resolveDivergence(store, runner, args.team, args.keepSource ?? args.keepRepo!, Boolean(args.keepSource), Boolean(args.allowPrivileged), io));
     const initial = await store.read();
-    const [team, binding] = selectTeam(initial.teams, args.team);
+    const [team, binding] = selectTeam(initial.teams, args.team, args.form);
     if (args.path) return success(await connectOne(resolve(args.path), { args, store, runner, config: initial, team, binding, io }));
 
     const batch: ConnectBatch = { kind: 'batch', shared: [], declined: [], refused: [] };
@@ -97,7 +99,7 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
             const offered = candidatesOf(inventory, args.allowPrivileged);
             return inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && !offered.includes(entry));
           });
-          if (omitted.length) io.print(`Skipped ${omitted.length} local folders that cannot be connected. Run \`npx -y terum-skills@latest ls --local\` for paths and reasons.`);
+          if (omitted.length) io.print(`Skipped ${omitted.length} local folders that cannot be connected. Run \`${invocation(args.form, 'ls --local')}\` for paths and reasons.`);
           if (!candidates.length) {
             io.print(`No local candidates to connect under ${roots.map((root) => printable(root.root)).join(' or ')}. Skills elsewhere can be connected by passing their folder path.`);
             return success(undefined);
@@ -107,7 +109,7 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
               io.print(`Local candidates under ${printable(inventory.root)}:`);
               for (const candidate of candidatesOf(inventory, args.allowPrivileged)) io.print(`  ${printable(candidate.path)}`);
             }
-            throw new Error(`No skill selected. In an interactive terminal, run \`npx -y terum-skills@latest connect --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
+            throw new Error(`No skill selected. In an interactive terminal, run \`${printable(invocation(args.form, 'connect'))} --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
           }
           qualify = new Set(candidates.filter((candidate) => candidates.some((other) => other.name === candidate.name && other.scope !== candidate.scope)).map((candidate) => candidate.name));
         }
@@ -136,9 +138,9 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
       const detail = error instanceof Error ? error.message : String(error);
       let message = `Stopped: ${detail}${detail.endsWith('.') ? '' : '.'}`;
       if (error instanceof ConnectStepError && error.phase === 'source-mutated') {
-        message = `Stopped: ${detail}. ${basename(selectedPath!)}'s SKILL.md at ${selectedPath} already carries the managed fields (license, metadata.id, metadata.author); the team repository was not changed. Fix the cause and run \`npx -y terum-skills@latest connect ${selectedPath}\` again.`;
+        message = `Stopped: ${detail}. ${basename(selectedPath!)}'s SKILL.md at ${selectedPath} already carries the managed fields (license, metadata.id, metadata.author); the team repository was not changed. Fix the cause and run \`${invocation(args.form, 'connect', selectedPath!)}\` again.`;
       } else if (error instanceof ConnectStepError && error.phase === 'pushed') {
-        message = `Stopped: ${detail}. ${basename(selectedPath!)} was pushed to team ${team} as ${error.id} but is not tracked on this machine; run \`npx -y terum-skills@latest sync\` and, if it is still not listed by \`ls --local\`, report this — the local ledger entry is missing.`;
+        message = `Stopped: ${detail}. ${basename(selectedPath!)} was pushed to team ${team} as ${error.id} but is not tracked on this machine; run \`${invocation(args.form, 'sync')}\` and, if it is still not listed by \`ls --local\`, report this — the local ledger entry is missing.`;
       }
       io.print(message);
       summarize();
@@ -219,17 +221,17 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
  * count includes it — the same rule the placement loop follows (rulings walk R6, 2026-09-06). Before,
  * a diverged shared skill printed its remedy once and the hourly stamp silenced it.
  */
-export async function reconcileShared(store: ConfigStore, runner: Runner, io: Prompter, skipTeams: ReadonlySet<string> = new Set(), defer: (team: string, label: string) => void = () => undefined): Promise<void> {
+export async function reconcileShared(store: ConfigStore, runner: Runner, io: Prompter, skipTeams: ReadonlySet<string> = new Set(), defer: (team: string, label: string) => void = () => undefined, form?: InvocationForm): Promise<void> {
   const config = await store.read();
   for (const [id, tracked] of Object.entries(config.shared)) {
     if (skipTeams.has(tracked.team)) continue;
     try {
       const clone = store.teamClone(tracked.team);
-      if (!(await exists(tracked.source))) { io.print(`Connected source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use connect --relocate or --forget.`); defer(tracked.team, id.slice(0, 8)); continue; }
+      if (!(await exists(tracked.source))) { io.print(`Connected source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use ${invocation(form, 'connect --relocate')} or ${invocation(form, 'connect --forget')}.`); defer(tracked.team, id.slice(0, 8)); continue; }
       let record;
       try { record = (await skillRecords(clone, tracked.team)).find((item) => item.id === id); }
       catch (error) { io.print(`Could not read connected ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, id.slice(0, 8)); continue; }
-      if (!record) { io.print(`Repository copy for connected ${id.slice(0, 8)} is missing; run connect again to restore it.`); defer(tracked.team, id.slice(0, 8)); continue; }
+      if (!record) { io.print(`Repository copy for connected ${id.slice(0, 8)} is missing; run ${invocation(form, 'connect')} again to restore it.`); defer(tracked.team, id.slice(0, 8)); continue; }
       const team = await readTeamPolicy(clone);
       const fresh = await store.read();
       const author = `${fresh.display_name ?? ''} <${fresh.email ?? ''}>`;
@@ -243,7 +245,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const repairedRepo = injectManagedFields(repoContents, { license: team.license, id, author });
     // The existing privileged-content consent gate is orthogonal to HYG4. Keep its actionable
     // remediation ahead of hygiene; either refusal occurs before any source or team-repo write.
-    if ((await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) { io.print(`Connected skill ${record.name} now contains plugin or hook definitions; run connect --keep-source ${id} --allow-privileged after reviewing them.`); defer(tracked.team, record.name); continue; }
+    if ((await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) { io.print(`Connected skill ${record.name} now contains plugin or hook definitions; run ${invocation(form, 'connect --keep-source', id)} --allow-privileged after reviewing them.`); defer(tracked.team, record.name); continue; }
     // §5.3: a changed `name` is a rename, not a new skill — the ID carries across it. The source's
     // declared name is the target; the repository folder follows on the local-edit row below.
     // (The folder basename is not consulted: `connect --relocate` may legitimately point anywhere.)
@@ -264,7 +266,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const repoDigest = await canonicalDigest(record.directory);
     const baseline = tracked.baseline;
     if (!baseline || (sourceDigest !== baseline && repoDigest !== baseline)) {
-      io.print(`Connected skill ${record.name} diverged (source ${sourceDigest}, repo ${repoDigest}); choose connect --keep-source ${id} or --keep-repo ${id}.`);
+      io.print(`Connected skill ${record.name} diverged (source ${sourceDigest}, repo ${repoDigest}); choose ${invocation(form, 'connect --keep-source', id)} or ${invocation(form, 'connect --keep-repo', id)}.`);
       defer(tracked.team, record.name);
       continue;
     }

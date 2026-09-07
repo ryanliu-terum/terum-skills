@@ -10,16 +10,16 @@ import { systemRunner } from '../../lib/runner.js';
 
 describe('uninstall (§6 pending)', () => {
   it('says no team is configured for a bare ref on an unjoined machine, refuses a missing member or project selector as a usage error, and does not take an inherited key for a project', async () => {
-    expect(await run({ ref: 'sample', config: createConfigStore(await temporaryDirectory()) }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No team is configured. Run `team join` first.' });
+    expect(await run({ ref: 'sample', config: createConfigStore(await temporaryDirectory()) }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No team is configured. Run `npx -y terum-skills@latest team join` first.' });
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    expect(await run({ kind: 'member', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a member handle: `uninstall-skill member <handle>`.' });
+    expect(await run({ kind: 'member', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a member handle: `npx -y terum-skills@latest uninstall-skill member <handle>`.' });
     const traversal = await run({ kind: 'member', member: '../../../../etc/hostname', config: store }, new ScriptedPrompter());
     expect(traversal).toMatchObject({ ok: false, error: expect.stringContaining('Invalid member handle') });
     expect(traversal.ok ? '' : traversal.error).not.toContain('hostname.json');
-    expect(await run({ kind: 'project', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a project name: `uninstall-skill project <name>`.' });
+    expect(await run({ kind: 'project', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a project name: `npx -y terum-skills@latest uninstall-skill project <name>`.' });
     expect(await run({ kind: 'project', project: 'constructor', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Unknown project constructor.' });
   });
 

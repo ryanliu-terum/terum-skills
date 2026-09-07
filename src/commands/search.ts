@@ -1,3 +1,5 @@
+import { invocation } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
@@ -9,7 +11,7 @@ import { installCounts, latestTree, shortHash, skillEndorsement } from '../lib/r
 import { Runner, systemRunner } from '../lib/runner.js';
 import { format as formatSkill } from './ls.js';
 
-export interface SearchArgs { term: string; category?: string; author?: string; project?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
+export interface SearchArgs extends WithForm { term: string; category?: string; author?: string; project?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
 export interface SearchHit {
   team: string; id: string; name: string; author: string; category: string; installs: number; latest: string; endorsed: string;
   /** The `HEAD:skills/<name>` lookup failed — the folder is on disk but not in HEAD, or git would not run — so `latest` is `—`. The row stays (search's corpus is the working tree); a UI greys out Install from this, not from the dash (rulings walk R12, 2026-09-06). */
@@ -57,7 +59,7 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         hits.push(hit);
         io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed }));
         }
-        const stale = await staleLine(store.root, team, args.now);
+        const stale = await staleLine(store.root, team, args.now, args.form);
         if (stale) io.print(stale);
         // Per-row degradation covers ONE unresolvable folder. When every hit in the team failed to
         // resolve, the git side itself is unusable — git not on PATH, an unborn HEAD, a corrupt object
@@ -68,7 +70,7 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         const message = error instanceof Error ? error.message : String(error);
         failures.push(`${team}: ${message}`);
         io.print(`${team}:`);
-        io.print(isMissing(error) ? `${team} is not cloned yet; run \`terum-skills sync\`.` : `${team} could not be searched: ${message}`);
+        io.print(isMissing(error) ? `${team} is not cloned yet; run \`${invocation(args.form, 'sync')}\`.` : `${team} could not be searched: ${message}`);
       }
     }
     if (failures.length === Object.keys(config.teams).length && failures.length) return failure(failures.join('\n'));

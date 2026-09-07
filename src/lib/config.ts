@@ -1,3 +1,4 @@
+import { invocation, type InvocationForm } from './invocation.js';
 import { access, open, readFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -19,12 +20,12 @@ export interface ConfigStore {
 }
 
 /** Resolve the configured team in one place so verbs cannot drift on ambiguity handling. */
-export function selectTeam<T extends { remote: string }>(teams: Record<string, T>, requested?: string): [string, T] {
+export function selectTeam<T extends { remote: string }>(teams: Record<string, T>, requested?: string, form?: InvocationForm): [string, T] {
   // An own key only: the record inherits Object.prototype, and `constructor` is a legal team name.
   if (requested) { if (!Object.hasOwn(teams, requested)) throw new Error(`Team ${requested} is not configured.`); return [requested, teams[requested]!]; }
   const entries = Object.entries(teams);
   if (entries.length === 1) return entries[0]!;
-  if (entries.length === 0) throw new Error('No team is configured. Run `team join` first.');
+  if (entries.length === 0) throw new Error(`No team is configured. Run \`${invocation(form, 'team join')}\` first.`);
   throw new Error(`More than one team is configured; pass --team <name> (${entries.map(([name]) => name).join(', ')}).`);
 }
 

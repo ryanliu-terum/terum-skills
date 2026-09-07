@@ -41,9 +41,9 @@ describe('install (§6 refs)', () => {
 
   it('says no team is configured — the one sentence every verb uses — for a bare ref on an unjoined machine, and refuses a missing member or project selector as a usage error', async () => {
     const store = createConfigStore(await temporaryDirectory());
-    expect(await run({ ref: 'sample', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No team is configured. Run `team join` first.' });
-    expect(await run({ kind: 'member', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a member handle: `install member <handle>`.' });
-    expect(await run({ kind: 'project', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a project name: `install project <name>`.' });
+    expect(await run({ ref: 'sample', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No team is configured. Run `npx -y terum-skills@latest team join` first.' });
+    expect(await run({ kind: 'member', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a member handle: `npx -y terum-skills@latest install member <handle>`.' });
+    expect(await run({ kind: 'project', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a project name: `npx -y terum-skills@latest install project <name>`.' });
     // A handle is held to the handle rule before it can become a path segment: no traversal, and no path echoed back.
     const traversal = await run({ kind: 'member', member: '../../../config', config: store }, new ScriptedPrompter());
     expect(traversal).toMatchObject({ ok: false, error: expect.stringContaining('Invalid member handle') });
@@ -75,7 +75,7 @@ describe('install (§6 refs)', () => {
     // A machine that already has a team keeps the message: a second team is `team join`'s explicit flow.
     const second = createConfigStore(join(root, 'second-state'));
     await second.update((config) => { config.teams.other = { remote: 'github.com/other/repo', handle: 'bob' }; });
-    expect(await run({ ref: 'acme/team/sample', config: second, home: join(root, 'second-home'), runner }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('team join acme/team') });
+    expect(await run({ ref: 'acme/team/sample', config: second, home: join(root, 'second-home'), runner }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining("npx -y terum-skills@latest team join 'acme/team'") });
   });
 
   it('an inherited object key is not a project', async () => {
@@ -386,7 +386,7 @@ describe('install (§6 refs)', () => {
     expect(await readFile(join(home, '.claude', 'skills', 'dup', 'SKILL.md'), 'utf8')).toContain('description: from first');
 
     const beforeUnjoined = JSON.stringify(await store.read());
-    expect(await run({ ref: 'other/repo/dup', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('team join other/repo') });
+    expect(await run({ ref: 'other/repo/dup', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining("npx -y terum-skills@latest team join 'other/repo'") });
     expect(JSON.stringify(await store.read())).toBe(beforeUnjoined);
     expect((await run({ ref: `team-a/${dupId.slice(0, 8)}`, config: store, home, runner: mapped }, new ScriptedPrompter())).ok).toBe(true);
     expect(await run({ ref: 'team-a/deadbeef', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('ambiguous') });

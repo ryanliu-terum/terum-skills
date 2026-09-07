@@ -1,3 +1,4 @@
+import { invocation, type InvocationForm } from './invocation.js';
 import { randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
@@ -167,9 +168,9 @@ export async function stampIsFresh(storeRoot: string, team: string, now: () => n
 }
 
 /** One stale notice for local read-only queries; an unreadable stamp is no evidence of a recent sync. */
-export async function staleLine(storeRoot: string, team: string, now: () => number = Date.now): Promise<string | null> {
+export async function staleLine(storeRoot: string, team: string, now: () => number = Date.now, form?: InvocationForm): Promise<string | null> {
   try { if (await stampIsFresh(storeRoot, team, now)) return null; } catch { /* unreadable is not fresh */ }
-  return `${team} may be stale; run \`npx -y terum-skills@latest sync\`.`;
+  return `${team} may be stale; run \`${invocation(form, 'sync')}\`.`;
 }
 
 /**

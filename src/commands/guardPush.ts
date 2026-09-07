@@ -1,3 +1,4 @@
+import type { WithForm } from '../lib/invocation.js';
 import { resolve } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { guardRawPush, GuardTree } from '../lib/guard.js';
@@ -6,7 +7,7 @@ import { normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { CommandResult, Runner, systemRunner } from '../lib/runner.js';
 
-export interface GuardPushArgs { remote: string; url: string; refs?: readonly string[]; cwd?: string; config?: ConfigStore; runner?: Runner; }
+export interface GuardPushArgs extends WithForm { remote: string; url: string; refs?: readonly string[]; cwd?: string; config?: ConfigStore; runner?: Runner; }
 export interface GuardPushResult { team: string; checked: number; }
 
 /** git's null OID — the "no content here" marker of a new branch or a deletion — matched by shape, not length: 40 zeros under sha-1, 64 under `--object-format=sha256`. */
@@ -62,7 +63,7 @@ export async function run(args: GuardPushArgs, io: Prompter): Promise<Result<Gua
       const listed = await git(['diff', '--name-only', '--no-renames', '-z', base, localSha]);
       if (listed.code !== 0) throw new Error(`Push guard could not diff ${base.slice(0, 8)}..${localSha.slice(0, 8)}: ${(listed.stderr || listed.stdout).trim()}. Run \`git fetch ${remoteLabel}\` and retry, or bypass with \`git push --no-verify\` (attributed to you).`);
       const changedPaths = listed.stdout.split('\0').filter(Boolean).sort();
-      guardRawPush(await treeBetween(git, base, localSha, changedPaths), { handle: binding.handle, author });
+      guardRawPush(await treeBetween(git, base, localSha, changedPaths), { handle: binding.handle, author }, args.form);
       checked += changedPaths.length;
     }
     if (checked) io.print(`terum-skills push guard: ${checked} path(s) to ${stripRemoteCredentials(args.url)} are yours.`);

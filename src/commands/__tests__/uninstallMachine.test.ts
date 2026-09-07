@@ -9,7 +9,7 @@ import { bareTeam, cloneWithIdentity, holdCloneLock, ScriptedPrompter, temporary
 import { fsForTests, run } from '../uninstallMachine.js';
 
 const complete = 'Machine cleanup complete. The package itself has not been removed; finish with the package manager that installed it.';
-const membership = 'Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `terum-skills install member <handle>` does.';
+const membership = 'Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.';
 const unrelated = { matcher: 'startup', hooks: [{ type: 'command', command: 'echo unrelated' }] };
 
 async function minimal() {
@@ -86,7 +86,7 @@ describe('machine uninstall', () => {
     if (result.ok) expect(result.value.kept).toContain(quarantine);
   });
 
-  it('stops before tearing down remaining teams when an unconfirmed team appears (§1.8 exact loop)', async () => {
+  it.each([undefined, 'bare'] as const)('stops before tearing down remaining teams when an unconfirmed team appears (§1.8 exact loop) (form=%s)', async (form) => {
     const { fixture, store, hook } = await prepared();
     class JoiningPrompter extends ScriptedPrompter {
       override async confirm(question: string) {
@@ -95,8 +95,9 @@ describe('machine uninstall', () => {
         return super.confirm(question);
       }
     }
-    const io = new JoiningPrompter([], [true]); const result = await run({ config: store, hook }, io);
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Team late was added while uninstalling') });
+    const io = new JoiningPrompter([], [true]); const result = await run({ config: store, hook, form }, io);
+    expect(result.ok ? '' : result.error).toContain(`${form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest'} uninstall`);
+      expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Team late was added while uninstalling') });
     await expect(access(store.teamClone('late'))).resolves.toBeUndefined(); expect((await store.read()).teams.late).toBeDefined();
     expect(io.lines).toContain('Done: nothing'); expect(io.lines).toContain('Remaining: team, late, config.json');
     expect(io.lines).not.toContain(complete);
@@ -146,23 +147,26 @@ describe('machine uninstall', () => {
     expect(await readFile(hook.settingsFile, 'utf8')).toBe(before); await expect(access(store.teamClone('team'))).resolves.toBeUndefined();
   });
 
-  it('reports completed and remaining teams on clone-lock refusal, then completes on retry', async () => {
+  it.each([undefined, 'bare'] as const)('reports completed and remaining teams on clone-lock refusal, then completes on retry (form=%s)', async (form) => {
     const { store, hook, placements } = await prepared(['a', 'b']); const release = await holdCloneLock(store.teamClone('b'));
     try {
-      const result = await run({ config: store, hook }, new ScriptedPrompter([], [true]));
+      const result = await run({ config: store, hook, form }, new ScriptedPrompter([], [true]));
+      expect(result.ok ? '' : result.error).toContain(`${form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest'} uninstall`);
       expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Done: a\nRemaining: b, config.json') });
       await gone(store.teamClone('a')); for (const path of placements) await gone(path);
       await expect(access(store.teamClone('b'))).resolves.toBeUndefined(); expect((await store.read()).teams.b).toBeDefined();
     } finally { await release(); }
-    expect((await run({ config: store, hook }, new ScriptedPrompter([], [true]))).ok).toBe(true);
+    expect((await run({ config: store, hook, form }, new ScriptedPrompter([], [true]))).ok).toBe(true);
   });
 
-  it('reports EBUSY and still attempts the remaining empty-directory removals', async () => {
+  it.each([undefined, 'bare'] as const)('reports EBUSY and still attempts the remaining empty-directory removals (form=%s)', async (form) => {
     const { store, hook } = await prepared(); const original = fsForTests.rmdir;
     fsForTests.rmdir = async (path) => { if (path === join(store.root, 'run')) throw Object.assign(new Error('busy'), { code: 'EBUSY' }); return rmdir(path); };
     try {
       const io = new ScriptedPrompter([], [true]);
-      expect(await run({ config: store, hook }, io)).toMatchObject({ ok: false, error: expect.stringContaining(`Could not remove ${join(store.root, 'run')}: busy`) });
+      const result = await run({ config: store, hook, form }, io);
+      expect(result.ok ? '' : result.error).toContain(`${form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest'} uninstall`);
+      expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`Could not remove ${join(store.root, 'run')}: busy`) });
       expect(io.lines).toContain(`Kept ${join(store.root, 'run')}: busy`); expect(io.lines).not.toContain(complete);
       await gone(join(store.root, 'cache')); await gone(join(store.root, 'teams'));
     } finally { fsForTests.rmdir = original; }
@@ -176,11 +180,13 @@ describe('machine uninstall', () => {
     expect(io.lines.slice(-2)).toEqual(['This copy of terum-skills runs from an unknown location.', 'Remove it with whatever put it there.']);
   });
 
-  it('keeps config when orphaned shared state remains', async () => {
+  it.each([undefined, 'bare'] as const)('keeps config when orphaned shared state remains (form=%s)', async (form) => {
     const { root, store, hook } = await minimal(); const source = join(root, 'source'); await mkdir(source);
     await store.update((c) => { c.shared.sample = { source, team: 'gone' }; });
     const io = new ScriptedPrompter([], [true]);
-    expect(await run({ config: store, hook }, io)).toMatchObject({ ok: false, error: expect.stringContaining('still configured — connected: 1') });
+    const result = await run({ config: store, hook, form }, io);
+      expect(result.ok ? '' : result.error).toContain(`${form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest'} uninstall`);
+      expect(result).toMatchObject({ ok: false, error: expect.stringContaining('still configured — connected: 1') });
     await expect(access(source)).resolves.toBeUndefined(); expect((await store.read()).shared.sample).toBeDefined(); expect(io.lines).not.toContain(complete);
   });
 });

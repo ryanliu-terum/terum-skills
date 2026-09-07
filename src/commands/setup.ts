@@ -1,3 +1,5 @@
+import { invocation } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 import { creatorAuthenticationError, detectOrOfferGh, teamByRemote } from '../lib/auth.js';
 import { COMMUNITY_URL } from '../lib/community.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
@@ -18,7 +20,7 @@ export interface SetupVerbs {
   invite: typeof invite;
   offerHook: typeof defaultOfferHook;
 }
-export interface SetupArgs {
+export interface SetupArgs extends WithForm {
   target?: string;
   /** §6 install bootstrap: the print-only steps (welcome, hints, community, closing summary) are suppressed; every prompt still happens. */
   quiet?: boolean;
@@ -106,7 +108,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
 
     const gh = await detectOrOfferGh(io, runner);
     if (role === 'creator') {
-      const error = creatorAuthenticationError(gh);
+      const error = creatorAuthenticationError(gh, args.form);
       if (error) return failed(error, role, teamName, remote, steps);
       say('GitHub: gh is logged in.');
     } else if (gh.authenticated) say('GitHub: gh is logged in. For an owner/repository target, setup will try to accept a matching invitation; Git access uses your configured Git credentials.');
@@ -120,7 +122,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         teamName = configured[0]; remote = configured[1].remote;
         steps.team = 'skipped';
       } else {
-        const result = await verbs.team({ kind: 'create', offerHook: false, config: store, runner }, io);
+        const result = await verbs.team({ form: args.form, kind: 'create', offerHook: false, config: store, runner }, io);
         if (!result.ok) return failed(result.error, role, teamName, remote, steps);
         teamName = result.value.team;
         remote = 'remote' in result.value ? result.value.remote : (await store.read()).teams[teamName]!.remote;
@@ -134,7 +136,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         say(`Team ${teamName} is already configured on this machine.`);
         steps.team = 'skipped';
       } else {
-        const result = await verbs.team({ kind: 'join', target: args.target!, offerHook: false, config: store, runner }, io);
+        const result = await verbs.team({ form: args.form, kind: 'join', target: args.target!, offerHook: false, config: store, runner }, io);
         if (!result.ok) return failed(result.error, role, teamName, remote, steps);
         teamName = result.value.team;
         remote = (await store.read()).teams[teamName]!.remote;
@@ -151,7 +153,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     // machine (R8). A folder that is present but incomplete, or another team's, may hold someone's
     // work and is refused with the move-aside repair.
     if (steps.team === 'skipped') {
-      const repair = `\`terum-skills team join ${stripRemoteCredentials(remote)}\``;
+      const repair = `\`${invocation(args.form, 'team join', stripRemoteCredentials(remote))}\``;
       const described = await describeClone(clone, normalizeRemote(remote), runner);
       if (described.state === 'absent') {
         say(`Team ${teamName}'s clone at ${clone} is missing; re-cloning it from ${stripRemoteCredentials(remote)}.`);
@@ -176,7 +178,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       const logins = answer.split(/[\s,]+/).filter(Boolean);
       if (logins.length === 0) steps.invite = 'skipped';
       else {
-        const result = await verbs.invite({ logins, team: teamName, config: store, runner }, io);
+        const result = await verbs.invite({ form: args.form, logins, team: teamName, config: store, runner }, io);
         if (!result.ok) return failed(result.error, role, teamName, remote, steps);
         steps.invite = 'done';
       }
@@ -187,18 +189,18 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     }
 
     if (args.offerConnect !== false) {
-      const result = await verbs.connect({ team: teamName, home: args.home, cwd: args.cwd, config: store, runner }, io);
+      const result = await verbs.connect({ form: args.form, team: teamName, home: args.home, cwd: args.cwd, config: store, runner }, io);
       if (!result.ok) return failed(result.error, role, teamName, remote, steps);
       steps.actions = result.value !== undefined && (!('kind' in result.value) || result.value.shared.length > 0) ? 'done' : 'skipped';
     } else steps.actions = 'skipped';
     say('Next, from any terminal:');
-    say(`  terum-skills install ${teamName}/<skill>   — install a shared skill (add @<version> to pin it)`);
-    say('  terum-skills ls [--local]             — list members and shared skills; --local lists your own');
-    say('  terum-skills search <term>            — find a skill by name, description, or category');
-    say('  terum-skills sync                     — pull updates and finish pending work');
-    say(`  npx -y terum-skills@latest publish <skill> — endorse a skill already connected to the team`);
-    say('  terum-skills eval <skill>             — evaluate a shared skill locally before publishing');
-    say('  npx -y terum-skills@latest connect      — connect your local skills to the team (asks which)');
+    say(`  ${invocation(args.form, 'install', { raw: `${teamName}/<skill>` })}   — install a shared skill (add @<version> to pin it)`);
+    say(`  ${invocation(args.form, 'ls [--local]')}             — list members and shared skills; --local lists your own`);
+    say(`  ${invocation(args.form, 'search <term>')}            — find a skill by name, description, or category`);
+    say(`  ${invocation(args.form, 'sync')}                     — pull updates and finish pending work`);
+    say(`  ${invocation(args.form, 'publish <skill>')} — endorse a skill already connected to the team`);
+    say(`  ${invocation(args.form, 'eval <skill>')}             — evaluate a shared skill locally before publishing`);
+    say(`  ${invocation(args.form, 'connect')}      — connect your local skills to the team (asks which)`);
 
     const communityUrl = args.communityUrl ?? COMMUNITY_URL;
     if (communityUrl === '' || args.quiet) steps.community = 'skipped';

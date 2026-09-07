@@ -1,3 +1,4 @@
+import { invocation, type InvocationForm } from './invocation.js';
 import { handleSchema, parseJson, parseSkillFrontmatter, personSchema, Team, teamSchema } from './schema.js';
 import { canonicalSkillDigest } from './skills.js';
 
@@ -79,7 +80,7 @@ function permitsReceipt(tree: GuardTree, path: string): boolean {
  * rejoin (e), and skill folders they author (a). Nothing else. Accidents, not abuse: the hook is
  * bypassable and the bypass is attributed.
  */
-export function guardRawPush(tree: GuardTree, identity: { handle: string; author?: string }): void {
+export function guardRawPush(tree: GuardTree, identity: { handle: string; author?: string }, form?: InvocationForm): void {
   const handle = normalizeHandle(identity.handle);
   for (const path of tree.changedPaths) {
     if (path === 'README.md') continue;
@@ -91,7 +92,7 @@ export function guardRawPush(tree: GuardTree, identity: { handle: string; author
     const skill = /^skills\/([^/]+)\/.+$/.exec(path);
     // Ownership is an author comparison (§5.3): with no local identity there is nothing to compare, and
     // saying so beats reading every skill path as someone else's.
-    if (skill && !identity.author) throw new GuardError(`Push guard cannot check ${path}: this machine has no name and email to match a skill's author against. Run \`terum-skills login\`, then retry (or bypass with \`git push --no-verify\`, attributed to you).`);
+    if (skill && !identity.author) throw new GuardError(`Push guard cannot check ${path}: this machine has no name and email to match a skill's author against. Run \`${invocation(form, 'login')}\`, then retry (or bypass with \`git push --no-verify\`, attributed to you).`);
     if (skill && ownsSkill(tree, skill[1]!, { action: 'connect', handle, author: identity.author })) continue;
     throw new GuardError(`Push guard refused ${path}: not yours as ${handle} (D12: only your own skills, your own people file, and the team lists through publish; \`git push --no-verify\` bypasses this and is attributed to you)`);
   }

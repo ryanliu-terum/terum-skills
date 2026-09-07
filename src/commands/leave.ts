@@ -1,3 +1,4 @@
+import type { WithForm } from '../lib/invocation.js';
 import { access, mkdir, rm } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
@@ -11,7 +12,7 @@ import { parseOrExplain, teamNameSchema } from '../lib/schema.js';
 import { withCloneLock } from '../lib/teamRepo.js';
 import { removePlacements } from './uninstall.js';
 
-export interface LeaveArgs { name: string; config?: ConfigStore; hook?: HookOptions; runner?: Runner; }
+export interface LeaveArgs extends WithForm { name: string; config?: ConfigStore; hook?: HookOptions; runner?: Runner; }
 export interface LeaveResult { team: string; remote: string; handle: string | null; removed: number; cloneRemoved: boolean; kept: string[]; }
 
 /** Leave only this machine: no team-repository mutation; git only inventories local work. */

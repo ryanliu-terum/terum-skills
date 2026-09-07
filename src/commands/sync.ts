@@ -1,3 +1,4 @@
+import type { WithForm } from '../lib/invocation.js';
 import type { Launch } from '../lib/launch.js';
 import { packageVersion } from '../lib/package.js';
 import { createReleaseState, maintainReleaseState, ProbePolicy, probePolicy, recordRunningAndRegistry, ReleaseStateStore } from '../lib/update.js';
@@ -20,7 +21,7 @@ import { reconcileShared } from './connect.js';
 import { installOne, skillAtSource } from './install.js';
 import { uninstallOne } from './uninstall.js';
 
-export interface SyncArgs {
+export interface SyncArgs extends WithForm {
   launch?: Launch; noUpdateCheck?: boolean; probe?: ProbePolicy; upstream?: string; state?: ReleaseStateStore;
   hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string;
   /** Test knob: the clone lock's stale window for refreshClone. */
@@ -150,7 +151,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
       }
     }
     // Reconciliation never prompts, but it reports — through the same notice channel.
-    await reconcileShared(store, runner, childIo, skipped, defer);
+    await reconcileShared(store, runner, childIo, skipped, defer, args.form);
     // Existing ledger paths drive every later decision. A folder merely present on disk is never
     // adopted, quarantined, or deleted without a ledger entry.
     const currentConfig = await store.read();

@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, relative, resolve, sep } from 'node:path';
@@ -40,6 +40,57 @@ describe('the built bin (dist/index.js)', () => {
     env = { PATH: process.env.PATH ?? '', HOME: home, USERPROFILE: home, GH_CONFIG_DIR: resolve(home, '.config', 'gh'), NODE_NO_WARNINGS: '1' };
   });
   afterAll(async () => { await rm(out, { recursive: true, force: true }); });
+
+  async function installedLayout(prefix: string) {
+    const packageRoot = resolve(prefix, 'node_modules/terum-skills');
+    await mkdir(packageRoot, { recursive: true });
+    await cp(resolve(out, 'dist'), resolve(packageRoot, 'dist'), { recursive: true });
+    await writeFile(resolve(packageRoot, 'package.json'), await readFile(resolve(root, 'package.json')));
+    await symlink(resolve(root, 'node_modules'), resolve(packageRoot, 'node_modules'), 'dir');
+    const entry = resolve(packageRoot, 'dist/index.js');
+    await chmod(entry, 0o755);
+    return entry;
+  }
+
+  it.skipIf(process.platform === 'win32')('proves global PATH hints by name, and vetoes absent PATH, shadowing and npm execution', async () => {
+    const scratch = resolve(out, 'global-fixture');
+    const entry = await installedLayout(resolve(scratch, 'lib'));
+    const binDir = resolve(scratch, 'bin'); await mkdir(binDir);
+    const link = resolve(binDir, 'terum-skills'); await symlink(entry, link);
+    const cleanPath = [dirname(process.execPath), env.PATH].join(delimiter);
+    const shadow = resolve(scratch, 'shadow'); await mkdir(shadow);
+    // An empty directory ahead of the real bin: a PATH walk must pass entries that lack the executable.
+    const miss = resolve(scratch, 'miss'); await mkdir(miss);
+    await writeFile(resolve(shadow, 'terum-skills'), '#!/bin/sh\nexit 99\n'); await chmod(resolve(shadow, 'terum-skills'), 0o755);
+    for (const scenario of ['by-name', 'absolute', 'shadow', 'npm']) {
+      const child = { ...env, PATH: scenario === 'absolute' ? cleanPath : [scenario === 'shadow' ? shadow : miss, binDir, cleanPath].join(delimiter), ...(scenario === 'npm' ? { npm_command: 'exec' } : {}) };
+      const executable = scenario === 'by-name' ? 'terum-skills' : link;
+      const prefix = scenario === 'by-name' ? 'terum-skills' : 'npx -y terum-skills@latest';
+      for (const command of ['--help', 'status']) {
+        const result = await run(executable, [command], { cwd: scratch, env: child });
+        expect(result.stdout).toContain(`  Create a team: ${prefix} setup`);
+        expect(result.stdout).toContain(`  Join a team:   ${prefix} setup <org>/<repo>`);
+        expect(result.stderr).toBe('');
+      }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32').each([null, {}])('keeps global provenance but npx hints for a .bin launch without dependency evidence (%j)', async (manifest) => {
+    const work = resolve(out, manifest === null ? 'no-manifest/work' : 'empty-manifest/work');
+    const entry = await installedLayout(work);
+    if (manifest !== null) await writeFile(resolve(work, 'package.json'), JSON.stringify(manifest));
+    const binDir = resolve(work, 'node_modules/.bin'); await mkdir(binDir);
+    const link = resolve(binDir, 'terum-skills'); await symlink(entry, link);
+    const child = { ...env, PATH: [dirname(process.execPath), env.PATH].join(delimiter), TERUM_SKILLS_NO_UPDATE_NOTIFIER: '1' };
+    const misuse = await run(link, ['uninstall', 'foo'], { cwd: work, env: child }).then(() => { throw new Error('expected failure'); }, (error: { code: number; stderr: string }) => error);
+    expect(misuse.code).toBe(1);
+    expect(misuse.stderr).toBe('To remove a skill, use `npx -y terum-skills@latest uninstall-skill <ref>`.\n');
+    expect((await run(link, ['status'], { cwd: work, env: child })).stdout).toContain('Create a team: npx -y terum-skills@latest setup');
+    const update = await run(link, ['update'], { cwd: work, env: child });
+    expect(update.stdout).toContain('If installed globally with npm, run:');
+    expect(update.stdout).toContain('npm install -g terum-skills@latest');
+    expect(update.stdout).not.toContain('Declared dependency of:');
+  });
 
   it('a bare `setup` with stdin not a TTY fails closed at the create-or-join question: exit 1, no gh or git spawned, nothing written under HOME', async () => {
     const home = resolve(out, 'notty-home'); await mkdir(home, { recursive: true });
@@ -176,7 +227,8 @@ describe('the built bin (dist/index.js)', () => {
     await built.installPushGuard(clone, systemRunner);
     const armed = await readFile(resolve(clone, '.git', 'hooks', 'pre-push'), 'utf8');
     expect(armed).toContain(bin);
-    expect(armed).not.toContain('npx');
+    expect(armed).toContain('Re-run `npx -y terum-skills@latest team join <remote>`');
+    expect(armed.split('\n').find((line) => line.includes(' guard-push'))).not.toContain('npx');
     // A machine-wide core.hooksPath pointing away from .git/hooks would hide the guard: the clone-local override is what makes the refusal below fire.
     await mkdir(resolve(home, 'no-hooks'), { recursive: true });
     await writeFile(resolve(home, '.gitconfig'), `[core]\n\thooksPath = ${resolve(home, 'no-hooks')}\n`);

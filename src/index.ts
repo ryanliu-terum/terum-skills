@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-import { readFile, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import path from 'node:path';
+import { resolveInvocationForm } from './lib/invocation.js';
+import { readFile, realpath, access, stat } from 'node:fs/promises';
 import { createConfigStore } from './lib/config.js';
 import { packageVersion } from './lib/package.js';
 import { createReleaseState, updateNotice } from './lib/update.js';
@@ -30,19 +33,20 @@ const launch = await describeLaunch({
   entry: fileURLToPath(import.meta.url), realpath,
   readJson: async (path) => { try { return JSON.parse(await readFile(path, 'utf8')) as unknown; } catch { return null; } },
 });
+const form = await resolveInvocationForm({ launch, env: process.env, platform: process.platform, pathEntries: (process.env.PATH ?? '').split(path.delimiter), access: (p) => access(p, constants.X_OK), realpath, stat });
 const noUpdateCheck = Boolean(process.env.CI || process.env.NO_UPDATE_NOTIFIER || process.env.TERUM_SKILLS_NO_UPDATE_NOTIFIER);
 const afterVerb = process.stderr.isTTY && !noUpdateCheck
   ? async () => updateNotice({ state: createReleaseState(createConfigStore().root), launch, running: packageVersion(), stderr: (line) => { process.stderr.write(`${line}\n`); } })
   : undefined;
 const execute = createExecute({
-  afterVerb,
+  afterVerb, form,
   io: terminalPrompter({ outputClosed }),
   stderr: (line) => { process.stderr.write(`${line}\n`); },
   setExitCode: (code) => { process.exitCode = code; },
 });
 
 try {
-  await buildProgram(execute, undefined, { launch, noUpdateCheck }).parseAsync();
+  await buildProgram(execute, undefined, { launch, form, noUpdateCheck }).parseAsync();
 } catch (error) {
   // commander's own exits (help, version, usage errors) — it has already printed; keep its code.
   process.exitCode = error instanceof CommanderError ? error.exitCode : 1;

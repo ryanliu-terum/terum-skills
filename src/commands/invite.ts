@@ -1,3 +1,4 @@
+import type { WithForm } from '../lib/invocation.js';
 import { explainGhFailure } from '../lib/auth.js';
 import { createConfigStore, ConfigStore, selectTeam } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
@@ -6,7 +7,7 @@ import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { githubLoginSchema, parseOrExplain } from '../lib/schema.js';
 
-export interface InviteArgs { logins: readonly string[]; team?: string; config?: ConfigStore; runner?: Runner; }
+export interface InviteArgs extends WithForm { logins: readonly string[]; team?: string; config?: ConfigStore; runner?: Runner; }
 export interface InviteResult { team: string; invited: readonly string[]; already: readonly string[]; failed?: readonly { login: string; error: string }[]; }
 
 /** §6 GitHub-only collaborator invitations. It deliberately has no team-repo write path. */
@@ -15,7 +16,7 @@ export async function run(args: InviteArgs, io: Prompter): Promise<Result<Invite
     if (args.logins.length === 0) throw new Error('Provide at least one GitHub login.');
     const store = args.config ?? createConfigStore();
     const config = await store.read();
-    const [team, binding] = selectTeam(config.teams, args.team);
+    const [team, binding] = selectTeam(config.teams, args.team, args.form);
     const allowed = hostOperationAllowed(binding.remote);
     if (!allowed.ok) throw new Error(allowed.error);
     const runner = args.runner ?? systemRunner;
