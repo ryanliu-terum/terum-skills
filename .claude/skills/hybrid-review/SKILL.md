@@ -1,6 +1,6 @@
 ---
 name: hybrid-review
-description: Cross-model code-diff reviewer. Same 4-dimension review as /ultrareview, but the adversarial verify panel runs on OpenAI Codex instead of Claude, so the verifiers do not share the finders' blind spots. Use when a diff matters enough that a false positive surviving verification would cost real time — live auth/RLS/contract changes, pre-merge gates, or any batch where /ultrareview's findings felt over-confident. Args: same as /ultrareview — [<PR#>] [--working] [--no-triage] [--no-logs] + knobs/presets (--quick|--balanced|--in-depth|--max; --model/--review-model; --efficient/--verify) — except --verify-model, which here selects the Codex tier (sol|terra|luna) rather than a Claude model. Plus --fast (hybrid-only) for Codex Fast mode — a no-op as of 2026-09-04 (no measured speedup on exec or on the interactive app-server path; openai/codex#32191); same model, effort, and panel. The default flow ends in a triage: every confirmed finding is investigated and sorted into mechanical / clear / fork / declined, with a patch for the mechanical ones — nothing is applied without your confirmation.
+description: Cross-model code-diff reviewer. Same 4-dimension review as /ultrareview, but the adversarial verify panel runs on OpenAI Codex instead of Claude, so the verifiers do not share the finders' blind spots. Use when a diff matters enough that a false positive surviving verification would cost real time — the write path (safeWrite, guard, placer), spec-contract changes, pre-merge gates, or any batch where /ultrareview's findings felt over-confident. Args: same as /ultrareview — [<PR#>] [--working] [--no-triage] [--no-logs] + knobs/presets (--quick|--balanced|--in-depth|--max; --model/--review-model; --efficient/--verify) — except --verify-model, which here selects the Codex tier (astra|sol|terra|luna) rather than a Claude model. Plus --fast (hybrid-only) for Codex Fast mode — a no-op as of 2026-09-04 (no measured speedup on exec or on the interactive app-server path; openai/codex#32191); same model, effort, and panel. The default flow ends in a triage: every confirmed finding is investigated and sorted into mechanical / clear / fork / declined, with a patch for the mechanical ones — nothing is applied without your confirmation.
 ---
 
 Run the multi-agent code-diff reviewer with a **cross-model verify panel**: Claude finds, Codex verifies.
@@ -20,22 +20,24 @@ severity rubric, same report. Only the voters change.
 
 | | `/ultrareview` | `/hybrid-review` |
 | --- | --- | --- |
-| Verify panel | 3× Claude | 3× Codex (`gpt-5.6-sol` @ `high`) |
-| Best for | most diffs; fast iteration | diffs where a surviving FP costs real time — live RLS/auth/contract changes, pre-merge gates, big unreviewed batches |
+| Verify panel | 3× Claude | 3× Codex (`gpt-6-astra` @ `high`) |
+| Best for | most diffs; fast iteration | diffs where a surviving FP costs real time — the write path (safeWrite, guard, placer), spec-contract changes, pre-merge gates, big unreviewed batches |
 | Requires | nothing | `codex login status` authenticated |
 
-Reach for `/hybrid-review` when a surviving false positive would cost real time — live
-auth/RLS/contract changes, pre-merge gates, or a batch big enough that you would otherwise run
+Reach for `/hybrid-review` when a surviving false positive would cost real time — the write
+path, spec-contract changes, pre-merge gates, or a batch big enough that you would otherwise run
 `/ultrareview --in-depth`.
 
 ## The standard panel (do not run a thinner one without saying so)
 
-**`gpt-5.6-sol` @ `high` effort · 3 voters · `relayFailures: 0`.** Locked by Ryan 2026-08-04.
-A bare `--codex-verify` already resolves to exactly this (tier `sol`, effort fallback `high`,
+**`gpt-6-astra` @ `high` effort · 3 voters · `relayFailures: 0`.** Set by Ryan 2026-09-05
+("change the hybrid review to use astra on high"), superseding `gpt-5.6-sol` @ `high` (locked
+2026-08-04). A bare `--codex-verify` already resolves to exactly this (tier `astra`, effort fallback `high`,
 verify level `full` = 3 votes / 2-to-kill / cap 40) — so **the standard is what you get by NOT
 passing preset flags.** `--quick` drops to `medium` and a single voter; `--balanced` to 2 voters;
 `--efficient` / `--verify=<level>` to 1-2. The workflow logs `NOTE: OFF-STANDARD hybrid panel` for
-any of them (votes < 3, or effort `medium`), and you must repeat it in your summary.
+any of them (votes < 3, effort `medium`, or `--verify-model=sol|terra|luna`), and you must repeat it
+in your summary.
 
 `relayFailures: 0` is part of the standard, not a nice-to-have: a dropped relay is an *absent*
 vote, which lowers a finding's vote count and routes it to **contested** — visually identical, in
@@ -52,7 +54,7 @@ tool; it is not a hang.
 `--fast` appends `-c service_tier="fast"` to every relay's `codex exec`: Codex **Fast mode**, the
 priority inference queue (`fast` is the documented alias for the request tier `priority`). Same
 model, same effort, same 3 votes — only the queue changes — so the panel keeps its name, the
-OFF-STANDARD note does not fire, and the report label becomes `codex:gpt-5.6-sol@high+fast`
+OFF-STANDARD note does not fire, and the report label becomes `codex:gpt-6-astra@high+fast`
 (`modeDetail.codex.fast: true`).
 
 What it costs and buys, per OpenAI: **2.5× plan credits** on GPT-5.6 for a claimed **~1.5× token
@@ -96,8 +98,9 @@ does not bound it — a shorter timeout is the 2026-08-05 regression again) and 
 tier, Codex prints `warning: Configured service tier … is not advertised as supported … and will
 be omitted from requests` on stderr and runs at **standard** speed with exit 0. The relay sends
 stderr to `/dev/null`, so such a panel is indistinguishable from a standard one in the report.
-All three selectable tiers (`sol|terra|luna`) advertise it today, so this only matters if
-`CODEX_MODELS` ever changes.
+All four selectable tiers (`astra|sol|terra|luna`) advertise it today (Astra's catalog entry says
+"2x speed, increased usage"; the no-op measurement above was on Sol and has not been repeated on
+Astra), so this only matters if `CODEX_MODELS` ever changes.
 
 ### The relay timeout (the failure this standard exists to prevent)
 
@@ -157,14 +160,16 @@ decision to keep that preamble byte-identical across reviewer scripts is why).
 
 ### Model flags in hybrid mode
 
-- `--verify-model=<sol|terra|luna>` → the **Codex** tier (`gpt-5.6-sol` / `-terra` / `-luna`).
-  Default `sol`. It no longer takes `opus|sonnet|haiku|fable` — the verifier is not a Claude model.
+- `--verify-model=<astra|sol|terra|luna>` → the **Codex** tier (`gpt-6-astra` / `gpt-5.6-sol` /
+  `-terra` / `-luna`). Default `astra`. It no longer takes `opus|sonnet|haiku|fable` — the verifier
+  is not a Claude model. Any tier other than `astra` logs the OFF-STANDARD note.
 - Reasoning effort rides the preset: `quick` → `medium`, `balanced`/`--in-depth` → `high`,
-  `--max` → `xhigh`. **Bare invocation → `sol` at `high` with 3 votes — the standard.** Anything
+  `--max` → `xhigh`. **Bare invocation → `astra` at `high` with 3 votes — the standard.** Anything
   that lowers the vote count lands below it: `--quick` (1 vote @ `medium`), `--balanced` (2 votes
   @ `high`), `--efficient[=level]` (1-2), and `--verify=conservative|balanced|aggressive` (2/1/1).
   `--in-depth` (3 @ `high`) IS the standard; `--max` (3 @ `xhigh`) is above it. The workflow logs
-  `NOTE: OFF-STANDARD hybrid panel` whenever votes < 3 or effort is `medium`, and at 1 vote the
+  `NOTE: OFF-STANDARD hybrid panel` whenever votes < 3, effort is `medium`, or the tier is not
+  `astra`, and at 1 vote the
   report also carries a `! LOW-CONFIDENCE PASS` banner — repeat both when you report.
   `ultra` is deliberately unreachable — it delegates to Codex's own subagents, and nondeterministic
   sub-fan-out inside a deterministic vote panel defeats the point of a vote panel.
@@ -178,7 +183,7 @@ decision to keep that preamble byte-identical across reviewer scripts is why).
 
 **Identical to `/ultrareview` steps 1-7** (report to `.planning/reviews/<target>.review.md`,
 inline summary, adjudicate from the Triage buckets with the standalone test, auto bug-logs for
-confirmed **critical/high/security** findings, then act on the buckets — mechanical patches
+confirmed **critical/high/data-loss** findings, then act on the buckets — mechanical patches
 batch-applied only on your explicit confirmation, clear fixes confirmed one by one, forks handed to
 `/decision-walk`). Follow `.claude/skills/ultrareview/SKILL.md` for those steps verbatim — do not
 re-derive them; the auto-log threshold, the bucket rules and the apply gate live there and must
@@ -188,7 +193,7 @@ Defaults worth stating because they are opt-OUT, not opt-in: **triage runs by de
 (`--no-triage` skips; it investigates every confirmed finding, supplies a patch only for the
 trivial + low-risk + isolated ones, and never applies anything — and it is skipped automatically on
 an un-checked-out PR and on an invalid panel), and **auto bug-logs run by default** for confirmed
-critical/high/security findings (`--no-logs` skips). Confirmed medium/low findings are
+critical/high/data-loss findings (`--no-logs` skips). Confirmed medium/low findings are
 deliberately not logged — hand one to `/single-fix` and it writes its own log on demand.
 
 The triage agents run on **Claude** (the review model), not on Codex. That is deliberate: the

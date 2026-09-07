@@ -56,7 +56,8 @@ ask a human that nothing can answer) or `--dangerously-bypass-approvals-and-sand
 
 | Tier | Model | Use |
 | --- | --- | --- |
-| `sol` | `gpt-5.6-sol` | Default. Anything where a wrong verdict costs real time. |
+| `astra` | `gpt-6-astra` | GPT-6. The `/hybrid-review` verify-panel standard since 2026-09-05 (Ryan). Reach for it where a wrong verdict costs real time. |
+| `sol` | `gpt-5.6-sol` | Default for the other analysis surfaces (`/codex-spec` finders, the adversarial-test generator). |
 | `terra` | `gpt-5.6-terra` | Mid. |
 | `luna` | `gpt-5.6-luna` | Cheap bulk passes. |
 
@@ -66,7 +67,8 @@ Effort: `low` | `medium` | `high` | `xhigh`. Default `high` for verdict work.
 understands. A wrong answer caused by an ambiguous rules file gets more confidently wrong at
 `xhigh`, not more correct.
 
-CLI floor is **0.145.0** (the GPT-5.6 tiers went GA 2026-07-09). An older CLI silently falls back to
+CLI floor is **0.145.0** for the GPT-5.6 tiers (GA 2026-07-09) and **0.153.4** for `gpt-6-astra`
+(the CLI it was confirmed listed and entitled at `high` on, 2026-09-05; older CLIs were not checked). An older CLI silently falls back to
 an older model, which looks exactly like it worked.
 
 ## The schema trap — every property must be required

@@ -416,8 +416,8 @@ codebase, its architecture, or the web stack (Next.js, Supabase, Chrome extensio
 ### What's broken
 
 {Plain-English explanation of what a user would experience. No jargon.
-"When you do X, Y happens instead of Z." If it's a security issue, explain
-what an attacker could do and how.}
+"When you do X, Y happens instead of Z." If it loses or corrupts data, say
+whose data and how; do not frame it around an attacker (no threat model yet).}
 
 ### Why it's broken
 
@@ -486,9 +486,28 @@ call look measured.
 - `3` — removes the coupling here AND sweeps the known sibling call-sites
 - `4` — makes the class of bug unrepresentable (lint rule, CI gate, type, schema constraint, shared wrapper)
 
-**Cost (0-4, higher = more expensive)** — `0` minutes, code-only, plain `git revert` · `1` an hour, few callers, revert-safe · `2` needs a migration or a prod apply, or touches shared code · `3` migration plus backfill, or many writers newly able to throw · `4` multi-repo coordination, or only confirmable against real prod data
+**Fit (0-4)** — how exactly the fixed behaviour is the behaviour the governing spec describes and
+the ratified North Star asks for:
+- `0` — contradicts a sentence in the spec or the North Star (cite it)
+- `1` — the spec is silent and the North Star does not decide it; the option guesses at intent
+- `2` — the spec is silent, but the North Star or a root CLAUDE.md invariant implies this behaviour (cite it)
+- `3` — matches a cited spec sentence
+- `4` — matches a cited spec sentence AND that behaviour is one the North Star names as the point
 
-**Do NOT add, average, subtract, or otherwise combine Depth and Cost.** They are different
+Where they come from: the governing spec is the latest `.planning/specs/*.md` covering the
+changed area (its own "North Star check" line counts); the ratified North Star is the
+`north_star:` frontmatter of the newest `.planning/decisions/*-decision-walk.md` for that area.
+Cite section and sentence. **A Fit without a citation is a guess and reads as `1`.** If both are
+silent, say so once — every option then caps at `2`, and options that differ in user-visible
+behaviour are a fork for Ryan, not a pick.
+
+**Effort (one line per option, never a score)** — hours, files, migration or multi-repo
+coordination, revert path. It is reported so Ryan knows what he is buying. It never chooses:
+highest Fit wins, then highest Depth, and only a tie on both lets effort break it, out loud.
+*Ryan, 2026-09-06: implementation time and rework surface area are not reasons to prefer a less
+correct fix.* (Until that date this axis was **Cost 0-4**; see the amendment below.)
+
+**Do NOT add, average, subtract, or otherwise combine Fit and Depth.** They are different
 currencies and a single figure cannot carry both. Report them as a pair.
 
 *Why score at all, and why unsummed. A 44-run trial (2026-07-30) scored fixed option sets from
@@ -539,10 +558,18 @@ sections hoping to improve the pick; that was tested and it made things worse.*
 maximally opposite. Three of the five bugs were lopsided (one option was "leave as-is") and
 every scheme agreed.*
 
-**The trade sentence (required).** Because there is no total, you must state the exchange
-rate yourself, in this form: **"paying {cost} to buy {depth}, worth it here because ___"**
-(or "not worth it here because ___"). This sentence is where the actual judgment lives —
-a rubric that sums is making this same trade silently at a rate someone guessed in advance.
+*Amendment 2026-09-06 (Ryan). The trial above was run with **Cost** as the second axis. What it
+validated is that scoring beats not scoring and that two axes must never be summed; it did NOT
+validate Cost as the axis (7 / 8 / 9 are within noise). In practice Cost let the model prefer the
+cheaper fix over the one the spec describes, so Cost was replaced by **Fit** and demoted to the
+Effort footnote. The 9/10 figure has not been re-measured with the Fit·Depth pair — re-run the
+trial before quoting it for the new pair.*
+
+**The conformance sentence (required).** Because there is no total, you must state in one line
+what the recommended option is correct *against*, in this form: **"Option N implements {spec §X:
+'quoted sentence'} — or: the spec is silent and {North Star: 'quoted'} implies it — and beats
+Option M because ___"**. This sentence is where the actual judgment lives — a rubric that sums is
+making this same call silently at a rate someone guessed in advance.
 
 **Anti-strawman floor.** Every listed option must be one a competent engineer might
 actually pick. If an option is Depth `0` AND you cannot state its **Wins if** line, delete
@@ -550,17 +577,18 @@ it — do not pad the list to three. One option is a legitimate answer.
 
 #### Output — the pair table first, then detail
 
-| Option | Depth | Cost | Hinges on |
+| Option | Fit | Depth | Hinges on |
 |---|---|---|---|
-| 1. {name} | {0-4} | {0-4} | {U1, U3 — or "nothing; right in every world"} |
+| 1. {name} | {0-4} ({spec §X} / silent) | {0-4} | {U1, U3 — or "nothing; right in every world"} |
 | 2. {name} | … | … | … |
 
 {Then, for each option:}
 
-**Option {N}: {name} — Depth {d}/4 · Cost {c}/4**
+**Option {N}: {name} — Fit {f}/4 · Depth {d}/4**
 - What it does (plain English): {what the fix actually does and how that removes the symptom — same register as "What's broken" above, naming the mechanism and the resulting behavior, NOT just the files. e.g. "saves the new assignment before erasing the old one, so a crash can never leave the conversation with no project."}
 - What to change: {specific files and what changes}
-- Effort: {estimate}
+- Fit rests on: {section + quoted sentence, or "silent"}
+- Effort (not a score): {hours, files, migrations, revert path}
 - Risk: {what could go wrong}
 - **Wins if**: {the specific condition under which THIS option beats the one you're
   recommending — a fact about the world, not a restatement of its trade-off. Wherever
@@ -570,8 +598,10 @@ it — do not pad the list to three. One option is a legitimate answer.
   instead what would make it LOSE. If you cannot name a world where an option wins, it is
   a strawman: delete it per the floor rule.}
 
-End with the **trade sentence** and a one-line **Recommendation** naming the option, its
-Depth·Cost pair, and the single deciding reason.
+End with the **conformance sentence** and a one-line **Recommendation** naming the option, its
+Fit·Depth pair, and the single deciding reason. Highest Fit wins; equal Fit → highest Depth;
+equal both → say so and let effort break the tie out loud. Never pick the shallower or
+less-conformant option because it is cheaper.
 
 **If a cheap observation would resolve an uncertainty that flips the recommendation, say
 that INSTEAD of picking.** "Run this query first; if U1 is false the answer is Option 3,

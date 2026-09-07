@@ -1,6 +1,6 @@
 ---
 name: codex-implement
-description: Delegate implementation of a locked spec to OpenAI Codex CLI in an isolated git worktree, then verify the result yourself. Claude specs and reviews; Codex writes the code. Use when a spec in .planning/specs/ is ready to build and you want it implemented by Codex rather than inline. Args: <spec-path> [--routine|--standard|--deep] (aliases --light|--normal|--heavy) [--model=<sol|terra|luna>] [--effort=<low|medium|high|xhigh|max|ultra>] [--fast] [--branch=<name>] [--here] [--dry-run]
+description: Delegate implementation of a locked spec to OpenAI Codex CLI in an isolated git worktree, then verify the result yourself. Claude specs and reviews; Codex writes the code. Use when a spec in .planning/specs/ is ready to build and you want it implemented by Codex rather than inline. Args: <spec-path> [--routine|--standard|--deep] (aliases --light|--normal|--heavy) [--model=<astra|sol|terra|luna>] [--effort=<low|medium|high|xhigh|max|ultra>] [--fast] [--branch=<name>] [--here] [--dry-run]
 ---
 
 Hand a locked spec to Codex CLI for implementation, in a throwaway worktree, then bring the diff
@@ -100,7 +100,7 @@ never widen permissions** — see § Safety.
 | --- | --- | --- | --- | --- |
 | `--routine` | `--light` | `gpt-5.6-luna` | `medium` | Mechanical, fully-specified, **short-context** work: renames, boilerplate, docstrings, test scaffolding. See the Luna caveat below — this preset has a sharp edge. |
 | `--standard` | `--normal` | `gpt-5.6-terra` | `high` | **Default.** Everyday feature work: a new route, a new lib module, a contract change with SPA follow-through |
-| `--deep` | `--heavy` | `gpt-5.6-sol` | `max` | Multi-file refactors, hard debugging, migration-adjacent work, anything touching auth/privacy predicates |
+| `--deep` | `--heavy` | `gpt-5.6-sol` | `max` | Multi-file refactors, hard debugging, migration-adjacent work, anything on the write path (safeWrite, guard, placer) where a wrong step loses a teammate's files |
 
 Default when no preset is given: **`--standard`**.
 
@@ -130,8 +130,9 @@ Two things follow, and both are load-bearing:
 
 ## Individual knobs (override any preset)
 
-- `--model=<sol|terra|luna>` → `gpt-5.6-sol` · `gpt-5.6-terra` · `gpt-5.6-luna`.
-  Bare `gpt-5.6` aliases to Sol.
+- `--model=<astra|sol|terra|luna>` → `gpt-6-astra` · `gpt-5.6-sol` · `gpt-5.6-terra` · `gpt-5.6-luna`.
+  Bare `gpt-5.6` aliases to Sol. `astra` (GPT-6) is the `/hybrid-review` verify standard since
+  2026-09-05; the implement presets above stay on the 5.6 tiers until Ryan says otherwise.
 - **`gpt-5.3-codex` is NOT usable here.** Verified 2026-07-22: with ChatGPT-account auth the API
   rejects it — *"The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT
   account."* Same for `gpt-5.3-codex-spark`. This is an auth-mode limit, not a plan limit — the
@@ -152,6 +153,8 @@ Two things follow, and both are load-bearing:
 
 **Effort support is model-dependent — `minimal` is rejected on Sol** (verified 2026-07-22).
 Confirmed available on `gpt-5.6-sol`: `low`, `medium`, `high`, `xhigh`, `max`, `ultra`.
+`gpt-6-astra` lists the same six in the catalog; `high` confirmed by the probe below 2026-09-05
+(CLI 0.153.4, `turn.completed`, ~5 s).
 
 **To re-verify entitlements** after any plan/auth change, probe with `--json` and look for
 `turn.failed` — the plain-text output is NOT a valid test (it prints a session header echoing
@@ -428,7 +431,7 @@ Then, in order:
 4. **Cross-model review** — `codex exec review --base main` from inside the worktree, for a
    second opinion from a different model family.
 5. **`/ultrareview --working`** for the full four-dimension pass — or **`/hybrid-review --working`**
-   on a `--deep` run or anything touching auth/RLS/contracts, which runs the same four dimensions
+   on a `--deep` run or anything touching the write path or a spec contract, which runs the same four dimensions
    with the *verify* panel on Codex instead of Claude. That is the direct fix for the correlated-
    verifier error our own `/ultrareview` post-mortem found: a Claude finder plus a Claude verifier
    can share one misreading and pass a false positive through; a cross-vendor panel cannot.

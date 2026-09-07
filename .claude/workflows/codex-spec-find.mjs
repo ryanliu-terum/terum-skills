@@ -19,7 +19,7 @@
 //   node .claude/workflows/codex-spec-find.mjs <spec-path> --out <dir> [options]
 //
 //   --out <dir>            required; where to write findings.json + per-finder raw output
-//   --tier sol|terra|luna  Codex model tier (default sol)
+//   --tier astra|sol|terra|luna  Codex model tier (default sol; astra = gpt-6-astra)
 //   --effort <level>       model_reasoning_effort (default high)
 //   --dims <list>          comma list of drift,reality,quality,readiness (default all)
 //   --drift-cap <n>        max sibling specs to diff against (default 8)
@@ -33,7 +33,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
-const CODEX_TIERS = { sol: 'gpt-5.6-sol', terra: 'gpt-5.6-terra', luna: 'gpt-5.6-luna' }
+const CODEX_TIERS = { astra: 'gpt-6-astra', sol: 'gpt-5.6-sol', terra: 'gpt-5.6-terra', luna: 'gpt-5.6-luna' }
 const RULES = '.claude/workflows/codex-spec-find-rules.md'
 const FINDINGS_SCHEMA = '.claude/workflows/codex-spec-findings.schema.json'
 const MANIFEST_SCHEMA = '.claude/workflows/codex-spec-manifest.schema.json'
@@ -200,7 +200,7 @@ const READINESS_PROMPT = (n, of) =>
   `- missing or hand-wavy test strategy (this repo mandates Vitest + adversarial inputs + collocated __tests__)\n` +
   `- unclear sequencing or unstated dependencies between steps\n` +
   `- steps that assume undocumented behavior\n` +
-  `- a security-relevant contract left to implementer discretion: an authorization or ownership check, a privacy predicate, a replay/idempotency rule. If you would have to invent it to build the step, that is a BLOCKER — someone less careful ships it open.\n\n` +
+  `- a data-integrity contract left to implementer discretion: what is written, in what order, what survives a crash mid-way, whether a step can be re-run. If you would have to invent it to build the step, that is a GAP (BLOCKER only if another step assumes it or a well-meaning user loses data without it). Authorization, ownership, privacy and anti-abuse contracts are GAP at most — no threat model is adopted yet (Ryan, 2026-09-06); do not model a hostile caller.\n\n` +
   `Quote the vague step and say exactly what is missing to build it. If build-ready, return findings: [].`
 
 // --- run --------------------------------------------------------------------

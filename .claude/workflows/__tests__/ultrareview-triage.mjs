@@ -24,13 +24,13 @@ const F = (title, severity = 'high') => ({ severity, title, file: 'lib/a.ts', li
 const TITLES = ['mech-one', 'clear-one', 'fork-one', 'declined-one', 'nopatch-one', 'dead-one', 'badidx-one', 'noreason-one', 'contested-one']
 const FINDINGS = TITLES.map(t => F(t))
 
-const opt = (name, depth, cost) => ({ name, change: 'change for ' + name, depth, cost, winsIf: 'wins if ' + name })
+const opt = (name, depth, fit) => ({ name, change: 'change for ' + name, depth, fit, fitCitation: fit >= 3 ? 'spec §1: "does X"' : 'silent', effort: 'an hour', winsIf: 'wins if ' + name })
 const base = { rootCause: 'rc', rootCauseLocation: 'lib/a.ts:10', disposition: 'fix', options: [opt('A', 2, 0)], recommended: 0, oneClearlyWins: true, whyOneOrFork: 'only one sensible fix', difficulty: 'trivial', risk: 'low', scope: 'isolated', patch: '' }
 const PATCH = '--- a/lib/a.ts\n+++ b/lib/a.ts\n@@ -10 +10 @@\n-x\n+y'
 const TRIAGE = {
   'mech-one':     { ...base, patch: PATCH },
-  'clear-one':    { ...base, options: [opt('A', 3, 2), opt('B', 1, 0)], difficulty: 'moderate', risk: 'medium' },
-  'fork-one':     { ...base, options: [opt('A', 4, 3), opt('B', 2, 0)], oneClearlyWins: false, whyOneOrFork: 'depth vs cost, product call', patch: PATCH },
+  'clear-one':    { ...base, options: [opt('A', 3, 3), opt('B', 1, 1)], difficulty: 'moderate', risk: 'medium' },
+  'fork-one':     { ...base, options: [opt('A', 4, 1), opt('B', 2, 3)], oneClearlyWins: false, whyOneOrFork: 'more depth only at lower fit; the spec describes the shallower behaviour', patch: PATCH },
   'declined-one': { ...base, disposition: 'decline', declineReason: 'settled deferral: .planning/debug/x/bug-1.deferred.md' },
   'nopatch-one':  { ...base },                                                  // trivial/low/isolated, NO patch -> clear
   'dead-one':     null,                                                         // agent died / was skipped

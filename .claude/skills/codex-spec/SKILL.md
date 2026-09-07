@@ -1,6 +1,6 @@
 ---
 name: codex-spec
-description: Cross-model spec auditor. Same four dimensions as /ultraspec (cross-spec drift, spec-vs-code reality, internal quality, build-readiness), but the FINDERS run on OpenAI Codex and the adversarial verify panel runs on Claude — the mirror image of /hybrid-review. Use when a spec was written by Claude and you want it reviewed by something that does not share the author's blind spots, especially before handing it to /codex-implement. The default flow ends in a triage: every confirmed finding is investigated and sorted into mechanical / clear / fork / declined (with a diff for the mechanical ones), so the run finishes with "apply this batch on one confirmation, confirm these one by one, walk these forks" — never with an autonomous spec rewrite. Args: <path-to-spec> [--dims <list>] [--tier sol|terra|luna] [--effort <level>] [--verify full|conservative|balanced|aggressive] [--drift-cap N] [--batch N] [--concurrency N] [--timeout <ms>] [--no-triage].
+description: Cross-model spec auditor. Same four dimensions as /ultraspec (cross-spec drift, spec-vs-code reality, internal quality, build-readiness), but the FINDERS run on OpenAI Codex and the adversarial verify panel runs on Claude — the mirror image of /hybrid-review. Use when a spec was written by Claude and you want it reviewed by something that does not share the author's blind spots, especially before handing it to /codex-implement. The default flow ends in a triage: every confirmed finding is investigated and sorted into mechanical / clear / fork / declined (with a diff for the mechanical ones), so the run finishes with "apply this batch on one confirmation, confirm these one by one, walk these forks" — never with an autonomous spec rewrite. Args: <path-to-spec> [--dims <list>] [--tier astra|sol|terra|luna] [--effort <level>] [--verify full|conservative|balanced|aggressive] [--drift-cap N] [--batch N] [--concurrency N] [--timeout <ms>] [--no-triage].
 ---
 
 Audit a planning spec with **Codex finding and Claude verifying**.
@@ -37,9 +37,9 @@ per-dimension floor so that cannot happen.
 
 | | `/ultraspec` | `/codex-spec` |
 | --- | --- | --- |
-| Finders | Claude | **Codex** (`gpt-5.6-sol`) |
+| Finders | Claude | **Codex** (`gpt-5.6-sol`; `--tier astra` for `gpt-6-astra`) |
 | Verifiers | Claude | Claude |
-| Best for | everyday spec audits; drift-heavy specs with many siblings | a Claude-written spec before build, anything heading to `/codex-implement`, security-shaped specs where an unstated contract is the risk |
+| Best for | everyday spec audits; drift-heavy specs with many siblings | a Claude-written spec before build, anything heading to `/codex-implement`, specs where an unstated write-path or data-integrity contract is the risk |
 | Requires | nothing | `codex login status` authenticated |
 
 They are complements, not replacements. Run both on a spec that matters — the finding sets overlap
@@ -67,7 +67,7 @@ Run it from the repo root. **Run it in the background** (`run_in_background: tru
 15+ Codex calls and routinely exceeds the foreground Bash timeout. A bounded default run on a
 158-line spec took ~9 minutes at `--effort high`.
 
-Flags: `--dims drift,reality,quality,readiness` · `--tier sol|terra|luna` · `--effort <level>` ·
+Flags: `--dims drift,reality,quality,readiness` · `--tier astra|sol|terra|luna` (default `sol`) · `--effort <level>` ·
 `--drift-cap N` (default 8) · `--batch N` artifacts per reality reviewer (default 8) ·
 `--concurrency N` (default 6) · `--timeout <ms>` per call.
 
@@ -118,7 +118,7 @@ command line → `triage: false`).
 **The Triage stage** (on by default, Ryan 2026-09-04) runs after verification, on Claude, one
 read-only agent per CONFIRMED finding: it reads the finding from `findingsPath` by index, reads
 the cited section *and every other place the spec states the same rule*, decides fix-vs-decline
-(with a citation), lists 1-3 resolution options with Depth/Cost/Wins-if, and rates the recommended
+(with a citation), lists 1-3 resolution options with Fit/Depth/Wins-if (effort as a footnote), and rates the recommended
 one on the `/single-fix` scale with a spec twist — a rule stated in more than one place is
 `pattern`, never `isolated` (2026-09-03: a rule stated twice was fixed once and left superseded in
 the other place). The bucket is derived in code from the ratings, never chosen by the agent:
@@ -160,7 +160,7 @@ explicit **"Triage — NOTHING APPLIED YET"** heading, then:
   a patch match. After applying, grep the spec once more for each touched rule's key terms (the
   `scope: pattern` rating guards against the twice-stated-rule failure; this grep is the belt to
   that brace). Bump the spec's revision line if it carries one. One commit.
-- **Clear** — present each with its root cause, the recommended option (Depth/Cost/Wins-if) and
+- **Clear** — present each with its root cause, the recommended option (Fit/Depth/Wins-if) and
   ratings, and the other places it is stated if `pattern`. Confirm one at a time; draft the text
   and show it before writing it.
 - **Forks** — do NOT resolve them. Offer

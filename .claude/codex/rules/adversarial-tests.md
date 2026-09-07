@@ -29,8 +29,10 @@ correct-looking implementations could differ there and both claim to satisfy the
 Do not close the gap with a plausible-sounding expectation; a confidently wrong expected value
 manufactures a false failure, wastes the reader's time, and trains them to distrust the whole run.
 
-Contract gaps are a **primary output**. In a privacy, auth, or data-integrity contract an
-unspecified case is usually the most valuable thing you will produce all run.
+Contract gaps are a **primary output**. In a data-integrity contract (what is written, in what
+order, what survives a crash mid-way) an unspecified case is usually the most valuable thing you
+will produce all run. Do not aim inputs at a hostile caller — no threat model is adopted yet
+(Ryan, 2026-09-06); an input counts when a well-meaning user could plausibly supply it.
 
 ## What makes an input adversarial
 

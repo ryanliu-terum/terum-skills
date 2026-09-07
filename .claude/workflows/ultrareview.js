@@ -11,12 +11,12 @@ export const meta = {
   ],
 }
 
-// ultrareview + knobs. Invoke: Workflow({ scriptPath, args: '[<PR#>] [--working] [--no-triage] [--no-logs]
+// ultrareview + knobs. Invoke: Workflow({ scriptPath, args: '[<PR#>] [--working] [--no-triage] [--no-logs] [--base=<ref>]
 //   [--efficient[=level]] [--verify=level] [--preset=quick|balanced|in-depth|max | --quick|--balanced|--in-depth|--max]
 //   [--model=<m>] [--review-model=<m>] [--verify-model=<m>] [--fable-review] [--codex-verify]' })
 // Cost levels: full|conservative|balanced|aggressive (verify depth). Models: opus|sonnet|haiku|fable per stage.
 // --codex-verify (= /hybrid-review): finders stay on Claude, the verify panel runs on OpenAI Codex.
-//   In that mode --verify-model selects the CODEX tier (sol|terra|luna) instead of a Claude model.
+//   In that mode --verify-model selects the CODEX tier (astra|sol|terra|luna) instead of a Claude model.
 // No --drift (ultrareview reviews the whole diff; cost dial trims verification only). --in-depth vs --max differ only by review model (sonnet vs opus) here, since costDrift is inert.
 // A Dedup stage sits between Review and Verify: it cuts REDUNDANCY, never depth (every distinct finding still gets the full vp.votes panel).
 // A Triage stage sits between Verify and Synthesize: one read-only agent per CONFIRMED finding investigates and RATES the fix;
@@ -25,8 +25,8 @@ export const meta = {
 const FILES_PER_BATCH = 6
 const DIMENSIONS = [
   { key: 'correctness', label: 'Correctness & tests' },
-  { key: 'security', label: 'Security & data-loss' },
-  { key: 'invariants', label: 'Terum invariants' },
+  { key: 'security', label: 'Data-loss & integrity' },        // key kept (dedup tests, auto-log rule); the attacker lens is out -- see POSTURE
+  { key: 'invariants', label: 'Spec conformance & invariants' },
   { key: 'reuse', label: 'Reuse, simplify, perf' },
 ]
 const sevRank = { critical: 0, high: 1, medium: 2, low: 3 }
@@ -55,6 +55,20 @@ const NO_LOGS = TOKENS.includes('--no-logs')
 const WORKING = TOKENS.includes('--working')
 const PR = TOKENS.map(t => t.match(/^#?(\d+)$/)).filter(Boolean).map(m => m[1])[0] || null
 const MODE_KIND = PR ? 'pr' : (WORKING ? 'working' : 'branch')
+// --base=<ref>: branch mode diffs against this ref instead of `main`. Parsed here, not via
+// flagVal, because flagVal lowercases values and branch names are case-sensitive. /harden
+// needs it (2026-09-04): a loop that commits a round of fixes and then re-reviews everything
+// since the run started has no stable target otherwise -- `main...HEAD` is empty when the work
+// already sits on main, and `--working` is empty the moment a round is committed. Ignored with a
+// NOTE outside branch mode (a PR carries its own base; --working diffs against HEAD). The ref is
+// interpolated into a prompt that tells an agent to run `git diff <ref>...HEAD`, so anything
+// that is not a plain ref falls back to main with a WARNING rather than reaching a shell.
+const BASE_RAW = TOKENS.find(t => t.toLowerCase().startsWith('--base='))
+const BASE_GIVEN = BASE_RAW ? BASE_RAW.slice('--base='.length) : ''
+const BASE_OK = /^[A-Za-z0-9][A-Za-z0-9._\/~^@{}-]*$/.test(BASE_GIVEN)
+const BASE_REF = (MODE_KIND === 'branch' && BASE_GIVEN && BASE_OK) ? BASE_GIVEN : 'main'
+if (BASE_GIVEN && !BASE_OK) log('WARNING: ignoring --base "' + BASE_GIVEN + '" (not a plain git ref); diffing against main')
+if (BASE_GIVEN && MODE_KIND !== 'branch') log('NOTE: --base is ignored in ' + MODE_KIND + ' mode (a PR has its own base; --working diffs against HEAD).')
 
 // --- Shared knob preamble (keep byte-identical with ultraspec; only PARAMS/severities differ) ---
 const LEVELS = ['full', 'conservative', 'balanced', 'aggressive']
@@ -111,17 +125,23 @@ const modelFlag = (name) => {
 // contested-not-confirmed. Claude's recorded score on the same 5 was 0/5.
 //
 // Two axes on Codex (tier x reasoning effort), so the mapping is explicit:
-// --verify-model keeps meaning "which model" (sol|terra|luna); effort rides the preset.
+// --verify-model keeps meaning "which model" (astra|sol|terra|luna); effort rides the preset.
 // `ultra` is deliberately NOT reachable -- it is "maximum reasoning with automatic task
 // delegation", i.e. Codex spawning its own subagents. Nondeterministic sub-fan-out inside
 // a deterministic vote panel defeats the purpose of having a vote panel.
 const CODEX_VERIFY = TOKENS.includes('--codex-verify')
-const CODEX_MODELS = { sol: 'gpt-5.6-sol', terra: 'gpt-5.6-terra', luna: 'gpt-5.6-luna' }
+// `astra` = GPT-6 Astra (catalog slug `gpt-6-astra`, "Our most capable model for complex, demanding
+// work"; listed and entitled at `high` on this account 2026-09-05, CLI 0.153.4, plan pro). It is the
+// DEFAULT verify tier per Ryan's 2026-09-05 directive ("change the hybrid review to use astra on
+// high"), superseding sol@high (2026-08-04). The three GPT-5.6 tiers stay selectable via
+// --verify-model, but any of them is an OFF-STANDARD panel now (see the check below).
+const CODEX_MODELS = { astra: 'gpt-6-astra', sol: 'gpt-5.6-sol', terra: 'gpt-5.6-terra', luna: 'gpt-5.6-luna' }
+const CODEX_DEFAULT_TIER = 'astra'
 // `balanced` runs at HIGH, same as in-depth (Ryan, 2026-07-30). Deliberate: the verifier is the
 // stage where cheapening causes false positives to survive, so the effort dial is NOT the axis
 // that separates balanced from in-depth -- vote count (2 vs 3) and base model (sonnet vs opus) are.
 const CODEX_EFFORT_BY_PRESET = { quick: 'medium', balanced: 'high', 'in-depth': 'high', max: 'xhigh' }
-// Bare invocation (no preset) gets HIGH, not the sol/medium floor: bare already means the
+// Bare invocation (no preset) gets HIGH, not a medium floor: bare already means the
 // FULL panel (3 votes, all severities, cap 40), so pairing the deepest vote structure with
 // the shallowest reasoning was incoherent once balanced moved to high. There is no
 // "inherit session model" analog on the Codex side, so this fallback must be an explicit pick.
@@ -129,15 +149,15 @@ const codexModelFlag = () => {
   const raw = flagVal('verify-model')
   if (raw === undefined || raw === '') return undefined
   if (CODEX_MODELS[raw]) return raw
-  log('WARNING: ignoring unknown Codex model "' + raw + '" for --verify-model (expected ' + Object.keys(CODEX_MODELS).join('/') + '); using sol')
+  log('WARNING: ignoring unknown Codex model "' + raw + '" for --verify-model (expected ' + Object.keys(CODEX_MODELS).join('/') + '); using ' + CODEX_DEFAULT_TIER)
   return undefined
 }
-const CODEX_TIER = CODEX_VERIFY ? (codexModelFlag() ?? 'sol') : null
+const CODEX_TIER = CODEX_VERIFY ? (codexModelFlag() ?? CODEX_DEFAULT_TIER) : null
 const CODEX_EFFORT = CODEX_VERIFY ? (CODEX_EFFORT_BY_PRESET[presetName] ?? 'high') : null
 const CODEX_SLUG = CODEX_VERIFY ? CODEX_MODELS[CODEX_TIER] : null
 // --fast: Codex "Fast mode" (config `service_tier = "fast"`, the documented alias for the
 // request tier `priority`). Same model, same weights, same effort -- only the inference
-// queue changes -- so a fast panel is still ON-STANDARD (sol@high x3) and does not trip the
+// queue changes -- so a fast panel is still ON-STANDARD (astra@high x3) and does not trip the
 // OFF-STANDARD note below. Vendor claim: 1.5x token speed at 2.5x plan-credit burn on
 // GPT-5.6 (it is NOT 2x). Measured 2026-09-04 (sol, n=2 per arm, same prompt): NO gain --
 // ~40 tok/s read-heavy@high and ~53 tok/s generation-heavy@medium in BOTH arms, wall-clock
@@ -155,13 +175,14 @@ const CODEX_SLUG = CODEX_VERIFY ? CODEX_MODELS[CODEX_TIER] : null
 // Opt-in per run, never a default: if the backend ever honours it, it spends the weekly Codex
 // quota 2.5x faster for the same verdicts. Hybrid-only -- the Claude verify panel has no service
 // tier, so outside --codex-verify it is a logged no-op. Verified 2026-09-04 (CLI 0.147.0,
-// plan_type pro): accepted on gpt-5.6-sol; terra and luna advertise the same tier in the
+// plan_type pro): accepted on gpt-5.6-sol; terra, luna and gpt-6-astra advertise the same tier in the
 // model catalog. A model that does NOT advertise it (gpt-5.4-mini) still exits 0 and runs
 // at STANDARD speed; the only signal is `warning: Configured service tier ... will be
 // omitted from requests` on stderr (an `error` item in the stream under --json) -- never in
 // the `-o` file -- and the relay sends both streams to /dev/null, so such a panel would be
-// indistinguishable from a standard one in the report. Only the three CODEX_MODELS are
-// reachable here, and all three advertise the tier.
+// indistinguishable from a standard one in the report. Only the four CODEX_MODELS are
+// reachable here, and all four advertise the tier (astra's catalog entry claims "2x speed" where
+// the 5.6 tiers say 1.5x; the no-op timing above was on sol and has not been repeated on astra).
 const CODEX_FAST = flagVal('fast') !== undefined
 if (CODEX_FAST && !CODEX_VERIFY) log('NOTE: --fast ignored -- it sets the CODEX service tier and this run verifies on Claude. Use /hybrid-review (--codex-verify) to get it.')
 if (CODEX_FAST && CODEX_VERIFY) log('NOTE: --fast requests Codex Fast mode (service_tier=priority), but as of 2026-09-04 it produced NO measurable speedup on this account on any surface -- codex exec on CLI 0.147/0.153 and the app-server path the IDE uses (openai/codex#32191, #30413; OpenAI on #14204: routing is server-side, the response tier field is not a signal). Expect standard speed; re-time before relying on it.')
@@ -187,18 +208,19 @@ const modelLabel = (m) => m || 'inherit'
 const LOW_CONFIDENCE = vp.votes < 2
 const verifyLabel = CODEX_VERIFY ? ('codex:' + CODEX_SLUG + '@' + CODEX_EFFORT + (CODEX_FAST ? '+fast' : '')) : modelLabel(VERIFY_MODEL)
 const MODE = {
-  verify: VERIFY_LEVEL, preset: presetName || null, codexVerify: CODEX_VERIFY, triage: TRIAGE,
+  verify: VERIFY_LEVEL, preset: presetName || null, codexVerify: CODEX_VERIFY, triage: TRIAGE, base: MODE_KIND === 'branch' ? BASE_REF : null,
   codex: CODEX_VERIFY ? { tier: CODEX_TIER, model: CODEX_SLUG, effort: CODEX_EFFORT, fast: CODEX_FAST } : null,
   models: { base: modelLabel(BASE_MODEL), review: modelLabel(REVIEW_MODEL), verify: verifyLabel },
 }
 log('Mode: ' + (CODEX_VERIFY ? 'HYBRID (claude finds -> codex verifies) | ' : '') + (presetName ? 'preset=' + presetName + ' -> ' : '') + 'verify=' + VERIFY_LEVEL + (TRIAGE ? '' : ', NO-TRIAGE') + (NO_LOGS ? ', no-logs' : '') + ' | models: base=' + modelLabel(BASE_MODEL) + ' review=' + modelLabel(REVIEW_MODEL) + ' verify=' + verifyLabel + (LOW_CONFIDENCE ? ' | LOW-CONFIDENCE (1-vote verify)' : ''))
-// The hybrid STANDARD (Ryan, 2026-08-04): gpt-5.6-sol @ high, 3 surviving votes per finding,
-// relayFailures 0. Bare `--codex-verify` already resolves to exactly that; a preset can drop
-// below it (`--quick` -> medium effort, 1 vote), so say so out loud rather than letting a
-// thinner panel wear the same name in the report.
-if (CODEX_VERIFY && (vp.votes < 3 || CODEX_EFFORT === 'medium')) log('NOTE: OFF-STANDARD hybrid panel (' + CODEX_SLUG + '@' + CODEX_EFFORT + ', ' + vp.votes + ' vote(s)). The standard is sol@high x3 votes -- drop the preset flags to get it. Say which panel ran when you report the result.')
+// The hybrid STANDARD (Ryan, 2026-09-05, superseding sol@high of 2026-08-04): gpt-6-astra @ high,
+// 3 surviving votes per finding, relayFailures 0. Bare `--codex-verify` already resolves to exactly
+// that; a preset can drop below it (`--quick` -> medium effort, 1 vote) and `--verify-model=sol|
+// terra|luna` swaps the model out from under the name, so say so out loud rather than letting a
+// thinner or different panel wear the same name in the report.
+if (CODEX_VERIFY && (vp.votes < 3 || CODEX_EFFORT === 'medium' || CODEX_TIER !== CODEX_DEFAULT_TIER)) log('NOTE: OFF-STANDARD hybrid panel (' + CODEX_SLUG + '@' + CODEX_EFFORT + ', ' + vp.votes + ' vote(s)). The standard is ' + CODEX_DEFAULT_TIER + '@high x3 votes -- drop the preset and --verify-model flags to get it. Say which panel ran when you report the result.')
 // --model must never read as if it steered the verifier in hybrid mode.
-if (CODEX_VERIFY && EXPLICIT_MODEL) log('NOTE: --model=' + EXPLICIT_MODEL + ' applies to the CLAUDE stages only (manifest/review/dedup/triage/synthesize); the verify panel runs on ' + CODEX_SLUG + '. Use --verify-model=sol|terra|luna to change it.')
+if (CODEX_VERIFY && EXPLICIT_MODEL) log('NOTE: --model=' + EXPLICIT_MODEL + ' applies to the CLAUDE stages only (manifest/review/dedup/triage/synthesize); the verify panel runs on ' + CODEX_SLUG + '. Use --verify-model=astra|sol|terra|luna to change it.')
 
 // --- Helpers ---
 const tally = (arr) => arr.reduce((a, f) => { a[f.severity] = (a[f.severity] || 0) + 1; return a }, { critical: 0, high: 0, medium: 0, low: 0 })
@@ -297,8 +319,8 @@ const TRIAGE_SCHEMA = {
     disposition: { enum: ['fix', 'decline'] },
     declineReason: { type: 'string' },
     options: { type: 'array', items: {
-      type: 'object', required: ['name', 'change', 'depth', 'cost', 'winsIf'],
-      properties: { name: { type: 'string' }, change: { type: 'string' }, depth: { type: 'number' }, cost: { type: 'number' }, winsIf: { type: 'string' } },
+      type: 'object', required: ['name', 'change', 'depth', 'fit', 'effort', 'winsIf'],
+      properties: { name: { type: 'string' }, change: { type: 'string' }, depth: { type: 'number' }, fit: { type: 'number' }, fitCitation: { type: 'string' }, effort: { type: 'string' }, winsIf: { type: 'string' } },
     }},
     recommended: { type: 'number' },
     oneClearlyWins: { type: 'boolean' },
@@ -324,7 +346,7 @@ const manifest = await agent(
   'Mode: ' + MODE_KIND + (PR ? ('  PR #' + PR) : '') + '\n\n' +
   '## Task -- acquire the review-target diff and return its file list. Do NOT review anything yet.\n' +
   (MODE_KIND === 'branch'
-    ? '1. Run `git rev-parse --is-inside-work-tree`; if not a repo, return diffAvailable:false. baseRef = "main". Run `git diff --numstat main...HEAD` and `git diff --name-status main...HEAD`. target = `git rev-parse --abbrev-ref HEAD`. filesOnDisk = true.\n'
+    ? '1. Run `git rev-parse --is-inside-work-tree`; if not a repo, return diffAvailable:false. baseRef = "' + BASE_REF + '". Run `git diff --numstat ' + BASE_REF + '...HEAD` and `git diff --name-status ' + BASE_REF + '...HEAD`. target = `git rev-parse --abbrev-ref HEAD`. filesOnDisk = true.\n'
     : MODE_KIND === 'working'
     ? '1. baseRef = "HEAD". Run `git diff --numstat HEAD` and `git diff --name-status HEAD` (covers staged + unstaged TRACKED changes; untracked files are NOT included -- if any exist, mention them in note). target = "working". filesOnDisk = true.\n'
     : '1. Run `gh pr view ' + (PR || '') + ' --json files,headRefName,baseRefName,number`. baseRef = baseRefName. target = "pr-' + (PR || '') + '". Derive changed files + churn from that JSON (and `gh pr diff ' + (PR || '') + ' --name-only` if needed). filesOnDisk = (headRefName === current `git rev-parse --abbrev-ref HEAD`).\n') +
@@ -347,10 +369,16 @@ if (PR && WORKING) log('NOTE: both PR# and --working given; reviewing PR #' + PR
 
 // --- Phase 2: Review (parallel fan-out: dimension x file-batch) ---
 phase('Review')
+// Posture (Ryan, 2026-09-06): the released tools are open source and there is no external-attacker
+// model yet -- a bad actor is an intra-company problem for later. Reviews judge what a well-meaning
+// user experiences: data loss, crashes, and behaviour that differs from the governing spec / North Star.
+const POSTURE =
+  '## Posture (Ryan, 2026-09-06)\n' +
+  'The tools under review are open source with no external-attacker model yet; a bad actor is an intra-company problem for later. Do NOT model a hostile caller: no attacker, privilege-escalation, cross-tenant, or malicious-input findings. An input-handling defect counts only when a well-meaning user\'s ordinary input triggers it (a skill name with a space, a path with unicode, a symlinked folder) -- write it up as a correctness or data-loss bug for that user, never as an exploit. Correctness means the behaviour the governing spec describes and the ratified North Star asks for; when a finding turns on either, cite the sentence.\n'
 const RUBRIC =
   '## Severity rubric (assign exactly one per finding)\n' +
-  '- critical: crashes the process, data loss, a security hole (auth bypass, cross-user/team private leak, injection, secret-in-URL), or a confirmed prod-breaking bug.\n' +
-  '- high: a real functional bug -- wrong behavior, an unhandled error path, a Terum-invariant violation in a user-facing path, or contract drift that will break the SPA.\n' +
+  '- critical: crashes the process, loses or corrupts user data or the shared team repo (a silent drop, a partial multi-write with no rollback, a wipe outside the sanctioned command), or a confirmed prod-breaking bug.\n' +
+  '- high: a real functional bug -- wrong behavior, an unhandled error path, a changed behaviour the governing spec describes differently (quote both), or contract drift that will break a consumer.\n' +
   '- medium: edge-case bug, missing/weak test, reuse-dedup across 3+ sites or a 50+-line duplication, a notable inefficiency.\n' +
   '- low: minor cleanup, small duplication (<3 sites), style/altitude nit.\n'
 const fileList = (batch) => batch.map(f => '- [' + f.status + '] ' + f.path + (f.summary ? '  -- ' + f.summary : '')).join('\n')
@@ -363,8 +391,8 @@ const DIFF_HOWTO = () =>
     : '. Files are NOT on disk (un-checked-out PR) -- review from the diff text alone.')
 const CHECKLISTS = {
   correctness: 'logic/control-flow bugs, off-by-one, unhandled throws / process-killing crashes, races, wrong async ordering; AND test gaps: a changed behaviour with no collocated __tests__/{domain}/{name}.test.ts, or weak/non-adversarial test inputs (a regex or keyword lookup that would pass every current test = too weak).',
-  security: 'auth-matches-caller (cookie-only requireAuth() on a non-browser/SPA/extension route = bug), a cross-user/team read on the ADMIN/service-role client missing a `private = false` predicate IN THE QUERY, SQL/command injection (incl. unescaped % _ \\\\ in a PostgREST .like()), a secret in a URL query string (CWE-598), path traversal; AND data-loss: silent drops, a missing rollback on a partial multi-write, a sync/backfill that reports complete while skipping items.',
-  invariants: 'Terum CLAUDE.md invariants on the CHANGED lines: an unchecked Supabase `error` (EVERY .from()/.rpc()/storage result, incl. Promise.all elements and the extension capture chain), a route catch that returns 200 with an empty/different shape (must be 5xx), fire-and-forget in serverless (a bare fetch().catch() before return -- must be after()/await), persisting progress BEFORE the work succeeds, Zod .optional() where .nullish() is required (or .min(1) on a response array), comparing against magic enum literals instead of the shared contract, placeholder/mock data in shipped UI, a contract change not mirrored in the SPA copy.',
+  security: 'data loss and integrity for a WELL-MEANING user: silent drops, a missing rollback on a partial multi-write, a sync/publish/backfill that reports complete while skipping items, a write that clobbers uncommitted or unrelated user files, a destructive step with no confirmation or outside the sanctioned command, progress persisted BEFORE the work succeeds, an operation that cannot be safely re-run after a crash mid-way. Input handling ONLY where ordinary input breaks it (an unescaped % or _ in a LIKE, a path with spaces or unicode, a symlink in a skills folder). No attacker model -- see Posture.',
+  invariants: 'spec conformance FIRST: locate the governing spec (the latest .planning/specs/*.md covering the changed area; its own "North Star check" line counts) and the ratified North Star (`north_star:` frontmatter of the newest .planning/decisions/*-decision-walk.md for that area). A changed behaviour the spec describes DIFFERENTLY = high (quote the spec sentence and the code). A changed behaviour neither the spec nor the North Star covers = medium, written up as "unspecified", not as wrong. THEN this repo\'s root CLAUDE.md invariants on the CHANGED lines (a new function/route that duplicates an existing one, two active paths doing the same thing). No spec covering the area at all: say so in one finding at most, severity low.',
   reuse: 'duplicate logic that should extend existing code (search the repo first -- the "Before implementing" rule), dead or parallel code paths left behind, premature abstraction (<3 uses), oversized files doing too much, needless inefficiency (serial awaits that could parallelize, N+1 queries).',
 }
 const WIDER = (key) => (key === 'invariants' || key === 'reuse')
@@ -373,7 +401,7 @@ const WIDER = (key) => (key === 'invariants' || key === 'reuse')
 const REVIEW_PROMPT = (dim, batch, bi) =>
   '## ' + dim.label + ' Reviewer (batch ' + (bi + 1) + ')\n\n' +
   'Review target: ' + manifest.target + ' (mode ' + MODE_KIND + ', base ' + manifest.baseRef + ').\n\n' +
-  RUBRIC + '\n' +
+  RUBRIC + '\n' + POSTURE + '\n' +
   '## Files in this batch\n' + fileList(batch) + '\n\n' +
   '## How to read them\n' + DIFF_HOWTO() + WIDER(dim.key) + '\n\n' +
   '## Hunt for (' + dim.label + ')\n' + CHECKLISTS[dim.key] + '\n\n' +
@@ -519,7 +547,7 @@ if (findings.length === 0) {
     target: manifest.target, mode: MODE_KIND, modeDetail: MODE, baseRef: manifest.baseRef, triageMode: TRIAGE, noLogs: NO_LOGS,
     summary: 'Clean: ' + manifest.target + ' raised no findings across ' + reviewResults.length + ' reviewers (' + changedFiles.length + ' files).',
     triage: emptyTriage('no findings'),
-    reportMarkdown: '# ultrareview: ' + manifest.target + '\n\n**Verdict:** clean. No correctness, security, invariant, or reuse findings across ' + changedFiles.length + ' changed files.\n',
+    reportMarkdown: '# ultrareview: ' + manifest.target + '\n\n**Verdict:** clean. No correctness, data-loss, spec-conformance, or reuse findings across ' + changedFiles.length + ' changed files.\n',
     counts: { critical: 0, high: 0, medium: 0, low: 0 },
     topFindings: [], confirmedFindings: [], contestedFindings: [], droppedFindings: [], unverifiedFindings: [],
     stats: { ...emptyStats, verified: 0, confirmed: 0, contested: 0, dropped: 0, unverified: 0 },
@@ -537,7 +565,8 @@ const VERIFY_PROMPT = (f, v) =>
   '1. the cited line/code does not exist or the finding misquotes it;\n' +
   '2. the concern is already handled nearby (the error IS checked / the value IS awaited a few lines away; the predicate IS present);\n' +
   '3. it is a settled deferral EXPLICITLY recorded in PRODUCT-CONCERNS.md or a `.planning/debug` `.deferred.md` entry (cite which), OR an intentional choice justified by a concrete LOAD-BEARING reason you can CITE such that deviating would itself be a bug;\n' +
-  '4. it is a stylistic opinion, not a functional defect.\n' +
+  '4. it is a stylistic opinion, not a functional defect;\n' +
+  '5. its only harm needs a hostile caller (an attacker, privilege escalation, cross-tenant abuse, malicious input). No threat model is adopted yet (Ryan, 2026-09-06) -- refute it as out of scope, UNLESS a well-meaning user\'s ordinary input triggers the same defect, in which case keep it as the correctness/data-loss bug it is and say so in the reason.\n' +
   '## Convention is NOT a refutation. "It matches the other call-sites / it is how this repo does it / it is pre-existing" does NOT refute a real fragility. Apply the standalone test: would this code be correct and non-fragile as the ONLY place doing it, given just the invariants it actually relies on? If NO, keep it real (refuted=false), note it is repo-wide, and name the sibling call-sites (the sweep worklist).\n' +
   'refuted=false ONLY if the finding is real, specific, and actionable. Default to refuted=true when you cannot verify the evidence. Set correctedSeverity if the severity is wrong (advisory). Reason MUST quote what you found.\n\nStructured output only.'
 
@@ -705,8 +734,9 @@ log('Verify: ' + confirmed.length + ' confirmed, ' + contested.length + ' contes
 //               inspection. Surfaced WITH the citation; the human can overrule. A decline with
 //               no reason is not a decline -- it lands untriaged. Convention alone ("matches the
 //               siblings / pre-existing") is never a reason: the standalone test applies.
-//   fork        no single fix clearly wins: a real depth-vs-cost trade-off, or it hinges on a
-//               product/design decision the code cannot settle. Goes to /decision-walk with its
+//   fork        no single fix clearly wins: the spec is silent and the options differ in
+//               behaviour (a product/design decision the code cannot settle), or more Depth is
+//               only available at lower Fit. Effort NEVER makes a fork. Goes to /decision-walk with its
 //               options; never decided here (2026-09-03 lesson: autonomous batch decisions in
 //               place of the human walk was the failure pattern). A fork stays a fork even when
 //               the recommended option happens to be trivial and comes with a patch.
@@ -742,12 +772,12 @@ const TRIAGE_PROMPT = (f) =>
   'Review target: ' + manifest.target + ' (mode ' + MODE_KIND + ', base ' + manifest.baseRef + ').\n' +
   'This finding SURVIVED ' + vp.votes + '-vote adversarial verification (' + (CODEX_VERIFY ? 'Codex' : 'Claude') + ' panel, vote ' + (f.validVotes - f.refutedVotes) + '-' + f.refutedVotes + '). Do not re-litigate whether it is real. Investigate HOW to fix it and whether one fix clearly wins. Read-only: do NOT edit anything.\n\n' +
   '## Finding\nDimension: ' + f.dimension + '\nSeverity: ' + f.severity + '\nFile: ' + f.file + (f.line ? ':' + f.line : '') + '\nTitle: ' + f.title + '\nEvidence: ' + f.evidence + '\n' + (f.suggestion ? 'Reviewer suggestion (a hypothesis, not the answer): ' + f.suggestion + '\n' : '') + '\n' +
-  '## Step 1 -- investigate\n' + DIFF_HOWTO() + ' Read the cited file at the cited line plus enough context (callers, callees, the collocated test) to name the root cause as file:line and say WHY the code produces the defect. Grep for sibling call-sites that share the pattern.\n\n' +
+  '## Step 1 -- investigate\n' + DIFF_HOWTO() + ' Read the cited file at the cited line plus enough context (callers, callees, the collocated test) to name the root cause as file:line and say WHY the code produces the defect. Grep for sibling call-sites that share the pattern. Then locate what "correct" means here: the governing spec (the latest .planning/specs/*.md covering this area; its "North Star check" line counts) and the ratified North Star (`north_star:` frontmatter of the newest .planning/decisions/*-decision-walk.md for the area). Quote the sentence(s) that describe this behaviour, or state that both are silent.\n\n' +
   '## Step 2 -- disposition\n' +
   'Default `fix`. Set `decline` ONLY for: (a) a settled deferral explicitly recorded in PRODUCT-CONCERNS.md or a `.planning/debug/**/*.deferred.md` entry -- cite which; (b) an intentional choice with a concrete LOAD-BEARING reason you can cite, such that deviating would itself be a bug (a code comment explaining why counts -- read above and below the line); (c) on inspection it is not a defect -- quote exactly what you found. "It matches the other call-sites / it is pre-existing" is NOT a reason: apply the standalone test (would this be wrong or fragile as the ONLY place doing it?) -- if yes, it is a fix with scope=pattern, not a decline. Put the citation in declineReason; a decline without one is discarded.\n\n' +
   '## Step 3 -- options (1-3, best first; do NOT manufacture alternatives -- one sensible fix means one option)\n' +
-  'Each option: name; change (what and where, concretely); depth 0-4 = how much of the problem it removes (0 hides the symptom, 2 fixes this site, 4 removes the cause everywhere); cost 0-4 (0 minutes, code-only, plain revert; 1 an hour, few callers, revert-safe; 2 shared code, a migration, or a prod apply; 3 migration plus backfill, or many callers newly able to throw; 4 multi-repo, or only confirmable against prod data); winsIf = the specific condition under which THIS option beats the recommended one (for the recommended option itself: the condition under which it wins, one line). Never add or average depth and cost.\n' +
-  '`recommended` = 0-based index into options. `oneClearlyWins` = true when the recommended option dominates: no alternative beats it on an axis that matters here, or every alternative is strictly worse. false when a real trade-off remains (more depth only at real cost, with no obvious answer) OR the right choice hinges on a product/design decision the code cannot settle. Say which in whyOneOrFork, in plain English a non-engineer could decide from.\n\n' +
+  'Each option: name; change (what and where, concretely); fit 0-4 = how exactly the fixed behaviour is the behaviour the governing spec describes and the North Star asks for (0 contradicts a spec sentence or the North Star -- cite it; 1 both are silent and the option guesses at intent; 2 the spec is silent but the North Star or a root CLAUDE.md invariant implies this behaviour -- cite it; 3 matches a cited spec sentence; 4 matches a cited spec sentence AND it is a behaviour the North Star names as the point); fitCitation = the section + quoted sentence the fit score rests on, or "silent" -- a fit without a citation reads as 1; depth 0-4 = how much of the problem it removes (0 hides the symptom, 2 fixes this site, 4 removes the cause everywhere); effort = ONE line of fact (hours, files, migration or multi-repo coordination, revert path) -- reported so the reader knows what they are buying, never a reason to prefer a less correct option (Ryan, 2026-09-06: implementation time and rework surface do not outrank correctness); winsIf = the specific condition under which THIS option beats the recommended one (for the recommended option itself: the condition under which it wins, one line). Never add or average fit and depth.\n' +
+  '`recommended` = 0-based index into options: the highest fit; at equal fit the highest depth; at equal both, say so and let effort break the tie out loud in whyOneOrFork. `oneClearlyWins` = true when the recommended option has the highest fit and no alternative beats it on depth at equal fit (or every alternative is strictly worse). false when (a) the spec and North Star are silent and the options differ in user-visible behaviour -- a product/design decision the code cannot settle -- or (b) more depth is only available at lower fit (the spec describes the shallower behaviour). Effort differences NEVER make a fork. Say which in whyOneOrFork, in plain English a non-engineer could decide from.\n\n' +
   '## Step 4 -- rate the RECOMMENDED option (definitions mirror .claude/skills/single-fix/SKILL.md Phase 1 Q2-Q4; keep them in sync)\n' +
   'difficulty: trivial = ~1-10 line mechanical change (wrong field name, missing null check, wrong boolean/enum, off-by-one, missing await, swapped args, typo in a string key); moderate = 10-50 lines, needs design thought, or coordinated changes across functions/files; hard = architectural, unclear fix boundary, new abstraction, or the right fix is debatable.\n' +
   'risk: low = one expression changed or a check added, no callers affected, no behavior change for non-buggy inputs; medium = few callers that need verification, additive but touches shared code; high = many callers, shared state, removes/restructures paths, or ordering/timing invariants.\n' +
@@ -813,7 +843,7 @@ const report = await agent(
   '## Unverified findings (efficient mode skipped adversarial verification for these)\n' + (unverifiedBlock || '(none)') + '\n\n' +
   '## Instructions\n' +
   '1. Cross-dimension duplicates were ALREADY merged before verification (a "Merged: N reviewer reports" tag shows how many each represents). Merge only RESIDUAL near-duplicates -- same root cause at a different file/line (combine evidence; keep the highest severity). When a finding carries a Merged tag, state it in the finding line (e.g. "merges 4 reports across Correctness/Security") -- independent rediscovery is a signal worth showing the reader.\n' +
-  '2. Group by dimension (Correctness & tests / Security & data-loss / Terum invariants / Reuse, simplify, perf); within each, order critical -> high -> medium -> low.\n' +
+  '2. Group by dimension (' + DIMENSIONS.map(d => d.label).join(' / ') + '); within each, order critical -> high -> medium -> low.\n' +
   '3. reportMarkdown: titled "# ultrareview: ' + manifest.target + '"' + (banner ? ', with the banner as the first line under the title,' : ',') + ' then a one-paragraph verdict and a severity-count table, then grouped CONFIRMED findings (file:line, evidence, suggested fix) as checkbox items.\n' +
   '4. counts: CONFIRMED findings per severity (exclude contested + unverified).\n' +
   '5. topFindings: the confirmed critical and high items (severity, dimension, title, file, line).\n' +
@@ -835,7 +865,7 @@ const stats = { ...emptyStats, verified: verified.length, confirmed: confirmed.l
 // re-insertion above), and a dropped patch or a dropped fork is exactly the kind of silent loss
 // this stage exists to prevent. The Forks section is written in /decision-walk's input shape.
 const loc = (f) => '`' + f.file + (f.line ? ':' + f.line : '') + '`'
-const optLine = (o, i, rec) => '  - ' + (i === rec ? '**' : '') + 'Option ' + (i + 1) + ': ' + o.name + (i === rec ? ' (recommended)**' : '') + ' — Depth ' + o.depth + '/4 · Cost ' + o.cost + '/4. ' + o.change + ' *Wins if:* ' + o.winsIf
+const optLine = (o, i, rec) => '  - ' + (i === rec ? '**' : '') + 'Option ' + (i + 1) + ': ' + o.name + (i === rec ? ' (recommended)**' : '') + ' — Fit ' + o.fit + '/4' + (nonEmpty(o.fitCitation) ? ' (' + o.fitCitation + ')' : '') + ' · Depth ' + o.depth + '/4. ' + o.change + (nonEmpty(o.effort) ? ' *Effort (not a score):* ' + o.effort : '') + ' *Wins if:* ' + o.winsIf
 const item = (f) => '- **' + f.severity + ' — ' + f.title + '** — ' + loc(f) + '\n  - Root cause: ' + (f.triage.rootCause || '?') + ' (' + (f.triage.rootCauseLocation || '?') + ')'
 const ratings = (t) => t.difficulty + ' / ' + t.risk + ' risk / ' + t.scope + (t.scope === 'pattern' && nonEmpty(t.patternDetail) ? ' — siblings: ' + t.patternDetail : '')
 const section = (title, list, body) => '\n### ' + title + ' (' + list.length + ')\n\n' + (list.length ? list.map(body).join('\n') + '\n' : '_none_\n')
