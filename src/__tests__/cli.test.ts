@@ -153,6 +153,17 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     await program.parseAsync(['validate', 'sample', '--team', 't'], { from: 'user' });
     expect(calls).toEqual([{ target: 'sample', team: 't' }]);
   });
+
+  it('wires eval as an injectable verb with every local-only option', async () => {
+    const calls: unknown[] = [];
+    const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+      eval: async (args) => { calls.push(args); return success({ team: 't', id: 'id', name: args.ref, runDir: '/tmp/run', ccVersion: 'stub', executionStatus: 'complete' }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['eval', 'sample', '--k', '2', '--triggers-only', '--case', 'happy', '--model', 'sonnet', '--judge-model', 'opus', '--working', '--team', 't'], { from: 'user' });
+    expect(calls).toEqual([{ ref: 'sample', k: 2, triggersOnly: true, case: 'happy', model: 'sonnet', judgeModel: 'opus', working: true, team: 't' }]);
+  });
 });
 
 describe('the pre-push hook\'s verb (D12)', () => {

@@ -85,7 +85,9 @@ export async function runTriggerEvals(agent: AgentApi, options: TriggerOptions):
     }
   }
   const tp = rows.filter((row) => row.expected && row.fired === true).length;
-  const fn = rows.filter((row) => row.expected && row.fired !== true).length;
+  // A selection call that itself failed has no routing observation in either
+  // direction. Near-misses already had this exemption; should-trigger rows do too.
+  const fn = rows.filter((row) => row.expected && row.fired === false).length;
   const fp = rows.filter((row) => !row.expected && row.fired === true).length;
   const tn = rows.filter((row) => !row.expected && row.fired === false).length;
   return {

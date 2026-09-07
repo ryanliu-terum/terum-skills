@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -183,15 +183,18 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
   it('a single flake is retried in a fresh sandbox and scores normally (§7.1 rev 7)', async () => {
     const skillDir = await skillFixture();
     const failures = new Map<string, number>();
+    // Writes the transcript file before resolving or rejecting, like the real agent (§17.8).
     const flakyOnce: AgentApi = {
-      runAgent: (_task, cwd) => {
+      runAgent: async (_task, cwd, options) => {
         const arm = existsSync(join(cwd, '.claude', 'skills', 's')) ? 'candidate' : 'baseline';
         const seen = failures.get(arm) ?? 0;
         failures.set(arm, seen + 1);
-        if (arm === 'baseline' && seen === 0) return Promise.reject(new AgentRunError('transient'));
-        return Promise.resolve(transcriptWith(arm === 'candidate' ? 'ran PREFLIGHT' : 'nope', [
+        const failing = arm === 'baseline' && seen === 0;
+        if (options?.transcriptPath) await writeFile(options.transcriptPath, failing ? 'failed-attempt' : 'success', 'utf8');
+        if (failing) throw new AgentRunError('transient');
+        return transcriptWith(arm === 'candidate' ? 'ran PREFLIGHT' : 'nope', [
           { type: 'system', subtype: 'init', skills: arm === 'candidate' ? ['s'] : [], model: 'claude-sonnet-5-20260115' },
-        ]));
+        ]);
       },
       askJson: () => Promise.resolve({}),
     };
@@ -203,6 +206,25 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     expect(rows[0]).toMatchObject({ outcome: 'win', decided_by: 'checks' });
     expect(arms.find((sample) => sample.arm === 'baseline')).toMatchObject({ failed: false, retried: true, model_id: 'claude-sonnet-5-20260115' });
     expect(arms.find((sample) => sample.arm === 'candidate')).toMatchObject({ retried: false, model_id: 'claude-sonnet-5-20260115' });
+    // §17.3: the failed attempt survives under the suffix; the retry holds the canonical §4.2 path.
+    await expect(readFile(join(scratch, 'c.baseline.0.attempt-1.jsonl'), 'utf8')).resolves.toBe('failed-attempt');
+    await expect(readFile(join(scratch, 'c.baseline.0.jsonl'), 'utf8')).resolves.toBe('success');
+  });
+
+  it('a staged arm that fails both attempts is scored empty, not refused as contamination (§17.7 scope)', async () => {
+    const skillDir = await skillFixture();
+    const candidateDead: AgentApi = {
+      runAgent: (_task, cwd) => (existsSync(join(cwd, '.claude', 'skills', 's'))
+        ? Promise.reject(new AgentRunError('agent run timed out'))
+        : Promise.resolve(transcriptWith('nope', [{ type: 'system', subtype: 'init', skills: [] }]))),
+      askJson: () => Promise.resolve({}),
+    };
+    const { arms } = await runCase(
+      { agent: candidateDead, rng: () => 0.9 },
+      caseOf({ checks: [{ transcript_mentions: 'PREFLIGHT' }] }),
+      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+    );
+    expect(arms.find((sample) => sample.arm === 'candidate')).toMatchObject({ failed: true, retried: true, fraction: 0 });
   });
 
   // §7.3 rev 6: membership of the skill under eval, not list equality — the real CLI's init
@@ -233,6 +255,24 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
       caseOf(),
       { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
     )).rejects.toThrow(ContaminationError);
+  });
+
+  it('refuses a staged arm that omits the init skills list (§17.7)', async () => {
+    const skillDir = await skillFixture();
+    const missingList: AgentApi = { runAgent: () => Promise.resolve(transcriptWith('ok')), askJson: () => Promise.resolve({}) };
+    await expect(runCase(
+      { agent: missingList, rng: () => 0.9 }, caseOf(),
+      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+    )).rejects.toThrow(ContaminationError);
+  });
+
+  it('a failing setup hook aborts this case without throwing (§17.9)', async () => {
+    const skillDir = await skillFixture();
+    const output = await runCase(
+      { agent: armAwareAgent('s'), rng: () => 0.9 }, caseOf({ setup: 'exit 3' }),
+      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+    );
+    expect(output).toEqual({ rows: [], arms: [] });
   });
 
   it('refuses the run when the skill under eval leaks into the baseline arm (§7.3)', async () => {

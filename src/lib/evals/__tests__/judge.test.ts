@@ -44,10 +44,10 @@ describe('double-ask with position swap (§7.5 rev 7)', () => {
     expect(half).toMatchObject({ winner: 'tie', decidedBy: 'judge-split' });
   });
 
-  it('a parsed but invalid winner counts as that ask saying tie', async () => {
+  it('a parsed but invalid winner takes the escalation path (§17.6)', async () => {
     const { agent, calls } = agentReturning([{ winner: 'C', reason: 'confused' }]);
-    expect(await judgePair(agent, { ...base, rng: () => 0.9 })).toMatchObject({ winner: 'tie', decidedBy: 'judge', reason: 'confused' });
-    expect(calls).toHaveLength(2);
+    expect(await judgePair(agent, { ...base, rng: () => 0.9 })).toMatchObject({ winner: 'tie', decidedBy: 'judge-unparseable' });
+    expect(calls).toHaveLength(3);
   });
 
   it('makeRng is deterministic for a seed (seed 0 reproducible)', () => {
@@ -92,6 +92,11 @@ describe('escalation chain (§7.5)', () => {
     const verdict = await judgePair(agent, { ...base, rng: () => 0.9 });
     expect(verdict).toMatchObject({ winner: 'tie', decidedBy: 'judge-refused' });
     expect(calls).toHaveLength(1); // refusals do not retry
+  });
+
+  it('a network failure is not recorded as judge-unparseable (§17.4)', async () => {
+    const { agent } = agentReturning([new AgentRunError('network connection reset')]);
+    expect(await judgePair(agent, { ...base, rng: () => 0.9 })).toMatchObject({ winner: 'tie', decidedBy: 'judge-network-error' });
   });
 
   it('non-agent errors propagate', async () => {

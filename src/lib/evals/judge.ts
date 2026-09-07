@@ -47,7 +47,7 @@ export interface JudgeVerdict {
   winner: 'left' | 'right' | 'tie';
   reason: string;
   swapped: boolean;
-  decidedBy: 'judge' | 'judge-split' | 'judge-unparseable' | 'judge-refused';
+  decidedBy: 'judge' | 'judge-split' | 'judge-unparseable' | 'judge-refused' | 'judge-network-error';
 }
 
 export interface JudgeOptions {
@@ -66,7 +66,9 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => set
 
 type AskOutcome =
   | { kind: 'judged'; winner: 'left' | 'right' | 'tie'; reason: string }
-  | { kind: 'judge-refused' | 'judge-unparseable'; reason: string };
+  | { kind: 'judge-refused' | 'judge-unparseable' | 'judge-network-error'; reason: string };
+
+const NETWORK_FAILURE = /\b(?:network|econn(?:reset|refused)|enotfound|socket|connection|dns|5\d\d|429)\b/i;
 
 /** One ask at a fixed ordering, through the escalation chain. */
 async function askOnce(agent: AgentApi, options: JudgeOptions, swap: boolean): Promise<AskOutcome> {
@@ -81,21 +83,32 @@ async function askOnce(agent: AgentApi, options: JudgeOptions, swap: boolean): P
 
   const chain = [model, model, options.escalationModel ?? DEFAULT_ESCALATION_MODEL];
   let lastError = '';
+  let networkFailures = 0;
   for (let attempt = 0; attempt < chain.length; attempt++) {
     try {
       const verdict = await agent.askJson(prompt, { model: chain[attempt]! });
       const winner = String(verdict['winner'] ?? 'tie').trim().toUpperCase();
       const reason = String(verdict['reason'] ?? '');
-      if (winner !== 'A' && winner !== 'B') return { kind: 'judged', winner: 'tie', reason };
+      if (winner !== 'A' && winner !== 'B' && winner !== 'TIE') {
+        lastError = `judge returned invalid winner ${JSON.stringify(winner)}`;
+        if (attempt < chain.length - 1) await sleep(500 * (attempt + 1));
+        continue;
+      }
+      if (winner === 'TIE') return { kind: 'judged', winner: 'tie', reason };
       return { kind: 'judged', winner: (winner === 'A') !== swap ? 'left' : 'right', reason };
     } catch (error) {
       if (!(error instanceof AgentRunError)) throw error;
       lastError = error.message;
       if (REFUSAL.test(lastError)) return { kind: 'judge-refused', reason: lastError.slice(0, 300) };
+      if (NETWORK_FAILURE.test(lastError)) {
+        networkFailures++;
+        if (attempt < chain.length - 1) await sleep(500 * (attempt + 1));
+        continue;
+      }
       if (attempt < chain.length - 1) await sleep(500 * (attempt + 1));
     }
   }
-  return { kind: 'judge-unparseable', reason: lastError.slice(0, 300) };
+  return { kind: networkFailures === chain.length ? 'judge-network-error' : 'judge-unparseable', reason: lastError.slice(0, 300) };
 }
 
 /**
