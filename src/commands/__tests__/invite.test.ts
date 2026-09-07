@@ -21,6 +21,8 @@ describe('invite (§6 host scoping)', () => {
     const result = await run({ logins: ['new', 'member', 'acme'], config: store, runner }, io);
     expect(result).toMatchObject({ ok: true, value: { invited: ['new'], already: ['member', 'acme'] } });
     expect(io.lines.join('\n')).toContain('npx -y terum-skills@latest setup acme/team');
+    // The global install line comes first inside the fence so a teammate gets the bare command as well (Ryan, 2026-09-06).
+    expect(io.lines.join('\n')).toContain('```\nnpm install -g terum-skills\nnpx -y terum-skills@latest setup acme/team');
     expect(io.lines.join('\n')).toContain('npx -y terum-skills@latest team join acme/team');
   });
 
