@@ -513,3 +513,19 @@ describe('remote failure call sites (issue 11)', () => {
     await expect(openTeamRepo(clone, 'github.com/acme/team', runner).safeWrite(() => undefined, { action: 'join', handle: 'me' })).rejects.toThrow(`Git is using SSH for ${ssh}`);
   });
 });
+
+it('returns a no-change mutation value', async () => {
+  const fixture = await bareTeam(); const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+  expect(await openTeamRepo(clone, fixture.bare).safeWrite(() => 'a', { action: 'join', handle: 'me' })).toEqual({ changed: false, pushedTo: 'main', returned: 'a' });
+});
+it('returns only the completed attempt value after rejection', async () => {
+  const fixture = await bareTeam(); const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+  let pushes = 0; let attempt = 0;
+  const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+    if (command === 'git' && args[0] === 'push' && pushes++ === 0) return { code: 1, stdout: '', stderr: 'non-fast-forward; fetch first' };
+    return next();
+  });
+  const result = await openTeamRepo(clone, fixture.bare, runner).safeWrite((tree) => { tree.set('people/me.json', personJson('me')); return attempt++; }, { action: 'join', handle: 'me', backoff: () => 0 });
+  expect(attempt).toBe(2);
+  expect(result).toEqual({ changed: true, pushedTo: 'main', returned: 1 });
+});

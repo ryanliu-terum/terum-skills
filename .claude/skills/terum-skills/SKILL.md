@@ -33,7 +33,7 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
   `connect`, and `publish` find the project root from the cwd by a filesystem walk, and the Bash
   tool's cwd is already the repo root. Absolute paths for every argument that is a path.
 - Do not use the skill-file `` !`command` `` injection: a non-zero exit aborts the whole skill,
-  and `validate` exits 1 whenever it has findings, which is a result, not a failure.
+  and `validate` exits 1 on error findings; a `warning HYG6` line with rc=0 is the size guideline, not a failure.
 - `$ARGUMENTS`: first token is the verb (`team <sub>` is two tokens); the rest passes through
   unchanged. With no arguments, ask which verb, defaulting to `status`, and list the two tables
   below in one line each. Prompts over flags: ask a question with a default; never demand a flag.
@@ -46,7 +46,7 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 | `ls [--team <t>]`, `ls member <h>`, `ls project <n>` | nothing | show stdout |
 | `ls --local` | nothing | show the **project** section in full; summarise the global section and the `Cannot be connected` list by count and reason unless the user asked for them (on a machine with many third-party skills that list runs to dozens of lines) |
 | `search <term> [--category] [--author] [--project]` | nothing | show stdout; `No skills found.` is a result |
-| `validate <abs-path or name> [--team <t>]` | nothing | rc=1 with `HYG…` lines means findings, not a crash; show them verbatim. A local folder that has never been connected fails HYG1 on the missing `license` field, which `connect` injects; say so instead of calling the skill broken |
+| `validate <abs-path or name> [--team <t>]` | nothing | exits 1 on error findings; a `warning HYG6` line with rc=0 is the size guideline, not a failure; show the lines verbatim. A local folder that has never been connected fails HYG1 on the missing `license` field, which `connect` injects; say so instead of calling the skill broken |
 | `update` | nothing | show stdout; it prints the update command and never runs it |
 | `sync` | say it will pull every configured team, place approved skills, and defer any skill whose `allowed-tools` grant needs consent | show stdout; a `N skills need review` line means the user must run `npx -y terum-skills@latest sync` in a terminal to answer the consent questions. Long on a cold clone: use `run_in_background` |
 | `sync --hook` | do not run by hand; the SessionStart hook already runs it hourly | n/a |

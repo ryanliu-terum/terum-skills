@@ -147,7 +147,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
-      validate: async (args) => { calls.push(args); return success({ name: args.target, findings: 0 }); },
+      validate: async (args) => { calls.push(args); return success({ name: args.target, findings: 0, warnings: 0 }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     await program.parseAsync(['validate', 'sample', '--team', 't'], { from: 'user' });

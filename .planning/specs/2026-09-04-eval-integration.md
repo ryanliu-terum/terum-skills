@@ -21,7 +21,7 @@ Ajay: **the eval side builds `validate`** (finding 13, Option 1 — full call-si
 hygiene parity). Milestones renumbered: hygiene now leads.
 Sequences the wiring between the landed phase-1 CLI (current main, `765032c`+) and the
 landed eval engine library (`src/lib/evals/` — all unit-tested, gates green).
-Authoritative designs stay in `2026-09-04-eval-engine.md` (**rev 13**) and
+Authoritative designs stay in `2026-09-04-eval-engine.md` (**rev 16**) and
 `2026-09-02-phase-1-build.md` (**rev 9**, BUILD-READY); this document only orders the
 work and names the seams. Deferred-issues register:
 `.planning/reviews/DEFERRED-2026-09-04-phase1-landing.md`.
@@ -49,7 +49,7 @@ built-but-defective library code, in dependency order:
 
 `lib/evals/hygiene.ts` (pure, exit-code gated, no LLM, no network). **The check
 table (HYG1–HYG6), the `inspectHygiene` API, and the caller list are eval spec
-§9's — authoritative as of its rev 13; this plan orders the work and does not
+§9's — authoritative as of its rev 16; this plan orders the work and does not
 restate the contract. On any divergence, §9 wins.**
 (One implementation note that is sequencing, not contract: the secret/PII scan
 shares `receipt.ts`'s credential patterns — export them as a named API rather than
@@ -57,16 +57,14 @@ copying.) Wired into all of §9's call sites, because `share` is a one-time act 
 after it, edits flow automatically. Build-order notes per site:
 
 - **`validate <path|name>`** — new verb, `commands/validate.ts`, registered in
-  `cli.ts` like every other verb; runs hygiene alone, non-zero exit on any finding.
+  `cli.ts` like every other verb; runs hygiene alone, non-zero exit on any error finding; warnings print with exit 0.
   Built by the **eval side** (Ajay's call, 2026-09-04, resolving the audit fork).
 - **`connect`** — calls `inspectHygiene` on the **post-injection candidate assembled
   in memory** (frontmatter after `injectManagedFields`), **before** both the source
   write-back and `safeWrite` — so a first share is never rejected for the managed
   fields the tool is about to add, and a refusal leaves the author's SKILL.md
-  byte-identical. Extends the existing privilege-rejection gate. The
-  divergence-resolution writes (`resolveDivergence`, reached via
-  `connect --keep-source`/`--keep-repo`, `action: 'sync'`) are part of the covered
-  set: they too run hygiene before any team-repo write.
+  byte-identical. Extends the existing privilege-rejection gate. `connect --keep-source` (`action: 'sync'`) runs hygiene before its team-repo write;
+  `--keep-repo` writes nothing to the team repo and runs no inspection.
 - **`sync`'s reconcile path** — the automatic mirror of edited shared sources
   (`reconcileShared` in `src/commands/share.ts`, every `safeWrite` it issues with
   `action: 'sync'`; entered from `sync.ts`) runs hygiene on each changed skill
@@ -110,11 +108,11 @@ policy mints no `publish/` branch and opens no PR; **race test (walk D4)**: a
 skill that gains a planted secret between publish's preflight and `safeWrite`'s
 replay is refused — the replayed mutation's own hygiene call catches it.
 Per-code boundary fixtures
-(§9 rev 12): bidi / zero-width / confusable token (HYG2 hit) vs plain multilingual
+(§9 rev 16): bidi / zero-width / confusable token (HYG2 hit) vs plain multilingual
 prose (no hit); allowlisted vs denied extension, and a shebang file with an
 allowlisted extension (HYG4 hit); `metadata.author` email (no hit) vs third-party
 email (HYG3 hit); license triple equal-after-normalization (no hit) vs pairwise
-conflict (HYG5 hit); SKILL.md at the HYG6 cap boundary (±1 char); one binary file
+conflict (HYG5 hit); SKILL.md at the HYG6 cap boundary (20,000 code units: no finding; 20,001: a warning, not an error), plus a supplementary-character fixture proving the unit; one binary file
 (HYG4-only scope); an allowlisted-extension, non-shebang file whose `executable`
 flag alone trips HYG4 (rev 4 — proves the mode set is consulted); and one
 "hygiene fails → author's SKILL.md byte-identical" case.
@@ -122,7 +120,7 @@ flag alone trips HYG4 (rev 4 — proves the mode set is consulted); and one
 ### IE2 — `eval` runs locally (no team-repo writes)
 
 `commands/eval.ts` orchestrates: resolve skill in the fetched team clone by name or id
-(`lib/skills.ts`) → **hygiene first, hard-stop on failure** (fail-closed per eval spec
+(`lib/skills.ts`) → **hygiene first, hard-stop on error findings; size warning printed, run proceeds** (fail-closed per eval spec
 §6.0/§9; IE1 is a prerequisite, there is no skip state) → preflight (`agent.preflight`,
 records `cc_version`) → trigger evals over the endorsed catalog (`team.json global` +
 current project list, resolved to name+description lines) → three-arm execution
@@ -146,7 +144,7 @@ for the `eval` half only; `ui` stays forbidden until phase 2.
 staging excludes `evals/`+`fixtures/`; `ContaminationError` (already implemented)
 aborts the run. *Exit:* a real two-arm + triggers run against a real shared skill on
 one laptop, run tree inspectable; test that **no preflight or agent process starts
-after a hygiene failure**; §17 regression assertions — a malformed `command_matching`
+after a hygiene error**; a warning-only skill reaches preflight; §17 regression assertions — a malformed `command_matching`
 pattern fails that check and the run completes (§17.1); a failing `setup` hook aborts
 only its case (§17.9); nonzero agent exit with partial stream-json raises
 `AgentRunError` and takes the fresh-sandbox retry (§17.8); a null `skills` init list
@@ -194,7 +192,7 @@ subscription. Two deterministic jobs:
 
 - **Hygiene job — blocking, key-free, ships now.** On PRs touching `skills/**`, run
   `validate` per changed skill. Deterministic, no LLM, no secrets — it always runs
-  and always blocks, on forks and unconfigured repos alike.
+  and always blocks on error findings, on forks and unconfigured repos alike.
 - **Receipt check on publish PRs [default — veto cheap].** On `publish/`-prefixed
   branches — the live shape is `publish/<name>-<handle>-<id8>` (`publish.ts`, R2),
   so the trigger matches the `publish/` prefix, not a literal `publish/<name>` —
