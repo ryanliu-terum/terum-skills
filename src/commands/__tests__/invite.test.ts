@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { ScriptedPrompter, fakeGh, ghOnlyRunner, noGhRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
-import { run } from '../invite.js';
+import { joinCommand, run } from '../invite.js';
 
 describe('invite (§6 host scoping)', () => {
+  it('formats the setup command the owner sends to a teammate', () => {
+    expect(joinCommand('acme/team')).toBe('npx -y terum-skills@latest setup acme/team');
+  });
+
   it('parses real gh status headers for invited, existing, and repository-owner responses and prints one join block', async () => {
     const store = createConfigStore(await temporaryDirectory());
     await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'admin' }; });

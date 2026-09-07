@@ -14,7 +14,7 @@ import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { parseJson, teamSchema } from '../lib/schema.js';
 import { describeClone } from '../lib/teamRepo.js';
-import { run as invite } from './invite.js';
+import { joinCommand, run as invite } from './invite.js';
 import { run as share } from './share.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
 
@@ -36,7 +36,7 @@ export interface SetupArgs {
   verbs?: Partial<SetupVerbs>;
 }
 export type StepOutcome = 'done' | 'skipped' | 'printed';
-type Step = 'welcome' | 'github' | 'team' | 'actions' | 'invite' | 'community' | 'hook' | 'done';
+type Step = 'welcome' | 'role' | 'github' | 'team' | 'actions' | 'invite' | 'community' | 'hook' | 'done';
 export interface SetupResult {
   role: 'creator' | 'joiner';
   team: string;
@@ -48,8 +48,22 @@ export interface SetupResult {
 const WELCOME = [
   'Welcome to terum-skills.',
   "Your team's skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have.",
-  'This wizard will check GitHub, set up your team, share a first skill, invite teammates, and offer the session hook. Re-run it any time; finished steps are skipped.',
+  'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, shares a first skill, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.',
 ];
+
+export const ROLE_QUESTION = 'Create a team or join one?';
+export const CREATE_CHOICE = 'Create a new team';
+export const JOIN_CHOICE = 'Join an existing team';
+
+function joinHandoff(): string[] {
+  return [
+    'Ask the team owner to invite you, then run the command they send you.',
+    'It may look like:',
+    `  ${joinCommand('<org>/<repo>')}`,
+    "If you already have access, use that setup command with your team's repository.",
+    'No changes were made.',
+  ];
+}
 
 function failed(error: unknown, role: SetupResult['role'], teamName: string, remote: string, steps: SetupResult['steps']): Result<SetupResult> {
   return failure(error instanceof Error ? error.message : String(error), { role, team: teamName, remote, steps });
@@ -85,6 +99,26 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     for (const line of WELCOME) say(line);
     steps.welcome = args.quiet ? 'skipped' : 'printed';
 
+    // The fork the argument used to decide silently. A target names a team to join; a configured
+    // machine resumes its first team and is told how to reach another; only a fresh machine with no
+    // target is asked — before gh is probed, so a joiner is never offered `gh auth login`. The
+    // selection has no default on purpose (the one exception to "a question with a default"): a wrong
+    // "create" is a private GitHub repository, a wrong "join" is a re-run. "Join" is a success exit
+    // that writes nothing; the owner's command creates every piece of local state itself.
+    const before = await store.read();
+    const configured = args.target === undefined ? Object.entries(before.teams)[0] : undefined;
+    if (configured) say(`Resuming setup for team ${configured[0]}. To join another team, run the setup command its owner sent you.`);
+    else if (args.target === undefined) {
+      io.print('Creating a new team creates a private GitHub repository under your account.');
+      const choice = await io.select(ROLE_QUESTION, [CREATE_CHOICE, JOIN_CHOICE]);
+      steps.role = 'done';
+      if (choice === JOIN_CHOICE) {
+        for (const line of joinHandoff()) io.print(line);
+        steps.team = 'printed';
+        return success({ role: 'joiner', team: teamName, remote, steps });
+      }
+    }
+
     const gh = await detectOrOfferGh(io, runner);
     if (role === 'creator') {
       const error = creatorAuthenticationError(gh);
@@ -95,12 +129,10 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     else say('GitHub: gh is not installed; you will be asked to accept the invitation in your browser.');
     steps.github = 'done';
 
-    const before = await store.read();
     if (role === 'creator') {
       const configured = Object.entries(before.teams)[0];
       if (configured) {
         teamName = configured[0]; remote = configured[1].remote;
-        say(`Team ${teamName} is already configured on this machine.`);
         steps.team = 'skipped';
       } else {
         const result = await verbs.team({ kind: 'create', offerHook: false, config: store, runner }, io);
@@ -148,6 +180,27 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       }
     }
 
+    // Invite comes straight after the team exists (Ryan, 2026-09-06; overrides build-spec default 42
+    // "invites after the actions"): the owner's next question is who is on the team, and the block
+    // `invite` prints is what they send each teammate. Creator only, GitHub remotes only; blank skips;
+    // a re-run asks again. A failed Result stops the wizard here (spec §6.1 "Errors"); GitHub, not the
+    // wizard, decides whether this account may add collaborators to the carried-forward repository.
+    if (role === 'joiner') steps.invite = 'skipped';
+    else if (isGitHubRemote(remote)) {
+      const answer = await io.text('Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', '');
+      const logins = answer.split(/[\s,]+/).filter(Boolean);
+      if (logins.length === 0) steps.invite = 'skipped';
+      else {
+        const result = await verbs.invite({ logins, team: teamName, config: store, runner }, io);
+        if (!result.ok) return failed(result.error, role, teamName, remote, steps);
+        steps.invite = 'done';
+      }
+    } else {
+      const clean = stripRemoteCredentials(remote);
+      io.print(`Access to ${clean} is managed on the host; grant it there, then send teammates: ${joinCommand(clean)}`);
+      steps.invite = 'skipped';
+    }
+
     if (role === 'creator') {
       const root = AGENT_PATHS['claude-code'].global(args.home ?? homedir());
       const available = await unsharedSkills(root, await store.read());
@@ -170,22 +223,6 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     say('  terum-skills search <term>            — find a skill by name, description, or category');
     say('  terum-skills sync                     — pull updates and finish pending work');
     say('  terum-skills publish <skill>          — endorse a skill for the whole team');
-
-    if (role === 'joiner') steps.invite = 'skipped';
-    else if (isGitHubRemote(remote)) {
-      const answer = await io.text('GitHub logins to invite (space or comma separated; blank to skip)', '');
-      const logins = answer.split(/[\s,]+/).filter(Boolean);
-      if (logins.length === 0) steps.invite = 'skipped';
-      else {
-        const result = await verbs.invite({ logins, team: teamName, config: store, runner }, io);
-        if (!result.ok) return failed(result.error, role, teamName, remote, steps);
-        steps.invite = 'done';
-      }
-    } else {
-      const clean = stripRemoteCredentials(remote);
-      io.print(`Access to ${clean} is managed on the host; grant it there, then send teammates: npx -y terum-skills@latest setup ${clean}`);
-      steps.invite = 'skipped';
-    }
 
     const communityUrl = args.communityUrl ?? COMMUNITY_URL;
     if (communityUrl === '' || args.quiet) steps.community = 'skipped';

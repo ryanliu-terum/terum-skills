@@ -44,8 +44,10 @@ export async function run(args: InviteArgs, io: Prompter): Promise<Result<Invite
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
 }
 
+export function joinCommand(target: string): string { return `npx -y terum-skills@latest setup ${target}`; }
+
 export function slackBlock(ownerRepo: string): string {
-  return [`Share this with your teammate:`, '```', `npx -y terum-skills@latest setup ${ownerRepo}`, '', `Bare equivalent: npx -y terum-skills@latest team join ${ownerRepo}`, '```'].join('\n');
+  return [`Share this with your teammate:`, '```', joinCommand(ownerRepo), '', `Bare equivalent: npx -y terum-skills@latest team join ${ownerRepo}`, '```'].join('\n');
 }
 
 export function githubRepository(remote: string): string {
