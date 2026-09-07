@@ -1,14 +1,44 @@
 import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as setup from '../setup.js';
+import { installHook } from '../../lib/hook.js';
 import { run } from '../install.js';
 import { run as sync } from '../sync.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { allowedTools } from '../../lib/schema.js';
 
 describe('install (§6 refs)', () => {
+  it('13 suppresses connect during a non-interactive bootstrap with a shareable global skill', async () => {
+    const fixture = await bareTeam(); const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
+    const id = '31313131-3131-4131-8131-313131313131';
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    const local = join(home, '.claude', 'skills', 'local'); await mkdir(local, { recursive: true });
+    const bytes = '---\nname: local\ndescription: local skill\n---\n'; await writeFile(join(local, 'SKILL.md'), bytes);
+    const remote = 'https://github.com/acme/team.git'; const runner = mappedRunner(remote, fixture.bare, fakeGh('seed'));
+    const hook = { settingsFile: join(fixture.root, 'settings.json'), backupDir: join(fixture.root, 'backups') }; await installHook(hook);
+    const realSetup = setup.run;
+    // Resume the bootstrap after its durable join: identity and hook consent already happened.
+    // A fresh join still requires those prompts; this isolates the new connect suppression.
+    const spy = vi.spyOn(setup, 'run').mockImplementation(async (args, io) => {
+      await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+      await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'seed' }; });
+      const result = await realSetup(args, io);
+      expect(result).toMatchObject({ ok: true, value: { steps: { actions: 'skipped' } } });
+      return result;
+    });
+    try {
+      const io = new NonInteractivePrompter();
+      expect(await run({ ref: 'acme/team/sample', config: store, home, runner, hook }, io)).toMatchObject({ ok: true, value: [{ id }] });
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]![0]).toMatchObject({ quiet: true, offerConnect: false });
+      expect(io.asked).toEqual([]);
+      expect(await readFile(join(local, 'SKILL.md'), 'utf8')).toBe(bytes);
+    } finally { spy.mockRestore(); }
+  });
+
   it('says no team is configured — the one sentence every verb uses — for a bare ref on an unjoined machine, and refuses a missing member or project selector as a usage error', async () => {
     const store = createConfigStore(await temporaryDirectory());
     expect(await run({ ref: 'sample', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No team is configured. Run `team join` first.' });

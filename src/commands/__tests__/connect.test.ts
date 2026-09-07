@@ -622,12 +622,185 @@ async function pickerFixture(name = 'sample') {
   return { fixture, home, store, source, original };
 }
 
+async function batchFixture(names = ['a', 'b', 'c']) {
+  const fixture = await pickerFixture(names[0]);
+  const sources: Record<string, string> = {};
+  const originals: Record<string, string> = {};
+  for (const name of names) {
+    const source = join(fixture.home, '.claude', 'skills', name);
+    await mkdir(source, { recursive: true });
+    sources[name] = source;
+    originals[name] = `---\nname: ${name}\ndescription: stock source\n---\n`;
+    await writeFile(join(source, 'SKILL.md'), originals[name]!);
+  }
+  return { ...fixture, sources, originals };
+}
+
+describe('locked multi-connect', () => {
+  const menu = 'Connect a local skill folder to team team?';
+
+  it('1 connects selected skills with ordered commits, source and ledger identities, and a summary', async () => {
+    const { fixture, home, store, sources, originals } = await batchFixture();
+    const before = await originSha(fixture.bare);
+    const io = new ScriptedPrompter(['Connect a', 'Connect c', 'Done'], [true, true], true);
+    const result = await run({ home, config: store }, io);
+    expect(result).toMatchObject({ ok: true, value: { kind: 'batch', shared: [{ name: 'a' }, { name: 'c' }], declined: [], refused: [] } });
+    expect(io.offered).toEqual([['Connect a', 'Connect b', 'Connect c', 'Skip'], ['Connect b', 'Connect c', 'Done'], ['Connect b', 'Done']]);
+    expect(io.asked).toEqual([menu, 'Connect a?', menu, 'Connect c?', menu]);
+    const ledger = (await store.read()).shared;
+    expect(Object.keys(ledger)).toHaveLength(2);
+    const ids = [];
+    for (const name of ['a', 'c']) {
+      const bytes = await readFile(join(sources[name]!, 'SKILL.md'), 'utf8');
+      const id = /id: ([0-9a-f-]{36})/.exec(bytes)![1]!;
+      ids.push(id);
+      expect(ledger[id]).toMatchObject({ source: sources[name], team: 'team' });
+      expect(await git(['show', `main:skills/${name}/SKILL.md`], fixture.bare)).toBe(bytes);
+    }
+    expect(new Set(ids).size).toBe(2);
+    expect(await git(['log', '--reverse', '--format=%s', `${before}..main`], fixture.bare)).toBe('seed: connect a\nseed: connect c\n');
+    expect(await readFile(join(sources.b!, 'SKILL.md'), 'utf8')).toBe(originals.b);
+    expect(io.lines).toContain('Connected 2 skills to team team: a, c.');
+  });
+
+  it('2 keeps a declined source offered and untouched while continuing to another skill', async () => {
+    const { home, store, sources, originals } = await batchFixture();
+    const io = new ScriptedPrompter(['Connect a', 'Connect b', 'Connect c', 'Done'], [true, false, true], true);
+    expect(await run({ home, config: store }, io)).toMatchObject({ ok: true, value: { shared: [{ name: 'a' }, { name: 'c' }], declined: ['b'] } });
+    expect(io.offered[2]).toEqual(['Connect b', 'Connect c', 'Done']);
+    expect(await readFile(join(sources.b!, 'SKILL.md'), 'utf8')).toBe(originals.b);
+    expect(io.lines).toContain('Not connected: b (declined).');
+  });
+
+  it('3 refuses HYG4 before mutation and continues to the next skill', async () => {
+    const { fixture, home, store, sources, originals } = await batchFixture();
+    await writeFile(join(sources.b!, 'notes.sh'), '#!/bin/sh\nplain notes');
+    const io = new ScriptedPrompter(['Connect a', 'Connect b', 'Connect c', 'Done'], [true, true], true);
+    expect(await run({ home, config: store }, io)).toMatchObject({ ok: true, value: { shared: [{ name: 'a' }, { name: 'c' }], refused: [{ name: 'b', reason: 'hygiene: File begins with a shebang' }] } });
+    expect(io.lines).toContain('HYG4 notes.sh: File begins with a shebang.');
+    expect(io.lines).toContain('Not connected: b (hygiene: File begins with a shebang).');
+    expect(await readFile(join(sources.b!, 'SKILL.md'), 'utf8')).toBe(originals.b);
+    expect(await readFile(join(sources.b!, 'notes.sh'), 'utf8')).toBe('#!/bin/sh\nplain notes');
+    expect(await git(['ls-tree', '--name-only', 'main:skills'], fixture.bare)).not.toContain('b\n');
+    expect(io.asked).toEqual([menu, 'Connect a?', menu, menu, 'Connect c?', menu]);
+  });
+
+  it('4 re-reads config and inventories new folders before every menu', async () => {
+    const { home, store, sources } = await batchFixture();
+    const config = { ...store, update: async (mutate: Parameters<typeof store.update>[0]) => {
+      const result = await store.update(mutate);
+      if (Object.values(result.shared).some((entry) => entry.source === sources.a)) {
+        await store.update((fresh) => {
+          fresh.shared['11111111-1111-4111-8111-111111111111'] = { source: sources.b!, team: 'team', baseline: '' };
+          fresh.placements[sources.c!] = { id: '22222222-2222-4222-8222-222222222222', team: 'team', scope: { kind: 'global' }, version: null, fingerprint: '', placed_at: '' };
+        });
+        const d = join(home, '.claude', 'skills', 'd'); await mkdir(d, { recursive: true });
+        await writeFile(join(d, 'SKILL.md'), '---\nname: d\ndescription: added between menus\n---\n');
+      }
+      return result;
+    } };
+    const io = new ScriptedPrompter(['Connect a', 'Done'], [true], true);
+    expect((await run({ home, config }, io)).ok).toBe(true);
+    expect(io.offered).toEqual([['Connect a', 'Connect b', 'Connect c', 'Skip'], ['Connect d', 'Done']]);
+  });
+
+  it('5 freezes duplicate labels and refuses a preflight collision without changing the second source', async () => {
+    const { fixture, home, store, original } = await pickerFixture();
+    const cwd = join(fixture.root, 'project'); const other = join(cwd, '.claude', 'skills', 'sample');
+    await mkdir(other, { recursive: true }); await mkdir(join(cwd, '.git'));
+    await writeFile(join(other, 'SKILL.md'), original);
+    const io = new ScriptedPrompter(['Connect sample (global)', 'Connect sample (project)', 'Done'], [true], true);
+    expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { shared: [{ name: 'sample' }], refused: [{ name: 'sample', reason: 'Skill name sample already exists in team team; choose a unique name.' }] } });
+    expect(io.offered).toEqual([['Connect sample (global)', 'Connect sample (project)', 'Skip'], ['Connect sample (project)', 'Done'], ['Connect sample (project)', 'Done']]);
+    expect(await readFile(join(other, 'SKILL.md'), 'utf8')).toBe(original);
+    expect(io.asked).toEqual([menu, 'Connect sample?', menu, menu]);
+  });
+
+  it('6 auto-exits after the sole candidate without offering Done', async () => {
+    const { home, store } = await pickerFixture();
+    const io = new ScriptedPrompter(['Connect sample'], [true], true);
+    expect(await run({ home, config: store }, io)).toMatchObject({ ok: true, value: { kind: 'batch', shared: [{ name: 'sample' }] } });
+    expect(io.offered).toEqual([['Connect sample', 'Skip']]);
+    expect(io.lines.at(-1)).toBe('Connected 1 skill to team team: sample.');
+  });
+
+  it('7 returns the durable partial batch when the second menu closes', async () => {
+    const { fixture, home, store, sources, originals } = await batchFixture();
+    const io = new ScriptedPrompter(['Connect a'], [true], true);
+    expect(await run({ home, config: store }, io)).toMatchObject({ ok: false, value: { kind: 'batch', shared: [{ name: 'a' }] } });
+    expect(io.lines.at(-2)).toMatch(/^Stopped: /);
+    expect(io.lines.at(-1)).toBe('Connected 1 skill to team team: a.');
+    expect(Object.values((await store.read()).shared).map((entry) => entry.source)).toEqual([sources.a]);
+    expect(await git(['show', 'main:skills/a/SKILL.md'], fixture.bare)).toBe(await readFile(join(sources.a!, 'SKILL.md'), 'utf8'));
+    expect(await readFile(join(sources.c!, 'SKILL.md'), 'utf8')).toBe(originals.c);
+    expect(io.asked).toEqual([menu, 'Connect a?', menu]);
+  });
+
+  it('8 reports a mutated source after a rejected push and stops before C', async () => {
+    const { fixture, home, store, sources, originals } = await batchFixture();
+    let pushes = 0;
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'push' && ++pushes > 1) return { code: 1, stdout: '', stderr: 'permission denied' };
+      return next();
+    });
+    const io = new ScriptedPrompter(['Connect a', 'Connect b', 'Connect c'], [true, true, true], true);
+    const result = await run({ home, config: store, runner }, io);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`b's SKILL.md at ${sources.b}`), value: { shared: [{ name: 'a' }] } });
+    expect(io.lines.join('\n')).toContain('the team repository was not changed. Fix the cause');
+    expect(await readFile(join(sources.b!, 'SKILL.md'), 'utf8')).toContain('metadata:');
+    expect(await readFile(join(sources.b!, 'SKILL.md'), 'utf8')).toContain('license: UNLICENSED');
+    expect(await git(['ls-tree', '--name-only', 'main:skills'], fixture.bare)).toBe('.gitkeep\na\n');
+    expect(Object.values((await store.read()).shared).map((entry) => entry.source)).toEqual([sources.a]);
+    expect(await readFile(join(sources.c!, 'SKILL.md'), 'utf8')).toBe(originals.c);
+    expect(io.asked).toEqual([menu, 'Connect a?', menu, 'Connect b?']);
+  });
+
+  it('9 reports pushed identity and team when the local ledger write fails', async () => {
+    const { fixture, home, store, sources } = await batchFixture();
+    let writes = 0;
+    const config = { ...store, update: async (mutate: Parameters<typeof store.update>[0]) => {
+      if (++writes === 2) throw new Error('ledger unavailable');
+      return store.update(mutate);
+    } };
+    const io = new ScriptedPrompter(['Connect a', 'Connect b', 'Connect c'], [true, true, true], true);
+    const result = await run({ home, config }, io);
+    const bytes = await git(['show', 'main:skills/b/SKILL.md'], fixture.bare);
+    const id = /id: ([0-9a-f-]{36})/.exec(bytes)![1]!;
+    expect(result).toMatchObject({ ok: false, error: `Stopped: ledger unavailable. b was pushed to team team as ${id} but is not tracked on this machine; run \`npx -y terum-skills@latest sync\` and, if it is still not listed by \`ls --local\`, report this — the local ledger entry is missing.`, value: { shared: [{ name: 'a' }] } });
+    expect((await store.read()).shared[id]).toBeUndefined();
+    expect(Object.values((await store.read()).shared).map((entry) => entry.source)).toEqual([sources.a]);
+    expect(io.asked).toEqual([menu, 'Connect a?', menu, 'Connect b?']);
+  });
+
+  it('10 keeps two distinct skill UUIDs stable across four push attempts with one commit per skill', async () => {
+    const { fixture, home, store, sources } = await batchFixture(['a', 'b']);
+    const ids: string[] = [];
+    const runner = wrapRunner(systemRunner, async (command, args, options, next) => {
+      if (command === 'git' && args[0] === 'push') {
+        const name = ids.length < 2 ? 'a' : 'b';
+        ids.push(/id: ([0-9a-f-]{36})/.exec(await readFile(join(options!.cwd!, 'skills', name, 'SKILL.md'), 'utf8'))![1]!);
+        if (ids.length % 2 === 1) return { code: 1, stdout: '', stderr: 'non-fast-forward; fetch first' };
+      }
+      return next();
+    });
+    const io = new ScriptedPrompter(['Connect a', 'Connect b'], [true, true], true);
+    expect((await run({ home, config: store, runner }, io)).ok).toBe(true);
+    expect(ids).toHaveLength(4); expect(ids[0]).toBe(ids[1]); expect(ids[2]).toBe(ids[3]); expect(ids[0]).not.toBe(ids[2]);
+    expect(Object.keys((await store.read()).shared).sort()).toEqual([ids[0], ids[2]].sort());
+    for (const [index, name] of ['a', 'b'].entries()) {
+      expect(await readFile(join(sources[name]!, 'SKILL.md'), 'utf8')).toContain(`id: ${ids[index * 2]}`);
+      expect(await git(['show', `main:skills/${name}/SKILL.md`], fixture.bare)).toContain(`id: ${ids[index * 2]}`);
+      expect((await git(['log', '--format=%s', 'main'], fixture.bare)).split('\n').filter((message) => message === `seed: connect ${name}`)).toHaveLength(1);
+    }
+  });
+});
+
 describe('issue 9 connect picker', () => {
   it.each(['sample', 'skip'])('shares %s through selection and a separate consent question', async (name) => {
     const { fixture, home, store, source } = await pickerFixture(name);
     const io = new ScriptedPrompter([`Connect ${name}`], [true], true);
     const result = await run({ home, config: store }, io);
-    expect(result).toMatchObject({ ok: true, value: { name } });
+    expect(result).toMatchObject({ ok: true, value: { kind: 'batch', shared: [{ name }] } });
     expect(io.offered).toEqual([[`Connect ${name}`, 'Skip']]);
     expect(io.asked).toEqual(['Connect a local skill folder to team team?', `Connect ${name}?`]);
     expect(await git(['show', `main:skills/${name}/SKILL.md`], fixture.bare)).toBe(await readFile(join(source, 'SKILL.md'), 'utf8'));
@@ -710,7 +883,7 @@ describe('project connect discovery', () => {
     const projectRoot = join(cwd, '.claude', 'skills'); await mkdir(projectRoot, { recursive: true }); await mkdir(join(cwd, '.git'));
     const projectSource = join(projectRoot, 'sample'); await rename(source, projectSource);
     const io = new ScriptedPrompter(['Connect sample'], [true], true);
-    expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { name: 'sample' } });
+    expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { kind: 'batch', shared: [{ name: 'sample' }] } });
     expect(io.offered).toEqual([['Connect sample', 'Skip']]);
     expect(io.asked).toEqual(['Connect a local skill folder to team team?', 'Connect sample?']);
     expect(Object.values((await store.read()).shared)).toEqual([expect.objectContaining({ source: projectSource })]);
@@ -721,9 +894,9 @@ describe('project connect discovery', () => {
     const { fixture, home, store, source, original } = await pickerFixture(); const cwd = join(fixture.root, 'project');
     const projectSource = join(cwd, '.claude', 'skills', 'sample'); await mkdir(projectSource, { recursive: true }); await mkdir(join(cwd, '.git'));
     const projectBytes = original.replace('stock source', 'project source'); await writeFile(join(projectSource, 'SKILL.md'), projectBytes);
-    const io = new ScriptedPrompter([`Connect sample (${scope})`], [true], true);
-    expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { name: 'sample' } });
-    expect(io.offered).toEqual([['Connect sample (global)', 'Connect sample (project)', 'Skip']]);
+    const io = new ScriptedPrompter([`Connect sample (${scope})`, 'Done'], [true], true);
+    expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { kind: 'batch', shared: [{ name: 'sample' }] } });
+    expect(io.offered).toEqual([['Connect sample (global)', 'Connect sample (project)', 'Skip'], [`Connect sample (${scope === 'global' ? 'project' : 'global'})`, 'Done']]);
     const selected = scope === 'global' ? source : projectSource;
     expect(Object.values((await store.read()).shared)).toEqual([expect.objectContaining({ source: selected })]);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(await readFile(join(selected, 'SKILL.md'), 'utf8'));

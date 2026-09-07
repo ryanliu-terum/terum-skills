@@ -73,7 +73,7 @@ terminal; the CLI will ask you a question the session cannot answer.*
 
 | Verb | Free dry run first | Command to hand over |
 |---|---|---|
-| `connect` (no path) | run it: the CLI lists every shareable folder under both roots and prints the exact command | `npx -y terum-skills@latest connect --team <team>` |
+| `connect` (no path) | run it: the CLI lists every shareable folder under both roots and prints the exact command | `npx -y terum-skills@latest connect --team <team>` — run it from the project whose skills you mean |
 | `connect <abs-path>` | run it: it refreshes the clone, runs hygiene, prints the `Will add:` card, then fails at `Connect <name>?`; nothing is written. Show the findings and the card | `npx -y terum-skills@latest connect <abs-path>` |
 | `connect --forget <id>`, `--keep-source <id>`, `--keep-repo <id>` | none | the same command |
 | `sync --prune` | none (`sync prune needs an interactive terminal.`) | `npx -y terum-skills@latest sync --prune` |

@@ -64,7 +64,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       // built on team, which is built on this module.
       if (!(error instanceof NotJoinedError) || Object.keys(config.teams).length > 0) throw error;
       const { run: setup } = await import('./setup.js');
-      const bootstrapped = await setup({ target: error.remote.replace(/^github\.com\//, ''), quiet: true, config: store, runner, home: args.home, hook: args.hook }, io);
+      const bootstrapped = await setup({ target: error.remote.replace(/^github\.com\//, ''), quiet: true, offerConnect: false, config: store, runner, home: args.home, hook: args.hook }, io);
       if (!bootstrapped.ok) throw new Error(bootstrapped.error);
       return bootstrapped.value.team;
     });
