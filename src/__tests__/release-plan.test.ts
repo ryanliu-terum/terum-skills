@@ -34,7 +34,7 @@ function world(version = '0.1.1', published = false, tagged = false, released = 
     tags: [{ name: 'v0.1.0', commit: LEGACY_SHA }, ...(tagged ? [{ name: `v${version}`, commit: SHA }] : [])],
     releases: [{ tag: 'v0.1.0' }, ...(released ? [{ tag: `v${version}` }] : [])],
     registry: {
-      versions: { '0.1.0': { integrity: 'sha512-legacy' }, ...(published ? { [version]: { integrity: INTEGRITY, attestations: true } } : {}) },
+      versions: { '0.1.0': { integrity: 'sha512-legacy' }, ...(published ? { [version]: { integrity: INTEGRITY, attestations: true, gitHead: SHA } } : {}) },
       distTags: { latest: published && !version.includes('-') ? version : '0.1.0', ...(published && version.includes('-') ? { next: version } : {}) },
     },
   };
@@ -57,8 +57,8 @@ async function invoke(obs: Observations | Observations[], args: string[], live =
   );
 }
 
-async function planned(obs: Observations, state: string, reason: string, version = obs.package.version, sha = SHA): Promise<string> {
-  const result = await invoke(obs, ['--plan', '--version', version, '--sha', sha, '--github-output']);
+async function planned(obs: Observations, state: string, reason: string, version = obs.package.version, sha = SHA, extra: string[] = []): Promise<string> {
+  const result = await invoke(obs, ['--plan', '--version', version, '--sha', sha, '--github-output', ...extra]);
   expect(result.stderr).toBe('');
   expect(result.code).toBe(state === 'refuse' || state === 'observation-error' ? 1 : 0);
   expect(result.stdout.split('\n')).toContain(`state=${state}`);
@@ -81,8 +81,14 @@ describe('release-plan CLI (R.5, hermetic observations)', () => {
     for (const line of ['recovery=false', 'dist_tag=latest', 'previous_tag=v0.1.0', 'mark_latest=true']) expect(output.split('\n')).toContain(line);
   });
 
-  it('2: recovers a publication with attestation but no tag', async () => {
+  it('2: recovers a publication whose gitHead matches but has no tag', async () => {
     await planned(world('0.1.1', true), 'tag-only', `v0.1.1 is missing; tag ${SHA}`);
+  });
+  it('2: an attestation alone is advisory, never source evidence for a tag', async () => {
+    const obs = world();
+    obs.registry = { versions: { '0.1.1': { integrity: INTEGRITY, attestations: true } }, distTags: {} };
+    const output = await planned(obs, 'refuse', 'incident decision');
+    expect(output).toContain('a provenance attestation is present; that is advisory, not source evidence');
   });
   it('3: recovers a missing GitHub Release', async () => {
     await planned(world('0.1.1', true, true), 'release-only', 'GitHub Release missing');
@@ -144,7 +150,7 @@ describe('release-plan CLI (R.5, hermetic observations)', () => {
     const obs = world('0.2.0-rc.10', true, true, true);
     obs.tags.push({ name: 'v0.2.0-rc.9', commit: OTHER });
     obs.releases = [{ tag: 'v0.1.0' }, { tag: 'v0.2.0-rc.9' }, { tag: 'v0.2.0-rc.10' }];
-    obs.registry = { versions: { '0.1.0': { integrity: 'legacy' }, '0.2.0-rc.9': { integrity: 'older', gitHead: OTHER }, '0.2.0-rc.10': { integrity: INTEGRITY, attestations: true } }, distTags: { latest: '0.1.0', next: '0.2.0-rc.10' } };
+    obs.registry = { versions: { '0.1.0': { integrity: 'legacy' }, '0.2.0-rc.9': { integrity: 'older', gitHead: OTHER }, '0.2.0-rc.10': { integrity: INTEGRITY, attestations: true, gitHead: SHA } }, distTags: { latest: '0.1.0', next: '0.2.0-rc.10' } };
     await audited(obs, 0, 'release state consistent');
   });
   it('11: compares minor versions numerically', async () => {
@@ -152,10 +158,26 @@ describe('release-plan CLI (R.5, hermetic observations)', () => {
     obs.tags.push({ name: 'v0.9.0', commit: OTHER });
     expect(await planned(obs, 'publish', 'is new')).toContain('previous_tag=v0.9.0\n');
   });
-  it('12: does not mark a stable backfill Latest', async () => {
+  it('12: refuses a stable backfill under the default latest dist-tag', async () => {
     const obs = world();
-    obs.registry = { versions: { '0.2.0': { integrity: 'newer', attestations: true } }, distTags: { latest: '0.2.0' } };
-    expect(await planned(obs, 'publish', 'is new')).toContain('mark_latest=false\n');
+    obs.registry = { versions: { '0.2.0': { integrity: 'newer', attestations: true, gitHead: OTHER } }, distTags: { latest: '0.2.0' } };
+    const output = await planned(obs, 'refuse', 'older than published stable 0.2.0; publishing it under latest would move the channel backwards');
+    expect(output).toContain('dist_tag');
+  });
+  it('12: publishes a stable backfill under an explicit dist-tag and never marks it Latest', async () => {
+    const obs = world();
+    obs.registry = { versions: { '0.2.0': { integrity: 'newer', attestations: true, gitHead: OTHER } }, distTags: { latest: '0.2.0' } };
+    const output = await planned(obs, 'publish', 'is new', '0.1.1', SHA, ['--dist-tag', 'previous']);
+    for (const line of ['dist_tag=previous', 'mark_latest=false']) expect(output.split('\n')).toContain(line);
+  });
+  it('12: honours an explicit dist-tag for the newest stable and for a prerelease', async () => {
+    expect((await planned(world(), 'publish', 'is new', '0.1.1', SHA, ['--dist-tag', 'beta'])).split('\n')).toContain('dist_tag=beta');
+    expect((await planned(world('0.2.0-rc.1'), 'publish', 'is new', '0.2.0-rc.1', SHA, ['--dist-tag', 'canary'])).split('\n')).toContain('dist_tag=canary');
+  });
+  it.each(['1.2.3', 'v1', 'bad tag', '-x', ''])('12: refuses dist-tag %j before evaluating the world', async (tag) => {
+    const obs = world();
+    obs.registry = { error: 'must not be consulted' };
+    await planned(obs, 'refuse', 'is not a valid npm dist-tag', '0.1.1', SHA, ['--dist-tag', tag]);
   });
   it.each(['registry', 'releases'] as const)('13: %s unavailable is an observation error, never publish', async (field) => {
     const obs = world();
@@ -164,8 +186,9 @@ describe('release-plan CLI (R.5, hermetic observations)', () => {
   });
 
   it.each([
-    { label: 'matching digest and attestation', pub: { integrity: INTEGRITY, attestations: true }, code: 0, reason: `served: integrity ${INTEGRITY}` },
-    { label: 'missing attestation after all polls', pub: { integrity: INTEGRITY }, code: 1, reason: 'without a provenance attestation' },
+    { label: 'matching digest, gitHead and attestation', pub: { integrity: INTEGRITY, attestations: true, gitHead: SHA }, code: 0, reason: `served: integrity ${INTEGRITY}` },
+    { label: 'missing attestation after all polls', pub: { integrity: INTEGRITY, gitHead: SHA }, code: 1, reason: 'without a provenance attestation' },
+    { label: 'attestation without gitHead, immediately', pub: { integrity: INTEGRITY, attestations: true }, code: 1, reason: `served without a gitHead or sourceCommit equal to ${SHA} (a provenance attestation is present; that is advisory` },
     { label: 'conflicting source', pub: { integrity: INTEGRITY, attestations: true, gitHead: OTHER }, code: 1, reason: `source ${OTHER} != ${SHA}` },
   ])('14: verifies $label', async ({ pub, code, reason }) => {
     const obs = world();
@@ -190,7 +213,7 @@ describe('release-plan CLI (R.5, hermetic observations)', () => {
     const result = await invoke([unavailable, world('0.1.1', true)], ['--verify-publication', '--version', '0.1.1', '--sha', SHA, '--integrity', INTEGRITY]);
     expect(result.code).toBe(0);
     expect(result.stderr).toBe('');
-    expect(result.stdout).toBe(`verified: 0.1.1 served: integrity ${INTEGRITY}, provenance true, gitHead absent\n`);
+    expect(result.stdout).toBe(`verified: 0.1.1 served: integrity ${INTEGRITY}, provenance true, gitHead ${SHA}\n`);
   });
   it('14: repeats the last sequenced observation until polls are exhausted', async () => {
     const unavailable = world();
@@ -217,17 +240,22 @@ describe('release-plan CLI (R.5, hermetic observations)', () => {
     obs.registry = { versions: { '0.1.0': { integrity: 'legacy' }, '0.1.1': { integrity: INTEGRITY } }, distTags: { latest: '0.1.1' } };
     await audited(obs, 1, 'FAIL source-unverified v0.1.1');
   });
+  it('15: an attestation without gitHead is still source-unverified, and says so', async () => {
+    const obs = world('0.1.1', true, true, true);
+    obs.registry = { versions: { '0.1.0': { integrity: 'legacy' }, '0.1.1': { integrity: INTEGRITY, attestations: true } }, distTags: { latest: '0.1.1' } };
+    await audited(obs, 1, 'FAIL source-unverified v0.1.1 (a provenance attestation is present; that is advisory, not source evidence)');
+  });
   it('15: reports release-missing', async () => {
     await audited(world('0.1.1', true, true), 1, 'FAIL release-missing v0.1.1');
   });
   it('15: reports latest rolled back behind the highest stable tag', async () => {
     const obs = world('0.1.1', true, true, true);
-    obs.registry = { versions: { '0.1.0': { integrity: 'legacy' }, '0.1.1': { integrity: INTEGRITY, attestations: true } }, distTags: { latest: '0.1.0' } };
+    obs.registry = { versions: { '0.1.0': { integrity: 'legacy' }, '0.1.1': { integrity: INTEGRITY, attestations: true, gitHead: SHA } }, distTags: { latest: '0.1.0' } };
     await audited(obs, 1, 'FAIL channel-mismatch highest stable tag v0.1.1 vs dist-tag latest 0.1.0');
   });
   it('15: reports next ahead of prerelease tags', async () => {
     const obs = world('0.2.0-rc.1', true, true, true);
-    obs.registry = { versions: { '0.1.0': { integrity: 'legacy' }, '0.2.0-rc.1': { integrity: INTEGRITY, attestations: true } }, distTags: { latest: '0.1.0', next: '0.2.0-rc.2' } };
+    obs.registry = { versions: { '0.1.0': { integrity: 'legacy' }, '0.2.0-rc.1': { integrity: INTEGRITY, attestations: true, gitHead: SHA } }, distTags: { latest: '0.1.0', next: '0.2.0-rc.2' } };
     await audited(obs, 1, 'FAIL channel-mismatch highest prerelease tag v0.2.0-rc.1 vs dist-tag next 0.2.0-rc.2');
   });
   it.each(['v1.2', 'vfoo'])('15: reports malformed-ref %s', async (name) => {
