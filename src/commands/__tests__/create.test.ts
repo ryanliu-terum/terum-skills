@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join as pathJoin } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
-import { create as rawCreate, WORKFLOW } from '../team.js';
+import { create as rawCreate, workflowUpdate, WORKFLOW } from '../team.js';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, exists, fakeGh, git, mappedRunner, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
 
@@ -18,16 +18,33 @@ async function emptyBare(): Promise<{ root: string; bare: string }> {
 }
 
 describe('team create (§6)', () => {
-  it('scaffolds a least-privilege, executable README and publish-comment workflow', () => {
+  it('scaffolds a least-privilege workflow with deterministic hygiene and receipt gates', () => {
     expect(WORKFLOW.split('\n').find((line) => line.includes('--jq'))).toBe('          existing=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate --jq \'.[] | select(.body | contains("<!-- terum-skills:pr-comment -->")) | .id\' | head -n 1)');
     const workflow = YAML.parse(WORKFLOW) as { jobs: Record<string, { if?: string; permissions?: Record<string, string>; steps: Array<{ run?: string; with?: Record<string, unknown> }> }> };
-    expect(Object.keys(workflow.jobs)).toEqual(['readme', 'publish-comment']);
+    expect(Object.keys(workflow.jobs)).toEqual(['hygiene', 'receipt-check', 'readme', 'publish-comment']);
+    expect(workflow.jobs.hygiene?.steps[0]?.with?.['fetch-depth']).toBe(0);
+    expect(WORKFLOW).toContain('git diff --name-only origin/${{ github.base_ref }}...HEAD -- skills/');
+    expect(WORKFLOW).toContain('npx -y terum-skills@latest validate "skills/$name" --cwd .');
+    expect(workflow.jobs['receipt-check']?.if).toBe("github.event_name == 'pull_request' && startsWith(github.head_ref, 'publish/')");
+    expect(WORKFLOW).toContain('npx -y terum-skills@latest receipt-check --base origin/main');
     expect(workflow.jobs.readme?.if).toBe("github.event_name == 'push'");
     expect(workflow.jobs.readme?.permissions).toEqual({ contents: 'write' });
     expect(workflow.jobs.readme?.steps.some((step) => step.run?.includes('chore: regenerate skills README'))).toBe(true);
     expect(workflow.jobs['publish-comment']?.permissions).toEqual({ contents: 'read', 'pull-requests': 'write' });
     expect(workflow.jobs['publish-comment']?.steps[0]?.with?.['persist-credentials']).toBe(false);
     expect(WORKFLOW).toContain('npx -y terum-skills@latest');
+  });
+
+  it('prints an exact workflow scaffold for manual migration and never writes an existing workflow', async () => {
+    const root = await temporaryDirectory();
+    const existing = pathJoin(root, 'terum-skills.yml');
+    await writeFile(existing, 'leave this alone\n');
+    const io = new ScriptedPrompter();
+    expect(await workflowUpdate({ print: true }, io)).toMatchObject({ ok: true, value: { workflow: WORKFLOW } });
+    const output = io.lines.join('\n');
+    expect(output.slice(0, WORKFLOW.length)).toBe(WORKFLOW);
+    expect(io.lines.at(-1)).toBe('Commit this to .github/workflows/terum-skills.yml in an ordinary PR by someone with push access.');
+    expect(await readFile(existing, 'utf8')).toBe('leave this alone\n');
   });
 
   it('offers the session hook directly unless setup explicitly suppresses it', async () => {
