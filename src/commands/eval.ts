@@ -1,12 +1,13 @@
 import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
-import { mkdir, readFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
+import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
 import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
 import { buildReceipt, receiptPath } from '../lib/evals/receipt.js';
@@ -32,6 +33,9 @@ export interface EvalArgs extends WithForm {
   judgeModel?: string;
   working?: boolean;
   commit?: boolean;
+  noGen?: boolean;
+  gen?: boolean;
+  save?: boolean;
   team?: string;
   config?: ConfigStore;
   runner?: Runner;
@@ -54,6 +58,10 @@ export interface EvalResult {
 export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResult>> {
   try {
     if (args.working && args.commit) return failure('--working --commit is refused: receipts pin committed skill trees only.');
+    if (args.save && !args.working) return failure('--save is only available with --working; generated assets may only be saved to your shared source.');
+    // A named case asserts an authored expectation; forcing regeneration contradicts it, and a
+    // generated case sharing the stem would silently evaluate something else (review P2).
+    if (args.gen && args.case !== undefined) return failure('--gen cannot be combined with --case: naming a case asserts an authored expectation, and generation would replace the set it selects from.');
     if (args.triggersOnly && args.executionOnly) return failure('--triggers-only and --execution-only cannot be used together.');
     const k = args.k ?? 3;
     if (!Number.isInteger(k) || k < 1) return failure('--k must be a positive integer.');
@@ -106,14 +114,52 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     await mkdir(transcriptDir, { recursive: true, mode: 0o700 });
     await mkdir(scratch, { recursive: true, mode: 0o700 });
 
-    const records = await skillRecords(clone, teamName);
-    const catalog = await endorsedCatalog(team, records, record.id, runner);
+    const wantsCases = !args.triggersOnly;
+    const wantsTriggers = !args.executionOnly;
+    const authoredCasesDir = join(candidateDir, 'evals', 'cases');
+    const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
+    const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
+    const authoredSelected = args.case === undefined ? authoredCaseFiles : authoredCaseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
+    // A named case is an authored assertion; it intentionally never causes a model call.
+    if (wantsCases && args.case !== undefined && authoredSelected.length === 0) return failure(`No eval case named ${args.case} for ${record.name}.`);
+    const generateCases = wantsCases && !args.noGen && (Boolean(args.gen) || authoredCaseFiles.length === 0);
+    const generateTriggers = wantsTriggers && !args.noGen && (Boolean(args.gen) || !authoredTrigger);
+    let generated: GeneratedAssets = {};
+    if (generateCases || generateTriggers) {
+      const records = await skillRecords(clone, teamName);
+      const catalog = await endorsedCatalog(team, records, record.id, runner);
+      const built = await generate({
+        agent: args.agent ?? systemAgent,
+        skill: candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '',
+        files: [...candidateFiles.files.keys()].sort(),
+        catalog,
+        model,
+        engineVersion: packageVersion() ?? 'unknown',
+        now: runAt,
+        cases: generateCases,
+        triggers: generateTriggers,
+      });
+      if (!built.ok) return failure(built.error);
+      generated = built.value;
+      await writeGeneratedAssets(join(runDir, 'generated'), generated);
+      if (args.save) {
+        const shared = config.shared[record.id]!;
+        const saved = await saveGeneratedAssets(shared.source, generated);
+        if (!saved.ok) return saved;
+      }
+      if (args.commit) return failure(`--commit is refused for generated eval assets. Review ${join(runDir, 'generated')}, save or copy the reviewed files into the skill's evals/, publish them, then rerun eval --commit at the committed version.`);
+    }
+
+    const casesDir = generated.cases === undefined ? authoredCasesDir : join(runDir, 'generated', 'cases');
+    const triggerPath = generated.triggers === undefined ? join(candidateDir, 'evals', 'triggers.yaml') : join(runDir, 'generated', 'triggers.yaml');
     let triggers: TriggerSummary | null = null;
-    if (!args.executionOnly) {
-      const source = await optionalText(join(candidateDir, 'evals', 'triggers.yaml'));
+    if (wantsTriggers) {
+      const source = await optionalText(triggerPath);
       if (source !== undefined) {
         const parsed = parseTriggers(source);
         if (!parsed.ok) return failure(parsed.error);
+        const records = await skillRecords(clone, teamName);
+        const catalog = await endorsedCatalog(team, records, record.id, runner);
         triggers = await runTriggerEvals(args.agent ?? systemAgent, { skillName: record.name, catalog, spec: parsed.value, model });
       }
     }
@@ -124,9 +170,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const caseNames: string[] = [];
     const rng = makeRng(0);
     let expectedRows = 0;
-    if (!args.triggersOnly) {
-      const casesDir = join(candidateDir, 'evals', 'cases');
-      const caseFiles = (await optionalDirectory(casesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
+    if (wantsCases) {
+      const caseFiles = generated.cases === undefined ? authoredCaseFiles : (await optionalDirectory(casesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
       const selected = args.case === undefined ? caseFiles : caseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
       if (args.case !== undefined && selected.length === 0) return failure(`No eval case named ${args.case} for ${record.name}.`);
       caseNames.push(...selected.map((file) => file.replace(/\.ya?ml$/i, '')));
@@ -153,7 +198,16 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       cc_version: preflight.value.ccVersion, model, judge_model: args.judgeModel ?? model,
       expected_rows: expectedRows,
       arm_skill_lists: Object.fromEntries([...new Set(arms.map((arm) => arm.arm))].map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null])),
+      ...(generated.cases !== undefined || generated.triggers !== undefined ? { generated_assets: { cases: generated.cases !== undefined, triggers: generated.triggers !== undefined } } : {}),
     }, [...rows, ...arms, ...(triggers === null ? [] : [triggers])]);
+    if (generated.cases !== undefined || generated.triggers !== undefined) {
+      const sets = [
+        wantsCases ? `cases: ${generated.cases === undefined ? 'authored' : `generated (${generated.cases.names.length})`}` : null,
+        wantsTriggers ? `triggers: ${generated.triggers === undefined ? 'authored' : 'generated'}` : null,
+      ].filter((line): line is string => line !== null);
+      io.print(`eval assets: ${sets.join(' · ')}`);
+      io.print(`Generated assets: ${join(runDir, 'generated')} — review before trusting; save or copy reviewed files into the skill before committing a receipt.`);
+    }
     io.print(renderReport(summary, triggers));
     let committedPath: string | undefined;
     if (args.commit) {
@@ -220,6 +274,39 @@ async function optionalText(path: string): Promise<string | undefined> {
 }
 async function optionalDirectory(path: string): Promise<string[]> {
   try { return await readdir(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
+}
+
+/** Generated files first land in the run tree, keeping §6.0's team/store write invariant intact. */
+async function writeGeneratedAssets(root: string, generated: GeneratedAssets): Promise<void> {
+  if (generated.triggers !== undefined) {
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    await writeFile(join(root, 'triggers.yaml'), generated.triggers, 'utf8');
+  }
+  if (generated.cases !== undefined) {
+    const cases = join(root, 'cases');
+    await mkdir(cases, { recursive: true, mode: 0o700 });
+    for (const [name, source] of Object.entries(generated.cases.files)) await writeFile(join(cases, name), source, 'utf8');
+  }
+}
+
+/** The sole IE5 source write: explicit --working --save, all targets checked before any write. */
+async function saveGeneratedAssets(source: string, generated: GeneratedAssets): Promise<Result> {
+  const cases = join(source, 'evals', 'cases');
+  const triggers = join(source, 'evals', 'triggers.yaml');
+  if (generated.cases !== undefined && await pathExists(cases)) return failure(`--save refused: ${cases} already exists; generated cases never overwrite authored assets.`);
+  if (generated.triggers !== undefined && await pathExists(triggers)) return failure(`--save refused: ${triggers} already exists; generated triggers never overwrite authored assets.`);
+  await writeGeneratedAssets(join(source, 'evals'), generated);
+  return success(undefined);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try { await readFile(path); return true; }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return false;
+    if (code === 'EISDIR') return true;
+    throw error;
+  }
 }
 
 async function endorsedCatalog(team: Awaited<ReturnType<typeof readTeam>>, records: Awaited<ReturnType<typeof skillRecords>>, evaluatedId: string, runner: Runner): Promise<string> {

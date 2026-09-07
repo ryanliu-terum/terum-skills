@@ -94,3 +94,7 @@ The gate must use the single `PACKAGE_NAME` / `APPROVED_UPSTREAM` pair in `src/l
 ## Troubleshooting
 
 Created a team by mistake? Join the right one with the command its owner sent you (`npx -y terum-skills@latest setup <org>/<repo>`); if its repository name matches a team you already have locally, run `terum-skills team join <org>/<repo> --as <other-name>` instead. Optional cleanup: `terum-skills team leave <accidental-name>` removes it from this machine (your membership is unchanged); delete the repository on GitHub yourself if you do not want it.
+
+## Evaluation
+
+`terum-skills eval <skill>` evaluates authored `evals/` assets locally. If execution cases or triggers are missing, it generates a reviewable local set under the run directory and uses it for that run; generated assets never produce a receipt. Review and copy them into the skill, or use `eval --working --save`, then publish and rerun `eval --commit` at the committed version. Use `--no-gen` for the previous empty-asset behavior and `--gen` for a fresh local second opinion without touching authored files.
