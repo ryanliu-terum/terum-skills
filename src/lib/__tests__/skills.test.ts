@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { canonicalDigest, declaredCategory, findSkill, injectManagedFields } from '../skills.js';
+import { readRoster, canonicalDigest, declaredCategory, findSkill, injectManagedFields } from '../skills.js';
 import { parseSkillFrontmatter } from '../schema.js';
-import { temporaryDirectory } from './fixtures.js';
+import { bareTeam, person, TEAM_JSON, temporaryDirectory } from './fixtures.js';
 
 describe('skills (§5.3 canonical frontmatter)', () => {
   it('generates the whole metadata block for an off-the-shelf SKILL.md — id, author, license, and misc as the category — and never overwrites a declared category', () => {
@@ -83,4 +83,16 @@ describe('skills (§5.3 canonical frontmatter)', () => {
     await mkdir(one); await writeFile(join(one, `x:${createHash('sha256').update('C1').digest('hex')}\ny`), 'C2');
     expect(await canonicalDigest(two)).not.toBe(await canonicalDigest(one));
   });
+});
+
+it('readRoster checks filename identity before archives, reports bad files, and sorts handles rather than filenames', async () => {
+  const { seed } = await bareTeam();
+  await writeFile(join(seed, 'team.json'), JSON.stringify({ ...TEAM_JSON, archived: ['old', 'seed'] }));
+  for (const handle of ['a-b', 'a', 'b', 'a0']) await writeFile(join(seed, 'people', `${handle}.json`), JSON.stringify(person(handle)));
+  await writeFile(join(seed, 'people', 'old.json'), JSON.stringify(person('new')));
+  await writeFile(join(seed, 'people', 'broken.json'), '{');
+  const result = await readRoster(seed);
+  expect(result.roster).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => ({ handle, displayName: handle })));
+  expect(result.problems.map((problem) => problem.file)).toEqual(['people/broken.json', 'people/old.json']);
+  expect(result.problems.every((problem) => problem.message.length > 0)).toBe(true);
 });

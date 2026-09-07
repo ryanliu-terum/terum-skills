@@ -7,6 +7,7 @@ import { run as uninstall } from './commands/uninstall.js';
 import { run as sync } from './commands/sync.js';
 import { run as search } from './commands/search.js';
 import { run as invite } from './commands/invite.js';
+import { run as status } from './commands/status.js';
 import { run as runLs } from './commands/ls.js';
 import { run as readme } from './commands/readme.js';
 import { run as runLeave } from './commands/leave.js';
@@ -21,10 +22,10 @@ import { Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>) => Promise<void>;
-export interface CliVerbs { login: typeof login; team: typeof runTeam; setup?: typeof runSetup; share?: typeof share; install?: typeof install; uninstall?: typeof uninstall; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; }
+export interface CliVerbs { login: typeof login; team: typeof runTeam; setup?: typeof runSetup; share?: typeof share; install?: typeof install; uninstall?: typeof uninstall; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }): Command {
-  const active: Required<CliVerbs> = { login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, share: verbs.share ?? share, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush };
+  const active: Required<CliVerbs> = { login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, share: verbs.share ?? share, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush };
   const program = new Command();
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
   // Root help gives first-time users a runnable next step, including after a local npm install.
@@ -80,6 +81,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   ls.action(async (options: { team?: string }) => execute((io) => active.ls({ kind: 'all', ...options }, io)));
   ls.command('member <handle>').option('--team <team>', 'configured team (required when more than one exists)').action(async (handle: string, options: { team?: string }) => execute((io) => active.ls({ kind: 'member', value: handle, team: options.team ?? ls.opts<{ team?: string }>().team }, io)));
   ls.command('project <name>').option('--team <team>', 'configured team (required when more than one exists)').action(async (name: string, options: { team?: string }) => execute((io) => active.ls({ kind: 'project', value: name, team: options.team ?? ls.opts<{ team?: string }>().team }, io)));
+  program.command('status').description('Show local team details; exit 0 means the query succeeded, not a setup-readiness or membership test').option('--team <team>', 'show only this configured team').action(async (options: { team?: string }) => execute((io) => active.status(options, io)));
   program
     .command('readme', { hidden: true })
     .option('--pr-comment <base-ref>', 'render the publish preview comment')

@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { creatorAuthenticationError, detectOrOfferGh, teamByRemote } from '../lib/auth.js';
@@ -8,11 +8,10 @@ import { exists } from '../lib/fs.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
 import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
 import { Prompter } from '../lib/prompt.js';
-import { activePeople, readPeople } from '../lib/readme.js';
-import { githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
+import { readRoster } from '../lib/skills.js';
+import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { parseJson, teamSchema } from '../lib/schema.js';
 import { describeClone } from '../lib/teamRepo.js';
 import { joinCommand, run as invite } from './invite.js';
 import { run as share } from './share.js';
@@ -239,17 +238,17 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       // before its header prints. The repository links come from the remote already in hand — they
       // are the payload the user sends teammates — so an unreadable clone must not take them with it.
       try {
-        const document = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
-        const roster = activePeople(await readPeople(clone), document.archived);
+        const { roster, problems } = await readRoster(clone);
         io.print('Members:');
-        for (const person of roster) io.print(`  @${person.handle} — ${person.display_name}`);
+        for (const person of roster) io.print(`  @${person.handle} — ${person.displayName}`);
+        for (const problem of problems) io.print(`  ${problem.file}: ${problem.message}`);
       } catch (error) {
         io.print(`Set up, but the team details could not be read from ${clone}: ${error instanceof Error ? error.message : String(error)}`);
       }
       const ownerRepo = githubOwnerRepo(remote);
-      const repositoryUrl = ownerRepo ? `https://github.com/${ownerRepo}` : stripRemoteCredentials(remote);
-      io.print(`Repository: ${repositoryUrl}`);
-      io.print(`README: ${ownerRepo ? `${repositoryUrl}/blob/main/README.md` : repositoryUrl}`);
+      const url = repositoryUrl(remote);
+      io.print(`Repository: ${url}`);
+      io.print(`README: ${ownerRepo ? `${url}/blob/main/README.md` : url}`);
       steps.done = 'printed';
     }
     return success({ role, team: teamName, remote, steps });

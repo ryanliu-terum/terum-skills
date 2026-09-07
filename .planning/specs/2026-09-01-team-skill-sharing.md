@@ -87,6 +87,7 @@ terum-skills invite <github-login>...        host identity, not the team handle 
 terum-skills share <path-to-skill>          one-time: enter the skill into skills/; updates then flow automatically on sync
 terum-skills publish <name> [--project <p>] endorse to the team: add its ID to team.json global or a project list, via PR
 terum-skills ls                             roster, skills with author/category/install counts, what you have installed
+terum-skills status [--team <name>]          installed version and offline local team summary; exit 0 is a successful query, not a readiness test
 terum-skills search <term> [--category <c>] [--author <h>] [--project <p>]   read-only substring search over the clone
 terum-skills install <ref>[@<version>] | member <handle> | project <name>
 terum-skills uninstall <ref> | member <handle> | project <name>

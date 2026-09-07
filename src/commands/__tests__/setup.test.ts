@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { COMMUNITY_URL } from '../../lib/community.js';
 import { createConfigStore } from '../../lib/config.js';
 import { offerHook } from '../../lib/hook.js';
-import { bareTeam, cloneWithIdentity, exists, fakeGh, git, mappedRunner, pushFromSeed, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, exists, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
 import { Prompter, PromptClosedError } from '../../lib/prompt.js';
 import { run } from '../setup.js';
 
@@ -490,4 +490,19 @@ describe('setup (§6.1)', () => {
     expect(result.value?.steps.team).toBeUndefined();
     expect(runner.calls.filter((call) => call.command === 'git' && call.args[0] === 'push')).toEqual([]);
   });
+});
+
+it('setup prints roster in handle order and diagnoses a filename mismatch instead of listing its declared handle', async () => {
+  const fixture = await bareTeam();
+  for (const handle of ['a-b', 'a', 'a0', 'b']) await pushFromSeed(fixture.seed, `people/${handle}.json`, JSON.stringify(person(handle)));
+  await pushFromSeed(fixture.seed, 'people/old.json', JSON.stringify(person('new')));
+  const store = createConfigStore(join(fixture.root, 'state'));
+  await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  const io = new ScriptedPrompter();
+  const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed')), communityUrl: '', verbs: { offerHook: async () => 'present' } }, io);
+  expect(result.ok).toBe(true);
+  expect(io.lines.filter((line) => line.startsWith('  @'))).toEqual(['a', 'a-b', 'a0', 'b', 'seed'].map((handle) => `  @${handle} — ${handle}`));
+  expect(io.lines.some((line) => /^  people\/old\.json: .+/.test(line))).toBe(true);
+  expect(io.lines).toContain(`README: ${fixture.bare}`);
 });

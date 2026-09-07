@@ -15,7 +15,7 @@ describe('search (§6)', () => {
     const result = await run({ term: 'testing', config: store }, io);
     expect(result).toMatchObject({ ok: true });
     expect(io.lines.join('\n')).toContain('sample');
-    expect(io.lines.join('\n')).toContain('may be stale');
+    expect(io.lines.join('\n')).toContain('may be stale; run `npx -y terum-skills@latest sync`.');
   });
 
   it('leaves the clone and bare repository byte-identical without invoking a write path', async () => {

@@ -144,8 +144,14 @@ export function lockPath(storeRoot: string, team: string): string { return join(
  * copied from another machine) is not evidence of a recent sync: the hook runs and rewrites it.
  */
 export async function stampIsFresh(storeRoot: string, team: string, now: () => number = Date.now): Promise<boolean> {
-  try { const age = now() - (await stat(stampPath(storeRoot, team))).mtimeMs; return age > -STAMP_SKEW_MS && age < STAMP_FRESH_MS; }
+  try { const details = await stat(stampPath(storeRoot, team)); const age = now() - details.mtimeMs; return details.isFile() && age > -STAMP_SKEW_MS && age < STAMP_FRESH_MS; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+}
+
+/** One stale notice for local read-only queries; an unreadable stamp is no evidence of a recent sync. */
+export async function staleLine(storeRoot: string, team: string, now: () => number = Date.now): Promise<string | null> {
+  try { if (await stampIsFresh(storeRoot, team, now)) return null; } catch { /* unreadable is not fresh */ }
+  return `${team} may be stale; run \`npx -y terum-skills@latest sync\`.`;
 }
 
 /**

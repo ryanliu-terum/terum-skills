@@ -30,11 +30,11 @@ describe('the built bin (dist/index.js)', () => {
     // Realpathed: the loader resolves the built module through realpath (/var -> /private/var on macOS), so `bin` and the launcher the built resolver derives from `import.meta.url` name the same path instead of merely ending the same way.
     out = await realpath(await mkdtemp(resolve(tmpdir(), 'terum-bin-')));
     // No source maps: the built module is imported below, and a map pointing at sources that are not beside it only makes vitest warn.
-    await run(process.execPath, [tsc, '-p', 'tsconfig.build.json', '--outDir', out, '--sourceMap', 'false', '--declarationMap', 'false'], { cwd: root });
+    await run(process.execPath, [tsc, '-p', 'tsconfig.build.json', '--outDir', resolve(out, 'dist'), '--sourceMap', 'false', '--declarationMap', 'false'], { cwd: root });
     // What `npm pack` would ship alongside dist/: the module type and the installed dependencies.
-    await writeFile(resolve(out, 'package.json'), '{ "type": "module" }\n');
+    await writeFile(resolve(out, 'package.json'), await readFile(resolve(root, 'package.json'), 'utf8'));
     await symlink(resolve(root, 'node_modules'), resolve(out, 'node_modules'), 'dir');
-    bin = resolve(out, 'index.js');
+    bin = resolve(out, 'dist', 'index.js');
     const home = resolve(out, 'home');
     // An explicit child env: no inherited NODE_OPTIONS or warnings on stderr, and gh's config under the throwaway home.
     env = { PATH: process.env.PATH ?? '', HOME: home, USERPROFILE: home, GH_CONFIG_DIR: resolve(home, '.config', 'gh'), NODE_NO_WARNINGS: '1' };
@@ -53,6 +53,15 @@ describe('the built bin (dist/index.js)', () => {
     for (const tool of ['gh', 'git']) expect.soft(await exists(resolve(out, `notty-${tool}-called`)), `${tool} was spawned`).toBe(false);
     expect.soft(await exists(resolve(home, '.terum'))).toBe(false);
     expect.soft(await exists(resolve(home, '.claude'))).toBe(false);
+  });
+
+  it('status prints the installed version and exact onboarding hints on stdout only', async () => {
+    const version = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')).version;
+    const result = await run(process.execPath, [bin, 'status'], { cwd: root, env });
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe(`terum-skills ${version}\nNo team is configured on this machine.\n  Create a team: npx -y terum-skills@latest setup\n  Join a team:   npx -y terum-skills@latest setup <org>/<repo>\n`);
+    const failed = await run(process.execPath, [bin, 'status', '--team', 'nope'], { cwd: root, env }).then(() => { throw new Error('expected failure'); }, (error: { code: number; stdout: string; stderr: string }) => error);
+    expect(failed).toMatchObject({ code: 1, stdout: `terum-skills ${version}\n`, stderr: 'Team nope is not configured.\n' });
   });
 
   it('builds with a shebang, prints help with exit 0, and fails a verb with its message on stderr and exit 1', async () => {
@@ -135,7 +144,7 @@ describe('the built bin (dist/index.js)', () => {
     const store = createConfigStore(resolve(home, '.terum', 'skills'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'), 'Seed', 'seed@example.com');
     // Armed through the BUILT package's own default — the resolver a real install runs (dist/index.js beside dist/lib/), not a hand-picked launcher; the machine's identity is the config under this HOME.
-    const built = await import(pathToFileURL(resolve(out, 'lib', 'teamRepo.js')).href) as typeof import('../lib/teamRepo.js');
+    const built = await import(pathToFileURL(resolve(out, 'dist', 'lib', 'teamRepo.js')).href) as typeof import('../lib/teamRepo.js');
     await built.installPushGuard(clone, systemRunner);
     const armed = await readFile(resolve(clone, '.git', 'hooks', 'pre-push'), 'utf8');
     expect(armed).toContain(bin);
