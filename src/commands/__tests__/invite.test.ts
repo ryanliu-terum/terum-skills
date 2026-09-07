@@ -55,3 +55,16 @@ describe('invite (§6 host scoping)', () => {
   });
 
 });
+
+
+it.each([['new'], ['member'], ['bad', 'new']])('invitation block stays conditional after %j (issue 11)', async (...logins) => {
+  const store = createConfigStore(await temporaryDirectory());
+  await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'admin' }; });
+  const runner = ghOnlyRunner((args) => {
+    if (args.at(-1)!.endsWith('/bad')) return { code: 1, stdout: 'HTTP/2.0 422 Unprocessable Entity\r\n', stderr: 'failed' };
+    return { code: 0, stdout: args.at(-1)!.endsWith('/member') ? 'HTTP/2.0 204 No Content\r\n' : 'HTTP/2.0 201 Created\r\n', stderr: '' };
+  });
+  const io = new ScriptedPrompter();
+  await run({ logins, config: store, runner }, io);
+  expect(io.lines.join('\n')).toContain('```\nIf you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.');
+});

@@ -5,7 +5,7 @@ import { COMMUNITY_URL } from '../../lib/community.js';
 import { createConfigStore } from '../../lib/config.js';
 import { failure, success } from '../../lib/result.js';
 import { offerHook } from '../../lib/hook.js';
-import { bareTeam, cloneWithIdentity, exists, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, exists, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { Prompter, PromptClosedError } from '../../lib/prompt.js';
 import { run } from '../setup.js';
 
@@ -566,4 +566,21 @@ describe('issue 9 setup delegation', () => {
     expect(io.lines).toContain(hasCandidate ? 'Nothing shared.' : `No local candidates to share under ${join(home, '.claude', 'skills')}. Skills elsewhere can be shared by passing their folder path.`);
     expect(io.lines).toContain('  npx -y terum-skills@latest share      — share one of your local skills (asks which)');
   });
+});
+
+it('setup joiner prints the conditional gh notice and propagates the clone access explanation (issue 11)', async () => {
+  const fixture = await bareTeam();
+  const store = createConfigStore(join(fixture.root, 'state'));
+  const remote = githubRemote('acme', 'team');
+  const base = mappedRunner(remote, fixture.bare, fakeGh('me', {
+    'api user/repository_invitations': { code: 0, stdout: JSON.stringify([{ id: 42, repository: { full_name: 'acme/team' } }]), stderr: '' },
+    'api --method PATCH user/repository_invitations/42': { code: 0, stdout: '{}', stderr: '' },
+  }));
+  const runner = wrapRunner(base, async (command, args, _options, next) => command === 'git' && args[0] === 'clone' ? { code: 128, stdout: '', stderr: 'remote: Repository not found.' } : next());
+  const io = new ScriptedPrompter(['', 'me', 'Me', 'me@example.com']);
+  const result = await run({ target: 'acme/team', config: store, home: join(fixture.root, 'home'), hook: hookFor(fixture.root), runner }, io);
+  expect.soft(result).toMatchObject({ ok: false, error: expect.stringContaining(`Git could not access ${remote}.`) });
+  expect(io.lines).toContain('GitHub: gh is logged in. For an owner/repository target, setup will try to accept a matching invitation; Git access uses your configured Git credentials.');
+  expect(base.calls.filter((call) => call.args.join(' ') === 'api --method PATCH user/repository_invitations/42')).toHaveLength(1);
+  expect(base.calls.some((call) => call.args.includes('setup-git') || call.args.includes('ls-remote'))).toBe(false);
 });

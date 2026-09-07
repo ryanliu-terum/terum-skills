@@ -438,7 +438,8 @@ export function parseJoinTarget(value: string): { remote: string; github: boolea
 
 /** Printed once when a pasted remote carried a credential (§5.1): it was dropped, and the user should know where access comes from instead. */
 export function credentialNotice(remote: string): string {
-  return `Ignored the credential embedded in the remote URL: terum-skills never stores one or passes one to git. Access to ${normalizeRemote(remote)} comes from gh on GitHub, or from your git credential helper elsewhere.`;
+  void remote; // Keep the public signature; the notice no longer names the remote.
+  return 'Ignored the credential embedded in the remote URL: terum-skills never stores one or passes one to git. Git access uses your configured Git credentials.';
 }
 
 /** GitHub invitations: gh logged in → list then PATCH; empty list means already a collaborator. Without gh → print the URL and wait. */

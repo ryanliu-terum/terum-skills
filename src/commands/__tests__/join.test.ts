@@ -1,11 +1,11 @@
 import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { join as rawJoin, MAX_HANDLE_ATTEMPTS, parseJoinTarget } from '../team.js';
+import { join as rawJoin, credentialNotice, MAX_HANDLE_ATTEMPTS, parseJoinTarget } from '../team.js';
 import { PromptClosedError } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
 import { systemRunner } from '../../lib/runner.js';
-import { bareTeam, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, exists, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
 
 const REMOTE = 'https://git.example/team.git';
 const answers = (handle = 'me', name = 'Me', email = 'me@example.com') => ['me', handle, name, email];
@@ -358,4 +358,45 @@ it('join prints handle order and reports mismatched roster filenames without los
   expect(result).toMatchObject({ ok: true, value: { roster: ['a', 'a-b', 'a0', 'b', 'me', 'seed'].map((handle) => ({ handle, displayName: handle === 'me' ? 'Me' : handle })) } });
   expect(io.lines.filter((line) => /^  (a|a-b|a0|b)  /.test(line))).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => `  ${handle}  ${handle}`));
   expect(io.lines.some((line) => /^  people\/old\.json: .+/.test(line))).toBe(true);
+});
+
+describe('join remote access diagnostics (issue 11)', () => {
+  it('accepts the invitation before a failed clone, explains the failure, and leaves no binding or clone', async () => {
+    const { fixture, store } = await setup();
+    const remote = 'https://github.com/acme/team.git';
+    const base = mappedRunner(remote, fixture.bare, fakeGh('me', {
+      'api user/repository_invitations': { code: 0, stdout: JSON.stringify([{ id: 42, repository: { full_name: 'acme/team' } }]), stderr: '' },
+      'api --method PATCH user/repository_invitations/42': { code: 0, stdout: '{}', stderr: '' },
+    }));
+    const runner = wrapRunner(base, async (command, args, _options, next) => command === 'git' && args[0] === 'clone' ? { code: 128, stdout: '', stderr: 'remote: Repository not found.' } : next());
+    const io = new ScriptedPrompter(['', 'me', 'Me', 'me@example.com']);
+    const result = await join({ target: 'acme/team', config: store, runner }, io);
+    expect(base.calls.filter((call) => call.args.join(' ') === 'api --method PATCH user/repository_invitations/42')).toHaveLength(1);
+    expect(await exists(store.teamClone('team'))).toBe(false);
+    expect((await store.read()).teams).toEqual({});
+    expect(base.calls.some((call) => call.args.includes('ls-remote') || call.args.includes('setup-git'))).toBe(false);
+    expect(io.asked).toEqual([]);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`Could not clone ${remote}: remote: Repository not found.\nGit could not access ${remote}.`) });
+  });
+  it('tells credential-pasting users that Git uses configured Git credentials', () => {
+    expect(credentialNotice('https://github.com/acme/team.git')).toBe('Ignored the credential embedded in the remote URL: terum-skills never stores one or passes one to git. Git access uses your configured Git credentials.');
+  });
+});
+
+
+it.each([false, true])('preserves invitation handling without gh authentication or with an empty list (authenticated=%s)', async (authenticated) => {
+  const { fixture, store } = await setup();
+  const remote = 'https://github.com/acme/team.git';
+  const runner = mappedRunner(remote, fixture.bare, fakeGh('me', {
+    'api user/repository_invitations': { code: 0, stdout: '[]', stderr: '' },
+  }, authenticated));
+  const io = new ScriptedPrompter(['', 'me', 'Me', 'me@example.com'], authenticated ? [] : [true]);
+  expect(await join({ target: 'acme/team', config: store, runner }, io)).toMatchObject({ ok: true });
+  const api = runner.calls.filter((call) => call.command === 'gh' && call.args[0] === 'api');
+  expect(api.some((call) => call.args.includes('PATCH'))).toBe(false);
+  if (!authenticated) {
+    expect(api).toEqual([]);
+    expect(io.lines).toContain('Accept the invitation at https://github.com/acme/team/invitations before continuing.');
+  }
+  expect(runner.calls.some((call) => call.args.includes('setup-git') || call.args.includes('ls-remote'))).toBe(false);
 });

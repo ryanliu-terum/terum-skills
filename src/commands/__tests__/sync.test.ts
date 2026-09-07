@@ -5,10 +5,11 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { acquireTeamLock, lockPath, removeRunArtifacts, stampPath } from '../../lib/hook.js';
 import { run } from '../sync.js';
+import { createExecute } from '../../lib/execute.js';
 import { run as install } from '../install.js';
 import { NonInteractivePrompter } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, holdCloneLock, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, holdCloneLock, mappedRunner, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { lockTarget } from '../../lib/placer.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { systemRunner } from '../../lib/runner.js';
@@ -103,6 +104,70 @@ describe('sync --hook (§3, §6)', () => {
     // Neither stamp existed before this run, so `other`'s can only have been written by it.
     await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+  });
+
+
+  it.each([false, true])('skips a classified fetch failure, preserves its state, completes healthy teams, and fails (hook=%s)', async (hook) => {
+    const { fixture, store, clone } = await configuredSkill();
+    const home = join(fixture.root, 'home');
+    const local = mappedRunner(fixture.bare, fixture.bare);
+    expect((await install({ ref: 'sample', config: store, home, runner: local }, new ScriptedPrompter())).ok).toBe(true);
+    const placedPath = join(home, '.claude', 'skills', 'sample');
+    await writeFile(join(placedPath, 'SKILL.md'), skill('hand edit'));
+    const orphan = join(home, '.claude', 'skills', 'orphan');
+    await cp(placedPath, orphan, { recursive: true });
+    await store.update((config) => {
+      config.placements[orphan] = { id: '33333333-3333-4333-8333-333333333333', team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:orphan' };
+      config.shared[ID] = { source: join(fixture.root, 'gone'), team: 'team', baseline: 'sha256:0' };
+      config.pending.push({ op: 'uninstall', id: ID, team: 'team', scope: { kind: 'global' }, started: '2026-09-04T00:00:00Z' });
+      config.teams.team!.remote = 'github.com/acme/team';
+    });
+    const other = await bareTeam();
+    const otherSkill = (description: string) => skill(description).replace('name: sample', 'name: elsewhere').replace(ID, SECOND_ID);
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', otherSkill('old healthy'));
+    const otherClone = await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    expect((await install({ ref: 'other/elsewhere', config: store, home, runner: local }, new ScriptedPrompter())).ok).toBe(true);
+    await pushFromSeed(other.seed, 'skills/elsewhere/SKILL.md', otherSkill('healthy updated'));
+    const before = await store.read();
+    const head = await git(['rev-parse', 'HEAD'], clone);
+    const otherHead = await git(['rev-parse', 'HEAD'], otherClone);
+    await mkdir(join(store.root, 'run'), { recursive: true });
+    await writeFile(stampPath(store.root, 'team'), 'old');
+    const remote = 'https://github.com/acme/team.git';
+    const runner = wrapRunner(mappedRunner(remote, fixture.bare), async (command, args, options, next) => command === 'git' && args[0] === 'fetch' && options?.cwd === clone ? { code: 128, stdout: '', stderr: 'remote: Repository not found.' } : next());
+    const io = new ScriptedPrompter([], [], !hook);
+    const result = await run({ hook, config: store, runner, now: later }, io);
+    expect.soft(result).toMatchObject({ ok: false, error: 'Sync finished with 1 team(s) skipped: team. See the notices above.' });
+    const errors: string[] = [];
+    const exitCodes: number[] = [];
+    await createExecute({ io, stderr: (line) => errors.push(line), setExitCode: (code) => exitCodes.push(code) })(async () => result, { verb: 'sync', notices: false });
+    expect(exitCodes).toEqual([1]);
+    expect(errors.at(-1)).toBe('Sync finished with 1 team(s) skipped: team. See the notices above.');
+    if (hook) expect(errors[0]).toContain('Skipping team: could not fetch');
+    const notices = hook ? result.value?.notices : io.lines;
+    expect.soft(notices?.join('\n')).toContain(`Skipping team: could not fetch ${remote}: remote: Repository not found.\nGit could not access ${remote}.`);
+    expect(await git(['rev-parse', 'HEAD'], otherClone)).not.toBe(otherHead);
+    await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+    expect(await readFile(join(home, '.claude', 'skills', 'elsewhere', 'SKILL.md'), 'utf8')).toContain('healthy updated');
+    expect(await readFile(stampPath(store.root, 'team'), 'utf8')).toBe('old');
+    expect(await git(['rev-parse', 'HEAD'], clone)).toBe(head);
+    expect(await readFile(join(placedPath, 'SKILL.md'), 'utf8')).toBe(skill('hand edit'));
+    expect(await readFile(join(orphan, 'SKILL.md'), 'utf8')).toBe(skill('hand edit'));
+    const after = await store.read();
+    expect(after.placements[placedPath]).toEqual(before.placements[placedPath]);
+    expect(after.placements[orphan]).toEqual(before.placements[orphan]);
+    expect(after.shared).toEqual(before.shared);
+    expect(after.pending).toEqual(before.pending);
+    expect(io.asked).toEqual([]);
+    for (const team of ['team', 'other']) {
+      await expect(access(lockPath(store.root, team))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(cloneLockPath(store.teamClone(team)))).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+    if (hook) {
+      expect(result.value).toMatchObject({ placed: 1, hook: true });
+      expect(io.lines).toEqual(['{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}']);
+    }
   });
 
   it('writes a stamp after interactive success but leaves an old stamp after a failed pull', async () => {
