@@ -1,10 +1,10 @@
-import { cp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
 import { candidatesOf, localSkills } from '../lib/local-skills.js';
-import { assertSkillDirectory, assertSkillSource, printable, scanSkillFolder } from '../lib/skill-source.js';
+import { assertSkillDirectory, printable, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
@@ -14,6 +14,7 @@ import { isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../li
 import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
 import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedFields, skillRecords } from '../lib/skills.js';
 import { MutableTree, openTeamRepo, shellQuote, treeText } from '../lib/teamRepo.js';
+import { formatHygieneFindings, hygieneFrontmatter, inspectHygiene } from '../lib/evals/hygiene.js';
 
 export interface ShareArgs {
   path?: string;
@@ -67,7 +68,9 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
     if (!isSkillName(name)) throw new Error(`Skill name ${name} must be 1–64 lowercase alphanumerics or single hyphens.`);
     if (!args.allowPrivileged && scan.privileged) throw new Error(`${name} contains plugin or hook definitions; retry with --allow-privileged after reviewing them.`);
     const raw = await readFile(join(source, 'SKILL.md'), 'utf8');
-    const description = assertSkillSource(raw, name);
+    // Hygiene owns the post-injection frontmatter gate. This source can legitimately lack the
+    // managed fields that injection supplies, so validating it before assembly would be wrong.
+    const description = raw;
     const clone = store.teamClone(team);
     const author = `${config.display_name} <${config.email}>`;
     const repo = openTeamRepo(clone, binding.remote, runner);
@@ -79,18 +82,22 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
     const id = randomUUID(); // minted before safeWrite, never inside its re-applied mutation
     const teamDoc = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
     const updated = injectManagedFields(raw, { license: teamDoc.policy.skill_license, id, author });
+    const candidate = await sourceFiles(source);
+    candidate.files.set('SKILL.md', Buffer.from(updated));
+    assertHygiene(name, candidate, teamDoc.policy.skill_license, Boolean(args.allowPrivileged));
     // Every field the tool writes is shown before the y/N — the category too, on the one kind of file
     // that has none (every off-the-shelf skill): it is generated, not asked for, and edited any time.
     const categoryLine = declaredCategory(raw) === undefined ? `\nmetadata.terum-category: ${DEFAULT_CATEGORY} (no category was set; edit SKILL.md any time)` : '';
     io.print(`Will add:\nlicense: ${teamDoc.policy.skill_license}\nmetadata.id: ${id}\nmetadata.author: ${author}${categoryLine}`);
     if (!(await io.confirm(`Share ${name}?`))) throw new Error('Share was declined.');
     await writeFile(join(source, 'SKILL.md'), updated, 'utf8');
-    const files = await sourceFiles(source);
+    // Push the exact bytes hygiene inspected — a re-read here would open a window where a
+    // concurrent editor save lands uninspected content in the team repo (cross-model review P1).
     await repo.safeWrite((tree) => {
       // The preflight clone can be stale; only the freshly reset tree handed to safeWrite is
       // authoritative for the repo-wide name invariant.
       if (tree.paths(`skills/${name}/`).length) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
-      mirrorToTree(tree, `skills/${name}`, files);
+      mirrorToTree(tree, `skills/${name}`, candidate.files);
     }, { action: 'share', handle: binding.handle, author, message: `${binding.handle}: share ${name}` });
     const baseline = await canonicalDigest(source);
     await store.update((fresh) => { fresh.shared[id] = { source, team, baseline }; });
@@ -124,15 +131,24 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const sourceSkill = join(tracked.source, 'SKILL.md');
     const sourceContents = await readFile(sourceSkill, 'utf8');
     const repaired = injectManagedFields(sourceContents, { license: team.license, id, author });
-    if (repaired !== sourceContents) await writeFile(sourceSkill, repaired, 'utf8');
     const repoSkill = join(record.directory, 'SKILL.md');
     const repoContents = await readFile(repoSkill, 'utf8');
     const repairedRepo = injectManagedFields(repoContents, { license: team.license, id, author });
+    // The existing privileged-content consent gate is orthogonal to HYG4. Keep its actionable
+    // remediation ahead of hygiene; either refusal occurs before any source or team-repo write.
+    if ((await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) { io.print(`Shared skill ${record.name} now contains plugin or hook definitions; run share --keep-source ${id} --allow-privileged after reviewing them.`); defer(tracked.team, record.name); continue; }
     // §5.3: a changed `name` is a rename, not a new skill — the ID carries across it. The source's
     // declared name is the target; the repository folder follows on the local-edit row below.
     // (The folder basename is not consulted: `share --relocate` may legitimately point anywhere.)
     const declared = parseSkillFrontmatter(repaired);
     const targetName = declared.ok ? declared.data.name : record.name;
+    const candidate = await sourceFiles(tracked.source);
+    candidate.files.set('SKILL.md', Buffer.from(repaired));
+    // A repo copy already carrying hooks means consent was given at share time; new privileged
+    // additions were already deferred to `share --keep-source --allow-privileged` above (walk D5).
+    try { assertHygiene(targetName, candidate, team.license, (await scanSkillFolder(record.directory)).privileged); }
+    catch (error) { io.print(`Shared skill ${record.name} failed hygiene:\n${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, record.name); continue; }
+    if (repaired !== sourceContents) await writeFile(sourceSkill, repaired, 'utf8');
     if (targetName !== record.name) {
       if (!isSkillName(targetName)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); defer(tracked.team, record.name); continue; }
       if ((await skillRecords(clone, tracked.team)).some((item) => item.name === targetName && item.id !== id)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; another skill already uses that name.`); defer(tracked.team, record.name); continue; }
@@ -161,10 +177,6 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
       }
       if (sourceDigest !== baseline) {
         if (!binding?.handle) throw new Error(`Team ${tracked.team} has no joined handle.`);
-        // The --allow-privileged gate is a property of publishing a source tree, not of the first
-        // share: hooks/ or .claude-plugin/ that appeared since are held back — baseline untouched, so
-        // the notice repeats every sync — until the author re-consents with --keep-source --allow-privileged.
-        if ((await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) { io.print(`Shared skill ${record.name} now contains plugin or hook definitions; run share --keep-source ${id} --allow-privileged after reviewing them.`); defer(tracked.team, record.name); continue; }
       // A pre-image with the prior author can only receive a managed-field refresh. Land that
       // narrow write first, then the normal author-owned content mirror on the replayed tree.
       await refreshRepo();
@@ -175,7 +187,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
           if (tree.paths(`skills/${targetName}/`).length) throw new Error(`Skill name ${targetName} already exists in team ${tracked.team}; choose a unique name.`);
           for (const path of tree.paths(`skills/${record!.name}/`)) tree.remove(path);
         }
-        mirrorToTree(tree, `skills/${targetName}`, files);
+        mirrorToTree(tree, `skills/${targetName}`, files.files);
       }, { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: targetName === record!.name ? `${binding.handle}: update ${record.name}` : `${binding.handle}: rename ${record.name} to ${targetName}` });
       if (targetName !== record.name) io.print(`Renamed shared skill ${record.name} to ${targetName}.`);
       await store.update((next) => { if (next.shared[id]) next.shared[id].baseline = sourceDigest; });
@@ -214,16 +226,21 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
     const sourceSkill = join(tracked.source, 'SKILL.md');
     const sourceContents = await readFile(sourceSkill, 'utf8');
     const repairedSource = injectManagedFields(sourceContents, { license: team.license, id, author });
-    if (repairedSource !== sourceContents) await writeFile(sourceSkill, repairedSource, 'utf8');
     const repoSkill = join(record.directory, 'SKILL.md');
     const repoContents = await readFile(repoSkill, 'utf8');
     const repairedRepo = injectManagedFields(repoContents, { license: team.license, id, author });
     const repo = openTeamRepo(clone, binding.remote, runner);
+    const candidate = await sourceFiles(tracked.source);
+    candidate.files.set('SKILL.md', Buffer.from(repairedSource));
+    // Consent carries: --allow-privileged now, or a repository copy that already holds the
+    // consented privileged form from an earlier share (walk D5).
+    assertHygiene(record.name, candidate, team.license, allowPrivileged || (await scanSkillFolder(record.directory)).privileged);
+    if (repairedSource !== sourceContents) await writeFile(sourceSkill, repairedSource, 'utf8');
     if (repairedRepo !== repoContents) {
       await repo.safeWrite((tree) => refreshManagedFieldsInTree(tree, `skills/${record.name}/SKILL.md`, { license: team.license, id, author }), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
     }
     const files = await sourceFiles(tracked.source);
-    await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
+    await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, files.files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
     const digest = await canonicalDigest(tracked.source);
     await store.update((fresh) => { fresh.shared[id]!.baseline = digest; });
   } else {
@@ -247,8 +264,12 @@ async function relocate(store: ConfigStore, value: { id: string; path: string } 
   return undefined;
 }
 function splitRelocate(value: string): { id: string; path: string } { const index = value.indexOf(':'); if (index < 1) throw new Error('Use --relocate <id>:<path>.'); return { id: value.slice(0, index), path: value.slice(index + 1) }; }
-async function sourceFiles(root: string): Promise<Map<string, Buffer>> { const result = new Map<string, Buffer>(); async function walk(current: string, relative = ''): Promise<void> { for (const entry of await readdir(current, { withFileTypes: true })) { const next = join(current, entry.name); const key = relative ? `${relative}/${entry.name}` : entry.name; if (entry.isDirectory()) await walk(next, key); else if (entry.isFile()) result.set(key, await readFile(next)); } } await walk(root); return result; }
 function mirrorToTree(tree: MutableTree, destination: string, files: Map<string, Buffer>): void { for (const path of tree.paths(`${destination}/`)) if (!files.has(path.slice(destination.length + 1))) tree.remove(path); for (const [path, content] of files) tree.set(`${destination}/${path}`, content); }
+function assertHygiene(name: string, input: Awaited<ReturnType<typeof sourceFiles>>, license: string, allowExecutable = false): void {
+  const skill = input.files.get('SKILL.md');
+  const findings = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable });
+  if (findings.length) throw new Error(formatHygieneFindings(findings));
+}
 /** The managed-field refresh as a mutation: re-derived from the fresh pre-image safeWrite hands it, so it can only ever change the managed lines of whatever is actually upstream (and restore a missing category, as injectManagedFields does everywhere). */
 function refreshManagedFieldsInTree(tree: MutableTree, path: string, values: { license: string; id: string; author: string }): void {
   const current = tree.before(path);

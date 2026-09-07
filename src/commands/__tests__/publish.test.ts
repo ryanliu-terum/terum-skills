@@ -101,6 +101,15 @@ describe('publish (§6)', () => {
     expect(io.lines.join('\n')).toContain('allowed-tools: Bash(git status)');
   });
 
+  it.each(['pr', 'push'] as const)('refuses hygiene failures before endorsement activity under %s policy', async (policy) => {
+    const { fixture, store } = await prepared(policy);
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `${skill()}ghp_abcdefghijklmnopqrstuvwxyz\n`);
+    const runner = mappedRunner(REMOTE, fixture.bare); const io = new ScriptedPrompter([], [true]);
+    expect(await run({ ref: 'sample', config: store, runner }, io)).toMatchObject({ ok: false, error: expect.stringContaining('HYG3') });
+    expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
+    expect(io.lines.join('\n')).not.toContain('allowed-tools:');
+  });
+
   it('handles projects, existing endorsements, and version refs before writing', async () => {
     const { fixture, store } = await prepared();
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: ['x'], skills: [] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
@@ -214,6 +223,17 @@ describe('publish (§6)', () => {
       return next();
     });
     await expect(run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('sample is no longer in the repository') });
+    expect(base.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
+  });
+
+  it('replays hygiene against the reset tree when a secret lands during publish', async () => {
+    const { fixture, store } = await prepared();
+    const base = mappedRunner(REMOTE, fixture.bare); let fetches = 0;
+    const runner = wrapRunner(base, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `${skill()}ghp_abcdefghijklmnopqrstuvwxyz\n`);
+      return next();
+    });
+    expect(await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('HYG3') });
     expect(base.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
   });
 

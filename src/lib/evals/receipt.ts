@@ -12,7 +12,8 @@ import { failure, success } from '../result.js';
  * §8: patterns scrubbed from anything that leaves the machine. Transcripts and run trees stay
  * local and un-redacted for debugging; the boundary is sharing, not recording.
  */
-const CREDENTIAL_PATTERNS: readonly RegExp[] = [
+/** §8's shared credential signatures. Hygiene imports this rather than maintaining a second list. */
+export const CREDENTIAL_PATTERNS: readonly RegExp[] = [
   /ghp_[A-Za-z0-9]{20,}/g,
   /github_pat_[A-Za-z0-9_]{20,}/g,
   /sk-ant-[A-Za-z0-9_-]{10,}/g,

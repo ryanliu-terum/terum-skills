@@ -23,6 +23,8 @@ export interface MutableTree extends GuardTree {
   remove(path: string): void;
   /** Tracked paths in the freshly reset tree. Needed to make a skill-folder update a true mirror. */
   paths(prefix?: string): readonly string[];
+  /** Executable Git entries in the freshly reset pre-image; mutations remain pure. */
+  executablePaths(prefix?: string): ReadonlySet<string>;
 }
 export type Mutate = (tree: MutableTree) => void;
 
@@ -122,8 +124,15 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
       if (compromised) throw new Error(lostLock(root));
       await requireGit(['fetch', 'origin']);
       await requireGit(['reset', '--hard', 'origin/main']);
-      const tracked = new Set((await requireGit(['ls-files', '-z'])).stdout.split('\0').filter(Boolean));
-      const tree = makeTree(root, tracked);
+      const index = (await requireGit(['ls-files', '--stage', '-z'])).stdout.split('\0').filter(Boolean);
+      const tracked = new Set<string>(); const executable = new Set<string>();
+      for (const entry of index) {
+        const tab = entry.indexOf('\t'); const path = tab < 0 ? undefined : entry.slice(tab + 1);
+        if (path === undefined) continue;
+        tracked.add(path);
+        if (entry.startsWith('100755 ')) executable.add(path);
+      }
+      const tree = makeTree(root, tracked, executable);
       mutate(tree);
       // Authorize the caller's own pure mutation before deriving any files from it. This keeps a
       // forbidden skill write from being reported as a frontmatter/README generation error.
@@ -229,7 +238,7 @@ export function assertSafePath(path: string): void {
 }
 
 /** The tree handed to a mutation: lazy reads of the reset checkout plus an overlay of its edits. */
-function makeTree(root: string, tracked: ReadonlySet<string>): MutableTree {
+function makeTree(root: string, tracked: ReadonlySet<string>, executable: ReadonlySet<string> = new Set()): MutableTree {
   const cache = new Map<string, Buffer>();
   const overlay = new Map<string, string | Buffer | undefined>();
   const before = (path: string): string | Buffer | undefined => {
@@ -254,7 +263,10 @@ function makeTree(root: string, tracked: ReadonlySet<string>): MutableTree {
         .filter((path) => (!overlay.has(path) || overlay.get(path) !== undefined) && path.startsWith(prefix))
         .sort();
     },
+    executablePaths(prefix = '') { return new Set([...executable].filter((path) => treePaths(path) && path.startsWith(prefix))); },
   };
+
+  function treePaths(path: string): boolean { return (!overlay.has(path) || overlay.get(path) !== undefined) && tracked.has(path); }
 }
 
 function sameContent(left: string | Buffer | undefined, right: string | Buffer | undefined): boolean {
