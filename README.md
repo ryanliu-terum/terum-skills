@@ -4,7 +4,7 @@ Share private Claude Code skills across a team through one private git repo. No 
 
 ## Get started
 
-Requires Node 22.12 or newer and `git`. Creating a GitHub team requires an authenticated GitHub CLI (`gh`). Joiners can accept an invitation in their browser and use their configured git credentials.
+Requires Node 22.12 or newer and `git`. Creating a GitHub team requires an authenticated GitHub CLI (`gh`). Joiners can accept an invitation in their browser and use their configured git credentials; if git is signed in to GitHub differently from gh, `gh auth setup-git --hostname github.com` makes git use gh's account.
 
 Create a team (first person) — on a new machine the wizard asks whether you are creating a team or joining one; re-run it to resume:
 

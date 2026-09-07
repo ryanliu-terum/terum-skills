@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { repositoryUrl, githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, isGitHubRemote, normalizeRemote, remoteName, remoteToGitUrl, sameRemote, stripRemoteCredentials } from '../remote.js';
+import { explainGitAccessFailure, repositoryUrl, githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, isGitHubRemote, normalizeRemote, remoteName, remoteToGitUrl, sameRemote, stripRemoteCredentials } from '../remote.js';
 
 // `aWxs/K3Q` carries a `/`, which the structured parse cannot cross (an unencoded `/` ends the
 // authority for git and curl too), so it can only be kept out of a message by the lossy fallback.
@@ -180,4 +180,59 @@ it('repositoryUrl renders GitHub links and strips credentials from other hosts',
   expect(repositoryUrl('https://secret:token@github.com/Acme/Team.git')).toBe('https://github.com/acme/team');
   expect(repositoryUrl('file:/tmp/team.git')).toBe('file:/tmp/team.git');
   expect(repositoryUrl('https://secret:token@git.example/acme/team.git')).toBe('https://git.example/acme/team.git');
+});
+
+describe('remote access explanations (issue 11)', () => {
+  const remote = 'https://github.com/acme/team.git';
+  const notFound = `Git could not access ${remote}.
+"Repository not found" can mean:
+- the repository URL is wrong, or the repository no longer exists;
+- your account lacks access, including an invitation that still needs acceptance;
+- Git's HTTPS credentials lack access, even if gh is logged in.
+
+Check the repository URL and accept any pending invitation at https://github.com/acme/team/invitations.
+Run \`gh auth status\` to check gh's account.
+If you want gh's active account to supply Git credentials for github.com,
+run \`gh auth setup-git --hostname github.com\`, then retry.
+This changes global Git credential configuration for github.com and its gist host.`;
+  const credentials = "Git has no usable HTTPS credentials for github.com (terum-skills runs git without a terminal prompt).\nStore one with your Git credential helper, or run `gh auth setup-git --hostname github.com` so gh's active account supplies them, then retry.";
+  const denied = `Git could not push to ${remote}.
+"Permission denied" means Git's HTTPS credentials lack write access to acme/team, even if gh is logged in.
+Ask the repository owner to grant you write access.
+If you want gh's active account to supply Git credentials for github.com,
+run \`gh auth setup-git --hostname github.com\`, then retry.
+This changes global Git credential configuration for github.com and its gist host.`;
+  const patterns = [
+    'remote: Repository not found.', "fatal: repository 'https://github.com/acme/team.git/' not found",
+    "fatal: could not read Username for 'https://github.com'", 'fatal: terminal prompts disabled',
+    'fatal: Authentication failed for https://github.com/acme/team.git',
+    'remote: Permission to acme/team.git denied to me.',
+    'ERROR: Repository not found.', 'git@github.com: Permission denied (publickey).',
+    'ERROR: Permission to acme/team.git denied to me.',
+  ];
+  it.each(patterns.slice(0, 2))('explains HTTPS not found: %s', (stderr) => {
+    expect(explainGitAccessFailure(remote, `before\n${stderr}\nafter`)).toBe(notFound);
+  });
+  it.each(patterns.slice(2, 5))('explains missing HTTPS credentials: %s', (stderr) => {
+    expect(explainGitAccessFailure(remote, stderr)).toBe(credentials);
+  });
+  it.each(patterns.slice(5, 6))('explains HTTPS write denial: %s', (stderr) => {
+    expect(explainGitAccessFailure(remote, stderr)).toBe(denied);
+  });
+  it.each(['git@github.com:acme/team.git', 'ssh://git@github.com:22/acme/team.git', 'github.com:acme/team.git'])('explains SSH using its transport: %s', (ssh) => {
+    for (const stderr of patterns.slice(6)) expect(explainGitAccessFailure(ssh, stderr)).toBe(`Git is using SSH for ${ssh}; the key it offered has no access to acme/team.\nCheck \`ssh -T git@github.com\` and the repository's access. gh's login does not apply to SSH.`);
+  });
+  it.each(patterns)('explains host-managed access: %s', (stderr) => {
+    const host = 'https://git.example/team.git';
+    expect(explainGitAccessFailure(host, stderr)).toBe(`Git could not access ${host}. Access is managed on that host; ask a team admin to grant you access, then retry.`);
+  });
+  it.each(['failed', 'file not found', 'fatal: The requested URL returned error: 403', 'prefix remote: Repository not found.', 'remote: Repository not found. suffix', "prefix fatal: repository 'foo' not found", 'ERROR: Repository not found. suffix'])('leaves unrelated or unanchored stderr unchanged: %s', (stderr) => {
+    expect(explainGitAccessFailure(remote, stderr)).toBeNull();
+  });
+  it('never throws for an invalid remote and strips credentials from displayed URLs', () => {
+    for (const invalid of ['', 'not a remote', 'ext::sh -c id']) expect(explainGitAccessFailure(invalid, patterns[0]!)).toBeNull();
+    expect(explainGitAccessFailure('https://me:tok@github.com/acme/team.git', patterns[0]!)).toBe(notFound);
+    expect(explainGitAccessFailure('https://me:tok@git.example/team.git', patterns[0]!)).not.toContain('tok');
+    expect(explainGitAccessFailure('https://github.com.evil.example/team.git', patterns[0]!)).toContain('Access is managed on that host');
+  });
 });

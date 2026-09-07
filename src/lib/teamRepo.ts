@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import lockfile from 'proper-lockfile';
 import { mkdirPrivate } from './fs.js';
 import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
-import { isGitHubRemote, normalizeRemote, remoteToGitUrl, stripRemoteCredentials } from './remote.js';
+import { explainGitAccessFailure, isGitHubRemote, normalizeRemote, remoteToGitUrl, stripRemoteCredentials } from './remote.js';
 import { CommandResult, Runner, systemRunner } from './runner.js';
 import { regenerateReadmeInTree } from './readme.js';
 
@@ -60,6 +60,14 @@ export class CloneBusy extends Error {
   constructor(message: string) { super(message); this.name = 'CloneBusy'; }
 }
 
+/** A classified refresh fetch failure. Sync skips this team; single-team callers retain the full error. */
+export class RemoteAccessError extends Error {
+  constructor(message: string, readonly origin: string, readonly stderr: string, readonly explanation: string) {
+    super(`${message}\n${explanation}`);
+    this.name = 'RemoteAccessError';
+  }
+}
+
 export const DEFAULT_DEADLINE_MS = 30_000;
 const defaultBackoff = (attempt: number): number => Math.floor(Math.random() * Math.min(1_000, 25 * 2 ** attempt));
 const wait = (milliseconds: number) => new Promise<void>((done) => setTimeout(done, milliseconds));
@@ -79,13 +87,16 @@ export function openTeamRepo(root: string, remote: string, runner: Runner = syst
 
 async function safeWrite(root: string, remote: string, runner: Runner, mutate: Mutate, options: SafeWriteOptions): Promise<SafeWriteResult> {
   const git: Git = (args) => runner.run('git', args, { cwd: root });
+  const origin = await assertOrigin(root, remote, git);
   const requireGit = async (args: readonly string[]) => {
     const result = await git(args);
-    if (result.code !== 0) throw new Error(`git ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim()}`);
+    if (result.code !== 0) {
+      const copy = args[0] === 'fetch' ? explainGitAccessFailure(origin, result.stderr) : null;
+      throw new Error(`git ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim()}${copy ? `\n${copy}` : ''}`);
+    }
     return result;
   };
 
-  await assertOrigin(root, remote, git);
   const realRoot = await realpath(root);
 
   const now = options.now ?? Date.now;
@@ -145,7 +156,10 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
       if (compromised) throw new Error(lostLock(root));
       const outcome = await push(git, branch);
       if (outcome.ok) return { changed: true, pushedTo: outcome.pushedTo };
-      if (!outcome.retryable) throw new PushRefused(`The remote refused the push: ${outcome.error.trim()}`);
+      if (!outcome.retryable) {
+        const copy = explainGitAccessFailure(origin, outcome.error);
+        throw new PushRefused(`The remote refused the push: ${outcome.error.trim()}${copy ? `\n${copy}` : ''}`);
+      }
       lastError = outcome.error;
       if (now() >= deadline) break;
       await (options.sleep ?? wait)((options.backoff ?? defaultBackoff)(attempt++));
@@ -172,13 +186,14 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
   }
 }
 
-async function assertOrigin(root: string, remote: string, git: Git): Promise<void> {
+async function assertOrigin(root: string, remote: string, git: Git): Promise<string> {
   const origin = await git(['remote', 'get-url', 'origin']);
   if (origin.code !== 0) throw new Error(`Clone at ${root} has no origin remote`);
   const actual = origin.stdout.trim();
   if (normalizeRemote(actual) !== normalizeRemote(remote)) {
     throw new Error(`Clone at ${root} points at ${stripRemoteCredentials(actual)}, not ${stripRemoteCredentials(remote)}; refusing to write to the wrong repository`);
   }
+  return actual;
 }
 
 /**
@@ -317,7 +332,10 @@ async function removeCreated(root: string, realRoot: string, path: string): Prom
 export async function cloneTeam(remote: string, destination: string, runner: Runner = systemRunner): Promise<void> {
   await mkdirPrivate(dirname(destination));
   const clone = await runner.run('git', ['clone', '-q', '--branch', 'main', '--', remoteToGitUrl(remote), destination]);
-  if (clone.code !== 0) throw new Error(`Could not clone ${stripRemoteCredentials(remote)}: ${(clone.stderr || clone.stdout).trim()}`);
+  if (clone.code !== 0) {
+    const copy = explainGitAccessFailure(remoteToGitUrl(remote), clone.stderr);
+    throw new Error(`Could not clone ${stripRemoteCredentials(remote)}: ${(clone.stderr || clone.stdout).trim()}${copy ? `\n${copy}` : ''}`);
+  }
   await installPushGuard(destination, runner);
 }
 
@@ -438,7 +456,16 @@ export async function refreshClone(runner: Runner, clone: string, options: { lab
       for (const args of [['fetch', 'origin'], ['reset', '--hard', 'origin/main']]) {
         assertHeld();
         const result = await runner.run('git', args, { cwd: clone, env: options.env });
-        if (result.code !== 0) throw new Error(`Could not refresh ${options.label ?? clone}: ${(result.stderr || result.stdout).trim()}`);
+        if (result.code !== 0) {
+          const stderr = (result.stderr || result.stdout).trim();
+          const message = `Could not refresh ${options.label ?? clone}: ${stderr}`;
+          if (args[0] === 'fetch') {
+            const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: clone, env: options.env });
+            const copy = origin.code === 0 ? explainGitAccessFailure(origin.stdout.trim(), result.stderr) : null;
+            if (copy) throw new RemoteAccessError(message, stripRemoteCredentials(origin.stdout), stderr, copy);
+          }
+          throw new Error(message);
+        }
       }
     }, options);
   } catch (error) {

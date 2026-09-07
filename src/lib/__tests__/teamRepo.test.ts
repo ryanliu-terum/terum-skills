@@ -10,7 +10,7 @@ import { describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, openT
 import { createConfigStore } from '../config.js';
 import { run as share } from '../../commands/share.js';
 import { ScriptedPrompter } from './fixtures.js';
-import { bareTeam, cloneWithIdentity, git, originSha, person, pushFromSeed, temporaryDirectory, wrapRunner } from './fixtures.js';
+import { bareTeam, cloneWithIdentity, mappedRunner, git, originSha, person, pushFromSeed, temporaryDirectory, wrapRunner } from './fixtures.js';
 
 const exists = (path: string) => access(path).then(() => true, () => false);
 const personJson = (handle: string) => `${JSON.stringify(person(handle))}\n`;
@@ -469,4 +469,43 @@ it('describeClone distinguishes failed probes from a runner that cannot verify, 
   expect(await cloneOrigin(root, unavailable)).toBeNull();
   const origin: Runner = { async run() { return { code: 0, stdout: 'github.com/acme/team', stderr: '' }; } };
   expect(await describeClone(root, 'github.com/acme/team', origin)).toEqual({ state: 'incomplete', reason: 'no-team-json' });
+});
+
+describe('remote failure call sites (issue 11)', () => {
+  const remote = 'https://github.com/acme/team.git';
+  const stderr = "remote: Repository not found.\nfatal: repository 'https://github.com/acme/team.git/' not found";
+  it('appends the clone explanation after the original git detail', async () => {
+    const fixture = await bareTeam();
+    const runner = wrapRunner(mappedRunner(remote, fixture.bare), async (command, args, _options, next) => command === 'git' && args[0] === 'clone' ? { code: 128, stdout: '', stderr } : next());
+    await expect(cloneTeam(remote, join(fixture.root, 'failed'), runner)).rejects.toThrow(`Could not clone ${remote}: ${stderr}\nGit could not access ${remote}.`);
+  });
+  it.each(['fetch', 'reset'])('refresh %s preserves the prefix and classifies only fetch', async (step) => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const base = mappedRunner(remote, fixture.bare);
+    const runner = wrapRunner(base, async (command, args, _options, next) => command === 'git' && args[0] === step ? { code: 128, stdout: '', stderr } : next());
+    const error = await refreshClone(runner, clone, { label: 'team' }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    if (step === 'fetch') expect((error as Error).message).toContain(`Could not refresh team: ${stderr}\nGit could not access ${remote}.`);
+    else expect((error as Error).message).toBe(`Could not refresh team: ${stderr}`);
+    expect((error as Error).name).toBe(step === 'fetch' ? 'RemoteAccessError' : 'Error');
+    expect(base.calls.filter((call) => call.args.join(' ') === 'remote get-url origin')).toHaveLength(step === 'fetch' ? 1 : 0);
+  });
+  it.each(['fetch', 'push'])('safeWrite %s appends the explanation using origin transport', async (step) => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const detail = step === 'fetch' ? stderr : 'remote: Permission to acme/team.git denied to me.';
+    const runner = wrapRunner(mappedRunner(remote, fixture.bare), async (command, args, _options, next) => command === 'git' && args[0] === step ? { code: 128, stdout: '', stderr: detail } : next());
+    const error = await openTeamRepo(clone, 'github.com/acme/team', runner).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(`${step === 'fetch' ? 'git fetch origin failed' : 'The remote refused the push'}: ${detail}\nGit could not ${step === 'fetch' ? 'access' : 'push to'} ${remote}.`);
+    if (step === 'push') expect(error).toBeInstanceOf(PushRefused);
+  });
+  it('safeWrite uses the SSH origin even with an HTTPS-normalized binding', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const ssh = 'git@github.com:acme/team.git';
+    const runner = wrapRunner(mappedRunner(ssh, fixture.bare), async (command, args, _options, next) => command === 'git' && args[0] === 'fetch' ? { code: 128, stdout: '', stderr: 'ERROR: Repository not found.' } : next());
+    await expect(openTeamRepo(clone, 'github.com/acme/team', runner).safeWrite(() => undefined, { action: 'join', handle: 'me' })).rejects.toThrow(`Git is using SSH for ${ssh}`);
+  });
 });

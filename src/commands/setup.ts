@@ -106,7 +106,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       const error = creatorAuthenticationError(gh);
       if (error) return failed(error, role, teamName, remote, steps);
       say('GitHub: gh is logged in.');
-    } else if (gh.authenticated) say('GitHub: gh is logged in; the invitation will be accepted for you.');
+    } else if (gh.authenticated) say('GitHub: gh is logged in. For an owner/repository target, setup will try to accept a matching invitation; Git access uses your configured Git credentials.');
     else if (gh.installed) say('GitHub: gh is installed but logged out; you will be asked to accept the invitation in your browser.');
     else say('GitHub: gh is not installed; you will be asked to accept the invitation in your browser.');
     steps.github = 'done';

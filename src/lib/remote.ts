@@ -200,6 +200,50 @@ export function repositoryUrl(remote: string): string {
   return ownerRepo ? `https://github.com/${ownerRepo}` : stripRemoteCredentials(remote);
 }
 
+/** Pure diagnostics for known git access failures; callers supply the actual transport URL. */
+export function explainGitAccessFailure(remote: string, stderr: string): string | null {
+  try {
+    const parsed = parseRemote(remote);
+    const notFound = /^remote: Repository not found\.$|^fatal: repository '.+' not found$/m.test(stderr);
+    const credentials = /could not read Username for 'https:\/\/github\.com'|terminal prompts disabled|Authentication failed for/m.test(stderr);
+    const pushDenied = /^remote: Permission to .+ denied to .+\.$/m.test(stderr);
+    const sshDenied = /^ERROR: Repository not found\.$|Permission denied \(publickey\)|^ERROR: Permission to .+ denied to .+\.$/m.test(stderr);
+    const shown = stripRemoteCredentials(remote);
+    if (!isGitHubRemote(remote)) {
+      return notFound || credentials || pushDenied || sshDenied
+        ? `Git could not access ${shown}. Access is managed on that host; ask a team admin to grant you access, then retry.`
+        : null;
+    }
+    const ownerRepo = githubOwnerRepo(remote);
+    if (parsed.kind === 'scp' || (parsed.kind === 'url' && parsed.scheme.toLowerCase() === 'ssh')) {
+      return sshDenied ? `Git is using SSH for ${shown}; the key it offered has no access to ${ownerRepo}.
+Check \`ssh -T git@github.com\` and the repository's access. gh's login does not apply to SSH.` : null;
+    }
+    if (parsed.kind !== 'url' || !/^https?$/i.test(parsed.scheme)) return null;
+    if (notFound) return `Git could not access ${shown}.
+"Repository not found" can mean:
+- the repository URL is wrong, or the repository no longer exists;
+- your account lacks access, including an invitation that still needs acceptance;
+- Git's HTTPS credentials lack access, even if gh is logged in.
+
+Check the repository URL and accept any pending invitation at https://github.com/${ownerRepo}/invitations.
+Run \`gh auth status\` to check gh's account.
+If you want gh's active account to supply Git credentials for github.com,
+run \`gh auth setup-git --hostname github.com\`, then retry.
+This changes global Git credential configuration for github.com and its gist host.`;
+    if (credentials) return "Git has no usable HTTPS credentials for github.com (terum-skills runs git without a terminal prompt).\nStore one with your Git credential helper, or run `gh auth setup-git --hostname github.com` so gh's active account supplies them, then retry.";
+    if (pushDenied) return `Git could not push to ${shown}.
+"Permission denied" means Git's HTTPS credentials lack write access to ${ownerRepo}, even if gh is logged in.
+Ask the repository owner to grant you write access.
+If you want gh's active account to supply Git credentials for github.com,
+run \`gh auth setup-git --hostname github.com\`, then retry.
+This changes global Git credential configuration for github.com and its gist host.`;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The repository basename, used as the default team name at `team join <url>` (§6). Only the
  * `file:<path>` and single-label `host:path` spellings carry a colon before the path; a dotted
