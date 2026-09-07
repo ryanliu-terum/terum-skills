@@ -176,8 +176,12 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       eval: async (args) => { calls.push(args); return success({ team: 't', id: 'id', name: args.ref, runDir: '/tmp/run', ccVersion: 'stub', executionStatus: 'complete' }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
-    await program.parseAsync(['eval', 'sample', '--k', '2', '--triggers-only', '--case', 'happy', '--model', 'sonnet', '--judge-model', 'opus', '--working', '--team', 't'], { from: 'user' });
-    expect(calls).toEqual([{ ref: 'sample', k: 2, triggersOnly: true, case: 'happy', model: 'sonnet', judgeModel: 'opus', working: true, team: 't' }]);
+    await program.parseAsync(['eval', 'sample', '--k', '2', '--triggers-only', '--case', 'happy', '--model', 'sonnet', '--judge-model', 'opus', '--working', '--gen', '--save', '--team', 't'], { from: 'user' });
+    await program.parseAsync(['eval', 'sample', '--no-gen'], { from: 'user' });
+    expect(calls).toEqual([
+      { ref: 'sample', k: 2, triggersOnly: true, case: 'happy', model: 'sonnet', judgeModel: 'opus', working: true, gen: true, save: true, team: 't' },
+      { ref: 'sample', noGen: true },
+    ]);
   });
 });
 
