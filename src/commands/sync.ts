@@ -14,7 +14,7 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { allowedTools, parseJson, personSchema, sameScope } from '../lib/schema.js';
 import { endorsedCandidates, findSkill, readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
-import { CloneBusy, openTeamRepo, refreshClone, treeText } from '../lib/teamRepo.js';
+import { CloneBusy, openTeamRepo, refreshClone, RemoteAccessError, treeText } from '../lib/teamRepo.js';
 import { materializeVersion } from '../lib/version.js';
 import { reconcileShared } from './share.js';
 import { installOne, skillAtSource } from './install.js';
@@ -88,13 +88,15 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
     const config = await store.read();
     // A team this run cannot work on costs exactly that team: it is left alone — not refreshed,
     // not read, not stamped fresh — and every other team still syncs, so the SessionStart hook
-    // still exits 0. Three reasons: another process holds the clone's writer lock (reported);
+    // can complete healthy teams. Lock/rate-limit skips still exit 0; classified fetch failures
+    // produce a final failure after healthy teams finish. Lock/rate-limit reasons: a writer lock (reported);
     // another run holds the team's §8 mutex (reported, except to a hook, for which another window
     // is doing the work); or, in hook mode only, the team synced within the hour (silent).
     // EVERY sync takes the mutex, not only a hook (rulings walk R4, 2026-09-06): `team leave` holds
     // it while it removes the team's placements, so a sync typed in another terminal can no longer
     // re-place a folder seconds after leave removed it, or pull into a clone being deleted.
     const skipped = new Set<string>();
+    const unreachable: string[] = [];
     for (const team of Object.keys(config.teams)) {
       const clone = store.teamClone(team);
       // The gate can throw — a lock file this process cannot read, a refused run/ directory — and
@@ -113,6 +115,10 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
       try {
         await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {}, lockStale: args.lockStale });
       } catch (error) {
+        if (error instanceof RemoteAccessError) {
+          notice(`Skipping ${team}: could not fetch ${error.origin}: ${error.stderr}\n${error.explanation}`);
+          skipped.add(team); unreachable.push(team); continue;
+        }
         if (!(error instanceof CloneBusy)) throw error;
         // Reported through `notices` alone, which the hook already writes to stderr: `deferred` is
         // rendered as a count of SKILLS needing review (execute.ts), so a team never belongs on it.
@@ -283,6 +289,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
       if (final.pending.some((entry) => entry.team === team)) continue;
       await writeStamp(store, team);
     }
+    if (unreachable.length) return failure(`Sync finished with ${unreachable.length} team(s) skipped: ${unreachable.join(', ')}. See the notices above.`, args.hook ? { placed, deferred, notices, changed, hook: true } : undefined);
     return success({ placed, deferred, notices, changed, hook: Boolean(args.hook) });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error), args.hook ? { placed, deferred, notices, changed, hook: true } : undefined); }
   finally { for (const release of releases) await release().catch(() => undefined); }
