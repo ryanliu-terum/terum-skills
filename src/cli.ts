@@ -53,7 +53,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .description('Onboarding wizard: on a new machine, asks whether to create a team or join one; re-run to resume; pass <org>/<repo> or a remote URL to join directly')
     .action(async (target: string | undefined) => execute((io) => active.setup({ target }, io), { verb: 'setup', notices: true }));
 
-  const team = program.command('team').description('Create or join a team');
+  const team = program.command('team').description('Create, join, leave, and admin settings for a team; run `terum-skills team` to see all options');
   team
     .command('create [name]')
     .description('Create a private team repository and become its first member (asks for the team name and the repository name when omitted)')
