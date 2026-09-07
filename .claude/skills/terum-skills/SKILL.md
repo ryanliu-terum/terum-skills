@@ -86,7 +86,8 @@ Whether `! <command>` in Claude Code's shell mode has a TTY is unverified; do no
 
 ## eval
 
-`eval` never asks a question and never writes the team repository (spec §6.0), so it runs here.
+`eval` never asks a question and, without `--commit`, never writes the team repository (spec §6.0), so
+it runs here.
 What it does, so the user knows what they are buying:
 
 1. Refreshes the team clone and reads the skill by name or id; `--working` evaluates the user's
@@ -106,7 +107,10 @@ Rules:
   a first look.
 - Run it with `run_in_background`; a full matrix takes minutes.
 - A skill with no `evals/` folder produces an empty matrix; say so before running.
-- `--commit` is refused by the CLI until committed receipts land (IE3, PR #31); do not pass it.
+- `--commit` (0.1.3+) is the one eval path that writes the team repository: after the run it adds
+  exactly one immutable receipt, `evals/<id>/<tree>/<run-id>.json`, straight to team `main` through
+  `safeWrite`, in the user's name. **Confirm with the user before passing it**, never add it on your
+  own, and never combine it with `--working` (the CLI refuses: receipts pin committed trees only).
 - Model flags pass through unchanged (`--model`, `--judge-model`; default `sonnet`).
 
 ## What this skill never does

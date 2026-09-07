@@ -4,7 +4,7 @@ Date: 2026-09-07. Baseline: `main` @ `8730d2e`, terum-skills 0.1.2 (npm `latest`
 Status: Ryan picked option A (§6) on 2026-09-07 and it is implemented, uncommitted, in the primary
 checkout: `.claude/skills/terum-skills/SKILL.md`, `.claude/commands/terum-skills.md`, one allowlist line in
 `.claude/settings.json`, one row in `.claude/skills/README.md`. Nothing in `src/` changed. `eval` was promoted
-from "wrap after a trial" to "wrap now" after reading `eval.ts` in full (no prompt; `--commit` refused until IE3).
+from "wrap after a trial" to "wrap now" after reading `eval.ts` in full (no prompt; `--commit` lands with IE3 in 0.1.3 and is the one eval path that writes the team repo).
 
 ## 1. Verdict in one paragraph
 
