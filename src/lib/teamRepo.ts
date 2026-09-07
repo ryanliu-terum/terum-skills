@@ -336,7 +336,7 @@ export function localPushGuardLauncher(): PushGuardLauncher | null {
 }
 
 /** POSIX-shell single quoting: a HOME with a space or a quote is still one word. */
-function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
+export function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
 
 /** This package's version, for the pinned `npx` fallback; null when package.json is out of reach (an unusual bundle). */
 export function packageVersion(): string | null {

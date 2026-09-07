@@ -6,6 +6,15 @@ import { bareTeam, cloneWithIdentity, fakeGh, git, holdCloneLock, mappedRunner, 
 import { run } from '../publish.js';
 import { CommandResult } from '../../lib/runner.js';
 
+const V = `npx -y terum-skills@${JSON.parse(await readFile(new URL('../../../package.json', import.meta.url), 'utf8')).version}`;
+
+async function localSkill(home: string, name: string, frontmatterName = name): Promise<string> {
+  const directory = join(home, '.claude', 'skills', name);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'SKILL.md'), `---\nname: ${frontmatterName}\ndescription: ${name} skill\n---\n`);
+  return directory;
+}
+
 const REMOTE = 'https://github.com/acme/team.git';
 const ID = '11111111-1111-4111-8111-111111111111';
 /** The branch a publish of `sample` by `seed` mints: fresh every run (R2), so tests match the shape, never a literal. */
@@ -183,7 +192,7 @@ describe('publish (§6)', () => {
     const other = await bareTeam();
     await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
     const runner = mappedRunner(REMOTE, fixture.bare);
-    await expect(run({ ref: 'team/missing', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: 'No skill team/missing in team team.' });
+    await expect(run({ ref: 'team/missing', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: `No skill team/missing in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} share '<path-to-skill>' --team 'team'\`, then publish its name.` });
     await expect(run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('A bare skill ref is ambiguous across configured teams') });
     await expect(run({ ref: 'sample', team: 'team', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: true, value: { team: 'team' } });
   });
@@ -269,4 +278,59 @@ describe('publish (§6)', () => {
     await expect(run({ ref: 'sample', project: 'constructor', config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: 'Unknown project constructor.' });
   });
 
+});
+
+
+describe('publish local recovery hints', () => {
+  it('a miss with an untracked local folder names the absolute share and retry commands with --team, and writes nothing', async () => {
+    const { fixture, store } = await prepared();
+    const home = join(fixture.root, 'home with space');
+    const local = await localSkill(home, 'local');
+    const runner = mappedRunner(REMOTE, fixture.bare);
+    const before = await originSha(fixture.bare);
+    const sourceBefore = await readFile(join(local, 'SKILL.md'), 'utf8');
+    const io = new ScriptedPrompter([], [], true);
+    await expect(run({ ref: 'local', home, project: 'p', config: store, runner }, io)).resolves.toMatchObject({ ok: false,
+      error: `No skill local in team team. Found a local folder at ${local} that is not tracked as a shared source or placement on this machine. To share it with team, run \`${V} share '${local}' --team 'team'\`, then retry \`${V} publish 'local' --team 'team' --project 'p'\`.` });
+    expect(io.asked).toEqual([]);
+    expect(await readFile(join(local, 'SKILL.md'), 'utf8')).toBe(sourceBefore);
+    expect((await store.read()).shared).toEqual({});
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
+  });
+
+  it('a miss with no candidate — no folder, a name-mismatched folder, a tracked source — gets the ls/share hint', async () => {
+    const { fixture, store } = await prepared();
+    const home = join(fixture.root, 'home');
+    await localSkill(home, 'gsd-x', 'gsd:x');
+    const tracked = await localSkill(home, 'mine');
+    await store.update((c) => { c.shared['22222222-2222-4222-8222-222222222222'] = { source: tracked, team: 'other', baseline: 'sha256:0' }; });
+    const runner = mappedRunner(REMOTE, fixture.bare);
+    const before = await originSha(fixture.bare);
+    const generic = (ref: string) => `No skill ${ref} in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} share '<path-to-skill>' --team 'team'\`, then publish its name.`;
+    for (const ref of ['missing', 'gsd-x', 'mine']) await expect(run({ ref, home, config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: generic(ref) });
+    expect(await originSha(fixture.bare)).toBe(before);
+  });
+
+  it('two configured teams: the hint carries the team the ref selected', async () => {
+    const { fixture, store } = await prepared();
+    const other = await bareTeam();
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    const home = join(fixture.root, 'home');
+    const local = await localSkill(home, 'local');
+    const result = await run({ ref: 'team/local', home, config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false,
+      error: `No skill team/local in team team. Found a local folder at ${local} that is not tracked as a shared source or placement on this machine. To share it with team, run \`${V} share '${local}' --team 'team'\`, then retry \`${V} publish 'team/local' --team 'team'\`.` });
+  });
+
+  it('an existing team skill with the same name as a local folder is endorsed, never re-shared', async () => {
+    const { fixture, store } = await prepared();
+    const home = join(fixture.root, 'home');
+    await localSkill(home, 'sample');
+    const before = await originSha(fixture.bare);
+    const result = await run({ ref: 'sample', home, config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { branch: expect.stringMatching(FRESH) } });
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect((await store.read()).shared).toEqual({});
+  });
 });

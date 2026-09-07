@@ -1,10 +1,9 @@
-import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { creatorAuthenticationError, detectOrOfferGh, teamByRemote } from '../lib/auth.js';
 import { COMMUNITY_URL } from '../lib/community.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { exists } from '../lib/fs.js';
+import { localSkillCandidates } from '../lib/local-skills.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
 import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
 import { Prompter } from '../lib/prompt.js';
@@ -12,7 +11,7 @@ import { readRoster } from '../lib/skills.js';
 import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { describeClone } from '../lib/teamRepo.js';
+import { describeClone, packageVersion } from '../lib/teamRepo.js';
 import { joinCommand, run as invite } from './invite.js';
 import { run as share } from './share.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
@@ -70,18 +69,6 @@ function failed(error: unknown, role: SetupResult['role'], teamName: string, rem
 
 function resolvedHook(store: ConfigStore, home: string | undefined, partial: HookOptions | undefined): Required<HookOptions> {
   return { ...defaultHookOptions(store.root, home), ...partial };
-}
-
-async function unsharedSkills(root: string, config: Awaited<ReturnType<ConfigStore['read']>>): Promise<string[]> {
-  if (!(await exists(root))) return [];
-  const excluded = new Set([...Object.values(config.shared).map((entry) => resolve(entry.source)), ...Object.keys(config.placements).map((path) => resolve(path))]);
-  const entries = await readdir(root, { withFileTypes: true });
-  const names: string[] = [];
-  for (const entry of entries) {
-    const path = join(root, entry.name);
-    if (entry.isDirectory() && await exists(join(path, 'SKILL.md')) && !excluded.has(resolve(path))) names.push(entry.name);
-  }
-  return names.sort();
 }
 
 export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupResult>> {
@@ -202,7 +189,8 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
 
     if (role === 'creator') {
       const root = AGENT_PATHS['claude-code'].global(args.home ?? homedir());
-      const available = await unsharedSkills(root, await store.read());
+      const { names: available, omitted, unreadable } = await localSkillCandidates(root, await store.read());
+      if (omitted.length + unreadable > 0) io.print(`Skipped ${omitted.length + unreadable} local folders that fail share validation.`);
       if (available.length === 0) {
         io.print(`No unshared skills under ${root}.`);
         steps.actions = 'skipped';
@@ -221,7 +209,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     say('  terum-skills ls                       — list members and shared skills');
     say('  terum-skills search <term>            — find a skill by name, description, or category');
     say('  terum-skills sync                     — pull updates and finish pending work');
-    say('  terum-skills publish <skill>          — endorse a skill for the whole team');
+    say(`  npx -y terum-skills@${packageVersion() ?? 'latest'} publish <skill> — endorse a skill already shared with the team`);
 
     const communityUrl = args.communityUrl ?? COMMUNITY_URL;
     if (communityUrl === '' || args.quiet) steps.community = 'skipped';
