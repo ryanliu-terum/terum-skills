@@ -314,7 +314,7 @@ describe('connect (§5.3)', () => {
     for (const io of [first, second]) {
       const warnings = io.lines.filter((line) => line.includes('Connected source'));
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toBe(`Connected source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use connect --relocate or --forget.`);
+      expect(warnings[0]).toBe(`Connected source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use npx -y terum-skills@latest connect --relocate or npx -y terum-skills@latest connect --forget.`);
     }
     expect(await originSha(fixture.bare)).toBe(sha);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toContain('name: sample');
@@ -463,7 +463,7 @@ describe('connect (§5.3)', () => {
     const sha = await originSha(fixture.bare);
     const io = new ScriptedPrompter();
     expect((await sync({ config: store }, io)).ok).toBe(true);
-    expect(io.lines).toContain(`Connected skill sample now contains plugin or hook definitions; run connect --keep-source ${id} --allow-privileged after reviewing them.`);
+    expect(io.lines).toContain(`Connected skill sample now contains plugin or hook definitions; run npx -y terum-skills@latest connect --keep-source '${id}' --allow-privileged after reviewing them.`);
     expect(await originSha(fixture.bare)).toBe(sha);
     expect(await git(['ls-tree', '-r', '--name-only', 'main', 'skills/sample/'], fixture.bare)).not.toContain('hooks/');
     expect((await store.read()).shared[id]!.baseline).toBe(baseline);
@@ -953,7 +953,7 @@ describe('issue 5 connected-source contract', () => {
     const io = new NonInteractivePrompter();
     const result = await sync({ config: store, hook: true }, io);
     expect(result.ok).toBe(true);
-    expect(result.value?.notices).toEqual([`Connected skill sample diverged (source ${await canonicalDigest(tracked.source)}, repo ${await canonicalDigest(join(store.teamClone('team'), 'skills', 'sample'))}); choose connect --keep-source ${id} or --keep-repo ${id}.`]);
+    expect(result.value?.notices).toEqual([`Connected skill sample diverged (source ${await canonicalDigest(tracked.source)}, repo ${await canonicalDigest(join(store.teamClone('team'), 'skills', 'sample'))}); choose npx -y terum-skills@latest connect --keep-source '${id}' or npx -y terum-skills@latest connect --keep-repo '${id}'.`]);
     expect(result.value?.deferred).toEqual(['sample']);
     expect(io.lines).toEqual([]); expect(io.asked).toEqual([]);
   });
@@ -995,7 +995,7 @@ it('issue 5 reports a missing repository copy with the exact connect remedy', as
   const { store } = await sharedFixture(); const [id] = Object.keys((await store.read()).shared);
   const directory = join(store.teamClone('team'), 'skills', 'sample'); await rename(directory, `${directory}-missing`);
   const io = new ScriptedPrompter(); await reconcileShared(store, systemRunner, io);
-  expect(io.lines).toEqual([`Repository copy for connected ${id!.slice(0, 8)} is missing; run connect again to restore it.`]);
+  expect(io.lines).toEqual([`Repository copy for connected ${id!.slice(0, 8)} is missing; run npx -y terum-skills@latest connect again to restore it.`]);
 });
 
 it('issue 5 reports an unreadable repository inventory using connected wording', async () => {

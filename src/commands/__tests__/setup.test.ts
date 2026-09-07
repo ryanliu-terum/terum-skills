@@ -107,13 +107,13 @@ describe('setup (§6.1)', () => {
     expect(suppressed.asked).toEqual([]);
   });
 
-  it('hands a target-less joiner back to the owner without any calls or local writes', async () => {
+  it.each([undefined, 'bare'] as const)('hands a target-less joiner back to the owner without any calls or local writes (form=%s)', async (form) => {
     const fixture = await bareTeam(); const root = join(fixture.root, 'handoff');
     const store = createConfigStore(join(root, 'state'));
     const runner = mappedRunner('https://github.com/me/team.git', fixture.bare, fakeGh('me', {}, false));
     const calls = { team: 0, connect: 0, invite: 0, offerHook: 0, ensureRoot: 0, update: 0 };
     const io = new ScriptedPrompter(['Join an existing team']);
-    const result = await run({ config: { ...store,
+    const result = await run({ form, config: { ...store,
       ensureRoot: async () => { calls.ensureRoot += 1; return store.ensureRoot(); },
       update: async (mutate) => { calls.update += 1; return store.update(mutate); },
     }, home: join(root, 'home'), runner, hook: hookFor(root), verbs: {
@@ -244,7 +244,7 @@ describe('setup (§6.1)', () => {
     expect(result.value.steps).toMatchObject({ welcome: 'printed', github: 'done', team: 'skipped', actions: 'skipped', invite: 'skipped', community: 'skipped', hook: 'skipped', done: 'printed' });
     expect(seen).toEqual([io]);
     expect(io.lines.join('\n')).not.toMatch(/\bui\b/i);
-    expect(io.lines).toContain('  terum-skills eval <skill>             — evaluate a shared skill locally before publishing');
+    expect(io.lines).toContain('  npx -y terum-skills@latest eval <skill>             — evaluate a shared skill locally before publishing');
     expect(io.lines.join('\n')).not.toContain('Feedback and requests:');
     expect(io.lines).toContain('Resuming setup for team team. To join another team, run the setup command its owner sent you.');
     expect(io.askedAbout('Create a team or join one?')).toBe(false);
@@ -288,37 +288,39 @@ describe('setup (§6.1)', () => {
     expect(io.lines).not.toContain('Members:');
   });
 
-  it('a folder with team.json but no repository — an interrupted leave, a restore that skipped dotfiles — is incomplete, not set up (R9)', async () => {
+  it.each([undefined, 'bare'] as const)('a folder with team.json but no repository — an interrupted leave, a restore that skipped dotfiles — is incomplete, not set up (R9) (form=%s)', async (form) => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await rm(join(clone, '.git'), { recursive: true, force: true });
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter();
-    const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+    const result = await run({ form, config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
       offerHook: async () => 'present',
     } }, io);
     expect(result.ok).toBe(false);
     expect(result.ok ? '' : result.error).toContain(`${clone} exists and is not a complete clone`);
     expect(result.ok ? '' : result.error).toContain('move it aside');
+    expect(result.ok ? '' : result.error).toContain(`run \`${form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest'} team join '${fixture.bare}'\` to restore it`);
     expect(io.lines).not.toContain('Members:');
   });
 
-  it('refuses a clone of a different remote the way team join does, naming the origin (R9)', async () => {
+  it.each([undefined, 'bare'] as const)('refuses a clone of a different remote the way team join does, naming the origin (R9) (form=%s)', async (form) => {
     const fixture = await bareTeam(); const other = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(other.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter();
-    const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+    const result = await run({ form, config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
       offerHook: async () => 'present',
     } }, io);
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`${clone} is a clone of`) });
     expect(result.ok ? '' : result.error).toContain('move it aside');
+    expect(result.ok ? '' : result.error).toContain(`run \`${form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest'} team join '${fixture.bare}'\` to restore it`);
     expect(io.lines).not.toContain('Members:');
   });
 
-  it('names the move-aside repair when the clone directory survives without team.json', async () => {
+  it.each([undefined, 'bare'] as const)('names the move-aside repair when the clone directory survives without team.json (form=%s)', async (form) => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -327,12 +329,13 @@ describe('setup (§6.1)', () => {
     await rm(join(clone, 'team.json'), { force: true });
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter();
-    const result = await run({ config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
+    const result = await run({ form, config: store, home: join(fixture.root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed', {}, true)), communityUrl: '', verbs: {
       offerHook: async () => 'present',
     } }, io);
     expect(result.ok).toBe(false);
     expect(result.ok ? '' : result.error).toContain(`${clone} exists and is not a complete clone`);
     expect(result.ok ? '' : result.error).toContain('move it aside');
+    expect(result.ok ? '' : result.error).toContain(`run \`${form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest'} team join '${fixture.bare}'\` to restore it`);
     expect(io.lines).not.toContain('Members:');
   });
 
@@ -387,17 +390,17 @@ describe('setup (§6.1)', () => {
       'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.',
       'Creating a new team creates a private GitHub repository under your account.',
       'GitHub: gh is logged in.', 'Next, from any terminal:',
-      '  terum-skills install alpha/<skill>   — install a shared skill (add @<version> to pin it)',
-      '  terum-skills ls [--local]             — list members and shared skills; --local lists your own',
-      '  terum-skills search <term>            — find a skill by name, description, or category',
-      '  terum-skills sync                     — pull updates and finish pending work',
+      '  npx -y terum-skills@latest install \'alpha/<skill>\'   — install a shared skill (add @<version> to pin it)',
+      '  npx -y terum-skills@latest ls [--local]             — list members and shared skills; --local lists your own',
+      '  npx -y terum-skills@latest search <term>            — find a skill by name, description, or category',
+      '  npx -y terum-skills@latest sync                     — pull updates and finish pending work',
       '  npx -y terum-skills@latest publish <skill> — endorse a skill already connected to the team',
-      '  terum-skills eval <skill>             — evaluate a shared skill locally before publishing',
+      '  npx -y terum-skills@latest eval <skill>             — evaluate a shared skill locally before publishing',
       'Feedback and requests: https://example.test/community', 'Members:', '  @alice — Alice',
       'Repository: https://github.com/alice/alpha-repo', 'README: https://github.com/alice/alpha-repo/blob/main/README.md',
     ]));
     expect(io.lines.join('\n')).not.toMatch(/\bui\b/i);
-    expect(io.lines).toContain('  terum-skills eval <skill>             — evaluate a shared skill locally before publishing');
+    expect(io.lines).toContain('  npx -y terum-skills@latest eval <skill>             — evaluate a shared skill locally before publishing');
     expect(runner.calls.filter((call) => call.command === 'gh' && call.args.join(' ').includes('collaborators/')).map((call) => call.args.at(-1))).toEqual(['repos/alice/alpha-repo/collaborators/bob', 'repos/alice/alpha-repo/collaborators/carol']);
     expect(JSON.parse(await readFile(hookFor(root).settingsFile, 'utf8')).hooks.SessionStart).toHaveLength(1);
     expect(await git(['ls-tree', '--name-only', 'main:skills'], bare)).toContain('starter');
@@ -490,12 +493,12 @@ describe('setup (§6.1)', () => {
     ]));
   });
 
-  it('skips invitations for a configured generic-git creator and prints the host handoff', async () => {
+  it.each([undefined, 'bare'] as const)('skips invitations for a configured generic-git creator and prints the host handoff (form=%s)', async (form) => {
     const fixture = await bareTeam(); const root = join(fixture.root, 'generic'); const store = createConfigStore(join(root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter([], [false]);
-    const result = await run({ config: store, home: join(root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed')), hook: hookFor(root) }, io);
+    const result = await run({ form, config: store, home: join(root, 'home'), runner: mappedRunner(fixture.bare, fixture.bare, fakeGh('seed')), hook: hookFor(root) }, io);
     if (!result.ok) throw new Error(result.error);
     expect(result.value.steps.invite).toBe('skipped');
     expect(io.askedAbout('Invite teammates')).toBe(false);
@@ -514,7 +517,7 @@ describe('setup (§6.1)', () => {
     expect(result.value.steps).toMatchObject({ invite: 'skipped', community: 'printed' });
     expect(io.lines).toContain(`Feedback and requests: ${COMMUNITY_URL}`);
     expect(io.lines.join('\n')).not.toMatch(/\bui\b/i);
-    expect(io.lines).toContain('  terum-skills eval <skill>             — evaluate a shared skill locally before publishing');
+    expect(io.lines).toContain('  npx -y terum-skills@latest eval <skill>             — evaluate a shared skill locally before publishing');
   });
 
   it('stops before team creation when a non-interactive creator is logged out', async () => {
@@ -523,7 +526,7 @@ describe('setup (§6.1)', () => {
     const io = new ScriptedPrompter(['Create a new team'], [], false);
     const result = await run({ config: createConfigStore(join(root, 'state')), home: join(root, 'home'), runner, hook: hookFor(root) }, io);
     expect(io.asked).toEqual(['Create a team or join one?']);
-    expect(result).toMatchObject({ ok: false, error: 'GitHub authentication is required to create a team: run `gh auth login` and retry, or create the team against an existing empty remote with `team create <name> --remote <url>`.' });
+    expect(result).toMatchObject({ ok: false, error: 'GitHub authentication is required to create a team: run `gh auth login` and retry, or create the team against an existing empty remote with `npx -y terum-skills@latest team create <name> --remote <url>`.' });
     expect(result.value?.steps.team).toBeUndefined();
     expect(runner.calls.filter((call) => call.command === 'git' && call.args[0] === 'push')).toEqual([]);
   });
@@ -619,4 +622,24 @@ it('setup joiner prints the conditional gh notice and propagates the clone acces
   expect(io.lines).toContain('GitHub: gh is logged in. For an owner/repository target, setup will try to accept a matching invitation; Git access uses your configured Git credentials.');
   expect(base.calls.filter((call) => call.args.join(' ') === 'api --method PATCH user/repository_invitations/42')).toHaveLength(1);
   expect(base.calls.some((call) => call.args.includes('setup-git') || call.args.includes('ls-remote'))).toBe(false);
+});
+
+
+it.each([undefined, 'bare'] as const)('threads %s from creator setup to connect omission hints and every epilogue line', async (form) => {
+  const fixture = await configuredCreator({});
+  const home = fixture.args.home;
+  await skillUnder(home, 'candidate');
+  const rejected = join(home, '.claude/skills/rejected'); await mkdir(rejected);
+  await writeFile(join(rejected, 'SKILL.md'), 'not frontmatter');
+  const io = new ScriptedPrompter(['', 'Skip'], [], true);
+  const result = await run({ ...fixture.args, form }, io);
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  const prefix = form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest';
+  expect(io.lines).toContain(`Skipped 1 local folders that cannot be connected. Run \`${prefix} ls --local\` for paths and reasons.`);
+  const start = io.lines.indexOf('Next, from any terminal:');
+  expect(start).toBeGreaterThan(-1);
+  const lines = io.lines.slice(start+1, start+8);
+  expect(lines).toHaveLength(7);
+  for (const line of lines) expect(line.startsWith(`  ${prefix} `)).toBe(true);
+  expect(lines.map((line) => line.slice(prefix.length+3).split(' ')[0])).toEqual(['install', 'ls', 'search', 'sync', 'publish', 'eval', 'connect']);
 });

@@ -137,6 +137,6 @@ describe('guard-push — the clone-local pre-push hook entry (D12)', () => {
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main, 'refs/heads/publish/x', foreign, 'refs/heads/publish/x', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/SKILL.md') });
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main, 'refs/heads/publish/x', ownPeople, 'refs/heads/publish/x', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: true, value: { checked: 2 } });
     await store.update((config) => { delete config.display_name; delete config.email; });
-    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringMatching(/no name and email[\s\S]*terum-skills login/) });
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringMatching(/no name and email[\s\S]*npx -y terum-skills@latest login/) });
   });
 });

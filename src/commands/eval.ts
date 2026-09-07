@@ -1,3 +1,5 @@
+import { invocation } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -20,7 +22,7 @@ import { findSkill, readTeam, skillRecords } from '../lib/skills.js';
 import { openTeamRepo, refreshClone } from '../lib/teamRepo.js';
 import { materializeVersion, resolveVersion } from '../lib/version.js';
 
-export interface EvalArgs {
+export interface EvalArgs extends WithForm {
   ref: string;
   k?: number;
   triggersOnly?: boolean;
@@ -58,8 +60,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
-    const [teamName, binding] = selectTeam(config.teams, args.team);
-    if (args.commit && !binding.handle) return failure(`Team ${teamName} has no joined handle; run \`team join\` before committing an eval receipt.`);
+    const [teamName, binding] = selectTeam(config.teams, args.team, args.form);
+    if (args.commit && !binding.handle) return failure(`Team ${teamName} has no joined handle; run \`${invocation(args.form, 'team join')}\` before committing an eval receipt.`);
     const clone = store.teamClone(teamName);
     await refreshClone(runner, clone, { label: teamName });
     const team = await readTeam(clone);

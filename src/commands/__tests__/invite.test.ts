@@ -8,7 +8,7 @@ describe('invite (§6 host scoping)', () => {
     expect(joinCommand('acme/team')).toBe('npx -y terum-skills@latest setup acme/team');
   });
 
-  it('parses real gh status headers for invited, existing, and repository-owner responses and prints one join block', async () => {
+  it.each([undefined, 'bare'] as const)('parses real gh status headers for invited, existing, and repository-owner responses and prints one join block (form=%s)', async (form) => {
     const store = createConfigStore(await temporaryDirectory());
     await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'admin' }; });
     const runner = ghOnlyRunner((args) => {
@@ -18,7 +18,7 @@ describe('invite (§6 host scoping)', () => {
       return { code: 1, stdout: 'HTTP/2.0 422 Unprocessable Entity\r\n', stderr: 'gh: Validation Failed (HTTP 422)' };
     });
     const io = new ScriptedPrompter();
-    const result = await run({ logins: ['new', 'member', 'acme'], config: store, runner }, io);
+    const result = await run({ form, logins: ['new', 'member', 'acme'], config: store, runner }, io);
     expect(result).toMatchObject({ ok: true, value: { invited: ['new'], already: ['member', 'acme'] } });
     expect(io.lines.join('\n')).toContain('npx -y terum-skills@latest setup acme/team');
     // The global install line comes first inside the fence so a teammate gets the bare command as well (Ryan, 2026-09-06).

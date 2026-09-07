@@ -305,20 +305,21 @@ describe('team create (§6)', () => {
     expect((await store.read()).teams).toEqual({});
   });
 
-  it('a failed scaffold push leaves no staging directory and says the remote holds no scaffold; a failure after the push says to team join instead', async () => {
+  it.each([undefined, 'bare'] as const)('a failed scaffold push leaves no staging directory and says the remote holds no scaffold; a failure after the push says to team join instead (form=%s)', async (form) => {
+    const prefix = form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest';
     const { root, bare } = await emptyBare();
     const publicRemote = 'https://git.example/boot.git';
     const store = createConfigStore(pathJoin(root, 'local'));
     const refused = wrapRunner(mappedRunner(publicRemote, bare), async (command, args, _options, next) => command === 'git' && args[0] === 'push' ? { code: 1, stdout: '', stderr: 'remote: Permission denied' } : next());
-    const result = await create({ name: 'boot', remote: publicRemote, config: store, runner: refused }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
-    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/Permission denied[\s\S]*holds no scaffold[\s\S]*team create boot --remote https:\/\/git\.example\/boot\.git/) });
+    const result = await create({ form, name: 'boot', remote: publicRemote, config: store, runner: refused }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(new RegExp(String.raw`Permission denied[\s\S]*holds no scaffold[\s\S]*${prefix} team create 'boot' --remote 'https:\/\/git\.example\/boot\.git`)) });
     expect(await readdir(pathJoin(store.root, 'teams'))).toEqual([]);
     expect((await store.read()).teams).toEqual({});
     expect((await git(['ls-remote', '--heads', bare])).trim()).toBe('');
     // The push lands but git reports failure afterwards: the remote is scaffolded, so the advice is team join, and staging is still cleaned up.
     const afterPush = wrapRunner(mappedRunner(publicRemote, bare), async (command, args, _options, next) => { const result = await next(); return command === 'git' && args[0] === 'push' ? { code: 1, stdout: '', stderr: 'hung up unexpectedly' } : result; });
-    const later = await create({ name: 'boot', remote: publicRemote, config: store, runner: afterPush }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
-    expect(later).toMatchObject({ ok: false, error: expect.stringMatching(/hung up unexpectedly[\s\S]*run `team join https:\/\/git\.example\/boot\.git`/) });
+    const later = await create({ form, name: 'boot', remote: publicRemote, config: store, runner: afterPush }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    expect(later).toMatchObject({ ok: false, error: expect.stringMatching(new RegExp(String.raw`hung up unexpectedly[\s\S]*run \`${prefix} team join 'https:\/\/git\.example\/boot\.git'\``)) });
     expect(await readdir(pathJoin(store.root, 'teams'))).toEqual([]);
     expect((await git(['ls-remote', '--heads', bare])).trim()).toContain('refs/heads/main');
   });
@@ -351,7 +352,8 @@ describe('team create (§6)', () => {
     expect((await git(['ls-remote', '--heads', bare])).trim()).toContain('refs/heads/main');
   });
 
-  it('a failed post-push re-probe admits it could not tell, and points at both recoveries', async () => {
+  it.each([undefined, 'bare'] as const)('a failed post-push re-probe admits it could not tell, and points at both recoveries (form=%s)', async (form) => {
+    const prefix = form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest';
     const { root, bare } = await emptyBare();
     const publicRemote = 'https://git.example/dark.git';
     const store = createConfigStore(pathJoin(root, 'local'));
@@ -362,8 +364,8 @@ describe('team create (§6)', () => {
       if (pushed && command === 'git' && args[0] === 'ls-remote') return { code: 128, stdout: '', stderr: 'Could not read from remote repository.' };
       return next();
     });
-    const result = await create({ name: 'dark', remote: publicRemote, config: store, runner: dark }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
-    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/hung up unexpectedly[\s\S]*Could not determine whether the scaffold reached[\s\S]*team join https:\/\/git\.example\/dark\.git[\s\S]*team create dark --remote/) });
+    const result = await create({ form, name: 'dark', remote: publicRemote, config: store, runner: dark }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(new RegExp(String.raw`hung up unexpectedly[\s\S]*Could not determine whether the scaffold reached[\s\S]*${prefix} team join 'https:\/\/git\.example\/dark\.git[\s\S]*${prefix} team create 'dark' --remote`)) });
     expect(await readdir(pathJoin(store.root, 'teams'))).toEqual([]);
   });
 
@@ -380,4 +382,23 @@ describe('team create arms the push guard (D12)', () => {
     expect(await readdir(pathJoin(store.root, 'teams'))).toEqual([]);
     expect((await store.read()).teams).toEqual({});
   });
+});
+
+
+it.each([undefined, 'bare'] as const)('routes remaining create recoveries (form=%s)', async (form) => {
+  const prefix = form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest';
+  const { root, bare } = await emptyBare(); const store = createConfigStore(pathJoin(root, 'state'));
+  await mkdir(store.teamClone('existing'), { recursive: true });
+  expect(await create({ name: 'existing', config: store, form }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`run \`${prefix} team join\``) });
+  const remote = 'https://git.example/created.git';
+  const occupied = wrapRunner(mappedRunner(remote, bare), async (command, args, _options, next) => command === 'git' && args[0] === 'ls-remote' ? { code: 0, stdout: 'abc refs/heads/main', stderr: '' } : next());
+  const refused = await create({ name: 'occupied', remote, config: store, runner: occupied, form }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+  expect(refused).toMatchObject({ ok: false, error: expect.stringContaining(`\`${prefix} team create --remote\` needs an empty repository. To join an existing team run \`${prefix} team join '${remote}'\``) });
+  const raced = wrapRunner(mappedRunner(remote, bare), async (command, args, _options, next) => {
+    const value = await next();
+    if (command === 'git' && args[0] === 'push') await store.update((c) => { c.teams.raced = { remote: 'git.example/other', handle: 'other' }; });
+    return value;
+  });
+  const result = await create({ name: 'raced', remote, config: store, runner: raced, form }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`run \`${prefix} team join '${remote}' --as <other-name>\``) });
 });

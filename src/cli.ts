@@ -1,3 +1,4 @@
+import { invocation, getStartedLines, type InvocationForm } from './lib/invocation.js';
 import { run as runUpdate } from './commands/update.js';
 import { packageVersion } from './lib/package.js';
 import { Command } from 'commander';
@@ -31,7 +32,7 @@ import { failure, Result } from './lib/result.js';
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
 export interface CliVerbs { update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; connect?: typeof connect; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; receiptCheck?: typeof runReceiptCheck; }
 
-export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { launch?: Launch; noUpdateCheck?: boolean } = {}): Command {
+export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean } = {}): Command {
   const active: Required<CliVerbs> = { update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, connect: verbs.connect ?? connect, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, receiptCheck: verbs.receiptCheck ?? runReceiptCheck };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
@@ -40,8 +41,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program.addHelpText('after', [
     '',
     'Get started:',
-    '  Create a team: npx -y terum-skills@latest setup',
-    '  Join a team:   npx -y terum-skills@latest setup <org>/<repo>',
+    ...getStartedLines(context.form).slice(1),
     '  Have a skill install command? Run it directly.',
     '  If no teams are configured, it guides you through setup first.',
   ].join('\n'));
@@ -49,81 +49,81 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program
     .command('login')
     .description('Check the GitHub CLI and record your identity (name, email, GitHub login, default handle); writes no team entry')
-    .action(async () => execute((io) => active.login({}, io), { verb: 'login', notices: true }));
+    .action(async () => execute((io) => active.login({ form: context.form }, io), { verb: 'login', notices: true }));
 
   program
     .command('setup [target]')
     .description('Onboarding wizard: on a new machine, asks whether to create a team or join one; re-run to resume; pass <org>/<repo> or a remote URL to join directly')
-    .action(async (target: string | undefined) => execute((io) => active.setup({ target, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
+    .action(async (target: string | undefined) => execute((io) => active.setup({ form: context.form, target, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
-  const team = program.command('team').description('Create, join, leave, and admin settings for a team; run `terum-skills team` to see all options');
+  const team = program.command('team').description(`Create, join, leave, and admin settings for a team; run \`${invocation(context.form, 'team')}\` to see all options`);
   team
     .command('create [name]')
     .description('Create a private team repository and become its first member (asks for the team name and the repository name when omitted)')
     .option('--org <org>', 'GitHub organization (default: your own account)')
     .option('--repo <repo>', 'GitHub repository name (default: <team name>-shared-skills)')
     .option('--remote <url>', 'push the scaffold to an existing EMPTY remote instead of creating one on GitHub')
-    .action(async (name: string | undefined, options: { org?: string; repo?: string; remote?: string }) => execute((io) => active.team({ kind: 'create', name, ...options }, io), { verb: 'team create', notices: true }));
+    .action(async (name: string | undefined, options: { org?: string; repo?: string; remote?: string }) => execute((io) => active.team({ form: context.form, kind: 'create', name, ...options }, io), { verb: 'team create', notices: true }));
   team
     .command('join <target>')
     .description('Join a team: <org>/<repo> on GitHub, or any git remote URL')
     .option('--as <name>', 'local team name (default: the repository name)')
-    .action(async (target: string, options: { as?: string }) => execute((io) => active.team({ kind: 'join', target, ...options }, io), { verb: 'team join', notices: true }));
+    .action(async (target: string, options: { as?: string }) => execute((io) => active.team({ form: context.form, kind: 'join', target, ...options }, io), { verb: 'team join', notices: true }));
   team
     .command('remove <handle>')
     .description('Revoke a member’s GitHub access and archive their roster entry')
     .option('--team <team>', 'configured team (required when more than one exists)')
     .option('--archive-only', 'archive roster membership without attempting host access changes')
-    .action(async (handle: string, options: { team?: string; archiveOnly?: boolean }) => execute((io) => active.team({ kind: 'remove', handle, ...options }, io), { verb: 'team remove', notices: true }));
+    .action(async (handle: string, options: { team?: string; archiveOnly?: boolean }) => execute((io) => active.team({ form: context.form, kind: 'remove', handle, ...options }, io), { verb: 'team remove', notices: true }));
   team
     .command('leave <name>')
     .description('Remove this team’s placed skills, its local clone, and its config entry from this machine (your membership is unchanged)')
-    .action(async (name: string) => execute((io) => active.leave({ name }, io), { verb: 'team leave', notices: true }));
+    .action(async (name: string) => execute((io) => active.leave({ form: context.form, name }, io), { verb: 'team leave', notices: true }));
   team
     .command('workflow-update')
     .description('Print the current workflow scaffold for manual migration; never writes a repository')
     .option('--print', 'print the workflow YAML and migration instruction')
-    .action(async (options: { print?: boolean }) => execute((io) => active.team({ kind: 'workflow-update', ...options }, io), { verb: 'team workflow-update', notices: false }));
+    .action(async (options: { print?: boolean }) => execute((io) => active.team({ form: context.form, kind: 'workflow-update', ...options }, io), { verb: 'team workflow-update', notices: false }));
 
   program
     .command('invite <github-login...>')
     .description('Invite GitHub users to the configured team')
     .option('--team <team>', 'configured team (required when more than one exists)')
-    .action(async (logins: string[], options: { team?: string }) => execute((io) => active.invite({ logins, ...options }, io), { verb: 'invite', notices: true }));
+    .action(async (logins: string[], options: { team?: string }) => execute((io) => active.invite({ form: context.form, logins, ...options }, io), { verb: 'invite', notices: true }));
   const ls = program.command('ls').description('List team members and shared skills (--local: your local Claude Code skills and their team status)').option('--local', 'list your local Claude Code skills and their team status instead of the team inventory').option('--team <team>', 'configured team (required when more than one exists)');
-  ls.action(async (options: { team?: string; local?: boolean }) => execute((io) => active.ls({ cwd: process.cwd(), kind: 'all', ...options }, io), { verb: 'ls', notices: true }));
-  ls.command('member <handle>').option('--team <team>', 'configured team (required when more than one exists)').action(async (handle: string, options: { team?: string }) => execute((io) => active.ls({ cwd: process.cwd(), kind: 'member', value: handle, team: options.team ?? ls.opts<{ team?: string }>().team, local: ls.opts<{ local?: boolean }>().local }, io), { verb: 'ls', notices: true }));
-  ls.command('project <name>').option('--team <team>', 'configured team (required when more than one exists)').action(async (name: string, options: { team?: string }) => execute((io) => active.ls({ cwd: process.cwd(), kind: 'project', value: name, team: options.team ?? ls.opts<{ team?: string }>().team, local: ls.opts<{ local?: boolean }>().local }, io), { verb: 'ls', notices: true }));
-  program.command('status').description('Show local team details; exit 0 means the query succeeded, not a setup-readiness or membership test').option('--team <team>', 'show only this configured team').action(async (options: { team?: string }) => execute((io) => active.status(options, io), { verb: 'status', notices: true }));
+  ls.action(async (options: { team?: string; local?: boolean }) => execute((io) => active.ls({ form: context.form, cwd: process.cwd(), kind: 'all', ...options }, io), { verb: 'ls', notices: true }));
+  ls.command('member <handle>').option('--team <team>', 'configured team (required when more than one exists)').action(async (handle: string, options: { team?: string }) => execute((io) => active.ls({ form: context.form, cwd: process.cwd(), kind: 'member', value: handle, team: options.team ?? ls.opts<{ team?: string }>().team, local: ls.opts<{ local?: boolean }>().local }, io), { verb: 'ls', notices: true }));
+  ls.command('project <name>').option('--team <team>', 'configured team (required when more than one exists)').action(async (name: string, options: { team?: string }) => execute((io) => active.ls({ form: context.form, cwd: process.cwd(), kind: 'project', value: name, team: options.team ?? ls.opts<{ team?: string }>().team, local: ls.opts<{ local?: boolean }>().local }, io), { verb: 'ls', notices: true }));
+  program.command('status').description('Show local team details; exit 0 means the query succeeded, not a setup-readiness or membership test').option('--team <team>', 'show only this configured team').action(async (options: { team?: string }) => execute((io) => active.status({ ...options, form: context.form }, io), { verb: 'status', notices: true }));
   program
     .command('readme', { hidden: true })
     .option('--pr-comment <base-ref>', 'render the publish preview comment')
-    .action(async (options: { prComment?: string }) => execute((io) => active.readme(options, io), { verb: 'readme', notices: false }));
+    .action(async (options: { prComment?: string }) => execute((io) => active.readme({ ...options, form: context.form }, io), { verb: 'readme', notices: false }));
   // The clone-local pre-push hook (D12): `guard-push <remote> <url> [<local ref> <local sha> <remote ref> <remote sha>]...`.
   program
     .command('guard-push <remote> <url> [refs...]', { hidden: true })
-    .action(async (remote: string, url: string, refs: string[]) => execute((io) => active.guardPush({ remote, url, refs }, io), { verb: 'guard-push', notices: false }));
+    .action(async (remote: string, url: string, refs: string[]) => execute((io) => active.guardPush({ form: context.form, remote, url, refs }, io), { verb: 'guard-push', notices: false }));
 
   program
     .command('publish <ref>')
     .description('Endorse a shared skill for the team: opens a pull request under policy "pr", commits directly under policy "push"')
     .option('--project <project>', 'endorse into the project list instead of the global list')
     .option('--team <team>', 'configured team (required when more than one exists and the ref is bare)')
-    .action(async (ref: string, options: { project?: string; team?: string }) => execute((io) => active.publish({ ref, ...options, cwd: process.cwd() }, io), { verb: 'publish', notices: true }));
+    .action(async (ref: string, options: { project?: string; team?: string }) => execute((io) => active.publish({ form: context.form, ref, ...options, cwd: process.cwd() }, io), { verb: 'publish', notices: true }));
 
-  program.command('validate <path|name>').description("Check a skill's safety and formatting deterministically: a shared skill by name or its local source folder by path (requires a configured team)").addHelpText('after', '\nDeterministic and offline (no model, no network call): HYG1 frontmatter, HYG2 hidden characters, HYG3 credentials and foreign emails, HYG4 executables and extensions, HYG5 license agreement, HYG6 size and description. A folder that has never been connected fails HYG1 on the managed fields connect adds (license, metadata.id, metadata.author, metadata.terum-category); connect it first.').option('--team <team>', 'configured team (required when more than one exists)').option('--cwd <team-checkout>', 'read the skill and team policy directly from this team checkout').action(async (target: string, options: { team?: string; cwd?: string }) => execute((io) => active.validate({ target, ...options }, io), { verb: 'validate', notices: true }));
-  program.command('receipt-check', { hidden: true }).option('--cwd <team-checkout>', 'team checkout (default: current directory)').option('--base <ref>', 'base ref (default: origin/main)').action(async (options: { cwd?: string; base?: string }) => execute((io) => active.receiptCheck(options, io), { verb: 'receipt-check', notices: false }));
-  program.command('eval <skill>').description('Evaluate a shared skill locally; never writes the team repository').option('--k <n>', 'repetitions per execution case', Number).option('--triggers-only').option('--execution-only').option('--case <stem>').option('--model <model>').option('--judge-model <model>').option('--working').option('--commit').option('--team <team>').action(async (ref: string, options: { k?: number; triggersOnly?: boolean; executionOnly?: boolean; case?: string; model?: string; judgeModel?: string; working?: boolean; commit?: boolean; team?: string }) => execute((io) => active.eval({ ref, ...options }, io), { verb: 'eval', notices: true }));
+  program.command('validate <path|name>').description("Check a skill's safety and formatting deterministically: a shared skill by name or its local source folder by path (requires a configured team)").addHelpText('after', '\nDeterministic and offline (no model, no network call): HYG1 frontmatter, HYG2 hidden characters, HYG3 credentials and foreign emails, HYG4 executables and extensions, HYG5 license agreement, HYG6 size and description. A folder that has never been connected fails HYG1 on the managed fields connect adds (license, metadata.id, metadata.author, metadata.terum-category); connect it first.').option('--team <team>', 'configured team (required when more than one exists)').option('--cwd <team-checkout>', 'read the skill and team policy directly from this team checkout').action(async (target: string, options: { team?: string; cwd?: string }) => execute((io) => active.validate({ form: context.form, target, ...options }, io), { verb: 'validate', notices: true }));
+  program.command('receipt-check', { hidden: true }).option('--cwd <team-checkout>', 'team checkout (default: current directory)').option('--base <ref>', 'base ref (default: origin/main)').action(async (options: { cwd?: string; base?: string }) => execute((io) => active.receiptCheck({ ...options, form: context.form }, io), { verb: 'receipt-check', notices: false }));
+  program.command('eval <skill>').description('Evaluate a shared skill locally; never writes the team repository').option('--k <n>', 'repetitions per execution case', Number).option('--triggers-only').option('--execution-only').option('--case <stem>').option('--model <model>').option('--judge-model <model>').option('--working').option('--commit').option('--team <team>').action(async (ref: string, options: { k?: number; triggersOnly?: boolean; executionOnly?: boolean; case?: string; model?: string; judgeModel?: string; working?: boolean; commit?: boolean; team?: string }) => execute((io) => active.eval({ form: context.form, ref, ...options }, io), { verb: 'eval', notices: true }));
 
   // M2 verbs are registered at the end to keep the M1/M3 commander edits mechanically mergeable.
-  program.command('connect [path]').description('Connect a skill folder to the team repository and keep its edits synced: adds license, id, and author to its SKILL.md after a y/N, then sync auto-commits your later edits (no path: choose from your local skills, one after another)').option('--team <team>').option('--allow-privileged').option('--keep-source <id>').option('--keep-repo <id>').option('--relocate <id:path>').option('--forget <id>').action(async (path: string | undefined, options: { team?: string; allowPrivileged?: boolean; keepSource?: string; keepRepo?: string; relocate?: string; forget?: string }) => execute((io) => active.connect({ path, ...options, cwd: process.cwd() }, io), { verb: 'connect', notices: true }));
+  program.command('connect [path]').description('Connect a skill folder to the team repository and keep its edits synced: adds license, id, and author to its SKILL.md after a y/N, then sync auto-commits your later edits (no path: choose from your local skills, one after another)').option('--team <team>').option('--allow-privileged').option('--keep-source <id>').option('--keep-repo <id>').option('--relocate <id:path>').option('--forget <id>').action(async (path: string | undefined, options: { team?: string; allowPrivileged?: boolean; keepSource?: string; keepRepo?: string; relocate?: string; forget?: string }) => execute((io) => active.connect({ form: context.form, path, ...options, cwd: process.cwd() }, io), { verb: 'connect', notices: true }));
   // `share` was renamed to `connect` in 0.1.4 (Ryan, 2026-09-07). Hidden, help disabled, every legacy option/operand accepted, so each old form ends in the same one-line refusal (exit 1, no prompt, no update notice). Remove at 0.2.0.
-  program.command('share', { hidden: true }).helpOption(false).allowUnknownOption().allowExcessArguments().action(async () => execute(async () => failure('`share` is now `connect`: run `npx -y terum-skills@latest connect [<path>]` (same options: --team, --allow-privileged, --keep-source, --keep-repo, --relocate, --forget).'), { verb: 'share', notices: false }));
-  program.command('install <ref> [value]').description('Install a skill: <ref>[@<version>], `member <handle>`, or `project <name>`').option('--team <team>').option('--force').action(async (ref: string, value: string | undefined, options: { team?: string; force?: boolean }) => execute((io) => active.install(ref === 'member' ? { kind: 'member', member: value, ...options } : ref === 'project' ? { kind: 'project', project: value, ...options } : { ref, ...options }, io), { verb: 'install', notices: true }));
-  program.command('uninstall-skill <ref> [value]').description('Remove a placed skill: <ref>, `member <handle>`, or `project <name>`').option('--team <team>').action(async (ref: string, value: string | undefined, options: { team?: string }) => execute((io) => active.uninstall(ref === 'member' ? { kind: 'member', member: value, ...options } : ref === 'project' ? { kind: 'project', project: value, ...options } : { ref, ...options }, io), { verb: 'uninstall-skill', notices: true }));
-  program.command('uninstall').description('Remove terum-skills from this machine: every team you joined (placed skills, local clones, cache), the session-start hook if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure('To remove a skill, use `terum-skills uninstall-skill <ref>`.') : active.uninstallMachine(context.launch ? { launch: context.launch } : {}, io), { verb: 'uninstall', notices: true }));
+  program.command('share', { hidden: true }).helpOption(false).allowUnknownOption().allowExcessArguments().action(async () => execute(async () => failure(`\`share\` is now \`connect\`: run \`${invocation(context.form, 'connect', '[<path>]')}\` (same options: --team, --allow-privileged, --keep-source, --keep-repo, --relocate, --forget).`), { verb: 'share', notices: false }));
+  program.command('install <ref> [value]').description('Install a skill: <ref>[@<version>], `member <handle>`, or `project <name>`').option('--team <team>').option('--force').action(async (ref: string, value: string | undefined, options: { team?: string; force?: boolean }) => execute((io) => active.install(ref === 'member' ? { kind: 'member', member: value, ...options, form: context.form } : ref === 'project' ? { kind: 'project', project: value, ...options, form: context.form } : { ref, ...options, form: context.form }, io), { verb: 'install', notices: true }));
+  program.command('uninstall-skill <ref> [value]').description('Remove a placed skill: <ref>, `member <handle>`, or `project <name>`').option('--team <team>').action(async (ref: string, value: string | undefined, options: { team?: string }) => execute((io) => active.uninstall(ref === 'member' ? { kind: 'member', member: value, ...options, form: context.form } : ref === 'project' ? { kind: 'project', project: value, ...options, form: context.form } : { ref, ...options, form: context.form }, io), { verb: 'uninstall-skill', notices: true }));
+  program.command('uninstall').description('Remove terum-skills from this machine: every team you joined (placed skills, local clones, cache), the session-start hook if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \`${invocation(context.form, 'uninstall-skill <ref>')}\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));
   program.command('sync').description('Pull the team repo, finish pending work, and refresh placed skills (--hook for the session hook)').option('--hook').option('--prune').action(async (options: { hook?: boolean; prune?: boolean }) => execute((io) => active.sync(options.hook ? { hook: true, prune: options.prune, ...context } : { prune: options.prune, ...context }, io), { verb: 'sync', notices: !options.hook }));
-  program.command('search <term>').description('Search shared skills by name, description, or category (read-only)').option('--category <category>').option('--author <author>').option('--project <project>').action(async (term: string, options: { category?: string; author?: string; project?: string }) => execute((io) => active.search({ term, ...options }, io), { verb: 'search', notices: true }));
+  program.command('search <term>').description('Search shared skills by name, description, or category (read-only)').option('--category <category>').option('--author <author>').option('--project <project>').action(async (term: string, options: { category?: string; author?: string; project?: string }) => execute((io) => active.search({ form: context.form, term, ...options }, io), { verb: 'search', notices: true }));
 
   program.command('update')
     .description("Show this copy's version, the latest advertised release, and the command that updates it (prints it, never runs it)")

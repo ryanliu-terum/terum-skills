@@ -1,3 +1,4 @@
+import type { WithForm } from '../lib/invocation.js';
 import { lstat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
@@ -7,7 +8,7 @@ import { failure, Result, success } from '../lib/result.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { readTeam } from '../lib/skills.js';
 
-export interface ValidateArgs { target: string; team?: string; cwd?: string; config?: ConfigStore; }
+export interface ValidateArgs extends WithForm { target: string; team?: string; cwd?: string; config?: ConfigStore; }
 export interface ValidateResult { name: string; findings: number; }
 
 /** Run the free §9 tier on a local skill folder, or a named skill in the selected team clone. */
@@ -18,7 +19,7 @@ export async function run(args: ValidateArgs, io: Prompter): Promise<Result<Vali
     if (args.cwd === undefined) {
       const store = args.config ?? createConfigStore();
       const config = await store.read();
-      const [team] = selectTeam(config.teams, args.team);
+      const [team] = selectTeam(config.teams, args.team, args.form);
       clone = store.teamClone(team);
       policy = (await readTeam(clone)).policy;
     } else {

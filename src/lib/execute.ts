@@ -1,9 +1,11 @@
+import { invocation, type InvocationForm } from './invocation.js';
 import type { Execute } from '../cli.js';
 import type { SyncResult } from '../commands/sync.js';
 import type { Prompter } from './prompt.js';
 
 /** What the bin owns: where failure text goes and how the exit code is set. Injected so the contract is testable. */
 export interface ExecuteSink {
+  form?: InvocationForm;
   io: Prompter;
   afterVerb?(): Promise<void>;
   stderr(line: string): void;
@@ -42,5 +44,5 @@ function isHookSync(value: unknown): value is SyncResult {
 
 function writeHookNotices(value: SyncResult, sink: ExecuteSink): void {
   for (const notice of value.notices) sink.stderr(notice);
-  if (value.deferred.length) sink.stderr(`${value.deferred.length} skills need review — run \`terum-skills sync\``);
+  if (value.deferred.length) sink.stderr(`${value.deferred.length} skills need review — run \`${invocation(sink.form, 'sync')}\``);
 }

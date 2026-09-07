@@ -1,3 +1,5 @@
+import { invocation } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 import { access, mkdir, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
@@ -10,7 +12,7 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { teardownTeam } from './leave.js';
 
 export const fsForTests = { rm, rmdir };
-export interface UninstallMachineArgs { config?: ConfigStore; hook?: HookOptions; launch?: Launch; runner?: Runner; home?: string; }
+export interface UninstallMachineArgs extends WithForm { config?: ConfigStore; hook?: HookOptions; launch?: Launch; runner?: Runner; home?: string; }
 export interface MachineUninstallResult { teams: string[]; removedPlacements: number; hookRemoved: boolean; configRemoved: boolean; kept: string[]; record: string; launch: Launch | null; }
 
 /** Confirm and remove this machine's tracked state. Package removal is always advice, never executed. */
@@ -51,7 +53,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     if (quarantineCount) kept.push(quarantine);
     kept.push(backups);
     if (shared.length) io.print(`Connected-skill sources stay where they are: ${shared.map(({ source }) => `${basename(source)}: ${source}`).join(', ')}`);
-    io.print('Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `terum-skills install member <handle>` does.');
+    io.print('Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
     io.print('The package itself is not removed by this command; the last line tells you how.');
     if (!(await io.confirm('Remove terum-skills from this machine?'))) return failure('Uninstall was cancelled.');
 
@@ -85,7 +87,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
       const added = remaining.find((name) => !confirmed.has(name));
       if (added !== undefined) {
         await reportRemaining();
-        return failure(`Team ${added} was added while uninstalling; re-run terum-skills uninstall.`);
+        return failure(`Team ${added} was added while uninstalling; re-run ${invocation(args.form, 'uninstall')}.`);
       }
       const name = remaining[0];
       if (name === undefined) break;
@@ -95,7 +97,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
         kept.push(...removed.kept); removedPlacements += removed.removedPaths.length;
       } catch (error) {
         const report = await reportRemaining();
-        return failure(`${message(error)}\n${report}\nRe-run \`terum-skills uninstall\` to continue.`);
+        return failure(`${message(error)}\n${report}\nRe-run \`${invocation(args.form, 'uninstall')}\` to continue.`);
       }
       teams.push(name); io.print(`Left ${name}.`);
     }
@@ -109,7 +111,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
         fresh.pending.length ? `pending: ${fresh.pending.length}` : '',
         Object.keys(fresh.shared).length ? `connected: ${Object.keys(fresh.shared).length}` : '',
       ].filter(Boolean).join(', ');
-      return failure(`Kept ${configPath}: still configured — ${what}. Re-run \`terum-skills uninstall\` to continue.`);
+      return failure(`Kept ${configPath}: still configured — ${what}. Re-run \`${invocation(args.form, 'uninstall')}\` to continue.`);
     }
     const configRemoved = removal === 'removed';
     if (configRemoved) io.print(`Removed ${configPath}.`);
@@ -127,7 +129,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
           continue;
         }
         io.print(`Kept ${path}: ${message(error)}`); kept.push(path);
-        directoryFailure ??= `Could not remove ${path}: ${message(error)}. Everything else was removed; re-run \`terum-skills uninstall\` to retry.`;
+        directoryFailure ??= `Could not remove ${path}: ${message(error)}. Everything else was removed; re-run \`${invocation(args.form, 'uninstall')}\` to retry.`;
       }
     }
     if (directoryFailure) return failure(directoryFailure);

@@ -139,7 +139,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       { verb: 'publish', cwd: process.cwd(), ref: 'fail' },
       { verb: 'leave', name: 'fail' },
     ]);
-    expect(Object.keys(calls[0] as object)).toEqual(['verb', 'ref', 'cwd']);
+    expect(Object.keys(calls[0] as object)).toEqual(['verb', 'form', 'ref', 'cwd']);
     expect(outcomes).toEqual([true, true, true, false, false]);
   });
 
@@ -230,7 +230,7 @@ describe('machine uninstall wiring', () => {
     const { program, calls, outcomes, errors } = machineHarness();
     await program.parseAsync(['uninstall', 'sample'], { from: 'user' });
     expect(calls).toEqual([]); expect(outcomes).toEqual([false]);
-    expect(errors).toEqual(['To remove a skill, use `terum-skills uninstall-skill <ref>`.']);
+    expect(errors).toEqual(['To remove a skill, use `npx -y terum-skills@latest uninstall-skill <ref>`.']);
   });
   it('rejects --team as an unknown option', async () => {
     const { program, calls } = machineHarness();
@@ -341,7 +341,7 @@ describe('issue 5 connect command contract', () => {
     program.configureOutput({ writeErr: (line) => { errors.push(line); }, writeOut: (line) => { stdout.push(line); } });
     await program.parseAsync(argv, { from: 'user' });
     expect(codes).toEqual([1]);
-    expect(errors).toEqual(['`share` is now `connect`: run `npx -y terum-skills@latest connect [<path>]` (same options: --team, --allow-privileged, --keep-source, --keep-repo, --relocate, --forget).']);
+    expect(errors).toEqual(['`share` is now `connect`: run `npx -y terum-skills@latest connect \'[<path>]\'` (same options: --team, --allow-privileged, --keep-source, --keep-repo, --relocate, --forget).']);
     expect(stdout).toEqual([]); expect(io.lines).toEqual([]); expect(connected).toBe(0);
     expect(io.asked).toEqual([]); expect(afterVerbs).toBe(0);
     expect(await readFile(configPath)).toEqual(before);

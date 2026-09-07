@@ -1,3 +1,4 @@
+import { invocation, type InvocationForm, type WithForm } from './invocation.js';
 import { ConfigStore, createConfigStore } from './config.js';
 import { Prompter } from './prompt.js';
 import { normalizeRemote } from './remote.js';
@@ -10,7 +11,7 @@ import { Config, emailSchema, githubLoginSchema, HANDLE_RULE, handleSchema, Team
  * remote uses whatever ambient git credentials the machine already has. The tool never prompts
  * for, stores, probes, or passes a token, and nobody — creator or joiner — is ever asked for one.
  */
-export interface AuthDependencies { config?: ConfigStore; runner?: Runner; }
+export interface AuthDependencies extends WithForm { config?: ConfigStore; runner?: Runner; }
 export interface Identity { handle: string; displayName: string; email: string; github: string; }
 export interface GhState { installed: boolean; authenticated: boolean; }
 
@@ -130,9 +131,9 @@ export async function askUntilValid(io: Prompter, question: string, defaultValue
 export interface CreatorAuth { identity: Identity; gh: GhState; }
 
 /** Shared wording for `team create` and setup's read-only GitHub preflight. */
-export function creatorAuthenticationError(gh: GhState): string | null {
-  if (!gh.installed) return 'Creating a GitHub team needs the GitHub CLI (gh) in phase 1. Install it from https://cli.github.com and run `gh auth login`, or create the team against an existing empty remote with `team create <name> --remote <url>`.';
-  if (!gh.authenticated) return 'GitHub authentication is required to create a team: run `gh auth login` and retry, or create the team against an existing empty remote with `team create <name> --remote <url>`.';
+export function creatorAuthenticationError(gh: GhState, form?: InvocationForm): string | null {
+  if (!gh.installed) return `Creating a GitHub team needs the GitHub CLI (gh) in phase 1. Install it from https://cli.github.com and run \`gh auth login\`, or create the team against an existing empty remote with \`${invocation(form, 'team create <name> --remote <url>')}\`.`;
+  if (!gh.authenticated) return `GitHub authentication is required to create a team: run \`gh auth login\` and retry, or create the team against an existing empty remote with \`${invocation(form, 'team create <name> --remote <url>')}\`.`;
   return null;
 }
 
@@ -146,7 +147,7 @@ export async function authenticateCreator(io: Prompter, dependencies: AuthDepend
   const runner = dependencies.runner ?? systemRunner;
   const config = await store.read();
   const gh = await detectOrOfferGh(io, runner);
-  const authenticationError = creatorAuthenticationError(gh);
+  const authenticationError = creatorAuthenticationError(gh, dependencies.form);
   if (authenticationError) throw new Error(authenticationError);
   const identity = await collectIdentity(io, config, runner, { gh });
   return { identity, gh };

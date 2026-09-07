@@ -455,7 +455,8 @@ describe('the clone-local push guard arming (D12)', () => {
     expect(withoutNpx.code).toBe(0);
     expect(withoutNpx.stderr).toContain('NOT checked');
     expect(pushGuardHook(null)).toContain(`terum-skills@${version}`);
-    expect(pushGuardHook(null)).not.toContain('@latest');
+    expect(pushGuardHook(null)).toContain('Re-run `npx -y terum-skills@latest team join <remote>`');
+    expect(pushGuardHook(null).split('\n').find((line) => line.startsWith('exec '))).not.toContain('@latest');
   });
 });
 

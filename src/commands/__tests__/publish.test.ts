@@ -301,7 +301,8 @@ describe('publish (§6)', () => {
 });
 
 
-describe('publish local recovery hints', () => {
+describe.each([undefined, 'bare'] as const)('publish local recovery hints (form=%s)', (form) => {
+  const V = form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest';
   it('a miss with an untracked local folder names the absolute connect and retry commands with --team, and writes nothing', async () => {
     const { fixture, store } = await prepared();
     const home = join(fixture.root, 'home with space');
@@ -310,7 +311,7 @@ describe('publish local recovery hints', () => {
     const before = await originSha(fixture.bare);
     const sourceBefore = await readFile(join(local, 'SKILL.md'), 'utf8');
     const io = new ScriptedPrompter([], [], true);
-    await expect(run({ ref: 'local', home, project: 'p', config: store, runner }, io)).resolves.toMatchObject({ ok: false,
+    await expect(run({ form, ref: 'local', home, project: 'p', config: store, runner }, io)).resolves.toMatchObject({ ok: false,
       error: `No skill local in team team. Found a local folder at ${local} that is not tracked as a connected source or placement on this machine. To connect it to team, run \`${V} connect '${local}' --team 'team'\`, then retry \`${V} publish 'local' --team 'team' --project 'p'\`.` });
     expect(io.asked).toEqual([]);
     expect(await readFile(join(local, 'SKILL.md'), 'utf8')).toBe(sourceBefore);
@@ -328,7 +329,7 @@ describe('publish local recovery hints', () => {
     const runner = mappedRunner(REMOTE, fixture.bare);
     const before = await originSha(fixture.bare);
     const generic = (ref: string) => `No skill ${ref} in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} connect '<path-to-skill>' --team 'team'\`, then publish its name.`;
-    for (const ref of ['missing', 'gsd-x', 'mine']) await expect(run({ ref, home, config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: generic(ref) });
+    for (const ref of ['missing', 'gsd-x', 'mine']) await expect(run({ form, ref, home, config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: generic(ref) });
     expect(await originSha(fixture.bare)).toBe(before);
   });
 
@@ -338,7 +339,7 @@ describe('publish local recovery hints', () => {
     await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
     const home = join(fixture.root, 'home');
     const local = await localSkill(home, 'local');
-    const result = await run({ ref: 'team/local', home, config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
+    const result = await run({ form, ref: 'team/local', home, config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: false,
       error: `No skill team/local in team team. Found a local folder at ${local} that is not tracked as a connected source or placement on this machine. To connect it to team, run \`${V} connect '${local}' --team 'team'\`, then retry \`${V} publish 'team/local' --team 'team'\`.` });
   });
@@ -348,7 +349,7 @@ describe('publish local recovery hints', () => {
     const home = join(fixture.root, 'home');
     await localSkill(home, 'sample');
     const before = await originSha(fixture.bare);
-    const result = await run({ ref: 'sample', home, config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
+    const result = await run({ form, ref: 'sample', home, config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: true, value: { branch: expect.stringMatching(FRESH) } });
     expect(await originSha(fixture.bare)).toBe(before);
     expect((await store.read()).shared).toEqual({});

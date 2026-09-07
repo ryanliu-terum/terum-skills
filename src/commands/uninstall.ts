@@ -1,3 +1,5 @@
+import { invocation } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 import { basename, dirname, join } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
@@ -10,7 +12,7 @@ import { findSkill, readPerson, readTeam } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
 
-export interface UninstallArgs { ref?: string; kind?: 'skill' | 'member' | 'project'; member?: string; project?: string; team?: string; config?: ConfigStore; runner?: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>; }
+export interface UninstallArgs extends WithForm { ref?: string; kind?: 'skill' | 'member' | 'project'; member?: string; project?: string; team?: string; config?: ConfigStore; runner?: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>; }
 export interface UninstalledResult { id: string; team: string; removed: number; }
 
 export async function run(args: UninstallArgs, io: Prompter): Promise<Result<UninstalledResult[]>> {
@@ -22,10 +24,10 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
     // The rule install and publish already use: a qualified ref names the team and `--team` only
     // answers a bare one. The destructive verb must not resolve the same two arguments to a
     // different team than the verb it undoes.
-    const team = parsedRef ? await teamForReference(config, parsedRef.team ?? args.team, parsedRef.remote, parsedRef.name) : selectTeam(config.teams, args.team)[0];
+    const team = parsedRef ? await teamForReference(config, parsedRef.team ?? args.team, parsedRef.remote, parsedRef.name, args.form) : selectTeam(config.teams, args.team, args.form)[0];
     if (args.kind === 'member' || args.member) {
       const handle = args.member ?? args.ref;
-      if (!handle) throw new Error('Provide a member handle: `uninstall-skill member <handle>`.');
+      if (!handle) throw new Error(`Provide a member handle: \`${invocation(args.form, 'uninstall-skill member <handle>')}\`.`);
       const member = await readPerson(store.teamClone(team), parseOrExplain(handleSchema, handle, 'member handle'));
       const targets: UninstallTarget[] = [];
       for (const item of member.installed) for (const scope of await ledgerScopes(store, team, item.id, [item.scope])) targets.push({ id: item.id, scope });
@@ -33,7 +35,7 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
     }
     if (args.kind === 'project' || args.project) {
       const project = args.project ?? args.ref;
-      if (!project) throw new Error('Provide a project name: `uninstall-skill project <name>`.');
+      if (!project) throw new Error(`Provide a project name: \`${invocation(args.form, 'uninstall-skill project <name>')}\`.`);
       const teamJson = await readTeam(store.teamClone(team));
       const listed = Object.hasOwn(teamJson.projects, project) ? teamJson.projects[project] : undefined;
       if (!listed) throw new Error(`Unknown project ${project}.`);

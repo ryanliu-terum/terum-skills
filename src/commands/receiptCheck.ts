@@ -1,3 +1,4 @@
+import type { WithForm } from '../lib/invocation.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { receiptSchema, Receipt } from '../lib/evals/receipt.js';
@@ -8,7 +9,7 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { teamSchema } from '../lib/schema.js';
 import { readTeam, skillRecords } from '../lib/skills.js';
 
-export interface ReceiptCheckArgs { cwd?: string; base?: string; runner?: Runner; }
+export interface ReceiptCheckArgs extends WithForm { cwd?: string; base?: string; runner?: Runner; }
 export interface ReceiptCheckResult { endorsed: string[]; checked: number; }
 
 type CheckedReceipt = { file: string; receipt: Receipt };

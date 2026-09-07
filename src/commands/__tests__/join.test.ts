@@ -234,14 +234,16 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(await git(['ls-tree', '--name-only', 'main:people'], other.bare)).toContain('me.json');
   });
 
-  it('re-checks remote uniqueness under the config lock, so a remote bound by another process while we prompted is not bound twice', async () => {
+  it.each([undefined, 'bare'] as const)('re-checks remote uniqueness under the config lock, so a remote bound by another process while we prompted is not bound twice (form=%s)', async (form) => {
     const { fixture, store } = await setup();
     const runner = wrapRunner(mappedRunner(REMOTE, fixture.bare), async (command, args, _options, next) => {
       if (command === 'git' && args[0] === 'push') await store.update((config) => { config.teams.other = { remote: 'git.example/team', handle: 'someone' }; });
       return next();
     });
-    const result = await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()));
+    const result = await join({ form, target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()));
     expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/already configured as team other[\s\S]*people\/me\.json was already pushed[\s\S]*team remove me/) });
+    expect(result.ok ? '' : result.error).toContain(`run \`${form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest'} team join '${REMOTE}'\` again`);
+    expect(result.ok ? '' : result.error).toContain('ask an admin to `team remove me`');
     expect(Object.keys((await store.read()).teams)).toEqual(['other']);
     expect(await git(['ls-tree', '--name-only', 'main:people'], fixture.bare)).toContain('me.json');
   });

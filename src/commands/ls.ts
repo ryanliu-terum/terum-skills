@@ -1,3 +1,5 @@
+import { invocation } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -12,7 +14,7 @@ import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
 
-export interface LsArgs { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
+export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
 export interface LsSkill { id: string; name: string; author: string; category: string; installs: number; latest: string; endorsement: string; }
 export interface LocalSection extends LocalRoot { rows: { name: string; path: string; state: string; problem?: string }[]; notOffered: { name: string; path: string; reason: string }[]; problems: { path: string; reason: string }[]; }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean }[]; skills: readonly LsSkill[]; }
@@ -24,7 +26,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     if (args.local && args.team) throw new Error('--local lists every configured team; drop --team.');
     const store = args.config ?? createConfigStore();
     if (args.local) return await showLocal(store, args.home ?? homedir(), io, args.cwd);
-    const [teamName] = selectTeam((await store.read()).teams, args.team);
+    const [teamName] = selectTeam((await store.read()).teams, args.team, args.form);
     const clone = store.teamClone(teamName);
     const runner = args.runner ?? systemRunner;
     const team = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
@@ -39,7 +41,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     for (const member of roster) io.print(`  ${member.handle}${member.active ? '' : ' (inactive)'}`);
     io.print('Skills:');
     for (const skill of skills) io.print(format(skill));
-    io.print('Local skills: npx -y terum-skills@latest ls --local');
+    io.print(`Local skills: ${invocation(args.form, 'ls --local')}`);
     return success({ roster, skills });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
 }

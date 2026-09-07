@@ -387,7 +387,7 @@ export function shellQuote(value: string): string { return `'${value.replace(/'/
 export function pushGuardHook(launcher: PushGuardLauncher | null): string {
   const check = launcher ? `[ -x ${shellQuote(launcher.node)} ] && [ -f ${shellQuote(launcher.entry)} ]` : 'command -v npx >/dev/null 2>&1';
   const launch = launcher ? `${shellQuote(launcher.node)} ${shellQuote(launcher.entry)} guard-push` : `npx -y ${shellQuote(`terum-skills@${packageVersion() ?? 'latest'}`)} guard-push`;
-  const warning = `terum-skills push guard: ${launcher ? launcher.entry : 'npx'} is gone, so this push was NOT checked. Re-run \`terum-skills team join <remote>\` to re-arm it.`;
+  const warning = `terum-skills push guard: ${launcher ? launcher.entry : 'npx'} is gone, so this push was NOT checked. Re-run \`npx -y terum-skills@latest team join <remote>\` to re-arm it.`;
   return [
     '#!/bin/sh',
     '# terum-skills: the D12 ownership guard for a raw push from this clone. Regenerated on every join; do not edit.',

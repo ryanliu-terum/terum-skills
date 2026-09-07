@@ -31,7 +31,7 @@ describe('execute — the bin contract (§3)', () => {
   it('a hook sync sends its notices and the review count to stderr on success and on failure, before any error line', async () => {
     const ok = sink();
     await ok.execute(async () => success({ placed: 0, deferred: ['a', 'b'], notices: ['Skipping team/x: bad'], changed: false, hook: true }));
-    expect(ok.lines).toEqual(['Skipping team/x: bad', '2 skills need review — run `terum-skills sync`']);
+    expect(ok.lines).toEqual(['Skipping team/x: bad', '2 skills need review — run `npx -y terum-skills@latest sync`']);
     expect(ok.codes).toEqual([]);
     const failed = sink();
     await failed.execute(async () => failure('Could not fast-forward team: offline', { placed: 0, deferred: [], notices: ['note'], changed: false, hook: true }));

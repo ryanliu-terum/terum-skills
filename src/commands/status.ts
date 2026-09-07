@@ -1,7 +1,9 @@
+import { invocation } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
-import { GET_STARTED_LINES } from '../lib/hints.js';
+import { getStartedLines } from '../lib/invocation.js';
 import { staleLine } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { normalizeRemote, repositoryUrl } from '../lib/remote.js';
@@ -11,7 +13,7 @@ import { readRoster, readTeam, RosterEntry, SkillProblem, skillRecords } from '.
 import { packageVersion } from '../lib/package.js';
 import { CloneState, describeClone } from '../lib/teamRepo.js';
 
-export interface StatusArgs { team?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
+export interface StatusArgs extends WithForm { team?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
 export interface TeamStatus {
   team: string; handle: string; repository: string | null; clone: CloneState; readable: boolean;
   members: RosterEntry[]; memberCount: number | null; unreadableMembers: number | null;
@@ -28,8 +30,8 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
     io.print(version === null ? 'terum-skills (version unknown)' : `terum-skills ${version}`);
     const store = args.config ?? createConfigStore();
     const config = await store.read();
-    const selected = args.team !== undefined ? [selectTeam(config.teams, args.team)] : Object.entries(config.teams);
-    if (!selected.length) for (const line of GET_STARTED_LINES) io.print(line);
+    const selected = args.team !== undefined ? [selectTeam(config.teams, args.team, args.form)] : Object.entries(config.teams);
+    if (!selected.length) for (const line of getStartedLines(args.form)) io.print(line);
     const lines: string[] = [];
     for (const [team, binding] of selected) {
       if (teams.length) io.print('');
@@ -53,7 +55,7 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
             io.print(`  Clone: ${clone} could not be verified (${state.error}); check that git is installed before repairing anything.`);
           } else {
             io.print(state.state === 'absent' ? `  Clone: ${clone} is missing.` : state.state === 'foreign' ? `  Clone: ${clone} is a clone of ${state.origin}, not ${remote}.` : `  Clone: ${clone} exists but is not a complete clone.`);
-            io.print(`  Restore it: ${state.state === 'absent' ? '' : `move ${clone} aside, then run `}npx -y terum-skills@latest team join ${remote}`);
+            io.print(`  Restore it: ${state.state === 'absent' ? '' : `move ${clone} aside, then run `}${invocation(args.form, 'team join')} ${remote}`);
           }
         } else {
           io.print('  From the local clone; GitHub access is not checked.');
@@ -80,7 +82,7 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
           io.print(`  Shared skills: ${skills.length}${skillProblems.length ? ` readable; ${skillProblems.length} unreadable` : ''}`);
           for (const problem of skillProblems) io.print(`    ${problem.name}: ${problem.message}`);
           io.print('  Evaluated skills: not yet available');
-          const stale = await staleLine(store.root, team, args.now);
+          const stale = await staleLine(store.root, team, args.now, args.form);
           detail.stale = stale !== null;
           if (stale) io.print(`  ${stale}`);
           detail.readable = true;

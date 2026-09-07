@@ -1,3 +1,4 @@
+import type { WithForm } from '../lib/invocation.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { Prompter } from '../lib/prompt.js';
@@ -6,7 +7,7 @@ import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { parseJson, teamSchema } from '../lib/schema.js';
 
-export interface ReadmeArgs { prComment?: string; cwd?: string; runner?: Runner; }
+export interface ReadmeArgs extends WithForm { prComment?: string; cwd?: string; runner?: Runner; }
 
 /** Hidden host-side entry point for the scaffolded Action. */
 export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ changed?: boolean; comment?: string }>> {

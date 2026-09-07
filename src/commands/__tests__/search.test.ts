@@ -187,7 +187,7 @@ describe('search (§6)', () => {
     await rm(second.clone, { recursive: true, force: true });
     const io = new ScriptedPrompter();
     expect(await run({ term: 'needle', config: first.store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ team: 'healthy' })] });
-    expect(io.lines).toEqual(expect.arrayContaining(['broken:', 'broken is not cloned yet; run `terum-skills sync`.']));
+    expect(io.lines).toEqual(expect.arrayContaining(['broken:', 'broken is not cloned yet; run `npx -y terum-skills@latest sync`.']));
     await rm(first.clone, { recursive: true, force: true });
     expect(await run({ term: 'needle', config: first.store }, new ScriptedPrompter())).toMatchObject({ ok: false });
   });
