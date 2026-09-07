@@ -1,9 +1,15 @@
+import * as fs from 'node:fs/promises';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
 import { run } from '../ls.js';
+import { candidatesOf, localSkills } from '../../lib/local-skills.js';
+import { ghOnlyRunner } from '../../lib/__tests__/fixtures.js';
+
+// Clone the ESM namespace so individual permission failures can be injected and restored.
+vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs/promises')>() }));
 
 const ID = '33333333-3333-4333-8333-333333333333';
 
@@ -90,8 +96,8 @@ describe('issue 9 local ls', () => {
     await store.update((config) => { config.placements[placed] = { id: ID, team: 'team', version: 'a'.repeat(40), scope: { kind: 'global' }, fingerprint: '', placed_at: '' }; });
     const io = new ScriptedPrompter();
     const result = await run({ local: true, home, config: store, runner: { run: async () => { throw new Error('must not run commands'); } } }, io);
-    expect(result).toMatchObject({ ok: true, value: { local: { root: join(home, '.claude', 'skills'), scope: 'global', rows: [{ name: 'mine', path: mine, state: 'untracked locally' }, { name: 'placed', path: placed, state: 'placement recorded from team @aaaaaaaa' }], notOffered: [{ name: 'gsd-x', path: rejected, reason: 'SKILL.md name gsd:x does not equal folder gsd-x' }], problems: [] } } });
-    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global only):`, `  mine — untracked locally; path: ${mine}`, `  placed — placement recorded from team @aaaaaaaa; path: ${placed}`, 'Not offered for sharing:', `  gsd-x — SKILL.md name gsd:x does not equal folder gsd-x; path: ${rejected}`, FOOTER]);
+    expect(result).toMatchObject({ ok: true, value: { local: [{ root: join(home, '.claude', 'skills'), scope: 'global', rows: [{ name: 'mine', path: mine, state: 'untracked locally' }, { name: 'placed', path: placed, state: 'placement recorded from team @aaaaaaaa' }], notOffered: [{ name: 'gsd-x', path: rejected, reason: 'SKILL.md name gsd:x does not equal folder gsd-x' }], problems: [] }] } });
+    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `  mine — untracked locally; path: ${mine}`, `  placed — placement recorded from team @aaaaaaaa; path: ${placed}`, 'Not offered for sharing:', `  gsd-x — SKILL.md name gsd:x does not equal folder gsd-x; path: ${rejected}`, FOOTER]);
     expect(io.asked).toEqual([]);
   });
 
@@ -111,7 +117,7 @@ describe('issue 9 local ls', () => {
     const io = new ScriptedPrompter();
     const result = await run({ local: true, home, config: store, runner: { run: async () => { throw new Error('no git'); } } }, io);
     const suffix = mode === 'global' ? 'endorsed (global)' : mode === 'project' ? 'endorsed (project: a, b)' : mode === 'unendorsed' ? 'not endorsed in local clone' : mode === 'missing' ? 'repository copy missing from local clone' : 'repository status unknown';
-    expect(result).toMatchObject({ ok: true, value: { local: { rows: [{ name: 'relocated', state: `shared source for team; ${suffix}` }, { name: 'report', state: 'untracked locally' }] } } });
+    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [{ name: 'relocated', state: `shared source for team; ${suffix}` }, { name: 'report', state: 'untracked locally' }] }] } });
     expect(io.lines).toContain(`  relocated — shared source for team; ${suffix}; path: ${source}`);
     expect(io.asked).toEqual([]); expect(io.lines.at(-1)).toBe(FOOTER);
     expect(await readFile(join(store.root, 'config.json'), 'utf8')).toBe(configBefore);
@@ -127,7 +133,7 @@ describe('issue 9 local ls', () => {
     });
     const calls: string[] = []; const wrapped = { ...store, teamClone: (team: string) => { calls.push(team); return store.teamClone(team); } };
     const io = new ScriptedPrompter(); const result = await run({ local: true, home, config: wrapped }, io);
-    expect(result).toMatchObject({ ok: true, value: { local: { rows: [expect.objectContaining({ name: 'missing', state: 'conflicting tracking: shared source for one; repository status unknown; shared source for two; repository status unknown; placement recorded from two', problem: 'SKILL.md missing' }), expect.objectContaining({ name: 'second' })] } } });
+    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [expect.objectContaining({ name: 'missing', state: 'conflicting tracking: shared source for one; repository status unknown; shared source for two; repository status unknown; placement recorded from two', problem: 'SKILL.md missing' }), expect.objectContaining({ name: 'second' })] }] } });
     expect(calls.sort()).toEqual(['one', 'two']);
     expect(io.lines[1]).toContain('; source problem: SKILL.md missing; path: ');
   });
@@ -136,14 +142,14 @@ describe('issue 9 local ls', () => {
     const home = await temporaryDirectory(); const root = join(home, '.claude', 'skills'); if (state === 'empty') await mkdir(root, { recursive: true });
     const io = new ScriptedPrompter();
     expect(await run({ local: true, home, config: createConfigStore(join(home, 'state')) }, io)).toMatchObject({ ok: true });
-    expect(io.lines).toEqual([`Local Claude Code skills (${root}; global only):`, state === 'empty' ? '  none' : `  none (${root} does not exist)`, FOOTER]);
+    expect(io.lines).toEqual([`Local Claude Code skills (${root}; global):`, state === 'empty' ? '  none' : `  none (${root} does not exist)`, FOOTER]);
   });
 
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('prints file and root inspection failures and succeeds', async () => {
     const home = await temporaryDirectory(); const path = await localSource(home, 'blocked'); const root = join(home, '.claude', 'skills'); const store = createConfigStore(join(home, 'state'));
     await chmod(join(path, 'SKILL.md'), 0o000);
     try {
-      const io = new ScriptedPrompter(); expect(await run({ local: true, home, config: store }, io)).toMatchObject({ ok: true, value: { local: { problems: [{ path, reason: expect.stringContaining('EACCES') }] } } });
+      const io = new ScriptedPrompter(); expect(await run({ local: true, home, config: store }, io)).toMatchObject({ ok: true, value: { local: [{ problems: [{ path, reason: expect.stringContaining('EACCES') }] }] } });
       expect(io.lines[1]).toMatch(/^Could not inspect .*EACCES/); expect(io.lines.at(-1)).toBe(FOOTER);
     } finally { await chmod(join(path, 'SKILL.md'), 0o600); }
     await chmod(root, 0o000);
@@ -168,5 +174,78 @@ describe('issue 9 local ls', () => {
     const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; }); const io = new ScriptedPrompter();
     expect(await run({ config: store }, io)).toMatchObject({ ok: true }); expect(io.lines.at(-1)).toBe('Local skills: npx -y terum-skills@latest ls --local');
+  });
+});
+
+
+describe('global and project local sections', () => {
+  it('lists both roots, retains project placements and malformed YAML, and caches team snapshots across roots without runner calls', async () => {
+    const home = await temporaryDirectory(); const repo = join(home, 'repo'); await mkdir(join(repo, '.git'), { recursive: true });
+    const store = createConfigStore(join(home, 'state'));
+    const global = await localSource(home, 'global'); const project = await localSource(repo, 'project'); const placed = await localSource(repo, 'placed');
+    const invalid = await localSource(repo, 'invalid', '---\nname: invalid\ndescription: a: b\n---\n');
+    await store.update((config) => {
+      config.shared[ID] = { source: global, team: 'team' };
+      config.shared.other = { source: project, team: 'team' };
+      config.placements[placed] = { id: ID, team: 'team', version: null, scope: { kind: 'project', project: 'app' }, fingerprint: '', placed_at: '' };
+    });
+    const clone = store.teamClone('team'); await mkdir(join(clone, 'skills', 'global'), { recursive: true });
+    await writeFile(join(clone, 'team.json'), JSON.stringify({ ...TEAM_JSON, global: [ID] }));
+    await writeFile(join(clone, 'skills', 'global', 'SKILL.md'), `---\nname: global\ndescription: stored\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`);
+    const teamCalls: string[] = []; const wrapped = { ...store, teamClone: (team: string) => { teamCalls.push(team); return store.teamClone(team); } };
+    const runner = ghOnlyRunner(() => ({ code: 0, stdout: '', stderr: '' })); const io = new ScriptedPrompter();
+    const before = await readFile(join(store.root, 'config.json'));
+    const result = await run({ local: true, home, cwd: repo, config: wrapped, runner }, io);
+    expect(result).toMatchObject({ ok: true, value: { local: [
+      { root: join(home, '.claude', 'skills'), scope: 'global', rows: [{ name: 'global', state: 'shared source for team; endorsed (global)' }] },
+      { root: join(repo, '.claude', 'skills'), scope: 'project', repoRoot: repo, rows: [{ name: 'placed', state: 'placement recorded from team' }, { name: 'project' }], notOffered: [{ name: 'invalid', path: invalid, reason: expect.stringContaining('not valid YAML') }] },
+    ] } });
+    expect(io.lines.filter((line) => line.startsWith('Local Claude Code skills'))).toEqual([
+      `Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `Local Claude Code skills (${join(repo, '.claude', 'skills')}; project):`,
+    ]);
+    expect(io.lines).toContain(`  placed — placement recorded from team; path: ${placed}`);
+    expect(io.lines).toContain('Not offered for sharing:');
+    expect(io.lines.filter((line) => line === FOOTER)).toHaveLength(1); expect(io.lines.at(-1)).toBe(FOOTER);
+    expect(teamCalls).toEqual(['team']); expect(runner.calls).toEqual([]); expect(io.asked).toEqual([]);
+    expect(await readFile(join(store.root, 'config.json'))).toEqual(before);
+    expect(candidatesOf(await localSkills(join(repo, '.claude', 'skills'), await store.read(), { scope: 'project', stateRoot: store.root }))).toEqual([]);
+  });
+
+  it('renders an absent project root as its own empty section', async () => {
+    const home = await temporaryDirectory(); const repo = join(home, 'repo'); await mkdir(join(repo, '.git'), { recursive: true });
+    const io = new ScriptedPrompter();
+    expect(await run({ local: true, home, cwd: repo, config: createConfigStore(join(home, 'state')) }, io)).toMatchObject({ ok: true, value: { local: [{ scope: 'global' }, { scope: 'project', rows: [] }] } });
+    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `  none (${join(home, '.claude', 'skills')} does not exist)`, `Local Claude Code skills (${join(repo, '.claude', 'skills')}; project):`, `  none (${join(repo, '.claude', 'skills')} does not exist)`, FOOTER]);
+  });
+
+  it('keeps outside-repository listing successful (regression) and adds the explicit cwd line before the footer', async () => {
+    const home = await temporaryDirectory(); const cwd = join(home, 'outside\nrepo'); await mkdir(cwd);
+    const io = new ScriptedPrompter();
+    expect(await run({ local: true, home, cwd, config: createConfigStore(join(home, 'state')) }, io)).toMatchObject({ ok: true });
+    expect(io.lines.slice(-2)).toEqual([`Project skills: none (${cwd.replace('\n', '?')} is not inside a git repository).`, FOOTER]);
+  });
+
+  it('does not print a no-repository message for a deduplicated home repository', async () => {
+    const home = await temporaryDirectory(); await mkdir(join(home, '.git'));
+    const io = new ScriptedPrompter(); const result = await run({ local: true, home, cwd: home, config: createConfigStore(join(home, 'state')) }, io);
+    expect(result).toMatchObject({ ok: true, value: { local: [{ scope: 'global' }] } });
+    expect(io.lines.filter((line) => line.startsWith('Local Claude'))).toHaveLength(1);
+    expect(io.lines.join('')).not.toContain('not inside a git repository');
+  });
+
+  it('prints project-root EACCES as an inspection problem and still succeeds', async () => {
+    const home = await temporaryDirectory(); const repo = join(home, 'repo'); await mkdir(join(repo, '.git'), { recursive: true });
+    const root = join(repo, '.claude', 'skills'); await mkdir(root, { recursive: true });
+    const original = fs.access;
+    const spy = vi.spyOn(fs, 'access').mockImplementation(async (...args) => {
+      if (args[0] === root) throw Object.assign(new Error('EACCES: project skills'), { code: 'EACCES' });
+      return original(...args);
+    });
+    try {
+      const io = new ScriptedPrompter();
+      expect(await run({ local: true, home, cwd: repo, config: createConfigStore(join(home, 'state')) }, io)).toMatchObject({ ok: true, value: { local: [{ scope: 'global' }] } });
+      expect(io.lines.slice(-2)).toEqual([`Could not inspect ${root}: EACCES: project skills`, FOOTER]);
+      expect(io.lines.join('')).not.toContain('; project):');
+    } finally { spy.mockRestore(); }
   });
 });

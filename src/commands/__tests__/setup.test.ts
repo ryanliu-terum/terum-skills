@@ -536,15 +536,15 @@ it('the creator picker omits name-mismatched folders and reports the skipped cou
 
 describe('issue 9 setup delegation', () => {
   it.each(['skipped', 'done', 'failed'] as const)('forwards the same io and home and records %s', async (outcome) => {
-    const fixture = await bareTeam(); const home = join(fixture.root, 'home');
+    const fixture = await bareTeam(); const home = join(fixture.root, 'home'); const cwd = join(fixture.root, 'project');
     const store = createConfigStore(join(fixture.root, 'state')); const remote = githubRemote('alice', 'team');
     const runner = mappedRunner(remote, fixture.bare, fakeGh('alice'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote, handle: 'seed' }; });
     const io = new ScriptedPrompter([''], [], true); let calls = 0;
-    const result = await run({ config: store, home, runner, communityUrl: '', verbs: {
+    const result = await run({ config: store, home, cwd, runner, communityUrl: '', verbs: {
       share: async (args, received) => {
-        calls += 1; expect(received).toBe(io); expect(args).toEqual({ team: 'team', home, config: store, runner });
+        calls += 1; expect(received).toBe(io); expect(args).toEqual({ team: 'team', home, cwd, config: store, runner });
         return outcome === 'failed' ? failure('share failed') : success(outcome === 'done' ? { id: 'id', name: 'sample' } : undefined);
       }, offerHook: async () => 'present',
     } }, io);

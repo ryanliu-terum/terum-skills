@@ -25,6 +25,7 @@ export interface SetupArgs {
   config?: ConfigStore;
   runner?: Runner;
   home?: string;
+  cwd?: string;
   hook?: HookOptions;
   communityUrl?: string;
   verbs?: Partial<SetupVerbs>;
@@ -184,7 +185,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     }
 
     if (role === 'creator') {
-      const result = await verbs.share({ team: teamName, home: args.home, config: store, runner }, io);
+      const result = await verbs.share({ team: teamName, home: args.home, cwd: args.cwd, config: store, runner }, io);
       if (!result.ok) return failed(result.error, role, teamName, remote, steps);
       steps.actions = result.value === undefined ? 'skipped' : 'done';
     } else steps.actions = 'skipped';

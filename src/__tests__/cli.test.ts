@@ -41,7 +41,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
   it.each([['ls', '--local'], ['ls', '--local', 'member', 'amy'], ['ls', '--local', 'project', 'app']])('issue 9 wires %j', async (...argv) => {
     const { program, calls } = harness();
     await program.parseAsync(argv, { from: 'user' });
-    expect(calls).toEqual([{ verb: 'ls', kind: argv[2] ?? 'all', local: true, ...(argv[3] ? { value: argv[3], team: undefined } : {}) }]);
+    expect(calls).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: argv[2] ?? 'all', local: true, ...(argv[3] ? { value: argv[3], team: undefined } : {}) }]);
   });
 
   it('maps every flag onto the verb arguments', async () => {
@@ -62,7 +62,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const { program, calls } = harness();
     await program.parseAsync(['setup'], { from: 'user' });
     await program.parseAsync(['setup', 'acme/team'], { from: 'user' });
-    expect(calls).toEqual([{ verb: 'setup', target: undefined }, { verb: 'setup', target: 'acme/team' }]);
+    expect(calls).toEqual([{ verb: 'setup', cwd: process.cwd(), target: undefined }, { verb: 'setup', cwd: process.cwd(), target: 'acme/team' }]);
   });
 
   it('routes a failing Result to execute, and login takes no team or remote (rev 9, Decision 4)', async () => {
@@ -108,7 +108,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(calls).toEqual([
       { verb: 'invite', logins: ['amy', 'bea'], team: 't' },
       { verb: 'team', kind: 'remove', handle: 'amy', archiveOnly: true, team: 't' },
-      { verb: 'ls', kind: 'project', value: 'app', team: 't' },
+      { verb: 'ls', cwd: process.cwd(), kind: 'project', value: 'app', team: 't' },
       { verb: 'readme', prComment: 'origin/main' },
     ]);
     expect(program.helpInformation()).not.toContain('readme');
@@ -121,8 +121,8 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       return calls;
     };
     expect(await parse(['team', 'remove', 'cy', '--team', 't'])).toEqual([{ verb: 'team', kind: 'remove', handle: 'cy', team: 't' }]);
-    expect(await parse(['ls', '--team', 't'])).toEqual([{ verb: 'ls', kind: 'all', team: 't' }]);
-    expect(await parse(['ls', '--team', 't', 'member', 'amy'])).toEqual([{ verb: 'ls', kind: 'member', value: 'amy', team: 't' }]);
+    expect(await parse(['ls', '--team', 't'])).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: 'all', team: 't' }]);
+    expect(await parse(['ls', '--team', 't', 'member', 'amy'])).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: 'member', value: 'amy', team: 't' }]);
   });
 
   it('wires publish (bare and with every flag) and team leave, and routes their failing Results to execute', async () => {
@@ -133,13 +133,13 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     await program.parseAsync(['publish', 'fail'], { from: 'user' });
     await program.parseAsync(['team', 'leave', 'fail'], { from: 'user' });
     expect(calls).toEqual([
-      { verb: 'publish', ref: 'x' },
-      { verb: 'publish', ref: 'x', project: 'p', team: 't' },
+      { verb: 'publish', cwd: process.cwd(), ref: 'x' },
+      { verb: 'publish', cwd: process.cwd(), ref: 'x', project: 'p', team: 't' },
       { verb: 'leave', name: 't' },
-      { verb: 'publish', ref: 'fail' },
+      { verb: 'publish', cwd: process.cwd(), ref: 'fail' },
       { verb: 'leave', name: 'fail' },
     ]);
-    expect(Object.keys(calls[0] as object)).toEqual(['verb', 'ref']);
+    expect(Object.keys(calls[0] as object)).toEqual(['verb', 'ref', 'cwd']);
     expect(outcomes).toEqual([true, true, true, false, false]);
   });
 
@@ -250,7 +250,7 @@ it('issue 9 bare share reaches the verb with an undefined path', async () => {
     share: async (args) => { calls.push(args); return success(undefined); },
   });
   await program.parseAsync(['share'], { from: 'user' });
-  expect(calls).toEqual([{ path: undefined }]);
+  expect(calls).toEqual([{ path: undefined, cwd: process.cwd() }]);
 });
 
 it('issue 9 non-interactive bare share exits 1 through createExecute', async () => {

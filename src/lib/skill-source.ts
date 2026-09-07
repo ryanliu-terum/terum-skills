@@ -1,14 +1,25 @@
+import { realpathSync } from 'node:fs';
 import { lstat, readFile, readdir, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import YAML from 'yaml';
 import { allowedTools, describeRaw, FRONTMATTER, isSkillName } from './schema.js';
 
 export { FRONTMATTER } from './schema.js';
-export type SourceProblem = 'symlink' | 'not-a-directory' | 'skill-md-missing' | 'skill-md-not-a-file' | 'no-frontmatter' | 'invalid-yaml' | 'illegal-name' | 'name-mismatch' | 'description-missing' | 'unsupported-field' | 'malformed-allowed-tools' | 'nested-symlink';
+export type SourceProblem = 'symlink' | 'not-a-directory' | 'skill-md-missing' | 'skill-md-not-a-file' | 'no-frontmatter' | 'invalid-yaml' | 'illegal-name' | 'name-mismatch' | 'description-missing' | 'unsupported-field' | 'malformed-allowed-tools' | 'nested-symlink' | 'inside-state-root';
 type SourceInspection = { ok: true; description: string } | { ok: false; reason: SourceProblem; detail: string };
 
 /** Terminal rendering only: filesystem paths and ledger values retain their original bytes. */
 export function printable(value: string): string { return value.replace(/\p{Cc}/gu, '?'); }
+
+/** State is recovery data, never an authoring source (including through a root alias). */
+export function assertNotInsideStateRoot(source: string, stateRoot: string): void {
+  let canonicalSource = resolve(source); let canonicalState = resolve(stateRoot);
+  try { canonicalSource = realpathSync(source); } catch { /* Retain lexical evidence. */ }
+  try { canonicalState = realpathSync(stateRoot); } catch { /* Retain lexical evidence. */ }
+  if (canonicalSource === canonicalState || canonicalSource.startsWith(canonicalState.endsWith(sep) ? canonicalState : `${canonicalState}${sep}`)) {
+    throw new Error(`${source} is inside the terum-skills state directory ${stateRoot}; move the folder elsewhere and share that path.`);
+  }
+}
 
 /** A tracked source may have been relocated; only initial imports enforce the folder's name. */
 export function inspectSkillSource(raw: string, folderName?: string): SourceInspection {
