@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-import { sep } from 'node:path';
+import { readFile, realpath } from 'node:fs/promises';
+import { createConfigStore } from './lib/config.js';
+import { packageVersion } from './lib/package.js';
+import { createReleaseState, updateNotice } from './lib/update.js';
 import { fileURLToPath } from 'node:url';
 import { describeLaunch } from './lib/launch.js';
 import { CommanderError } from 'commander';
@@ -23,15 +26,23 @@ for (const stream of [process.stdout, process.stderr]) {
 
 // The bin entry: a terminal Prompter, failures on stderr, a non-zero exit for every failure path.
 // The Result → stderr/exit-code mapping itself lives in lib/execute.ts, so it is tested without a process.
+const launch = await describeLaunch({
+  entry: fileURLToPath(import.meta.url), realpath,
+  readJson: async (path) => { try { return JSON.parse(await readFile(path, 'utf8')) as unknown; } catch { return null; } },
+});
+const noUpdateCheck = Boolean(process.env.CI || process.env.NO_UPDATE_NOTIFIER || process.env.TERUM_SKILLS_NO_UPDATE_NOTIFIER);
+const afterVerb = process.stderr.isTTY && !noUpdateCheck
+  ? async () => updateNotice({ state: createReleaseState(createConfigStore().root), launch, running: packageVersion(), stderr: (line) => { process.stderr.write(`${line}\n`); } })
+  : undefined;
 const execute = createExecute({
+  afterVerb,
   io: terminalPrompter({ outputClosed }),
   stderr: (line) => { process.stderr.write(`${line}\n`); },
   setExitCode: (code) => { process.exitCode = code; },
 });
 
 try {
-  await buildProgram(execute, undefined, { launch: describeLaunch({ // The loader realpaths the entry module; process.argv[1] is the bin symlink (`<prefix>/bin/terum-skills`), which says nothing about where the copy lives.
-    argv1: fileURLToPath(import.meta.url), env: process.env, cwd: process.cwd(), sep }) }).parseAsync();
+  await buildProgram(execute, undefined, { launch, noUpdateCheck }).parseAsync();
 } catch (error) {
   // commander's own exits (help, version, usage errors) — it has already printed; keep its code.
   process.exitCode = error instanceof CommanderError ? error.exitCode : 1;

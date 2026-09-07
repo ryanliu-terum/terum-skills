@@ -58,3 +58,25 @@ describe('systemRunner', () => {
     expect(result.stdout).toBe('héllo wörld — ✓');
   });
 });
+
+
+describe('bounded runner calls', () => {
+  it('kills a sleeping git alias and its child, settling on close', async () => {
+    const cwd = await temporaryDirectory(); const start = Date.now();
+    const result = await systemRunner.run('git', ['-c', 'alias.s=!sleep 30 & child=$!; echo "$child"; wait "$child"', 's'], { cwd, deadlineMs: 200, maxOutputBytes: 65536 });
+    expect(Date.now() - start).toBeLessThan(3500);
+    expect(result.code).toBe(124);
+    expect(result.stderr).toBe('terum-skills: git s exceeded 0.2 s');
+    const child = Number(result.stdout.trim()); expect(child).toBeGreaterThan(0);
+    let alive = true;
+    try { process.kill(child, 0); } catch { alive = false; }
+    expect(alive).toBe(false);
+  }, 35000);
+  it('drops bytes beyond the output cap', async () => {
+    const cwd = await temporaryDirectory();
+    const result = await systemRunner.run('git', ['-c', 'alias.big=!printf "1234567890"; printf "abcdefghij" >&2', 'big'], { cwd, maxOutputBytes: 8 });
+    expect(result.code).toBe(0);
+    expect(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(8);
+    expect(result.stdout + result.stderr).not.toBe('');
+  });
+});

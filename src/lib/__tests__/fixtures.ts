@@ -1,6 +1,7 @@
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Launch } from '../launch.js';
 import lockfile from 'proper-lockfile';
 import { CommandResult, Runner, RunOptions, systemRunner } from '../runner.js';
 import { Prompter, PromptClosedError } from '../prompt.js';
@@ -167,3 +168,38 @@ export const noGhRunner: Runner = { async run(command) { if (command === 'gh') t
 export async function content(path: string): Promise<string> { return readFile(path, 'utf8'); }
 export async function clean(path: string): Promise<void> { await rm(path, { recursive: true, force: true }); }
 export const exists = (path: string): Promise<boolean> => access(path).then(() => true, () => false);
+
+/** Refuse every call not explicitly allow-listed, including unexpected release destinations. */
+export function denyingRunner(allow: Array<{ command: 'git' | 'gh'; argsPrefix: readonly string[]; respond?: (args: readonly string[], options?: RunOptions) => CommandResult | Promise<CommandResult> }>, base?: Runner): Runner {
+  return { async run(command, args, options) {
+    const rule = allow.find((entry) => entry.command === command && entry.argsPrefix.every((arg, i) => args[i] === arg));
+    if (!rule) throw new Error(`unexpected runner call: ${command} ${args.join(' ')}`);
+    if (rule.respond) return rule.respond(args, options);
+    if (base) return base.run(command, args, options);
+    throw new Error(`unexpected runner call: ${command} ${args.join(' ')}`);
+  } };
+}
+
+export async function taggedBare(tags: string[]) {
+  const fixture = await bareTeam();
+  for (const tag of tags) await git(['tag', '-a', tag, '-m', tag], fixture.seed);
+  await git(['push', '-q', '--tags', 'origin'], fixture.seed);
+  return fixture;
+}
+
+export function fakeLaunch(kind: Launch['kind'], path?: string): Launch {
+  switch (kind) {
+    case 'npx': return { kind, path: path ?? '/cache/_npx/hash/node_modules/terum-skills/dist/index.js', cacheDir: '/cache/_npx/hash', request: 'terum-skills@latest' };
+    case 'local': return { kind, path: path ?? '/work/app/node_modules/terum-skills/dist/index.js', root: '/work/app', dependencyKind: 'dependencies' };
+    case 'source': return { kind, path: path ?? '/work/terum-skills/dist/index.js', root: '/work/terum-skills' };
+    case 'global': return { kind, path: path ?? '/opt/homebrew/lib/node_modules/terum-skills/dist/index.js' };
+    default: return { kind, path: path ?? '/unknown/index.js' };
+  }
+}
+
+export async function stateFileAt(root: string, record: unknown): Promise<string> {
+  await mkdir(join(root, 'run'), { recursive: true });
+  const path = join(root, 'run', 'latest-version.json');
+  await writeFile(path, typeof record === 'string' ? record : JSON.stringify(record), { mode: 0o600 });
+  return path;
+}

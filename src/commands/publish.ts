@@ -12,7 +12,8 @@ import { failure, Result, success } from '../lib/result.js';
 import { parseJson, parseSkillFrontmatter, Team, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { findSkill, readTeam } from '../lib/skills.js';
-import { openTeamRepo, packageVersion, refreshClone, SafeWriteOptions, shellQuote, treeText } from '../lib/teamRepo.js';
+import { packageVersion } from '../lib/package.js';
+import { openTeamRepo, refreshClone, SafeWriteOptions, shellQuote, treeText } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
 
 export interface PublishArgs {

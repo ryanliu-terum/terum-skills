@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { chmod, lstat, mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
+import { packageVersion } from './package.js';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import lockfile from 'proper-lockfile';
@@ -337,11 +337,6 @@ export function localPushGuardLauncher(): PushGuardLauncher | null {
 
 /** POSIX-shell single quoting: a HOME with a space or a quote is still one word. */
 export function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
-
-/** This package's version, for the pinned `npx` fallback; null when package.json is out of reach (an unusual bundle). */
-export function packageVersion(): string | null {
-  try { return (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? null; } catch { return null; }
-}
 
 /**
  * The pre-push hook body. It checks that its launcher still exists before running it, and exits 0

@@ -1,3 +1,6 @@
+import type { Launch } from '../lib/launch.js';
+import { packageVersion } from '../lib/package.js';
+import { createReleaseState, maintainReleaseState, ProbePolicy, probePolicy, recordRunningAndRegistry, ReleaseStateStore } from '../lib/update.js';
 import { readdir, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
@@ -18,6 +21,7 @@ import { installOne, skillAtSource } from './install.js';
 import { uninstallOne } from './uninstall.js';
 
 export interface SyncArgs {
+  launch?: Launch; noUpdateCheck?: boolean; probe?: ProbePolicy; upstream?: string; state?: ReleaseStateStore;
   hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string;
   /** Test knob: the clone lock's stale window for refreshClone. */
   lockStale?: number;
@@ -26,10 +30,30 @@ export interface SyncArgs {
 }
 export interface SyncResult { placed: number; deferred: string[]; notices: string[]; changed: boolean; hook: boolean; }
 
-/** Overloads keep the hook caller compiler-restricted to print-only I/O (§3). */
+/** The returned result is complete and every team lock is released before release maintenance. */
 export function run(args: SyncArgs & { hook: true }, io: NonInteractivePrompter): Promise<Result<SyncResult>>;
 export function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResult>>;
 export async function run(args: SyncArgs, io: Prompter | NonInteractivePrompter): Promise<Result<SyncResult>> {
+  // The body already handles print-only shapes conservatively; do not infer --hook from I/O.
+  const result = await runSync(args, io as Prompter);
+  const store = args.config ?? createConfigStore();
+  const state = args.state ?? createReleaseState(store.root, args.upstream);
+  const observation = { state, launch: args.launch, running: packageVersion(), now: args.now };
+  const interactive = !args.hook && !args.prune && io.interactive && 'confirm' in io;
+  try {
+    if (interactive && !args.noUpdateCheck) {
+      // RELEASE_PROBE_POLICY (constants.ts) decides who may probe; `args.probe` is a test override.
+      const probe = probePolicy(await store.read(), args.probe);
+      await maintainReleaseState({ ...observation, runner: args.runner ?? systemRunner, upstream: args.upstream, probe });
+    } else await recordRunningAndRegistry(observation);
+  } catch { /* Automatic discovery and local observation are best-effort and silent. */ }
+  return result;
+}
+
+/** Overloads keep the hook caller compiler-restricted to print-only I/O (§3). */
+function runSync(args: SyncArgs & { hook: true }, io: NonInteractivePrompter): Promise<Result<SyncResult>>;
+function runSync(args: SyncArgs, io: Prompter): Promise<Result<SyncResult>>;
+async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): Promise<Result<SyncResult>> {
   const notices: string[] = [];
   const deferred: string[] = [];
   // §8: a team this run left work undone in is not stamped, so the next session retries instead of
