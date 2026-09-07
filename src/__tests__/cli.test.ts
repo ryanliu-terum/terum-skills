@@ -331,7 +331,8 @@ describe('issue 5 connect command contract', () => {
     const io = new NonInteractivePrompter(); const errors: string[] = []; const stdout: string[] = []; const codes: number[] = [];
     let afterVerbs = 0; let connected = 0;
     const execute = createExecute({ io, stderr: (line) => { errors.push(line); }, setExitCode: (code) => { codes.push(code); }, afterVerb: async () => { afterVerbs++; } });
-    const connectStub: typeof connect = async (args, received) => { connected++; return connect({ ...args, config: store }, received); };
+    // Cast, not annotate: an arrow cannot satisfy `run`'s three overloads directly; the stub forwards every call, so the overloaded type is honest at runtime.
+    const connectStub = (async (args, received) => { connected++; return connect({ ...args, config: store }, received); }) as typeof connect;
     const program = buildProgram(execute, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }),
       team: async () => success({ team: 't', remote: 'r' }),

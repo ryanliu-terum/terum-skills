@@ -30,44 +30,134 @@ export interface ConnectArgs {
 }
 export interface ConnectResult { id: string; name: string; reconciled?: boolean; }
 
-export async function run(args: ConnectArgs, io: Prompter): Promise<Result<ConnectResult | undefined>> {
+export interface ConnectBatch { kind: 'batch'; shared: ConnectResult[]; declined: string[]; refused: { name: string; reason: string }[]; }
+export type ConnectOutcome = ConnectResult | ConnectBatch;
+
+type ConnectPhase = 'validate' | 'preflight' | 'consent' | 'source-mutated' | 'pushed';
+class ConnectStepError extends Error {
+  constructor(readonly phase: ConnectPhase, cause: unknown, readonly recoverable: boolean, readonly id?: string) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'ConnectStepError';
+  }
+}
+
+interface ConnectContext {
+  args: ConnectArgs;
+  store: ConfigStore;
+  runner: Runner;
+  config: Awaited<ReturnType<ConfigStore['read']>>;
+  team: string;
+  binding: Awaited<ReturnType<ConfigStore['read']>>['teams'][string];
+  io: Prompter;
+}
+
+export function run(args: ConnectArgs & { path: string }, io: Prompter): Promise<Result<ConnectResult | undefined>>;
+export function run(args: ConnectArgs & ({ keepSource: string } | { keepRepo: string } | { relocate: NonNullable<ConnectArgs['relocate']> } | { forget: string }), io: Prompter): Promise<Result<ConnectResult | undefined>>;
+export function run(args: ConnectArgs, io: Prompter): Promise<Result<ConnectOutcome | undefined>>;
+export async function run(args: ConnectArgs, io: Prompter): Promise<Result<ConnectOutcome | undefined>> {
   try {
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     if (args.forget) return success(await forget(store, args.forget, io));
     if (args.relocate) return success(await relocate(store, args.relocate));
     if (args.keepSource || args.keepRepo) return success(await resolveDivergence(store, runner, args.team, args.keepSource ?? args.keepRepo!, Boolean(args.keepSource), Boolean(args.allowPrivileged), io));
-    const config = await store.read();
-    const [team, binding] = selectTeam(config.teams, args.team);
-    let selectedPath = args.path;
-    if (!selectedPath) {
-      const { roots } = await localSkillRoots(args.home ?? homedir(), args.cwd);
-      const inventories = await Promise.all(roots.map((root) => localSkills(root.root, config, { scope: root.scope, stateRoot: store.root })));
-      const candidates = inventories.flatMap((inventory) => candidatesOf(inventory, args.allowPrivileged).map((entry) => ({ ...entry, scope: inventory.scope })));
-      const omitted = inventories.flatMap((inventory) => {
-        const offered = candidatesOf(inventory, args.allowPrivileged);
-        return inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && !offered.includes(entry));
-      });
-      if (omitted.length) io.print(`Skipped ${omitted.length} local folders that cannot be connected. Run \`npx -y terum-skills@latest ls --local\` for paths and reasons.`);
-      if (!candidates.length) {
-        io.print(`No local candidates to connect under ${roots.map((root) => printable(root.root)).join(' or ')}. Skills elsewhere can be connected by passing their folder path.`);
-        return success(undefined);
+    const initial = await store.read();
+    const [team, binding] = selectTeam(initial.teams, args.team);
+    if (args.path) return success(await connectOne(resolve(args.path), { args, store, runner, config: initial, team, binding, io }));
+
+    const batch: ConnectBatch = { kind: 'batch', shared: [], declined: [], refused: [] };
+    const attempted = new Map<string, 'declined' | 'refused'>();
+    const reasons = new Map<string, string>();
+    let qualify: Set<string> | undefined;
+    let menuStarted = false;
+    let selectedPath: string | undefined;
+    const summarize = (): void => {
+      batch.declined = []; batch.refused = [];
+      const notConnected: string[] = [];
+      for (const [path, outcome] of attempted) {
+        const name = basename(path);
+        const reason = outcome === 'declined' ? 'declined' : reasons.get(path)!;
+        if (outcome === 'declined') batch.declined.push(name);
+        else batch.refused.push({ name, reason });
+        notConnected.push(`${name} (${reason})`);
       }
-      if (!io.interactive) {
-        for (const inventory of inventories) {
-          io.print(`Local candidates under ${printable(inventory.root)}:`);
-          for (const candidate of candidatesOf(inventory, args.allowPrivileged)) io.print(`  ${printable(candidate.path)}`);
+      const count = batch.shared.length;
+      io.print(count ? `Connected ${count} ${count === 1 ? 'skill' : 'skills'} to team ${printable(team)}: ${batch.shared.map((skill) => printable(skill.name)).join(', ')}.` : 'Nothing connected.');
+      if (notConnected.length) io.print(`Not connected: ${notConnected.join(', ')}.`);
+    };
+    try {
+      while (true) {
+        selectedPath = undefined;
+        const config = await store.read();
+        const { roots } = await localSkillRoots(args.home ?? homedir(), args.cwd);
+        const inventories = await Promise.all(roots.map((root) => localSkills(root.root, config, { scope: root.scope, stateRoot: store.root })));
+        const candidates = inventories.flatMap((inventory) => candidatesOf(inventory, args.allowPrivileged).map((entry) => ({ ...entry, scope: inventory.scope })));
+        if (!qualify) {
+          const omitted = inventories.flatMap((inventory) => {
+            const offered = candidatesOf(inventory, args.allowPrivileged);
+            return inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && !offered.includes(entry));
+          });
+          if (omitted.length) io.print(`Skipped ${omitted.length} local folders that cannot be connected. Run \`npx -y terum-skills@latest ls --local\` for paths and reasons.`);
+          if (!candidates.length) {
+            io.print(`No local candidates to connect under ${roots.map((root) => printable(root.root)).join(' or ')}. Skills elsewhere can be connected by passing their folder path.`);
+            return success(undefined);
+          }
+          if (!io.interactive) {
+            for (const inventory of inventories) {
+              io.print(`Local candidates under ${printable(inventory.root)}:`);
+              for (const candidate of candidatesOf(inventory, args.allowPrivileged)) io.print(`  ${printable(candidate.path)}`);
+            }
+            throw new Error(`No skill selected. In an interactive terminal, run \`npx -y terum-skills@latest connect --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
+          }
+          qualify = new Set(candidates.filter((candidate) => candidates.some((other) => other.name === candidate.name && other.scope !== candidate.scope)).map((candidate) => candidate.name));
         }
-        throw new Error(`No skill selected. In an interactive terminal, run \`npx -y terum-skills@latest connect --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
+        if (!candidates.length) break;
+        const choices = new Map(candidates.map((candidate) => [`Connect ${printable(candidate.name)}${qualify!.has(candidate.name) ? ` (${candidate.scope})` : ''}`, candidate.path]));
+        const exit = batch.shared.length ? 'Done' : 'Skip';
+        menuStarted = true;
+        const choice = await io.select(`Connect a local skill folder to team ${printable(team)}?`, [...choices.keys(), exit]);
+        if (choice === exit) break;
+        selectedPath = choices.get(choice);
+        if (selectedPath === undefined) throw new Error(`Unknown choice ${printable(choice)}.`);
+        try {
+          const connected = await connectOne(resolve(selectedPath), { args, store, runner, config, team, binding, io });
+          batch.shared.push(connected);
+          attempted.delete(selectedPath); reasons.delete(selectedPath);
+        } catch (error) {
+          if (!(error instanceof ConnectStepError) || !error.recoverable) throw error;
+          io.print(error.message);
+          attempted.set(selectedPath, error.phase === 'consent' ? 'declined' : 'refused');
+          reasons.set(selectedPath, error.cause instanceof ConnectHygieneRefused ? error.cause.reason : error.message);
+        }
       }
-      const choices = new Map(candidates.map((candidate) => [`Connect ${printable(candidate.name)}${candidates.filter((entry) => entry.name === candidate.name).length > 1 ? ` (${candidate.scope})` : ''}`, candidate.path]));
-      const choice = await io.select(`Connect a local skill folder to team ${printable(team)}?`, [...choices.keys(), 'Skip']);
-      if (choice === 'Skip') { io.print('Nothing connected.'); return success(undefined); }
-      selectedPath = choices.get(choice);
-      if (selectedPath === undefined) throw new Error(`Unknown choice ${printable(choice)}.`);
+    } catch (error) {
+      // Discovery/non-TTY failures before the first menu retain their existing output contract.
+      if (!menuStarted) throw error;
+      const detail = error instanceof Error ? error.message : String(error);
+      let message = `Stopped: ${detail}${detail.endsWith('.') ? '' : '.'}`;
+      if (error instanceof ConnectStepError && error.phase === 'source-mutated') {
+        message = `Stopped: ${detail}. ${basename(selectedPath!)}'s SKILL.md at ${selectedPath} already carries the managed fields (license, metadata.id, metadata.author); the team repository was not changed. Fix the cause and run \`npx -y terum-skills@latest connect ${selectedPath}\` again.`;
+      } else if (error instanceof ConnectStepError && error.phase === 'pushed') {
+        message = `Stopped: ${detail}. ${basename(selectedPath!)} was pushed to team ${team} as ${error.id} but is not tracked on this machine; run \`npx -y terum-skills@latest sync\` and, if it is still not listed by \`ls --local\`, report this — the local ledger entry is missing.`;
+      }
+      io.print(message);
+      summarize();
+      // Preserve the existing first-menu unknown-choice error for callers, too.
+      return failure(batch.shared.length || error instanceof ConnectStepError ? message : detail, batch.shared.length ? batch : undefined);
     }
+    summarize();
+    return success(batch.shared.length ? batch : undefined);
+  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+}
+
+async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectResult> {
+  const { args, store, runner, config, team, binding, io } = ctx;
+  let phase: ConnectPhase = 'validate';
+  let recoverable = false;
+  let id: string | undefined;
+  try {
     if (!binding.handle || !config.email || !config.display_name) throw new Error('Connect needs your joined team identity, name, and email.');
-    const source = resolve(selectedPath);
+    recoverable = true;
     assertNotInsideStateRoot(source, store.root);
     const name = basename(source);
     if (!(await exists(join(source, 'SKILL.md')))) throw new Error(`${source} has no SKILL.md.`);
@@ -80,14 +170,18 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
     const description = raw;
     const clone = store.teamClone(team);
     const author = `${config.display_name} <${config.email}>`;
+    phase = 'preflight'; recoverable = false;
     const repo = openTeamRepo(clone, binding.remote, runner);
     // Connect refreshes before changing the user's source so an upstream collision is a no-write refusal;
     // the mutation-time assertion below still protects a race after this preflight.
     await repo.safeWrite(() => undefined, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}` });
     const records = await skillRecords(clone, team);
+    phase = 'validate'; recoverable = true;
     if (records.some((record) => record.name === name)) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
-    const id = randomUUID(); // minted before safeWrite, never inside its re-applied mutation
+    recoverable = false;
+    id = randomUUID(); // minted before safeWrite, never inside its re-applied mutation
     const teamDoc = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
+    recoverable = true;
     const updated = injectManagedFields(raw, { license: teamDoc.policy.skill_license, id, author });
     const candidate = await sourceFiles(source);
     candidate.files.set('SKILL.md', Buffer.from(updated));
@@ -95,8 +189,13 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
     // Every field connect writes is shown before the y/N — the category too, on the one kind of file
     // that has none (every off-the-shelf skill): it is generated, not asked for, and edited any time.
     const categoryLine = declaredCategory(raw) === undefined ? `\nmetadata.terum-category: ${DEFAULT_CATEGORY} (no category was set; edit SKILL.md any time)` : '';
+    phase = 'consent'; recoverable = false;
     io.print(`Will add:\nlicense: ${teamDoc.policy.skill_license}\nmetadata.id: ${id}\nmetadata.author: ${author}${categoryLine}`);
-    if (!(await io.confirm(`Connect ${name}?`))) throw new Error('Connect was declined.');
+    if (!(await io.confirm(`Connect ${name}?`))) {
+      recoverable = true;
+      throw new Error('Connect was declined.');
+    }
+    phase = 'source-mutated';
     await writeFile(join(source, 'SKILL.md'), updated, 'utf8');
     // Push the exact bytes hygiene inspected — a re-read here would open a window where a
     // concurrent editor save lands uninspected content in the team repo (cross-model review P1).
@@ -106,10 +205,11 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
       if (tree.paths(`skills/${name}/`).length) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
       mirrorToTree(tree, `skills/${name}`, candidate.files);
     }, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}` });
+    phase = 'pushed';
     const baseline = await canonicalDigest(source);
-    await store.update((fresh) => { fresh.shared[id] = { source, team, baseline }; });
-    return success({ id, name, reconciled: description.length > 0 });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+    await store.update((fresh) => { fresh.shared[id!] = { source, team, baseline }; });
+    return { id, name, reconciled: description.length > 0 };
+  } catch (cause) { throw new ConnectStepError(phase, cause, recoverable, id); }
 }
 
 /**
@@ -272,10 +372,18 @@ async function relocate(store: ConfigStore, value: { id: string; path: string } 
 }
 function splitRelocate(value: string): { id: string; path: string } { const index = value.indexOf(':'); if (index < 1) throw new Error('Use --relocate <id>:<path>.'); return { id: value.slice(0, index), path: value.slice(index + 1) }; }
 function mirrorToTree(tree: MutableTree, destination: string, files: Map<string, Buffer>): void { for (const path of tree.paths(`${destination}/`)) if (!files.has(path.slice(destination.length + 1))) tree.remove(path); for (const [path, content] of files) tree.set(`${destination}/${path}`, content); }
+class ConnectHygieneRefused extends Error {
+  readonly reason: string;
+  constructor(findings: ReturnType<typeof inspectHygiene>) {
+    super(formatHygieneFindings(findings));
+    this.reason = `hygiene: ${findings.map((finding) => finding.message.replace(/\.$/, '')).join('; ')}`;
+  }
+}
+
 function assertHygiene(name: string, input: Awaited<ReturnType<typeof sourceFiles>>, license: string, allowExecutable = false): void {
   const skill = input.files.get('SKILL.md');
   const findings = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable });
-  if (findings.length) throw new Error(formatHygieneFindings(findings));
+  if (findings.length) throw new ConnectHygieneRefused(findings);
 }
 /** The managed-field refresh as a mutation: re-derived from the fresh pre-image safeWrite hands it, so it can only ever change the managed lines of whatever is actually upstream (and restore a missing category, as injectManagedFields does everywhere). */
 function refreshManagedFieldsInTree(tree: MutableTree, path: string, values: { license: string; id: string; author: string }): void {

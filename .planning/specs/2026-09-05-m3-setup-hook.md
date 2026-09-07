@@ -63,11 +63,13 @@
 // src/commands/setup.ts
 export interface SetupVerbs {           // injection seam for tests; defaults are the real verbs
   team: typeof import('./team.js').run;
-  connect: typeof import('./connect.js').run;
+  connect: (args: ConnectArgs, io: Prompter) => Promise<Result<ConnectOutcome | undefined>>;
   invite: typeof import('./invite.js').run;
   offerHook: typeof import('../lib/hook.js').offerHook;
 }
 export interface SetupArgs {
+  offerConnect?: boolean;               // default true; false only for the install bootstrap
+  quiet?: boolean;                      // print-only suppression; prompts still happen
   target?: string;                       // absent → creator; `<org>/<repo>` or a remote URL → joiner
   config?: ConfigStore; runner?: Runner; home?: string;   // test seams, as every other verb
   hook?: HookOptions;                    // see §2.2; defaults to the real settings file and backup dir
@@ -99,7 +101,7 @@ Every line below goes through `io.print`. `Result.error` is what `src/index.ts` 
    - **Creator:** if `Object.keys(config.teams).length > 0` → print `Team <name> is already configured on this machine.` for the first configured team, record `skipped`, and carry that team forward. Otherwise `await verbs.team({ kind: 'create', offerHook: false, config, runner }, io)`; `team create` asks the team name and the repository name itself (Decision 5) and collects identity. A failure is this step's failure. On success carry `value.team`/`value.remote` forward (read the exact `CreateResult` shape from `team.ts`). The reading chosen for the parent's "and an optional org": **not asked in phase 1** — `team create --org` is the way to create under an organization; `setup` passes no `org`. Say so in the report.
    - **Joiner:** parse the target with `parseJoinTarget(target)` (throws on an invalid target — that is this step's failure). If `teamByRemote(config, normalizedRemote)` finds a configured team whose `handle` is set → print `Team <name> is already configured on this machine.`, record `skipped`, carry it forward. Otherwise `await verbs.team({ kind: 'join', target, offerHook: false, config, runner }, io)`; `team join` does the handle collision check, the invitation accept (with the browser URL and a y/N when gh is not logged in), the endorsed-set y/N, and the per-skill `allowed-tools` prompts — all on `io`, none of them `setup`'s.
 4. **First actions** (`done` | `skipped` for the share offer; the one-liners are always printed).
-   - **Creator:** calls `connect` with no path and the wizard's prompter, forwarding `home`, `cwd`, team, config, and runner — the picker, its omission summary, and the `connect` y/N are connect's own. `connect` inventories the global Claude Code root and the nearest repository’s project root when cwd is supplied (build spec §6, Ryan 2026-09-06), excludes sources recorded in either ledger, and offers `Connect <name>` labels (scope-qualified for duplicate names) plus `Skip` after offline validation; privileged sources require `--allow-privileged`. The full paths and rejection reasons are available through `ls --local`. `success(undefined)` (no candidates, or Skip) records the step `skipped`, a shared result `done`, and failure stops this step. Setup owns no enumeration or select call.
+   - **Both roles** (when `offerConnect` is not false): calls `connect` with no path and the wizard's prompter, forwarding `home`, `cwd`, team, config, and runner — the picker, its omission summary, and every `Connect <name>?` y/N are connect's own. It re-reads config and re-inventories both roots before every menu; sources tracked in either ledger are excluded, including the endorsed placements from `team join`. Labels are `Connect <name>`, scope-qualified for names duplicated at the first menu and stable for the invocation. Exit is `Skip` before any success, `Done` after; each success has its own commit and ledger write. `success(undefined)` or a batch with zero connected → `skipped`, ≥1 → `done`, a failure stops the step while retaining completed connects; a rerun offers only unconnected sources. **Install bootstrap:** the step is skipped without a prompt (`offerConnect: false`); `quiet` never suppresses a prompt. Setup owns no enumeration or select call. Joiner order is team (join, endorsed set, allowed-tools) → clone check → invite (skipped) → connect → hints → community → hook → done; the build spec §6.1 invitation-before-actions order supersedes the historical step numbering here.
    - **Both roles, always:** the `--local lists your own` one-liner includes global and project skills; keep its wording. Print exactly
      ```
      Next, from any terminal:
@@ -108,7 +110,7 @@ Every line below goes through `io.print`. `Result.error` is what `src/index.ts` 
        terum-skills search <term>            — find a skill by name, description, or category
        terum-skills sync                     — pull updates and finish pending work
        npx -y terum-skills@latest publish <skill> — endorse a skill already connected to the team
-       npx -y terum-skills@latest connect    — connect one of your local skills to the team; later edits sync automatically (asks which)
+       npx -y terum-skills@latest connect      — connect your local skills to the team (asks which)
      ```
      with `<team>` replaced by the carried team name. **The strings `eval` and `ui` must not appear anywhere in the wizard's output** (§6.1: reserved steps are absent, not stubbed).
 5. **Invite** (`done` | `skipped`). Creator only; a joiner never sees this step (record `skipped`).
@@ -137,7 +139,7 @@ Use the fixtures as `create.test.ts`, `join.test.ts`, and `leave.test.ts` do (`b
 
 ### 1.5 Walkthrough (`src/__tests__/m3-setup-walkthrough.test.ts`)
 
-The §12 two-person slice as far as it can run against the bare fixture with a fake gh, in one test: Alice runs `setup` (creator) — creates the team, shares one skill, invites `bob`; Bob runs `setup <org>/<repo>` (joiner) against the same bare remote with his own store and home — joins, is offered the endorsed set (empty at this point, so no prompt), sees the one-liners, gets the hook y/N once, and the done block lists `@alice` and `@bob`. Then Alice `publish`es the shared skill (`policy.publish: 'push'` seeded, or the `pr` path with a simulated merge as `m3-publish-walkthrough.test.ts` does) and Bob's next interactive `sync` asks the endorsed-set y/N exactly once. Assert on `origin/main`'s tree (two people files, one skill), on both settings files (one entry each), and on the absence of any `git push` to `main` from `setup` itself outside the verbs' own writes (the verbs' pushes are expected; `setup` adds none).
+The §12 two-person slice as far as it can run against the bare fixture with a fake gh, in one test: Alice runs `setup` (creator) — creates the team, invites `bob`, connects two skills; Bob runs `setup <org>/<repo>` (joiner) against the same bare remote with his own store and home — joins, is offered the endorsed set (empty at this point, so no prompt), is offered his own local skills (declines with Skip), sees the one-liners, gets the hook y/N once, and the done block lists `@alice` and `@bob`. Re-running Alice’s setup offers neither connected skill. Then Alice `publish`es one connected skill (`policy.publish: 'push'` seeded, or the `pr` path with a simulated merge as `m3-publish-walkthrough.test.ts` does) and Bob's next interactive `sync` asks the endorsed-set y/N exactly once. Assert on `origin/main`'s tree (two people files, two skills), on both settings files (one entry each), and on the absence of any `git push` to `main` from `setup` itself outside the verbs' own writes (the verbs' pushes are expected; `setup` adds none).
 
 ---
 

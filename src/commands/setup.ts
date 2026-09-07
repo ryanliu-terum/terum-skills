@@ -9,12 +9,12 @@ import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { describeClone } from '../lib/teamRepo.js';
 import { joinCommand, run as invite } from './invite.js';
-import { run as connect } from './connect.js';
+import { ConnectArgs, ConnectOutcome, run as connect } from './connect.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
 
 export interface SetupVerbs {
   team: typeof team;
-  connect: typeof connect;
+  connect: (args: ConnectArgs, io: Prompter) => Promise<Result<ConnectOutcome | undefined>>;
   invite: typeof invite;
   offerHook: typeof defaultOfferHook;
 }
@@ -22,6 +22,8 @@ export interface SetupArgs {
   target?: string;
   /** §6 install bootstrap: the print-only steps (welcome, hints, community, closing summary) are suppressed; every prompt still happens. */
   quiet?: boolean;
+  /** Offer local skills independently of print-only suppression. */
+  offerConnect?: boolean;
   config?: ConfigStore;
   runner?: Runner;
   home?: string;
@@ -43,7 +45,7 @@ export interface SetupResult {
 const WELCOME = [
   'Welcome to terum-skills.',
   "Your team's skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have.",
-  'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, connects a first skill, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.',
+  'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.',
 ];
 
 export const ROLE_QUESTION = 'Create a team or join one?';
@@ -184,10 +186,10 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       steps.invite = 'skipped';
     }
 
-    if (role === 'creator') {
+    if (args.offerConnect !== false) {
       const result = await verbs.connect({ team: teamName, home: args.home, cwd: args.cwd, config: store, runner }, io);
       if (!result.ok) return failed(result.error, role, teamName, remote, steps);
-      steps.actions = result.value === undefined ? 'skipped' : 'done';
+      steps.actions = result.value !== undefined && (!('kind' in result.value) || result.value.shared.length > 0) ? 'done' : 'skipped';
     } else steps.actions = 'skipped';
     say('Next, from any terminal:');
     say(`  terum-skills install ${teamName}/<skill>   — install a shared skill (add @<version> to pin it)`);
@@ -196,7 +198,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     say('  terum-skills sync                     — pull updates and finish pending work');
     say(`  npx -y terum-skills@latest publish <skill> — endorse a skill already connected to the team`);
     say('  terum-skills eval <skill>             — evaluate a shared skill locally before publishing');
-    say('  npx -y terum-skills@latest connect    — connect one of your local skills to the team; later edits sync automatically (asks which)');
+    say('  npx -y terum-skills@latest connect      — connect your local skills to the team (asks which)');
 
     const communityUrl = args.communityUrl ?? COMMUNITY_URL;
     if (communityUrl === '' || args.quiet) steps.community = 'skipped';

@@ -75,6 +75,38 @@ async function configuredCreator(handlers: Parameters<typeof fakeGh>[1], owner =
 }
 
 describe('setup (§6.1)', () => {
+  it('11 offers a joiner two project skills while excluding endorsed placements', async () => {
+    const fixture = await bareTeam(); const remote = 'https://git.example/team.git'; const home = join(fixture.root, 'home'); const cwd = join(fixture.root, 'project');
+    await mkdir(join(cwd, '.git'), { recursive: true });
+    await skillUnder(cwd, 'alpha'); await skillUnder(cwd, 'beta'); await skillUnder(cwd, 'endorsed');
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => {
+      config.teams.team = { remote: 'git.example/team', handle: 'seed' }; config.display_name = 'Seed'; config.email = 'seed@example.com';
+      config.placements[join(cwd, '.claude', 'skills', 'endorsed')] = { id: '33333333-3333-4333-8333-333333333333', team: 'team', scope: { kind: 'project', project: cwd }, version: null, fingerprint: '', placed_at: '' };
+    });
+    const io = new ScriptedPrompter(['Connect alpha', 'Connect beta'], [true, true], true);
+    const result = await run({ target: remote, config: store, home, cwd, runner: mappedRunner(remote, fixture.bare, fakeGh('seed')), verbs: { offerHook: async () => 'present' } }, io);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, value: { role: 'joiner', steps: { actions: 'done', invite: 'skipped' } } });
+    expect(io.offered).toEqual([['Connect alpha', 'Connect beta', 'Skip'], ['Connect beta', 'Done']]);
+    expect(io.asked).toEqual(['Connect a local skill folder to team team?', 'Connect alpha?', 'Connect a local skill folder to team team?', 'Connect beta?']);
+    expect(Object.values((await store.read()).shared).map((entry) => entry.source)).toEqual(['alpha', 'beta'].map((name) => join(cwd, '.claude', 'skills', name)));
+  });
+
+  it('12 quiet alone still offers connect; offerConnect false skips without asking', async () => {
+    const fixture = await bareTeam(); const remote = 'https://git.example/team.git'; const home = join(fixture.root, 'home'); await skillUnder(home);
+    const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: 'git.example/team', handle: 'seed' }; });
+    const args = { target: remote, quiet: true, config: store, home, runner: mappedRunner(remote, fixture.bare, fakeGh('seed')), verbs: { offerHook: async () => 'present' as const } };
+    const offered = new ScriptedPrompter(['Skip'], [], true);
+    const result = await run(args, offered);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, value: { steps: { actions: 'skipped' } } });
+    expect(offered.offered).toEqual([['Connect starter', 'Skip']]);
+    const suppressed = new ScriptedPrompter([], [], true);
+    expect(await run({ ...args, offerConnect: false }, suppressed)).toMatchObject({ ok: true, value: { steps: { actions: 'skipped' } } });
+    expect(suppressed.asked).toEqual([]);
+  });
+
   it('hands a target-less joiner back to the owner without any calls or local writes', async () => {
     const fixture = await bareTeam(); const root = join(fixture.root, 'handoff');
     const store = createConfigStore(join(root, 'state'));
@@ -134,7 +166,7 @@ describe('setup (§6.1)', () => {
     const result = await run(args, io);
     expect.soft(io.asked).toContain('Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)');
     expect.soft(io.askedAbout('GitHub logins to invite')).toBe(false);
-    expect.soft(io.lines).toContain('This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, connects a first skill, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.');
+    expect.soft(io.lines).toContain('This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.');
     expect(result.ok).toBe(true);
   });
 
@@ -352,7 +384,7 @@ describe('setup (§6.1)', () => {
     ]);
     expect(io.lines).toEqual(expect.arrayContaining([
       'Welcome to terum-skills.', "Your team's skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have.",
-      'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, connects a first skill, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.',
+      'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.',
       'Creating a new team creates a private GitHub repository under your account.',
       'GitHub: gh is logged in.', 'Next, from any terminal:',
       '  terum-skills install alpha/<skill>   — install a shared skill (add @<version> to pin it)',
@@ -419,7 +451,7 @@ describe('setup (§6.1)', () => {
     const root = join(fixture.root, 'quiet'); const store = createConfigStore(join(root, 'state'));
     const remote = 'https://git.example/team.git'; const runner = mappedRunner(remote, fixture.bare, fakeGh('bob'));
     const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [true]);
-    const result = await run({ target: remote, quiet: true, config: store, runner, hook: hookFor(root), communityUrl: 'https://example.test/community' }, io);
+    const result = await run({ target: remote, quiet: true, offerConnect: false, config: store, runner, hook: hookFor(root), communityUrl: 'https://example.test/community' }, io);
     if (!result.ok) throw new Error(result.error);
     expect(result.value.steps).toEqual({ welcome: 'skipped', github: 'done', team: 'done', actions: 'skipped', invite: 'skipped', community: 'skipped', hook: 'done', done: 'skipped' });
     expect(io.countAsked('Install the Claude Code session-start hook')).toBe(1);
@@ -530,10 +562,10 @@ it('the creator picker omits name-mismatched folders and reports the skipped cou
     'repo create alpha-repo --private': { code: 0, stdout: '', stderr: '' },
     'repo view alpha-repo --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/alpha-repo\n', stderr: '' },
   }));
-  const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', '', 'Connect starter'], [true, false], true);
+  const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', '', 'Connect starter', 'Done'], [true, false], true);
   const result = await run({ config: store, home, runner, hook: hookFor(root), communityUrl: '' }, io);
   if (!result.ok) throw new Error(result.error);
-  expect(io.offered).toEqual([['Create a new team', 'Join an existing team'], ['Connect skip', 'Connect starter', 'Skip']]);
+  expect(io.offered).toEqual([['Create a new team', 'Join an existing team'], ['Connect skip', 'Connect starter', 'Skip'], ['Connect skip', 'Done']]);
   expect(io.lines).toContain('Skipped 1 local folders that cannot be connected. Run `npx -y terum-skills@latest ls --local` for paths and reasons.');
 });
 
@@ -568,7 +600,7 @@ describe('issue 9 setup delegation', () => {
     expect(result).toMatchObject({ ok: true, value: { steps: { actions: 'skipped', invite: 'skipped', done: 'printed' } } });
     expect(io.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', ...(hasCandidate ? ['Connect a local skill folder to team team?'] : [])]);
     expect(io.lines).toContain(hasCandidate ? 'Nothing connected.' : `No local candidates to connect under ${join(home, '.claude', 'skills')}. Skills elsewhere can be connected by passing their folder path.`);
-    expect(io.lines).toContain('  npx -y terum-skills@latest connect    — connect one of your local skills to the team; later edits sync automatically (asks which)');
+    expect(io.lines).toContain('  npx -y terum-skills@latest connect      — connect your local skills to the team (asks which)');
   });
 });
 
