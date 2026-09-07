@@ -93,7 +93,7 @@ team-skills/
 Rules the tree encodes:
 - **A skill exists once.** Endorsement and project assignment reference its ID; nothing is ever copied within the repo.
 - **Membership is derived**: you are an **active member iff `people/<handle>.json` exists AND your handle is absent from `team.json archived`**. Both halves are required — the file alone is not membership, because departures archive rather than delete (§6 `team remove`). `team create` writes the creator's people file as part of the scaffold, so the creator is a member from the first commit. No shared members array — the review's concurrency fix.
-- **Skill folder name == frontmatter `name`** (1–64 lowercase alphanumerics/hyphens, no leading/trailing/double hyphens — Claude Code dispatches by directory name), unique repo-wide, enforced at `share`. Collisions surface at share time; the old install-time prefix machinery (D16) is gone.
+- **Skill folder name == frontmatter `name`** (1–64 lowercase alphanumerics/hyphens, no leading/trailing/double hyphens — Claude Code dispatches by directory name), unique repo-wide, enforced at `connect`. Collisions surface at connect time; the old install-time prefix machinery (D16) is gone.
 - **Ownership is metadata, not geography**: only the author named in a skill's `metadata.author` may modify its folder; only you may write `people/<you>.json`; `team.json` skill lists change via publish PRs, its `archived` list only via `team remove` (append) and `team join` (removing **your own** handle on rejoin). `guard.ts` enforces all four (§6.0).
 - No CODEOWNERS: it can't map metadata ownership, and it's decorative on GitHub Free anyway (review).
 
@@ -199,7 +199,7 @@ name: single-fix                 # == directory name
 description: one-line description
 license: UNLICENSED              # from team.json policy.skill_license
 metadata:
-  id: 8f3a2c1d-4e5f-…            # UUID minted at share; stable across renames
+  id: 8f3a2c1d-4e5f-…            # UUID minted at connect; stable across renames
   author: "Ryan Liu <ryan@terum.ai>"   # SkillEvaluator's required Name <email> format
   terum-category: workflow
 ```
@@ -217,7 +217,7 @@ Let `S` = canonical digest of the source tree now, `R` = canonical digest of the
 | same | same | nothing moved | no-op |
 | **changed** | same | local edit | commit source over the repo copy via safeWrite; `baseline := S` |
 | same | **changed** | another machine (or a bypassed guard) pushed | **fast-forward the source from the repo copy**; `baseline := R` |
-| **changed** | **changed** | concurrent divergence | **refuse both ways.** Report both digests and the diff path, place nothing, commit nothing. `share --keep-source <id>` or `share --keep-repo <id>` resolves it explicitly and sets the baseline to the winner. |
+| **changed** | **changed** | concurrent divergence | **refuse both ways.** Report both digests and the diff path, place nothing, commit nothing. `connect --keep-source <id>` or `connect --keep-repo <id>` resolves it explicitly and sets the baseline to the winner. |
 
 No baseline stored (a skill shared before this field existed, or a wiped `~/.terum/`) is **not** an excuse to guess: treat it as the both-changed row and make the user choose once, then record the baseline.
 
@@ -453,7 +453,7 @@ Regeneration: the scaffolded **GitHub Action** regenerates README on pushes to m
 ## 11. Build order
 
 - **M1 — plumbing:** scaffold, config, schemas, `Prompter` (§3 — library-first from the first verb, since retrofitting it is the expensive path), auth, `safeWrite()` + guard, `team create`/`join` against a real private repo. *Exit: two laptops joined; the join prompt flow works.*
-- **M2 — the loop:** `share` (+auto-update), `install`/`uninstall`, `sync`, `search`, native Placer (vendored pieces first, glue second), version cache. *Exit: onboarding walkthrough works for two people, including a pinned install and an allowed-tools prompt.*
+- **M2 — the loop:** `share` (verb renamed to `connect`, rev 13) (+auto-update), `install`/`uninstall`, `sync`, `search`, native Placer (vendored pieces first, glue second), version cache. *Exit: onboarding walkthrough works for two people, including a pinned install and an allowed-tools prompt.*
 - **M3 — the team layer:** `invite`, `remove`, `leave`, `ls`, `publish` (both policies), README generator + Action, then `setup` (§6.1) once every verb it sequences exists. *Exit: a publish PR merges, teammate gets the y/N on next sync, README shows it all; and the eight-step onboarding runs end to end from `npx -y terum-skills@latest setup` for a creator and from the printed `setup <org>/<repo>` block for a joiner, with every interrupt-and-rerun case in §12 passing.*
 - **M4 — ship:** hook (§8), Windows pass (same Placer code path — run the suite there), LICENSE (Apache-2.0) + NOTICE, npm metadata + publish dry-run, reserve name at 0.1.0. *Exit: `npx -y terum-skills@latest install <org>/<repo>/<skill>` works on a machine that has never seen the tool — the three-part ref carries its own repository, so the run bootstraps identity, joins, and installs in one command.* Publication after 0.1.0 goes through `.github/workflows/release.yml` (dispatch-only, dry-run by default; see README "Releasing").
 
