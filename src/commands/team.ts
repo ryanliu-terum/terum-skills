@@ -22,11 +22,15 @@ export interface TeamDependencies extends AuthDependencies { config?: ConfigStor
 export interface CreateArgs extends TeamDependencies { name?: string; org?: string; remote?: string; repo?: string; offerHook?: boolean; }
 export interface JoinArgs extends TeamDependencies { target: string; as?: string; offerHook?: boolean; }
 export interface RemoveArgs extends TeamDependencies { handle: string; team?: string; archiveOnly?: boolean; }
-export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs);
+export interface WorkflowUpdateArgs { print?: boolean; }
+export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs) | ({ kind: 'workflow-update' } & WorkflowUpdateArgs);
 export type CreateResult = { team: string; remote: string };
 export type JoinResult = { team: string; handle: string; rejoined: boolean; roster: RosterEntry[] };
 export type { RosterEntry } from '../lib/skills.js';
 export interface RemoveResult { team: string; handle: string; archiveOnly: boolean; }
+export interface WorkflowUpdateResult { workflow: string; }
+export type TeamRunResult = CreateResult | JoinResult | RemoveResult | WorkflowUpdateResult;
+export type TeamCommand = (args: TeamArgs, io: Prompter) => Promise<Result<TeamRunResult>>;
 
 export class HandleCollisionError extends Error {
   constructor(readonly handle: string) { super(`Handle ${handle} is already in use by an active member.`); this.name = 'HandleCollisionError'; }
@@ -38,10 +42,26 @@ export const MAX_HANDLE_ATTEMPTS = 3;
 export const MAX_REPO_ATTEMPTS = 3;
 const REPO_TAKEN = /already exists/i;
 
-export async function run(args: TeamArgs, io: Prompter): Promise<Result<CreateResult | JoinResult | RemoveResult>> {
+export function run(args: { kind: 'create' } & CreateArgs, io: Prompter): Promise<Result<CreateResult>>;
+export function run(args: { kind: 'join' } & JoinArgs, io: Prompter): Promise<Result<JoinResult>>;
+export function run(args: { kind: 'remove' } & RemoveArgs, io: Prompter): Promise<Result<RemoveResult>>;
+export function run(args: { kind: 'workflow-update' } & WorkflowUpdateArgs, io: Prompter): Promise<Result<WorkflowUpdateResult>>;
+export function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunResult>>;
+export async function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunResult>> {
   if (args.kind === 'create') return create(args, io);
   if (args.kind === 'join') return join(args, io);
-  return remove(args, io);
+  if (args.kind === 'remove') return remove(args, io);
+  return workflowUpdate(args, io);
+}
+
+/** Existing teams migrate by an ordinary PR; this command deliberately has no write path. */
+export async function workflowUpdate(args: WorkflowUpdateArgs, io: Prompter): Promise<Result<WorkflowUpdateResult>> {
+  if (!args.print) return failure('`team workflow-update` is print-only; pass --print.');
+  // `print` appends its own newline, so remove only the template terminator to make the emitted
+  // YAML prefix byte-identical to WORKFLOW. The migration instruction is deliberately separate.
+  io.print(WORKFLOW.endsWith('\n') ? WORKFLOW.slice(0, -1) : WORKFLOW);
+  io.print('Commit this to .github/workflows/terum-skills.yml in an ordinary PR by someone with push access.');
+  return success({ workflow: WORKFLOW });
 }
 
 /** §6 `team remove`: GitHub access revocation plus the guarded, historical roster archive. */
@@ -533,6 +553,35 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened]
 jobs:
+  hygiene:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate every changed skill
+        shell: bash
+        run: |
+          set -eo pipefail
+          git diff --name-only origin/\${{ github.base_ref }}...HEAD -- skills/ |
+            awk -F/ 'NF >= 2 { print $2 }' | sort -u |
+            while IFS= read -r name; do
+              # A deleted skill folder appears in the diff but has nothing left to validate.
+              [ -z "$name" ] || [ ! -d "skills/$name" ] || npx -y terum-skills@latest validate "skills/$name" --cwd .
+            done
+  receipt-check:
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'publish/')
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: npx -y terum-skills@latest receipt-check --base origin/main
   readme:
     if: github.event_name == 'push'
     permissions:

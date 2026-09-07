@@ -7,17 +7,25 @@ import { failure, Result, success } from '../lib/result.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { readTeam } from '../lib/skills.js';
 
-export interface ValidateArgs { target: string; team?: string; config?: ConfigStore; }
+export interface ValidateArgs { target: string; team?: string; cwd?: string; config?: ConfigStore; }
 export interface ValidateResult { name: string; findings: number; }
 
 /** Run the free §9 tier on a local skill folder, or a named skill in the selected team clone. */
 export async function run(args: ValidateArgs, io: Prompter): Promise<Result<ValidateResult>> {
   try {
-    const store = args.config ?? createConfigStore();
-    const config = await store.read();
-    const [team] = selectTeam(config.teams, args.team);
-    const clone = store.teamClone(team);
-    const policy = (await readTeam(clone)).policy;
+    let clone: string;
+    let policy: Awaited<ReturnType<typeof readTeam>>['policy'];
+    if (args.cwd === undefined) {
+      const store = args.config ?? createConfigStore();
+      const config = await store.read();
+      const [team] = selectTeam(config.teams, args.team);
+      clone = store.teamClone(team);
+      policy = (await readTeam(clone)).policy;
+    } else {
+      // The Action runs in an unconfigured team checkout; do not touch ConfigStore on this path.
+      clone = resolve(args.cwd);
+      policy = (await readTeam(clone)).policy;
+    }
     const absolute = resolve(args.target);
     let directory: string;
     try {

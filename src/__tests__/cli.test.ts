@@ -151,7 +151,22 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     await program.parseAsync(['validate', 'sample', '--team', 't'], { from: 'user' });
-    expect(calls).toEqual([{ target: 'sample', team: 't' }]);
+    await program.parseAsync(['validate', 'sample', '--cwd', '/checkout'], { from: 'user' });
+    expect(calls).toEqual([{ target: 'sample', team: 't' }, { target: 'sample', cwd: '/checkout' }]);
+  });
+
+  it('wires workflow-update as print-only and keeps receipt-check hidden like readme', async () => {
+    const calls: unknown[] = [];
+    const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }),
+      team: async (args) => { calls.push(['team', args]); return success({ workflow: 'yaml' }); },
+      receiptCheck: async (args) => { calls.push(['receipt-check', args]); return success({ endorsed: [], checked: 0 }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['team', 'workflow-update', '--print'], { from: 'user' });
+    await program.parseAsync(['receipt-check', '--cwd', '/checkout', '--base', 'origin/main'], { from: 'user' });
+    expect(calls).toEqual([['team', { kind: 'workflow-update', print: true }], ['receipt-check', { cwd: '/checkout', base: 'origin/main' }]]);
+    expect(program.helpInformation()).not.toContain('receipt-check');
   });
 
   it('wires eval as an injectable verb with every local-only option', async () => {
