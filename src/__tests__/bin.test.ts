@@ -74,6 +74,7 @@ describe('the built bin (dist/index.js)', () => {
   });
 
   it('gates notices on stderr TTY, CI and both opt-outs, with a positive sibling that prints last', async () => {
+    const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
     const stateRoot = resolve(out, 'notice-home/.terum/skills'); const at = new Date().toISOString();
     await mkdir(resolve(stateRoot, 'run'), { recursive: true });
     const state = { schema: 1, package: 'terum-skills', upstream: 'https://github.com/ryanliu-terum/terum-skills.git', running: null, registry: null, advertisement: { version: '9.9.9', at, source: 'git-tags' }, attempt: null, ack: null };
@@ -84,7 +85,7 @@ describe('the built bin (dist/index.js)', () => {
       const childEnv = { ...env, HOME: resolve(out, 'notice-home'), USERPROFILE: resolve(out, 'notice-home'), ...(gate !== 'enabled' && gate !== 'piped' ? { [gate]: '1' } : {}) };
       const result = await run(process.execPath, gate === 'piped' ? [bin, 'ls'] : [bootstrap], { cwd: root, env: childEnv }).catch((error: { stdout: string; stderr: string }) => error);
       expect(result.stdout).not.toContain('Newer terum-skills');
-      if (gate === 'enabled') expect(result.stderr.trim().split('\n').at(-1)).toBe(`Newer terum-skills release advertised: 9.9.9 (running 0.1.1). This copy: ${bin}. Run the latest release with npx -y terum-skills@latest <command>.`);
+      if (gate === 'enabled') expect(result.stderr.trim().split('\n').at(-1)).toBe(`Newer terum-skills release advertised: 9.9.9 (running ${manifest.version}). This copy: ${bin}. Run the latest release with npx -y terum-skills@latest <command>.`);
       else expect(result.stderr).not.toContain('Newer terum-skills');
     }
   });
