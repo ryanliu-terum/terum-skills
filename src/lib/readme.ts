@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isSkillName, Person, parseJson, parseSkillFrontmatter, personSchema, teamSchema } from './schema.js';
 import { githubOwnerRepo } from './remote.js';
+import { receiptSchema } from './evals/receipt.js';
 import { Runner, systemRunner } from './runner.js';
 import type { MutableTree } from './teamRepo.js';
 
@@ -18,6 +19,8 @@ export interface ReadmeSkill {
   category: string;
   author: string;
   latest: string;
+  /** Latest schema-valid receipt verdict for `latest`, or absent when no receipt exists. */
+  eval?: string;
 }
 
 export interface ReadmeData {
@@ -81,7 +84,7 @@ export function generateReadme(data: ReadmeData): string {
       // already defanged a link label (every cell has, per R14); an angle bracket could still spell an
       // HTML anchor, so those become entities here. A no-op for every name the CLI accepts.
       const shownName = cell(skill.name).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      lines.push(`| ${shownName} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | — | ${command} |`);
+      lines.push(`| ${shownName} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | ${cell(skill.eval ?? '—')} | ${command} |`);
     }
   }
   if (byAuthor.size === 0) lines.push('', '### Skills', '', 'No shared skills yet.');
@@ -131,7 +134,7 @@ export async function readReadmeData(clone: string, remote: string, runner: Runn
     if (!parsed.ok) throw new Error(`Invalid skills/${name}/SKILL.md: ${parsed.error}`);
     if (parsed.data.name !== name) throw new Error(`skills/${name}/SKILL.md names ${parsed.data.name}; folder name must match`);
     const latest = await latestTree(runner, clone, name);
-    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest });
+    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest, eval: await latestReceiptVerdict(clone, parsed.data.metadata.id, latest) });
   }
   return { team: { name: team.name, remote, global: team.global, projects: team.projects, archived: team.archived }, people, skills };
 }
@@ -160,9 +163,41 @@ export async function regenerateReadmeInTree(tree: MutableTree, remote: string, 
     if (!parsed.ok) throw new Error(`Invalid skills/${name}/SKILL.md: ${parsed.error}`);
     const latest = latestBySkill === undefined ? await latestTree(runner, clone, name) : latestBySkill.get(name);
     if (latest === undefined) throw new Error(`Cannot generate README: skills/${name} is absent from the written tree.`);
-    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest });
+    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest, eval: latestReceiptVerdictInTree(tree, parsed.data.metadata.id, latest) });
   }
   tree.set('README.md', applyReadme(asText(tree.after('README.md') ?? ''), generateReadme({ team: { name: team.name, remote, global: team.global, projects: team.projects, archived: team.archived }, people, skills })));
+}
+
+/** §5.4 / §12: display only the lexicographically newest valid receipt for this exact version. */
+async function latestReceiptVerdict(clone: string, id: string, version: string): Promise<string | undefined> {
+  const directory = join(clone, 'evals', id, version);
+  let names: string[];
+  try { names = await readdir(directory); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  const newest = names.filter((name) => name.endsWith('.json')).sort().at(-1);
+  if (newest === undefined) return undefined;
+  const source = await readFile(join(directory, newest), 'utf8');
+  return receiptVerdict(source, id, version);
+}
+
+/** The safeWrite fallback must derive README exclusively from the in-memory post-image. */
+function latestReceiptVerdictInTree(tree: MutableTree, id: string, version: string): string | undefined {
+  const prefix = `evals/${id}/${version}/`;
+  const newest = tree.paths(prefix).filter((path) => path.endsWith('.json')).sort().at(-1);
+  if (newest === undefined) return undefined;
+  const source = tree.after(newest);
+  return source === undefined ? undefined : receiptVerdict(asText(source), id, version);
+}
+
+function receiptVerdict(source: string, id: string, version: string): string | undefined {
+  try {
+    const receipt = receiptSchema.safeParse(JSON.parse(source));
+    if (!receipt.success || receipt.data.skill_id.toLowerCase() !== id.toLowerCase() || receipt.data.version !== version) return undefined;
+    // §5.4: a partial receipt is never silently promoted to a full verdict.
+    return receipt.data.execution_status === 'partial'
+      ? `${receipt.data.verdict} — partial (${receipt.data.scored_rows}/${receipt.data.expected_rows} scored)`
+      : receipt.data.verdict;
+  } catch { return undefined; }
 }
 
 /**

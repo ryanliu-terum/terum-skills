@@ -6,7 +6,7 @@ import { canonicalSkillDigest } from './skills.js';
  * nothing else is writable. It runs inside the safeWrite loop against the tree the mutation
  * actually produced; teamRepo additionally proves the staged diff equals that tree's changes.
  */
-export type GuardAction = 'share' | 'sync' | 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove';
+export type GuardAction = 'share' | 'sync' | 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'eval';
 
 export interface GuardContext {
   action: GuardAction;
@@ -24,6 +24,8 @@ export interface GuardTree {
   before(path: string): string | Buffer | undefined;
   after(path: string): string | Buffer | undefined;
   readonly changedPaths: readonly string[];
+  /** Post-image paths, needed by row g to resolve a receipt UUID against a skill's metadata. */
+  paths?(prefix?: string): readonly string[];
 }
 
 export class GuardError extends Error {
@@ -32,11 +34,16 @@ export class GuardError extends Error {
 
 const PEOPLE_ACTIONS: readonly GuardAction[] = ['join', 'install', 'uninstall', 'sync'];
 const SKILL_ACTIONS: readonly GuardAction[] = ['share', 'sync'];
+// Skill uuids are case-tolerant (z.uuid() admits both; callers pass metadata.id verbatim), but the
+// version segment is the receipt schema's 40-char LOWERCASE tree hash — an uppercase-hash directory
+// is one no reader (README lookup, incumbent selection) would ever resolve, so the guard refuses it.
+const RECEIPT_PATH = /^evals\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/([0-9a-f]{40})\/(\d{8}T\d{6}Z)\.json$/;
 
 export function guard(tree: GuardTree, rawContext: GuardContext): void {
   // Handles are stored lowercase (§5.4); compare like with like so a mixed-case caller is not refused.
   const context: GuardContext = { ...rawContext, handle: normalizeHandle(rawContext.handle), targetHandle: rawContext.targetHandle === undefined ? undefined : normalizeHandle(rawContext.targetHandle) };
   for (const path of tree.changedPaths) {
+    if (context.action === 'eval' && permitsReceipt(tree, path)) continue; // row g
     if (path === 'README.md') continue; // row f: generated, regenerated not hand-edited
     if (path === `people/${context.handle}.json` && PEOPLE_ACTIONS.includes(context.action)) continue; // row b
     if (path === 'team.json') { guardTeam(tree, context); continue; } // rows c, d, e
@@ -44,6 +51,25 @@ export function guard(tree: GuardTree, rawContext: GuardContext): void {
     if (skill && SKILL_ACTIONS.includes(context.action) && ownsSkill(tree, skill[1]!, context)) continue; // row a
     throw new GuardError(`Write guard refused ${path} for ${context.action} by ${context.handle}`);
   }
+}
+
+/**
+ * Row g: testimony is append-only. An eval mutation is exactly one new receipt whose UUID still
+ * names a skill in the post-image; the tree's structural authorization deliberately does not
+ * inspect receipt JSON (the command validates it before safeWrite).
+ */
+function permitsReceipt(tree: GuardTree, path: string): boolean {
+  if (tree.changedPaths.length !== 1 || tree.before(path) !== undefined || tree.after(path) === undefined) return false;
+  const match = RECEIPT_PATH.exec(path);
+  if (!match || tree.paths === undefined) return false;
+  const id = match[1]!.toLowerCase();
+  return tree.paths('skills/')
+    .filter((candidate) => /^skills\/[^/]+\/SKILL\.md$/.test(candidate))
+    .some((candidate) => {
+      const source = tree.after(candidate);
+      const parsed = source === undefined ? undefined : parseSkillFrontmatter(asText(source));
+      return parsed?.ok === true && parsed.data.metadata.id.toLowerCase() === id;
+    });
 }
 
 /**

@@ -117,6 +117,15 @@ describe('row verdicts (§7.1, port of _decide)', () => {
     const refusing = { ...deps, agent: { ...deps.agent, askJson: () => Promise.reject(new AgentRunError('usage policy')) } };
     expect(await decide(refusing, caseOf({ judge: 'r' }), t, t, [], [])).toMatchObject({ result: 'tie', decidedBy: 'judge-refused' });
   });
+
+  it('records the first A/B ordering on judge-decided rows (§17.5)', async () => {
+    let calls = 0;
+    const judged = await decide({
+      agent: { runAgent: () => Promise.reject(new Error('unused')), askJson: () => Promise.resolve({ winner: ++calls % 2 === 1 ? 'A' : 'B', reason: 'better' }) },
+      rng: () => 0.1,
+    }, caseOf({ judge: 'cleaner wins' }), t, t, [], []);
+    expect(judged).toMatchObject({ result: 'loss', decidedBy: 'judge', swapped: true });
+  });
 });
 
 describe('the three-arm matrix (§7.1 / §7.3)', () => {

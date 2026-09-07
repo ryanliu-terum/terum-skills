@@ -167,6 +167,8 @@ export interface ComparisonRow {
   outcome: Outcome;
   decided_by: string;
   reason: string;
+  /** §7.5: first judge ordering was A/B-swapped (absent when no judge ran). */
+  swapped?: boolean;
   checks_candidate: CheckResult[];
   checks_opponent: CheckResult[];
 }
@@ -282,6 +284,7 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
         skill: options.skillName, kind: 'execution', case: evalCase.name, rep,
         comparison: `candidate-vs-${opponent}`,
         outcome: outcome.result, decided_by: outcome.decidedBy, reason: outcome.reason,
+        ...(outcome.swapped === undefined ? {} : { swapped: outcome.swapped }),
         checks_candidate: checksByArm.get('candidate') ?? [], checks_opponent: checksByArm.get(opponent) ?? [],
       });
       log(`  ${evalCase.name} rep${rep} candidate-vs-${opponent}: ${outcome.result} (${outcome.decidedBy})`);
@@ -308,7 +311,7 @@ export async function decide(
   deps: RunCaseDeps, evalCase: EvalCase,
   candidate: Transcript | null, opponent: Transcript | null,
   candidateChecks: CheckResult[], opponentChecks: CheckResult[],
-): Promise<{ result: Outcome; decidedBy: string; reason: string }> {
+): Promise<{ result: Outcome; decidedBy: string; reason: string; swapped?: boolean }> {
   if (candidate === null && opponent === null) return { result: 'tie', decidedBy: 'both-arms-failed', reason: '' };
   if (candidate === null) return { result: 'loss', decidedBy: 'candidate-run-failed', reason: '' };
   if (opponent === null) return { result: 'win', decidedBy: 'opponent-run-failed', reason: '' };
@@ -325,7 +328,7 @@ export async function decide(
     escalationModel: deps.escalationModel ?? DEFAULT_ESCALATION_MODEL,
   });
   const result: Outcome = verdict.decidedBy === 'judge' ? ({ left: 'win', right: 'loss', tie: 'tie' } as const)[verdict.winner] : 'tie';
-  return { result, decidedBy: verdict.decidedBy, reason: verdict.reason };
+  return { result, decidedBy: verdict.decidedBy, reason: verdict.reason, swapped: verdict.swapped };
 }
 
 /** Convenience for callers wiring transcripts into §4.2 run trees. */

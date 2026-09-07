@@ -42,6 +42,17 @@ describe('redaction (§8, VE4)', () => {
   it('leaves clean text alone and ignores empty secrets', () => {
     expect(redact('routes 6/6, no false fires', [''])).toBe('routes 6/6, no false fires');
   });
+
+  it('redacts a PEM and caller-held slash-bearing value before a receipt crosses the sharing boundary (VE4)', () => {
+    const secret = 'judge/reason/with/slashes';
+    const built = buildReceipt({ ...valid(), attribution: `reason ${PEM} ${secret} ghp_${'z'.repeat(36)}` }, [secret]);
+    expect(built).toMatchObject({ ok: true });
+    if (!built.ok) return;
+    const committed = JSON.stringify(built.value);
+    expect(committed).not.toContain('PRIVATE KEY');
+    expect(committed).not.toContain(secret);
+    expect(committed).not.toContain('ghp_');
+  });
 });
 
 describe('receipt schema and build (§5.3)', () => {
