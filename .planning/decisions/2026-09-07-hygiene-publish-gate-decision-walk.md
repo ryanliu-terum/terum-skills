@@ -25,6 +25,8 @@ The nine clear findings were not walked — they carry drafted, judgment-free fi
 | 2 | Publish receipt-gate predicate | LOCK | Receipt always required at exact version; incumbent comparison present → must be not-FAIL; absent → CI verifies no prior version exists and allows the first publish. Contested 7 = duplicate of confirmed 25 | — |
 | 3 | Stale publish tests in phase-1 spec | LOCK | The sibling's test/acceptance rows still demand branch reuse + `-2` fallback the R2 ruling and landed code replaced; rewrite them to the create-only `publish/<name>-<handle>-<id8>` contract | — |
 | 4 | Publish inspection race | LOCK | Hygiene moves inside the replayed publish mutation, running against each attempt's fresh tree, with a race regression test — a same-skill edit landing mid-publish can no longer be endorsed uninspected | — |
+| 5 | HYG4 vs --allow-privileged consent | LOCK | Consent wins — an informed human's review waives the exec/shebang findings; everything else still applies | — |
+| 6 | validate scope | LOCK | Team-required — the license check needs the team policy; no silent skips | — |
 
 ---
 
@@ -110,3 +112,24 @@ The nine clear findings were not walked — they carry drafted, judgment-free fi
   fresh clone tree per attempt; exit criteria gain a race test (skill gains a secret
   between preflight and `safeWrite` → publish refuses). CI's hygiene job cannot
   cover this — publish PRs touch only `team.json`.
+
+---
+
+## Decision 5 — HYG4 vs `--allow-privileged` consent (post-implementation)
+
+**Verdict: LOCK — consent wins.** Surfaced by the IE1 implementation: Codex read
+rev-12/13's HYG4 literally, so `--allow-privileged` consent no longer admitted a
+hooks-bearing skill — silently closing phase-1's documented consent flow. Ryan
+("allow hooks", 2026-09-07): explicit consent waives HYG4's exec-bit/shebang
+findings; the extension allowlist and every other check still apply. Consent
+carries: `share`/`--keep-source` with the flag, reconcile when the repo copy
+already holds the consented form, and `publish` (content entered through share's
+gate); `validate` stays strict. Applied as engine spec rev 14 + the
+`allowExecutable` input flag.
+
+## Decision 6 — `validate` scope
+
+**Verdict: LOCK.** `validate` works only inside a configured team (Ryan,
+2026-09-07: "validate should only work when you're in a team") — the license
+check needs the team's policy, and a no-team validate would silently skip it.
+Confirms the implementation's conservative reading; no code change.
