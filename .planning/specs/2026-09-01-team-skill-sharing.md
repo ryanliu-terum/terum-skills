@@ -90,7 +90,8 @@ terum-skills ls                             roster, skills with author/category/
 terum-skills status [--team <name>]          installed version and offline local team summary; exit 0 is a successful query, not a readiness test
 terum-skills search <term> [--category <c>] [--author <h>] [--project <p>]   read-only substring search over the clone
 terum-skills install <ref>[@<version>] | member <handle> | project <name>
-terum-skills uninstall <ref> | member <handle> | project <name>
+terum-skills uninstall-skill <ref> | member <handle> | project <name>
+terum-skills uninstall                      confirmed machine cleanup (build spec §6, rev 10); package-manager removal remains a separate step
 terum-skills sync                           pull, auto-update shared skills, re-place installs, prompt on new team skills
 terum-skills eval <name> [--share]
 terum-skills eval show <name>@<version>

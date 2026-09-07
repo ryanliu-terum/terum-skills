@@ -25,7 +25,7 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
     const team = parsedRef ? await teamForReference(config, parsedRef.team ?? args.team, parsedRef.remote, parsedRef.name) : selectTeam(config.teams, args.team)[0];
     if (args.kind === 'member' || args.member) {
       const handle = args.member ?? args.ref;
-      if (!handle) throw new Error('Provide a member handle: `uninstall member <handle>`.');
+      if (!handle) throw new Error('Provide a member handle: `uninstall-skill member <handle>`.');
       const member = await readPerson(store.teamClone(team), parseOrExplain(handleSchema, handle, 'member handle'));
       const targets: UninstallTarget[] = [];
       for (const item of member.installed) for (const scope of await ledgerScopes(store, team, item.id, [item.scope])) targets.push({ id: item.id, scope });
@@ -33,7 +33,7 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
     }
     if (args.kind === 'project' || args.project) {
       const project = args.project ?? args.ref;
-      if (!project) throw new Error('Provide a project name: `uninstall project <name>`.');
+      if (!project) throw new Error('Provide a project name: `uninstall-skill project <name>`.');
       const teamJson = await readTeam(store.teamClone(team));
       const listed = Object.hasOwn(teamJson.projects, project) ? teamJson.projects[project] : undefined;
       if (!listed) throw new Error(`Unknown project ${project}.`);

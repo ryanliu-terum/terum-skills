@@ -73,6 +73,8 @@ describe('the built bin (dist/index.js)', () => {
     expect(help.stdout).toContain('npx -y terum-skills@latest setup');
     expect(help.stdout).toContain('npx -y terum-skills@latest setup <org>/<repo>');
     expect(help.stderr).toBe('');
+    expect(help.stdout).toContain('uninstall-skill');
+    expect(help.stdout).toMatch(/^\s*uninstall\s/m);
     const failed = await run(process.execPath, [bin, 'team', 'join', 'not a remote'], { cwd: root, env }).then(() => { throw new Error('expected a non-zero exit'); }, (error: { code?: number; stdout: string; stderr: string }) => error);
     expect(failed.code).toBe(1);
     expect(failed.stderr.trim().split('\n').at(-1)).toBe('Unsupported remote: not a remote');

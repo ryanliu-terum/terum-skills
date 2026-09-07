@@ -17,7 +17,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       ls: async (args) => { calls.push({ verb: 'ls', ...args }); return success({ roster: [], skills: [] }); },
       readme: async (args) => { calls.push({ verb: 'readme', ...args }); return success({ changed: false }); },
       publish: async (args) => { calls.push({ verb: 'publish', ...args }); return args.ref === 'fail' ? failure('nope') : success({ team: 't', id: 'id', name: args.ref, scope: { kind: 'global' as const }, policy: 'pr' as const, changed: false, branch: null, prUrl: null, compareUrl: null }); },
-      leave: async (args) => { calls.push({ verb: 'leave', ...args }); return args.name === 'fail' ? failure('nope') : success({ team: args.name, remote: 'r', handle: null, removed: 0, cloneRemoved: false }); },
+      leave: async (args) => { calls.push({ verb: 'leave', ...args }); return args.name === 'fail' ? failure('nope') : success({ team: args.name, remote: 'r', handle: null, removed: 0, cloneRemoved: false, kept: [] }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     return { program, calls, outcomes };
@@ -77,7 +77,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     await program.parseAsync(['share', 'folder', '--team', 'team'], { from: 'user' });
     await program.parseAsync(['install', 'sample', '--team', 'team'], { from: 'user' });
     await program.parseAsync(['install', 'member'], { from: 'user' });
-    await program.parseAsync(['uninstall', 'sample', '--team', 'team'], { from: 'user' });
+    await program.parseAsync(['uninstall-skill', 'sample', '--team', 'team'], { from: 'user' });
     await program.parseAsync(['sync', '--hook'], { from: 'user' });
     await program.parseAsync(['search', 'term', '--category', 'testing'], { from: 'user' });
     expect(calls).toEqual(expect.arrayContaining([
@@ -146,5 +146,44 @@ describe('the pre-push hook\'s verb (D12)', () => {
     expect(calls).toEqual([{ remote: 'origin', url: 'https://x/y.git', refs: ['refs/heads/main', 'a', 'refs/heads/main', 'b'] }]);
     // Hidden: an internal hook verb has no place in `terum-skills --help` (the same rule `readme` follows above).
     expect(program.helpInformation()).not.toContain('guard-push');
+  });
+});
+
+
+describe('machine uninstall wiring', () => {
+  function machineHarness(launch?: import('../lib/launch.js').Launch) {
+    const calls: unknown[] = []; const outcomes: boolean[] = []; const errors: string[] = [];
+    const execute: Execute = async (invoke) => { const result = await invoke(new ScriptedPrompter()); outcomes.push(result.ok); if (!result.ok) errors.push(result.error); };
+    const program = buildProgram(execute, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }),
+      team: async () => success({ team: 't', remote: 'r' }),
+      uninstall: async (args) => { calls.push(args); return success([]); },
+      uninstallMachine: async (args) => { calls.push(args); return success({ teams: [], removedPlacements: 0, hookRemoved: false, configRemoved: false, kept: [], record: '', launch: args.launch ?? null }); },
+    }, launch ? { launch } : {});
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    return { program, calls, outcomes, errors };
+  }
+  it('dispatches bare uninstall with no arguments and advertises both verbs', async () => {
+    const { program, calls, outcomes } = machineHarness();
+    await program.parseAsync(['uninstall'], { from: 'user' });
+    expect(calls).toEqual([{}]); expect(outcomes).toEqual([true]);
+    expect(program.helpInformation()).toContain('uninstall-skill');
+    expect(program.helpInformation()).toMatch(/^\s*uninstall\s/m);
+  });
+  it('refuses an operand without calling either verb', async () => {
+    const { program, calls, outcomes, errors } = machineHarness();
+    await program.parseAsync(['uninstall', 'sample'], { from: 'user' });
+    expect(calls).toEqual([]); expect(outcomes).toEqual([false]);
+    expect(errors).toEqual(['To remove a skill, use `terum-skills uninstall-skill <ref>`.']);
+  });
+  it('rejects --team as an unknown option', async () => {
+    const { program, calls } = machineHarness();
+    await expect(program.parseAsync(['uninstall', '--team', 't'], { from: 'user' })).rejects.toMatchObject({ code: 'commander.unknownOption' });
+    expect(calls).toEqual([]);
+  });
+  it('passes launch context as data', async () => {
+    const launch = { kind: 'unknown' as const, path: '/repo/src/index.ts' };
+    const { program, calls } = machineHarness(launch);
+    await program.parseAsync(['uninstall'], { from: 'user' }); expect(calls).toEqual([{ launch }]);
   });
 });

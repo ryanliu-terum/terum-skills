@@ -1,4 +1,4 @@
-import { open, readFile, rename, rm } from 'node:fs/promises';
+import { access, open, readFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -6,12 +6,13 @@ import lockfile from 'proper-lockfile';
 import { mkdirPrivate } from './fs.js';
 import { Config, configSchema, emptyConfig, parseJson, parseOrExplain, teamNameSchema } from './schema.js';
 
-/** §5.4 `~/.terum/skills/config.json` — never committed, safe to delete, mode 0600 (it names your teams, identity, and every placed path). */
+/** §5.4 `~/.terum/skills/config.json` — never committed, mode 0600 (it names your teams, identity, and every placed path); deleted only through `remove`, by `uninstall`. */
 export interface ConfigStore {
   readonly root: string;
   read(): Promise<Config>;
-  /** Read-modify-write under a lock, written atomically. The only way to change the file. */
+  /** Read-modify-write under a lock, written atomically. The only way to change the file; `remove` is the only way to delete it. */
   update(mutate: (config: Config) => void | Promise<void>): Promise<Config>;
+  remove(guard: (config: Config) => boolean): Promise<'removed' | 'kept' | 'absent'>;
   /** Create the private root (0700) before anything else writes under it. */
   ensureRoot(): Promise<void>;
   teamClone(team: string): string;
@@ -45,33 +46,46 @@ export function createConfigStore(root = join(homedir(), '.terum', 'skills'), op
     await mkdirPrivate(root);
     await mkdirPrivate(join(root, 'teams'));
   };
+  // Both mutation and deletion use one lock policy and abort before touching the file if compromised.
+  async function underLock<T>(action: (assertHeld: () => void) => Promise<T>): Promise<T> {
+    let compromised = false;
+    const release = await lockfile.lock(path, {
+      lockfilePath: `${path}.lock`,
+      realpath: false,
+      stale: options.lockStale ?? 30_000,
+      retries: { retries: 20, minTimeout: 25, maxTimeout: 250 },
+      onCompromised: () => { compromised = true; },
+    });
+    const assertHeld = (): void => {
+      if (compromised) throw new Error(`Lost the lock on ${path} to another process; nothing was written — retry the command.`);
+    };
+    try { return await action(assertHeld); }
+    finally { await release().catch(() => undefined); } // Never replace the outcome with a compromised-release error.
+  }
   return {
     root,
     read,
     ensureRoot,
     async update(mutate) {
       await ensureRoot();
-      // The default handler throws from a timer and crashes the CLI. Instead the compromise is
-      // recorded, and the write below is skipped: a snapshot read before another process took the
-      // lock must not be renamed over that process's write.
-      let compromised = false;
-      const release = await lockfile.lock(path, {
-        lockfilePath: `${path}.lock`,
-        realpath: false,
-        stale: options.lockStale ?? 30_000,
-        retries: { retries: 20, minTimeout: 25, maxTimeout: 250 },
-        onCompromised: () => { compromised = true; },
-      });
-      try {
+      return underLock(async (assertHeld) => {
         const config = await read();
         await mutate(config);
-        if (compromised) throw new Error(`Lost the lock on ${path} to another process; nothing was written — retry the command.`);
+        assertHeld();
         await writeAtomically(path, `${JSON.stringify(config, null, 2)}\n`);
         return config;
-      } finally {
-        // A compromised lock rejects on release ('Lock is already released'); that must never replace the real outcome.
-        await release().catch(() => undefined);
-      }
+      });
+    },
+    async remove(guard) {
+      try { await access(path); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'absent'; throw error; }
+      return underLock(async (assertHeld) => {
+        const config = await read();
+        if (!guard(config)) return 'kept';
+        assertHeld();
+        await rm(path, { force: true });
+        return 'removed';
+      });
     },
     teamClone(team) {
       return join(root, 'teams', parseOrExplain(teamNameSchema, team, 'team name'));
