@@ -26,7 +26,7 @@ export interface MutableTree extends GuardTree {
   /** Executable Git entries in the freshly reset pre-image; mutations remain pure. */
   executablePaths(prefix?: string): ReadonlySet<string>;
 }
-export type Mutate = (tree: MutableTree) => void;
+export type Mutate<R = void> = (tree: MutableTree) => R;
 
 export interface SafeWriteOptions extends GuardContext {
   /** Destination ref. Defaults to `main`; PR-policy `publish` passes a fresh `publish/<name>-<handle>-<id8>` (§6.0 step 4). A non-main branch is created, never replaced. */
@@ -41,12 +41,12 @@ export interface SafeWriteOptions extends GuardContext {
   lockStale?: number;
 }
 
-export interface SafeWriteResult { changed: boolean; pushedTo: string; }
+export interface SafeWriteResult<R = void> { changed: boolean; pushedTo: string; returned: R; }
 
 export interface TeamRepo {
   readonly root: string;
   readonly remote: string;
-  safeWrite(mutate: Mutate, options: SafeWriteOptions): Promise<SafeWriteResult>;
+  safeWrite<R = void>(mutate: Mutate<R>, options: SafeWriteOptions): Promise<SafeWriteResult<R>>;
 }
 
 /** The deadline passed while the remote kept moving ahead (§6.0 step 5). */
@@ -84,10 +84,10 @@ const lostLock = (root: string): string => `Lost the safeWrite lock on ${root} t
 type Git = (args: readonly string[]) => Promise<CommandResult>;
 
 export function openTeamRepo(root: string, remote: string, runner: Runner = systemRunner): TeamRepo {
-  return { root, remote, safeWrite: (mutate, options) => safeWrite(root, remote, runner, mutate, options) };
+  return { root, remote, safeWrite: <R = void>(mutate: Mutate<R>, options: SafeWriteOptions) => safeWrite(root, remote, runner, mutate, options) };
 }
 
-async function safeWrite(root: string, remote: string, runner: Runner, mutate: Mutate, options: SafeWriteOptions): Promise<SafeWriteResult> {
+async function safeWrite<R = void>(root: string, remote: string, runner: Runner, mutate: Mutate<R>, options: SafeWriteOptions): Promise<SafeWriteResult<R>> {
   const git: Git = (args) => runner.run('git', args, { cwd: root });
   const origin = await assertOrigin(root, remote, git);
   const requireGit = async (args: readonly string[]) => {
@@ -133,10 +133,10 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
         if (entry.startsWith('100755 ')) executable.add(path);
       }
       const tree = makeTree(root, tracked, executable);
-      mutate(tree);
+      const returned = mutate(tree);
       // Authorize the caller's own pure mutation before deriving any files from it. This keeps a
       // forbidden skill write from being reported as a frontmatter/README generation error.
-      if (tree.changedPaths.length === 0) return { changed: false, pushedTo: branch };
+      if (tree.changedPaths.length === 0) return { changed: false, pushedTo: branch, returned };
       guard(tree, options);
       // §9: Actions own GitHub README commits; generic remotes regenerate as a derived safeWrite path.
       // §6.0's eval exception is narrower: its receipt is immutable testimony and its commit must
@@ -166,7 +166,7 @@ async function safeWrite(root: string, remote: string, runner: Runner, mutate: M
       await requireGit(['commit', '-q', '-m', options.message ?? `${options.handle}: ${options.action}`]);
       if (compromised) throw new Error(lostLock(root));
       const outcome = await push(git, branch);
-      if (outcome.ok) return { changed: true, pushedTo: outcome.pushedTo };
+      if (outcome.ok) return { changed: true, pushedTo: outcome.pushedTo, returned };
       if (!outcome.retryable) {
         const copy = explainGitAccessFailure(origin, outcome.error);
         throw new PushRefused(`The remote refused the push: ${outcome.error.trim()}${copy ? `\n${copy}` : ''}`);

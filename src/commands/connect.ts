@@ -15,7 +15,7 @@ import { isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../li
 import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
 import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedFields, skillRecords } from '../lib/skills.js';
 import { MutableTree, openTeamRepo, shellQuote, treeText } from '../lib/teamRepo.js';
-import { formatHygieneFindings, hygieneFrontmatter, inspectHygiene } from '../lib/evals/hygiene.js';
+import { assessHygiene, type HygieneAssessment, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 
 export interface ConnectArgs extends WithForm {
   path?: string;
@@ -129,7 +129,7 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
           if (!(error instanceof ConnectStepError) || !error.recoverable) throw error;
           io.print(error.message);
           attempted.set(selectedPath, error.phase === 'consent' ? 'declined' : 'refused');
-          reasons.set(selectedPath, error.cause instanceof ConnectHygieneRefused ? error.cause.reason : error.message);
+          reasons.set(selectedPath, error.cause instanceof HygieneRefused ? hygieneReason(error.cause) : error.message);
         }
       }
     } catch (error) {
@@ -149,7 +149,11 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
     }
     summarize();
     return success(batch.shared.length ? batch : undefined);
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) {
+    // `--keep-source` refusals surface here directly; connectOne reports its own before wrapping.
+    if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment);
+    return failure(error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectResult> {
@@ -187,7 +191,7 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
     const updated = injectManagedFields(raw, { license: teamDoc.policy.skill_license, id, author });
     const candidate = await sourceFiles(source);
     candidate.files.set('SKILL.md', Buffer.from(updated));
-    assertHygiene(name, candidate, teamDoc.policy.skill_license, Boolean(args.allowPrivileged));
+    reportHygieneWarnings((line) => io.print(line), assessHygiene(name, candidate, teamDoc.policy.skill_license, Boolean(args.allowPrivileged)));
     // Every field connect writes is shown before the y/N — the category too, on the one kind of file
     // that has none (every off-the-shelf skill): it is generated, not asked for, and edited any time.
     const categoryLine = declaredCategory(raw) === undefined ? `\nmetadata.terum-category: ${DEFAULT_CATEGORY} (no category was set; edit SKILL.md any time)` : '';
@@ -211,7 +215,10 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
     const baseline = await canonicalDigest(source);
     await store.update((fresh) => { fresh.shared[id!] = { source, team, baseline }; });
     return { id, name, reconciled: description.length > 0 };
-  } catch (cause) { throw new ConnectStepError(phase, cause, recoverable, id); }
+  } catch (cause) {
+    if (cause instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), cause.assessment);
+    throw new ConnectStepError(phase, cause, recoverable, id);
+  }
 }
 
 /**
@@ -255,8 +262,9 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     candidate.files.set('SKILL.md', Buffer.from(repaired));
     // A repo copy already carrying hooks means consent was given at connect time; new privileged
     // additions were already deferred to `connect --keep-source --allow-privileged` above (walk D5).
-    try { assertHygiene(targetName, candidate, team.license, (await scanSkillFolder(record.directory)).privileged); }
-    catch (error) { io.print(`Connected skill ${record.name} failed hygiene:\n${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, record.name); continue; }
+    let assessment: HygieneAssessment;
+    try { assessment = assessHygiene(targetName, candidate, team.license, (await scanSkillFolder(record.directory)).privileged); }
+    catch (error) { if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment); io.print(`Connected skill ${record.name} failed hygiene:\n${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, record.name); continue; }
     if (repaired !== sourceContents) await writeFile(sourceSkill, repaired, 'utf8');
     if (targetName !== record.name) {
       if (!isSkillName(targetName)) { io.print(`Connected skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); defer(tracked.team, record.name); continue; }
@@ -289,15 +297,15 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
       // A pre-image with the prior author can only receive a managed-field refresh. Land that
       // narrow write first, then the normal author-owned content mirror on the replayed tree.
       await refreshRepo();
-      const files = await sourceFiles(tracked.source);
       await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => {
         if (targetName !== record!.name) {
           // The preflight list can be stale; only the freshly reset tree is authoritative for the name invariant.
           if (tree.paths(`skills/${targetName}/`).length) throw new Error(`Skill name ${targetName} already exists in team ${tracked.team}; choose a unique name.`);
           for (const path of tree.paths(`skills/${record!.name}/`)) tree.remove(path);
         }
-        mirrorToTree(tree, `skills/${targetName}`, files.files);
+        mirrorToTree(tree, `skills/${targetName}`, candidate.files);
       }, { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: targetName === record!.name ? `${binding.handle}: update ${record.name}` : `${binding.handle}: rename ${record.name} to ${targetName}` });
+      reportHygieneWarnings((line) => io.print(line), assessment);
       if (targetName !== record.name) io.print(`Renamed connected skill ${record.name} to ${targetName}.`);
       await store.update((next) => { if (next.shared[id]) next.shared[id].baseline = sourceDigest; });
       } else {
@@ -343,13 +351,12 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
     candidate.files.set('SKILL.md', Buffer.from(repairedSource));
     // Consent carries: --allow-privileged now, or a repository copy that already holds the
     // consented privileged form from an earlier connect (walk D5).
-    assertHygiene(record.name, candidate, team.license, allowPrivileged || (await scanSkillFolder(record.directory)).privileged);
+    reportHygieneWarnings((line) => io.print(line), assessHygiene(record.name, candidate, team.license, allowPrivileged || (await scanSkillFolder(record.directory)).privileged));
     if (repairedSource !== sourceContents) await writeFile(sourceSkill, repairedSource, 'utf8');
     if (repairedRepo !== repoContents) {
       await repo.safeWrite((tree) => refreshManagedFieldsInTree(tree, `skills/${record.name}/SKILL.md`, { license: team.license, id, author }), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
     }
-    const files = await sourceFiles(tracked.source);
-    await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, files.files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
+    await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, candidate.files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
     const digest = await canonicalDigest(tracked.source);
     await store.update((fresh) => { fresh.shared[id]!.baseline = digest; });
   } else {
@@ -374,19 +381,11 @@ async function relocate(store: ConfigStore, value: { id: string; path: string } 
 }
 function splitRelocate(value: string): { id: string; path: string } { const index = value.indexOf(':'); if (index < 1) throw new Error('Use --relocate <id>:<path>.'); return { id: value.slice(0, index), path: value.slice(index + 1) }; }
 function mirrorToTree(tree: MutableTree, destination: string, files: Map<string, Buffer>): void { for (const path of tree.paths(`${destination}/`)) if (!files.has(path.slice(destination.length + 1))) tree.remove(path); for (const [path, content] of files) tree.set(`${destination}/${path}`, content); }
-class ConnectHygieneRefused extends Error {
-  readonly reason: string;
-  constructor(findings: ReturnType<typeof inspectHygiene>) {
-    super(formatHygieneFindings(findings));
-    this.reason = `hygiene: ${findings.map((finding) => finding.message.replace(/\.$/, '')).join('; ')}`;
-  }
+/** The batch summary's one-line reason for a hygiene refusal: `Not connected: <name> (hygiene: …)`. */
+function hygieneReason(refused: HygieneRefused): string {
+  return `hygiene: ${refused.assessment.errors.map((finding) => finding.message.replace(/\.$/, '')).join('; ')}`;
 }
 
-function assertHygiene(name: string, input: Awaited<ReturnType<typeof sourceFiles>>, license: string, allowExecutable = false): void {
-  const skill = input.files.get('SKILL.md');
-  const findings = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable });
-  if (findings.length) throw new ConnectHygieneRefused(findings);
-}
 /** The managed-field refresh as a mutation: re-derived from the fresh pre-image safeWrite hands it, so it can only ever change the managed lines of whatever is actually upstream (and restore a missing category, as injectManagedFields does everywhere). */
 function refreshManagedFieldsInTree(tree: MutableTree, path: string, values: { license: string; id: string; author: string }): void {
   const current = tree.before(path);

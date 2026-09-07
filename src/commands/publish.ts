@@ -15,7 +15,7 @@ import { findSkill, readTeam } from '../lib/skills.js';
 import { openTeamRepo, refreshClone, SafeWriteOptions, shellQuote, treeText } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
 import { sourceFiles } from '../lib/skill-source.js';
-import { formatHygieneFindings, hygieneFrontmatter, inspectHygiene } from '../lib/evals/hygiene.js';
+import { assessHygiene, formatHygieneWarnings, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 
 export interface PublishArgs extends WithForm {
   ref: string;
@@ -60,7 +60,9 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     if (list.includes(record.id)) return alreadyEndorsed(base, scopeLabel, io);
     // Avoid displaying the direct-push endorsement card for content hygiene refuses. The same
     // inspector is replayed below against safeWrite's freshly reset tree to close the race.
-    assertHygiene(record.name, await sourceFiles(record.directory), teamJson.policy.skill_license);
+    const preflight = assessHygiene(record.name, await sourceFiles(record.directory), teamJson.policy.skill_license, true);
+    reportHygieneWarnings((line) => io.print(line), preflight);
+    const preflightWarnings = new Set(preflight.warnings.map((warning) => formatHygieneWarnings([warning])));
     // One fresh branch and one fresh PR per publish (rulings walk R2, 2026-09-06): the name is unique,
     // the push is create-only (teamRepo.ts push()), and an endorsement already open for this skill is a
     // note and a y/N — never a refusal, never a force-push. Two competing PRs are two PRs; GitHub flags
@@ -97,13 +99,14 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
         if (contents !== undefined) files.set(path.slice(prefix.length), Buffer.isBuffer(contents) ? contents : Buffer.from(contents));
       }
       const executable = new Set([...tree.executablePaths(prefix)].map((path) => path.slice(prefix.length)));
-      assertHygiene(record.name, { files, executable }, fresh.policy.skill_license);
+      const assessment = assessHygiene(record.name, { files, executable }, fresh.policy.skill_license, true);
       // The branch (or the direct push to main) was chosen from the policy read before the loop; the
       // tree being written may be newer, and a policy the team changed meanwhile must win.
       if (fresh.policy.publish !== teamJson.policy.publish) throw new Error(`The team publish policy changed to "${fresh.policy.publish}" while this publish ran; rerun publish.`);
       const next = endorse(fresh, record.id, scope);
-      if (next === undefined) return;
+      if (next === undefined) return assessment;
       tree.set('team.json', next);
+      return assessment;
     }, {
       action: 'publish',
       handle: binding.handle,
@@ -112,6 +115,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       ...args.safeWrite,
     });
     if (!written.changed) return alreadyEndorsed(base, scopeLabel, io);
+    reportHygieneWarnings((line) => { if (!preflightWarnings.has(line)) io.print(line); }, written.returned);
     if (teamJson.policy.publish === 'push') {
       io.print(`Published ${record.name} to ${team} (${scopeLabel}).`);
       return success({ ...base, changed: true, branch: null, prUrl: null, compareUrl: null });
@@ -137,7 +141,10 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     io.print(`Pushed ${branch}. Open a pull request from ${branch} into main to complete the endorsement:`);
     io.print(compareUrl ?? `${stripRemoteCredentials(binding.remote)} — branch ${branch}`);
     return success({ ...base, changed: true, branch, prUrl: null, compareUrl });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) {
+    if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment);
+    return failure(error instanceof Error ? error.message : String(error));
+  }
 }
 
 function alreadyEndorsed(base: Omit<PublishResult, 'changed' | 'branch' | 'prUrl' | 'compareUrl'>, scopeLabel: string, io: Prompter): Result<PublishResult> {
@@ -151,14 +158,6 @@ function compare(remote: string, branch: string): string | null {
   return ownerRepo ? `https://github.com/${ownerRepo}/compare/main...${branch}?expand=1` : null;
 }
 function commandMessage(stderr: string, stdout: string): string { return (stderr || stdout).trim(); }
-function assertHygiene(name: string, input: Awaited<ReturnType<typeof sourceFiles>>, license: string): void {
-  const skill = input.files.get('SKILL.md');
-  // allowExecutable: publish endorses content that entered the repo through connect's consent gate,
-  // so exec/shebang form was already reviewed there (walk D5); every other check still applies.
-  const findings = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable: true });
-  if (findings.length) throw new Error(formatHygieneFindings(findings));
-}
-
 /**
  * The exact team.json this publish writes over `fresh` — the one serialization both the safeWrite
  * mutation and the branch-reuse vet use, so "already carries exactly this endorsement" is a byte

@@ -1007,3 +1007,151 @@ it('issue 5 reports an unreadable repository inventory using connected wording',
   const io = new ScriptedPrompter(); await reconcileShared(store, systemRunner, io);
   expect(io.lines).toEqual([`Could not read connected ${id!.slice(0, 8)}: ${detail}`]);
 });
+describe('HYG6 size warnings', () => {
+  it('reconcile mirrors inspected bytes when the source changes during the managed-field refresh', async () => {
+    const { fixture, store } = await sharedFixture();
+    const [, tracked] = Object.entries((await store.read()).shared)[0]!;
+    await store.update((config) => { config.email = 'changed@example.com'; });
+    const sourceSkill = join(tracked.source, 'SKILL.md');
+    const edited = (await readFile(sourceSkill, 'utf8')).replace('description: x', 'description: inspected edit').padEnd(20_001, 'x');
+    const inspected = edited.replace('me@example.com', 'changed@example.com');
+    const second = inspected.replace('description: inspected edit', 'description: second edit');
+    await writeFile(sourceSkill, edited);
+    let fetches = 0;
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      // Direct reconcile has no preflight fetch. The changed email forces a managed-field
+      // safeWrite first: fetch 1 follows inspection and precedes the old source re-read.
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 1) {
+        expect(await readFile(sourceSkill, 'utf8')).toBe(inspected);
+        await writeFile(sourceSkill, second);
+      }
+      return next();
+    });
+    const io = new ScriptedPrompter(); const deferred: string[] = [];
+    await reconcileShared(store, runner, io, new Set(), (team, label) => { deferred.push(`${team}/${label}`); });
+    expect(deferred).toEqual([]);
+    expect(fetches).toBe(4); // Each of the two safeWrites fetches on entry and in finally.
+    expect(await readFile(sourceSkill, 'utf8')).toBe(second);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(inspected);
+    expect(io.lines.filter((line) => line.startsWith('warning HYG6'))).toHaveLength(1);
+  });
+
+  it('--keep-source mirrors inspected bytes when the source changes during the managed-field refresh', async () => {
+    const { fixture, store } = await sharedFixture();
+    const [id, tracked] = Object.entries((await store.read()).shared)[0]!;
+    await store.update((config) => { config.email = 'changed@example.com'; });
+    const sourceSkill = join(tracked.source, 'SKILL.md');
+    const edited = (await readFile(sourceSkill, 'utf8')).replace('description: x', 'description: inspected edit').padEnd(20_001, 'x');
+    const inspected = edited.replace('me@example.com', 'changed@example.com');
+    const second = inspected.replace('description: inspected edit', 'description: second edit');
+    await writeFile(sourceSkill, edited);
+    let fetches = 0;
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      // --keep-source has no preflight fetch either. Its managed-field safeWrite runs
+      // after inspection and before the old source re-read used by the mirror.
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 1) {
+        expect(await readFile(sourceSkill, 'utf8')).toBe(inspected);
+        await writeFile(sourceSkill, second);
+      }
+      return next();
+    });
+    const io = new ScriptedPrompter();
+    expect(await run({ keepSource: id, config: store, runner }, io)).toMatchObject({ ok: true });
+    expect(fetches).toBe(4);
+    expect(await readFile(sourceSkill, 'utf8')).toBe(second);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(inspected);
+    expect(io.lines.filter((line) => line.startsWith('warning HYG6'))).toHaveLength(1);
+  });
+
+  it.each([false, true])('first connect reports warnings before consent and refuses only errors (mixed: %s)', async (mixed) => {
+    const { fixture, store, source, original } = await pickerFixture();
+    const bytes = original + 'x'.repeat(20_001) + (mixed ? '\u202E' : '');
+    await writeFile(join(source, 'SKILL.md'), bytes);
+    const before = await originSha(fixture.bare); const io = new ScriptedPrompter([], [true]);
+    const result = await run({ path: source, config: store }, io);
+    expect(result.ok).toBe(!mixed);
+    expect(io.lines[0]).toMatch(/^warning HYG6/);
+    if (mixed) {
+      expect(result).toMatchObject({ error: expect.stringContaining('HYG2') });
+      expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(bytes);
+      expect(await originSha(fixture.bare)).toBe(before);
+      expect(io.lines.some((line) => line.startsWith('Will add:'))).toBe(false);
+    } else {
+      expect(io.lines.findIndex((line) => line.startsWith('warning HYG6'))).toBeLessThan(io.lines.findIndex((line) => line.startsWith('Will add:')));
+      expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(await readFile(join(source, 'SKILL.md'), 'utf8'));
+      expect(Object.values((await store.read()).shared)[0]!.baseline).toBe(await canonicalDigest(source));
+    }
+  });
+
+  it.each([false, true])('reconcile mirrors warnings but defers errors (mixed: %s)', async (mixed) => {
+    const { fixture, store } = await sharedFixture();
+    const [id, tracked] = Object.entries((await store.read()).shared)[0]!;
+    const before = await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare);
+    const bytes = before + 'x'.repeat(20_001) + (mixed ? '\nghp_abcdefghijklmnopqrstuvwxyz\n' : '');
+    await writeFile(join(tracked.source, 'SKILL.md'), bytes);
+    const io = new ScriptedPrompter(); const deferred: string[] = [];
+    await reconcileShared(store, systemRunner, io, new Set(), (team, label) => { deferred.push(`${team}/${label}`); });
+    expect(io.lines[0]).toMatch(/^warning HYG6/);
+    if (mixed) {
+      expect(io.lines[1]).toContain('HYG3'); expect(deferred).toEqual(['team/sample']);
+      expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(before);
+      expect((await store.read()).shared[id]!.baseline).toBe(tracked.baseline);
+      expect(await readFile(join(tracked.source, 'SKILL.md'), 'utf8')).toBe(bytes);
+    } else {
+      expect(deferred).toEqual([]);
+      expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(bytes);
+      expect((await store.read()).shared[id]!.baseline).toBe(await canonicalDigest(tracked.source));
+      expect((await store.read()).shared[id]!.baseline).not.toBe(tracked.baseline);
+    }
+  });
+
+  it('unchanged oversized source has no output', async () => {
+    const { fixture, store } = await sharedFixture();
+    const [id, tracked] = Object.entries((await store.read()).shared)[0]!;
+    const bytes = (await readFile(join(tracked.source, 'SKILL.md'), 'utf8')) + 'x'.repeat(20_001);
+    await writeFile(join(tracked.source, 'SKILL.md'), bytes);
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', bytes);
+    await git(['fetch', 'origin'], store.teamClone('team')); await git(['reset', '--hard', 'origin/main'], store.teamClone('team'));
+    const baseline = await canonicalDigest(tracked.source); await store.update((config) => { config.shared[id]!.baseline = baseline; });
+    const io = new ScriptedPrompter(); const deferred: string[] = [];
+    await reconcileShared(store, systemRunner, io, new Set(), (_team, label) => { deferred.push(label); });
+    expect(io.lines).toEqual([]); expect(deferred).toEqual([]);
+  });
+
+  it('repo-to-source reconciliation emits no hygiene output', async () => {
+    const { fixture, store } = await sharedFixture();
+    const [id, tracked] = Object.entries((await store.read()).shared)[0]!;
+    const baselineBytes = (await readFile(join(tracked.source, 'SKILL.md'), 'utf8')) + 'x'.repeat(20_001);
+    await writeFile(join(tracked.source, 'SKILL.md'), baselineBytes);
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', baselineBytes);
+    const baseline = await canonicalDigest(tracked.source); await store.update((config) => { config.shared[id]!.baseline = baseline; });
+    const bytes = baselineBytes + '\nremote edit';
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', bytes);
+    const io = new ScriptedPrompter(); expect((await sync({ config: store }, io)).ok).toBe(true);
+    expect(io.lines.filter((line) => /HYG|hygiene/.test(line))).toEqual([]);
+    expect(await readFile(join(tracked.source, 'SKILL.md'), 'utf8')).toBe(bytes);
+  });
+
+  it.each([false, true])('--keep-source proceeds with size warnings and refuses mixed errors (mixed: %s)', async (mixed) => {
+    const { fixture, store } = await sharedFixture(); const [id, tracked] = Object.entries((await store.read()).shared)[0]!;
+    const before = await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare);
+    const bytes = before + 'x'.repeat(20_001) + (mixed ? '\nghp_abcdefghijklmnopqrstuvwxyz' : '');
+    await writeFile(join(tracked.source, 'SKILL.md'), bytes); const io = new ScriptedPrompter();
+    expect(await run({ keepSource: id, config: store }, io)).toMatchObject({ ok: !mixed });
+    expect(io.lines[0]).toMatch(/^warning HYG6/);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(mixed ? before : bytes);
+    expect((await store.read()).shared[id]!.baseline).toBe(mixed ? tracked.baseline : await canonicalDigest(tracked.source));
+  });
+
+  it('--keep-repo never inspects oversized content', async () => {
+    const { fixture, store } = await sharedFixture(); const [id, tracked] = Object.entries((await store.read()).shared)[0]!;
+    const bytes = (await readFile(join(tracked.source, 'SKILL.md'), 'utf8')) + 'x'.repeat(20_001) + '\nghp_abcdefghijklmnopqrstuvwxyz';
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', bytes);
+    await git(['fetch', 'origin'], store.teamClone('team')); await git(['reset', '--hard', 'origin/main'], store.teamClone('team'));
+    const before = await originSha(fixture.bare); const io = new ScriptedPrompter();
+    expect((await run({ keepRepo: id, config: store }, io)).ok).toBe(true);
+    expect(io.lines.filter((line) => /HYG|hygiene/.test(line))).toEqual([]);
+    expect(await originSha(fixture.bare)).toBe(before);
+    expect(await readFile(join(tracked.source, 'SKILL.md'), 'utf8')).toBe(bytes);
+  });
+});

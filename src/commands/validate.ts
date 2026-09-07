@@ -2,14 +2,14 @@ import type { WithForm } from '../lib/invocation.js';
 import { lstat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
-import { formatHygieneFindings, hygieneFrontmatter, inspectHygiene } from '../lib/evals/hygiene.js';
+import { assessHygiene, formatHygieneFindings, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { readTeam } from '../lib/skills.js';
 
 export interface ValidateArgs extends WithForm { target: string; team?: string; cwd?: string; config?: ConfigStore; }
-export interface ValidateResult { name: string; findings: number; }
+export interface ValidateResult { name: string; findings: number; warnings: number; }
 
 /** Run the free §9 tier on a local skill folder, or a named skill in the selected team clone. */
 export async function run(args: ValidateArgs, io: Prompter): Promise<Result<ValidateResult>> {
@@ -35,14 +35,18 @@ export async function run(args: ValidateArgs, io: Prompter): Promise<Result<Vali
     } catch { directory = resolve(clone, 'skills', args.target); }
     await assertSkillDirectory(directory);
     const input = await sourceFiles(directory);
-    const skill = input.files.get('SKILL.md');
     const name = basename(directory);
-    const findings = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: policy.skill_license } });
-    if (findings.length) {
-      for (const finding of findings) io.print(`${finding.code} ${finding.path}${finding.line === undefined ? '' : `:${finding.line}`}: ${finding.message}`);
-      return failure(`Hygiene failed for ${name}:\n${formatHygieneFindings(findings)}`, { name, findings: findings.length });
+    let assessment;
+    try { assessment = assessHygiene(name, input, policy.skill_license); }
+    catch (error) { if (!(error instanceof HygieneRefused)) throw error; assessment = error.assessment; }
+    reportHygieneWarnings((line) => io.print(line), assessment);
+    if (assessment.errors.length) {
+      const errors = formatHygieneFindings(assessment.errors);
+      for (const line of errors.split('\n')) io.print(line);
+      return failure(`Hygiene failed for ${name}:\n${errors}`, { name, findings: assessment.errors.length, warnings: assessment.warnings.length });
     }
-    io.print(`${name}: hygiene passed.`);
-    return success({ name, findings: 0 });
+    const warnings = assessment.warnings.length;
+    io.print(`${name}: hygiene passed${warnings ? ` (${warnings} warning${warnings === 1 ? '' : 's'})` : ''}.`);
+    return success({ name, findings: 0, warnings });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
 }

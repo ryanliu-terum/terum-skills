@@ -13,6 +13,7 @@ import { bareTeam, cloneWithIdentity, git, holdCloneLock, mappedRunner, person, 
 import { lockTarget } from '../../lib/placer.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { systemRunner } from '../../lib/runner.js';
+import { canonicalDigest } from '../../lib/skills.js';
 import { cloneLockPath } from '../../lib/teamRepo.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -969,4 +970,31 @@ describe('release maintenance after sync', () => {
     expect(io.lines).toEqual([]);
     expect(JSON.parse(await readFile(join(f.store.root, 'run/latest-version.json'), 'utf8')).attempt).toMatchObject({ ok: false, error: 'offline' });
   });
+});
+
+it.each([false, true])('hook mirrors an oversized edit with notices and stamps only completed teams (unrelated deferral: %s)', async (unrelated) => {
+  const { fixture, store, clone } = await configuredSkill();
+  const source = join(fixture.root, 'sample'); await cp(join(clone, 'skills/sample'), source, { recursive: true });
+  const baseline = await canonicalDigest(source);
+  await store.update((config) => {
+    config.display_name = 'Seed'; config.email = 'seed@example.com';
+    config.shared[ID] = { source, team: 'team', baseline };
+    if (unrelated) config.shared[SECOND_ID] = { source: join(fixture.root, 'missing'), team: 'team', baseline: 'sha256:0' };
+  });
+  const bytes = skill('old') + 'x'.repeat(20_001); await writeFile(join(source, 'SKILL.md'), bytes);
+  const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+  const result = await run({ hook: true, config: store }, io);
+  expect(result).toMatchObject({ ok: true, value: { deferred: unrelated ? [SECOND_ID.slice(0, 8)] : [], notices: expect.arrayContaining([expect.stringMatching(/^warning HYG6/)]) } });
+  expect(await readFile(join(clone, 'skills/sample/SKILL.md'), 'utf8')).toBe(bytes);
+  expect((await store.read()).shared[ID]!.baseline).toBe(await canonicalDigest(source));
+  expect(io.lines.every((line) => line === '{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}')).toBe(true);
+  const errors: string[] = [];
+  await createExecute({ io: new ScriptedPrompter(), stderr: (line) => errors.push(line), setExitCode: () => undefined })(async () => result, { verb: 'sync', notices: false });
+  expect(errors.some((line) => line.startsWith('warning HYG6'))).toBe(true);
+  if (unrelated) await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  else {
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
+    const second = await run({ hook: true, config: store }, io);
+    expect(second).toMatchObject({ ok: true, value: { deferred: [], notices: [] } });
+  }
 });

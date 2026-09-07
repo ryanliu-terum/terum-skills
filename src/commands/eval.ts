@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
-import { formatHygieneFindings, hygieneFrontmatter, inspectHygiene } from '../lib/evals/hygiene.js';
+import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
 import { buildReceipt, receiptPath } from '../lib/evals/receipt.js';
 import { aggregate, renderReport, runIdFrom, writeRunTree } from '../lib/evals/results.js';
@@ -85,17 +85,14 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
 
     // This is intentionally before preflight, trigger selection, run-tree creation, or any agent call.
     const candidateFiles = await sourceFiles(candidateDir);
-    const skill = candidateFiles.files.get('SKILL.md');
-    const hygiene = inspectHygiene({
-      name: record.name,
-      frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill),
-      files: candidateFiles.files,
-      executable: candidateFiles.executable,
-      policy: { skill_license: team.policy.skill_license },
+    try {
       // A store copy passed connect's consent gate. A working source remains subject to its own mode.
-      allowExecutable: !args.working,
-    });
-    if (hygiene.length) return failure(`Hygiene failed for ${record.name}:\n${formatHygieneFindings(hygiene)}`);
+      reportHygieneWarnings((line) => io.print(line), assessHygiene(record.name, candidateFiles, team.policy.skill_license, !args.working));
+    } catch (error) {
+      if (!(error instanceof HygieneRefused)) throw error;
+      reportHygieneWarnings((line) => io.print(line), error.assessment);
+      return failure(`Hygiene failed for ${record.name}:\n${error.message}`);
+    }
 
     const model = args.model ?? DEFAULT_MODEL;
     const preflight = await (args.preflight ?? systemPreflight)(model);

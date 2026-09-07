@@ -3,7 +3,10 @@ import YAML from 'yaml';
 import { CREDENTIAL_PATTERNS } from './receipt.js';
 import { allowedTools, describeRaw, FRONTMATTER, skillFrontmatterSchema } from '../schema.js';
 
-export interface HygieneFinding { code: 'HYG1' | 'HYG2' | 'HYG3' | 'HYG4' | 'HYG5' | 'HYG6'; path: string; line?: number; message: string; }
+export type HygieneCode = 'HYG1' | 'HYG2' | 'HYG3' | 'HYG4' | 'HYG5' | 'HYG6';
+export interface HygieneFinding { code: HygieneCode; path: string; line?: number; message: string; }
+/** §9 rev 16: errors gate (fail-closed); warnings are printed by every caller and gate nothing. */
+export interface HygieneAssessment { readonly errors: readonly HygieneFinding[]; readonly warnings: readonly HygieneFinding[]; }
 export interface HygieneInput {
   name: string;
   frontmatter: unknown;
@@ -32,21 +35,22 @@ export function hygieneFrontmatter(source: Buffer): unknown {
 }
 
 /** The §9 pure API: callers supply file bytes and observed executable bits. */
-export function inspectHygiene(input: HygieneInput): HygieneFinding[] {
-  const findings: HygieneFinding[] = [];
+export function inspectHygiene(input: HygieneInput): HygieneAssessment {
+  const errors: HygieneFinding[] = [];
+  const warnings: HygieneFinding[] = [];
   const skill = input.files.get('SKILL.md');
   const parsed = skillFrontmatterSchema.safeParse(input.frontmatter);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const where = issue !== undefined && issue.path.length ? `field ${issue.path.join('.')}` : 'frontmatter';
-    findings.push({ code: 'HYG1', path: 'SKILL.md', message: `SKILL.md ${where} is invalid${issue === undefined ? '' : `: ${issue.message}`} (allowed top-level fields: name, description, license, metadata, allowed-tools).` });
+    errors.push({ code: 'HYG1', path: 'SKILL.md', message: `SKILL.md ${where} is invalid${issue === undefined ? '' : `: ${issue.message}`} (allowed top-level fields: name, description, license, metadata, allowed-tools).` });
   } else if (parsed.data.name !== input.name) {
-    findings.push({ code: 'HYG1', path: 'SKILL.md', line: lineOf(skill, /^name\s*:/m), message: `SKILL.md name ${parsed.data.name} does not equal folder ${input.name}.` });
+    errors.push({ code: 'HYG1', path: 'SKILL.md', line: lineOf(skill, /^name\s*:/m), message: `SKILL.md name ${parsed.data.name} does not equal folder ${input.name}.` });
   } else {
     const grants = allowedTools(parsed.data['allowed-tools']);
     if (!grants.ok) {
       const line = lineOf(skill, /^allowed-tools\s*:/m);
-      findings.push({ code: 'HYG1', path: 'SKILL.md', ...(line === undefined ? {} : { line }), message: `${input.name}: allowed-tools is malformed${line === undefined ? '' : ` (SKILL.md line ${line})`}: ${describeRaw(grants.raw)}. Use a YAML list of tool patterns, or one comma-separated string.` });
+      errors.push({ code: 'HYG1', path: 'SKILL.md', ...(line === undefined ? {} : { line }), message: `${input.name}: allowed-tools is malformed${line === undefined ? '' : ` (SKILL.md line ${line})`}: ${describeRaw(grants.raw)}. Use a YAML list of tool patterns, or one comma-separated string.` });
     }
   }
 
@@ -58,13 +62,13 @@ export function inspectHygiene(input: HygieneInput): HygieneFinding[] {
       const mixed = invisible ? undefined : mixedScriptOffset(text);
       if (invisible || mixed !== undefined) {
         const offset = invisible?.index ?? mixed!;
-        findings.push({ code: 'HYG2', path, line: lineAt(text, offset), message: invisible ? 'Contains a bidi control or zero-width character.' : 'Contains a whitespace-delimited token that mixes Unicode scripts.' });
+        errors.push({ code: 'HYG2', path, line: lineAt(text, offset), message: invisible ? 'Contains a bidi control or zero-width character.' : 'Contains a whitespace-delimited token that mixes Unicode scripts.' });
       }
       const credential = credentialOffset(text);
       const foreignEmail = emailOffset(text, author);
       if (credential !== undefined || foreignEmail !== undefined) {
         const offset = credential ?? foreignEmail!;
-        findings.push({ code: 'HYG3', path, line: lineAt(text, offset), message: credential !== undefined ? 'Contains a credential-shaped value.' : 'Contains an email address that is not the skill author.' });
+        errors.push({ code: 'HYG3', path, line: lineAt(text, offset), message: credential !== undefined ? 'Contains a credential-shaped value.' : 'Contains an email address that is not the skill author.' });
       }
     }
     const dot = path.lastIndexOf('.');
@@ -72,7 +76,7 @@ export function inspectHygiene(input: HygieneInput): HygieneFinding[] {
     const shebang = text?.startsWith('#!') ?? false;
     const executableForm = !input.allowExecutable && (input.executable.has(path) || shebang);
     if (executableForm || !ALLOWED_EXTENSIONS.has(extension)) {
-      findings.push({ code: 'HYG4', path, message: executableForm ? (input.executable.has(path) ? 'File has an executable mode.' : 'File begins with a shebang.') : `File extension ${extension || '(none)'} is not allowlisted.` });
+      errors.push({ code: 'HYG4', path, message: executableForm ? (input.executable.has(path) ? 'File has an executable mode.' : 'File begins with a shebang.') : `File extension ${extension || '(none)'} is not allowlisted.` });
     }
   }
 
@@ -83,18 +87,49 @@ export function inspectHygiene(input: HygieneInput): HygieneFinding[] {
       const detected = text === undefined ? undefined : detectLicense(text);
       if (detected !== undefined) licenses.push(detected);
     }
-    if (new Set(licenses).size > 1) findings.push({ code: 'HYG5', path: 'SKILL.md', line: lineOf(skill, /^license\s*:/m), message: 'Frontmatter, team policy, and bundled LICENSE files must declare the same license.' });
+    if (new Set(licenses).size > 1) errors.push({ code: 'HYG5', path: 'SKILL.md', line: lineOf(skill, /^license\s*:/m), message: 'Frontmatter, team policy, and bundled LICENSE files must declare the same license.' });
   }
   const skillText = skill === undefined ? undefined : decodeText(skill);
-  if ((skillText?.length ?? 0) > 20_000) findings.push({ code: 'HYG6', path: 'SKILL.md', message: 'SKILL.md exceeds 20,000 characters.' });
+  // String.prototype.length counts UTF-16 code units, not code points or UTF-8 bytes.
+  const length = skillText?.length ?? 0;
+  if (length > 20_000) warnings.push({ code: 'HYG6', path: 'SKILL.md', message: `SKILL.md is ${thousands(length)} characters, ${thousands(length - 20_000)} over the 20,000-character guideline (~5k tokens). Size alone does not block this operation; loading this skill uses that much more context.` });
   const description = parsed.success ? parsed.data.description : recordValue(input.frontmatter, 'description');
-  if (typeof description !== 'string' || !description.trim()) findings.push({ code: 'HYG6', path: 'SKILL.md', line: lineOf(skill, /^description\s*:/m), message: 'description must not be empty.' });
-  return findings;
+  if (typeof description !== 'string' || !description.trim()) errors.push({ code: 'HYG6', path: 'SKILL.md', line: lineOf(skill, /^description\s*:/m), message: 'description must not be empty.' });
+  return { errors, warnings };
 }
 
 export function formatHygieneFindings(findings: readonly HygieneFinding[]): string {
   return findings.map((finding) => `${finding.code} ${finding.path}${finding.line === undefined ? '' : `:${finding.line}`}: ${finding.message}`).join('\n');
 }
+
+export function formatHygieneWarnings(findings: readonly HygieneFinding[]): string {
+  return findings.map((finding) => `warning ${formatHygieneFindings([finding])}`).join('\n');
+}
+
+/** A refusal retains warnings so callers can report them before the errors. */
+export class HygieneRefused extends Error {
+  readonly assessment: HygieneAssessment;
+  constructor(assessment: HygieneAssessment) {
+    super(formatHygieneFindings(assessment.errors));
+    this.name = 'HygieneRefused';
+    this.assessment = assessment;
+  }
+}
+
+/** The single pure gate shared by every hygiene caller. */
+export function assessHygiene(name: string, input: { files: Map<string, Buffer>; executable: ReadonlySet<string> }, license: string, allowExecutable = false): HygieneAssessment {
+  const skill = input.files.get('SKILL.md');
+  const assessment = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable });
+  if (assessment.errors.length) throw new HygieneRefused(assessment);
+  return assessment;
+}
+
+/** Print each warning once through a caller-owned output channel. */
+export function reportHygieneWarnings(print: (line: string) => void, assessment: HygieneAssessment): void {
+  for (const warning of assessment.warnings) print(formatHygieneWarnings([warning]));
+}
+
+function thousands(value: number): string { return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
 
 function decodeText(contents: Buffer): string | undefined {
   if (contents.subarray(0, 8192).includes(0)) return undefined;

@@ -76,3 +76,18 @@ describe('eval (§6 / IE2)', () => {
     await expect(run({ ref: 'sample', working: true, config: store }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: 'sample is not a connected local source for team team; --working is unavailable.' });
   });
 });
+
+it.each([false, true])('size warning reaches eval preflight unless accompanied by an error (mixed: %s)', async (mixed) => {
+  const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('x'.repeat(20_001) + (mixed ? '\u202E' : '')));
+  await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+  const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  let preflightCalls = 0; let agentCalls = 0;
+  const agent: AgentApi = { runAgent: (_task, cwd) => { agentCalls++; return Promise.resolve(transcript(existsSync(join(cwd, '.claude', 'skills', 'sample')) ? ['sample'] : [])); }, askJson: () => { agentCalls++; return Promise.resolve({ selected: [] }); } };
+  const io = new ScriptedPrompter();
+  const result = await run({ ref: 'sample', config: store, agent, k: 1, preflight: async () => { preflightCalls++; return success({ ccVersion: 'stub' }); } }, io);
+  expect(result.ok).toBe(!mixed); expect(preflightCalls).toBe(mixed ? 0 : 1);
+  expect(io.lines[0]).toMatch(/^warning HYG6/);
+  if (mixed) { expect(agentCalls).toBe(0); expect(result).toMatchObject({ error: expect.stringContaining('HYG2') }); }
+  else { expect(agentCalls).toBeGreaterThan(0); expect(result).toMatchObject({ value: { executionStatus: 'complete' } }); }
+});

@@ -373,3 +373,86 @@ describe('publish project recovery hints', () => {
     expect(runner.calls.some((call) => call.args[0] === 'push')).toBe(false);
   });
 });
+
+describe('publish HYG6 warnings', () => {
+  it.each(['pr', 'push'] as const)('publishes oversized content with exactly one warning under %s', async (policy) => {
+    const { fixture, store } = await prepared(policy);
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill().padEnd(20_001, 'x'));
+    const runner = mappedRunner(REMOTE, fixture.bare); const io = new ScriptedPrompter([], [true]);
+    const result = await run({ ref: 'sample', config: store, runner }, io);
+    expect(result).toMatchObject({ ok: true, value: { changed: true } });
+    expect(io.lines.filter((line) => line.startsWith('warning HYG6'))).toHaveLength(1);
+    expect(io.lines[0]).toContain('20,001');
+    expect(runner.calls.filter((call) => call.command === 'git' && call.args[0] === 'push')).toHaveLength(1);
+  });
+
+  it.each([
+    { before: 0, after: 20_001, lengths: ['20,001'] },
+    { before: 20_001, after: 21_001, lengths: ['20,001', '21,001'] },
+    { before: 20_001, after: 0, lengths: ['20,001'] },
+  ])('reports only completed replay warning changes ($before -> $after)', async ({ before, after, lengths }) => {
+    const { fixture, store } = await prepared();
+    if (before) await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill().padEnd(before, 'x'));
+    const io = new ScriptedPrompter(); const base = mappedRunner(REMOTE, fixture.bare);
+    let fetches = 0; let duringWrite: string[] | undefined;
+    const runner = wrapRunner(base, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) {
+        duringWrite = [...io.lines];
+        await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill().padEnd(after, 'x'));
+      }
+      const result = await next();
+      // Includes commit, push, and safeWrite's finally fetch/reset: no mutation-time printing.
+      if (command === 'git' && duringWrite !== undefined) expect(io.lines).toEqual(duringWrite);
+      return result;
+    });
+    expect(await run({ ref: 'sample', config: store, runner }, io)).toMatchObject({ ok: true, value: { changed: true } });
+    const warnings = io.lines.filter((line) => line.startsWith('warning HYG6'));
+    expect(warnings).toHaveLength(lengths.length);
+    lengths.forEach((length, index) => expect(warnings[index]).toContain(`is ${length} characters`));
+  });
+
+  it('prints replay warnings before refusing mixed errors', async () => {
+    const { fixture, store } = await prepared(); const io = new ScriptedPrompter();
+    const base = mappedRunner(REMOTE, fixture.bare); let fetches = 0;
+    const runner = wrapRunner(base, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill().padEnd(20_001, 'x') + '\nghp_abcdefghijklmnopqrstuvwxyz');
+      return next();
+    });
+    expect(await run({ ref: 'sample', config: store, runner }, io)).toMatchObject({ ok: false, error: expect.stringContaining('HYG3') });
+    expect(io.lines).toEqual([expect.stringMatching(/^warning HYG6/)]);
+    expect(base.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
+  });
+
+  it.each(['pr', 'push'] as const)('mixed preflight shows warning before refusal without a card under %s', async (policy) => {
+    const { fixture, store } = await prepared(policy);
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill().padEnd(20_001, 'x') + '\nghp_abcdefghijklmnopqrstuvwxyz');
+    const runner = mappedRunner(REMOTE, fixture.bare); const io = new ScriptedPrompter([], [true]);
+    expect(await run({ ref: 'sample', config: store, runner }, io)).toMatchObject({ ok: false, error: expect.stringContaining('HYG3') });
+    expect(io.lines).toEqual([expect.stringMatching(/^warning HYG6/)]); expect(io.asked).toEqual([]);
+    expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
+  });
+
+  it('already-endorsed oversized content has no hygiene output', async () => {
+    const { fixture, store } = await prepared();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill().padEnd(20_001, 'x') + '\nghp_abcdefghijklmnopqrstuvwxyz');
+    await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ ...TEAM_JSON, global: [ID] }));
+    const io = new ScriptedPrompter(); const runner = mappedRunner(REMOTE, fixture.bare);
+    expect(await run({ ref: 'sample', config: store, runner }, io)).toMatchObject({ ok: true, value: { changed: false } });
+    expect(io.lines).toEqual(['sample is already endorsed (global) in team.']);
+    expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
+  });
+
+  it('prints no new replay warning when another publisher already endorsed it', async () => {
+    const { fixture, store } = await prepared(); const io = new ScriptedPrompter();
+    let fetches = 0;
+    const runner = wrapRunner(mappedRunner(REMOTE, fixture.bare), async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) {
+        await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill().padEnd(20_001, 'x'));
+        await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ ...TEAM_JSON, global: [ID] }));
+      }
+      return next();
+    });
+    expect(await run({ ref: 'sample', config: store, runner }, io)).toMatchObject({ ok: true, value: { changed: false } });
+    expect(io.lines).toEqual(['sample is already endorsed (global) in team.']);
+  });
+});

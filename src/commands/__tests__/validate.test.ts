@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
+import { createExecute } from '../../lib/execute.js';
 import { run } from '../validate.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -33,4 +34,22 @@ describe('validate (§9)', () => {
     expect(await run({ target: 'sample', cwd: checkout }, dirty)).toMatchObject({ ok: false, error: expect.stringContaining('HYG2') });
     expect(dirty.lines.join('\n')).toContain('HYG2');
   });
+});
+
+it.each([false, true])('reports size warnings before errors and preserves exit semantics (cwd: %s)', async (cwd) => {
+  const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+  const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  const args = cwd ? { target: 'sample', cwd: clone } : { target: 'sample', config: store };
+  for (const mixed of [false, true]) {
+    await writeFile(join(clone, 'skills/sample/SKILL.md'), skill('x'.repeat(20_001) + (mixed ? '\u202E' : '')));
+    const io = new ScriptedPrompter(); const exits: number[] = [];
+    const result = await run(args, io);
+    expect(result).toMatchObject({ ok: !mixed, value: { findings: mixed ? 1 : 0, warnings: 1 } });
+    expect(io.lines[0]).toMatch(/^warning HYG6/);
+    if (mixed) expect(io.lines[1]).toMatch(/^HYG2/);
+    else expect(io.lines[1]).toBe('sample: hygiene passed (1 warning).');
+    await createExecute({ io, stderr: () => undefined, setExitCode: (code) => exits.push(code) })(async () => result, { verb: 'validate', notices: false });
+    expect(exits).toEqual(mixed ? [1] : []);
+  }
 });
