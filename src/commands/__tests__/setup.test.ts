@@ -211,7 +211,8 @@ describe('setup (§6.1)', () => {
     if (!result.ok) throw new Error(result.error);
     expect(result.value.steps).toMatchObject({ welcome: 'printed', github: 'done', team: 'skipped', actions: 'skipped', invite: 'skipped', community: 'skipped', hook: 'skipped', done: 'printed' });
     expect(seen).toEqual([io]);
-    expect(io.lines.join('\n')).not.toMatch(/\b(eval|ui)\b/i);
+    expect(io.lines.join('\n')).not.toMatch(/\bui\b/i);
+    expect(io.lines).toContain('  terum-skills eval <skill>             — evaluate a shared skill locally before publishing');
     expect(io.lines.join('\n')).not.toContain('Feedback and requests:');
     expect(io.lines).toContain('Resuming setup for team team. To join another team, run the setup command its owner sent you.');
     expect(io.askedAbout('Create a team or join one?')).toBe(false);
@@ -359,10 +360,12 @@ describe('setup (§6.1)', () => {
       '  terum-skills search <term>            — find a skill by name, description, or category',
       '  terum-skills sync                     — pull updates and finish pending work',
       '  npx -y terum-skills@latest publish <skill> — endorse a skill already shared with the team',
+      '  terum-skills eval <skill>             — evaluate a shared skill locally before publishing',
       'Feedback and requests: https://example.test/community', 'Members:', '  @alice — Alice',
       'Repository: https://github.com/alice/alpha-repo', 'README: https://github.com/alice/alpha-repo/blob/main/README.md',
     ]));
-    expect(io.lines.join('\n')).not.toMatch(/\b(eval|ui)\b/i);
+    expect(io.lines.join('\n')).not.toMatch(/\bui\b/i);
+    expect(io.lines).toContain('  terum-skills eval <skill>             — evaluate a shared skill locally before publishing');
     expect(runner.calls.filter((call) => call.command === 'gh' && call.args.join(' ').includes('collaborators/')).map((call) => call.args.at(-1))).toEqual(['repos/alice/alpha-repo/collaborators/bob', 'repos/alice/alpha-repo/collaborators/carol']);
     expect(JSON.parse(await readFile(hookFor(root).settingsFile, 'utf8')).hooks.SessionStart).toHaveLength(1);
     expect(await git(['ls-tree', '--name-only', 'main:skills'], bare)).toContain('starter');
@@ -478,7 +481,8 @@ describe('setup (§6.1)', () => {
     ]);
     expect(result.value.steps).toMatchObject({ invite: 'skipped', community: 'printed' });
     expect(io.lines).toContain(`Feedback and requests: ${COMMUNITY_URL}`);
-    expect(io.lines.join('\n')).not.toMatch(/\b(eval|ui)\b/i);
+    expect(io.lines.join('\n')).not.toMatch(/\bui\b/i);
+    expect(io.lines).toContain('  terum-skills eval <skill>             — evaluate a shared skill locally before publishing');
   });
 
   it('stops before team creation when a non-interactive creator is logged out', async () => {

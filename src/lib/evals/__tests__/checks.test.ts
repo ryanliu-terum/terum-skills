@@ -38,6 +38,11 @@ describe('the five check kinds (§5.1, verbatim port)', () => {
     expect(runChecks([{ no_command_matching: 'rm -rf' }], transcript, sandbox)[0]).toMatchObject({ passed: true });
   });
 
+  it('malformed regex patterns fail their check without aborting the case (§17.1)', () => {
+    expect(runChecks([{ command_matching: '[' }], transcript, sandbox)[0]).toMatchObject({ passed: false, detail: expect.stringContaining('malformed check') });
+    expect(runChecks([{ no_command_matching: '[' }], transcript, sandbox)[0]).toMatchObject({ passed: false, detail: expect.stringContaining('malformed check') });
+  });
+
   it('file_exists / file_absent look inside the sandbox only', () => {
     expect(runChecks([{ file_exists: 'deployed.marker' }], transcript, sandbox)[0]).toMatchObject({ passed: true });
     expect(runChecks([{ file_exists: 'missing.txt' }], transcript, sandbox)[0]).toMatchObject({ passed: false });

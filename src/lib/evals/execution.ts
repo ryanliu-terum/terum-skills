@@ -12,7 +12,7 @@
  * transcript and `execution_status` reflects any unscored holes.
  */
 import { spawn } from 'node:child_process';
-import { chmod, cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, rename, writeFile } from 'node:fs/promises';
 import { statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
@@ -225,6 +225,7 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
 
   const rows: ComparisonRow[] = [];
   const samples: ArmSample[] = [];
+  try {
   for (let rep = 0; rep < options.k; rep++) {
     const transcripts = new Map<Arm, Transcript | null>();
     const checksByArm = new Map<Arm, CheckResult[]>();
@@ -234,16 +235,20 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
       let sandbox = '';
       let transcript: Transcript | null = null;
       let retried = false;
+      const transcriptPath = join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.jsonl`);
       for (let attempt = 0; attempt < 2 && transcript === null; attempt++) {
         sandbox = await seedSandbox(evalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch });
         try {
-          transcript = await deps.agent.runAgent(evalCase.task, sandbox, {
-            transcriptPath: join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.jsonl`),
-            model: deps.model ?? DEFAULT_MODEL,
-          });
+          transcript = await deps.agent.runAgent(evalCase.task, sandbox, { transcriptPath, model: deps.model ?? DEFAULT_MODEL });
         } catch (error) {
           if (!(error instanceof AgentRunError)) throw error;
-          if (attempt === 0) retried = true;
+          if (attempt === 0) {
+            retried = true;
+            // §17.3: the failed attempt's transcript survives under a distinct suffix; the retry
+            // takes the canonical §4.2 path (missing file = the run died before writing one).
+            try { await rename(transcriptPath, join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.attempt-1.jsonl`)); }
+            catch (renameError) { if ((renameError as NodeJS.ErrnoException).code !== 'ENOENT') throw renameError; }
+          }
           log(`  ${evalCase.name} rep${rep} ${arm}: agent run failed${attempt === 0 ? ', retrying once' : ' twice, scoring empty'}: ${error.message}`);
         }
       }
@@ -252,8 +257,13 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
       // signal is membership of the skill under eval, never list equality. Everything else in the
       // list is CLI-provided; user/global skills are excluded by construction (--setting-sources
       // project), measured on CC 2.1.236 (VE1).
+      const staged = skillDir !== null;
+      // §17.7 targets a transcript whose init event omits `skills`. A fully failed arm
+      // (transcript null) stays on the rev-7 scored-empty path and greys the verdict instead.
+      if (transcript !== null && staged && skillList === null) {
+        throw new ContaminationError(`arm '${arm}' did not report its resolved skill list; refusing the run (§7.3)`);
+      }
       if (skillList !== null) {
-        const staged = skillDir !== null;
         if (skillList.includes(options.skillName) !== staged) {
           throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}] — '${options.skillName}' ${staged ? 'is missing from an arm that staged it' : 'leaked into an arm without it staged'}; refusing the run (§7.3)`);
         }
@@ -276,6 +286,15 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
       });
       log(`  ${evalCase.name} rep${rep} candidate-vs-${opponent}: ${outcome.result} (${outcome.decidedBy})`);
     }
+  }
+  } catch (error) {
+    // A seed/setup failure makes this case an unscored hole, not a failure of the
+    // entire case matrix. Other authored cases still provide useful evidence.
+    if (error instanceof Error && error.message.includes(`case '${evalCase.name}': setup failed`)) {
+      log(`  ${evalCase.name}: ABORTED (setup) — ${error.message}`);
+      return { rows: [], arms: [] };
+    }
+    throw error;
   }
   return { rows, arms: samples };
 }

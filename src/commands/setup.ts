@@ -194,6 +194,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     say('  terum-skills search <term>            — find a skill by name, description, or category');
     say('  terum-skills sync                     — pull updates and finish pending work');
     say(`  npx -y terum-skills@latest publish <skill> — endorse a skill already shared with the team`);
+    say('  terum-skills eval <skill>             — evaluate a shared skill locally before publishing');
     say('  npx -y terum-skills@latest share      — share one of your local skills (asks which)');
 
     const communityUrl = args.communityUrl ?? COMMUNITY_URL;

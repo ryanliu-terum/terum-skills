@@ -60,6 +60,11 @@ describe('runAgent through a stub binary (§7.1)', () => {
     await expect(systemAgent.runAgent('task', scratch)).rejects.toThrow(AgentRunError);
     await expect(systemAgent.runAgent('task', scratch)).rejects.toThrow(/rc=7.*broken pipe/s);
   });
+
+  it('nonzero exit with partial stream-json still raises AgentRunError (§17.8)', async () => {
+    await stub(`printf '%s\\n' '${STREAM.split('\n')[0]}' >&1; echo broken >&2; exit 7`);
+    await expect(systemAgent.runAgent('task', scratch)).rejects.toThrow(AgentRunError);
+  });
 });
 
 describe('askJson through a stub binary (§7.2 / §7.5)', () => {

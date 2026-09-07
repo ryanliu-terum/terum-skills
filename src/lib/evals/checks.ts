@@ -42,7 +42,12 @@ export function runChecks(specs: readonly CheckSpec[], transcript: TranscriptTex
     }
     const check = CHECKS[kind];
     if (!check) return { name: kind, passed: false, detail: `unknown check kind '${kind}'` };
-    return check(arg, transcript, sandbox);
+    // Cases are authored input. A malformed argument (notably an invalid regex) is a
+    // failed check, never an exception that aborts the rest of the evaluation.
+    try { return check(arg, transcript, sandbox); }
+    catch (error) {
+      return { name: `${kind}:${String(arg)}`, passed: false, detail: error instanceof Error ? `malformed check: ${error.message}` : 'malformed check' };
+    }
   });
 }
 

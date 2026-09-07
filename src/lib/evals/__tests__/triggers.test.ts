@@ -42,6 +42,13 @@ describe('trigger scoring (§7.2, port of triggers.py)', () => {
     expect(summary.rows[1]).toMatchObject({ fired: null, correct: false, error: expect.stringContaining('network down') });
   });
 
+  it('an errored should-trigger call counts in neither fn nor fp (§17.2)', async () => {
+    const summary = await runTriggerEvals(fakeAgent({ 'boom': new AgentRunError('network down') }), {
+      skillName: 's', catalog: '- s: d', spec: { shouldTrigger: ['boom'], shouldNotTrigger: [] },
+    });
+    expect(summary).toMatchObject({ tp: 0, fn: 0, fp: 0, tn: 0, recall: null });
+  });
+
   it('recall and precision are null-safe on empty lists', async () => {
     const summary = await runTriggerEvals(fakeAgent({}), { skillName: 's', catalog: '- s: d', spec: { shouldTrigger: [], shouldNotTrigger: [] } });
     expect(summary.recall).toBeNull();

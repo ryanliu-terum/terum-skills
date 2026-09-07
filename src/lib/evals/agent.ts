@@ -151,7 +151,9 @@ async function runAgent(task: string, cwd: string, options: RunAgentOptions = {}
   const outcome = await run(task, cwd, options);
   if (options.transcriptPath !== undefined) await writeFile(options.transcriptPath, outcome.stdout, 'utf8');
   if (outcome.timedOut) throw new AgentRunError(`agent run timed out after ${options.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`);
-  if (outcome.code !== 0 && !outcome.stdout.trim()) throw new AgentRunError(`agent run failed (rc=${outcome.code}): ${outcome.stderr.slice(-2000)}`);
+  // Partial stream-json is still an unsuccessful agent run. Persist it first for
+  // inspection, then let execution retry it in a fresh sandbox.
+  if (outcome.code !== 0) throw new AgentRunError(`agent run failed (rc=${outcome.code}): ${outcome.stderr.slice(-2000)}`);
   return Transcript.fromStream(outcome.stdout);
 }
 
