@@ -11,6 +11,7 @@
       "Bash(npm test *)",
       "Bash(npx tsc:*)",
       "Bash(npx vitest *)",
+      "Bash(npx -y terum-skills@latest *)",
       "Bash(node *)",
       "Bash(git *)",
       "Bash(gh pr *)",
