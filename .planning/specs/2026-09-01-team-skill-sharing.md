@@ -37,6 +37,8 @@ A team is one private git repo. A skill lives in that repo exactly once, under a
 | D3 | Docker is reserved for a possible future self-hosted registry server (`docker compose up`). Never for an environment the user codes inside. | DECIDED |
 | D4 | The team needs a shared git remote, not GitHub specifically. GitHub, GitLab, Bitbucket, self-hosted Gitea, or a bare repo over SSH all work for **storing and syncing** skills. **Membership *administration* is a different matter:** `invite` and access-revoking `team remove` need a collaborator API and an admin predicate, which are host-specific, so phase 1 implements them for GitHub only and fails honestly elsewhere (`--archive-only` still records the departure). Host adapters DEFERRED. | DECIDED (scoped 2026-09-03) |
 | D5 | The only thing outside the user's machine is the git host. No account with us, no server, no container. | DECIDED |
+| D40 | Release discovery contacts the approved public upstream only on machines with at least one configured GitHub team (`github-teams`); interactive sync at most once per 24 h, explicit `update` every time. `RELEASE_PROBE_POLICY` in `src/lib/constants.ts` is the one-line switch; `everyone` and `nobody` are the other supported values. Tag truthfulness is issue 10's release workflow (PR pending). | DECIDED (Ryan, 2026-09-06, issue 8) |
+| D41 | An update ping is a labelled release advertisement (or an observed npx-latest-cache release), never a claim of npm availability. Tags are advertised only after verified npm publication; issue 10 owns enforcement. Running versions alone are not publication evidence. | DECIDED (Ryan, 2026-09-06, issue 8) |
 
 Why no container: a skill is a folder with a SKILL.md that Claude Code reads from the project's `.claude/skills` or the global skills directory. There is no runtime to isolate. Running Claude Code inside a container breaks host auth (macOS Keychain OAuth), host MCP servers, the VS Code and Chrome extensions, and the user's own global skills and hooks, and it adds Docker Desktop as a prerequisite with a paid license at larger companies. The repo carries the entire sharing load; the container carried none of it.
 
@@ -93,6 +95,7 @@ terum-skills install <ref>[@<version>] | member <handle> | project <name>
 terum-skills uninstall-skill <ref> | member <handle> | project <name>
 terum-skills uninstall                      confirmed machine cleanup (build spec §6, rev 10); package-manager removal remains a separate step
 terum-skills sync                           pull, auto-update shared skills, re-place installs, prompt on new team skills
+terum-skills update                         running version, latest advertised release, and the command that updates this copy (printed, never run)
 terum-skills eval <name> [--share]
 terum-skills eval show <name>@<version>
 terum-skills ui                             local web UI on localhost (see 3.6)
