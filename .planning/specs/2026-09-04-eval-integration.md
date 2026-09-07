@@ -38,12 +38,13 @@ Both sides exist; **zero wiring exists.** Missing, in dependency order:
 
 ### IE1 — hygiene tier + `validate` (pure, lands first)
 
-`lib/evals/hygiene.ts` (pure, exit-code gated, no LLM, no network): frontmatter+name
-match, malformed `allowed-tools` refusal, unicode trickery, secret/PII scan (sharing
-`receipt.ts`'s credential patterns — export them as a named API rather than copying),
-bundled-script scan, license reconciliation vs `team.json policy.skill_license`, size
-cap. Wired into **all** the call sites eval spec §9 names, because `share` is a
-one-time act — after it, edits flow automatically:
+`lib/evals/hygiene.ts` (pure, exit-code gated, no LLM, no network). **The check list
+and the caller list are eval spec §9's — authoritative as of its rev 11; this plan
+orders the work and does not restate the contract. On any divergence, §9 wins.**
+(One implementation note that is sequencing, not contract: the secret/PII scan
+shares `receipt.ts`'s credential patterns — export them as a named API rather than
+copying.) Wired into all of §9's call sites, because `share` is a one-time act —
+after it, edits flow automatically. Build-order notes per site:
 
 - **`validate <path|name>`** — new verb, `commands/validate.ts`, registered in
   `cli.ts` like every other verb; runs hygiene alone, non-zero exit on any finding.
@@ -74,14 +75,11 @@ one-time act — after it, edits flow automatically:
 
 **Deferred-register interaction:** register §B is CLOSED (2026-09-06, PRs #4/#7) —
 `share` already refuses a malformed `allowed-tools` and names the SKILL.md line
-(`src/commands/share.ts:230-235`). Hygiene does not close that item; it **absorbs**
-it: §9's zod parse alone does not catch it (`'allowed-tools': z.unknown().optional()`,
-`src/lib/schema.ts:112`), so hygiene's frontmatter check calls `allowedTools()` and
-fails closed when `grants.ok === false`, emitting the same line-numbered message via
-`describeRaw`; `share`'s inspection delegates to that single function rather than
+(`src/commands/share.ts:230-235`). Hygiene **absorbs** that check rather than
+re-closing it — the contract now lives in eval spec §9 check 1 (rev 11). Build
+notes: `share`'s inspection delegates to the single hygiene function rather than
 keeping a second live path, and the existing share tests for the malformed message
-move/extend to the hygiene suite. (Eval spec §9 check 1 should be amended to match —
-flagged there, owned by the drift finding on §9's caller list.)
+move/extend to the hygiene suite.
 
 *Exit:* hygiene suite green; `validate` returns non-zero on a deliberately-tricky
 skill (bidi chars + planted secret + license conflict + malformed `allowed-tools`)

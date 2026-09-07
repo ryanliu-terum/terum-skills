@@ -1,14 +1,14 @@
 # terum-skills eval engine — build spec
 
-**Status:** DRAFT (rev 10, 2026-09-06; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe; rev 7 = variance reducers, same probe: §7.5 judge double-asked in both orderings with disagreement → `judge-split` tie, §7.1 headless note appended to every arm + one arm retry in a fresh sandbox + `model_id` snapshot recorded per arm; rev 8 = `requires` host-tool declarations with environment-skip semantics (option 1, Ajay 2026-09-06): missing tools skip the case as visible unscored holes + `environment_skips` receipt field, CI runner canonical for gating; rev 9 = sixth check kind `command_succeeds` for deterministic script verifiers, SkillsBench-style; rev 10 = §11 rewritten (Ryan, 2026-09-06 walk D2): CI never runs a model or holds an API key — the eval job and its `ANTHROPIC_API_KEY` repo secret are removed, the publish gate becomes a deterministic receipt check, and rev 8's "CI runner canonical for gating" clause is superseded — gating receipts are produced locally, with `environment_skips` greying verdicts as before) — written under a partial lift of the phase-3 spec
+**Status:** DRAFT (rev 11, 2026-09-06; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe; rev 7 = variance reducers, same probe: §7.5 judge double-asked in both orderings with disagreement → `judge-split` tie, §7.1 headless note appended to every arm + one arm retry in a fresh sandbox + `model_id` snapshot recorded per arm; rev 8 = `requires` host-tool declarations with environment-skip semantics (option 1, Ajay 2026-09-06): missing tools skip the case as visible unscored holes + `environment_skips` receipt field, CI runner canonical for gating; rev 9 = sixth check kind `command_succeeds` for deterministic script verifiers, SkillsBench-style; rev 10 = §11 rewritten (Ryan, 2026-09-06 walk D2): CI never runs a model or holds an API key — the eval job and its `ANTHROPIC_API_KEY` repo secret are removed, the publish gate becomes a deterministic receipt check, and rev 8's "CI runner canonical for gating" clause is superseded — gating receipts are produced locally, with `environment_skips` greying verdicts as before; rev 11 = code-vs-spec reconciliation against the built library (Ryan, 2026-09-06): §9 caller list gains `sync`'s reconcile path and the malformed-`allowed-tools` check — finding 6 upheld, register §B absorbed — §5.1/§7.1 absorb shipped semantics (case-insensitive `transcript_mentions`, sandbox-escape containment, `command_succeeds` shell/timeout, all-checks-passed comparison wording, `decided_by` vocabulary, `execution_status` conditions, attribution derivation, 30s probe cap), ME4 gains the orchestrator's open-ends contract, and the new §17 registers nine code defects + hardening notes from the audit — the spec stays normative, the code gets fixed at IE time) — written under a partial lift of the phase-3 spec
 gate (Ajay, in-session 2026-09-04: "we're on a time crunch … just do as much as you can";
 the override did not record in Terum — receipt rejected — so the shared ledger still
 shows the gate standing). Items that genuinely need published-skill experience are marked
 **[provisional — revisit with experience]**; everything else is written to the phase-1
 standard: implement as written, defaults are veto-cheap.
 
-**Parents:** `2026-09-02-phase-1-build.md` (rev 8, authoritative for everything it
-covers — this spec never contradicts it, only extends), ledger
+**Parents:** `2026-09-02-phase-1-build.md` (rev 9, BUILD-READY — authoritative for
+everything it covers; this spec never contradicts it, only extends), ledger
 `2026-09-01-team-skill-sharing.md` (D22, D26, D28–D30), decision walk Decision 5
 **as superseded** by the engine decision (Ajay, 2026-09-04, recorded in Terum:
 engine = skilldeck's `claude`-CLI harness adapted for terum-skills), research dossiers
@@ -39,9 +39,11 @@ commit is the receipt"), and the UI renders receipts, never re-runs anything.
 **In:** the `eval` verb and engine library (`src/lib/evals/`); execution cases and
 trigger files as authored artifacts inside skill folders; the committed receipt schema
 at `evals/<skill-id>/<tree-hash>/<run-id>.json`; the guard row and `GuardAction` for receipt
-writes; the hygiene (deep deterministic validation) tier wired into `share`/`publish`;
-secret redaction; the publish-PR CI eval job; the UI data
-contract (what Teddy renders, from where).
+writes; the hygiene (deep deterministic validation) tier wired into every
+skill-content mutation (§9's authoritative caller list: `validate`, `share`,
+`publish`, `sync`'s reconcile path, CI);
+secret redaction; the publish-PR CI receipt check (rev 10 — CI runs no evals); the
+UI data contract (what Teddy renders, from where).
 
 **Out (gated/deferred):** share-card rasterization (D30 stays OPEN; candidate survey in
 research §6 — `@resvg/resvg-js` recommended, decide at build time), `eval-gen`
@@ -63,7 +65,7 @@ src/
     agent.ts                  spawn `claude` (the ONLY module that spawns it); Transcript
     execution.ts              three-arm case loop, sandbox seeding, verdict per comparison
     triggers.ts               catalog-wide selection eval over the endorsed set
-    checks.ts                 the five deterministic check kinds (verbatim port)
+    checks.ts                 the six deterministic check kinds (rev 9 added command_succeeds)
     judge.ts                  pairwise judge + position swap + retry/escalation chain
     stats.ts                  net_lift, exact two-sided sign test
     results.ts                local run trees, run meta, report rendering
@@ -141,12 +143,12 @@ Verbatim skilldeck format plus one optional field:
   "files": { "src/app.ts": "…" },           // optional inline seeds; .sh → 0755
   "setup": "git init -q && …",              // optional shell hook, 60s cap
   "checks": [                               // optional; single-key dicts, six kinds:
-    { "transcript_mentions": "STRIPE_KEY" },//   substring over full transcript text
+    { "transcript_mentions": "STRIPE_KEY" },//   case-insensitive substring, full transcript
     { "no_command_matching": "deploy\\.sh" },// regex over Bash commands, pass = no hit
     { "command_matching": "npm test" },     //   regex over Bash commands, pass = hit
     { "file_exists": "deployed.marker" },   //   path relative to sandbox
     { "file_absent": ".env.leaked" },
-    { "command_succeeds": "python3 -m pytest -q verify.py" }  // rev 9: sandbox cmd, pass = rc 0
+    { "command_succeeds": "python3 -m pytest -q verify.py" }  // rev 9: /bin/sh -ce in sandbox, pass = rc 0, 120s cap (killed → fails with rc=killed)
   ],
   "judge": "2–4 sentence rubric",           // optional; judge runs ONLY on check ties
   "bucket": "adversarial"                   // optional; explicit|implicit|contextual|
@@ -161,8 +163,11 @@ any agent run; a case with missing requirements is **skipped as
 `environment_skips[case]`**, its rows counted as unscored holes that grey the verdict
 — never run to a both-arms-flail tie, because a false NEUTRAL from a missing
 toolchain is indistinguishable from "skill doesn't help." Receipts carry
-`environment_skips` (optional field, rev 8); CI's pinned runner is the canonical
-environment for gating receipts, local runs may legitimately skip more.
+`environment_skips` (optional field, rev 8). The requirement probe carries a 30s
+per-probe timeout (measured: a 10s cap falsely reported pandas missing under
+14-process contention). *(Rev 10 supersedes the earlier "CI runner canonical for
+gating" clause here: CI runs no evals — gating receipts are produced locally, and
+`environment_skips` greys verdicts as before.)*
 
 Authoring rule (from the 2026-09-04 determinism probe): skill conventions and case
 tasks must not pattern-match to prompt injection — an unconditional magic-string
@@ -170,8 +175,15 @@ mandate ("every report MUST start with the literal line X") makes a wary agent s
 and ask instead of complying, and a headless agent that asks a question dies silently,
 scoring as skill failure. Phrase conventions as natural practice, not incantation.
 
-Unknown check kinds **fail** (they never error the run). Checks are all-or-nothing per
-arm; there is no partial credit inside a case.
+Unknown check kinds **fail** (they never error the run), as do malformed check specs.
+`file_exists`/`file_absent` paths are resolved against the sandbox and a path that
+escapes it **fails the check** with `path escapes the sandbox` — including
+`file_absent`, where an escaping path fails even though the file is trivially absent
+from the sandbox (containment beats literal semantics; rev 11, documenting shipped
+behavior). Checks are all-or-nothing per arm; there is no partial credit inside a
+case — and §7.1's round decision compares the two arms' all-checks-passed booleans,
+never per-check pass-sets (rev 11 wording fix: two arms passing disjoint subsets tie
+on checks and fall through to the judge).
 
 ### 5.2 Trigger file (`skills/<name>/evals/triggers.yaml`)
 
@@ -273,6 +285,7 @@ row (append-only — an existing receipt path is never rewritten). It never touc
 | Stage | Requirement |
 |---|---|
 | `share` | No eval requirement. Hygiene tier must pass (extends phase-1 V5 gate). |
+| `sync` (reconcile of edited shared sources) | No eval requirement. Hygiene must pass per changed skill before the first team-repo write (§9) — a secret pasted into an already-shared skill never reaches the repo. |
 | `publish` PR | The PR must carry a **locally-produced committed receipt** at the skill's current version whose candidate-vs-**incumbent** comparison is not FAIL (regression gate); CI verifies the receipt deterministically (§11, rev 10) and runs no evals of its own. |
 
 There is no tier above `publish` — the verified badge was scrapped (rev 4, Ajay). The
@@ -309,12 +322,26 @@ sample also records `model_id`, the **resolved model snapshot from the init even
 the §16.9 same-model comparability rule checkable.
 
 → run checks → emit one row per (rep × opponent). Verdict per row, in order: both arms
-failed → tie; one failed → other wins; check pass-sets differ → decided by checks;
-equal + no rubric → tie; equal + rubric → judge (§7.5). An `AgentRunError` or timeout
-is **retried once in a fresh sandbox** (rev 7 — an infra flake scored against the
-empty transcript is a spurious loss; `retried` is recorded on the arm sample); a
-second failure never aborts the matrix — the arm's row is scored against an empty
-transcript and `execution_status` reflects any unscored holes.
+failed → tie; one failed → other wins; all-checks-passed booleans differ → decided by
+checks (rev 11 wording fix — arms passing disjoint check subsets are checks-equal and
+fall through, per §5.1's all-or-nothing rule); equal + no rubric → tie; equal +
+rubric → judge (§7.5). An `AgentRunError` or timeout is **retried once in a fresh
+sandbox** (rev 7 — an infra flake scored against the empty transcript is a spurious
+loss; `retried` is recorded on the arm sample); a second failure never aborts the
+matrix — the arm's row is scored against an empty transcript and `execution_status`
+reflects any unscored holes.
+
+Row bookkeeping (rev 11, documenting shipped behavior): `decided_by` ranges over
+`checks`, `checks-equal-no-judge`, `both-arms-failed`, `candidate-run-failed`,
+`opponent-run-failed`, and §7.5's judge outcomes (`judge`, `judge-split`,
+`judge-unparseable`, `judge-refused`). **`both-arms-failed` rows are the sole
+unscored-hole class** — a one-arm failure is a scored win/loss per the rule above.
+`execution_status` is `failed` when zero rows scored against a nonzero expectation,
+`complete` when the expectation is zero (so a triggers-only run is `complete` with a
+NEUTRAL verdict, not greyed). The receipt's `attribution` one-liner is derived
+deterministically: wins/losses are attributed to "execution checks" when at least
+half their rows were checks-decided, else to "judge calls"; all-ties renders
+"all comparisons tied".
 
 ### 7.2 Trigger evals
 
@@ -375,10 +402,21 @@ un-redacted for debugging; the boundary is *sharing*, not recording.
 
 ## 9. Hygiene tier (deep deterministic validation)
 
-`hygiene.ts`, run by `validate`, `share`, `publish`, and CI. Free, no LLM, exit-code
+`hygiene.ts`, run by `validate`, `share`, `publish`, **`sync`'s reconcile path**, and
+CI — this list is **authoritative** (rev 11; the integration plan points here rather
+than restating it): hygiene runs before *every* skill-content mutation of the team
+repo. On the sync path that means before the FIRST team-repo write for each changed
+skill — before `reconcileShared`'s managed-field `safeWrite` as well as the content
+mirror — and on failure that skill is skipped with no commit of any kind, the stored
+baseline not advanced, and the failure reported per skill. Free, no LLM, exit-code
 gated. Checks, all fail-closed:
 
-1. Frontmatter schema (existing zod strict parse) + folder-name/`name` match.
+1. Frontmatter schema (existing zod strict parse) + folder-name/`name` match. The
+   zod parse alone does NOT catch a malformed `allowed-tools`
+   (`'allowed-tools': z.unknown().optional()`), so this check also calls
+   `allowedTools()` and fails closed when `grants.ok === false`, emitting the same
+   line-numbered message `share` uses today (rev 11, absorbing register §B — closed
+   2026-09-06 — into hygiene as the single live path).
 2. Unicode trickery: bidi controls, zero-width characters, mixed-script confusables in
    SKILL.md and any bundled text file.
 3. Secret/PII scan: the §8 credential patterns + emails outside `metadata.author`.
@@ -477,7 +515,13 @@ surface.
   efficiency capture. *Exit:* a two-arm run on a real shared skill reproduces the §5c
   probe result shape; VE6 closed.
 - **ME4 — product surface.** `commands/eval.ts`, `--commit` receipts through
-  `safeWrite`, CI job, UI contract frozen (§12 published to Teddy).
+  `safeWrite`, CI job, UI contract frozen (§12 published to Teddy). The orchestrator
+  owns the library's open ends (rev 11): it derives `expected_rows` from the FULL
+  case list — skipped cases included, so environment skips actually grey the verdict
+  — plumbs `runCase().skipped` into `environment_skips`, populates
+  `arm_skill_lists`, wires the seeded RNG (seed 0) into `deps.rng`, and materializes
+  the incumbent tree (last receipted version, else `origin/main`'s prior state) —
+  none of which the library does on its own.
   *Exit:* one publish PR on a real team repo carrying a green receipt end-to-end.
 - **ME5 (deferred) — `eval-gen`**: model-authored cases/triggers with the four-bucket
   taxonomy, `# generated — review before trusting` header, check-kind whitelist.
@@ -541,3 +585,55 @@ skipped), **triggers** (errored selection call counts in neither tn nor fp),
     2026-09-04.)*
 17. D30 (rasterizer library) stays OPEN; `@resvg/resvg-js` is the researched
     recommendation to confirm at ME4+.
+
+## 17. Code-vs-spec divergence register (rev 11 — 2026-09-06 audit of the built library)
+
+A section-by-section comparison of this spec against the shipped `src/lib/evals/`
+modules (two independent read-only agents, spot-verified). The library matches the
+spec on every load-bearing semantic: §7.1 decide ordering, §7.3 contamination
+membership, the rev-7 fresh-sandbox retry, §7.5 double-ask/judge-split/escalation/
+refusal, the headless note, `model_id` capture, all six §5.1 check kinds, the §16.5
+sign test and verdict bands (0.219 VE5 value reproduces), arm-score aggregation,
+every §5.3 receipt field including `environment_skips`, and the §8 redaction list.
+The divergences below are **code defects or gaps — the spec stays normative**; fix
+them in the IE milestones rather than blessing them:
+
+1. **Malformed regex check arg crashes the run** — `checks.ts` builds
+   `new RegExp(arg)` unguarded for `command_matching`/`no_command_matching`, so a
+   case authored with a bad pattern throws out of `runChecks` and aborts the whole
+   case, violating §5.1's fail-never-error rule (unknown kinds and malformed specs
+   are guarded; regex args are not). Fix: wrap per-check execution, fail the check.
+2. **Trigger scoring is asymmetric on errored calls** — an errored selection call on
+   a should-trigger prompt counts as a routing miss (`fired !== true` → fn), while
+   errored near-misses count in neither fp nor tn (§7.2's intent is symmetric
+   exemption). Fix: exclude errored rows from fn as well, or retry once like arms.
+3. **The retry clobbers the failed attempt's transcript** — both attempts write the
+   same transcript path, so the flake recorded as `retried` leaves no inspectable
+   artifact (contradicts §4.2's post-hoc-inspection promise). Fix: suffix the failed
+   attempt's transcript.
+4. **Judge network failures mislabel as `judge-unparseable`** — infra errors share
+   the 3-attempt parse-escalation budget with no retry-with-backoff (§7.5 treats
+   them separately); the receipt cannot distinguish flake from unparseable model.
+5. **The judge's A/B ordering (`swapped`) is not recorded in the row** — §7.5 says
+   "recorded in the row"; `decide()` discards it and `ComparisonRow` has no field.
+6. **A non-A/B judge winner value becomes a `judge`-decided tie** — a malformed
+   `winner` (e.g. `"C"`) should take the §7.5 escalation path, not silently tie
+   with `decided_by: 'judge'`.
+7. **Contamination check silently skipped when the init event lacks `skills`** —
+   `skillList()` null disables the §7.3 assert and the run proceeds ungreyed with
+   `arm_skill_lists: null`. Fix: treat a null list on a staged arm as a preflight
+   failure (or grey the receipt).
+8. **A crashed agent with partial stdout is scored as a real arm** — nonzero exit
+   with non-empty stream-json parses and scores instead of raising `AgentRunError`,
+   so it never triggers the §7.1 retry.
+9. **A failing `setup` hook aborts the whole run, not the case** — the rejection
+   escapes `runCase` uncaught, contradicting §5.1's "nonzero rc aborts the case"
+   (and the code's own doc comment).
+
+Hardening notes (spec-silent behavior to revisit at ME4, not defects): `askJson`
+(judge + trigger calls) runs in the invoking process's cwd with
+`--setting-sources project`, so a `.claude/` in the runner's cwd is in scope for
+those calls — pin their cwd at ME4; sandboxes are anonymous `arm-*` temp dirs with
+no case/arm/rep mapping, and orphaned sandboxes accumulate on retry; `transcriptName()`
+is dead code disagreeing with the live path; a non-`AgentRunError` exception in the
+trigger sweep discards all prior rows.
