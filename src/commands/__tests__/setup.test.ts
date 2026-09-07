@@ -390,7 +390,7 @@ describe('setup (§6.1)', () => {
       'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.',
       'Creating a new team creates a private GitHub repository under your account.',
       'GitHub: gh is logged in.', 'Next, from any terminal:',
-      '  npx -y terum-skills@latest install \'alpha/<skill>\'   — install a shared skill (add @<version> to pin it)',
+      '  npx -y terum-skills@latest install alpha/<skill>   — install a shared skill (add @<version> to pin it)',
       '  npx -y terum-skills@latest ls [--local]             — list members and shared skills; --local lists your own',
       '  npx -y terum-skills@latest search <term>            — find a skill by name, description, or category',
       '  npx -y terum-skills@latest sync                     — pull updates and finish pending work',

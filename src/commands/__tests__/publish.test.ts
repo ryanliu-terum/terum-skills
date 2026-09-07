@@ -201,7 +201,7 @@ describe('publish (§6)', () => {
     const other = await bareTeam();
     await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
     const runner = mappedRunner(REMOTE, fixture.bare);
-    await expect(run({ ref: 'team/missing', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: `No skill team/missing in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} connect '<path-to-skill>' --team 'team'\`, then publish its name.` });
+    await expect(run({ ref: 'team/missing', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: `No skill team/missing in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} connect <path-to-skill> --team 'team'\`, then publish its name.` });
     await expect(run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('A bare skill ref is ambiguous across configured teams') });
     await expect(run({ ref: 'sample', team: 'team', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: true, value: { team: 'team' } });
   });
@@ -328,7 +328,7 @@ describe.each([undefined, 'bare'] as const)('publish local recovery hints (form=
     await store.update((c) => { c.shared['22222222-2222-4222-8222-222222222222'] = { source: tracked, team: 'other', baseline: 'sha256:0' }; });
     const runner = mappedRunner(REMOTE, fixture.bare);
     const before = await originSha(fixture.bare);
-    const generic = (ref: string) => `No skill ${ref} in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} connect '<path-to-skill>' --team 'team'\`, then publish its name.`;
+    const generic = (ref: string) => `No skill ${ref} in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} connect <path-to-skill> --team 'team'\`, then publish its name.`;
     for (const ref of ['missing', 'gsd-x', 'mine']) await expect(run({ form, ref, home, config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: generic(ref) });
     expect(await originSha(fixture.bare)).toBe(before);
   });

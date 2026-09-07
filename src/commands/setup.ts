@@ -194,7 +194,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       steps.actions = result.value !== undefined && (!('kind' in result.value) || result.value.shared.length > 0) ? 'done' : 'skipped';
     } else steps.actions = 'skipped';
     say('Next, from any terminal:');
-    say(`  ${invocation(args.form, 'install', `${teamName}/<skill>`)}   — install a shared skill (add @<version> to pin it)`);
+    say(`  ${invocation(args.form, 'install', { raw: `${teamName}/<skill>` })}   — install a shared skill (add @<version> to pin it)`);
     say(`  ${invocation(args.form, 'ls [--local]')}             — list members and shared skills; --local lists your own`);
     say(`  ${invocation(args.form, 'search <term>')}            — find a skill by name, description, or category`);
     say(`  ${invocation(args.form, 'sync')}                     — pull updates and finish pending work`);

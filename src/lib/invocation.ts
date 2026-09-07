@@ -42,9 +42,11 @@ function isAbsent(error: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
-/** Undefined form defaults to npx. Arguments use POSIX quoting, not cmd.exe syntax. */
-export function invocation(form: InvocationForm | undefined, verb: string, ...args: string[]): string {
-  return [form === 'bare' ? 'terum-skills' : NPX_PREFIX, verb, ...args.map(shellQuote)].join(' ');
+/** A placeholder the user replaces (`[<path>]`, `<team>/<skill>`): rendered as written, never quoted. */
+export interface RawFragment { raw: string; }
+/** Undefined form defaults to npx. String arguments are real values and use POSIX quoting (not cmd.exe syntax); a RawFragment is a placeholder and stays unquoted. */
+export function invocation(form: InvocationForm | undefined, verb: string, ...args: (string | RawFragment)[]): string {
+  return [form === 'bare' ? 'terum-skills' : NPX_PREFIX, verb, ...args.map((arg) => typeof arg === 'string' ? shellQuote(arg) : arg.raw)].join(' ');
 }
 
 /** Shared onboarding copy for a successful query that found no configured teams. */

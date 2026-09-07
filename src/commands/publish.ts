@@ -228,5 +228,5 @@ async function notInTeam(args: PublishArgs, config: Config, team: string, name: 
   if (found.length) {
     return found.map(({ path, scope }) => `No skill ${args.ref} in team ${team}. Found a local folder at ${path}${found.length > 1 ? ` (${scope})` : ''} that is not tracked as a connected source or placement on this machine. To connect it to ${team}, run \`${invocation(args.form, 'connect', path) + teamOption}\`, then retry \`${retry}\`.`).join('\n') + note;
   }
-  return `No skill ${args.ref} in team ${team}. Run \`${invocation(args.form, 'ls') + teamOption}\` to check the team's skill names. To add a local skill, run \`${invocation(args.form, 'connect', '<path-to-skill>')} --team ${shellQuote(team)}\`, then publish its name.${note}`;
+  return `No skill ${args.ref} in team ${team}. Run \`${invocation(args.form, 'ls') + teamOption}\` to check the team's skill names. To add a local skill, run \`${invocation(args.form, 'connect', { raw: '<path-to-skill>' })} --team ${shellQuote(team)}\`, then publish its name.${note}`;
 }

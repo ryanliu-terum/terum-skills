@@ -33,6 +33,6 @@ it.each([undefined, 'bare'] as const)('routes help and refusal text with form=%s
   await program.parseAsync(['share'], { from: 'user' });
   expect(errors).toEqual([
     `To remove a skill, use \`${prefix} uninstall-skill <ref>\`.`,
-    `\`share\` is now \`connect\`: run \`${prefix} connect '[<path>]'\` (same options: --team, --allow-privileged, --keep-source, --keep-repo, --relocate, --forget).`,
+    `\`share\` is now \`connect\`: run \`${prefix} connect [<path>]\` (same options: --team, --allow-privileged, --keep-source, --keep-repo, --relocate, --forget).`,
   ]);
 });

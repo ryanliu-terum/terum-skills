@@ -294,7 +294,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/lib/invocation.ts",
     "line": 38,
     "policy": "routed",
-    "pattern": "return [form === 'bare' ? 'terum-skills' : NPX_PREFIX, verb, ...args.map(shellQuote)].join(' ');"
+    "pattern": "return [form === 'bare' ? 'terum-skills' : NPX_PREFIX, verb, ...args.map((arg) => typeof arg === 'string' ? shellQuote(arg) : arg.raw)].join(' ');"
   },
   {
     "file": "src/lib/launch.ts",

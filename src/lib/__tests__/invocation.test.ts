@@ -54,4 +54,8 @@ describe('runtime hint evidence (independent of provenance)', () => {
       expect(invocation(form, 'connect', "it's here")).toBe(`${prefix} connect 'it'\\''s here'`);
     }
   });
+  it('leaves a raw placeholder fragment unquoted while quoting the real value beside it', () => {
+    expect(invocation(undefined, 'connect', { raw: '[<path>]' }, 'Te am')).toBe("npx -y terum-skills@latest connect [<path>] 'Te am'");
+    expect(invocation('bare', 'install', { raw: 'alpha/<skill>' })).toBe('terum-skills install alpha/<skill>');
+  });
 });
