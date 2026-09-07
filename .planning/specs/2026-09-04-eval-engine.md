@@ -1,6 +1,6 @@
 # terum-skills eval engine — build spec
 
-**Status:** DRAFT (rev 12, 2026-09-06; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe; rev 7 = variance reducers, same probe: §7.5 judge double-asked in both orderings with disagreement → `judge-split` tie, §7.1 headless note appended to every arm + one arm retry in a fresh sandbox + `model_id` snapshot recorded per arm; rev 8 = `requires` host-tool declarations with environment-skip semantics (option 1, Ajay 2026-09-06): missing tools skip the case as visible unscored holes + `environment_skips` receipt field, CI runner canonical for gating; rev 9 = sixth check kind `command_succeeds` for deterministic script verifiers, SkillsBench-style; rev 10 = §11 rewritten (Ryan, 2026-09-06 walk D2): CI never runs a model or holds an API key — the eval job and its `ANTHROPIC_API_KEY` repo secret are removed, the publish gate becomes a deterministic receipt check, and rev 8's "CI runner canonical for gating" clause is superseded — gating receipts are produced locally, with `environment_skips` greying verdicts as before; rev 11 = code-vs-spec reconciliation against the built library (Ryan, 2026-09-06): §9 caller list gains `sync`'s reconcile path and the malformed-`allowed-tools` check — finding 6 upheld, register §B absorbed — §5.1/§7.1 absorb shipped semantics (case-insensitive `transcript_mentions`, sandbox-escape containment, `command_succeeds` shell/timeout, all-checks-passed comparison wording, `decided_by` vocabulary, `execution_status` conditions, attribution derivation, 30s probe cap), ME4 gains the orchestrator's open-ends contract, and the new §17 registers nine code defects + hardening notes from the audit — the spec stays normative, the code gets fixed at IE time; rev 12 = §9 predicates frozen (audit finding 19, applied on Ryan's continue): pure `inspectHygiene` API, scanned-input rule (share's `sourceFiles` map, UTF-8/no-NUL text test), and the HYG1–HYG6 table with exact code points, the mixed-script token algorithm, the extension allowlist, SPDX-normalized license compare, and the 20,000-char cap — the [provisional cap] marker resolved as a veto-cheap default) — written under a partial lift of the phase-3 spec
+**Status:** DRAFT (rev 13, 2026-09-07; rev 2–3 = §12 card slots reshuffled: efficiency promoted to the card, attribution moved one click deeper; rev 4 = verified badge tier scrapped entirely; rev 5 = receipts append-only, one immutable file per committed run — all Ajay; rev 6 = §7.3 contamination check asserts membership not equality + VE1 closed + §5.1 authoring rule, from the 2026-09-04 determinism probe; rev 7 = variance reducers, same probe: §7.5 judge double-asked in both orderings with disagreement → `judge-split` tie, §7.1 headless note appended to every arm + one arm retry in a fresh sandbox + `model_id` snapshot recorded per arm; rev 8 = `requires` host-tool declarations with environment-skip semantics (option 1, Ajay 2026-09-06): missing tools skip the case as visible unscored holes + `environment_skips` receipt field, CI runner canonical for gating; rev 9 = sixth check kind `command_succeeds` for deterministic script verifiers, SkillsBench-style; rev 10 = §11 rewritten (Ryan, 2026-09-06 walk D2): CI never runs a model or holds an API key — the eval job and its `ANTHROPIC_API_KEY` repo secret are removed, the publish gate becomes a deterministic receipt check, and rev 8's "CI runner canonical for gating" clause is superseded — gating receipts are produced locally, with `environment_skips` greying verdicts as before; rev 11 = code-vs-spec reconciliation against the built library (Ryan, 2026-09-06): §9 caller list gains `sync`'s reconcile path and the malformed-`allowed-tools` check — finding 6 upheld, register §B absorbed — §5.1/§7.1 absorb shipped semantics (case-insensitive `transcript_mentions`, sandbox-escape containment, `command_succeeds` shell/timeout, all-checks-passed comparison wording, `decided_by` vocabulary, `execution_status` conditions, attribution derivation, 30s probe cap), ME4 gains the orchestrator's open-ends contract, and the new §17 registers nine code defects + hardening notes from the audit — the spec stays normative, the code gets fixed at IE time; rev 12 = §9 predicates frozen (audit finding 19, applied on Ryan's continue): pure `inspectHygiene` API, scanned-input rule (share's `sourceFiles` map, UTF-8/no-NUL text test), and the HYG1–HYG6 table with exact code points, the mixed-script token algorithm, the extension allowlist, SPDX-normalized license compare, and the 20,000-char cap — the [provisional cap] marker resolved as a veto-cheap default; rev 13 = round-3 audit fixes + 2026-09-07 walk (Ryan): §9's frozen input gains `executable: ReadonlySet<string>` — HYG4's exec-bit clause was unimplementable against a bare `Map<string, Buffer>` — HYG2 becomes single-script-per-token (walk D1, superseding the self-contradicting wording), HYG3's email matcher/normalization/author-extraction/RFC-2606 exemption written out, §6.1+§11's publish receipt predicate fixed to require not-FAIL and permit first publication with a deterministic incumbent rule (walk D2), and §8 redaction re-worded off the retired `teams.<team>.token` field) — written under a partial lift of the phase-3 spec
 gate (Ajay, in-session 2026-09-04: "we're on a time crunch … just do as much as you can";
 the override did not record in Terum — receipt rejected — so the shared ledger still
 shows the gate standing). Items that genuinely need published-skill experience are marked
@@ -286,7 +286,7 @@ row (append-only — an existing receipt path is never rewritten). It never touc
 |---|---|
 | `share` | No eval requirement. Hygiene tier must pass (extends phase-1 V5 gate). |
 | `sync` (reconcile of edited shared sources) | No eval requirement. Hygiene must pass per changed skill before the first team-repo write (§9) — a secret pasted into an already-shared skill never reaches the repo. |
-| `publish` PR | The PR must carry a **locally-produced committed receipt** at the skill's current version whose candidate-vs-**incumbent** comparison is not FAIL (regression gate); CI verifies the receipt deterministically (§11, rev 10) and runs no evals of its own. |
+| `publish` PR | The PR must carry a current, schema-valid **locally-produced committed receipt** at the skill's exact tree-hash version. If the receipt carries a candidate-vs-**incumbent** comparison, it must be **not FAIL** (regression gate). If it carries none, CI verifies **no prior version of the skill exists** (no earlier receipted tree-hash for its id, and no prior `skills/<name>/` tree on `origin/main`) and the first publish proceeds (rev 13, walk D2 — the earlier wording blocked every first publish and never tested FAIL). CI verifies the receipt deterministically (§11) and runs no evals of its own. Incumbent rule **[default — veto cheap]**: incumbent = the most recent receipted tree-hash for the skill id, by run-id order, excluding the candidate's own hash; none → the first-publish path. |
 
 There is no tier above `publish` — the verified badge was scrapped (rev 4, Ajay). The
 sign test is decoration at k=3 (a 3/3 sweep is p = 0.25 two-sided — it cannot gate);
@@ -395,8 +395,10 @@ suricata lesson) are a documented failure mode: the row becomes a tie with
 ## 8. Secret redaction
 
 Before any content leaves the machine (receipt fields today; any future shared evidence)
-it passes `redact()`: every token stored in `config.teams[*].token`, plus standard
-credential patterns (`ghp_…`, `github_pat_…`, `sk-ant-…`, `AKIA…`, PEM blocks,
+it passes `redact()`: every caller-supplied secret string passed to
+`redact(text, secrets)` (phase-1 rev 9 retired `teams.<team>.token`, Decision 2 —
+there is no configured team token, so the array is empty today and exists for
+values the caller already holds), plus standard credential patterns (`ghp_…`, `github_pat_…`, `sk-ant-…`, `AKIA…`, PEM blocks,
 `Bearer <jwt>`), replaced with `[redacted]`. Transcripts and run trees stay local and
 un-redacted for debugging; the boundary is *sharing*, not recording.
 
@@ -412,11 +414,17 @@ baseline not advanced, and the failure reported per skill. Free, no LLM, exit-co
 gated.
 
 **API (rev 12 — the predicates frozen; pure, per §3 and ME1):**
-`inspectHygiene(input: { name, frontmatter, files: Map<string, Buffer>, policy: { skill_license } }): HygieneFinding[]`
+`inspectHygiene(input: { name, frontmatter, files: Map<string, Buffer>, executable: ReadonlySet<string>, policy: { skill_license } }): HygieneFinding[]`
 where `HygieneFinding = { code, path, line?, message }`. No I/O, no subprocess; an
 empty array is a pass, any finding is a fail (fail-closed), and callers gate on
-array length. **Scanned input:** exactly the file map `share`'s `sourceFiles`
-builds — hygiene never walks the disk itself. Symlinks cannot occur in the map
+array length. **Scanned input:** the caller supplies both structures — hygiene
+never walks the disk itself (rev 13). `share`/`sync` build the map from
+`sourceFiles` and the `executable` set from a `stat` of each entry at read time
+(`executable` holds the subset of `files` keys whose source mode has any of
+`0o111` set); `validate`/`publish`/CI build them from an `lstat` of the resolved
+skill directory or the clone-resident `skills/<name>/` tree (Git entry mode
+`100755` → in the set, `100644` → not). A caller that cannot observe modes (none
+today) passes an empty set — a pass, not a skip. Symlinks cannot occur in the map
 (`assertSkillDirectory` refuses them tree-wide before any share); hygiene asserts
 that invariant rather than re-implementing it. A file is **text** iff its content
 decodes as UTF-8 with no NUL byte in the first 8 KiB; non-text files are subject
@@ -425,9 +433,9 @@ only to HYG4. Every finding carries a stable code:
 | Code | Predicate (exact) |
 |---|---|
 | HYG1 | Frontmatter fails the strict zod parse, or folder name ≠ `name`, or `allowedTools(frontmatter['allowed-tools'])` returns `grants.ok === false` (the zod parse alone cannot catch it — `'allowed-tools': z.unknown().optional()`); emits the same line-numbered message `share` uses today (rev 11, absorbing register §B — closed 2026-09-06 — into hygiene as the single live path). |
-| HYG2 | Any text file contains a bidi control (U+202A–U+202E, U+2066–U+2069) or zero-width character (U+200B–U+200D, U+2060, U+FEFF); or any whitespace-delimited token mixes scripts — per token, using the Unicode Script property: ASCII plus **at most one** non-Latin script is allowed, two or more non-Latin scripts (or Latin homoglyph mixes like Cyrillic-in-Latin) fail **[default — veto cheap]**. |
-| HYG3 | Any text file matches a §8 `CREDENTIAL_PATTERNS` regex (exported from `receipt.ts` as a named API — the single definition), or contains an email address whose value is not byte-equal to `metadata.author`'s email (the only exemption). |
-| HYG4 | Any file has the exec bit set, or opens with `#!`, or has an extension outside the allowlist — `.md .txt .json .yaml .yml .csv .toml .xml .html .css .js .ts .py .sh .sql .svg .png .jpg .jpeg .gif .webp .pdf` **[default — veto cheap]** — with `.sh`/`.js`/`.ts`/`.py` allowed as *content* but still failing on exec bit or shebang (executable form is the signal, not the language). Pairs with (does not replace) `share`'s `hasPrivilegedContent` gate for `.claude-plugin/` and hooks. |
+| HYG2 | Any text file contains a bidi control (U+202A–U+202E, U+2066–U+2069) or zero-width character (U+200B–U+200D, U+2060, U+FEFF); or any whitespace-delimited token mixes scripts — per token, using the Unicode Script property, **all letters must share one script** (Common/Inherited — digits, punctuation, symbols — always permitted). Whole-word alternation between scripts is fine; a single token mixing two scripts (the Cyrillic-in-Latin homoglyph shape) fails. (Rev 13, walk D1 2026-09-07 — supersedes the self-contradicting "ASCII plus one non-Latin script" wording.) |
+| HYG3 | Any text file matches a §8 `CREDENTIAL_PATTERNS` regex (exported from `receipt.ts` as a named API — the single definition), or contains an email address that is not the author's own. Email matcher (rev 13): `/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g`, with leading/trailing punctuation (`.` `,` `>` `)` etc.) not consumed by the token boundary; ASCII-only — non-ASCII local parts and Unicode/punycode domains are out of scope **[default — veto cheap]**. Comparison: domain ASCII-lowercased on both sides, local part compared case-sensitively. The exempt value is the text inside `metadata.author`'s angle brackets (`"Name <email>"`, phase-1 §5.4); an author field with no angle brackets exempts nothing. RFC-2606 placeholder domains (`example.com`, `example.org`, `example.net`, `*.invalid`, `*.test`) are also exempt **[default — veto cheap]**. |
+| HYG4 | Any file whose path is in `executable` (the caller-supplied mode set — rev 13; the exec-bit clause was unimplementable against a bare `Map<string, Buffer>`), or that opens with `#!`, or has an extension outside the allowlist — `.md .txt .json .yaml .yml .csv .toml .xml .html .css .js .ts .py .sh .sql .svg .png .jpg .jpeg .gif .webp .pdf` **[default — veto cheap]** — with `.sh`/`.js`/`.ts`/`.py` allowed as *content* but still failing on exec bit or shebang (executable form is the signal, not the language). Pairs with (does not replace) `share`'s `hasPrivilegedContent` gate for `.claude-plugin/` and hooks. |
 | HYG5 | After normalization (trim, case-fold, SPDX identifier compare), frontmatter `license`, `policy.skill_license`, and any bundled `LICENSE*` file's detected identifier are not all equal — any pairwise conflict fails. |
 | HYG6 | SKILL.md exceeds **20,000 characters** (~5k tokens at 4 chars/token — the counting method; resolves the former [provisional cap] as a veto-cheap default), or `description` is empty/whitespace. |
 
@@ -453,10 +461,11 @@ deterministic jobs:
 
 - **Hygiene** — blocking, key-free: on PRs touching `skills/**`, `terum-skills
   validate` per changed skill (§9).
-- **Receipt check [default — veto cheap]** — on `publish/`-prefixed PRs, verify a
-  committed receipt exists for the endorsed skill at its current tree-hash version,
-  parses against `receiptSchema`, and includes a candidate-vs-incumbent comparison;
-  missing or stale receipt blocks (§6.1's regression gate, in evidence form). The
+- **Receipt check [default — veto cheap]** — on `publish/`-prefixed PRs, the §6.1
+  publish-PR predicate, verified deterministically (rev 13): a schema-valid
+  committed receipt at the skill's exact tree-hash version; an incumbent comparison,
+  when present, must be not-FAIL; when absent, CI verifies no prior version exists
+  and allows the first publish. Missing, stale, or FAIL-carrying receipt blocks. The
   receipt is produced locally by the publisher; CI validates evidence, it never
   generates it.
 
@@ -495,7 +504,7 @@ surface.
 - **VE3 (new):** guard row g adversarial suite: non-UUID dir, 39/41-char hash, receipt
   for a nonexistent id, receipt write under action `share`, path traversal inside
   `evals/`, malformed run-id filename, overwrite of an existing receipt path.
-- **VE4 (new):** redaction: plant a team token + `ghp_` + PEM in a judge reason; assert
+- **VE4 (new):** redaction: plant `ghp_` + a PEM block + a `/`-bearing secret-like value passed through `secrets` in a judge reason; assert
   the committed receipt carries none.
 - **VE5 (new):** stats property tests: `sign_test(0,0)=1`, symmetry, known values
   (5W/1L → 0.219); net-lift tie handling.
@@ -597,7 +606,9 @@ spec on every load-bearing semantic: §7.1 decide ordering, §7.3 contamination
 membership, the rev-7 fresh-sandbox retry, §7.5 double-ask/judge-split/escalation/
 refusal, the headless note, `model_id` capture, all six §5.1 check kinds, the §16.5
 sign test and verdict bands (0.219 VE5 value reproduces), arm-score aggregation,
-every §5.3 receipt field including `environment_skips`, and the §8 redaction list.
+every §5.3 receipt field including `environment_skips`, and the §8 redaction list
+(`redact`/`buildReceipt` retain the optional `secrets` parameter with no configured
+source — a hook for caller-held values, not a defect; do not re-open it).
 The divergences below are **code defects or gaps — the spec stays normative**; fix
 them in the IE milestones rather than blessing them:
 
