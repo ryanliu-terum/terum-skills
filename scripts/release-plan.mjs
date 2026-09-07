@@ -3,8 +3,14 @@
 // CI-only; not product code. The CLI never touches the registry (AGENTS.md:30); this runs on the git host's
 // compute, which the build spec's North Star allows (§1 :14). No dependencies; Node >= 22.
 //
-//   --plan --version V --sha SHA [--github-output]       one row of the recovery table (see investigation §R.3)
-//   --verify-publication --version V --sha SHA [--integrity I]   bounded poll until the registry serves V with I + provenance
+//   --plan --version V --sha SHA [--dist-tag T] [--github-output]   one row of the recovery table (see investigation §R.3)
+//     T is the npm dist-tag a publish would use (default latest; a stable version older than the newest published
+//     stable is refused under latest — pass another tag to backfill; prereleases use next unless T overrides it)
+//   --verify-publication --version V --sha SHA [--integrity I]   bounded poll until the registry serves V with I, gitHead SHA + provenance
+//
+// Source evidence: only a registry gitHead or sourceCommit equal to the dispatched commit proves where a published
+// tarball came from. A provenance attestation is advisory: it proves a trusted workflow built the tarball, not which
+// commit it built. The build job stamps gitHead into the packed manifest so every workflow publication carries it.
 //   --drift                                              audit every tag/registry/Release pair; exit 1 on drift, 2 on observation error
 //   --observations FILE                                  hermetic mode: read the world from JSON (tests); no git/npm/gh is spawned
 //
@@ -38,7 +44,7 @@ export function compare(a, b) {
   return 0;
 }
 
-function args() { const out = {}; const a = process.argv.slice(2); for (let i = 0; i < a.length; i++) { if (a[i].startsWith('--')) { const k = a[i].slice(2); const v = a[i + 1] && !a[i + 1].startsWith('--') ? a[++i] : true; out[k] = v; } } return out; }
+function args() { const out = {}; const a = process.argv.slice(2); for (let i = 0; i < a.length; i++) { if (a[i].startsWith('--')) { const k = a[i].slice(2); const v = a[i + 1] !== undefined && !a[i + 1].startsWith('--') ? a[++i] : true; out[k] = v; } } return out; }
 const sh = (cmd, argv, opts = {}) => execFileSync(cmd, argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000, ...opts });
 
 function observeLive() {
@@ -66,26 +72,29 @@ function sourceEvidence(pub, commit) {
   if (!pub) return 'absent';
   if (pub.sourceCommit) return pub.sourceCommit === commit ? 'verified' : 'mismatch';
   if (pub.gitHead) return pub.gitHead === commit ? 'verified' : 'mismatch';
-  if (pub.attestations) return 'verified'; // provenance exists; its subject is checked by npm at publish, the digest by --verify-publication
-  return 'unverified';
+  return 'unverified'; // an attestation alone is advisory (Codex review of #18, ruling 2026-09-07): it names a builder, not this commit
 }
+const advisory = (pub) => (pub.attestations ? ' (a provenance attestation is present; that is advisory, not source evidence)' : '');
+const DIST_TAG = /^[A-Za-z][A-Za-z0-9._-]*$/; // npm also rejects anything readable as a semver range, e.g. v1 or 1.x
 
-export function plan(obs, { version, sha }) {
+export function plan(obs, { version, sha, distTag = 'latest' }) {
   const out = { state: 'refuse', reason: '', version, tag: `v${version}`, prerelease: 'false', dist_tag: 'latest', previous_tag: '', mark_latest: 'false' };
   const done = (state, reason) => ({ ...out, state, reason: sanitize(reason) });
   if (!SEMVER.test(version)) return done('refuse', `${version} is not strict SemVer`);
   if (!SHA40.test(sha)) return done('refuse', `sha ${sha} is not a full 40-hex commit`);
+  if (!DIST_TAG.test(distTag) || /^v\d/i.test(distTag)) return done('refuse', `dist_tag ${distTag} is not a valid npm dist-tag (letters, digits, . _ -; not a version or range)`);
   if (obs.package.name !== PACKAGE) return done('refuse', `package.json names ${obs.package.name}, not ${PACKAGE}`);
   if (obs.package.version !== version) return done('refuse', `package.json at ${sha} says ${obs.package.version}, dispatch says ${version}`);
   if (obs.registry.error) return done('observation-error', `registry: ${obs.registry.error}`);
   if (obs.releases.error) return done('observation-error', `releases: ${obs.releases.error}`);
   const pre = Boolean(parse(version).pre);
-  out.prerelease = String(pre); out.dist_tag = pre ? 'next' : 'latest';
+  out.prerelease = String(pre); out.dist_tag = pre && distTag === 'latest' ? 'next' : distTag;
   const stableTags = obs.tags.map((t) => t.name).filter((n) => /^v/.test(n) && SEMVER.test(n.slice(1)) && !parse(n.slice(1)).pre).map((n) => n.slice(1));
   const older = stableTags.filter((v) => compare(v, version) < 0).sort(compare);
   out.previous_tag = older.length ? `v${older.at(-1)}` : '';
   const publishedStable = Object.keys(obs.registry.versions).filter((v) => !parse(v)?.pre);
-  out.mark_latest = String(!pre && publishedStable.every((v) => compare(v, version) <= 0));
+  const newerStable = publishedStable.filter((v) => compare(v, version) > 0).sort(compare);
+  out.mark_latest = String(!pre && newerStable.length === 0);
   const tag = obs.tags.find((t) => t.name === out.tag);
   const pub = obs.registry.versions[version];
   const rel = obs.releases.find((r) => r.tag === out.tag);
@@ -93,11 +102,12 @@ export function plan(obs, { version, sha }) {
   if (pub) {
     const ev = sourceEvidence(pub, sha);
     if (ev === 'mismatch') return done('refuse', `${version} is on npm from ${pub.sourceCommit ?? pub.gitHead}, not ${sha}`);
-    if (ev === 'unverified' && !LEGACY[version]) return done('refuse', `${version} is on npm without provenance or gitHead linking it to ${sha}; tagging it is an incident decision, not a workflow action`);
+    if (ev === 'unverified' && !LEGACY[version]) return done('refuse', `${version} is on npm without a gitHead or sourceCommit linking it to ${sha}${advisory(pub)}; tagging it is an incident decision, not a workflow action`);
     if (!tag) return done('tag-only', `${version} is on npm (integrity ${pub.integrity}) but ${out.tag} is missing; tag ${sha}`);
     if (!rel) return done('release-only', `${out.tag} and npm ${version} agree; GitHub Release missing`);
     return done('noop', `${version} is published, tagged at ${sha}, and released; nothing to do`);
   }
+  if (!pre && distTag === 'latest' && newerStable.length) return done('refuse', `${version} is older than published stable ${newerStable.at(-1)}; publishing it under latest would move the channel backwards. Re-dispatch with dist_tag set to another tag (for example previous) to backfill it`);
   if (tag) return { ...done('publish', `${out.tag} exists at ${sha} but ${version} is not on npm (false advertisement); retrying the original candidate`), recovery: 'true' };
   return { ...done('publish', `${version} is new: publish, verify, tag, release`), recovery: 'false' };
 }
@@ -120,7 +130,7 @@ export function drift(obs) {
     if (legacy && (legacy.tag !== t.name || legacy.commit !== t.commit)) failures.push(`source-mismatch ${t.name}: legacy record expects ${legacy.commit}`);
     const ev = sourceEvidence(pub, t.commit);
     if (ev === 'mismatch') failures.push(`source-mismatch ${t.name}: npm says ${pub.sourceCommit ?? pub.gitHead}, tag says ${t.commit}`);
-    else if (ev === 'unverified') (legacy ? info : failures).push(`${legacy ? 'source-unverified-legacy' : 'source-unverified'} ${t.name}${legacy ? ` (${legacy.reason})` : ''}`);
+    else if (ev === 'unverified') (legacy ? info : failures).push(`${legacy ? 'source-unverified-legacy' : 'source-unverified'} ${t.name}${legacy ? ` (${legacy.reason})` : advisory(pub)}`);
     if (!obs.releases.some((r) => r.tag === t.name)) failures.push(`release-missing ${t.name}`);
   }
   for (const v of Object.keys(obs.registry.versions)) if (!canonical.some((t) => t.version === v)) failures.push(`published-untagged ${v}`);
@@ -145,6 +155,7 @@ async function verifyPublication(obs0, { version, sha, integrity }, observe) {
       if (!pub) last = `${version} not served yet`;
       else if (integrity && pub.integrity !== integrity) return { ok: false, reason: `integrity ${pub.integrity} != packed ${integrity}` };
       else if (sourceEvidence(pub, sha) === 'mismatch') return { ok: false, reason: `source ${pub.sourceCommit ?? pub.gitHead} != ${sha}` };
+      else if (sourceEvidence(pub, sha) === 'unverified' && !LEGACY[version]) return { ok: false, reason: `${version} is served without a gitHead or sourceCommit equal to ${sha}${advisory(pub)}` };
       else if (!pub.attestations && !LEGACY[version]) last = `${version} served without a provenance attestation`;
       else return { ok: true, reason: `${version} served: integrity ${pub.integrity}, provenance ${pub.attestations}, gitHead ${pub.gitHead ?? 'absent'}` };
     }
@@ -160,7 +171,7 @@ const observe = a.observations ? () => {
   return Array.isArray(observations) ? observations[Math.min(observationIndex++, observations.length - 1)] : observations;
 } : observeLive;
 if (a.plan) {
-  const result = plan(observe(), { version: String(a.version), sha: String(a.sha) });
+  const result = plan(observe(), { version: String(a.version), sha: String(a.sha), distTag: a['dist-tag'] !== undefined ? String(a['dist-tag']) : 'latest' });
   const lines = Object.entries(result).map(([k, v]) => `${k}=${v}`);
   process.stdout.write(lines.join('\n') + '\n');
   process.exitCode = result.state === 'refuse' || result.state === 'observation-error' ? 1 : 0;

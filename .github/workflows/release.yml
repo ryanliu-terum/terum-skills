@@ -3,7 +3,9 @@ name: Release
 # terum-skills release: ONE explicit dispatch per intentional release, on main, for a named version at a
 # named merged commit. Order: validate → build/test/pack (read-only) → publish + verify (npm environment,
 # OIDC) → tag + GitHub Release (contents: write) → audit. The tag is created only after the registry
-# serves the exact bytes we packed, with a provenance attestation. Nothing here bumps versions.
+# serves the exact bytes we packed, with a gitHead equal to the dispatched commit and a provenance attestation.
+# The attestation is advisory (it names the builder, not the commit); the digest and gitHead are the gates.
+# Nothing here bumps versions.
 #
 # Recovery: re-dispatch with the SAME expected_version and expected_sha; scripts/release-plan.mjs
 # decides which of publish / tag / release is still missing (see its recovery table) and the jobs skip
@@ -29,6 +31,11 @@ on:
         description: 'Gates + pack + smoke only. No publish, no tag, no Release.'
         type: boolean
         default: true
+      dist_tag:
+        description: 'npm dist-tag to publish under. latest (default) is refused for a stable version older than the newest published stable; pass another tag (e.g. previous) to backfill. Prereleases publish under next unless this overrides it.'
+        required: false
+        type: string
+        default: latest
 
 permissions: {}
 
@@ -93,7 +100,8 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           SHA: ${{ github.sha }}
           DRY_RUN: ${{ inputs.dry_run }}
-        run: node scripts/release-plan.mjs --plan --version "$EXPECTED_VERSION" --sha "$SHA" --github-output >> "$GITHUB_OUTPUT"
+          DIST_TAG: ${{ inputs.dist_tag }}
+        run: node scripts/release-plan.mjs --plan --version "$EXPECTED_VERSION" --sha "$SHA" --dist-tag "${DIST_TAG:-latest}" --github-output >> "$GITHUB_OUTPUT"
       - name: Report the plan
         env:
           STATE: ${{ steps.plan.outputs.state }}
@@ -129,10 +137,17 @@ jobs:
       - run: npm test
       - id: pack
         name: Pack once (prepack builds dist/) and retain the digest
+        env:
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           mkdir -p release
+          # npm records gitHead only when publishing from a directory with a real .git; a tarball publish would
+          # leave the registry with no commit link. Stamp it into the packed manifest (uncommitted) so the registry
+          # carries the source evidence that release-plan.mjs and the drift audit require.
+          npm pkg set "gitHead=$SHA"
           npm pack --json --pack-destination release > release/pack.json
+          git checkout -- package.json
           # shellcheck disable=SC2016 # the single-quoted block is JavaScript handed to node -e, not shell
           node -e '
             const [p] = JSON.parse(require("fs").readFileSync("release/pack.json","utf8"));
@@ -188,8 +203,9 @@ jobs:
           DIST_TAG: ${{ needs.validate.outputs.dist_tag }}
         # If the first real run shows no attestation for a tarball spec, switch to `npm publish --provenance`
         # from a checkout at github.sha in this job and keep the integrity comparison below as the artifact check.
+        # DIST_TAG comes from the validated dispatch input (latest is refused for an out-of-order stable).
         run: npm publish "./release/$FILENAME" --provenance --access public --tag "$DIST_TAG"
-      - name: Verify the registry serves these bytes, with provenance
+      - name: Verify the registry serves these bytes, from this commit, with provenance
         env:
           V: ${{ needs.validate.outputs.version }}
           EXPECTED_INTEGRITY: ${{ needs.build.outputs.integrity }}
