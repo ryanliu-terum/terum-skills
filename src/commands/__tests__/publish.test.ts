@@ -201,7 +201,7 @@ describe('publish (§6)', () => {
     const other = await bareTeam();
     await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
     const runner = mappedRunner(REMOTE, fixture.bare);
-    await expect(run({ ref: 'team/missing', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: `No skill team/missing in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} share '<path-to-skill>' --team 'team'\`, then publish its name.` });
+    await expect(run({ ref: 'team/missing', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: `No skill team/missing in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} connect '<path-to-skill>' --team 'team'\`, then publish its name.` });
     await expect(run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('A bare skill ref is ambiguous across configured teams') });
     await expect(run({ ref: 'sample', team: 'team', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: true, value: { team: 'team' } });
   });
@@ -302,7 +302,7 @@ describe('publish (§6)', () => {
 
 
 describe('publish local recovery hints', () => {
-  it('a miss with an untracked local folder names the absolute share and retry commands with --team, and writes nothing', async () => {
+  it('a miss with an untracked local folder names the absolute connect and retry commands with --team, and writes nothing', async () => {
     const { fixture, store } = await prepared();
     const home = join(fixture.root, 'home with space');
     const local = await localSkill(home, 'local');
@@ -311,7 +311,7 @@ describe('publish local recovery hints', () => {
     const sourceBefore = await readFile(join(local, 'SKILL.md'), 'utf8');
     const io = new ScriptedPrompter([], [], true);
     await expect(run({ ref: 'local', home, project: 'p', config: store, runner }, io)).resolves.toMatchObject({ ok: false,
-      error: `No skill local in team team. Found a local folder at ${local} that is not tracked as a shared source or placement on this machine. To share it with team, run \`${V} share '${local}' --team 'team'\`, then retry \`${V} publish 'local' --team 'team' --project 'p'\`.` });
+      error: `No skill local in team team. Found a local folder at ${local} that is not tracked as a connected source or placement on this machine. To connect it to team, run \`${V} connect '${local}' --team 'team'\`, then retry \`${V} publish 'local' --team 'team' --project 'p'\`.` });
     expect(io.asked).toEqual([]);
     expect(await readFile(join(local, 'SKILL.md'), 'utf8')).toBe(sourceBefore);
     expect((await store.read()).shared).toEqual({});
@@ -319,7 +319,7 @@ describe('publish local recovery hints', () => {
     expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
   });
 
-  it('a miss with no candidate — no folder, a name-mismatched folder, a tracked source — gets the ls/share hint', async () => {
+  it('a miss with no candidate — no folder, a name-mismatched folder, a tracked source — gets the ls/connect hint', async () => {
     const { fixture, store } = await prepared();
     const home = join(fixture.root, 'home');
     await localSkill(home, 'gsd-x', 'gsd:x');
@@ -327,7 +327,7 @@ describe('publish local recovery hints', () => {
     await store.update((c) => { c.shared['22222222-2222-4222-8222-222222222222'] = { source: tracked, team: 'other', baseline: 'sha256:0' }; });
     const runner = mappedRunner(REMOTE, fixture.bare);
     const before = await originSha(fixture.bare);
-    const generic = (ref: string) => `No skill ${ref} in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} share '<path-to-skill>' --team 'team'\`, then publish its name.`;
+    const generic = (ref: string) => `No skill ${ref} in team team. Run \`${V} ls --team 'team'\` to check the team's skill names. To add a local skill, run \`${V} connect '<path-to-skill>' --team 'team'\`, then publish its name.`;
     for (const ref of ['missing', 'gsd-x', 'mine']) await expect(run({ ref, home, config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: generic(ref) });
     expect(await originSha(fixture.bare)).toBe(before);
   });
@@ -340,7 +340,7 @@ describe('publish local recovery hints', () => {
     const local = await localSkill(home, 'local');
     const result = await run({ ref: 'team/local', home, config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: false,
-      error: `No skill team/local in team team. Found a local folder at ${local} that is not tracked as a shared source or placement on this machine. To share it with team, run \`${V} share '${local}' --team 'team'\`, then retry \`${V} publish 'team/local' --team 'team'\`.` });
+      error: `No skill team/local in team team. Found a local folder at ${local} that is not tracked as a connected source or placement on this machine. To connect it to team, run \`${V} connect '${local}' --team 'team'\`, then retry \`${V} publish 'team/local' --team 'team'\`.` });
   });
 
   it('an existing team skill with the same name as a local folder is endorsed, never re-shared', async () => {
@@ -365,9 +365,9 @@ describe('publish project recovery hints', () => {
     const result = await run({ ref: 'local', home, cwd, project: 'p', config: store, runner }, io);
     expect(result.ok).toBe(false); if (result.ok) throw new Error('Expected recovery hint');
     expect(result.error).toContain(`Found a local folder at ${project}${duplicated ? ' (project)' : ''} that`);
-    expect(result.error).toContain(`${V} share '${project}' --team 'team'`);
+    expect(result.error).toContain(`${V} connect '${project}' --team 'team'`);
     expect(result.error).toContain(`${V} publish 'local' --team 'team' --project 'p'`);
-    if (duplicated) { expect(result.error).toContain(`Found a local folder at ${global} (global) that`); expect(result.error).toContain(`${V} share '${global}' --team 'team'`); }
+    if (duplicated) { expect(result.error).toContain(`Found a local folder at ${global} (global) that`); expect(result.error).toContain(`${V} connect '${global}' --team 'team'`); }
     expect(io.asked).toEqual([]); expect((await store.read()).shared).toEqual({});
     expect(runner.calls.some((call) => call.args[0] === 'push')).toBe(false);
   });

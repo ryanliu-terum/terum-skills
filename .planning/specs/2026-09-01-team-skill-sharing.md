@@ -86,7 +86,7 @@ terum-skills team join <org>/<repo> | <remote-url>       the URL form joins a te
 terum-skills team leave <name>
 terum-skills team remove <handle>
 terum-skills invite <github-login>...        host identity, not the team handle (D9)
-terum-skills share <path-to-skill>          one-time: enter the skill into skills/; updates then flow automatically on sync
+terum-skills connect <path-to-skill>          one-time: enter the skill into skills/; updates then flow automatically on sync (renamed from share 2026-09-07)
 terum-skills publish <name> [--project <p>] endorse to the team: add its ID to team.json global or a project list, via PR
 terum-skills ls                             roster, skills with author/category/install counts, what you have installed
 terum-skills status [--team <name>]          installed version and offline local team summary; exit 0 is a successful query, not a readiness test
@@ -108,7 +108,7 @@ Rules for `install` (load-bearing for the share flow in 3.8):
 - `member <handle>` and `project <name>` are bulk selectors (keyword-marked because handles and project names can collide); details in the phase-1 build spec §6.
 
 Rules for `setup` (normative text is build spec §6.1; added 2026-09-03 to match Ryan's eight-step onboarding flow):
-- It sequences the verbs above and owns no write path and no consent prompt of its own; each y/N (hook, endorsed set, `allowed-tools`, `share` frontmatter) is asked by the verb that defines it.
+- It sequences the verbs above and owns no write path and no consent prompt of its own; each y/N (hook, endorsed set, `allowed-tools`, `connect` frontmatter) is asked by the verb that defines it.
 - The team name is collected before any skill action because the repo must exist first; invites come directly after the team exists (amended 2026-09-06; the build spec is authoritative); the hook offer is the second-to-last step; a community link is printed, never opened.
 - Steps that belong to the local UI (phase 2: the wizard ends by opening it) and to eval (phase 3) are absent from the phase-1 wizard, not stubbed. The phase gates from walk Decision 2 stand.
 - Re-running it resumes at the first unfinished step by detecting outcomes (config, remote people file, settings entry) — it keeps no state file and never creates a second repo, people file, or hook entry.
@@ -234,7 +234,7 @@ First person:
 ```
 npx -y terum-skills@latest setup
 ```
-answers `Create a new team` and walks the eight steps: welcome → GitHub (gh, or gh's own login, or a token) → team name → invite teddy ajay → share a first skill and see the five one-liners → community link → hook y/N → done (roster, repo URL, README URL). The bare verbs it sequences remain usable on their own:
+answers `Create a new team` and walks the eight steps: welcome → GitHub (gh, or gh's own login, or a token) → team name → invite teddy ajay → connect a first skill and see the five one-liners → community link → hook y/N → done (roster, repo URL, README URL). The bare verbs it sequences remain usable on their own:
 ```
 terum-skills login
 terum-skills team create acme

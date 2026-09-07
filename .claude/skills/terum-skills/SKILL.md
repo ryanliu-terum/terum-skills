@@ -1,6 +1,6 @@
 ---
 name: terum-skills
-description: "Run a terum-skills CLI verb from inside the session (ls, ls --local, status, search, validate, update, sync, publish, install, uninstall-skill, invite, eval) and hand the verbs that ask a terminal question (share, setup, team create/join/leave/remove, uninstall, sync --prune, login) to the user as a ready-to-run command, because the Bash tool has no TTY. Use when the user wants to see team or local skill state, check a skill's hygiene, sync, publish, install, invite, or evaluate a shared skill without leaving Claude Code."
+description: "Run a terum-skills CLI verb from inside the session (ls, ls --local, status, search, validate, update, sync, publish, install, uninstall-skill, invite, eval) and hand the verbs that ask a terminal question (connect, setup, team create/join/leave/remove, uninstall, sync --prune, login) to the user as a ready-to-run command, because the Bash tool has no TTY. Use when the user wants to see team or local skill state, check a skill's hygiene, sync, publish, install, invite, or evaluate a shared skill without leaving Claude Code."
 ---
 
 Run one `terum-skills` verb on the user's behalf, or prepare it for them when the CLI would
@@ -30,7 +30,7 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 - Always `npx -y terum-skills@latest <verb> …` (the supported form for every printed command).
   Never a bare `terum-skills`, never a checkout path, never `node dist/index.js`.
 - Run through the Bash tool from the current working directory. Do not `cd`: `ls --local`,
-  `share`, and `publish` find the project root from the cwd by a filesystem walk, and the Bash
+  `connect`, and `publish` find the project root from the cwd by a filesystem walk, and the Bash
   tool's cwd is already the repo root. Absolute paths for every argument that is a path.
 - Do not use the skill-file `` !`command` `` injection: a non-zero exit aborts the whole skill,
   and `validate` exits 1 whenever it has findings, which is a result, not a failure.
@@ -44,9 +44,9 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 |---|---|---|
 | `status [--team <t>]` | nothing | show stdout; the `may be stale; run … sync` line is advice, offer `/terum-skills sync` |
 | `ls [--team <t>]`, `ls member <h>`, `ls project <n>` | nothing | show stdout |
-| `ls --local` | nothing | show the **project** section in full; summarise the global section and the `Not offered for sharing` list by count and reason unless the user asked for them (on a machine with many third-party skills that list runs to dozens of lines) |
+| `ls --local` | nothing | show the **project** section in full; summarise the global section and the `Cannot be connected` list by count and reason unless the user asked for them (on a machine with many third-party skills that list runs to dozens of lines) |
 | `search <term> [--category] [--author] [--project]` | nothing | show stdout; `No skills found.` is a result |
-| `validate <abs-path or name> [--team <t>]` | nothing | rc=1 with `HYG…` lines means findings, not a crash; show them verbatim. A local folder that has never been shared fails HYG1 on the missing `license` field, which `share` injects; say so instead of calling the skill broken |
+| `validate <abs-path or name> [--team <t>]` | nothing | rc=1 with `HYG…` lines means findings, not a crash; show them verbatim. A local folder that has never been connected fails HYG1 on the missing `license` field, which `connect` injects; say so instead of calling the skill broken |
 | `update` | nothing | show stdout; it prints the update command and never runs it |
 | `sync` | say it will pull every configured team, place approved skills, and defer any skill whose `allowed-tools` grant needs consent | show stdout; a `N skills need review` line means the user must run `npx -y terum-skills@latest sync` in a terminal to answer the consent questions. Long on a cold clone: use `run_in_background` |
 | `sync --hook` | do not run by hand; the SessionStart hook already runs it hourly | n/a |
@@ -73,9 +73,9 @@ terminal; the CLI will ask you a question the session cannot answer.*
 
 | Verb | Free dry run first | Command to hand over |
 |---|---|---|
-| `share` (no path) | run it: the CLI lists every shareable folder under both roots and prints the exact command | `npx -y terum-skills@latest share --team <team>` |
-| `share <abs-path>` | run it: it refreshes the clone, runs hygiene, prints the `Will add:` card, then fails at `Share <name>?`; nothing is written. Show the findings and the card | `npx -y terum-skills@latest share <abs-path>` |
-| `share --forget <id>`, `--keep-source <id>`, `--keep-repo <id>` | none | the same command |
+| `connect` (no path) | run it: the CLI lists every shareable folder under both roots and prints the exact command | `npx -y terum-skills@latest connect --team <team>` |
+| `connect <abs-path>` | run it: it refreshes the clone, runs hygiene, prints the `Will add:` card, then fails at `Connect <name>?`; nothing is written. Show the findings and the card | `npx -y terum-skills@latest connect <abs-path>` |
+| `connect --forget <id>`, `--keep-source <id>`, `--keep-repo <id>` | none | the same command |
 | `sync --prune` | none (`sync prune needs an interactive terminal.`) | `npx -y terum-skills@latest sync --prune` |
 | `uninstall` | run it: it prints exactly what would be removed and fails at the y/N | `npx -y terum-skills@latest uninstall` |
 | `team leave <name>`, `team remove <handle>` | none | the same command |
@@ -91,7 +91,7 @@ it runs here.
 What it does, so the user knows what they are buying:
 
 1. Refreshes the team clone and reads the skill by name or id; `--working` evaluates the user's
-   local shared source instead of the clone copy.
+   local connected source instead of the clone copy.
 2. Runs the hygiene tier; findings abort before any agent call.
 3. Preflight: `claude --version` plus one 1-turn smoke task; fails fast if `claude` is absent,
    logged out, or the model is unavailable. Nested `claude -p` works from inside a session.

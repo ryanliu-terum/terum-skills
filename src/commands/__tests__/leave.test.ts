@@ -30,7 +30,9 @@ describe('team leave (§6)', () => {
     // `team.lock.stale-neighbour` is itself a legal team name: its live mutex and stamp begin with this team's aside prefix and are not ours to sweep.
     await writeFile(`${lock}.stale-neighbour.lock`, 'another team holds this');
     await writeFile(`${lock}.stale-neighbour.stamp`, 'another team synced');
-    await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { removed: 1, cloneRemoved: true } });
+    const io = new ScriptedPrompter([], [true]);
+    await expect(run({ name: 'team', config: store }, io)).resolves.toMatchObject({ ok: true, value: { removed: 1, cloneRemoved: true } });
+    expect(io.lines).toContain('1 connected skill record(s) will be removed.');
     await expect(access(placed.path)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(cache)).rejects.toMatchObject({ code: 'ENOENT' }); await expect(access(stamp)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(lock)).rejects.toMatchObject({ code: 'ENOENT' });

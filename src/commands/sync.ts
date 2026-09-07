@@ -16,7 +16,7 @@ import { endorsedCandidates, findSkill, readPerson, readTeam, skillRecords } fro
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { CloneBusy, openTeamRepo, refreshClone, RemoteAccessError, treeText } from '../lib/teamRepo.js';
 import { materializeVersion } from '../lib/version.js';
-import { reconcileShared } from './share.js';
+import { reconcileShared } from './connect.js';
 import { installOne, skillAtSource } from './install.js';
 import { uninstallOne } from './uninstall.js';
 

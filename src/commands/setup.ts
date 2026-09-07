@@ -9,12 +9,12 @@ import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { describeClone } from '../lib/teamRepo.js';
 import { joinCommand, run as invite } from './invite.js';
-import { run as share } from './share.js';
+import { run as connect } from './connect.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
 
 export interface SetupVerbs {
   team: typeof team;
-  share: typeof share;
+  connect: typeof connect;
   invite: typeof invite;
   offerHook: typeof defaultOfferHook;
 }
@@ -43,7 +43,7 @@ export interface SetupResult {
 const WELCOME = [
   'Welcome to terum-skills.',
   "Your team's skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have.",
-  'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, shares a first skill, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.',
+  'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, connects a first skill, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.',
 ];
 
 export const ROLE_QUESTION = 'Create a team or join one?';
@@ -72,7 +72,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   const role: SetupResult['role'] = args.target === undefined ? 'creator' : 'joiner';
   const store = args.config ?? createConfigStore();
   const runner = args.runner ?? systemRunner;
-  const verbs: SetupVerbs = { team, share, invite, offerHook: defaultOfferHook, ...args.verbs };
+  const verbs: SetupVerbs = { team, connect, invite, offerHook: defaultOfferHook, ...args.verbs };
   const steps: SetupResult['steps'] = {};
   let teamName = '';
   let remote = '';
@@ -185,7 +185,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     }
 
     if (role === 'creator') {
-      const result = await verbs.share({ team: teamName, home: args.home, cwd: args.cwd, config: store, runner }, io);
+      const result = await verbs.connect({ team: teamName, home: args.home, cwd: args.cwd, config: store, runner }, io);
       if (!result.ok) return failed(result.error, role, teamName, remote, steps);
       steps.actions = result.value === undefined ? 'skipped' : 'done';
     } else steps.actions = 'skipped';
@@ -194,9 +194,9 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     say('  terum-skills ls [--local]             — list members and shared skills; --local lists your own');
     say('  terum-skills search <term>            — find a skill by name, description, or category');
     say('  terum-skills sync                     — pull updates and finish pending work');
-    say(`  npx -y terum-skills@latest publish <skill> — endorse a skill already shared with the team`);
+    say(`  npx -y terum-skills@latest publish <skill> — endorse a skill already connected to the team`);
     say('  terum-skills eval <skill>             — evaluate a shared skill locally before publishing');
-    say('  npx -y terum-skills@latest share      — share one of your local skills (asks which)');
+    say('  npx -y terum-skills@latest connect    — connect one of your local skills to the team; later edits sync automatically (asks which)');
 
     const communityUrl = args.communityUrl ?? COMMUNITY_URL;
     if (communityUrl === '' || args.quiet) steps.community = 'skipped';

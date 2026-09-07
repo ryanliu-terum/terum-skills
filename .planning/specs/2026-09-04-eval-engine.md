@@ -284,7 +284,7 @@ row (append-only — an existing receipt path is never rewritten). It never touc
 
 | Stage | Requirement |
 |---|---|
-| `share` | No eval requirement. Hygiene tier must pass (extends phase-1 V5 gate). |
+| `connect` | No eval requirement. Hygiene tier must pass (extends phase-1 V5 gate). |
 | `sync` (reconcile of edited shared sources) | No eval requirement. Hygiene must pass per changed skill before the first team-repo write (§9) — a secret pasted into an already-shared skill never reaches the repo. |
 | `publish` PR | The PR must carry a current, schema-valid **locally-produced committed receipt** at the skill's exact tree-hash version. If the receipt carries a candidate-vs-**incumbent** comparison, it must be **not FAIL** (regression gate). If it carries none, CI verifies **no prior version of the skill exists** (no earlier receipted tree-hash for its id, and no prior `skills/<name>/` tree on `origin/main`) and the first publish proceeds (rev 13, walk D2 — the earlier wording blocked every first publish and never tested FAIL). CI verifies the receipt deterministically (§11) and runs no evals of its own. Incumbent rule **[default — veto cheap]**: incumbent = the most recent receipted tree-hash for the skill id, by run-id order, excluding the candidate's own hash; none → the first-publish path. |
 
@@ -409,7 +409,7 @@ un-redacted for debugging; the boundary is *sharing*, not recording.
 
 ## 9. Hygiene tier (deep deterministic validation)
 
-`hygiene.ts`, run by `validate`, `share`, `publish`, **`sync`'s reconcile path**, and
+`hygiene.ts`, run by `validate`, `connect`, `publish`, **`sync`'s reconcile path**, and
 CI — this list is **authoritative** (rev 11; the integration plan points here rather
 than restating it): hygiene runs before *every* skill-content mutation of the team
 repo. On the sync path that means before the FIRST team-repo write for each changed

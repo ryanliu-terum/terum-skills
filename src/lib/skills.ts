@@ -146,7 +146,7 @@ export function injectManagedFields(source: string, values: { license: string; i
   document.set('license', values.license);
   const metadata = (raw as Record<string, unknown>).metadata;
   // A real YAML map, never a plain `{}`: `setIn` below walks YAML nodes and treats a plain object as a
-  // scalar, which is exactly how a file with no `metadata:` block used to crash the share.
+  // scalar, which is exactly how a file with no `metadata:` block used to crash the connect.
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) document.set('metadata', document.createNode({}));
   document.setIn(['metadata', 'id'], values.id);
   document.setIn(['metadata', 'author'], values.author);

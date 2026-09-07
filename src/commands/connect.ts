@@ -15,7 +15,7 @@ import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedField
 import { MutableTree, openTeamRepo, shellQuote, treeText } from '../lib/teamRepo.js';
 import { formatHygieneFindings, hygieneFrontmatter, inspectHygiene } from '../lib/evals/hygiene.js';
 
-export interface ShareArgs {
+export interface ConnectArgs {
   path?: string;
   home?: string;
   cwd?: string;
@@ -28,9 +28,9 @@ export interface ShareArgs {
   config?: ConfigStore;
   runner?: Runner;
 }
-export interface ShareResult { id: string; name: string; reconciled?: boolean; }
+export interface ConnectResult { id: string; name: string; reconciled?: boolean; }
 
-export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareResult | undefined>> {
+export async function run(args: ConnectArgs, io: Prompter): Promise<Result<ConnectResult | undefined>> {
   try {
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
@@ -48,9 +48,9 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
         const offered = candidatesOf(inventory, args.allowPrivileged);
         return inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && !offered.includes(entry));
       });
-      if (omitted.length) io.print(`Skipped ${omitted.length} local folders that cannot be offered for sharing. Run \`npx -y terum-skills@latest ls --local\` for paths and reasons.`);
+      if (omitted.length) io.print(`Skipped ${omitted.length} local folders that cannot be connected. Run \`npx -y terum-skills@latest ls --local\` for paths and reasons.`);
       if (!candidates.length) {
-        io.print(`No local candidates to share under ${roots.map((root) => printable(root.root)).join(' or ')}. Skills elsewhere can be shared by passing their folder path.`);
+        io.print(`No local candidates to connect under ${roots.map((root) => printable(root.root)).join(' or ')}. Skills elsewhere can be connected by passing their folder path.`);
         return success(undefined);
       }
       if (!io.interactive) {
@@ -58,15 +58,15 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
           io.print(`Local candidates under ${printable(inventory.root)}:`);
           for (const candidate of candidatesOf(inventory, args.allowPrivileged)) io.print(`  ${printable(candidate.path)}`);
         }
-        throw new Error(`No skill selected. In an interactive terminal, run \`npx -y terum-skills@latest share --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
+        throw new Error(`No skill selected. In an interactive terminal, run \`npx -y terum-skills@latest connect --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
       }
-      const choices = new Map(candidates.map((candidate) => [`Share ${printable(candidate.name)}${candidates.filter((entry) => entry.name === candidate.name).length > 1 ? ` (${candidate.scope})` : ''}`, candidate.path]));
-      const choice = await io.select(`Share a local skill with team ${printable(team)}?`, [...choices.keys(), 'Skip']);
-      if (choice === 'Skip') { io.print('Nothing shared.'); return success(undefined); }
+      const choices = new Map(candidates.map((candidate) => [`Connect ${printable(candidate.name)}${candidates.filter((entry) => entry.name === candidate.name).length > 1 ? ` (${candidate.scope})` : ''}`, candidate.path]));
+      const choice = await io.select(`Connect a local skill folder to team ${printable(team)}?`, [...choices.keys(), 'Skip']);
+      if (choice === 'Skip') { io.print('Nothing connected.'); return success(undefined); }
       selectedPath = choices.get(choice);
       if (selectedPath === undefined) throw new Error(`Unknown choice ${printable(choice)}.`);
     }
-    if (!binding.handle || !config.email || !config.display_name) throw new Error('Share needs your joined team identity, name, and email.');
+    if (!binding.handle || !config.email || !config.display_name) throw new Error('Connect needs your joined team identity, name, and email.');
     const source = resolve(selectedPath);
     assertNotInsideStateRoot(source, store.root);
     const name = basename(source);
@@ -75,15 +75,15 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
     if (!isSkillName(name)) throw new Error(`Skill name ${name} must be 1–64 lowercase alphanumerics or single hyphens.`);
     if (!args.allowPrivileged && scan.privileged) throw new Error(`${name} contains plugin or hook definitions; retry with --allow-privileged after reviewing them.`);
     const raw = await readFile(join(source, 'SKILL.md'), 'utf8');
-    // Hygiene owns the post-injection frontmatter gate. This source can legitimately lack the
+    // Hygiene owns connect's post-injection frontmatter gate. This source can legitimately lack the
     // managed fields that injection supplies, so validating it before assembly would be wrong.
     const description = raw;
     const clone = store.teamClone(team);
     const author = `${config.display_name} <${config.email}>`;
     const repo = openTeamRepo(clone, binding.remote, runner);
-    // Refresh before changing the user's source so an upstream collision is a no-write refusal;
+    // Connect refreshes before changing the user's source so an upstream collision is a no-write refusal;
     // the mutation-time assertion below still protects a race after this preflight.
-    await repo.safeWrite(() => undefined, { action: 'share', handle: binding.handle, author, message: `${binding.handle}: share ${name}` });
+    await repo.safeWrite(() => undefined, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}` });
     const records = await skillRecords(clone, team);
     if (records.some((record) => record.name === name)) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
     const id = randomUUID(); // minted before safeWrite, never inside its re-applied mutation
@@ -92,11 +92,11 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
     const candidate = await sourceFiles(source);
     candidate.files.set('SKILL.md', Buffer.from(updated));
     assertHygiene(name, candidate, teamDoc.policy.skill_license, Boolean(args.allowPrivileged));
-    // Every field the tool writes is shown before the y/N — the category too, on the one kind of file
+    // Every field connect writes is shown before the y/N — the category too, on the one kind of file
     // that has none (every off-the-shelf skill): it is generated, not asked for, and edited any time.
     const categoryLine = declaredCategory(raw) === undefined ? `\nmetadata.terum-category: ${DEFAULT_CATEGORY} (no category was set; edit SKILL.md any time)` : '';
     io.print(`Will add:\nlicense: ${teamDoc.policy.skill_license}\nmetadata.id: ${id}\nmetadata.author: ${author}${categoryLine}`);
-    if (!(await io.confirm(`Share ${name}?`))) throw new Error('Share was declined.');
+    if (!(await io.confirm(`Connect ${name}?`))) throw new Error('Connect was declined.');
     await writeFile(join(source, 'SKILL.md'), updated, 'utf8');
     // Push the exact bytes hygiene inspected — a re-read here would open a window where a
     // concurrent editor save lands uninspected content in the team repo (cross-model review P1).
@@ -105,7 +105,7 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
       // authoritative for the repo-wide name invariant.
       if (tree.paths(`skills/${name}/`).length) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
       mirrorToTree(tree, `skills/${name}`, candidate.files);
-    }, { action: 'share', handle: binding.handle, author, message: `${binding.handle}: share ${name}` });
+    }, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}` });
     const baseline = await canonicalDigest(source);
     await store.update((fresh) => { fresh.shared[id] = { source, team, baseline }; });
     return success({ id, name, reconciled: description.length > 0 });
@@ -125,11 +125,11 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     if (skipTeams.has(tracked.team)) continue;
     try {
       const clone = store.teamClone(tracked.team);
-      if (!(await exists(tracked.source))) { io.print(`Shared source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use share --relocate or --forget.`); defer(tracked.team, id.slice(0, 8)); continue; }
+      if (!(await exists(tracked.source))) { io.print(`Connected source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use connect --relocate or --forget.`); defer(tracked.team, id.slice(0, 8)); continue; }
       let record;
       try { record = (await skillRecords(clone, tracked.team)).find((item) => item.id === id); }
-      catch (error) { io.print(`Could not read shared ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, id.slice(0, 8)); continue; }
-      if (!record) { io.print(`Repository copy for shared ${id.slice(0, 8)} is missing; run share again to restore it.`); defer(tracked.team, id.slice(0, 8)); continue; }
+      catch (error) { io.print(`Could not read connected ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, id.slice(0, 8)); continue; }
+      if (!record) { io.print(`Repository copy for connected ${id.slice(0, 8)} is missing; run connect again to restore it.`); defer(tracked.team, id.slice(0, 8)); continue; }
       const team = await readTeamPolicy(clone);
       const fresh = await store.read();
       const author = `${fresh.display_name ?? ''} <${fresh.email ?? ''}>`;
@@ -143,28 +143,28 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const repairedRepo = injectManagedFields(repoContents, { license: team.license, id, author });
     // The existing privileged-content consent gate is orthogonal to HYG4. Keep its actionable
     // remediation ahead of hygiene; either refusal occurs before any source or team-repo write.
-    if ((await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) { io.print(`Shared skill ${record.name} now contains plugin or hook definitions; run share --keep-source ${id} --allow-privileged after reviewing them.`); defer(tracked.team, record.name); continue; }
+    if ((await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) { io.print(`Connected skill ${record.name} now contains plugin or hook definitions; run connect --keep-source ${id} --allow-privileged after reviewing them.`); defer(tracked.team, record.name); continue; }
     // §5.3: a changed `name` is a rename, not a new skill — the ID carries across it. The source's
     // declared name is the target; the repository folder follows on the local-edit row below.
-    // (The folder basename is not consulted: `share --relocate` may legitimately point anywhere.)
+    // (The folder basename is not consulted: `connect --relocate` may legitimately point anywhere.)
     const declared = parseSkillFrontmatter(repaired);
     const targetName = declared.ok ? declared.data.name : record.name;
     const candidate = await sourceFiles(tracked.source);
     candidate.files.set('SKILL.md', Buffer.from(repaired));
-    // A repo copy already carrying hooks means consent was given at share time; new privileged
-    // additions were already deferred to `share --keep-source --allow-privileged` above (walk D5).
+    // A repo copy already carrying hooks means consent was given at connect time; new privileged
+    // additions were already deferred to `connect --keep-source --allow-privileged` above (walk D5).
     try { assertHygiene(targetName, candidate, team.license, (await scanSkillFolder(record.directory)).privileged); }
-    catch (error) { io.print(`Shared skill ${record.name} failed hygiene:\n${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, record.name); continue; }
+    catch (error) { io.print(`Connected skill ${record.name} failed hygiene:\n${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, record.name); continue; }
     if (repaired !== sourceContents) await writeFile(sourceSkill, repaired, 'utf8');
     if (targetName !== record.name) {
-      if (!isSkillName(targetName)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); defer(tracked.team, record.name); continue; }
-      if ((await skillRecords(clone, tracked.team)).some((item) => item.name === targetName && item.id !== id)) { io.print(`Shared skill ${record.name}: cannot rename to ${targetName}; another skill already uses that name.`); defer(tracked.team, record.name); continue; }
+      if (!isSkillName(targetName)) { io.print(`Connected skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); defer(tracked.team, record.name); continue; }
+      if ((await skillRecords(clone, tracked.team)).some((item) => item.name === targetName && item.id !== id)) { io.print(`Connected skill ${record.name}: cannot rename to ${targetName}; another skill already uses that name.`); defer(tracked.team, record.name); continue; }
     }
     const sourceDigest = await canonicalDigest(tracked.source);
     const repoDigest = await canonicalDigest(record.directory);
     const baseline = tracked.baseline;
     if (!baseline || (sourceDigest !== baseline && repoDigest !== baseline)) {
-      io.print(`Shared skill ${record.name} diverged (source ${sourceDigest}, repo ${repoDigest}); choose share --keep-source ${id} or --keep-repo ${id}.`);
+      io.print(`Connected skill ${record.name} diverged (source ${sourceDigest}, repo ${repoDigest}); choose connect --keep-source ${id} or --keep-repo ${id}.`);
       defer(tracked.team, record.name);
       continue;
     }
@@ -196,7 +196,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
         }
         mirrorToTree(tree, `skills/${targetName}`, files.files);
       }, { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: targetName === record!.name ? `${binding.handle}: update ${record.name}` : `${binding.handle}: rename ${record.name} to ${targetName}` });
-      if (targetName !== record.name) io.print(`Renamed shared skill ${record.name} to ${targetName}.`);
+      if (targetName !== record.name) io.print(`Renamed connected skill ${record.name} to ${targetName}.`);
       await store.update((next) => { if (next.shared[id]) next.shared[id].baseline = sourceDigest; });
       } else {
         const displaced = await replaceDirectory(record.directory, tracked.source, join(store.root, 'quarantine'));
@@ -208,23 +208,23 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
         await store.update((next) => { if (next.shared[id]) next.shared[id].baseline = repoDigest; });
       }
     } catch (error) {
-      io.print(`Could not reconcile shared ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`);
+      io.print(`Could not reconcile connected ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`);
       defer(tracked.team, id.slice(0, 8));
     }
   }
 }
 
-async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverride: string | undefined, id: string, keepSource: boolean, allowPrivileged: boolean, io: Prompter): Promise<ShareResult> {
+async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverride: string | undefined, id: string, keepSource: boolean, allowPrivileged: boolean, io: Prompter): Promise<ConnectResult> {
   const config = await store.read();
   const tracked = config.shared[id];
-  if (!tracked) throw new Error(`No shared skill ${id}.`);
+  if (!tracked) throw new Error(`No connected skill ${id}.`);
   const clone = store.teamClone(teamOverride ?? tracked.team);
   const record = (await skillRecords(clone, tracked.team)).find((skill) => skill.id === id);
   if (!record) throw new Error(`Repository copy for ${id} is missing.`);
   if (keepSource) {
     const binding = config.teams[tracked.team];
     if (!binding?.handle) throw new Error(`Team ${tracked.team} has no joined handle.`);
-    // Same gate as the first share and the sync reconciler: privileged content the repository copy
+    // Same gate as the first connect and the sync reconciler: privileged content the repository copy
     // does not already carry needs the explicit flag. It runs before every write this branch makes —
     // the source managed-field repair and the managed-field commit included — so a refusal is no-write.
     if (!allowPrivileged && (await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) throw new Error(`${record.name} contains plugin or hook definitions; retry with --allow-privileged after reviewing them.`);
@@ -240,7 +240,7 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
     const candidate = await sourceFiles(tracked.source);
     candidate.files.set('SKILL.md', Buffer.from(repairedSource));
     // Consent carries: --allow-privileged now, or a repository copy that already holds the
-    // consented privileged form from an earlier share (walk D5).
+    // consented privileged form from an earlier connect (walk D5).
     assertHygiene(record.name, candidate, team.license, allowPrivileged || (await scanSkillFolder(record.directory)).privileged);
     if (repairedSource !== sourceContents) await writeFile(sourceSkill, repairedSource, 'utf8');
     if (repairedRepo !== repoContents) {
@@ -267,7 +267,7 @@ async function forget(store: ConfigStore, id: string, io: Prompter): Promise<und
 async function relocate(store: ConfigStore, value: { id: string; path: string } | string): Promise<undefined> {
   const parsed = typeof value === 'string' ? splitRelocate(value) : value;
   await assertRelocation(parsed.path, parsed.id);
-  await store.update((config) => { const shared = config.shared[parsed.id]; if (!shared) throw new Error(`No shared skill ${parsed.id}.`); shared.source = resolve(parsed.path); });
+  await store.update((config) => { const shared = config.shared[parsed.id]; if (!shared) throw new Error(`No connected skill ${parsed.id}.`); shared.source = resolve(parsed.path); });
   return undefined;
 }
 function splitRelocate(value: string): { id: string; path: string } { const index = value.indexOf(':'); if (index < 1) throw new Error('Use --relocate <id>:<path>.'); return { id: value.slice(0, index), path: value.slice(index + 1) }; }
