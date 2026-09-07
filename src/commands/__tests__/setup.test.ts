@@ -530,9 +530,10 @@ it('the creator picker omits name-mismatched folders and reports the skipped cou
     'repo create alpha-repo --private': { code: 0, stdout: '', stderr: '' },
     'repo view alpha-repo --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/alpha-repo\n', stderr: '' },
   }));
-  const io = new RecordingPrompter(['alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'starter', ''], [true, false]);
+  // Post-#13 prompt order: role question, team create identity, repository name, invite (blank skips), then the share picker.
+  const io = new RecordingPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', '', 'starter'], [true, false]);
   const result = await run({ config: store, home, runner, hook: hookFor(root), communityUrl: '' }, io);
   if (!result.ok) throw new Error(result.error);
-  expect(io.choices[0]).toEqual(['starter', 'skip']);
+  expect(io.choices).toEqual([['Create a new team', 'Join an existing team'], ['starter', 'skip']]);
   expect(io.lines).toContain('Skipped 1 local folders that fail share validation.');
 });
