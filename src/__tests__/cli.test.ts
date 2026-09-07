@@ -153,6 +153,14 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     await program.parseAsync(['validate', 'sample', '--team', 't'], { from: 'user' });
     await program.parseAsync(['validate', 'sample', '--cwd', '/checkout'], { from: 'user' });
     expect(calls).toEqual([{ target: 'sample', team: 't' }, { target: 'sample', cwd: '/checkout' }]);
+    const validate = program.commands.find((command) => command.name() === 'validate');
+    expect(validate?.description()).toContain('by name or its local source folder by path');
+    expect(validate?.description()).toContain('requires a configured team');
+    // The epilogue is emitted by outputHelp() (the --help path), not by helpInformation().
+    let help = '';
+    validate?.configureOutput({ writeOut: (text) => { help += text; } });
+    validate?.outputHelp();
+    expect(help).toContain('Deterministic and offline');
   });
 
   it('wires workflow-update as print-only and keeps receipt-check hidden like readme', async () => {
