@@ -207,7 +207,7 @@ it.each([false, true])('size warning reaches eval preflight unless accompanied b
   let preflightCalls = 0; let agentCalls = 0;
   const agent: AgentApi = { runAgent: (_task, cwd) => { agentCalls++; return Promise.resolve(transcript(existsSync(join(cwd, '.claude', 'skills', 'sample')) ? ['sample'] : [])); }, askJson: () => { agentCalls++; return Promise.resolve({ selected: [] }); } };
   const io = new ScriptedPrompter();
-  const result = await run({ ref: 'sample', config: store, agent, k: 1, preflight: async () => { preflightCalls++; return success({ ccVersion: 'stub' }); } }, io);
+  const result = await run({ ref: 'sample', noGen: true, config: store, agent, k: 1, preflight: async () => { preflightCalls++; return success({ ccVersion: 'stub' }); } }, io);
   expect(result.ok).toBe(!mixed); expect(preflightCalls).toBe(mixed ? 0 : 1);
   expect(io.lines[0]).toMatch(/^warning HYG6/);
   if (mixed) { expect(agentCalls).toBe(0); expect(result).toMatchObject({ error: expect.stringContaining('HYG2') }); }
