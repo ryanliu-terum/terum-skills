@@ -14,6 +14,8 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { findSkill, readTeam } from '../lib/skills.js';
 import { openTeamRepo, refreshClone, SafeWriteOptions, shellQuote, treeText } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
+import { sourceFiles } from '../lib/skill-source.js';
+import { formatHygieneFindings, hygieneFrontmatter, inspectHygiene } from '../lib/evals/hygiene.js';
 
 export interface PublishArgs {
   ref: string;
@@ -55,6 +57,9 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const list = scope.kind === 'global' ? teamJson.global : teamJson.projects[scope.project]!.skills;
     const base: Omit<PublishResult, 'changed' | 'branch' | 'prUrl' | 'compareUrl'> = { team, id: record.id, name: record.name, scope, policy: teamJson.policy.publish };
     if (list.includes(record.id)) return alreadyEndorsed(base, scopeLabel, io);
+    // Avoid displaying the direct-push endorsement card for content hygiene refuses. The same
+    // inspector is replayed below against safeWrite's freshly reset tree to close the race.
+    assertHygiene(record.name, await sourceFiles(record.directory), teamJson.policy.skill_license);
     // One fresh branch and one fresh PR per publish (rulings walk R2, 2026-09-06): the name is unique,
     // the push is create-only (teamRepo.ts push()), and an endorsement already open for this skill is a
     // note and a y/N — never a refusal, never a force-push. Two competing PRs are two PRs; GitHub flags
@@ -84,6 +89,14 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       const parsed = skillSource === undefined ? undefined : parseSkillFrontmatter(treeText(skillSource));
       if (!parsed?.ok || parsed.data.metadata.id !== record.id) throw new Error(`${record.name} is no longer in the repository as ${record.id.slice(0, 8)}; run sync and retry.`);
       const fresh = parseJson(teamSchema, treeText(teamSource), 'team.json');
+      const prefix = `skills/${record.name}/`;
+      const files = new Map<string, Buffer>();
+      for (const path of tree.paths(prefix)) {
+        const contents = tree.after(path);
+        if (contents !== undefined) files.set(path.slice(prefix.length), Buffer.isBuffer(contents) ? contents : Buffer.from(contents));
+      }
+      const executable = new Set([...tree.executablePaths(prefix)].map((path) => path.slice(prefix.length)));
+      assertHygiene(record.name, { files, executable }, fresh.policy.skill_license);
       // The branch (or the direct push to main) was chosen from the policy read before the loop; the
       // tree being written may be newer, and a policy the team changed meanwhile must win.
       if (fresh.policy.publish !== teamJson.policy.publish) throw new Error(`The team publish policy changed to "${fresh.policy.publish}" while this publish ran; rerun publish.`);
@@ -137,6 +150,13 @@ function compare(remote: string, branch: string): string | null {
   return ownerRepo ? `https://github.com/${ownerRepo}/compare/main...${branch}?expand=1` : null;
 }
 function commandMessage(stderr: string, stdout: string): string { return (stderr || stdout).trim(); }
+function assertHygiene(name: string, input: Awaited<ReturnType<typeof sourceFiles>>, license: string): void {
+  const skill = input.files.get('SKILL.md');
+  // allowExecutable: publish endorses content that entered the repo through share's consent gate,
+  // so exec/shebang form was already reviewed there (walk D5); every other check still applies.
+  const findings = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable: true });
+  if (findings.length) throw new Error(formatHygieneFindings(findings));
+}
 
 /**
  * The exact team.json this publish writes over `fresh` — the one serialization both the safeWrite

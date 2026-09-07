@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import YAML from 'yaml';
 import { allowedTools, describeRaw, FRONTMATTER, isSkillName } from './schema.js';
@@ -41,12 +41,31 @@ function inspect(raw: string, folderName?: string): { ok: true; description: str
   for (const key of Object.keys(parsed)) {
     if (!['name', 'description', 'license', 'metadata', 'allowed-tools'].includes(key)) return reject('unsupported-field', `unsupported top-level field ${key} (only name, description, license, metadata, allowed-tools)`);
   }
+  // Discovery needs a candidate/omission reason. Share itself deliberately does not call this
+  // validator: its assembled post-injection candidate goes through the single HYG1 path instead.
   const grants = allowedTools(parsed['allowed-tools']);
   if (!grants.ok) {
     const line = raw.split(/\r?\n/).findIndex((text) => /^allowed-tools\s*:/.test(text)) + 1;
     return reject('malformed-allowed-tools', `allowed-tools is malformed (SKILL.md line ${line})`, `${folderName}: allowed-tools is malformed${line ? ` (SKILL.md line ${line})` : ''}: ${describeRaw(grants.raw)}. Use a YAML list of tool patterns, or one comma-separated string.`);
   }
   return { ok: true, description: parsed.description };
+}
+
+/** File bytes and the mode facts hygiene needs; callers validate the directory/symlink invariant first. */
+export async function sourceFiles(root: string): Promise<{ files: Map<string, Buffer>; executable: Set<string> }> {
+  const files = new Map<string, Buffer>(); const executable = new Set<string>();
+  async function walk(current: string, relative = ''): Promise<void> {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const next = join(current, entry.name); const key = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) await walk(next, key);
+      else if (entry.isFile()) {
+        files.set(key, await readFile(next));
+        if ((await lstat(next)).mode & 0o111) executable.add(key);
+      }
+    }
+  }
+  await walk(root);
+  return { files, executable };
 }
 
 /** One sequential walk, retaining the first nested link without ever following it. */

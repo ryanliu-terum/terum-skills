@@ -142,6 +142,17 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(Object.keys(calls[0] as object)).toEqual(['verb', 'ref']);
     expect(outcomes).toEqual([true, true, true, false, false]);
   });
+
+  it('wires validate with its target and team selection', async () => {
+    const calls: unknown[] = [];
+    const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+      validate: async (args) => { calls.push(args); return success({ name: args.target, findings: 0 }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['validate', 'sample', '--team', 't'], { from: 'user' });
+    expect(calls).toEqual([{ target: 'sample', team: 't' }]);
+  });
 });
 
 describe('the pre-push hook\'s verb (D12)', () => {

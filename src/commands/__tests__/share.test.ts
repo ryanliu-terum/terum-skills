@@ -135,6 +135,18 @@ describe('share (§5.3)', () => {
     expect((await store.read()).shared[id]!.baseline).toBe(await canonicalDigest(source));
   });
 
+  it('blocks a planted credential during reconcile before any managed-field refresh, repo write, or baseline advance', async () => {
+    const { fixture, store } = await sharedFixture();
+    const id = Object.keys((await store.read()).shared)[0]!; const source = (await store.read()).shared[id]!.source;
+    const baseline = (await store.read()).shared[id]!.baseline;
+    const repoBefore = await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare);
+    await writeFile(join(source, 'SKILL.md'), `${await readFile(join(source, 'SKILL.md'), 'utf8')}\nghp_abcdefghijklmnopqrstuvwxyz\n`);
+    const io = new ScriptedPrompter(); await reconcileShared(store, systemRunner, io);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(repoBefore);
+    expect((await store.read()).shared[id]!.baseline).toBe(baseline);
+    expect(io.lines.join('\n')).toContain('HYG3');
+  });
+
   it('fast-forwards an unchanged authored source when another machine advances the repository copy', async () => {
     const { fixture, store } = await sharedFixture();
     const id = Object.keys((await store.read()).shared)[0]!;
@@ -461,9 +473,10 @@ describe('share (§5.3)', () => {
     await expect(run({ keepSource: id, config: store }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('--allow-privileged') });
     expect(await originSha(fixture.bare)).toBe(sha);
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(sourceBefore);
+    // Walk D5 (Ryan, 2026-09-07): explicit --allow-privileged consent waives HYG4's exec/shebang
+    // findings — the reviewed hooks land, and once the repo copy carries them later edits sync freely.
     expect((await run({ keepSource: id, allowPrivileged: true, config: store }, new ScriptedPrompter())).ok).toBe(true);
     expect(await git(['ls-tree', '-r', '--name-only', 'main', 'skills/sample/'], fixture.bare)).toContain('skills/sample/hooks/session-start.sh');
-    // Once the repository copy carries the hooks, later edits publish normally again.
     await writeFile(join(source, 'SKILL.md'), (await readFile(join(source, 'SKILL.md'), 'utf8')).replace('description: x', 'description: after consent'));
     expect((await sync({ config: store }, new ScriptedPrompter())).ok).toBe(true);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toContain('description: after consent');
@@ -669,12 +682,14 @@ describe('issue 9 share picker', () => {
     expect((await store.read()).shared).toEqual({});
   });
 
-  it('refuses unsupported source fields before any write or consent', async () => {
+  it('routes unsupported source fields through the HYG1 gate before any write or consent', async () => {
     const { fixture, home, store, source, original } = await pickerFixture();
     const bytes = original.replace('description: stock source', 'description: stock source\nargument-hint: example');
     await writeFile(join(source, 'SKILL.md'), bytes); const before = await originSha(fixture.bare);
     const io = new ScriptedPrompter([], [true]);
-    expect(await run({ path: source, home, config: store }, io)).toEqual({ ok: false, error: 'unsupported top-level field argument-hint (only name, description, license, metadata, allowed-tools)' });
+    const picked = await run({ path: source, home, config: store }, io);
+    expect(picked.ok).toBe(false);
+    if (!picked.ok) { expect(picked.error).toContain('HYG1'); expect(picked.error).toContain('argument-hint'); }
     expect(io.asked).toEqual([]);
     expect(await originSha(fixture.bare)).toBe(before);
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(bytes);
