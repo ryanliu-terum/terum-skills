@@ -1008,6 +1008,61 @@ it('issue 5 reports an unreadable repository inventory using connected wording',
   expect(io.lines).toEqual([`Could not read connected ${id!.slice(0, 8)}: ${detail}`]);
 });
 describe('HYG6 size warnings', () => {
+  it('reconcile mirrors inspected bytes when the source changes during the managed-field refresh', async () => {
+    const { fixture, store } = await sharedFixture();
+    const [, tracked] = Object.entries((await store.read()).shared)[0]!;
+    await store.update((config) => { config.email = 'changed@example.com'; });
+    const sourceSkill = join(tracked.source, 'SKILL.md');
+    const edited = (await readFile(sourceSkill, 'utf8')).replace('description: x', 'description: inspected edit').padEnd(20_001, 'x');
+    const inspected = edited.replace('me@example.com', 'changed@example.com');
+    const second = inspected.replace('description: inspected edit', 'description: second edit');
+    await writeFile(sourceSkill, edited);
+    let fetches = 0;
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      // Direct reconcile has no preflight fetch. The changed email forces a managed-field
+      // safeWrite first: fetch 1 follows inspection and precedes the old source re-read.
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 1) {
+        expect(await readFile(sourceSkill, 'utf8')).toBe(inspected);
+        await writeFile(sourceSkill, second);
+      }
+      return next();
+    });
+    const io = new ScriptedPrompter(); const deferred: string[] = [];
+    await reconcileShared(store, runner, io, new Set(), (team, label) => { deferred.push(`${team}/${label}`); });
+    expect(deferred).toEqual([]);
+    expect(fetches).toBe(4); // Each of the two safeWrites fetches on entry and in finally.
+    expect(await readFile(sourceSkill, 'utf8')).toBe(second);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(inspected);
+    expect(io.lines.filter((line) => line.startsWith('warning HYG6'))).toHaveLength(1);
+  });
+
+  it('--keep-source mirrors inspected bytes when the source changes during the managed-field refresh', async () => {
+    const { fixture, store } = await sharedFixture();
+    const [id, tracked] = Object.entries((await store.read()).shared)[0]!;
+    await store.update((config) => { config.email = 'changed@example.com'; });
+    const sourceSkill = join(tracked.source, 'SKILL.md');
+    const edited = (await readFile(sourceSkill, 'utf8')).replace('description: x', 'description: inspected edit').padEnd(20_001, 'x');
+    const inspected = edited.replace('me@example.com', 'changed@example.com');
+    const second = inspected.replace('description: inspected edit', 'description: second edit');
+    await writeFile(sourceSkill, edited);
+    let fetches = 0;
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      // --keep-source has no preflight fetch either. Its managed-field safeWrite runs
+      // after inspection and before the old source re-read used by the mirror.
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 1) {
+        expect(await readFile(sourceSkill, 'utf8')).toBe(inspected);
+        await writeFile(sourceSkill, second);
+      }
+      return next();
+    });
+    const io = new ScriptedPrompter();
+    expect(await run({ keepSource: id, config: store, runner }, io)).toMatchObject({ ok: true });
+    expect(fetches).toBe(4);
+    expect(await readFile(sourceSkill, 'utf8')).toBe(second);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(inspected);
+    expect(io.lines.filter((line) => line.startsWith('warning HYG6'))).toHaveLength(1);
+  });
+
   it.each([false, true])('first connect reports warnings before consent and refuses only errors (mixed: %s)', async (mixed) => {
     const { fixture, store, source, original } = await pickerFixture();
     const bytes = original + 'x'.repeat(20_001) + (mixed ? '\u202E' : '');

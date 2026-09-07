@@ -293,14 +293,13 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
       // A pre-image with the prior author can only receive a managed-field refresh. Land that
       // narrow write first, then the normal author-owned content mirror on the replayed tree.
       await refreshRepo();
-      const files = await sourceFiles(tracked.source);
       await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => {
         if (targetName !== record!.name) {
           // The preflight list can be stale; only the freshly reset tree is authoritative for the name invariant.
           if (tree.paths(`skills/${targetName}/`).length) throw new Error(`Skill name ${targetName} already exists in team ${tracked.team}; choose a unique name.`);
           for (const path of tree.paths(`skills/${record!.name}/`)) tree.remove(path);
         }
-        mirrorToTree(tree, `skills/${targetName}`, files.files);
+        mirrorToTree(tree, `skills/${targetName}`, candidate.files);
       }, { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: targetName === record!.name ? `${binding.handle}: update ${record.name}` : `${binding.handle}: rename ${record.name} to ${targetName}` });
       reportHygieneWarnings((line) => io.print(line), assessment);
       if (targetName !== record.name) io.print(`Renamed connected skill ${record.name} to ${targetName}.`);
@@ -353,8 +352,7 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
     if (repairedRepo !== repoContents) {
       await repo.safeWrite((tree) => refreshManagedFieldsInTree(tree, `skills/${record.name}/SKILL.md`, { license: team.license, id, author }), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
     }
-    const files = await sourceFiles(tracked.source);
-    await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, files.files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
+    await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, candidate.files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
     const digest = await canonicalDigest(tracked.source);
     await store.update((fresh) => { fresh.shared[id]!.baseline = digest; });
   } else {
