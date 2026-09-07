@@ -6,7 +6,7 @@ import { reconcileShared, run } from '../share.js';
 import { run as sync } from '../sync.js';
 import { run as install } from '../install.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, originSha, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, originSha, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, ghOnlyRunner, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { canonicalDigest } from '../../lib/skills.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
@@ -699,5 +699,72 @@ describe('issue 9 share picker', () => {
   it('explicit paths never inspect the injected home', async () => {
     const { fixture, store, source } = await pickerFixture(); const home = join(fixture.root, 'not-a-directory'); await writeFile(home, 'file');
     expect(await run({ path: source, home, config: store }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true, value: { name: 'sample' } });
+  });
+});
+
+
+describe('project share discovery', () => {
+  it('offers a project-only candidate with its unqualified name and keeps the separate confirmation', async () => {
+    const { fixture, home, store, source } = await pickerFixture(); const cwd = join(fixture.root, 'project');
+    const projectRoot = join(cwd, '.claude', 'skills'); await mkdir(projectRoot, { recursive: true }); await mkdir(join(cwd, '.git'));
+    const projectSource = join(projectRoot, 'sample'); await rename(source, projectSource);
+    const io = new ScriptedPrompter(['Share sample'], [true], true);
+    expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { name: 'sample' } });
+    expect(io.offered).toEqual([['Share sample', 'Skip']]);
+    expect(io.asked).toEqual(['Share a local skill with team team?', 'Share sample?']);
+    expect(Object.values((await store.read()).shared)).toEqual([expect.objectContaining({ source: projectSource })]);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(await readFile(join(projectSource, 'SKILL.md'), 'utf8'));
+  });
+
+  it.each(['global', 'project'])('qualifies duplicate names and shares the selected %s source', async (scope) => {
+    const { fixture, home, store, source, original } = await pickerFixture(); const cwd = join(fixture.root, 'project');
+    const projectSource = join(cwd, '.claude', 'skills', 'sample'); await mkdir(projectSource, { recursive: true }); await mkdir(join(cwd, '.git'));
+    const projectBytes = original.replace('stock source', 'project source'); await writeFile(join(projectSource, 'SKILL.md'), projectBytes);
+    const io = new ScriptedPrompter([`Share sample (${scope})`], [true], true);
+    expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { name: 'sample' } });
+    expect(io.offered).toEqual([['Share sample (global)', 'Share sample (project)', 'Skip']]);
+    const selected = scope === 'global' ? source : projectSource;
+    expect(Object.values((await store.read()).shared)).toEqual([expect.objectContaining({ source: selected })]);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(await readFile(join(selected, 'SKILL.md'), 'utf8'));
+    expect(await readFile(join(scope === 'global' ? projectSource : source, 'SKILL.md'), 'utf8')).toBe(scope === 'global' ? projectBytes : original);
+  });
+
+  it('names both roots when there are no candidates', async () => {
+    const { fixture, store } = await pickerFixture(); const home = join(fixture.root, 'empty-home'); const cwd = join(fixture.root, 'project');
+    await mkdir(join(cwd, '.git'), { recursive: true }); const io = new NonInteractivePrompter();
+    expect(await run({ home, cwd, config: store }, io)).toEqual({ ok: true, value: undefined });
+    expect(io.lines).toEqual([`No local candidates to share under ${join(home, '.claude', 'skills')} or ${join(cwd, '.claude', 'skills')}. Skills elsewhere can be shared by passing their folder path.`]);
+  });
+
+  it('prints one non-interactive candidates block per root and sums omission counts', async () => {
+    const { fixture, home, store, source } = await pickerFixture(); const cwd = join(fixture.root, 'project');
+    const projectSource = join(cwd, '.claude', 'skills', 'project'); await mkdir(projectSource, { recursive: true }); await mkdir(join(cwd, '.git'));
+    await writeFile(join(projectSource, 'SKILL.md'), '---\nname: project\ndescription: local\n---\n');
+    for (const base of [home, cwd]) {
+      const invalid = join(base, '.claude', 'skills', 'invalid'); await mkdir(invalid); await writeFile(join(invalid, 'SKILL.md'), '---\nname: invalid\ndescription: a: b\n---\n');
+    }
+    const runner = ghOnlyRunner(() => ({ code: 0, stdout: '', stderr: '' })); const io = new NonInteractivePrompter();
+    expect(await run({ home, cwd, config: store, runner }, io)).toMatchObject({ ok: false, error: expect.stringContaining('No skill selected.') });
+    expect(io.lines).toEqual([
+      'Skipped 2 local folders that cannot be offered for sharing. Run `npx -y terum-skills@latest ls --local` for paths and reasons.',
+      `Local candidates under ${join(home, '.claude', 'skills')}:`, `  ${source}`,
+      `Local candidates under ${join(cwd, '.claude', 'skills')}:`, `  ${projectSource}`,
+    ]);
+    expect(io.asked).toEqual([]); expect(runner.calls).toEqual([]);
+  });
+
+  it.each([false, true])('refuses explicit state-directory sources before git and preserves all bytes (aliased: %s)', async (aliased) => {
+    const { fixture, store } = await pickerFixture();
+    const root = join(store.root, 'authoring'); const source = join(root, 'inside'); await mkdir(source, { recursive: true });
+    const original = '---\nname: inside\ndescription: state source\n---\n'; const binary = Buffer.from([0, 255, 42, 128]);
+    await writeFile(join(source, 'SKILL.md'), original); await writeFile(join(source, 'asset.bin'), binary);
+    const alias = join(fixture.root, 'alias'); if (aliased) await symlink(root, alias);
+    const selected = aliased ? join(alias, 'inside') : source;
+    const before = await originSha(fixture.bare); const configBefore = await readFile(join(store.root, 'config.json'));
+    const runner = ghOnlyRunner(() => ({ code: 0, stdout: '', stderr: '' })); const io = new ScriptedPrompter([], [true], true);
+    expect(await run({ path: selected, config: store, runner }, io)).toEqual({ ok: false, error: `${selected} is inside the terum-skills state directory ${store.root}; move the folder elsewhere and share that path.` });
+    expect(runner.calls).toEqual([]); expect(io.asked).toEqual([]);
+    expect(await originSha(fixture.bare)).toBe(before); expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(original);
+    expect(await readFile(join(source, 'asset.bin'))).toEqual(binary); expect(await readFile(join(store.root, 'config.json'))).toEqual(configBefore);
   });
 });

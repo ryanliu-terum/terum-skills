@@ -1,7 +1,9 @@
-import { lstat, readdir, readFile, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { access, lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { Config } from './schema.js';
-import { inspectSkillSource, scanSkillFolder, type SourceProblem } from './skill-source.js';
+import { AGENT_PATHS } from './placer/agent-paths.js';
+import { assertNotInsideStateRoot, inspectSkillSource, scanSkillFolder, type SourceProblem } from './skill-source.js';
 
 export interface SharedRef { id: string; team: string; }
 export interface PlacementRef { id: string; team: string; version: string | null; }
@@ -12,17 +14,62 @@ export type Inspection =
 export interface LocalEntry { name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; inspection: Inspection; }
 export interface LocalInventory {
   root: string;
-  scope: 'global';
+  scope: 'global' | 'project';
   rootState: 'scanned' | 'absent' | 'unreadable';
   entries: LocalEntry[];
   problems: { path: string; reason: string }[];
 }
-export interface LocalCandidates { names: string[]; omitted: { name: string; reason: string }[]; unreadable: number; }
+export interface LocalRoot { root: string; scope: 'global' | 'project'; repoRoot?: string; }
+
+/**
+ * Discovery is filesystem-only: the nearest .git file or directory selects the project root.
+ * install's currentRepoRoot and sync's matchingProjectRoot are git+remote-validated PLACEMENT
+ * resolvers (§5.2); they deliberately remain separate from this read-only discovery operation.
+ */
+export async function localSkillRoots(home: string, cwd?: string): Promise<{ roots: LocalRoot[]; noRepository?: string; problems: { path: string; reason: string }[] }> {
+  const roots: LocalRoot[] = [{ root: AGENT_PATHS['claude-code'].global(home), scope: 'global' }];
+  const problems: { path: string; reason: string }[] = [];
+  if (cwd === undefined) return { roots, problems };
+  let dir = resolve(cwd);
+  for (;;) {
+    const marker = join(dir, '.git');
+    try {
+      const entry = await lstat(marker);
+      if (entry.isFile() || entry.isDirectory()) break;
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+        problems.push({ path: marker, reason: error instanceof Error ? error.message : String(error) });
+        return { roots, problems };
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return { roots, noRepository: cwd, problems };
+    dir = parent;
+  }
+  const project = AGENT_PATHS['claude-code'].project(dir);
+  try { await access(project, constants.R_OK | constants.X_OK); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      problems.push({ path: project, reason: error instanceof Error ? error.message : String(error) });
+      return { roots, problems };
+    }
+  }
+  const globalPath = await realpath(roots[0]!.root).catch(() => resolve(roots[0]!.root));
+  const projectPath = await realpath(project).catch(() => resolve(project));
+  if (globalPath !== projectPath) roots.push({ root: project, scope: 'project', repoRoot: dir });
+  return { roots, problems };
+}
+
+/** Canonicalize only the parent: a child symlink must remain a distinct, rejected entry. */
+async function canonicalParentPath(path: string): Promise<string | undefined> {
+  try { return join(await realpath(dirname(path)), basename(path)); }
+  catch { return undefined; }
+}
 
 /** Direct entries only. Provenance is ledger evidence, independent of inspection success. */
-export async function localSkills(root: string, config: Pick<Config, 'shared' | 'placements'>): Promise<LocalInventory> {
+export async function localSkills(root: string, config: Pick<Config, 'shared' | 'placements'>, options: { scope: LocalRoot['scope']; stateRoot: string }): Promise<LocalInventory> {
   root = resolve(root);
-  const inventory: LocalInventory = { root, scope: 'global', rootState: 'scanned', entries: [], problems: [] };
+  const inventory: LocalInventory = { root, scope: options.scope, rootState: 'scanned', entries: [], problems: [] };
   let names: string[];
   try { names = (await readdir(root)).sort(); }
   catch (error) {
@@ -30,17 +77,30 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
     else { inventory.rootState = 'unreadable'; inventory.problems.push({ path: root, reason: error instanceof Error ? error.message : String(error) }); }
     return inventory;
   }
+  const sharedPaths = await Promise.all(Object.entries(config.shared).map(async ([id, ref]) => ({ id, ref, canonical: await canonicalParentPath(resolve(ref.source)) })));
+  const placementPaths = await Promise.all(Object.entries(config.placements).map(async ([target, ref]) => ({ target, ref, canonical: await canonicalParentPath(resolve(target)) })));
   for (const name of names) {
     const path = join(root, name);
-    const shared = Object.entries(config.shared).filter(([, ref]) => resolve(ref.source) === path).map(([id, ref]) => ({ id, team: ref.team }));
-    const placement = Object.entries(config.placements).find(([target]) => resolve(target) === path)?.[1];
+    const canonical = await canonicalParentPath(path);
+    const shared = sharedPaths.filter(({ ref, canonical: reference }) => resolve(ref.source) === path || (canonical !== undefined && reference === canonical)).map(({ id, ref }) => ({ id, team: ref.team }));
+    const placement = placementPaths.find(({ target, canonical: reference }) => resolve(target) === path || (canonical !== undefined && reference === canonical))?.ref;
     const tracked = shared.length > 0 || placement !== undefined;
     const entry: LocalEntry = { name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version } } : {}), inspection: { kind: 'failed', reason: '' } };
     const reject = (reason: SourceProblem, detail: string): void => { entry.inspection = { kind: 'rejected', reason, detail }; };
     try {
       const details = await lstat(path);
-      if (details.isSymbolicLink()) reject('symlink', 'symbolic link');
-      else if (!details.isDirectory()) {
+      if (details.isSymbolicLink()) {
+        reject('symlink', 'symbolic link');
+        inventory.entries.push(entry);
+        continue;
+      }
+      try { assertNotInsideStateRoot(path, options.stateRoot); }
+      catch {
+        reject('inside-state-root', `inside the terum-skills state directory ${options.stateRoot}`);
+        inventory.entries.push(entry);
+        continue;
+      }
+      if (!details.isDirectory()) {
         if (!tracked) continue;
         reject('not-a-directory', 'not a directory');
       } else {
@@ -72,12 +132,3 @@ export function candidatesOf(inventory: LocalInventory, allowPrivileged = false)
   return inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && entry.inspection.kind === 'candidate' && (allowPrivileged || !entry.inspection.privileged));
 }
 
-/** Issue 7's API remains a projection of the same inspection and provenance. */
-export async function localSkillCandidates(root: string, config: Pick<Config, 'shared' | 'placements'>): Promise<LocalCandidates> {
-  const inventory = await localSkills(root, config);
-  return {
-    names: candidatesOf(inventory).map((entry) => entry.name),
-    omitted: inventory.entries.flatMap((entry) => !entry.shared.length && !entry.placement && entry.inspection.kind === 'rejected' ? [{ name: entry.name, reason: entry.inspection.detail }] : []),
-    unreadable: inventory.problems.length + inventory.entries.filter((entry) => entry.inspection.kind === 'failed').length,
-  };
-}

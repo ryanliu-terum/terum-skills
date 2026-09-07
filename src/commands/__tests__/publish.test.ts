@@ -354,3 +354,21 @@ describe('publish local recovery hints', () => {
     expect((await store.read()).shared).toEqual({});
   });
 });
+
+
+describe('publish project recovery hints', () => {
+  it.each([false, true])('prints the actual project candidate path and scope-labels duplicate names (duplicated: %s)', async (duplicated) => {
+    const { fixture, store } = await prepared(); const home = join(fixture.root, 'home'); const cwd = join(fixture.root, 'project');
+    await mkdir(join(cwd, '.git'), { recursive: true }); const project = await localSkill(cwd, 'local');
+    const global = duplicated ? await localSkill(home, 'local') : undefined;
+    const runner = mappedRunner(REMOTE, fixture.bare); const io = new ScriptedPrompter();
+    const result = await run({ ref: 'local', home, cwd, project: 'p', config: store, runner }, io);
+    expect(result.ok).toBe(false); if (result.ok) throw new Error('Expected recovery hint');
+    expect(result.error).toContain(`Found a local folder at ${project}${duplicated ? ' (project)' : ''} that`);
+    expect(result.error).toContain(`${V} share '${project}' --team 'team'`);
+    expect(result.error).toContain(`${V} publish 'local' --team 'team' --project 'p'`);
+    if (duplicated) { expect(result.error).toContain(`Found a local folder at ${global} (global) that`); expect(result.error).toContain(`${V} share '${global}' --team 'team'`); }
+    expect(io.asked).toEqual([]); expect((await store.read()).shared).toEqual({});
+    expect(runner.calls.some((call) => call.args[0] === 'push')).toBe(false);
+  });
+});

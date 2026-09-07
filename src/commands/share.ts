@@ -2,9 +2,8 @@ import { cp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
-import { candidatesOf, localSkills } from '../lib/local-skills.js';
-import { assertSkillDirectory, printable, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
+import { candidatesOf, localSkillRoots, localSkills } from '../lib/local-skills.js';
+import { assertNotInsideStateRoot, assertSkillDirectory, printable, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
@@ -19,6 +18,7 @@ import { formatHygieneFindings, hygieneFrontmatter, inspectHygiene } from '../li
 export interface ShareArgs {
   path?: string;
   home?: string;
+  cwd?: string;
   team?: string;
   keepSource?: string;
   keepRepo?: string;
@@ -41,20 +41,26 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
     const [team, binding] = selectTeam(config.teams, args.team);
     let selectedPath = args.path;
     if (!selectedPath) {
-      const inventory = await localSkills(AGENT_PATHS['claude-code'].global(args.home ?? homedir()), config);
-      const candidates = candidatesOf(inventory, args.allowPrivileged);
-      const omitted = inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && !candidates.includes(entry));
+      const { roots } = await localSkillRoots(args.home ?? homedir(), args.cwd);
+      const inventories = await Promise.all(roots.map((root) => localSkills(root.root, config, { scope: root.scope, stateRoot: store.root })));
+      const candidates = inventories.flatMap((inventory) => candidatesOf(inventory, args.allowPrivileged).map((entry) => ({ ...entry, scope: inventory.scope })));
+      const omitted = inventories.flatMap((inventory) => {
+        const offered = candidatesOf(inventory, args.allowPrivileged);
+        return inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && !offered.includes(entry));
+      });
       if (omitted.length) io.print(`Skipped ${omitted.length} local folders that cannot be offered for sharing. Run \`npx -y terum-skills@latest ls --local\` for paths and reasons.`);
       if (!candidates.length) {
-        io.print(`No local candidates to share under ${printable(inventory.root)}. Skills elsewhere can be shared by passing their folder path.`);
+        io.print(`No local candidates to share under ${roots.map((root) => printable(root.root)).join(' or ')}. Skills elsewhere can be shared by passing their folder path.`);
         return success(undefined);
       }
       if (!io.interactive) {
-        io.print(`Local candidates under ${printable(inventory.root)}:`);
-        for (const candidate of candidates) io.print(`  ${printable(candidate.path)}`);
+        for (const inventory of inventories) {
+          io.print(`Local candidates under ${printable(inventory.root)}:`);
+          for (const candidate of candidatesOf(inventory, args.allowPrivileged)) io.print(`  ${printable(candidate.path)}`);
+        }
         throw new Error(`No skill selected. In an interactive terminal, run \`npx -y terum-skills@latest share --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
       }
-      const choices = new Map(candidates.map((candidate) => [`Share ${printable(candidate.name)}`, candidate.path]));
+      const choices = new Map(candidates.map((candidate) => [`Share ${printable(candidate.name)}${candidates.filter((entry) => entry.name === candidate.name).length > 1 ? ` (${candidate.scope})` : ''}`, candidate.path]));
       const choice = await io.select(`Share a local skill with team ${printable(team)}?`, [...choices.keys(), 'Skip']);
       if (choice === 'Skip') { io.print('Nothing shared.'); return success(undefined); }
       selectedPath = choices.get(choice);
@@ -62,6 +68,7 @@ export async function run(args: ShareArgs, io: Prompter): Promise<Result<ShareRe
     }
     if (!binding.handle || !config.email || !config.display_name) throw new Error('Share needs your joined team identity, name, and email.');
     const source = resolve(selectedPath);
+    assertNotInsideStateRoot(source, store.root);
     const name = basename(source);
     if (!(await exists(join(source, 'SKILL.md')))) throw new Error(`${source} has no SKILL.md.`);
     const scan = await assertSkillDirectory(source);
