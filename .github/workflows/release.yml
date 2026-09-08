@@ -244,7 +244,7 @@ jobs:
         run: |
           set -euo pipefail
           APP=$(find "src-tauri/target/$TARGET/release/bundle/macos" -maxdepth 1 -name '*.app' -print -quit)
-          [ -n "$APP" ] && [ -d "$APP" ] || { echo "::error::no .app produced for $TARGET"; exit 1; }
+          if [ -z "$APP" ] || [ ! -d "$APP" ]; then echo "::error::no .app produced for $TARGET"; exit 1; fi
           # The ad-hoc signature must verify, or Gatekeeper shows "damaged" instead of "could not verify".
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -dv "$APP" 2>&1 | grep -q 'Signature=adhoc' || { echo "::error::expected an ad-hoc signature"; exit 1; }
@@ -263,7 +263,7 @@ jobs:
         run: |
           set -euo pipefail
           EXE=$(find "src-tauri/target/$TARGET/release/bundle/nsis" -maxdepth 1 -name '*-setup.exe' -print -quit)
-          [ -n "$EXE" ] && [ -f "$EXE" ] || { echo "::error::no NSIS installer produced for $TARGET"; exit 1; }
+          if [ -z "$EXE" ] || [ ! -f "$EXE" ]; then echo "::error::no NSIS installer produced for $TARGET"; exit 1; fi
           mkdir -p out
           OUT="out/terum-skills-desktop_${V}_${SUFFIX}"
           cp "$EXE" "$OUT"
