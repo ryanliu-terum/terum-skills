@@ -13,29 +13,24 @@ As a result, we built Terum, a free, fully open source tool that lets you evalua
 
 ## Why should I use this? Who would find this helpful?
 
-- Who would find this helpful?
-
+Who would find this helpful?
 - Developers in an team looking to discover and share best practices internally
 Individuals looking to evaluate the infinite amount of publicly available skills and decide which ones are best for personal use cases. 
 
 
 
-- Isn't it super easy to share skills by just pushing them to GitHub? 
+Isn't it super easy to share skills by just pushing them to GitHub? 
+- Yes, it is and you should if you only work on one project and don't mind having your .claude in your project. However, if you're working on multiple projects with specialized skills, if the repo does not allow .claude in the repo itself(open source, enterprise projects), if you're trying to manage and separate global and project skills, or replicate a specific teammate's suite of skills quickly, then Terum will increase efficiency and save time compared to pushing to GitHub. 
 
-- Yes, it is! However, if you're working on multiple projects with specialized skills, if the repo does not allow .claude in the repo itself(open source, enterprise projects), if you're trying to manage and separate global and project skills, or replicate a specific teammate's suite of skills quickly, then Terum will increase efficiency and save time compared to pushing to GitHub. 
 
-
-- Aren't there open source frameworks for evaluating skills already? 
-
+Aren't there open source frameworks for evaluating skills already? 
 - Yes, there are! Like Nvidia's SkillEvaluator or the SkillsBench paper. Our evaluation methods are heavily based off of these proven methods. Terum doesn't try to reinvent the wheel, it just adopts these methods to for ease of use. SkillEvaluator requires Docker and an API key; SkillsBench requires you to bring your own tests. Terum runs using your subscription plan, with one terminal installation, using dynamically generated tests for the specific skill being tested. 
 
-- How are you evaluating skills?
-
+How are you evaluating skills?
 - Answered above. For more specific notes on methodology, scroll to the bottom. 
 
 
-- Does any private information including skill usage, metadata, or information get out? 
-
+Does any private information including skill usage, metadata, or information get out? 
 - Nope! Fully open source, locally hosted. All skill data is yours and your team's. 
 
 
