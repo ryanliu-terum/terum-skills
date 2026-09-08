@@ -43,17 +43,17 @@ Does any private information including skill usage, metadata, or information get
 Requires Node 22.12+, `git`, and an authenticated GitHub CLI (`gh auth login`).
 
 ```sh
-npm install -g terum-skills
-terum-skills setup
+npx -y terum-skills@latest setup
 ```
 
-Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/skills/terum-skills/`, so Claude Code can run these commands for you inside a session (and hand you the ones that need a terminal). It ships inside the npm package; re-running `terum-skills setup` after an update refreshes it.
+There is no install step — `npx -y` fetches and runs the latest release every time. (Prefer a permanent `terum-skills` binary? See [Installing, updating, uninstalling](#installing-updating-uninstalling).)
 
-The default setup command will lead you towards creating a team. To join a team, ask the owner of a team to use terum-skills invite <your github username>. They will receive a command that you can paste into your terminal. Or, if you know the organization name and repo name, you can run:
+Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/skills/terum-skills/`, so Claude Code can run these commands for you inside a session (and hand you the ones that need a terminal). It ships inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes it.
+
+The default setup command will lead you towards creating a team. To join a team, ask the owner of a team to use `npx -y terum-skills@latest invite <your github username>`. They will receive a command that you can paste into your terminal. Or, if you know the organization name and repo name, you can run:
 
 ```sh
-npm install -g terum-skills
-terum-skills setup <org name>/<repo name>
+npx -y terum-skills@latest setup <org name>/<repo name>
 ```
 
 ## Commands
@@ -73,7 +73,7 @@ terum-skills setup <org name>/<repo name>
 | | `eval <skill>` | Run the skill's evals on your own Claude Code login; `--commit` files a receipt |
 | Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
 
-`terum-skills --help` and `terum-skills <verb> --help` list every option.
+`npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option.
 
 ## How it works
 
@@ -174,6 +174,7 @@ CI never runs a model and never holds an API key; every eval token is a member's
 
 ## Installing, updating, uninstalling
 
+- **Default (no install):** every documented command runs as `npx -y terum-skills@latest <verb>`. npx fetches the newest release on each run, so there is nothing to install, update, or add to PATH. The forms below are optional alternatives that give you a bare `terum-skills` binary.
 - **Global:** `npm install -g terum-skills`. If `terum-skills: command not found`, add `$(npm prefix -g)/bin` (the prefix itself on Windows) to PATH.
 - **Project-local:** `npm install terum-skills` puts the binary under `node_modules/.bin`; run it as `npx terum-skills …` from that folder.
 - **Update:** `terum-skills update` prints this copy's version, the newest advertised release, and the exact command that updates *this* copy. It never runs a package manager. `npx -y terum-skills@latest` fetches the newest release every run and updates nothing else.
@@ -187,7 +188,7 @@ A release is one deliberate action. Bump `version` in `package.json` and both `v
 
 ## Troubleshooting
 
-- **Created a team by mistake?** Join the right one with the line its owner sent you. If its repository name collides with a local team, `terum-skills team join <org>/<repo> --as <other-name>`. `team leave <accidental>` removes it from this machine; delete the repository on GitHub yourself.
+- **Created a team by mistake?** Join the right one with the line its owner sent you. If its repository name collides with a local team, `npx -y terum-skills@latest team join <org>/<repo> --as <other-name>`. `team leave <accidental>` removes it from this machine; delete the repository on GitHub yourself.
 - **git and gh signed in differently?** `gh auth setup-git --hostname github.com` makes git use gh's account.
 - **A never-connected folder fails `validate` on HYG1.** The managed fields (`license`, `metadata.id`, `metadata.author`) are what `connect` adds; connect it first.
 - **`sync` printed a divergence line.** Your source and the repo copy both changed. Pick `connect --keep-source <id>` or `connect --keep-repo <id>`; nothing moves until you do.
