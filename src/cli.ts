@@ -1,5 +1,6 @@
 import { invocation, getStartedLines, type InvocationForm } from './lib/invocation.js';
 import { run as runUpdate } from './commands/update.js';
+import { run as runApp } from './commands/app.js';
 import { packageVersion } from './lib/package.js';
 import { Command } from 'commander';
 import { run as login } from './commands/login.js';
@@ -30,10 +31,10 @@ import { failure, Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
-export interface CliVerbs { update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; connect?: typeof connect; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; receiptCheck?: typeof runReceiptCheck; }
+export interface CliVerbs { app?: typeof runApp; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; connect?: typeof connect; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; receiptCheck?: typeof runReceiptCheck; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean } = {}): Command {
-  const active: Required<CliVerbs> = { update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, connect: verbs.connect ?? connect, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, receiptCheck: verbs.receiptCheck ?? runReceiptCheck };
+  const active: Required<CliVerbs> = { app: verbs.app ?? runApp, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, connect: verbs.connect ?? connect, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, receiptCheck: verbs.receiptCheck ?? runReceiptCheck };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
@@ -127,6 +128,10 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program.command('uninstall').description('Remove terum-skills from this machine: every team you joined (placed skills, local clones, cache), the session-start hook and the /terum-skills Claude Code skill if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \`${invocation(context.form, 'uninstall-skill <ref>')}\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));
   program.command('sync').description('Pull the team repo, finish pending work, and refresh placed skills (--hook for the session hook)').option('--hook', 'session-start mode: stdout is the reload directive or empty; notices and the review count go to stderr').option('--prune', 'delete quarantined items under ~/.terum/skills/quarantine after listing them and asking').action(async (options: { hook?: boolean; prune?: boolean }) => execute((io) => active.sync(options.hook ? { hook: true, prune: options.prune, ...context } : { prune: options.prune, ...context }, io), { verb: 'sync', notices: !options.hook }));
   program.command('search <term>').description('Search shared skills by name, description, or category (read-only)').option('--category <category>').option('--author <author>').option('--project <project>').action(async (term: string, options: { category?: string; author?: string; project?: string }) => execute((io) => active.search({ form: context.form, term, ...options }, io), { verb: 'search', notices: true }));
+
+  program.command('app')
+    .description('Open the Terum Skills desktop app for this version, downloading it first if needed (macOS, Windows on ARM); records where this CLI is so the app can drive it')
+    .action(async () => execute((io) => active.app({ form: context.form, launch: context.launch }, io), { verb: 'app', notices: false }));
 
   program.command('update')
     .description("Show this copy's version, the latest advertised release, and the command that updates it (prints it, never runs it)")

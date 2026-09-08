@@ -9,8 +9,15 @@ export interface Runner {
   run(command: 'git' | 'gh', args: readonly string[], options?: RunOptions): Promise<CommandResult>;
 }
 
-export const systemRunner: Runner = {
-  run(command, args, options = {}) {
+export const systemRunner: Runner = { run: (command, args, options) => execCommand(command, args, options) };
+
+/**
+ * The one spawner. `Runner` narrows it to git and gh for every verb; the `app` command alone also runs
+ * the platform's own tools to unpack and open the desktop app (`tar`, `open`, the NSIS installer), which
+ * AGENTS.md records as the single exception to "only git and gh". Injected there like `Runner` is here.
+ */
+export type Exec = (command: string, args: readonly string[], options?: RunOptions) => Promise<CommandResult>;
+export const execCommand: Exec = (command, args, options = {}) => {
     return new Promise((resolve, reject) => {
       const inherit = options.stdio === 'inherit';
       const grouped = options.deadlineMs !== undefined && platform() !== 'win32';
@@ -67,5 +74,4 @@ export const systemRunner: Runner = {
         resolve({ code: expired ? 124 : code ?? 1, stdout: Buffer.concat(out).toString('utf8'), stderr: expired ? `terum-skills: ${command} ${verb} exceeded ${options.deadlineMs! / 1000} s` : Buffer.concat(err).toString('utf8') });
       });
     });
-  },
 };

@@ -28,7 +28,10 @@ author chose to close a gap — implement it as written, do not treat it as unde
 ## Invariants you must hold when you write code here
 
 - **Nothing runs anywhere but laptops and the git host.** No HTTP client, no server, no daemon,
-  no third-party CLI on the install path. Shell out only to `git` and `gh`.
+  no third-party CLI on the install path. Shell out only to `git` and `gh`. One exception, recorded
+  in `.planning/decisions/2026-09-08-desktop-app-cli-decision-walk.md` (D7, D8): `terum-skills app`
+  also runs the platform's own tools to unpack and open the desktop app (`tar`, `open`, the NSIS
+  installer it downloaded through `gh`), through the `Exec` seam in `src/lib/runner.ts`.
 - **Every write to the team repo goes through `safeWrite()`** (build spec §6.0): fetch, hard-reset
   the clone to `origin/main`, re-run a *pure* mutation, commit, push, retry to a 30-second deadline.
   A mutation that does I/O, mints an ID, or prompts is a bug.

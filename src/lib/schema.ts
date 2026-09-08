@@ -88,7 +88,10 @@ const teamsSchema = z.preprocess((value) => {
     return kept.handle === null || kept.handle === undefined ? [] : [[name, kept]];
   }));
 }, z.record(z.string(), teamConfigSchema));
+/** Machine-wide: whether this person opted into the desktop app (decision walk D4, 2026-09-08). Absent = never asked. */
+export const appChoiceSchema = z.object({ choice: z.enum(['opted-in', 'declined']), at: z.string() }).passthrough();
 export const configSchema = z.object({
+  app: appChoiceSchema.optional(),
   default_handle: handleSchema.optional(),
   email: emailSchema.optional(),
   display_name: z.string().min(1).optional(),

@@ -607,5 +607,47 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 140,
     "policy": "not-a-hint",
     "pattern": "io.print(`Installed the /terum-skills Claude Code skill at ${directory}.`);"
+  },
+  {
+    "file": "src/commands/app.ts",
+    "line": 17,
+    "policy": "prose",
+    "pattern": "* `terum-skills app` (decision walk 2026-09-08, D1 D3 D7 D8): make sure this version's desktop app is on the"
+  },
+  {
+    "file": "src/commands/app.ts",
+    "line": 23,
+    "policy": "not-a-hint",
+    "pattern": "export const APP_REPOSITORY = 'ryanliu-terum/terum-skills';"
+  },
+  {
+    "file": "src/commands/app.ts",
+    "line": 24,
+    "policy": "not-a-hint",
+    "pattern": "export const APP_SLUG = 'terum-skills-desktop';"
+  },
+  {
+    "file": "src/commands/app.ts",
+    "line": 59,
+    "policy": "prose",
+    "pattern": "if (!version) return failure('This copy of terum-skills has no version; the desktop app is published per version.');"
+  },
+  {
+    "file": "src/commands/app.ts",
+    "line": 64,
+    "policy": "prose",
+    "pattern": "if (platform === 'wsl') io.print('The desktop app runs on the Windows side of this machine, not inside WSL. Install terum-skills there and run this command from a Windows terminal; from here, everything works in the terminal.');"
+  },
+  {
+    "file": "src/commands/app.ts",
+    "line": 90,
+    "policy": "prose",
+    "pattern": "if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return failure(`No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(args.form)}`);"
+  },
+  {
+    "file": "src/commands/app.ts",
+    "line": 165,
+    "policy": "prose",
+    "pattern": "if (/release not found|Not Found \\(HTTP 404\\)|no assets match/i.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;"
   }
 ];
