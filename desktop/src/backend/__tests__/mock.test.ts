@@ -1,0 +1,64 @@
+import { it, expect, afterEach, vi } from 'vitest';
+import { createMockBackend } from '../mock';
+import { design } from '../mock/data';
+import type { Run, Frame } from '../types';
+afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();});
+async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
+it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect((await b.library({scope:'Global'})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:'Global'});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
+it.each([
+ ['library',"ENOENT: no such file or directory, scandir '~/.terum/skills'"],
+ ['skill',"ENOENT: no such file or directory, open '~/.claude/skills/deploy-check/SKILL.md'"],
+ ['inbox',"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com"],
+ ['marketplace',"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com"],
+ ['share',"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'"],
+ ['settings',"SyntaxError: Unexpected token } in JSON at position 412 · ~/.terum/skills/config.json"],
+ ['onboarding',"Skipping terum: could not fetch https://github.com/terum/team-skills.git: fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com"],
+] as const)('returns the exact %s board error',async(family,error)=>{
+ location.hash='#/frame?__mock=error';const b=createMockBackend();
+ const reads={library:()=>b.library({scope:'Global'}),skill:()=>b.skill({ref:'deploy-check'}),inbox:()=>b.inbox(),marketplace:()=>b.catalog(),share:()=>b.roster(),settings:()=>b.settings(),onboarding:()=>b.onboarding()};
+ expect(await reads[family]()).toEqual({ok:false,error});
+ if(family==='marketplace')expect(await b.search({q:'deploy'})).toEqual({ok:false,error});
+ if(family==='settings')expect(await b.update()).toEqual({ok:false,error});
+ if(family==='onboarding')expect(await b.sync({}).done).toEqual({ok:false,error});
+ if(family==='skill')expect(await b.skill({ref:'migration-guard'})).toEqual({ok:false,error:"ENOENT: no such file or directory, open '~/.claude/skills/migration-guard/SKILL.md'"});
+});
+it('returns disabled and not-installed details without changing fixture data',async()=>{const b=createMockBackend();location.hash='#/skill/deploy-check?__mock=disabled';const off=await b.skill({ref:'deploy-check'});expect(off.ok).toBe(true);if(!off.ok)throw new Error(off.error);expect(off.value.enabled).toBe(false);location.hash='#/skill/deploy-check?__mock=not-installed';const absent=await b.skill({ref:'deploy-check'});expect(absent.ok&&absent.value.root).toBe('Marketplace');expect(absent.ok&&absent.value.installed).toBe(false);});
+it('honours latency, slow, and deliberately pending loading reads',async()=>{vi.useFakeTimers();const b=createMockBackend({latencyMs:50});const resolved=vi.fn();void b.inbox().then(resolved);await vi.advanceTimersByTimeAsync(49);expect(resolved).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(resolved).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=slow';const slow=vi.fn();void b.inbox().then(slow);await vi.advanceTimersByTimeAsync(1999);expect(slow).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(slow).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=loading';const loading=vi.fn();void b.inbox().then(loading);await vi.advanceTimersByTimeAsync(10000);expect(loading).not.toHaveBeenCalled();});
+it('models connect selection, a declined skill, an accepted skill and Done',async()=>{const run=createMockBackend().connect({});let selected=0;const result=await answerAll(run,frame=>frame.kind==='select'?(selected++===0?'api-docs':selected===2?'handoff-note':'Done'):frame.question==='Connect handoff-note?');expect(result).toEqual({ok:true,value:{kind:'batch',shared:[{id:'handoff-note',name:'handoff-note'}],declined:['api-docs'],refused:[]}});});
+it('returns the required decline for Skip and a single result for path connect',async()=>{const b=createMockBackend();expect(await answerAll(b.connect({}),()=> 'Skip')).toEqual({ok:false,error:'Connect was declined.'});expect(await answerAll(b.connect({path:'/skills/api-docs'}),()=>true)).toEqual({ok:true,value:{id:'api-docs',name:'api-docs'}});});
+it('requires confirmation for install, removal, prune and team leave',async()=>{const b=createMockBackend();for(const run of [b.install({ref:'deploy-check'}),b.uninstallSkill({ref:'deploy-check'}),b.uninstallMachine({}),b.sync({prune:true}),b.team({kind:'leave'})]){expect((await answerAll<unknown>(run,()=>false)).ok).toBe(false);}});
+it('returns fixture-shaped results for successful verbs',async()=>{const b=createMockBackend();expect((await answerAll(b.install({ref:'deploy-check',scope:'Terum'}),()=>true))).toEqual({ok:true,value:[{id:'deploy-check',name:'deploy-check',scope:'Terum'}]});expect((await b.invite({logins:['sam']}).done)).toEqual({ok:true,value:{invited:['sam']}});expect((await b.publish({ref:'deploy-check'}).done).ok).toBe(true);expect((await b.eval({ref:'deploy-check'}).done).ok).toBe(true);expect(await b.validate({ref:'deploy-check'})).toEqual({ok:true,value:{name:'deploy-check',findings:0,warnings:0}});expect((await answerAll(b.setup({offerConnect:false}),()=> 'Join an existing team')).ok).toBe(true);});
+it('handles unknown refs, invalid preferences, storage corruption and unavailable clipboard',async()=>{const b=createMockBackend();expect((await b.install({ref:'missing'}).done).ok).toBe(false);b.prefs.set('theme','light');expect(b.prefs.get('theme','dark')).toBe('light');localStorage.setItem('terum-skills-app:pref:bad','{broken');expect(b.prefs.get('bad',42)).toBe(42);expect(()=>b.prefs.set('bad',undefined)).toThrow();expect(()=>b.prefs.set('bad',NaN)).toThrow();expect(await b.copyToClipboard('text')).toEqual({ok:false,error:'Clipboard unavailable.'});expect(await b.copyImage(new Blob(['x'],{type:'text/plain'}))).toEqual({ok:false,error:'Expected a PNG image.'});});
+
+it('filters project scopes and isolates returned data from the source fixtures',async()=>{const b=createMockBackend();const mrf=await b.library({scope:'MRF'});expect(mrf.ok&&mrf.value.skills.every(s=>['migration-guard','csv-profiler'].includes(s.name))).toBe(true);expect(mrf.ok&&mrf.value.skills.length).toBeGreaterThan(0);const first=await b.library({scope:'Global'});if(!first.ok)throw new Error(first.error);const n=first.value.skills.length;first.value.skills.pop();const next=await b.library({scope:'Global'});expect(next.ok&&next.value.skills.length).toBe(n);});
+
+it.each(['loading','error','slow','disabled','not-installed','default'])('status resolves immediately with identity during %s',async scenario=>{
+ location.hash='#/library/global?__mock='+scenario;vi.useFakeTimers();
+ const status=await createMockBackend({latencyMs:500}).status();
+ expect(status).toEqual({ok:true,value:{machine:design.MACHINE,me:design.ME,teams:design.TEAMS,counts:design.COUNTS}});
+ expect(status.ok&&status.value.machine.gh_login).toBe('teniroo');
+ expect(vi.getTimerCount()).toBe(0);
+});
+it('clones status and successful long results, including nested receipts',async()=>{
+ const b=createMockBackend();const first=await b.eval({ref:'deploy-check'}).done;
+ if(!first.ok||!first.value.receipt)throw new Error('Expected receipt');
+ const original=structuredClone(first.value.receipt);
+ Reflect.set(first.value.receipt,'catalog','mutated');
+ const next=await b.eval({ref:'deploy-check'}).done;
+ expect(next.ok&&next.value.receipt).toEqual(original);
+ const status=await b.status();if(!status.ok)throw new Error(status.error);status.value.machine.gh_login='mutated';
+ const fresh=await b.status();expect(fresh.ok&&fresh.value.machine.gh_login).toBe('teniroo');
+});
+it('returns isolated Settings and Onboarding constants without reshaping them',async()=>{
+ const b=createMockBackend();const settings=await b.settings();const onboarding=await b.onboarding();
+ expect(settings.ok).toBe(true);expect(onboarding.ok).toBe(true);
+ if(!settings.ok||!onboarding.ok)throw new Error('Expected fixture reads');
+ for(const [key,value] of Object.entries(settings.value))expect(value).toEqual(Reflect.get(design,key));
+ for(const key of ['ONBOARD_STEPS','ONBOARD_BASICS','GLOBAL_SET','ONBOARD_PLACED','ONBOARD_LATER','ONBOARD_COMMUNITY','ONBOARD_FETCH_ERROR','WELCOME_LINES','BASICS_COPY','BASICS_HINT','THEME_OPTIONS','LIBRARY_OVERVIEW','INVITEE','TEAM_REPO','INVITE_TIP'])expect(Reflect.get(onboarding.value,key)).toEqual(Reflect.get(design,key));
+ expect(onboarding.value.skill.name).toBe(design.SKILLS[0]?.name);expect(onboarding.value.summary?.lift).toBe(44);expect(onboarding.value.arm).toEqual(design.DETAIL.receipt?.arm);expect(onboarding.value.rosterInitials).toEqual(design.ROSTER.map(q=>q.initials));expect(onboarding.value.bootRows).toHaveLength(4);expect(onboarding.value.failedBootRows[1]?.[0]).toBe('failed');
+ expect(settings.value.SETTINGS_NAV).toEqual(design.SETTINGS_NAV);expect(onboarding.value.ONBOARD_STEPS).toEqual(design.ONBOARD_STEPS);
+ settings.value.TEAMS.pop();onboarding.value.ONBOARD_STEPS.pop();
+ const nextSettings=await b.settings();const nextOnboarding=await b.onboarding();
+ expect(nextSettings.ok&&nextSettings.value.TEAMS).toEqual(design.TEAMS);
+ expect(nextOnboarding.ok&&nextOnboarding.value.ONBOARD_STEPS).toEqual(design.ONBOARD_STEPS);
+});

@@ -1,0 +1,25 @@
+import { decodeText } from '../../lib/fixture-text';
+import type { Catalog, InboxItem, Result, SkillCard, SkillDetail, TokenKey } from '../types';
+import * as derive from './derive';
+import { design } from './fixture';
+export { design } from './fixture';
+export const sidebarCounts=design.COUNTS;
+export function today():Date{return new Date(design.generatedFrom.today+'T12:00:00Z');}
+export function cardOf(s:typeof design.CATALOG[number]):SkillCard{return {...s,favorite:s.favorite??false,flags:s.flags??[],flagText:Object.fromEntries(Object.entries(s.flag_text??{}).filter((entry):entry is [string,string]=>entry[1]!==undefined)),enabled:s.enabled??true,installed:s.installed??true,wlt:s.wlt??null,summary:derive.summary_of(s),installsN:derive.installs_of(s),tokensK:derive.tokens_of(s),indicators:Object.fromEntries(Object.entries(design.INDICATORS).map(([key,[icon,token,text]])=>[key,{icon,text,token:token as TokenKey}])) as SkillCard['indicators']};}
+export function inboxItems():InboxItem[]{return design.INBOX.map(item=>({...item,id:item.kind+(item.sub?'-'+item.sub:'')+'-'+item.name,summary:derive.summary_of(item),incumbentLift:derive.incumbent_lift(item),...(item.receipt?{reportNumbers:derive.report_numbers(item)}:{})}));}
+export const defaultInboxId='share-secret-scan';
+export function selectedInboxId(id?:string):string|null {return id===undefined?defaultInboxId:inboxItems().some(it=>it.id===id)?id:null;}
+export function detailOf(d:typeof design.DETAIL):SkillDetail{
+ const s=cardOf({...d,wlt:d.wlt??undefined,...(d.partial?{partial:d.partial}:{partial:undefined})});
+ const fm=`---\nname: ${d.name}\ndescription: ${d.desc}\nlicense: UNLICENSED\n${d.grants.length?'allowed-tools: '+d.grants.join(', ')+'\n':''}metadata:\n  id: ${design.SKILL_MD_ID}\n  author: "${d.author.name} <${d.author.handle}@terum.ai>"\n  terum-category: ${d.category}\n---`;
+ return {...d,...s,history:d.history.map(h=>({...h,summary:derive.summary_of(h)})),root:d.root==='Marketplace'?'Marketplace':'Global',skillMd:{frontmatter:decodeText(fm),body:design.SKILL_MD_BODY.map(([kind,content])=>({kind,content}))},evalEstimate:d.receipt?derive.eval_estimate({receipt:d.receipt}):null,evalEstimateText:d.receipt?derive.eval_estimate_text({receipt:d.receipt}):'',evalEstimateTip:d.receipt?derive.eval_estimate_tip({receipt:d.receipt}):'',evalCommand:derive.eval_command(d),shareCommand:derive.share_command(d),incumbentLift:derive.incumbent_lift(d),reportNumbers:derive.report_numbers(d),scoreFractions:{...derive.score_fractions(d.receipt),routesExpected:d.receipt?d.receipt.triggers.tp+d.receipt.triggers.fn:0},method:design.METHOD};
+}
+export function skillByRef(ref:string):Result<SkillDetail>{
+ switch(ref){case 'deploy-check':return {ok:true,value:detailOf(design.DETAIL)};case 'migration-guard':return {ok:true,value:detailOf(design.DETAIL_PARTIAL)};case 'onboarding-tour':return {ok:true,value:detailOf(design.DETAIL_NO_RECEIPT)};}
+ const raw=[...design.SKILLS,...design.CATALOG].find(s=>s.name===ref);
+ if(!raw)return {ok:false,error:'No skill named '+ref+'.'};
+ const card=cardOf(raw),authors:Record<string,string>=design.AUTHOR_OF;
+ const author=design.ROSTER.find(p=>p.handle===(authors[ref]??'teddy'))??design.TEDDY;
+ return {ok:true,value:detailOf({...card,cases:card.cases??design.DEFAULT_CASES,receipt:null,history:[],hygiene:[],grants:[],grants_approved:'',activity:[],users:[],used_by:[],files:['SKILL.md'],size_bytes:'—',lines:0,version:'—',version_full:'—',scope:'Global',favorites:0,installs_n:card.installsN,installed:true,author,repo:'terum/team-skills',path:'skills/'+ref,desc_long:card.desc})};
+}
+export function catalogData():Catalog{return {skills:design.CATALOG.map(cardOf),extras:design.MARKET_EXTRA.map(cardOf),people:design.ROSTER.map(q=>({...q,lastPublish:q.last_publish,skills:derive.skills_by(q.handle).map(s=>s.name),adoption:derive.adoption_of(q.handle),publishLine:derive.publish_line(q),teamsLine:derive.teams_line(q.handle),buckets:derive.person_buckets(q.handle).map(([bucket,rows])=>[bucket,rows.map(s=>s.name)]),placeNote:derive.person_place_note(q),onDisk:derive.person_on_disk(q.handle)})),projects:design.PROJECTS.map(q=>({...q,memberHandles:derive.project_members(q).map(p=>p.handle),memberInitials:derive.project_members(q).map(p=>p.initials),skillsIn:derive.skills_in(q).map(s=>s.name)})),categories:design.CATEGORIES,categoryRemaining:Object.fromEntries(design.CATEGORIES.map(([key,,n])=>[key,derive.category_remaining(key,n)])),topRated:derive.top_rated(design.CATALOG.length).map(s=>s.name),peopleByAdoption:derive.people_by_adoption().map(p=>p.handle),projectsByMembers:derive.projects_by_members().map(p=>p.name),categorySkills:Object.fromEntries(design.CATEGORIES.map(([key])=>[key,derive.category_skills(key).map(s=>s.name)])),filterDefault:design.FILTER_DEFAULT,filterCount:derive.filter_count(),verdictCounts:derive.verdict_counts(),catalogN:design.CATALOG_N,teamN:design.TEAM_N,bulkInstall:Object.fromEntries(design.PROJECTS.map(q=>[q.key,derive.bulk_install(q)]))};}

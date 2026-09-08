@@ -182,6 +182,14 @@ CI never runs a model and never holds an API key; every eval token is a member's
 
 Release notices appear last on stderr, at most once per release per day, and are suppressed in CI, when stderr is piped, or when `NO_UPDATE_NOTIFIER` or `TERUM_SKILLS_NO_UPDATE_NOTIFIER` is set. Version checks read git tags from this repository only, never the npm registry, and only when a configured team is on GitHub.
 
+## Desktop app (preview)
+
+`desktop/` holds the desktop frontend: a Vite + React app that today runs in a browser on a mock backend and
+renders every screen of the design, ahead of its Tauri shell. It has its own package, lockfile and gates
+(`cd desktop && npm install && npm run dev`, then open `http://localhost:1420/#/library/global`); nothing in it
+ships in the npm package. `desktop/GAPS.md` lists what the drawn screens need from the CLI that it does not
+have yet.
+
 ## Releasing (maintainers)
 
 A release is one deliberate action. Bump `version` in `package.json` and both `version` fields in `package-lock.json` in a reviewed PR, merge it, then run **Actions → Release** with the version and the full merged commit SHA (`dry_run` first). The workflow runs the gates, packs once with the commit stamped as `gitHead`, publishes to npm with provenance behind a reviewer-approved environment, verifies the registry serves those exact bytes, and only then creates the `v<version>` tag and a GitHub Release. Tags therefore advertise verified publications and are never moved; `release-drift.yml` checks every tag against the registry daily. A failed run is re-dispatched with the same inputs and finishes whatever step is missing.

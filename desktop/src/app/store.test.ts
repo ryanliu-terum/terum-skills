@@ -1,0 +1,8 @@
+import { it, expect, vi, afterEach } from 'vitest';
+import { applyTheme, useUiStore } from './store';
+afterEach(()=>{vi.unstubAllGlobals();localStorage.clear();});
+it('stamps and persists an explicit theme',()=>{applyTheme('light');expect(document.documentElement.dataset.theme).toBe('light');expect(localStorage.getItem('terum-theme')).toBe('light');applyTheme('dark');expect(document.documentElement.dataset.theme).toBe('dark');});
+it('resolves system from the media preference',()=>{vi.stubGlobal('matchMedia',vi.fn().mockReturnValue({matches:true}));applyTheme('system');expect(matchMedia).toHaveBeenCalledWith('(prefers-color-scheme: light)');expect(document.documentElement.dataset.theme).toBe('light');vi.stubGlobal('matchMedia',vi.fn().mockReturnValue({matches:false}));applyTheme('system');expect(matchMedia).toHaveBeenCalledWith('(prefers-color-scheme: light)');expect(document.documentElement.dataset.theme).toBe('dark');});
+it('updates layout preferences and records the last route',()=>{useUiStore.getState().setRailOpen(false);useUiStore.getState().setOverviewHidden(true);useUiStore.getState().setLastRoute('/share');expect(useUiStore.getState()).toMatchObject({railOpen:false,overviewHidden:true,lastRoute:'/share'});});
+
+it('validates persisted fields before hydration and retains store actions',async()=>{useUiStore.setState({theme:'dark',railOpen:true});localStorage.setItem('terum-skills-app:ui',JSON.stringify({state:{theme:'invalid',railOpen:'no',setTheme:'not a function'},version:0}));await useUiStore.persist.rehydrate();expect(useUiStore.getState()).toMatchObject({theme:'dark',railOpen:true});expect(typeof useUiStore.getState().setTheme).toBe('function');});

@@ -1,0 +1,1 @@
+export function TrafficLights(){return <div style={{display:'flex',alignItems:'center',gap:8}} aria-hidden="true">{[['#ff5f57','#e0443e'],['#febc2e','#dea123'],['#28c840','#1aab29']].map(([fill,ring])=><div key={fill} style={{width:12,height:12,borderRadius:'50%',background:fill,boxShadow:`inset 0 0 0 0.5px ${ring}`}} />)}</div>;}
