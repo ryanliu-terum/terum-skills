@@ -44,12 +44,13 @@ Requires Node 22.12+, `git`, and an authenticated GitHub CLI (`gh auth login`).
 
 ```sh
 npm install -g terum-skills
-npx -y terum-skills@latest setup
+terum-skills setup
 ```
 
-The default setup command will lead you towards creating a team. To join a team, ask the owner of a team to use terum-skills invite <your github username>. They will receive a command that you can paste into your terminal. Or, if you know the organization name and repo name, you can run. 
+The default setup command will lead you towards creating a team. To join a team, ask the owner of a team to use terum-skills invite <your github username>. They will receive a command that you can paste into your terminal. Or, if you know the organization name and repo name, you can run:
 
 ```sh
+npm install -g terum-skills
 terum-skills setup <org name>/<repo name>
 ```
 
