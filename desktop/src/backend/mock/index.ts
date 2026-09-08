@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { decodeText } from '../../lib/fixture-text';
+import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
 import type { ConnectBatch, ConnectOutcome, Result, Roster, Run, SearchHit } from '../types';
 import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData } from './data';
@@ -7,10 +9,10 @@ import { onboardingData } from './onboarding';
 import { readScenario } from './scenario';
 import { createRun } from './run';
 import type { RunContext } from './run';
-const fatal="fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com";
-const errors={library:"ENOENT: no such file or directory, scandir '~/.terum/skills'",settings:"SyntaxError: Unexpected token } in JSON at position 412 · ~/.terum/skills/config.json",inbox:fatal,marketplace:fatal,share:"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'",skill:(ref:string)=>`ENOENT: no such file or directory, open '~/.claude/skills/${ref}/SKILL.md'`,onboarding:design.ONBOARD_FETCH_ERROR.replaceAll("&#39;", "'")};
+const fatal=decodeText(design.ONBOARD_FETCH_ERROR);
+const errors={library:"EACCES: permission denied, scandir '~/.terum/skills'",settings:"Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)",inbox:fatal,marketplace:"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com",share:"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'",skill:(ref:string)=>`ENOENT: no such file or directory, open '~/.claude/skills/${ref}/SKILL.md'`,onboarding:design.ONBOARD_FETCH_ERROR.replaceAll("&#39;", "'")};
 const ok=<T>(value:T):Result<T>=>({ok:true,value});
-const fail=(error:string):Result<never>=>({ok:false,error});
+const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeText(error),'')});
 export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
  const latency=opts.latencyMs??0;
  if(!Number.isFinite(latency)||latency<0)throw new Error('latencyMs must be a finite nonnegative number.');
@@ -20,7 +22,8 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   const delay=scenario==='slow'?2000:latency;
   if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
   if(scenario==='error')return fail(typeof errors[family]==='function'?errors[family](ref):errors[family]);
-  return structuredClone(get(scenario));
+  const result=get(scenario);
+  return structuredClone(result.ok?result:{...result,error:abbreviateHome(decodeText(result.error),'')});
  }
  function long<T>(family:Exclude<keyof typeof errors,'skill'>,script:(ctx:RunContext)=>Promise<Result<T>>):Run<T>{
   const scenario=readScenario();
@@ -44,8 +47,8 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   async capabilities(){return {windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
   async status(){return structuredClone(ok({machine:design.MACHINE,me:design.ME,teams:design.TEAMS,counts:{...design.COUNTS,...(readScenario()==='empty'?{Global:'0'}:{})}}));},
   settings:()=>read('settings',()=>ok({MACHINE:design.MACHINE,ME:design.ME,TEAMS:design.TEAMS,TEAM_POLICY:design.TEAM_POLICY,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,SHARED:design.SHARED,LOCAL_UNSHARED:design.LOCAL_UNSHARED,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN})),
-  onboarding:()=>read('onboarding',()=>ok(onboardingData())),
-  library:({scope})=>read('library',scenario=>{const scopes:Record<string,readonly string[]>=design.LIST_OF;const canonical=['Global','Terum','SSM','MRF'].find(s=>s.toLowerCase()===scope.toLowerCase())??scope;return ok({skills:(scenario==='empty'?[]:canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.origin!=='local'&&scopes[skill.name]?.includes(canonical))).map(s=>({...cardOf(s),enabled:backend.prefs.get('enabled:'+s.name,s.enabled??true),favorite:backend.prefs.get('favorite:'+s.name,s.favorite??false)})),overview:design.LIBRARY_OVERVIEW,title:scenario==='empty'?'0 skills':library_title(canonical)});}),
+  onboarding:async()=>{const result=await read('onboarding',()=>ok(onboardingData()));return result.ok?result:{...result,value:onboardingData()};},
+  library:({scope})=>read('library',scenario=>{const scopes:Record<string,readonly string[]>=design.LIST_OF;const canonical=['Global','Terum','SSM','MRF'].find(s=>s.toLowerCase()===scope.toLowerCase())??scope;const skills=scenario==='empty'?[]:canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.project!=='local'&&scopes[skill.name]?.includes(canonical));return ok({skills:skills.map(s=>({...cardOf(s),enabled:backend.prefs.get('enabled:'+s.name,s.enabled??true),favorite:backend.prefs.get('favorite:'+s.name,s.favorite??false)})),overview:design.LIBRARY_OVERVIEW,title:scenario==='empty'?'0 skills':`${skills.length} of ${library_title(canonical)}`});}),
   skill:({ref})=>read('skill',scenario=>{if(scenario==='not-installed'&&ref==='deploy-check')return ok(detailOf(design.DETAIL_NOT_INSTALLED));const result=skillByRef(ref);return result.ok?ok({...result.value,enabled:scenario==='disabled'?false:backend.prefs.get('enabled:'+ref,result.value.enabled),favorite:backend.prefs.get('favorite:'+ref,result.value.favorite)}):result;},ref),
   receipts:({skillId,version})=>read('library',()=>{const detail=skillByRef(skillId);if(!detail.ok)return fail(detail.error);return ok(detail.value.version===version?detail.value.receipt??null:null);}),
   inbox:()=>read('inbox',scenario=>ok(scenario==='empty'?[]:inboxItems())),

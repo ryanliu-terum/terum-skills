@@ -1,3 +1,4 @@
+import { homeDir } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { z } from 'zod';
@@ -20,6 +21,7 @@ export interface Bridge {
   kill(id: string): Promise<void>;
   readAppState(): Promise<AppState | null>;
   hostPlatform(): Promise<string>;
+  homeDirectory(): Promise<string>;
 }
 
 export function tauriBridge(): Bridge {
@@ -47,5 +49,6 @@ export function tauriBridge(): Bridge {
       return parsed.data;
     },
     hostPlatform: () => invoke<string>('host_platform'),
+    homeDirectory: homeDir,
   };
 }

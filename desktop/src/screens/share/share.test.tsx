@@ -33,3 +33,19 @@ it('does not launch duplicate invitation runs while one is pending',async()=>{le
 it('cancels an active invitation run when its screen unmounts',async()=>{const run=createRun(async ctx=>{await ctx.sleep(60_000);return {ok:true,value:{invited:['sortiz']}};});const cancel=vi.spyOn(run,'cancel');vi.spyOn(backend,'invite').mockReturnValue(run);const view=open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));view.unmount();await waitFor(()=>expect(cancel).toHaveBeenCalled());expect((await run.done).ok).toBe(false);});
 
 it('keeps the main landmark accessible while the invite is open',async()=>{open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});const main=screen.getByRole('main');const dialog=screen.getByRole('dialog');expect(main).toBeInTheDocument();expect(main.closest('[aria-hidden="true"], [inert]')).toBeNull();expect(main.closest('.shell')).not.toBeNull();expect(dialog.closest('.shell')).toBe(main.closest('.shell'));expect(main).not.toContainElement(dialog);});
+
+
+it('keeps Invite on ShareError and omits member facets (CP-18)',async()=>{
+ open('#/share');await screen.findByRole('textbox',{name:'Find members'});
+ expect(screen.queryByRole('button',{name:'Filter members'})).toBeNull();
+ cleanup();open('#/share?__mock=error');await screen.findByRole('alert');
+ fireEvent.click(screen.getByRole('button',{name:'Invite'}));
+ expect(await screen.findByRole('dialog')).toHaveTextContent('Invite members');
+});
+it('renders the exact join note and variadic invite placeholder (CP-05/CP-06)',async()=>{
+ open('#/share?dialog=invite');const input=await screen.findByRole('textbox',{name:'GitHub logins'});
+ const dialog=screen.getByRole('dialog');
+ expect(dialog).toHaveTextContent("GitHub emails the invitation. The block runs the joiner's wizard: with gh signed in it accepts the pending invitation, otherwise it asks them to accept it in the browser, and git must have access to this repository.");
+ fireEvent.change(input,{target:{value:''}});
+ expect(dialog).toHaveTextContent('npx -y terum-skills@latest invite <github-login>...');
+});

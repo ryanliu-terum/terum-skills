@@ -6,6 +6,7 @@ import type { Backend } from '../Backend';
 import type { Capabilities, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
+import { abbreviateHome } from '../paths';
 
 /**
  * The real adapter: every long verb is one `terum-skills --frames <verb>` process (run.ts). What the CLI has
@@ -29,25 +30,46 @@ const cliEval = z.object({ name: z.string() }).passthrough();
 const cliValidate = z.object({ name: z.string(), findings: z.number(), warnings: z.number() });
 const cliSearch = z.array(z.object({ id: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), unresolved: z.boolean() }).passthrough());
 
-const gap = (what: string): Result<never> => ({ ok: false, error: `${what} is not available from terum-skills yet: the CLI has no verb that returns it (desktop/GAPS.md). The terminal has everything the app shows here.` });
 const PREF = 'terum-skills-app:pref:';
 
 export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   // Read once per app session; `terum-skills app` rewrites the file on every launch, and the app is launched by it.
   let stateOnce: Promise<AppState | null> | undefined;
   const state = () => (stateOnce ??= bridge.readAppState());
+  let homeOnce: Promise<string> | undefined;
+  const home = () => (homeOnce ??= bridge.homeDirectory().catch(() => ''));
+  async function result<T>(value: Result<T>): Promise<Result<T>> {
+    return value.ok ? value : { ...value, error: abbreviateHome(value.error, await home()) };
+  }
+  const fail = (error: string) => result<never>({ ok: false, error });
+  const gap = (what: string) => fail(`${what} is not available from terum-skills yet: the CLI has no verb that returns it (desktop/GAPS.md). The terminal has everything the app shows here.`);
   const listeners = new Set<(source: ChangeSource) => void>();
   const notify = (...sources: ChangeSource[]) => { for (const source of sources) for (const listener of listeners) listener(source); };
   const cwd = () => backend.prefs.get<string>('workspace', '') || undefined;
 
   function run<TIn, TOut>(argv: readonly string[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut, touches: ChangeSource[] = ['config', 'placed']): Run<TOut> {
-    return cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), map: (value) => map(schema.parse(value)), onSettled: (result) => { if (result.ok) notify(...touches); } });
+    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), map: (value) => map(schema.parse(value)), onSettled: (result) => { if (result.ok) notify(...touches); } });
+    return {
+      done: job.done.then(result),
+      answer: (id, value) => job.answer(id, value),
+      cancel: () => job.cancel(),
+      frames: {
+        async *[Symbol.asyncIterator]() {
+          for await (const frame of job.frames) {
+            const directory = await home();
+            if (frame.t === 'print') yield { ...frame, line: abbreviateHome(frame.line, directory) };
+            else if (frame.t === 'result' && frame.error !== undefined) yield { ...frame, error: abbreviateHome(frame.error, directory) };
+            else yield frame;
+          }
+        },
+      },
+    };
   }
   /** A verb that never asks: drive it to completion; an unexpected question is a failure, never an auto-answer. */
   async function read<TIn, TOut>(argv: readonly string[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut): Promise<Result<TOut>> {
-    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), map: (value) => map(schema.parse(value)) });
+    const job = run(argv, schema, map, []);
     for await (const frame of job.frames) {
-      if (frame.t === 'ask') { await job.cancel(); return { ok: false, error: `terum-skills asked "${frame.question}" during a read-only call; the desktop app never answers questions on your behalf.` }; }
+      if (frame.t === 'ask') { await job.cancel(); return fail(`terum-skills asked "${frame.question}" during a read-only call; the desktop app never answers questions on your behalf.`); }
     }
     return job.done;
   }
@@ -80,12 +102,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? [args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role }), ['config', 'clone', 'placed']),
     eval: (args: EvalArgs) => run(['eval', args.ref, ...(args.commit ? ['--commit'] : [])], cliEval, (value): EvalResult => ({ name: value.name, receipt: null }), ['clone']),
-    validate: (args: ValidateArgs) => args.ref || args.cwd ? read(['validate', args.ref ?? args.cwd ?? '', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : [])], cliValidate, (value): ValidateResult => value) : Promise.resolve({ ok: false, error: 'validate needs a skill name or a folder.' }),
+    validate: (args: ValidateArgs) => args.ref || args.cwd ? read(['validate', args.ref ?? args.cwd ?? '', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : [])], cliValidate, (value): ValidateResult => value) : fail('validate needs a skill name or a folder.'),
     // `update` prints its advice and returns no value; the printed lines are the advice. The seam wants numbers the CLI does not return.
     update: async () => gap('Update advice as structured data'),
-    async openInEditor(path) { try { await openPath(path); return { ok: true, value: undefined }; } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; } },
-    async copyToClipboard(text) { try { await writeText(text); return { ok: true, value: undefined }; } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; } },
-    async copyImage(png) { try { await writeImage(await Image.fromBytes(new Uint8Array(await png.arrayBuffer()))); return { ok: true, value: undefined }; } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; } },
+    async openInEditor(path) { try { await openPath(path); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
+    async copyToClipboard(text) { try { await writeText(text); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
+    async copyImage(png) { try { await writeImage(await Image.fromBytes(new Uint8Array(await png.arrayBuffer()))); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     // The webview's own storage is app-owned and survives relaunches; same key scheme as the mock so a preference set in one mode reads in the other.
     prefs: prefStore(),
     subscribe(listener): Subscription { listeners.add(listener); return () => { listeners.delete(listener); }; },

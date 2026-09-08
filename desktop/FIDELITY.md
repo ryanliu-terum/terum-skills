@@ -27,7 +27,7 @@ One row per in-scope board (87: every canvas board except the nine *States/*Hove
 | SkillDetailDisabled | `#/skill/deploy-check?__mock=disabled` | locked | 0.0030 | status switch off |
 | SkillDetailNotInstalled | `#/skill/deploy-check?__mock=not-installed` | locked | 0.0030 | reached from Marketplace: crumb root Marketplace, sidebar Marketplace selected |
 | SkillDetailInstall | `#/skill/deploy-check?__mock=not-installed&dialog=install` | locked | 0.0035 |  |
-| SkillDetailInstallLight | `#/skill/deploy-check?__mock=not-installed&dialog=install&theme=light` | in-progress | 0.0035 | the 88th board: every other row was locked first (the rule below); locks in the maintainers' own run |
+| SkillDetailInstallLight | `#/skill/deploy-check?__mock=not-installed&dialog=install&theme=light` | locked | 0.0035 | the 88th board, locked 2026-09-08 after the other 87 (63 differing pixels, 0.00005) |
 | SkillDetailRemove | `#/skill/deploy-check?dialog=remove` | locked | 0.0035 |  |
 | SkillDetailRunEval | `#/skill/deploy-check?tab=evals&dialog=run-eval` | locked | 0.0035 |  |
 | SkillDetailLoading | `#/skill/deploy-check?__mock=loading` | locked | 0.0020 |  |
