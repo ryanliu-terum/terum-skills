@@ -42,6 +42,24 @@ describe('invite (§6 host scoping)', () => {
     expect(runner.calls.filter((call) => call.args.includes('x/../repos/acme/other'))).toHaveLength(0);
   });
 
+  it('a 404 names the missing GitHub user instead of blaming the invitation cap; other statuses keep the cap sentence', async () => {
+    const store = createConfigStore(await temporaryDirectory());
+    await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'admin' }; });
+    const runner = ghOnlyRunner((args) => {
+      const endpoint = args.at(-1)!;
+      if (endpoint.endsWith('/nosuchuser')) return { code: 1, stdout: 'HTTP/2.0 404 Not Found\r\n', stderr: 'gh: Not Found (HTTP 404)' };
+      if (endpoint.endsWith('/capped')) return { code: 1, stdout: 'HTTP/2.0 403 Forbidden\r\n', stderr: 'gh: Forbidden (HTTP 403)' };
+      return { code: 0, stdout: 'HTTP/2.0 201 Created\r\n', stderr: '' };
+    });
+    const io = new ScriptedPrompter();
+    const result = await run({ logins: ['nosuchuser', 'capped', 'real'], config: store, runner }, io);
+    expect(result).toMatchObject({ ok: false, value: { invited: ['real'], failed: [{ login: 'nosuchuser' }, { login: 'capped' }] } });
+    const lines = io.lines.join('\n');
+    expect(lines).toContain('Could not invite @nosuchuser: there is no GitHub user named @nosuchuser.');
+    expect(lines).not.toMatch(/nosuchuser.*caps invitations/);
+    expect(lines).toContain('Could not invite @capped (GitHub status 403). GitHub caps invitations at 50 per repository per day.');
+  });
+
   it('refuses a generic remote before it invokes gh', async () => {
     const store = createConfigStore(await temporaryDirectory());
     await store.update((config) => { config.teams.team = { remote: 'git.example/acme/team', handle: 'admin' }; });

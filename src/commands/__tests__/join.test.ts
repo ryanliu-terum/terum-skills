@@ -396,6 +396,8 @@ it.each([false, true])('preserves invitation handling without gh authentication 
   expect(await join({ target: 'acme/team', config: store, runner }, io)).toMatchObject({ ok: true });
   const api = runner.calls.filter((call) => call.command === 'gh' && call.args[0] === 'api');
   expect(api.some((call) => call.args.includes('PATCH'))).toBe(false);
+  // An empty list is said out loud before the clone, so a "repository not found" that follows has its cause on the line above (D6, 2026-09-08).
+  expect(io.lines.some((line) => line.startsWith('No pending GitHub invitation to acme/team for your account.'))).toBe(authenticated);
   if (!authenticated) {
     expect(api).toEqual([]);
     expect(io.lines).toContain('Accept the invitation at https://github.com/acme/team/invitations before continuing.');

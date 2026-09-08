@@ -35,7 +35,10 @@ export async function run(args: InviteArgs, io: Prompter): Promise<Result<Invite
       // GitHub returns 422 when adding the repository owner, but other 422 responses are failures.
       if (status === 422 && login.toLowerCase() === endpoint.split('/')[0]!.toLowerCase()) { already.push(login); io.print(`@${login} already has access (owner).`); continue; }
       if (response.code === 0 && status === null) { invited.push(login); io.print(`Invited @${login}.`); continue; }
-      const error = `Could not invite @${login} (GitHub status ${status ?? 'unknown'}). GitHub caps invitations at 50 per repository per day. ${(response.stderr || response.stdout).trim()}`.trim();
+      // 404 on PUT .../collaborators/<login> is GitHub saying the login does not exist; it has nothing to do with the daily cap (2026-09-08, D6).
+      const error = status === 404
+        ? `Could not invite @${login}: there is no GitHub user named @${login}. Check the spelling; GitHub logins are case-insensitive but must exist.`
+        : `Could not invite @${login} (GitHub status ${status ?? 'unknown'}). GitHub caps invitations at 50 per repository per day. ${(response.stderr || response.stdout).trim()}`.trim();
       failed.push({ login, error });
       io.print(error);
     }
