@@ -185,6 +185,13 @@ export const BOARDS:readonly Board[]=[
     "height": 900
   },
   {
+    "name": "SkillDetailInstallLight",
+    "route": "#/skill/deploy-check?__mock=not-installed&dialog=install&theme=light",
+    "klass": "dialog",
+    "width": 1440,
+    "height": 900
+  },
+  {
     "name": "SkillDetailRemove",
     "route": "#/skill/deploy-check?dialog=remove",
     "klass": "dialog",
