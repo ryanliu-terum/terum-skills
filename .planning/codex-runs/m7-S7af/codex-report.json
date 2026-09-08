@@ -1,0 +1,94 @@
+{
+  "status": "partial",
+  "summary": "Implemented adapter plumbing, surface declarations, query cancellation and invalidation, sidebar visibility, and recorded-frame replay tests. All gates pass. Three sidebar count literals remain pending clarification because removing them conflicts with existing locked-board expectations.",
+  "filesChanged": [
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Added Surfaces, ReadOptions, team arguments, search metadata, and publish fields."},
+    {"path":"desktop/src/backend/Backend.ts","change":"modified","why":"Added surfaces() and optional read cancellation parameters."},
+    {"path":"desktop/src/backend/tauri/run.ts","change":"modified","why":"Preserves mapped values beside failed results."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Implemented diagnostics, cancellation, team arguments, connect, publish, validate, and search corrections."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Implements the expanded seam and declares all surfaces available."},
+    {"path":"desktop/src/app/providers.tsx","change":"modified","why":"Applies query lifecycle defaults and subscribes to backend changes."},
+    {"path":"desktop/src/app/invalidation.ts","change":"added","why":"Defines the pure change-source invalidation map."},
+    {"path":"desktop/src/components/domain/Sidebar.tsx","change":"modified","why":"Hides unavailable navigation surfaces."},
+    {"path":"desktop/src/components/domain/Shell.tsx","change":"modified","why":"Queries surfaces and forwards the status cancellation signal."},
+    {"path":"desktop/src/screens/library/LibraryScreen.tsx","change":"modified","why":"Forwards cancellation and removes the empty-state count literal."},
+    {"path":"desktop/src/screens/share/ShareScreen.tsx","change":"modified","why":"Aligns query keys, forwards cancellation, and separates invitation read lifecycles."},
+    {"path":"desktop/src/screens/marketplace/MarketplaceScreen.tsx","change":"modified","why":"Aligns query keys and forwards cancellation."},
+    {"path":"desktop/src/screens/settings/SettingsScreen.tsx","change":"modified","why":"Aligns catalog query keys and forwards cancellation."},
+    {"path":"desktop/src/screens/inbox/InboxScreen.tsx","change":"modified","why":"Aligns skill query keys and forwards cancellation."},
+    {"path":"desktop/src/screens/skill/SkillScreen.tsx","change":"modified","why":"Forwards query cancellation."},
+    {"path":"desktop/src/screens/onboarding/OnboardingScreen.tsx","change":"modified","why":"Forwards query cancellation."},
+    {"path":"desktop/src/backend/tauri/__tests__/fake-bridge.ts","change":"added","why":"Extracts the existing fake Bridge for shared regression and replay tests."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"Tests failure values and updates the search contract assertion."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"Strictly verifies all mock surfaces are available."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"added","why":"Tests adapter mappings, arguments, gaps, diagnostics, and cancellation."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","change":"added","why":"Replays recorded status and search frames."},
+    {"path":"desktop/src/app/invalidation.test.ts","change":"added","why":"Tests query policy, invalidation mapping, notifications, and unsubscribe."},
+    {"path":"desktop/src/components/domain/Sidebar.test.tsx","change":"added","why":"Tests surface visibility, status-derived counts, and signal forwarding."}
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "0 errors, 0 warnings.",
+      "preExistingFailures": "None; baseline passed."
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "tsc --noEmit exited 0.",
+      "preExistingFailures": "None; baseline passed."
+    },
+    "test": {
+      "ran": true,
+      "passed": true,
+      "output": "44 files passed; 471 tests passed, 88 skipped, 0 failed (559 total).",
+      "preExistingFailures": "None; baseline: 40 files passed, 426 tests passed, 88 skipped."
+    }
+  },
+  "openQuestions": [
+    {
+      "question": "May the existing route-specific empty-board counts move into mock status()? Current status returns Global=0 everywhere in the empty scenario, while ShareEmpty and InboxEmpty expect Global=30 and InboxEmpty expects zero Inbox counts.",
+      "specSection": "§3; desktop invariants 4, 5, 7",
+      "conservativeChoice": "Requested clarification; preserved the three conflicting screen literals and existing board assertions. Removed Library's compatible literal."
+    },
+    {
+      "question": "Maintainer follow-up: re-anchor GAPS.md and add PF-08.",
+      "specSection": "§4",
+      "conservativeChoice": "Left the maintainer-owned file untouched."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "Inbox, Share, and Marketplace sidebar count literals remain.",
+      "why": "Removing them with current mock status changes locked-board counts. The clarification request remains unanswered."
+    },
+    {
+      "what": "Extracted read() as a shared exported run consumer.",
+      "why": "Allows recorded status replay through the same diagnostics and cancellation path while status() remains a typed gap; schema parsing remains centralized in run()."
+    }
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Kept native operations behind the backend seam; screens use backend methods and types."},
+    {"number":2,"howSatisfied":"Added the explicitly specified Surfaces declaration separately from existing capability flags."},
+    {"number":3,"howSatisfied":"Left generated fixtures and tokens untouched."},
+    {"number":4,"howSatisfied":"Preserved fidelity assets, tolerances, and existing board assertions; did not run Playwright."},
+    {"number":5,"howSatisfied":"Left styling and geometry unchanged; deferred conflicting empty-board count changes."},
+    {"number":7,"howSatisfied":"Added regression coverage without weakening tests or adding lint suppressions."},
+    {"number":8,"howSatisfied":"Ran all required desktop gates, read back every write, and used no git, network, installation, or commits."}
+  ],
+  "testsModified": [
+    {
+      "path":"desktop/src/backend/tauri/__tests__/run.test.ts",
+      "whatChanged":"Extracted the fake Bridge, added failure-value cases, and updated the exact search result expectation.",
+      "justification":"Shared test infrastructure and the explicitly changed SearchHit contract; no assertions removed or weakened."
+    },
+    {
+      "path":"desktop/src/backend/__tests__/mock.test.ts",
+      "whatChanged":"Added strict all-true surfaces() equality.",
+      "justification":"Required expanded mock seam coverage."
+    }
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Mock visual fidelity is preserved: existing board assertions pass, but pixel fidelity was not measured because Playwright was prohibited."
+}

@@ -1,0 +1,18 @@
+# m7-S7af: orchestrator's own gates, 2026-09-08 PT, Ryan's Mac (Node 25, Playwright chromium 1243)
+# Codex: gpt-6-astra, high, workspace-write, two passes (codex-prompt.md → codex-report.json "partial": three COUNTS literals kept
+# pending a mock-vs-board question; codex-prompt-2.md → codex-report-2.json "complete": the mock's status() derives empty counts by route).
+# Self-reports (hypotheses): pass 2 typecheck 0, lint 0, vitest 45 files / 530 passed + 88 oracle-skipped.
+# Branch then merged origin/main (S7ag, b7be3c5); two test-file conflicts (index.test.ts add/add, run.test.ts fake bridge) resolved by
+# the orchestrator over a shared fake-bridge.ts; the resolution dropped two closing braces, caught by the gates and fixed.
+
+desktop typecheck : rc=0
+desktop lint      : rc=0 (eslint . --max-warnings 0)
+desktop vitest    : rc=0  45 files passed, 625 tests passed (TERUM_DESIGN_DIR set; NODE_OPTIONS=--no-experimental-webstorage)
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (30.6s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (38.0s)
+cargo check       : rc=0  (S7ag's lib.rs merged in; shared warm target)
+real-data proof   : replay.test.ts (in vitest above) replays .planning/codex-runs/m7-S7af/frames/{status,search,ls,ls--local,ls-member-mira,ls-project-terum}.jsonl
+                    recorded from the fixture team (fixture.sh, HOME=<fx>/home) against dist/index.js at 099d486; asserts the typed status gap,
+                    the value carried on a failing frame, and every SearchHit field from the wire with description '' and no design constant.

@@ -1,0 +1,5 @@
+{"t":"hello","protocol":1,"version":"0.1.6","verbs":["login","setup","team create","team join","team remove","team leave","team workflow-update","invite","ls","status","publish","validate","eval","connect","install","uninstall-skill","uninstall","sync","search","update"],"features":{"favorites":false,"follow":false,"roles":false,"lastSeen":false,"installScope":false,"inviteScoping":false,"disablePerMachine":false,"projectMembers":false,"liftOnCards":false,"runEvalInApp":false,"perCase":false,"progress":false}}
+{"t":"print","level":"info","line":"Member mira:"}
+{"t":"print","level":"info","line":"  Authored: deploy-check"}
+{"t":"print","level":"info","line":"  Installed: deploy-check, tdd"}
+{"t":"result","verb":"ls","ok":true,"exitCode":0,"value":{"roster":[{"handle":"mira","active":true},{"handle":"ravi","active":true},{"handle":"seed","active":true}],"skills":[{"id":"11111111-1111-4111-8111-111111111111","name":"deploy-check","author":"Mira Chen <mira@example.com>","category":"ops","installs":2,"latest":"43bf7396","endorsement":"global"}]}}

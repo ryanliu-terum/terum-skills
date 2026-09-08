@@ -1,0 +1,43 @@
+{
+  "status": "complete",
+  "summary": "Finished AD-03: mock status() now derives counts from route and scenario through one pure function. All four screens delegate counts to status or omit them; prior changes and the real adapter remain untouched. All required gates passed.",
+  "filesChanged": [
+    {"path":"desktop/src/backend/mock/status-counts.ts","change":"added","why":"Centralizes the approved route × scenario count mapping."},
+    {"path":"desktop/src/backend/mock/__tests__/status-counts.test.ts","change":"added","why":"Tests the mapping, fixture immutability, and status integration."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Uses the pure count function in status()."},
+    {"path":"desktop/src/screens/inbox/InboxScreen.tsx","change":"modified","why":"Removes the remaining count literal."},
+    {"path":"desktop/src/screens/share/ShareScreen.tsx","change":"modified","why":"Removes the remaining count literal."},
+    {"path":"desktop/src/screens/marketplace/MarketplaceScreen.tsx","change":"modified","why":"Removes the remaining count literal and mock count branch."},
+    {"path":"desktop/src/screens/inbox/inbox.test.tsx","change":"modified","why":"Verifies omitted empty Inbox badges and status-supplied counts."},
+    {"path":"desktop/src/screens/share/share.test.tsx","change":"modified","why":"Verifies preserved empty-board badges and status-supplied counts."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","change":"modified","why":"Verifies preserved empty-scenario badges and status-supplied counts."},
+    {"path":"desktop/src/components/domain/Shell.test.tsx","change":"modified","why":"Updates InboxEmpty’s exact expected badge list to the approved omission behavior."}
+  ],
+  "gates": {
+    "lint":{"ran":true,"passed":true,"output":"eslint . --max-warnings 0 exited 0; no diagnostics.","preExistingFailures":""},
+    "typecheck":{"ran":true,"passed":true,"output":"tsc --noEmit exited 0; no diagnostics.","preExistingFailures":""},
+    "test":{"ran":true,"passed":true,"output":"45 files passed; 530 tests passed, 88 skipped, 0 failed (618 total).","preExistingFailures":""}
+  },
+  "openQuestions": [
+    {
+      "question":"Maintainer follow-up: re-anchor desktop/GAPS.md to f8557c4 and add PF-08 (opt out of publishing install records: HARD, ships as drawn).",
+      "specSection":"§4",
+      "conservativeChoice":"Left the maintainer-owned file untouched."
+    }
+  ],
+  "deviations": [],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Route-specific mock knowledge stays behind the backend seam; the real adapter is untouched."},
+    {"number":5,"howSatisfied":"Implemented the maintainer-approved empty-board counts without styling changes."},
+    {"number":7,"howSatisfied":"Added regression coverage and retained exact assertions; all existing test changes are declared."},
+    {"number":8,"howSatisfied":"Ran all required desktop gates, read back every write, and used no git, network, installation, Playwright, or commits."}
+  ],
+  "testsModified": [
+    {"path":"desktop/src/screens/inbox/inbox.test.tsx","whatChanged":"Added exact empty-badge omission checks and an injected status-count regression.","justification":"Verifies the approved count source and omission behavior; existing content assertions retained."},
+    {"path":"desktop/src/screens/share/share.test.tsx","whatChanged":"Strengthened empty-board badge checks and added an injected status-count regression.","justification":"Verifies both preserved board values and exclusive use of status counts."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","whatChanged":"Added empty-scenario badge checks and an injected status-count regression.","justification":"Verifies removal of the screen override without changing populated content."},
+    {"path":"desktop/src/components/domain/Shell.test.tsx","whatChanged":"Changed InboxEmpty’s exact badge array from seven entries to four, removing three zero badges.","justification":"The maintainer explicitly requires omitted Pushes/Updates/Alerts keys; exact equality remains enforced."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim":"Pixel fidelity is preserved: count assertions pass, but visual fidelity was not measured because Playwright was prohibited."
+}
