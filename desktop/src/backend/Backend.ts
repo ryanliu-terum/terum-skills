@@ -1,0 +1,31 @@
+import type { Settings, Onboarding, Capabilities, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, Scope, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+export interface Backend {
+  capabilities(): Promise<Capabilities>;
+  status(): Promise<Result<StatusResult>>;
+  settings(): Promise<Result<Settings>>;
+  onboarding(): Promise<Result<Onboarding>>;
+  library(q: { scope: Scope }): Promise<Result<Library>>;
+  skill(q: { ref: string }): Promise<Result<SkillDetail>>;
+  receipts(q: { skillId: string; version: string }): Promise<Result<Receipt | null>>;
+  inbox(): Promise<Result<InboxItem[]>>;
+  catalog(q?: { q?: string }): Promise<Result<Catalog>>;
+  roster(): Promise<Result<Roster>>;
+  search(args: SearchArgs): Promise<Result<SearchHit[]>>;
+  install(args: InstallArgs): Run<InstalledResult[]>;
+  uninstallSkill(args: UninstallArgs): Run<UninstalledResult[]>;
+  uninstallMachine(args: Record<string, never>): Run<MachineUninstallResult>;
+  connect(args: ConnectArgs): Run<ConnectOutcome | undefined>;
+  publish(args: PublishArgs): Run<PublishResult>;
+  sync(args: SyncArgs): Run<SyncResult>;
+  invite(args: InviteArgs): Run<InviteResult>;
+  team(args: TeamArgs): Run<TeamResult>;
+  setup(args: SetupArgs): Run<SetupResult>;
+  eval(args: EvalArgs): Run<EvalResult>;
+  validate(args: ValidateArgs): Promise<Result<ValidateResult>>;
+  update(): Promise<Result<UpdateAdvice>>;
+  openInEditor(path: string): Promise<Result<void>>;
+  copyToClipboard(text: string): Promise<Result<void>>;
+  copyImage(png: Blob): Promise<Result<void>>;
+  readonly prefs: PrefStore;
+  subscribe(listener: (source: ChangeSource) => void): Subscription;
+}

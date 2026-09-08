@@ -1,0 +1,45 @@
+name: Desktop
+
+# The desktop frontend under desktop/ has its own package, lockfile and gates (desktop/AGENTS.md, "The gates").
+# This runs the portable subset: typecheck, lint, vitest, the production build and the Playwright route smokes.
+# The design-dependent gates (export:check, e2e:fidelity) need the private design canvas named by
+# TERUM_DESIGN_DIR and skip without it, so they are not run here. Hermetic: no secrets.
+
+on:
+  pull_request:
+    paths: ['desktop/**', '.github/workflows/desktop-ci.yml']
+  push:
+    branches: [main]
+    paths: ['desktop/**', '.github/workflows/desktop-ci.yml']
+
+permissions: {}
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: desktop
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e:routes

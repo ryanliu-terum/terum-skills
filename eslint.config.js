@@ -39,7 +39,8 @@ const PROMPTER_BOUNDARY = {
 };
 
 export default [
-  { ignores: ['dist/**', 'node_modules/**', '.claude/**', '.planning/**', 'src/lib/placer/vendor/**'] },
+  // desktop/ is its own package with its own ESLint config and gates (see .github/workflows/desktop-ci.yml).
+  { ignores: ['dist/**', 'node_modules/**', '.claude/**', '.planning/**', 'src/lib/placer/vendor/**', 'desktop/**'] },
   ...tseslint.configs.recommended,
   PROMPTER_BOUNDARY,
 ];

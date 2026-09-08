@@ -1,0 +1,5089 @@
+{
+  "generatedFrom": {
+    "buildPy": "e98f519ede67c94ecc1979cf8ead469d",
+    "today": "2026-09-06"
+  },
+  "TOKENS": {
+    "chrome": [
+      "#0f1011",
+      "#f8f8f8",
+      "#191a23"
+    ],
+    "panel": [
+      "#191a1b",
+      "#ffffff",
+      "#1d1e2b"
+    ],
+    "bg2": [
+      "#1c1c1f",
+      "#f9f8f9",
+      "#292a35"
+    ],
+    "bg3": [
+      "#232326",
+      "#f4f2f4",
+      "rgba(133, 134, 152, 0.2)"
+    ],
+    "bg4": [
+      "#28282c",
+      "#eeedef",
+      "#313248"
+    ],
+    "text1": [
+      "#f7f8f8",
+      "#282a30",
+      "#eeeffc"
+    ],
+    "text2": [
+      "#d0d6e0",
+      "#3c4149",
+      "#d2d3e0"
+    ],
+    "text3": [
+      "#8a8f98",
+      "#6f6e77",
+      "#858699"
+    ],
+    "text4": [
+      "#62666d",
+      "#86848d",
+      "#6b6d85"
+    ],
+    "border1": [
+      "#23252a",
+      "#e9e8ea",
+      "#2c2d3c"
+    ],
+    "border2": [
+      "#34343a",
+      "#e4e2e4",
+      "#393a4b"
+    ],
+    "brand": [
+      "#5e6ad2",
+      "#5e6ad2",
+      "#575bc7"
+    ],
+    "accent": [
+      "#7170ff",
+      "#7170ff",
+      "#575bc7"
+    ],
+    "link": [
+      "#828fff",
+      "#5558cc",
+      "#828fff"
+    ],
+    "good": [
+      "#27a644",
+      "#187235",
+      "#4cb782"
+    ],
+    "bad": [
+      "#ed6767",
+      "#b43232",
+      "#eb5757"
+    ],
+    "warn": [
+      "#f0bf00",
+      "#9a6b00",
+      "#f2c94c"
+    ],
+    "info": [
+      "#4ea7fc",
+      "#1f6fc4",
+      "#4ea7fc"
+    ],
+    "brandhover": [
+      "#525dc0",
+      "#525dc0",
+      "#4d51b3"
+    ],
+    "brandpressed": [
+      "#4a54ad",
+      "#4a54ad",
+      "#43479c"
+    ],
+    "modal": [
+      "#1f2023",
+      "#ffffff",
+      "#23243a"
+    ],
+    "scrim": [
+      "rgba(0, 0, 0, 0.5)",
+      "rgba(20, 20, 30, 0.32)",
+      "rgba(0, 0, 0, 0.5)"
+    ],
+    "shadowhigh": [
+      "0px 16px 48px #00000080",
+      "0px 16px 40px -8px #00000033",
+      "0px 16px 48px #00000080"
+    ],
+    "onfill": [
+      "#0f1011",
+      "#ffffff",
+      "#0f1011"
+    ],
+    "tooltipbg": [
+      "#2b2c30",
+      "#282a30",
+      "#2b2c3c"
+    ],
+    "tooltipfg": [
+      "#f7f8f8",
+      "#f7f8f8",
+      "#eeeffc"
+    ],
+    "tooltipborder": [
+      "#34343a",
+      "#34343a",
+      "#393a4b"
+    ],
+    "control": [
+      "#6a6b72",
+      "#86848d",
+      "#6b6d85"
+    ],
+    "shadowlow": [
+      "0px 2px 4px #0000001a",
+      "0px 1px 4px -1px #00000017",
+      "0px 1px 0.5px #00000026"
+    ]
+  },
+  "SKILLS": [
+    {
+      "origin": "terum",
+      "category": "infra",
+      "name": "deploy-check",
+      "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
+      "wlt": [
+        11,
+        3,
+        4
+      ],
+      "cases": 6,
+      "size": "4.2k tokens",
+      "installs": "12 installs",
+      "favorite": true
+    },
+    {
+      "origin": "ssm",
+      "category": "docs",
+      "name": "release-notes",
+      "desc": "Drafts release notes from merged PR titles and the changelog convention in CONTRIBUTING.",
+      "wlt": [
+        2,
+        1,
+        6
+      ],
+      "size": "2.1k tokens",
+      "installs": "4 installs"
+    },
+    {
+      "origin": "terum",
+      "category": "review",
+      "name": "pr-review",
+      "desc": "Reviews a pull request the way Ryan does: contract drift first, then silent failures, then style.",
+      "wlt": [
+        6,
+        2,
+        1
+      ],
+      "size": "6.8k tokens",
+      "installs": "11 installs",
+      "favorite": true,
+      "flags": [
+        "update"
+      ],
+      "flag_text": {
+        "update": "Update available · ryan pushed 7e8f9a0b1c2d · 2 days ago"
+      }
+    },
+    {
+      "origin": "terum",
+      "category": "ops",
+      "name": "incident-triage",
+      "desc": "Walks a production alert to a root-cause hypothesis using the runbook and recent deploys.",
+      "wlt": [
+        1,
+        5,
+        3
+      ],
+      "size": "5.5k tokens",
+      "installs": "2 installs",
+      "flags": [
+        "broken"
+      ],
+      "flag_text": {
+        "broken": "Broken references · runbook.md, deploys.json missing"
+      }
+    },
+    {
+      "origin": "local",
+      "category": "docs",
+      "name": "api-docs",
+      "desc": "Generates endpoint docs from the Zod contracts and keeps the examples in sync with fixtures.",
+      "size": "1.6k tokens",
+      "installs": "0 installs",
+      "enabled": false
+    },
+    {
+      "origin": "mrf",
+      "category": "infra",
+      "name": "migration-guard",
+      "desc": "Refuses to apply a Supabase migration without a dry run, a numbered file, and a rollback note.",
+      "wlt": [
+        5,
+        0,
+        2
+      ],
+      "partial": [
+        7,
+        9
+      ],
+      "size": "3.9k tokens",
+      "installs": "8 installs",
+      "flags": [
+        "local"
+      ]
+    },
+    {
+      "origin": "terum",
+      "category": "testing",
+      "name": "test-writer",
+      "desc": "Writes the failing test first, then the smallest change that passes it, then the edge cases.",
+      "wlt": [
+        6,
+        1,
+        2
+      ],
+      "size": "7.4k tokens",
+      "installs": "10 installs",
+      "favorite": true
+    },
+    {
+      "origin": "ssm",
+      "category": "git",
+      "name": "commit-msg",
+      "desc": "Formats commit messages to the repo convention and adds the session attribution trailer.",
+      "wlt": [
+        2,
+        2,
+        5
+      ],
+      "size": "0.9k tokens",
+      "installs": "9 installs",
+      "enabled": false
+    },
+    {
+      "origin": "terum",
+      "category": "onboarding",
+      "name": "onboarding-tour",
+      "desc": "Explains the team repo layout to a new member and installs the starter set of skills.",
+      "size": "3.2k tokens",
+      "installs": "1 install"
+    },
+    {
+      "origin": "mrf",
+      "category": "data",
+      "name": "csv-profiler",
+      "desc": "Profiles a CSV before import: types, nulls, outliers, and the columns that will break the schema.",
+      "wlt": [
+        4,
+        1,
+        4
+      ],
+      "size": "2.8k tokens",
+      "installs": "6 installs"
+    },
+    {
+      "origin": "terum",
+      "category": "review",
+      "name": "silent-failure-hunt",
+      "desc": "Finds catch blocks that only log, fallbacks that hide errors, and retries without a budget.",
+      "wlt": [
+        6,
+        0,
+        3
+      ],
+      "size": "5.1k tokens",
+      "installs": "9 installs"
+    },
+    {
+      "origin": "local",
+      "category": "writing",
+      "name": "handoff-note",
+      "desc": "Writes the end-of-session handoff: state, decisions, gotchas, and the next step in one page.",
+      "wlt": [
+        2,
+        3,
+        4
+      ],
+      "size": "1.9k tokens",
+      "installs": "3 installs"
+    },
+    {
+      "origin": "ssm",
+      "category": "research",
+      "name": "source-check",
+      "desc": "Verifies every cited URL resolves and actually says what the claim attributes to it before a report ships.",
+      "wlt": [
+        3,
+        1,
+        5
+      ],
+      "size": "2.4k tokens",
+      "installs": "5 installs"
+    },
+    {
+      "origin": "terum",
+      "category": "infra",
+      "name": "env-audit",
+      "desc": "Lists every environment variable a service reads and flags the ones missing from Vercel or the example file.",
+      "wlt": [
+        0,
+        5,
+        4
+      ],
+      "size": "3.0k tokens",
+      "installs": "4 installs"
+    },
+    {
+      "origin": "terum",
+      "category": "docs",
+      "name": "adr-writer",
+      "desc": "Turns a design discussion into an architecture decision record: the options weighed, the one chosen, and why.",
+      "wlt": [
+        7,
+        0,
+        2
+      ],
+      "size": "3.4k tokens",
+      "installs": "7 installs",
+      "flags": [
+        "update"
+      ],
+      "flag_text": {
+        "update": "Update available · ryan pushed c41d0e9f8a27 · 5 days ago"
+      }
+    }
+  ],
+  "INBOX": [
+    {
+      "origin": "terum",
+      "category": "ops",
+      "name": "incident-triage",
+      "desc": "Walks a production alert to a root-cause hypothesis using the runbook and recent deploys.",
+      "wlt": [
+        1,
+        5,
+        3
+      ],
+      "size": "5.5k tokens",
+      "installs": "2 installs",
+      "flags": [
+        "broken"
+      ],
+      "flag_text": {
+        "broken": "Broken references · runbook.md, deploys.json missing"
+      },
+      "kind": "alert",
+      "sub": "missing",
+      "days": 0,
+      "when": "40 minutes ago",
+      "actor": null,
+      "author": {
+        "handle": "mira",
+        "name": "Mira Kaur",
+        "role": "design",
+        "initials": "MK"
+      },
+      "scope": "Global",
+      "version": "9c2b5e7d1a03",
+      "title": "incident-triage is missing 2 files",
+      "fact": "runbook.md, deploys.json · found at the last sync",
+      "state": "Re-place from the team copy",
+      "missing": [
+        [
+          "runbook.md",
+          "SKILL.md, line 14"
+        ],
+        [
+          "deploys.json",
+          "SKILL.md, line 22"
+        ]
+      ],
+      "unread": true,
+      "date": "2026-09-06"
+    },
+    {
+      "origin": "terum",
+      "category": "infra",
+      "name": "deploy-check",
+      "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
+      "wlt": [
+        11,
+        3,
+        4
+      ],
+      "cases": 6,
+      "size": "4.2k tokens",
+      "installs": "12 installs",
+      "favorite": true,
+      "desc_long": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars. It reads the Vercel project config, the migrations directory and the example env file, then prints one line per unmet condition with the command that fixes it.",
+      "files": [
+        "SKILL.md",
+        "checklist.md",
+        "scripts/verify.sh"
+      ],
+      "size_bytes": "21.4 kB",
+      "lines": 184,
+      "version": "5f0e12ab9c3d",
+      "version_full": "5f0e12ab9c3d4e7ab1f28a6d0c3e9b47d2f1a8c0",
+      "scope": "Global",
+      "favorites": 11,
+      "installs_n": 12,
+      "installed": true,
+      "used_by": [
+        "AP",
+        "RL",
+        "MK"
+      ],
+      "users": [
+        [
+          "ajay",
+          "AP",
+          "Global · since 2026-08-02"
+        ],
+        [
+          "ryan",
+          "RL",
+          "Global · since 2026-08-02"
+        ],
+        [
+          "mira",
+          "MK",
+          "Global · since 2026-08-28"
+        ],
+        [
+          "teddy",
+          "TZ",
+          "Global · since 2026-08-28"
+        ],
+        [
+          "kai",
+          "KO",
+          "Terum · since 2026-08-30"
+        ]
+      ],
+      "author": {
+        "handle": "ajay",
+        "name": "Ajay Patel",
+        "role": "platform",
+        "initials": "AP"
+      },
+      "repo": "terum/team-skills",
+      "path": "skills/deploy-check",
+      "receipt": {
+        "when": "8 days ago",
+        "date": "2026-08-29",
+        "timestamp": "2026-08-29 22:15 UTC",
+        "runner": "ajay",
+        "run_id": "20260829T221500Z",
+        "catalog": 30,
+        "incumbent": {
+          "wlt": [
+            8,
+            5,
+            5
+          ],
+          "version": "3b1c9d4e2f70"
+        },
+        "sign_p": "0.057",
+        "inc_p": "0.581",
+        "arm": {
+          "candidate": 0.82,
+          "incumbent": 0.74,
+          "baseline": 0.61
+        },
+        "triggers": {
+          "tp": 6,
+          "fn": 0,
+          "fp": 0,
+          "tn": 5,
+          "recall": "1.00",
+          "precision": "1.00",
+          "misses": []
+        },
+        "eff": {
+          "candidate": [
+            "9.4",
+            "41 s",
+            "$0.38"
+          ],
+          "incumbent": [
+            "10.6",
+            "46 s",
+            "$0.44"
+          ],
+          "baseline": [
+            "12.1",
+            "53 s",
+            "$0.51"
+          ]
+        },
+        "attribution": "wins on execution checks; judge ties on style cases",
+        "model": "sonnet",
+        "judge": "sonnet",
+        "cc": "2.34.0",
+        "k": 3,
+        "engine": "0.1.0",
+        "per_case": [
+          [
+            "stale-env-vars",
+            1.0,
+            0.78,
+            [
+              2,
+              1,
+              0
+            ]
+          ],
+          [
+            "migration-drift",
+            0.89,
+            0.44,
+            [
+              3,
+              0,
+              0
+            ]
+          ],
+          [
+            "secret-scan-gate",
+            0.83,
+            0.67,
+            [
+              1,
+              0,
+              2
+            ]
+          ],
+          [
+            "rollback-plan",
+            0.78,
+            0.44,
+            [
+              3,
+              0,
+              0
+            ]
+          ],
+          [
+            "healthcheck-wiring",
+            0.75,
+            0.67,
+            [
+              1,
+              1,
+              1
+            ]
+          ],
+          [
+            "dns-cutover-order",
+            0.67,
+            0.67,
+            [
+              1,
+              1,
+              1
+            ]
+          ]
+        ],
+        "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
+        "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057; 12 rounds settled by checks, 2 by judge). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
+        "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
+        "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
+        "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
+      },
+      "history": [
+        {
+          "when": "8 days ago",
+          "runner": "ajay",
+          "version": "5f0e12ab9c3d",
+          "wlt": [
+            11,
+            3,
+            4
+          ],
+          "rows": "WWLWWWWTTWWWWLTWLT"
+        },
+        {
+          "when": "15 days ago",
+          "runner": "ryan",
+          "version": "3b1c9d4e2f70",
+          "wlt": [
+            9,
+            3,
+            6
+          ],
+          "rows": "WTWWTLWTWWTLWTWTLW"
+        },
+        {
+          "when": "22 days ago",
+          "runner": "teddy",
+          "version": "3b1c9d4e2f70",
+          "wlt": [
+            8,
+            4,
+            6
+          ],
+          "rows": "TWWTLWTWLWTWLTWWLT"
+        },
+        {
+          "when": "31 days ago",
+          "runner": "ajay",
+          "version": "9d2a7e41c05b",
+          "wlt": [
+            6,
+            4,
+            8
+          ],
+          "rows": "TWTLWTTWLTWTLWTWLT"
+        }
+      ],
+      "hygiene": [
+        [
+          "Frontmatter",
+          "schema valid · name matches the folder",
+          "pass"
+        ],
+        [
+          "Unicode",
+          "no bidi controls, zero-width or confusable characters",
+          "pass"
+        ],
+        [
+          "Secrets and PII",
+          "no credentials; no emails outside metadata.author",
+          "pass"
+        ],
+        [
+          "Bundled scripts",
+          "scripts/verify.sh · allow-listed extension",
+          "pass"
+        ],
+        [
+          "License",
+          "UNLICENSED · matches team policy",
+          "pass"
+        ],
+        [
+          "Size",
+          "SKILL.md 4.2k tokens · cap 5k",
+          "pass"
+        ]
+      ],
+      "grants": [
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep"
+      ],
+      "grants_approved": "approved on this machine · 2026-09-03",
+      "activity": [
+        [
+          "KO",
+          "<b>kai</b> installed to Terum",
+          "7 days ago"
+        ],
+        [
+          "AP",
+          "<b>ajay</b> ran an eval · PASS +44%",
+          "8 days ago"
+        ],
+        [
+          "TZ",
+          "<b>teddy</b> and <b>mira</b> installed to Global",
+          "9 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> pushed 5f0e12ab9c3d · checklist.md, scripts/verify.sh",
+          "12 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> ran an eval on 3b1c9d4e2f70 · PASS +33%",
+          "15 days ago"
+        ],
+        [
+          "KO",
+          "<b>kai</b> favorited",
+          "18 days ago"
+        ],
+        [
+          "TZ",
+          "<b>teddy</b> ran an eval on 3b1c9d4e2f70 · NEUTRAL +22%",
+          "22 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> pushed 3b1c9d4e2f70 · SKILL.md",
+          "24 days ago"
+        ],
+        [
+          "AP",
+          "<b>ajay</b> ran an eval on 9d2a7e41c05b · NEUTRAL +11%",
+          "31 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> shared deploy-check to terum · 9d2a7e41c05b",
+          "36 days ago"
+        ]
+      ],
+      "kind": "alert",
+      "sub": "offtarget",
+      "days": 0,
+      "when": "3 hours ago",
+      "actor": null,
+      "sessions": 14,
+      "on_target": 9,
+      "fired": [
+        [
+          "summarize yesterday's standup",
+          1
+        ],
+        [
+          "rename the CSV columns to snake_case",
+          2
+        ],
+        [
+          "write the release notes for 0.4",
+          3
+        ],
+        [
+          "explain this stack trace",
+          4
+        ],
+        [
+          "draft the retro agenda",
+          6
+        ]
+      ],
+      "title": "deploy-check fired off-target 5 times",
+      "fact": "14 sessions this week · its receipt says 0 false fires",
+      "state": "Disable, or re-run the eval with these prompts",
+      "unread": true,
+      "date": "2026-09-06"
+    },
+    {
+      "kind": "share",
+      "name": "secret-scan",
+      "origin": "terum",
+      "category": "infra",
+      "days": 1,
+      "actor": {
+        "handle": "ajay",
+        "name": "Ajay Patel",
+        "role": "platform",
+        "initials": "AP"
+      },
+      "author": {
+        "handle": "ajay",
+        "name": "Ajay Patel",
+        "role": "platform",
+        "initials": "AP"
+      },
+      "scope": "Global",
+      "version": "8b2f6c1e0d94",
+      "desc": "Scans a diff for credentials and private keys before a share or a publish, and blocks the commit with the exact line.",
+      "wlt": [
+        7,
+        1,
+        1
+      ],
+      "size": "3.1k tokens",
+      "installs": "5 installs",
+      "grants": [
+        "Bash",
+        "Read",
+        "Grep"
+      ],
+      "eval_days": 4,
+      "title": "ajay shared secret-scan with you",
+      "fact": "to Global · needs Bash, Read, Grep",
+      "state": "Install or decline",
+      "unread": true,
+      "when": "1 day ago",
+      "date": "2026-09-05"
+    },
+    {
+      "origin": "terum",
+      "category": "review",
+      "name": "pr-review",
+      "desc": "Reviews a pull request the way Ryan does: contract drift first, then silent failures, then style.",
+      "wlt": [
+        7,
+        1,
+        1
+      ],
+      "size": "6.8k tokens",
+      "installs": "11 installs",
+      "favorite": true,
+      "flags": [],
+      "flag_text": {
+        "update": "Update available · ryan pushed 7e8f9a0b1c2d · 2 days ago"
+      },
+      "kind": "update",
+      "days": 2,
+      "actor": {
+        "handle": "ryan",
+        "name": "Ryan Liu",
+        "role": "founder",
+        "initials": "RL"
+      },
+      "author": {
+        "handle": "ryan",
+        "name": "Ryan Liu",
+        "role": "founder",
+        "initials": "RL"
+      },
+      "scope": "Global",
+      "from_version": "4d9e0b7a2c15",
+      "version": "7e8f9a0b1c2d",
+      "files": [
+        [
+          "SKILL.md",
+          "changed",
+          "+12 −4"
+        ],
+        [
+          "scripts/review.sh",
+          "added",
+          "+38"
+        ]
+      ],
+      "grants": [
+        "Read",
+        "Grep",
+        "Glob"
+      ],
+      "grants_added": [
+        "Bash"
+      ],
+      "incumbent": [
+        5,
+        3,
+        1
+      ],
+      "eval_days": 2,
+      "title": "pr-review updated to 7e8f9a0b1c2d",
+      "fact": "ryan · SKILL.md, scripts/review.sh · asks for Bash",
+      "state": "Waiting for your approval",
+      "unread": true,
+      "when": "2 days ago",
+      "date": "2026-09-04"
+    },
+    {
+      "kind": "review",
+      "name": "single-fix",
+      "origin": "terum",
+      "category": "review",
+      "days": 3,
+      "actor": {
+        "handle": "ryan",
+        "name": "Ryan Liu",
+        "role": "founder",
+        "initials": "RL"
+      },
+      "author": {
+        "handle": "ryan",
+        "name": "Ryan Liu",
+        "role": "founder",
+        "initials": "RL"
+      },
+      "scope": "Global",
+      "version": "d2c4e6f8a0b1",
+      "pr": 42,
+      "desc": "Triages one bug through the four diagnosis questions, fixes it inline when it is trivial and isolated, and escalates the rest with a pattern search.",
+      "wlt": [
+        6,
+        1,
+        2
+      ],
+      "size": "4.7k tokens",
+      "installs": "9 installs",
+      "installs_n": 9,
+      "hygiene_passed": 6,
+      "eval_days": 5,
+      "title": "ryan proposes publishing single-fix",
+      "fact": "to Global · PR #42 · hygiene 6 of 6",
+      "state": "Approve and merge, or request changes",
+      "unread": true,
+      "when": "3 days ago",
+      "date": "2026-09-03"
+    },
+    {
+      "origin": "mrf",
+      "category": "infra",
+      "name": "migration-guard",
+      "desc": "Refuses to apply a Supabase migration without a dry run, a numbered file, and a rollback note.",
+      "wlt": [
+        5,
+        0,
+        2
+      ],
+      "partial": [
+        7,
+        9
+      ],
+      "size": "3.9k tokens",
+      "installs": "8 installs",
+      "flags": [
+        "local"
+      ],
+      "kind": "alert",
+      "sub": "local",
+      "days": 4,
+      "actor": {
+        "handle": "teddy",
+        "name": "Teddy",
+        "role": "design",
+        "initials": "TZ"
+      },
+      "author": {
+        "handle": "ryan",
+        "name": "Ryan Liu",
+        "role": "founder",
+        "initials": "RL"
+      },
+      "scope": "MRF",
+      "version": "a17c3e9d4b02",
+      "diff": [
+        [
+          "rollback.md",
+          "changed",
+          "+9 −2"
+        ]
+      ],
+      "title": "Your copy of migration-guard was edited",
+      "fact": "rollback.md +9 −2 · team version by ryan",
+      "state": "Restore, or share the change",
+      "unread": true,
+      "when": "4 days ago",
+      "date": "2026-09-02"
+    },
+    {
+      "origin": "terum",
+      "category": "docs",
+      "name": "adr-writer",
+      "desc": "Turns a design discussion into an architecture decision record: the options weighed, the one chosen, and why.",
+      "wlt": null,
+      "size": "3.4k tokens",
+      "installs": "7 installs",
+      "flags": [],
+      "flag_text": {
+        "update": "Update available · ryan pushed c41d0e9f8a27 · 5 days ago"
+      },
+      "kind": "update",
+      "days": 5,
+      "actor": {
+        "handle": "ryan",
+        "name": "Ryan Liu",
+        "role": "founder",
+        "initials": "RL"
+      },
+      "author": {
+        "handle": "ryan",
+        "name": "Ryan Liu",
+        "role": "founder",
+        "initials": "RL"
+      },
+      "scope": "Global",
+      "from_version": "b7a2c15d4e9f",
+      "version": "c41d0e9f8a27",
+      "files": [
+        [
+          "SKILL.md",
+          "changed",
+          "+3 −1"
+        ]
+      ],
+      "grants": [],
+      "grants_added": [],
+      "incumbent": null,
+      "eval_days": null,
+      "title": "adr-writer updated to c41d0e9f8a27",
+      "fact": "ryan · SKILL.md +3 −1 · grants unchanged",
+      "state": "Places on next sync",
+      "unread": false,
+      "when": "5 days ago",
+      "date": "2026-09-01"
+    },
+    {
+      "origin": "terum",
+      "category": "infra",
+      "name": "deploy-check",
+      "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
+      "wlt": [
+        11,
+        3,
+        4
+      ],
+      "cases": 6,
+      "size": "4.2k tokens",
+      "installs": "12 installs",
+      "favorite": true,
+      "desc_long": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars. It reads the Vercel project config, the migrations directory and the example env file, then prints one line per unmet condition with the command that fixes it.",
+      "files": [
+        "SKILL.md",
+        "checklist.md",
+        "scripts/verify.sh"
+      ],
+      "size_bytes": "21.4 kB",
+      "lines": 184,
+      "version": "5f0e12ab9c3d",
+      "version_full": "5f0e12ab9c3d4e7ab1f28a6d0c3e9b47d2f1a8c0",
+      "scope": "Global",
+      "favorites": 11,
+      "installs_n": 12,
+      "installed": true,
+      "used_by": [
+        "AP",
+        "RL",
+        "MK"
+      ],
+      "users": [
+        [
+          "ajay",
+          "AP",
+          "Global · since 2026-08-02"
+        ],
+        [
+          "ryan",
+          "RL",
+          "Global · since 2026-08-02"
+        ],
+        [
+          "mira",
+          "MK",
+          "Global · since 2026-08-28"
+        ],
+        [
+          "teddy",
+          "TZ",
+          "Global · since 2026-08-28"
+        ],
+        [
+          "kai",
+          "KO",
+          "Terum · since 2026-08-30"
+        ]
+      ],
+      "author": {
+        "handle": "ajay",
+        "name": "Ajay Patel",
+        "role": "platform",
+        "initials": "AP"
+      },
+      "repo": "terum/team-skills",
+      "path": "skills/deploy-check",
+      "receipt": {
+        "when": "8 days ago",
+        "date": "2026-08-29",
+        "timestamp": "2026-08-29 22:15 UTC",
+        "runner": "ajay",
+        "run_id": "20260829T221500Z",
+        "catalog": 30,
+        "incumbent": {
+          "wlt": [
+            8,
+            5,
+            5
+          ],
+          "version": "3b1c9d4e2f70"
+        },
+        "sign_p": "0.057",
+        "inc_p": "0.581",
+        "arm": {
+          "candidate": 0.82,
+          "incumbent": 0.74,
+          "baseline": 0.61
+        },
+        "triggers": {
+          "tp": 6,
+          "fn": 0,
+          "fp": 0,
+          "tn": 5,
+          "recall": "1.00",
+          "precision": "1.00",
+          "misses": []
+        },
+        "eff": {
+          "candidate": [
+            "9.4",
+            "41 s",
+            "$0.38"
+          ],
+          "incumbent": [
+            "10.6",
+            "46 s",
+            "$0.44"
+          ],
+          "baseline": [
+            "12.1",
+            "53 s",
+            "$0.51"
+          ]
+        },
+        "attribution": "wins on execution checks; judge ties on style cases",
+        "model": "sonnet",
+        "judge": "sonnet",
+        "cc": "2.34.0",
+        "k": 3,
+        "engine": "0.1.0",
+        "per_case": [
+          [
+            "stale-env-vars",
+            1.0,
+            0.78,
+            [
+              2,
+              1,
+              0
+            ]
+          ],
+          [
+            "migration-drift",
+            0.89,
+            0.44,
+            [
+              3,
+              0,
+              0
+            ]
+          ],
+          [
+            "secret-scan-gate",
+            0.83,
+            0.67,
+            [
+              1,
+              0,
+              2
+            ]
+          ],
+          [
+            "rollback-plan",
+            0.78,
+            0.44,
+            [
+              3,
+              0,
+              0
+            ]
+          ],
+          [
+            "healthcheck-wiring",
+            0.75,
+            0.67,
+            [
+              1,
+              1,
+              1
+            ]
+          ],
+          [
+            "dns-cutover-order",
+            0.67,
+            0.67,
+            [
+              1,
+              1,
+              1
+            ]
+          ]
+        ],
+        "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
+        "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057; 12 rounds settled by checks, 2 by judge). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
+        "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
+        "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
+        "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
+      },
+      "history": [
+        {
+          "when": "8 days ago",
+          "runner": "ajay",
+          "version": "5f0e12ab9c3d",
+          "wlt": [
+            11,
+            3,
+            4
+          ],
+          "rows": "WWLWWWWTTWWWWLTWLT"
+        },
+        {
+          "when": "15 days ago",
+          "runner": "ryan",
+          "version": "3b1c9d4e2f70",
+          "wlt": [
+            9,
+            3,
+            6
+          ],
+          "rows": "WTWWTLWTWWTLWTWTLW"
+        },
+        {
+          "when": "22 days ago",
+          "runner": "teddy",
+          "version": "3b1c9d4e2f70",
+          "wlt": [
+            8,
+            4,
+            6
+          ],
+          "rows": "TWWTLWTWLWTWLTWWLT"
+        },
+        {
+          "when": "31 days ago",
+          "runner": "ajay",
+          "version": "9d2a7e41c05b",
+          "wlt": [
+            6,
+            4,
+            8
+          ],
+          "rows": "TWTLWTTWLTWTLWTWLT"
+        }
+      ],
+      "hygiene": [
+        [
+          "Frontmatter",
+          "schema valid · name matches the folder",
+          "pass"
+        ],
+        [
+          "Unicode",
+          "no bidi controls, zero-width or confusable characters",
+          "pass"
+        ],
+        [
+          "Secrets and PII",
+          "no credentials; no emails outside metadata.author",
+          "pass"
+        ],
+        [
+          "Bundled scripts",
+          "scripts/verify.sh · allow-listed extension",
+          "pass"
+        ],
+        [
+          "License",
+          "UNLICENSED · matches team policy",
+          "pass"
+        ],
+        [
+          "Size",
+          "SKILL.md 4.2k tokens · cap 5k",
+          "pass"
+        ]
+      ],
+      "grants": [
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep"
+      ],
+      "grants_approved": "approved on this machine · 2026-09-03",
+      "activity": [
+        [
+          "KO",
+          "<b>kai</b> installed to Terum",
+          "7 days ago"
+        ],
+        [
+          "AP",
+          "<b>ajay</b> ran an eval · PASS +44%",
+          "8 days ago"
+        ],
+        [
+          "TZ",
+          "<b>teddy</b> and <b>mira</b> installed to Global",
+          "9 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> pushed 5f0e12ab9c3d · checklist.md, scripts/verify.sh",
+          "12 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> ran an eval on 3b1c9d4e2f70 · PASS +33%",
+          "15 days ago"
+        ],
+        [
+          "KO",
+          "<b>kai</b> favorited",
+          "18 days ago"
+        ],
+        [
+          "TZ",
+          "<b>teddy</b> ran an eval on 3b1c9d4e2f70 · NEUTRAL +22%",
+          "22 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> pushed 3b1c9d4e2f70 · SKILL.md",
+          "24 days ago"
+        ],
+        [
+          "AP",
+          "<b>ajay</b> ran an eval on 9d2a7e41c05b · NEUTRAL +11%",
+          "31 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> shared deploy-check to terum · 9d2a7e41c05b",
+          "36 days ago"
+        ]
+      ],
+      "kind": "eval",
+      "days": 8,
+      "actor": {
+        "handle": "ajay",
+        "name": "Ajay Patel",
+        "role": "platform",
+        "initials": "AP"
+      },
+      "title": "Eval finished · deploy-check PASS +44%",
+      "fact": "ajay · 18 rounds · 11W 3L 4T · v 5f0e12ab9c3d",
+      "state": "Receipt committed to the team repo",
+      "unread": false,
+      "when": "8 days ago",
+      "date": "2026-08-29"
+    },
+    {
+      "origin": "terum",
+      "category": "infra",
+      "name": "deploy-check",
+      "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
+      "wlt": [
+        11,
+        3,
+        4
+      ],
+      "cases": 6,
+      "size": "4.2k tokens",
+      "installs": "12 installs",
+      "favorite": true,
+      "desc_long": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars. It reads the Vercel project config, the migrations directory and the example env file, then prints one line per unmet condition with the command that fixes it.",
+      "files": [
+        "SKILL.md",
+        "checklist.md",
+        "scripts/verify.sh"
+      ],
+      "size_bytes": "21.4 kB",
+      "lines": 184,
+      "version": "5f0e12ab9c3d",
+      "version_full": "5f0e12ab9c3d4e7ab1f28a6d0c3e9b47d2f1a8c0",
+      "scope": "Global",
+      "favorites": 11,
+      "installs_n": 12,
+      "installed": true,
+      "used_by": [
+        "AP",
+        "RL",
+        "MK"
+      ],
+      "users": [
+        [
+          "ajay",
+          "AP",
+          "Global · since 2026-08-02"
+        ],
+        [
+          "ryan",
+          "RL",
+          "Global · since 2026-08-02"
+        ],
+        [
+          "mira",
+          "MK",
+          "Global · since 2026-08-28"
+        ],
+        [
+          "teddy",
+          "TZ",
+          "Global · since 2026-08-28"
+        ],
+        [
+          "kai",
+          "KO",
+          "Terum · since 2026-08-30"
+        ]
+      ],
+      "author": {
+        "handle": "ajay",
+        "name": "Ajay Patel",
+        "role": "platform",
+        "initials": "AP"
+      },
+      "repo": "terum/team-skills",
+      "path": "skills/deploy-check",
+      "receipt": {
+        "when": "8 days ago",
+        "date": "2026-08-29",
+        "timestamp": "2026-08-29 22:15 UTC",
+        "runner": "ajay",
+        "run_id": "20260829T221500Z",
+        "catalog": 30,
+        "incumbent": {
+          "wlt": [
+            8,
+            5,
+            5
+          ],
+          "version": "3b1c9d4e2f70"
+        },
+        "sign_p": "0.057",
+        "inc_p": "0.581",
+        "arm": {
+          "candidate": 0.82,
+          "incumbent": 0.74,
+          "baseline": 0.61
+        },
+        "triggers": {
+          "tp": 6,
+          "fn": 0,
+          "fp": 0,
+          "tn": 5,
+          "recall": "1.00",
+          "precision": "1.00",
+          "misses": []
+        },
+        "eff": {
+          "candidate": [
+            "9.4",
+            "41 s",
+            "$0.38"
+          ],
+          "incumbent": [
+            "10.6",
+            "46 s",
+            "$0.44"
+          ],
+          "baseline": [
+            "12.1",
+            "53 s",
+            "$0.51"
+          ]
+        },
+        "attribution": "wins on execution checks; judge ties on style cases",
+        "model": "sonnet",
+        "judge": "sonnet",
+        "cc": "2.34.0",
+        "k": 3,
+        "engine": "0.1.0",
+        "per_case": [
+          [
+            "stale-env-vars",
+            1.0,
+            0.78,
+            [
+              2,
+              1,
+              0
+            ]
+          ],
+          [
+            "migration-drift",
+            0.89,
+            0.44,
+            [
+              3,
+              0,
+              0
+            ]
+          ],
+          [
+            "secret-scan-gate",
+            0.83,
+            0.67,
+            [
+              1,
+              0,
+              2
+            ]
+          ],
+          [
+            "rollback-plan",
+            0.78,
+            0.44,
+            [
+              3,
+              0,
+              0
+            ]
+          ],
+          [
+            "healthcheck-wiring",
+            0.75,
+            0.67,
+            [
+              1,
+              1,
+              1
+            ]
+          ],
+          [
+            "dns-cutover-order",
+            0.67,
+            0.67,
+            [
+              1,
+              1,
+              1
+            ]
+          ]
+        ],
+        "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
+        "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057; 12 rounds settled by checks, 2 by judge). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
+        "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
+        "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
+        "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
+      },
+      "history": [
+        {
+          "when": "8 days ago",
+          "runner": "ajay",
+          "version": "5f0e12ab9c3d",
+          "wlt": [
+            11,
+            3,
+            4
+          ],
+          "rows": "WWLWWWWTTWWWWLTWLT"
+        },
+        {
+          "when": "15 days ago",
+          "runner": "ryan",
+          "version": "3b1c9d4e2f70",
+          "wlt": [
+            9,
+            3,
+            6
+          ],
+          "rows": "WTWWTLWTWWTLWTWTLW"
+        },
+        {
+          "when": "22 days ago",
+          "runner": "teddy",
+          "version": "3b1c9d4e2f70",
+          "wlt": [
+            8,
+            4,
+            6
+          ],
+          "rows": "TWWTLWTWLWTWLTWWLT"
+        },
+        {
+          "when": "31 days ago",
+          "runner": "ajay",
+          "version": "9d2a7e41c05b",
+          "wlt": [
+            6,
+            4,
+            8
+          ],
+          "rows": "TWTLWTTWLTWTLWTWLT"
+        }
+      ],
+      "hygiene": [
+        [
+          "Frontmatter",
+          "schema valid · name matches the folder",
+          "pass"
+        ],
+        [
+          "Unicode",
+          "no bidi controls, zero-width or confusable characters",
+          "pass"
+        ],
+        [
+          "Secrets and PII",
+          "no credentials; no emails outside metadata.author",
+          "pass"
+        ],
+        [
+          "Bundled scripts",
+          "scripts/verify.sh · allow-listed extension",
+          "pass"
+        ],
+        [
+          "License",
+          "UNLICENSED · matches team policy",
+          "pass"
+        ],
+        [
+          "Size",
+          "SKILL.md 4.2k tokens · cap 5k",
+          "pass"
+        ]
+      ],
+      "grants": [
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep"
+      ],
+      "grants_approved": "approved on this machine · 2026-09-03",
+      "activity": [
+        [
+          "KO",
+          "<b>kai</b> installed to Terum",
+          "7 days ago"
+        ],
+        [
+          "AP",
+          "<b>ajay</b> ran an eval · PASS +44%",
+          "8 days ago"
+        ],
+        [
+          "TZ",
+          "<b>teddy</b> and <b>mira</b> installed to Global",
+          "9 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> pushed 5f0e12ab9c3d · checklist.md, scripts/verify.sh",
+          "12 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> ran an eval on 3b1c9d4e2f70 · PASS +33%",
+          "15 days ago"
+        ],
+        [
+          "KO",
+          "<b>kai</b> favorited",
+          "18 days ago"
+        ],
+        [
+          "TZ",
+          "<b>teddy</b> ran an eval on 3b1c9d4e2f70 · NEUTRAL +22%",
+          "22 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> pushed 3b1c9d4e2f70 · SKILL.md",
+          "24 days ago"
+        ],
+        [
+          "AP",
+          "<b>ajay</b> ran an eval on 9d2a7e41c05b · NEUTRAL +11%",
+          "31 days ago"
+        ],
+        [
+          "RL",
+          "<b>ryan</b> shared deploy-check to terum · 9d2a7e41c05b",
+          "36 days ago"
+        ]
+      ],
+      "kind": "author",
+      "days": 9,
+      "actor": null,
+      "events": [
+        [
+          "TZ",
+          "<b>teddy</b> and <b>mira</b> installed it to Global",
+          9
+        ],
+        [
+          "RL",
+          "<b>ryan</b> ran an eval on 3b1c9d4e2f70 · PASS +33%",
+          15
+        ],
+        [
+          "KO",
+          "<b>kai</b> favorited it",
+          18
+        ],
+        [
+          "TZ",
+          "<b>teddy</b> ran an eval on 3b1c9d4e2f70 · NEUTRAL +22%",
+          22
+        ],
+        [
+          "AP",
+          "<b>ajay</b> ran an eval on 9d2a7e41c05b · NEUTRAL +11%",
+          31
+        ]
+      ],
+      "digest": {
+        "installs": [
+          "teddy",
+          "mira"
+        ],
+        "evals": [
+          "ryan",
+          "teddy",
+          "ajay"
+        ],
+        "favs": [
+          "kai"
+        ],
+        "events": [
+          [
+            "TZ",
+            "<b>teddy</b> and <b>mira</b> installed it to Global",
+            9
+          ],
+          [
+            "RL",
+            "<b>ryan</b> ran an eval on 3b1c9d4e2f70 · PASS +33%",
+            15
+          ],
+          [
+            "KO",
+            "<b>kai</b> favorited it",
+            18
+          ],
+          [
+            "TZ",
+            "<b>teddy</b> ran an eval on 3b1c9d4e2f70 · NEUTRAL +22%",
+            22
+          ],
+          [
+            "AP",
+            "<b>ajay</b> ran an eval on 9d2a7e41c05b · NEUTRAL +11%",
+            31
+          ]
+        ],
+        "title": "deploy-check · 2 installs, 3 evals, 1 favorite",
+        "fact": "teddy, mira installed · ryan, teddy, ajay ran evals · kai favorited"
+      },
+      "title": "deploy-check · 2 installs, 3 evals, 1 favorite",
+      "fact": "teddy, mira installed · ryan, teddy, ajay ran evals · kai favorited",
+      "state": "Last 30 days · a skill you wrote",
+      "unread": false,
+      "when": "9 days ago",
+      "date": "2026-08-28"
+    },
+    {
+      "origin": "terum",
+      "category": "infra",
+      "name": "env-audit",
+      "desc": "Lists every environment variable a service reads and flags the ones missing from Vercel or the example file.",
+      "wlt": [
+        0,
+        5,
+        4
+      ],
+      "size": "3.0k tokens",
+      "installs": "4 installs",
+      "kind": "alert",
+      "sub": "regression",
+      "days": 9,
+      "actor": {
+        "handle": "ryan",
+        "name": "Ryan Liu",
+        "role": "founder",
+        "initials": "RL"
+      },
+      "author": {
+        "handle": "ajay",
+        "name": "Ajay Patel",
+        "role": "platform",
+        "initials": "AP"
+      },
+      "scope": "Global",
+      "version": "d4c3b2a1f0e9",
+      "eval_days": 9,
+      "previous": {
+        "version": "2c1d0f9e8b7a",
+        "wlt": [
+          3,
+          2,
+          4
+        ],
+        "runner": "ajay",
+        "days": 30
+      },
+      "attribution": "misses variables read through indirection; no wins on the Vercel diff",
+      "title": "env-audit regressed to FAIL",
+      "fact": "−56% on d4c3b2a1f0e9 · ryan · was NEUTRAL +11%",
+      "state": "Disable, or open the evals",
+      "unread": false,
+      "when": "9 days ago",
+      "date": "2026-08-28"
+    },
+    {
+      "kind": "team",
+      "name": "mira",
+      "origin": "terum",
+      "category": "people",
+      "days": 12,
+      "actor": {
+        "handle": "mira",
+        "name": "Mira Kaur",
+        "role": "design",
+        "initials": "MK"
+      },
+      "author": {
+        "handle": "ryan",
+        "name": "Ryan Liu",
+        "role": "founder",
+        "initials": "RL"
+      },
+      "scope": "terum",
+      "version": "—",
+      "desc": "",
+      "wlt": null,
+      "installed_n": 30,
+      "approved": [
+        "deploy-check"
+      ],
+      "later": [
+        [
+          "deploy-check",
+          "2026-08-28"
+        ]
+      ],
+      "title": "mira joined terum",
+      "fact": "installed the global set · 1 grant approved since",
+      "state": "Invited by ryan",
+      "unread": false,
+      "when": "12 days ago",
+      "date": "2026-08-25"
+    }
+  ],
+  "CATALOG": [
+    {
+      "origin": "terum",
+      "category": "infra",
+      "name": "deploy-check",
+      "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
+      "wlt": [
+        11,
+        3,
+        4
+      ],
+      "cases": 6,
+      "size": "4.2k tokens",
+      "installs": "12 installs",
+      "favorite": true
+    },
+    {
+      "origin": "ssm",
+      "category": "docs",
+      "name": "release-notes",
+      "desc": "Drafts release notes from merged PR titles and the changelog convention in CONTRIBUTING.",
+      "wlt": [
+        2,
+        1,
+        6
+      ],
+      "size": "2.1k tokens",
+      "installs": "4 installs"
+    },
+    {
+      "origin": "terum",
+      "category": "review",
+      "name": "pr-review",
+      "desc": "Reviews a pull request the way Ryan does: contract drift first, then silent failures, then style.",
+      "wlt": [
+        6,
+        2,
+        1
+      ],
+      "size": "6.8k tokens",
+      "installs": "11 installs",
+      "favorite": true,
+      "flags": [
+        "update"
+      ],
+      "flag_text": {
+        "update": "Update available · ryan pushed 7e8f9a0b1c2d · 2 days ago"
+      }
+    },
+    {
+      "origin": "terum",
+      "category": "ops",
+      "name": "incident-triage",
+      "desc": "Walks a production alert to a root-cause hypothesis using the runbook and recent deploys.",
+      "wlt": [
+        1,
+        5,
+        3
+      ],
+      "size": "5.5k tokens",
+      "installs": "2 installs",
+      "flags": [
+        "broken"
+      ],
+      "flag_text": {
+        "broken": "Broken references · runbook.md, deploys.json missing"
+      }
+    },
+    {
+      "origin": "mrf",
+      "category": "infra",
+      "name": "migration-guard",
+      "desc": "Refuses to apply a Supabase migration without a dry run, a numbered file, and a rollback note.",
+      "wlt": [
+        5,
+        0,
+        2
+      ],
+      "partial": [
+        7,
+        9
+      ],
+      "size": "3.9k tokens",
+      "installs": "8 installs",
+      "flags": [
+        "local"
+      ]
+    },
+    {
+      "origin": "terum",
+      "category": "testing",
+      "name": "test-writer",
+      "desc": "Writes the failing test first, then the smallest change that passes it, then the edge cases.",
+      "wlt": [
+        6,
+        1,
+        2
+      ],
+      "size": "7.4k tokens",
+      "installs": "10 installs",
+      "favorite": true
+    },
+    {
+      "origin": "ssm",
+      "category": "git",
+      "name": "commit-msg",
+      "desc": "Formats commit messages to the repo convention and adds the session attribution trailer.",
+      "wlt": [
+        2,
+        2,
+        5
+      ],
+      "size": "0.9k tokens",
+      "installs": "9 installs",
+      "enabled": false
+    },
+    {
+      "origin": "terum",
+      "category": "onboarding",
+      "name": "onboarding-tour",
+      "desc": "Explains the team repo layout to a new member and installs the starter set of skills.",
+      "size": "3.2k tokens",
+      "installs": "1 install"
+    },
+    {
+      "origin": "mrf",
+      "category": "data",
+      "name": "csv-profiler",
+      "desc": "Profiles a CSV before import: types, nulls, outliers, and the columns that will break the schema.",
+      "wlt": [
+        4,
+        1,
+        4
+      ],
+      "size": "2.8k tokens",
+      "installs": "6 installs"
+    },
+    {
+      "origin": "terum",
+      "category": "review",
+      "name": "silent-failure-hunt",
+      "desc": "Finds catch blocks that only log, fallbacks that hide errors, and retries without a budget.",
+      "wlt": [
+        6,
+        0,
+        3
+      ],
+      "size": "5.1k tokens",
+      "installs": "9 installs"
+    },
+    {
+      "origin": "ssm",
+      "category": "research",
+      "name": "source-check",
+      "desc": "Verifies every cited URL resolves and actually says what the claim attributes to it before a report ships.",
+      "wlt": [
+        3,
+        1,
+        5
+      ],
+      "size": "2.4k tokens",
+      "installs": "5 installs"
+    },
+    {
+      "origin": "terum",
+      "category": "infra",
+      "name": "env-audit",
+      "desc": "Lists every environment variable a service reads and flags the ones missing from Vercel or the example file.",
+      "wlt": [
+        0,
+        5,
+        4
+      ],
+      "size": "3.0k tokens",
+      "installs": "4 installs"
+    },
+    {
+      "origin": "terum",
+      "category": "docs",
+      "name": "adr-writer",
+      "desc": "Turns a design discussion into an architecture decision record: the options weighed, the one chosen, and why.",
+      "wlt": [
+        7,
+        0,
+        2
+      ],
+      "size": "3.4k tokens",
+      "installs": "7 installs",
+      "flags": [
+        "update"
+      ],
+      "flag_text": {
+        "update": "Update available · ryan pushed c41d0e9f8a27 · 5 days ago"
+      }
+    },
+    {
+      "origin": "terum",
+      "category": "security",
+      "name": "secret-scan",
+      "desc": "Scans a diff for credentials and private keys before a share or a publish, and blocks the commit with the exact line.",
+      "wlt": [
+        7,
+        1,
+        1
+      ],
+      "size": "3.1k tokens",
+      "installs": "5 installs",
+      "installed": false,
+      "grants": [
+        "Bash",
+        "Read",
+        "Grep"
+      ]
+    },
+    {
+      "origin": "docs",
+      "category": "review",
+      "name": "a11y-audit",
+      "desc": "Walks a page with the accessibility tree and lists every control a screen reader cannot name or reach.",
+      "wlt": [
+        5,
+        1,
+        3
+      ],
+      "size": "2.6k tokens",
+      "installs": "6 installs",
+      "installed": false,
+      "grants": [
+        "Read"
+      ]
+    },
+    {
+      "origin": "docs",
+      "category": "docs",
+      "name": "storybook-sync",
+      "desc": "Regenerates the component stories from the props tables and flags a story whose example no longer compiles.",
+      "wlt": [
+        3,
+        2,
+        4
+      ],
+      "size": "1.8k tokens",
+      "installs": "4 installs",
+      "installed": false,
+      "grants": []
+    },
+    {
+      "origin": "docs",
+      "category": "infra",
+      "name": "bundle-budget",
+      "desc": "Fails the build when a route's client bundle grows past its budget and names the import that did it.",
+      "size": "2.2k tokens",
+      "installs": "3 installs",
+      "installed": false,
+      "grants": [
+        "Bash",
+        "Read"
+      ]
+    }
+  ],
+  "MARKET_EXTRA": [
+    {
+      "origin": "terum",
+      "category": "security",
+      "name": "secret-scan",
+      "desc": "Scans a diff for credentials and private keys before a share or a publish, and blocks the commit with the exact line.",
+      "wlt": [
+        7,
+        1,
+        1
+      ],
+      "size": "3.1k tokens",
+      "installs": "5 installs",
+      "installed": false,
+      "grants": [
+        "Bash",
+        "Read",
+        "Grep"
+      ]
+    },
+    {
+      "origin": "docs",
+      "category": "review",
+      "name": "a11y-audit",
+      "desc": "Walks a page with the accessibility tree and lists every control a screen reader cannot name or reach.",
+      "wlt": [
+        5,
+        1,
+        3
+      ],
+      "size": "2.6k tokens",
+      "installs": "6 installs",
+      "installed": false,
+      "grants": [
+        "Read"
+      ]
+    },
+    {
+      "origin": "docs",
+      "category": "docs",
+      "name": "storybook-sync",
+      "desc": "Regenerates the component stories from the props tables and flags a story whose example no longer compiles.",
+      "wlt": [
+        3,
+        2,
+        4
+      ],
+      "size": "1.8k tokens",
+      "installs": "4 installs",
+      "installed": false,
+      "grants": []
+    },
+    {
+      "origin": "docs",
+      "category": "infra",
+      "name": "bundle-budget",
+      "desc": "Fails the build when a route's client bundle grows past its budget and names the import that did it.",
+      "size": "2.2k tokens",
+      "installs": "3 installs",
+      "installed": false,
+      "grants": [
+        "Bash",
+        "Read"
+      ]
+    }
+  ],
+  "PEOPLE": [
+    {
+      "handle": "ryan",
+      "name": "Ryan Liu",
+      "role": "founder",
+      "initials": "RL",
+      "followers": 5,
+      "joined": "2026-06-12",
+      "last_publish": "2 days ago · pr-review"
+    },
+    {
+      "handle": "ajay",
+      "name": "Ajay Patel",
+      "role": "platform",
+      "initials": "AP",
+      "followers": 4,
+      "joined": "2026-06-12",
+      "last_publish": "1 day ago · secret-scan"
+    },
+    {
+      "handle": "mira",
+      "name": "Mira Kaur",
+      "role": "design",
+      "initials": "MK",
+      "followers": 2,
+      "joined": "2026-08-25",
+      "last_publish": "9 days ago · source-check"
+    },
+    {
+      "handle": "lena",
+      "name": "Lena Fischer",
+      "role": "web",
+      "initials": "LF",
+      "followers": 1,
+      "joined": "2026-08-11",
+      "last_publish": "4 days ago · a11y-audit"
+    },
+    {
+      "handle": "kai",
+      "name": "Kai Okafor",
+      "role": "data",
+      "initials": "KO",
+      "followers": 1,
+      "joined": "2026-07-20",
+      "last_publish": "16 days ago · csv-profiler"
+    },
+    {
+      "handle": "teddy",
+      "name": "Teddy",
+      "role": "design",
+      "initials": "TZ",
+      "followers": 0,
+      "joined": "2026-06-12",
+      "last_publish": "—"
+    }
+  ],
+  "ROSTER_MORE": [
+    {
+      "handle": "priya",
+      "name": "Priya Nair",
+      "role": "infra",
+      "initials": "PN",
+      "followers": 0,
+      "joined": "2026-06-20",
+      "last_publish": "—"
+    },
+    {
+      "handle": "jonas",
+      "name": "Jonas Weber",
+      "role": "web",
+      "initials": "JW",
+      "followers": 0,
+      "joined": "2026-07-08",
+      "last_publish": "—"
+    },
+    {
+      "handle": "ana",
+      "name": "Ana Costa",
+      "role": "data",
+      "initials": "AC",
+      "followers": 0,
+      "joined": "2026-07-22",
+      "last_publish": "—"
+    },
+    {
+      "handle": "tom",
+      "name": "Tom Reed",
+      "role": "platform",
+      "initials": "TR",
+      "followers": 0,
+      "joined": "2026-08-03",
+      "last_publish": "—"
+    },
+    {
+      "handle": "yuki",
+      "name": "Yuki Sato",
+      "role": "design",
+      "initials": "YS",
+      "followers": 0,
+      "joined": "2026-08-19",
+      "last_publish": "—"
+    },
+    {
+      "handle": "omar",
+      "name": "Omar Haddad",
+      "role": "ops",
+      "initials": "OH",
+      "followers": 0,
+      "joined": "2026-08-27",
+      "last_publish": "—"
+    }
+  ],
+  "ROSTER": [
+    {
+      "handle": "ryan",
+      "name": "Ryan Liu",
+      "role": "founder",
+      "initials": "RL",
+      "followers": 5,
+      "joined": "2026-06-12",
+      "last_publish": "2 days ago · pr-review"
+    },
+    {
+      "handle": "ajay",
+      "name": "Ajay Patel",
+      "role": "platform",
+      "initials": "AP",
+      "followers": 4,
+      "joined": "2026-06-12",
+      "last_publish": "1 day ago · secret-scan"
+    },
+    {
+      "handle": "mira",
+      "name": "Mira Kaur",
+      "role": "design",
+      "initials": "MK",
+      "followers": 2,
+      "joined": "2026-08-25",
+      "last_publish": "9 days ago · source-check"
+    },
+    {
+      "handle": "lena",
+      "name": "Lena Fischer",
+      "role": "web",
+      "initials": "LF",
+      "followers": 1,
+      "joined": "2026-08-11",
+      "last_publish": "4 days ago · a11y-audit"
+    },
+    {
+      "handle": "kai",
+      "name": "Kai Okafor",
+      "role": "data",
+      "initials": "KO",
+      "followers": 1,
+      "joined": "2026-07-20",
+      "last_publish": "16 days ago · csv-profiler"
+    },
+    {
+      "handle": "teddy",
+      "name": "Teddy",
+      "role": "design",
+      "initials": "TZ",
+      "followers": 0,
+      "joined": "2026-06-12",
+      "last_publish": "—"
+    },
+    {
+      "handle": "priya",
+      "name": "Priya Nair",
+      "role": "infra",
+      "initials": "PN",
+      "followers": 0,
+      "joined": "2026-06-20",
+      "last_publish": "—"
+    },
+    {
+      "handle": "jonas",
+      "name": "Jonas Weber",
+      "role": "web",
+      "initials": "JW",
+      "followers": 0,
+      "joined": "2026-07-08",
+      "last_publish": "—"
+    },
+    {
+      "handle": "ana",
+      "name": "Ana Costa",
+      "role": "data",
+      "initials": "AC",
+      "followers": 0,
+      "joined": "2026-07-22",
+      "last_publish": "—"
+    },
+    {
+      "handle": "tom",
+      "name": "Tom Reed",
+      "role": "platform",
+      "initials": "TR",
+      "followers": 0,
+      "joined": "2026-08-03",
+      "last_publish": "—"
+    },
+    {
+      "handle": "yuki",
+      "name": "Yuki Sato",
+      "role": "design",
+      "initials": "YS",
+      "followers": 0,
+      "joined": "2026-08-19",
+      "last_publish": "—"
+    },
+    {
+      "handle": "omar",
+      "name": "Omar Haddad",
+      "role": "ops",
+      "initials": "OH",
+      "followers": 0,
+      "joined": "2026-08-27",
+      "last_publish": "—"
+    }
+  ],
+  "PROJECTS": [
+    {
+      "name": "Terum",
+      "key": "terum",
+      "ico": "box",
+      "desc": "The product monorepo: web app, API and the deploy pipeline.",
+      "skills": 22,
+      "members": 8,
+      "remote": "github.com/terum/terum",
+      "installed": true,
+      "favorites": 11,
+      "updated": "2 days ago",
+      "path": "~/Projects/terum",
+      "admin": {
+        "handle": "ryan",
+        "name": "Ryan Liu",
+        "role": "founder",
+        "initials": "RL"
+      },
+      "evaluated": 19
+    },
+    {
+      "name": "SSM",
+      "key": "ssm",
+      "ico": "sparkle",
+      "desc": "Teddy's skills workshop: goal setup, research and onboarding studies.",
+      "skills": 15,
+      "members": 3,
+      "remote": "github.com/terum/ssm",
+      "installed": true,
+      "favorites": 9,
+      "updated": "5 days ago",
+      "path": "~/Projects/SSM",
+      "admin": {
+        "handle": "teddy",
+        "name": "Teddy",
+        "role": "design",
+        "initials": "TZ"
+      },
+      "evaluated": 11
+    },
+    {
+      "name": "MRF",
+      "key": "mrf",
+      "ico": "database",
+      "desc": "Data pipelines and the migration framework behind the warehouse.",
+      "skills": 32,
+      "members": 6,
+      "remote": "github.com/terum/mrf",
+      "installed": true,
+      "favorites": 8,
+      "updated": "yesterday",
+      "path": "~/Projects/mrf",
+      "admin": {
+        "handle": "ajay",
+        "name": "Ajay Patel",
+        "role": "platform",
+        "initials": "AP"
+      },
+      "evaluated": 27
+    },
+    {
+      "name": "Docs",
+      "key": "docs",
+      "ico": "book-open",
+      "desc": "The public docs site, its component stories and the style guide.",
+      "skills": 8,
+      "members": 4,
+      "remote": "github.com/terum/docs",
+      "installed": false,
+      "favorites": 6,
+      "updated": "12 days ago",
+      "path": null,
+      "admin": {
+        "handle": "lena",
+        "name": "Lena Fischer",
+        "role": "web",
+        "initials": "LF"
+      },
+      "evaluated": 5
+    }
+  ],
+  "MEMBER": {
+    "ryan": [
+      "admin",
+      [
+        "Terum",
+        "MRF"
+      ],
+      "today"
+    ],
+    "ajay": [
+      "member",
+      [
+        "Terum",
+        "MRF"
+      ],
+      "today"
+    ],
+    "mira": [
+      "member",
+      [
+        "Terum",
+        "SSM",
+        "Docs"
+      ],
+      "yesterday"
+    ],
+    "lena": [
+      "member",
+      [
+        "Docs"
+      ],
+      "yesterday"
+    ],
+    "kai": [
+      "member",
+      [
+        "Terum",
+        "MRF"
+      ],
+      "3 days ago"
+    ],
+    "teddy": [
+      "admin",
+      [
+        "Terum",
+        "SSM"
+      ],
+      "today"
+    ],
+    "priya": [
+      "member",
+      [
+        "Terum",
+        "MRF"
+      ],
+      "2 days ago"
+    ],
+    "jonas": [
+      "member",
+      [
+        "Docs"
+      ],
+      "5 days ago"
+    ],
+    "ana": [
+      "member",
+      [
+        "MRF"
+      ],
+      "yesterday"
+    ],
+    "tom": [
+      "member",
+      [
+        "Terum",
+        "MRF"
+      ],
+      "4 days ago"
+    ],
+    "yuki": [
+      "member",
+      [
+        "SSM",
+        "Docs"
+      ],
+      "8 days ago"
+    ],
+    "omar": [
+      "member",
+      [
+        "Terum"
+      ],
+      "8 days ago"
+    ]
+  },
+  "INVITED": [
+    {
+      "handle": "sam",
+      "name": "Sam Ortiz",
+      "role": "web",
+      "initials": "SO",
+      "invited": "2026-09-05",
+      "by": "ryan"
+    }
+  ],
+  "CATEGORIES": [
+    [
+      "infra",
+      "box",
+      6
+    ],
+    [
+      "docs",
+      "book-open",
+      5
+    ],
+    [
+      "review",
+      "eye",
+      5
+    ],
+    [
+      "ops",
+      "terminal",
+      3
+    ],
+    [
+      "testing",
+      "flask",
+      3
+    ],
+    [
+      "data",
+      "database",
+      3
+    ],
+    [
+      "git",
+      "git-commit",
+      2
+    ],
+    [
+      "onboarding",
+      "users",
+      1
+    ],
+    [
+      "research",
+      "search",
+      1
+    ],
+    [
+      "security",
+      "shield",
+      1
+    ]
+  ],
+  "DETAIL": {
+    "origin": "terum",
+    "category": "infra",
+    "name": "deploy-check",
+    "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
+    "wlt": [
+      11,
+      3,
+      4
+    ],
+    "cases": 6,
+    "size": "4.2k tokens",
+    "installs": "12 installs",
+    "favorite": true,
+    "desc_long": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars. It reads the Vercel project config, the migrations directory and the example env file, then prints one line per unmet condition with the command that fixes it.",
+    "files": [
+      "SKILL.md",
+      "checklist.md",
+      "scripts/verify.sh"
+    ],
+    "size_bytes": "21.4 kB",
+    "lines": 184,
+    "version": "5f0e12ab9c3d",
+    "version_full": "5f0e12ab9c3d4e7ab1f28a6d0c3e9b47d2f1a8c0",
+    "scope": "Global",
+    "favorites": 11,
+    "installs_n": 12,
+    "installed": true,
+    "used_by": [
+      "AP",
+      "RL",
+      "MK"
+    ],
+    "users": [
+      [
+        "ajay",
+        "AP",
+        "Global · since 2026-08-02"
+      ],
+      [
+        "ryan",
+        "RL",
+        "Global · since 2026-08-02"
+      ],
+      [
+        "mira",
+        "MK",
+        "Global · since 2026-08-28"
+      ],
+      [
+        "teddy",
+        "TZ",
+        "Global · since 2026-08-28"
+      ],
+      [
+        "kai",
+        "KO",
+        "Terum · since 2026-08-30"
+      ]
+    ],
+    "author": {
+      "handle": "ajay",
+      "name": "Ajay Patel",
+      "role": "platform",
+      "initials": "AP"
+    },
+    "repo": "terum/team-skills",
+    "path": "skills/deploy-check",
+    "receipt": {
+      "when": "8 days ago",
+      "date": "2026-08-29",
+      "timestamp": "2026-08-29 22:15 UTC",
+      "runner": "ajay",
+      "run_id": "20260829T221500Z",
+      "catalog": 30,
+      "incumbent": {
+        "wlt": [
+          8,
+          5,
+          5
+        ],
+        "version": "3b1c9d4e2f70"
+      },
+      "sign_p": "0.057",
+      "inc_p": "0.581",
+      "arm": {
+        "candidate": 0.82,
+        "incumbent": 0.74,
+        "baseline": 0.61
+      },
+      "triggers": {
+        "tp": 6,
+        "fn": 0,
+        "fp": 0,
+        "tn": 5,
+        "recall": "1.00",
+        "precision": "1.00",
+        "misses": []
+      },
+      "eff": {
+        "candidate": [
+          "9.4",
+          "41 s",
+          "$0.38"
+        ],
+        "incumbent": [
+          "10.6",
+          "46 s",
+          "$0.44"
+        ],
+        "baseline": [
+          "12.1",
+          "53 s",
+          "$0.51"
+        ]
+      },
+      "attribution": "wins on execution checks; judge ties on style cases",
+      "model": "sonnet",
+      "judge": "sonnet",
+      "cc": "2.34.0",
+      "k": 3,
+      "engine": "0.1.0",
+      "per_case": [
+        [
+          "stale-env-vars",
+          1.0,
+          0.78,
+          [
+            2,
+            1,
+            0
+          ]
+        ],
+        [
+          "migration-drift",
+          0.89,
+          0.44,
+          [
+            3,
+            0,
+            0
+          ]
+        ],
+        [
+          "secret-scan-gate",
+          0.83,
+          0.67,
+          [
+            1,
+            0,
+            2
+          ]
+        ],
+        [
+          "rollback-plan",
+          0.78,
+          0.44,
+          [
+            3,
+            0,
+            0
+          ]
+        ],
+        [
+          "healthcheck-wiring",
+          0.75,
+          0.67,
+          [
+            1,
+            1,
+            1
+          ]
+        ],
+        [
+          "dns-cutover-order",
+          0.67,
+          0.67,
+          [
+            1,
+            1,
+            1
+          ]
+        ]
+      ],
+      "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
+      "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057; 12 rounds settled by checks, 2 by judge). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
+      "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
+      "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
+      "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
+    },
+    "history": [
+      {
+        "when": "8 days ago",
+        "runner": "ajay",
+        "version": "5f0e12ab9c3d",
+        "wlt": [
+          11,
+          3,
+          4
+        ],
+        "rows": "WWLWWWWTTWWWWLTWLT"
+      },
+      {
+        "when": "15 days ago",
+        "runner": "ryan",
+        "version": "3b1c9d4e2f70",
+        "wlt": [
+          9,
+          3,
+          6
+        ],
+        "rows": "WTWWTLWTWWTLWTWTLW"
+      },
+      {
+        "when": "22 days ago",
+        "runner": "teddy",
+        "version": "3b1c9d4e2f70",
+        "wlt": [
+          8,
+          4,
+          6
+        ],
+        "rows": "TWWTLWTWLWTWLTWWLT"
+      },
+      {
+        "when": "31 days ago",
+        "runner": "ajay",
+        "version": "9d2a7e41c05b",
+        "wlt": [
+          6,
+          4,
+          8
+        ],
+        "rows": "TWTLWTTWLTWTLWTWLT"
+      }
+    ],
+    "hygiene": [
+      [
+        "Frontmatter",
+        "schema valid · name matches the folder",
+        "pass"
+      ],
+      [
+        "Unicode",
+        "no bidi controls, zero-width or confusable characters",
+        "pass"
+      ],
+      [
+        "Secrets and PII",
+        "no credentials; no emails outside metadata.author",
+        "pass"
+      ],
+      [
+        "Bundled scripts",
+        "scripts/verify.sh · allow-listed extension",
+        "pass"
+      ],
+      [
+        "License",
+        "UNLICENSED · matches team policy",
+        "pass"
+      ],
+      [
+        "Size",
+        "SKILL.md 4.2k tokens · cap 5k",
+        "pass"
+      ]
+    ],
+    "grants": [
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep"
+    ],
+    "grants_approved": "approved on this machine · 2026-09-03",
+    "activity": [
+      [
+        "KO",
+        "<b>kai</b> installed to Terum",
+        "7 days ago"
+      ],
+      [
+        "AP",
+        "<b>ajay</b> ran an eval · PASS +44%",
+        "8 days ago"
+      ],
+      [
+        "TZ",
+        "<b>teddy</b> and <b>mira</b> installed to Global",
+        "9 days ago"
+      ],
+      [
+        "RL",
+        "<b>ryan</b> pushed 5f0e12ab9c3d · checklist.md, scripts/verify.sh",
+        "12 days ago"
+      ],
+      [
+        "RL",
+        "<b>ryan</b> ran an eval on 3b1c9d4e2f70 · PASS +33%",
+        "15 days ago"
+      ],
+      [
+        "KO",
+        "<b>kai</b> favorited",
+        "18 days ago"
+      ],
+      [
+        "TZ",
+        "<b>teddy</b> ran an eval on 3b1c9d4e2f70 · NEUTRAL +22%",
+        "22 days ago"
+      ],
+      [
+        "RL",
+        "<b>ryan</b> pushed 3b1c9d4e2f70 · SKILL.md",
+        "24 days ago"
+      ],
+      [
+        "AP",
+        "<b>ajay</b> ran an eval on 9d2a7e41c05b · NEUTRAL +11%",
+        "31 days ago"
+      ],
+      [
+        "RL",
+        "<b>ryan</b> shared deploy-check to terum · 9d2a7e41c05b",
+        "36 days ago"
+      ]
+    ]
+  },
+  "DETAIL_PARTIAL": {
+    "origin": "mrf",
+    "category": "infra",
+    "name": "migration-guard",
+    "desc": "Refuses to apply a Supabase migration without a dry run, a numbered file, and a rollback note.",
+    "wlt": [
+      5,
+      0,
+      2
+    ],
+    "cases": 3,
+    "size": "3.9k tokens",
+    "installs": "8 installs",
+    "favorite": false,
+    "desc_long": "Refuses to apply a Supabase migration without a dry run, a numbered file, and a rollback note. Reads the migrations directory and the project ref, then blocks the apply until every gate passes.",
+    "files": [
+      "SKILL.md",
+      "rollback.md"
+    ],
+    "size_bytes": "18.3 kB",
+    "lines": 162,
+    "version": "a17c3e9d4b02",
+    "version_full": "a17c3e9d4b02f6e19c0d7b3a5e28d4c1f09b6a73",
+    "scope": "Global",
+    "favorites": 9,
+    "installs_n": 8,
+    "installed": true,
+    "used_by": [
+      "AP",
+      "RL",
+      "TZ"
+    ],
+    "users": [],
+    "author": {
+      "handle": "ryan",
+      "name": "Ryan Liu",
+      "role": "founder",
+      "initials": "RL"
+    },
+    "repo": "mrf/team-skills",
+    "path": "skills/migration-guard",
+    "receipt": {
+      "when": "2 days ago",
+      "date": "2026-09-04",
+      "timestamp": "2026-09-04 09:12 UTC",
+      "runner": "teddy",
+      "run_id": "20260904T091200Z",
+      "catalog": 30,
+      "incumbent": null,
+      "sign_p": "0.063",
+      "inc_p": "0.581",
+      "arm": {
+        "candidate": 0.88,
+        "incumbent": null,
+        "baseline": 0.57
+      },
+      "triggers": {
+        "tp": 4,
+        "fn": 1,
+        "fp": 0,
+        "tn": 5,
+        "recall": "0.80",
+        "precision": "1.00",
+        "misses": [
+          "apply the pending Supabase migration to staging"
+        ]
+      },
+      "eff": {
+        "candidate": [
+          "5.1",
+          "36 s",
+          "$0.31"
+        ],
+        "incumbent": null,
+        "baseline": [
+          "6.4",
+          "44 s",
+          "$0.40"
+        ]
+      },
+      "attribution": "wins on the dry-run and numbering checks; 2 rounds unscored after an agent timeout",
+      "model": "sonnet",
+      "judge": "sonnet",
+      "cc": "2.34.0",
+      "k": 3,
+      "engine": "0.1.0",
+      "per_case": [
+        [
+          "missing-dry-run",
+          0.92,
+          0.5,
+          [
+            2,
+            0,
+            1
+          ]
+        ],
+        [
+          "unnumbered-file",
+          0.89,
+          0.61,
+          [
+            2,
+            0,
+            1
+          ]
+        ],
+        [
+          "no-rollback",
+          0.83,
+          0.61,
+          [
+            1,
+            0,
+            0
+          ],
+          2
+        ]
+      ],
+      "abstract": "Three execution cases were run at k = 3 repetitions across two arms (baseline, candidate; no prior version exists), with trigger selection measured against the team catalog of 30 skills. Two rounds hit the agent timeout after one retry and stay unscored, so the run is partial: 7 of 9 rounds scored. The candidate outperformed baseline in 5 of the 7 scored rounds (net lift +0.71, sign test p = 0.063) and missed one of five should-trigger prompts. Verdict: PASS, greyed for the partial run.",
+      "results": "Mean deterministic-check pass rate was 0.88 for the candidate and 0.57 for baseline over the scored rounds (Fig. 1). Against baseline the candidate won 5, lost 0, and tied 2 of 7 scored rounds (net lift +0.71, p = 0.063; 4 rounds settled by checks, 1 by judge) (Fig. 2). no-rollback carries both unscored rounds (Table 1).",
+      "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 4 of 5 should-trigger prompts (recall 0.80) and on 0 of 5 near-miss distractors (precision 1.00).",
+      "efficiency_text": "The candidate was cheaper and faster than baseline on every measure (Table 2).",
+      "coverage": "7 of 9 rounds scored: 2 rounds in no-rollback hit the 600 s agent timeout twice and stay unscored, never averaged. All 6 hygiene screens passed. The sign test is informational at k = 3. Raw transcripts and sandboxes remain on teddy's machine under run 20260904T091200Z; all committed content passed secret redaction."
+    },
+    "history": [
+      {
+        "when": "2 days ago",
+        "runner": "teddy",
+        "version": "a17c3e9d4b02",
+        "wlt": [
+          5,
+          0,
+          2
+        ],
+        "rows": "WWTWWTW--",
+        "partial": [
+          7,
+          9
+        ]
+      }
+    ],
+    "hygiene": [
+      [
+        "Frontmatter",
+        "schema valid · name matches the folder",
+        "pass"
+      ],
+      [
+        "Unicode",
+        "no bidi controls, zero-width or confusable characters",
+        "pass"
+      ],
+      [
+        "Secrets and PII",
+        "no credentials; no emails outside metadata.author",
+        "pass"
+      ],
+      [
+        "Bundled scripts",
+        "scripts/verify.sh · allow-listed extension",
+        "pass"
+      ],
+      [
+        "License",
+        "UNLICENSED · matches team policy",
+        "pass"
+      ],
+      [
+        "Size",
+        "SKILL.md 4.2k tokens · cap 5k",
+        "pass"
+      ]
+    ],
+    "grants": [
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep"
+    ],
+    "grants_approved": "approved on this machine · 2026-09-03",
+    "activity": [
+      [
+        "TZ",
+        "<b>teddy</b> ran an eval · partial, 7 of 9 rounds scored",
+        "2 days ago"
+      ],
+      [
+        "TZ",
+        "<b>teddy</b> edited locally · not yet shared",
+        "4 days ago"
+      ],
+      [
+        "RL",
+        "<b>ryan</b> shared migration-guard to mrf",
+        "20 days ago"
+      ]
+    ],
+    "partial": [
+      7,
+      9
+    ],
+    "flags": [
+      "local"
+    ]
+  },
+  "DETAIL_NO_RECEIPT": {
+    "origin": "terum",
+    "category": "onboarding",
+    "name": "onboarding-tour",
+    "desc": "Explains the team repo layout to a new member and installs the starter set of skills.",
+    "wlt": null,
+    "cases": 3,
+    "size": "3.2k tokens",
+    "installs": "1 install",
+    "favorite": false,
+    "desc_long": "Explains the team repo layout to a new member and installs the starter set of skills, then walks through the first share and the first eval so the conventions stick.",
+    "files": [
+      "SKILL.md"
+    ],
+    "size_bytes": "12.6 kB",
+    "lines": 118,
+    "version": "c0ffee12ab34",
+    "version_full": "c0ffee12ab34d9e8b7c6a5f4e3d2c1b0a9f8e7d6",
+    "scope": "Global",
+    "favorites": 2,
+    "installs_n": 1,
+    "installed": true,
+    "used_by": [
+      "TZ"
+    ],
+    "users": [
+      [
+        "teddy",
+        "TZ",
+        "Global · since 2026-09-03"
+      ]
+    ],
+    "author": {
+      "handle": "ryan",
+      "name": "Ryan Liu",
+      "role": "founder",
+      "initials": "RL"
+    },
+    "repo": "terum/team-skills",
+    "path": "skills/onboarding-tour",
+    "receipt": null,
+    "history": [],
+    "hygiene": [
+      [
+        "Frontmatter",
+        "schema valid · name matches the folder",
+        "pass"
+      ],
+      [
+        "Unicode",
+        "no bidi controls, zero-width or confusable characters",
+        "pass"
+      ],
+      [
+        "Secrets and PII",
+        "no credentials; no emails outside metadata.author",
+        "pass"
+      ],
+      [
+        "Bundled scripts",
+        "scripts/verify.sh · allow-listed extension",
+        "pass"
+      ],
+      [
+        "License",
+        "UNLICENSED · matches team policy",
+        "pass"
+      ],
+      [
+        "Size",
+        "SKILL.md 4.2k tokens · cap 5k",
+        "pass"
+      ]
+    ],
+    "grants": [
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep"
+    ],
+    "grants_approved": "approved on this machine · 2026-09-03",
+    "activity": [
+      [
+        "RL",
+        "<b>ryan</b> shared onboarding-tour to terum",
+        "3 days ago"
+      ]
+    ],
+    "partial": null,
+    "flags": []
+  },
+  "DETAIL_NOT_INSTALLED": {
+    "origin": "terum",
+    "category": "infra",
+    "name": "deploy-check",
+    "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
+    "wlt": [
+      11,
+      3,
+      4
+    ],
+    "cases": 6,
+    "size": "4.2k tokens",
+    "installs": "12 installs",
+    "favorite": false,
+    "desc_long": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars. It reads the Vercel project config, the migrations directory and the example env file, then prints one line per unmet condition with the command that fixes it.",
+    "files": [
+      "SKILL.md",
+      "checklist.md",
+      "scripts/verify.sh"
+    ],
+    "size_bytes": "21.4 kB",
+    "lines": 184,
+    "version": "5f0e12ab9c3d",
+    "version_full": "5f0e12ab9c3d4e7ab1f28a6d0c3e9b47d2f1a8c0",
+    "scope": null,
+    "favorites": 10,
+    "installs_n": 12,
+    "installed": false,
+    "used_by": [
+      "AP",
+      "RL",
+      "MK"
+    ],
+    "users": [
+      [
+        "ajay",
+        "AP",
+        "Global · since 2026-08-02"
+      ],
+      [
+        "ryan",
+        "RL",
+        "Global · since 2026-08-02"
+      ],
+      [
+        "mira",
+        "MK",
+        "Global · since 2026-08-28"
+      ],
+      [
+        "teddy",
+        "TZ",
+        "Global · since 2026-08-28"
+      ],
+      [
+        "kai",
+        "KO",
+        "Terum · since 2026-08-30"
+      ]
+    ],
+    "author": {
+      "handle": "ajay",
+      "name": "Ajay Patel",
+      "role": "platform",
+      "initials": "AP"
+    },
+    "repo": "terum/team-skills",
+    "path": "skills/deploy-check",
+    "receipt": {
+      "when": "8 days ago",
+      "date": "2026-08-29",
+      "timestamp": "2026-08-29 22:15 UTC",
+      "runner": "ajay",
+      "run_id": "20260829T221500Z",
+      "catalog": 30,
+      "incumbent": {
+        "wlt": [
+          8,
+          5,
+          5
+        ],
+        "version": "3b1c9d4e2f70"
+      },
+      "sign_p": "0.057",
+      "inc_p": "0.581",
+      "arm": {
+        "candidate": 0.82,
+        "incumbent": 0.74,
+        "baseline": 0.61
+      },
+      "triggers": {
+        "tp": 6,
+        "fn": 0,
+        "fp": 0,
+        "tn": 5,
+        "recall": "1.00",
+        "precision": "1.00",
+        "misses": []
+      },
+      "eff": {
+        "candidate": [
+          "9.4",
+          "41 s",
+          "$0.38"
+        ],
+        "incumbent": [
+          "10.6",
+          "46 s",
+          "$0.44"
+        ],
+        "baseline": [
+          "12.1",
+          "53 s",
+          "$0.51"
+        ]
+      },
+      "attribution": "wins on execution checks; judge ties on style cases",
+      "model": "sonnet",
+      "judge": "sonnet",
+      "cc": "2.34.0",
+      "k": 3,
+      "engine": "0.1.0",
+      "per_case": [
+        [
+          "stale-env-vars",
+          1.0,
+          0.78,
+          [
+            2,
+            1,
+            0
+          ]
+        ],
+        [
+          "migration-drift",
+          0.89,
+          0.44,
+          [
+            3,
+            0,
+            0
+          ]
+        ],
+        [
+          "secret-scan-gate",
+          0.83,
+          0.67,
+          [
+            1,
+            0,
+            2
+          ]
+        ],
+        [
+          "rollback-plan",
+          0.78,
+          0.44,
+          [
+            3,
+            0,
+            0
+          ]
+        ],
+        [
+          "healthcheck-wiring",
+          0.75,
+          0.67,
+          [
+            1,
+            1,
+            1
+          ]
+        ],
+        [
+          "dns-cutover-order",
+          0.67,
+          0.67,
+          [
+            1,
+            1,
+            1
+          ]
+        ]
+      ],
+      "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
+      "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057; 12 rounds settled by checks, 2 by judge). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
+      "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
+      "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
+      "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
+    },
+    "history": [
+      {
+        "when": "8 days ago",
+        "runner": "ajay",
+        "version": "5f0e12ab9c3d",
+        "wlt": [
+          11,
+          3,
+          4
+        ],
+        "rows": "WWLWWWWTTWWWWLTWLT"
+      },
+      {
+        "when": "15 days ago",
+        "runner": "ryan",
+        "version": "3b1c9d4e2f70",
+        "wlt": [
+          9,
+          3,
+          6
+        ],
+        "rows": "WTWWTLWTWWTLWTWTLW"
+      },
+      {
+        "when": "22 days ago",
+        "runner": "teddy",
+        "version": "3b1c9d4e2f70",
+        "wlt": [
+          8,
+          4,
+          6
+        ],
+        "rows": "TWWTLWTWLWTWLTWWLT"
+      },
+      {
+        "when": "31 days ago",
+        "runner": "ajay",
+        "version": "9d2a7e41c05b",
+        "wlt": [
+          6,
+          4,
+          8
+        ],
+        "rows": "TWTLWTTWLTWTLWTWLT"
+      }
+    ],
+    "hygiene": [
+      [
+        "Frontmatter",
+        "schema valid · name matches the folder",
+        "pass"
+      ],
+      [
+        "Unicode",
+        "no bidi controls, zero-width or confusable characters",
+        "pass"
+      ],
+      [
+        "Secrets and PII",
+        "no credentials; no emails outside metadata.author",
+        "pass"
+      ],
+      [
+        "Bundled scripts",
+        "scripts/verify.sh · allow-listed extension",
+        "pass"
+      ],
+      [
+        "License",
+        "UNLICENSED · matches team policy",
+        "pass"
+      ],
+      [
+        "Size",
+        "SKILL.md 4.2k tokens · cap 5k",
+        "pass"
+      ]
+    ],
+    "grants": [
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep"
+    ],
+    "grants_approved": "approved on this machine · 2026-09-03",
+    "activity": [
+      [
+        "KO",
+        "<b>kai</b> installed to Terum",
+        "7 days ago"
+      ],
+      [
+        "AP",
+        "<b>ajay</b> ran an eval · PASS +44%",
+        "8 days ago"
+      ],
+      [
+        "TZ",
+        "<b>teddy</b> and <b>mira</b> installed to Global",
+        "9 days ago"
+      ],
+      [
+        "RL",
+        "<b>ryan</b> pushed 5f0e12ab9c3d · checklist.md, scripts/verify.sh",
+        "12 days ago"
+      ],
+      [
+        "RL",
+        "<b>ryan</b> ran an eval on 3b1c9d4e2f70 · PASS +33%",
+        "15 days ago"
+      ],
+      [
+        "KO",
+        "<b>kai</b> favorited",
+        "18 days ago"
+      ],
+      [
+        "TZ",
+        "<b>teddy</b> ran an eval on 3b1c9d4e2f70 · NEUTRAL +22%",
+        "22 days ago"
+      ],
+      [
+        "RL",
+        "<b>ryan</b> pushed 3b1c9d4e2f70 · SKILL.md",
+        "24 days ago"
+      ],
+      [
+        "AP",
+        "<b>ajay</b> ran an eval on 9d2a7e41c05b · NEUTRAL +11%",
+        "31 days ago"
+      ],
+      [
+        "RL",
+        "<b>ryan</b> shared deploy-check to terum · 9d2a7e41c05b",
+        "36 days ago"
+      ]
+    ],
+    "root": "Marketplace",
+    "flags": []
+  },
+  "AUTHOR_OF": {
+    "deploy-check": "ajay",
+    "release-notes": "mira",
+    "pr-review": "ryan",
+    "incident-triage": "mira",
+    "migration-guard": "ryan",
+    "test-writer": "ryan",
+    "commit-msg": "mira",
+    "onboarding-tour": "ryan",
+    "csv-profiler": "kai",
+    "silent-failure-hunt": "ryan",
+    "source-check": "mira",
+    "env-audit": "ajay",
+    "adr-writer": "ryan",
+    "secret-scan": "ajay",
+    "a11y-audit": "lena",
+    "storybook-sync": "lena",
+    "bundle-budget": "lena"
+  },
+  "LIST_OF": {
+    "deploy-check": [
+      "Global",
+      "Terum"
+    ],
+    "pr-review": [
+      "Global",
+      "Terum"
+    ],
+    "test-writer": [
+      "Global",
+      "Terum"
+    ],
+    "silent-failure-hunt": [
+      "Global",
+      "Terum"
+    ],
+    "adr-writer": [
+      "Global",
+      "Terum"
+    ],
+    "onboarding-tour": [
+      "Global",
+      "Terum"
+    ],
+    "secret-scan": [
+      "Global"
+    ],
+    "release-notes": [
+      "SSM"
+    ],
+    "commit-msg": [
+      "SSM"
+    ],
+    "source-check": [
+      "SSM"
+    ],
+    "incident-triage": [
+      "Terum"
+    ],
+    "env-audit": [
+      "Terum"
+    ],
+    "migration-guard": [
+      "MRF"
+    ],
+    "csv-profiler": [
+      "MRF"
+    ],
+    "a11y-audit": [
+      "Docs"
+    ],
+    "storybook-sync": [
+      "Docs"
+    ],
+    "bundle-budget": [
+      "Docs"
+    ]
+  },
+  "COUNTS": {
+    "Global": "30",
+    "Terum": "22",
+    "SSM": "15",
+    "MRF": "32",
+    "Pushes": "3",
+    "Updates": "3",
+    "Alerts": "8"
+  },
+  "KINDS": {
+    "share": [
+      "Shared with you",
+      "arrow-down-to-line",
+      "brand"
+    ],
+    "update": [
+      "Update",
+      "refresh",
+      "info"
+    ],
+    "alert": [
+      "Alert",
+      "alert",
+      "warn"
+    ],
+    "eval": [
+      "Eval finished",
+      "chart",
+      "good"
+    ],
+    "review": [
+      "Review request",
+      "eye",
+      "text2"
+    ],
+    "author": [
+      "Your skill",
+      "sparkle",
+      "text2"
+    ],
+    "team": [
+      "Team",
+      "users",
+      "text3"
+    ]
+  },
+  "CATALOG_N": 30,
+  "TEAM_N": 12,
+  "HOVER_INDEX": 2,
+  "INBOX_UNREAD": 6,
+  "PROVENANCE": "sonnet · agent CLI 2.34.0 · k=3",
+  "K": 3,
+  "DEFAULT_CASES": 3,
+  "RYAN": {
+    "handle": "ryan",
+    "name": "Ryan Liu",
+    "role": "founder",
+    "initials": "RL"
+  },
+  "AJAY": {
+    "handle": "ajay",
+    "name": "Ajay Patel",
+    "role": "platform",
+    "initials": "AP"
+  },
+  "MIRA": {
+    "handle": "mira",
+    "name": "Mira Kaur",
+    "role": "design",
+    "initials": "MK"
+  },
+  "KAI": {
+    "handle": "kai",
+    "name": "Kai Okafor",
+    "role": "data",
+    "initials": "KO"
+  },
+  "TEDDY": {
+    "handle": "teddy",
+    "name": "Teddy",
+    "role": "design",
+    "initials": "TZ"
+  },
+  "LENA": {
+    "handle": "lena",
+    "name": "Lena Fischer",
+    "role": "web",
+    "initials": "LF"
+  },
+  "TAB_ITEMS": [
+    [
+      "SKILL.md",
+      "book-open"
+    ],
+    [
+      "Evals",
+      "chart"
+    ],
+    [
+      "Quality",
+      "check-circle"
+    ],
+    [
+      "Activity",
+      "eye"
+    ]
+  ],
+  "METHOD": "Each case seeds an isolated sandbox per (arm × repetition); rounds are scored pairwise by deterministic checks first, with a rubric-anchored, position-counterbalanced LLM judge adjudicating ties only (agent model sonnet; judge sonnet with opus escalation).",
+  "FILTER_DEFAULT": {
+    "verdicts": [
+      "PASS"
+    ],
+    "lift_min": 20,
+    "tokens_max": 5.0,
+    "installs_min": 3
+  },
+  "INVITEE": "sortiz",
+  "TEAM_REPO": "terum/team-skills",
+  "INVITE_TIP": "GitHub emails the invitation; the block runs the joiner&#39;s wizard",
+  "VERDICT_STYLE": {
+    "PASS": {
+      "dark": [
+        "#27a644",
+        "rgba(39, 166, 68, 0.12)"
+      ],
+      "light": [
+        "#187235",
+        "rgba(24, 114, 53, 0.12)"
+      ],
+      "figma": [
+        "#4cb782",
+        "rgba(76, 183, 130, 0.12)"
+      ]
+    },
+    "NEUTRAL": {
+      "dark": [
+        "#d0d6e0",
+        "#28282c"
+      ],
+      "light": [
+        "#3c4149",
+        "#eeedef"
+      ],
+      "figma": [
+        "#d2d3e0",
+        "#313248"
+      ]
+    },
+    "FAIL": {
+      "dark": [
+        "#ed6767",
+        "rgba(237, 103, 103, 0.12)"
+      ],
+      "light": [
+        "#b43232",
+        "rgba(180, 50, 50, 0.12)"
+      ],
+      "figma": [
+        "#eb5757",
+        "rgba(235, 87, 87, 0.12)"
+      ]
+    }
+  },
+  "INDICATORS": {
+    "update": [
+      "arrow-up-circle",
+      "info",
+      "Update available · ajay pushed e2a7c4d9b1f0 · 2 days ago"
+    ],
+    "local": [
+      "pencil",
+      "warn",
+      "Edited locally · next sync quarantines this copy"
+    ],
+    "broken": [
+      "alert",
+      "bad",
+      "Broken references · 2 files missing"
+    ]
+  },
+  "MACHINE": {
+    "name": "teddy-mbp",
+    "os": "macOS 15.6 · Apple silicon",
+    "gh_login": "teniroo",
+    "gh_version": "2.76.1"
+  },
+  "ME": {
+    "handle": "teddy",
+    "name": "Teddy",
+    "email": "teddy@terum.ai",
+    "default_handle": "teddy"
+  },
+  "TEAMS": [
+    {
+      "name": "Terum",
+      "key": "terum",
+      "remote": "github.com/terum/team-skills",
+      "handle": "teddy",
+      "clone": "~/.terum/skills/teams/terum",
+      "members": 12,
+      "skills": 30,
+      "last_sync": "12 minutes ago",
+      "stamp": "2026-09-06 14:02"
+    }
+  ],
+  "TEAM_POLICY": {
+    "publish": "Pull request",
+    "license": "UNLICENSED"
+  },
+  "PLACEMENTS": [
+    [
+      "~/.claude/skills/deploy-check",
+      "deploy-check",
+      "Global",
+      null,
+      "2026-09-03",
+      "up to date"
+    ],
+    [
+      "~/.claude/skills/pr-review",
+      "pr-review",
+      "Global",
+      null,
+      "2026-08-21",
+      "update available"
+    ],
+    [
+      "~/.claude/skills/migration-guard",
+      "migration-guard",
+      "Global",
+      null,
+      "2026-08-14",
+      "edited locally"
+    ],
+    [
+      "~/Projects/terum/.claude/skills/test-writer",
+      "test-writer",
+      "Terum",
+      null,
+      "2026-08-30",
+      "up to date"
+    ],
+    [
+      "~/Projects/SSM/.claude/skills/release-notes",
+      "release-notes",
+      "SSM",
+      "2b7c41e0d9a3",
+      "2026-08-14",
+      "pinned"
+    ],
+    [
+      "~/Projects/mrf/.claude/skills/csv-profiler",
+      "csv-profiler",
+      "MRF",
+      null,
+      "2026-09-01",
+      "up to date"
+    ]
+  ],
+  "PLACEMENTS_N": 99,
+  "PINNED_N": 2,
+  "APPROVALS": [
+    [
+      "deploy-check",
+      [
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep"
+      ],
+      "2026-09-03"
+    ],
+    [
+      "test-writer",
+      [
+        "Bash",
+        "Read",
+        "Write",
+        "Edit"
+      ],
+      "2026-08-30"
+    ],
+    [
+      "migration-guard",
+      [
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep"
+      ],
+      "2026-08-14"
+    ],
+    [
+      "incident-triage",
+      [
+        "Bash",
+        "Read",
+        "Grep"
+      ],
+      "2026-07-02"
+    ]
+  ],
+  "QUARANTINE": [
+    [
+      "2026-08-28T09:14:30Z",
+      "csv-profiler",
+      "a local edit moved aside at sync",
+      "42 KB"
+    ],
+    [
+      "2026-08-19T16:02:11Z",
+      "a11y-audit",
+      "orphan: no longer in your people file",
+      "18 KB"
+    ]
+  ],
+  "SHARED": [],
+  "LOCAL_UNSHARED": [
+    "api-docs",
+    "handoff-note"
+  ],
+  "HOOK": {
+    "installed": true,
+    "file": "~/.claude/settings.json",
+    "timeout": 60
+  },
+  "APP_VERSION": "0.1.0 (build 12)",
+  "AGENT_CLI": "claude 2.34.0",
+  "COMMUNITY": "github.com/ryanliu-terum/terum-skills/issues",
+  "STORAGE": {
+    "cache": "1.1 MB",
+    "cache_n": 2,
+    "evals": "312 MB",
+    "evals_n": 14,
+    "quarantine": "60 KB"
+  },
+  "SETTINGS_NAV": [
+    [
+      "Account",
+      "user"
+    ],
+    [
+      "Teams",
+      "users"
+    ],
+    [
+      "This machine",
+      "laptop"
+    ],
+    [
+      "Sync",
+      "refresh"
+    ],
+    [
+      "Updates",
+      "arrow-up-circle"
+    ],
+    [
+      "Inbox",
+      "inbox"
+    ],
+    [
+      "Evals",
+      "flask"
+    ],
+    [
+      "Sharing",
+      "upload"
+    ],
+    [
+      "Appearance",
+      "sun"
+    ],
+    [
+      "Advanced",
+      "sliders"
+    ],
+    [
+      "About",
+      "info"
+    ]
+  ],
+  "SHORTCUTS": [
+    [
+      "Search",
+      "⌘K"
+    ],
+    [
+      "Settings",
+      "⌘,"
+    ],
+    [
+      "Sync now",
+      "⌘R"
+    ],
+    [
+      "Back · forward",
+      "⌘[ · ⌘]"
+    ]
+  ],
+  "INBOX_KIND_TEXT": {
+    "share": "A teammate published a skill to a list you are on. Install it or decline; nothing is placed without your say.",
+    "update": "A skill you track changed on the team.",
+    "alert": "A skill is missing, off target, edited locally or regressed.",
+    "eval": "A receipt landed for a skill you use.",
+    "review": "Someone asked you to review a skill.",
+    "author": "Activity on a skill you authored.",
+    "team": "Someone joined or left."
+  },
+  "THEME_OPTIONS": [
+    "System",
+    "Light",
+    "Dark"
+  ],
+  "ONBOARD_STEPS": [
+    "Welcome",
+    "Style",
+    "Basics",
+    "Team",
+    "Feedback",
+    "Done"
+  ],
+  "ONBOARD_BASICS": [
+    [
+      "Manage",
+      "box"
+    ],
+    [
+      "Eval",
+      "flask"
+    ],
+    [
+      "Share",
+      "upload"
+    ],
+    [
+      "Search",
+      "search"
+    ],
+    [
+      "More to come",
+      "sparkle"
+    ]
+  ],
+  "GLOBAL_SET": [
+    "deploy-check",
+    "pr-review",
+    "test-writer",
+    "silent-failure-hunt",
+    "adr-writer",
+    "onboarding-tour",
+    "secret-scan"
+  ],
+  "ONBOARD_PLACED": 4,
+  "ONBOARD_LATER": [
+    [
+      "Install from Slack with one click",
+      "a terum-skills:// link that asks before it installs"
+    ],
+    [
+      "Post to Slack from Share",
+      "needs a Slack app token stored locally"
+    ],
+    [
+      "A hosted dashboard",
+      "this app pointed at an API instead of your clone"
+    ]
+  ],
+  "ONBOARD_COMMUNITY": {
+    "name": "Discord",
+    "invite": "https://discord.gg/8tnRrxRM3Z"
+  },
+  "ONBOARD_FETCH_ERROR": "Skipping terum: could not fetch https://github.com/terum/team-skills.git: fatal: unable to access &#39;https://github.com/terum/team-skills.git/&#39;: Could not resolve host: github.com",
+  "WELCOME_LINES": [
+    "Welcome to terum-skills.",
+    "Your team&#39;s skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have."
+  ],
+  "BASICS_COPY": {
+    "Manage": "Your Library lists every skill the team shares. Turn one on to load it into every session; the heart marks the ones you rely on.",
+    "Eval": "An eval runs a skill against your team&#39;s catalog; with --commit its receipt lands in the team repository, and every card&#39;s verdict and net lift are read from there.",
+    "Share": "Share a skill you wrote and it lands in the team repository. Teammates install it with one line, and the line travels with the skill.",
+    "Search": "⌘K finds skills, people and projects across the team. The Marketplace is the same search with filters and the team&#39;s picks.",
+    "More to come": "Three things the sharing spec defers until the basics prove themselves. Ask for what you need under Feedback and requests."
+  },
+  "BASICS_HINT": {
+    "Manage": "npx -y terum-skills@latest install &lt;skill&gt;",
+    "Eval": "npx -y terum-skills@latest eval deploy-check --commit",
+    "Share": "npx -y terum-skills@latest share",
+    "Search": "npx -y terum-skills@latest search deploy",
+    "More to come": null
+  },
+  "ICON_PATHS": {
+    "panel-left": "<rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"></rect><path d=\"M9 3v18\"></path>",
+    "chevron-left": "<path d=\"m15 18-6-6 6-6\"></path>",
+    "chevron-right": "<path d=\"m9 18 6-6-6-6\"></path>",
+    "chevron-down": "<path d=\"m6 9 6 6 6-6\"></path>",
+    "chevron-up": "<path d=\"m18 15-6-6-6 6\"></path>",
+    "search": "<circle cx=\"11\" cy=\"11\" r=\"7\"></circle><path d=\"m20 20-3.5-3.5\"></path>",
+    "bell": "<path d=\"M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9\"></path><path d=\"M13.7 21a2 2 0 0 1-3.4 0\"></path>",
+    "globe": "<circle cx=\"12\" cy=\"12\" r=\"10\"></circle><path d=\"M2 12h20\"></path><path d=\"M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\"></path>",
+    "folder": "<path d=\"M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z\"></path>",
+    "box": "<path d=\"M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z\"></path><path d=\"m3.3 7 8.7 5 8.7-5\"></path><path d=\"M12 22V12\"></path>",
+    "inbox": "<path d=\"M22 12h-6l-2 3h-4l-2-3H2\"></path><path d=\"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\"></path>",
+    "arrow-down-to-line": "<path d=\"M12 17V3\"></path><path d=\"m6 11 6 6 6-6\"></path><path d=\"M19 21H5\"></path>",
+    "refresh": "<path d=\"M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\"></path><path d=\"M3 3v5h5\"></path><path d=\"M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16\"></path><path d=\"M16 16h5v5\"></path>",
+    "alert": "<path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\"></path><path d=\"M12 9v4\"></path><path d=\"M12 17h.01\"></path>",
+    "store": "<path d=\"m2 7 1.5-4h17L22 7\"></path><path d=\"M2 7v2a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0V7\"></path><path d=\"M4 12v9h16v-9\"></path><path d=\"M9 21v-6h6v6\"></path>",
+    "users": "<path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2\"></path><circle cx=\"9\" cy=\"7\" r=\"4\"></circle><path d=\"M22 21v-2a4 4 0 0 0-3-3.87\"></path><path d=\"M16 3.13a4 4 0 0 1 0 7.75\"></path>",
+    "settings": "<path d=\"M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z\"></path><circle cx=\"12\" cy=\"12\" r=\"3\"></circle>",
+    "heart": "<path d=\"M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z\"></path>",
+    "more": "<circle cx=\"12\" cy=\"12\" r=\"1\"></circle><circle cx=\"19\" cy=\"12\" r=\"1\"></circle><circle cx=\"5\" cy=\"12\" r=\"1\"></circle>",
+    "plus": "<path d=\"M5 12h14\"></path><path d=\"M12 5v14\"></path>",
+    "filter": "<path d=\"M4 21v-7\"></path><path d=\"M4 10V3\"></path><path d=\"M12 21v-9\"></path><path d=\"M12 8V3\"></path><path d=\"M20 21v-5\"></path><path d=\"M20 12V3\"></path><path d=\"M1 14h6\"></path><path d=\"M9 8h6\"></path><path d=\"M17 16h6\"></path>",
+    "sort": "<path d=\"m21 16-4 4-4-4\"></path><path d=\"M17 20V4\"></path><path d=\"m3 8 4-4 4 4\"></path><path d=\"M7 4v16\"></path>",
+    "x": "<path d=\"M18 6 6 18\"></path><path d=\"m6 6 12 12\"></path>",
+    "arrow-up-circle": "<circle cx=\"12\" cy=\"12\" r=\"10\"></circle><path d=\"m16 12-4-4-4 4\"></path><path d=\"M12 16V8\"></path>",
+    "pencil": "<path d=\"M21.17 6.83a2.5 2.5 0 0 0-3.54-3.54L4 17v3h3Z\"></path><path d=\"m15 5 4 4\"></path>",
+    "arrow-up-right": "<path d=\"M7 7h10v10\"></path><path d=\"M7 17 17 7\"></path>",
+    "terminal": "<path d=\"m4 17 6-6-6-6\"></path><path d=\"M12 19h8\"></path>",
+    "arrow-left": "<path d=\"m12 19-7-7 7-7\"></path><path d=\"M19 12H5\"></path>",
+    "panel-right": "<rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"></rect><path d=\"M15 3v18\"></path>",
+    "book-open": "<path d=\"M12 7v14\"></path><path d=\"M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z\"></path>",
+    "chart": "<path d=\"M3 3v16a2 2 0 0 0 2 2h16\"></path><path d=\"m19 9-5 5-4-4-3 3\"></path>",
+    "check-circle": "<circle cx=\"12\" cy=\"12\" r=\"10\"></circle><path d=\"m9 12 2 2 4-4\"></path>",
+    "eye": "<path d=\"M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0\"></path><circle cx=\"12\" cy=\"12\" r=\"3\"></circle>",
+    "copy": "<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"></rect><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"></path>",
+    "trash": "<path d=\"M3 6h18\"></path><path d=\"M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6\"></path><path d=\"M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2\"></path><path d=\"M10 11v6\"></path><path d=\"M14 11v6\"></path>",
+    "play": "<path d=\"m6 3 14 9-14 9z\"></path>",
+    "check": "<path d=\"M20 6 9 17l-5-5\"></path>",
+    "file": "<path d=\"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z\"></path><path d=\"M14 2v4a2 2 0 0 0 2 2h4\"></path>",
+    "git-commit": "<circle cx=\"12\" cy=\"12\" r=\"3\"></circle><path d=\"M3 12h6\"></path><path d=\"M15 12h6\"></path>",
+    "shield": "<path d=\"M12 3l7 3v5c0 5-3 8.5-7 10-4-1.5-7-5-7-10V6l7-3z\"></path>",
+    "flask": "<path d=\"M10 3h4\"></path><path d=\"M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3\"></path><path d=\"M8 15h8\"></path>",
+    "database": "<ellipse cx=\"12\" cy=\"6\" rx=\"7\" ry=\"3\"></ellipse><path d=\"M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6\"></path><path d=\"M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3\"></path>",
+    "sparkle": "<path d=\"M12 3v3\"></path><path d=\"M12 18v3\"></path><path d=\"M3 12h3\"></path><path d=\"M18 12h3\"></path><path d=\"m5.6 5.6 2.2 2.2\"></path><path d=\"m16.2 16.2 2.2 2.2\"></path><path d=\"m5.6 18.4 2.2-2.2\"></path><path d=\"m16.2 7.8 2.2-2.2\"></path>",
+    "help-circle": "<circle cx=\"12\" cy=\"12\" r=\"10\"></circle><path d=\"M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3\"></path><path d=\"M12 17h.01\"></path>",
+    "user-plus": "<path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2\"></path><circle cx=\"9\" cy=\"7\" r=\"4\"></circle><path d=\"M19 8v6\"></path><path d=\"M22 11h-6\"></path>",
+    "user": "<path d=\"M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2\"></path><circle cx=\"12\" cy=\"7\" r=\"4\"></circle>",
+    "laptop": "<path d=\"M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16\"></path>",
+    "upload": "<path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"></path><polyline points=\"17 8 12 3 7 8\"></polyline><line x1=\"12\" x2=\"12\" y1=\"3\" y2=\"15\"></line>",
+    "sun": "<circle cx=\"12\" cy=\"12\" r=\"4\"></circle><path d=\"M12 2v2\"></path><path d=\"M12 20v2\"></path><path d=\"m4.93 4.93 1.41 1.41\"></path><path d=\"m17.66 17.66 1.41 1.41\"></path><path d=\"M2 12h2\"></path><path d=\"M20 12h2\"></path><path d=\"m6.34 17.66-1.41 1.41\"></path><path d=\"m19.07 4.93-1.41 1.41\"></path>",
+    "sliders": "<line x1=\"21\" x2=\"14\" y1=\"4\" y2=\"4\"></line><line x1=\"10\" x2=\"3\" y1=\"4\" y2=\"4\"></line><line x1=\"21\" x2=\"12\" y1=\"12\" y2=\"12\"></line><line x1=\"8\" x2=\"3\" y1=\"12\" y2=\"12\"></line><line x1=\"21\" x2=\"16\" y1=\"20\" y2=\"20\"></line><line x1=\"12\" x2=\"3\" y1=\"20\" y2=\"20\"></line><line x1=\"14\" x2=\"14\" y1=\"2\" y2=\"6\"></line><line x1=\"8\" x2=\"8\" y1=\"10\" y2=\"14\"></line><line x1=\"16\" x2=\"16\" y1=\"18\" y2=\"22\"></line>",
+    "info": "<circle cx=\"12\" cy=\"12\" r=\"10\"></circle><path d=\"M12 16v-4\"></path><path d=\"M12 8h.01\"></path>",
+    "lock": "<rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"></rect><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"></path>",
+    "external-link": "<path d=\"M15 3h6v6\"></path><path d=\"M10 14 21 3\"></path><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"></path>"
+  },
+  "TERUM_MARK": "<path fill=\"currentColor\" d=\"M2234.6,2001.57c-14.32,19.89,10.46,28.26,29.27,22.25,34.1-10.89,15.5,20.7-7.13,22.89-36.74,3.55-58.92-37.29-15.41-50.31,6.8-1.1-3.84,2.09-6.73,5.17Z\"></path><path fill=\"currentColor\" d=\"M2316.73,2022.24c2.49-15.83,23.82-16.49,34.96-11.8,8.34,3.73,12.81,11.87,14.58,19.77,2.85,11.59-4.9,20.18-14.83,23.81-.27.19-.77.24-.85-.21-.06-.67.58-1.11,1-1.61.61-.69,1.2-1.08,1.79-1.81,1.52-1.88,1.49-3.75,1.84-5.73,1.28-12.5-9.24-19.95-18.42-18.07-2.91.56-5.38,2.21-7.84,3.54-5.97,3.14-10.07-.26-12.22-4.85\"></path><path fill=\"currentColor\" stroke=\"currentColor\" stroke-width=\".07\" stroke-miterlimit=\"10\" d=\"M2264.84,2003.67c-1.9-19.03,18.11-89.27,39.19-31.07,8.87,34.48,10.56,75.41-1.22,111.23-18.51,46.55-43.66-23.52-33.09-29.46,1.88,7.6,2.42,16.74,9.86,22.29,23.86,12.5,12-79.41,11.54-81.18-8.65-33.28-18.8-16.42-22.67,6.39-.4,2.36-1.15,6.23-3.21,3.01-.27-.51-.53-4.39-.46-9.75\"></path><circle fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-miterlimit=\"10\" cx=\"2289.98\" cy=\"2025.81\" r=\"92.07\"></circle>",
+  "LAYOUT": {
+    "FRAME_W": 1440,
+    "FRAME_H": 900,
+    "TOPBAR_H": 40,
+    "SIDEBAR_W": 240,
+    "ROW_H": 28,
+    "SECTION_H": 24,
+    "NEST_INDENT": 24,
+    "CARD_H": 148,
+    "RAIL_W": 280,
+    "CONTENT_W": 760,
+    "REPORT_W": 640,
+    "LIST_W": 360,
+    "HERO_SEARCH_W": 560,
+    "PROJECT_CARD_H": 124,
+    "PERSON_CARD_H": 124,
+    "MARKET_FULL_H": 1080,
+    "SETTINGS_NAV_W": 200,
+    "SETTINGS_CONTENT_W": 700,
+    "ONBOARD_W": 520,
+    "ONBOARD_TOP": 49,
+    "ONBOARD_PANEL_H": 240,
+    "TILE_MIN_H": 118,
+    "MEMBER_COLS": [
+      130,
+      120,
+      220,
+      110
+    ],
+    "LIFT_COL": 118,
+    "FIELD_H": 24,
+    "FIELDS_GAP": 20
+  },
+  "LIBRARY_OVERVIEW": {
+    "skills": "30",
+    "skills_delta": "+3 this month",
+    "evaluated": "27 of 30",
+    "meter": {
+      "pass_": 20,
+      "neutral": 5,
+      "fail": 2,
+      "total": 30
+    },
+    "meter_text": "20 pass · 5 neutral · 2 fail",
+    "installs": "148",
+    "installs_delta": "+9 this week · 12 teammates · last 12 weeks",
+    "sparkline": [
+      4,
+      6,
+      3,
+      8,
+      5,
+      9,
+      7,
+      11,
+      8,
+      12,
+      10,
+      9
+    ],
+    "attention": "8",
+    "attention_lines": [
+      "2 failing evals",
+      "3 updates available",
+      "3 not evaluated"
+    ],
+    "attention_link": "Open alerts",
+    "zero": {
+      "skills": "Nothing added yet",
+      "evaluated": "Nothing evaluated yet",
+      "installs": "Share a skill to see installs here",
+      "attention": "All clear"
+    }
+  },
+  "SKILL_MD_ID": "5f0e12ab-9c3d-4e7a-b1f2-8a6d0c3e9b47",
+  "SKILL_MD_BODY": [
+    [
+      "h2",
+      "When to use"
+    ],
+    [
+      "p",
+      "Before any deploy to Vercel from a branch that touches migrations, environment variables, or the build config. Run it yourself or let the pre-push hook call it; it never deploys, it only says whether you can."
+    ],
+    [
+      "h2",
+      "Steps"
+    ],
+    [
+      "ol",
+      [
+        "Read the Vercel project config and the example env file for the service being deployed.",
+        "List migrations added on this branch and check each one has a number, a dry run, and a rollback note.",
+        "Diff the env vars the code reads against what Vercel has pinned for this environment.",
+        "Print one line per unmet condition with the command that fixes it, then stop."
+      ]
+    ],
+    [
+      "h2",
+      "Checks"
+    ],
+    [
+      "code",
+      "scripts/verify.sh --branch \"$(git branch --show-current)\" --env preview"
+    ]
+  ],
+  "CLI_VERSION": "0.1.2",
+  "CLI_LATEST": "0.1.3",
+  "FOLLOWING": [],
+  "SHARED_SPECIMEN": [
+    "api-docs",
+    "~/.claude/skills/api-docs",
+    "Terum",
+    "In sync"
+  ],
+  "WORDS": {
+    "0": "no",
+    "1": "one",
+    "2": "two",
+    "3": "three",
+    "4": "four",
+    "5": "five",
+    "6": "six",
+    "7": "seven",
+    "8": "eight",
+    "9": "nine"
+  },
+  "P_BASE": "0.057",
+  "P_INC": "0.581",
+  "P_PARTIAL": "0.063",
+  "DERIVED": {
+    "receipts": {
+      "deploy-check": {
+        "w": 11,
+        "l": 3,
+        "t": 4,
+        "n": 18,
+        "lift": 44,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.057"
+      },
+      "release-notes": {
+        "w": 2,
+        "l": 1,
+        "t": 6,
+        "n": 9,
+        "lift": 11,
+        "verdict": "NEUTRAL",
+        "partial": null,
+        "sign_p": "1.000"
+      },
+      "pr-review": {
+        "w": 6,
+        "l": 2,
+        "t": 1,
+        "n": 9,
+        "lift": 44,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.289"
+      },
+      "incident-triage": {
+        "w": 1,
+        "l": 5,
+        "t": 3,
+        "n": 9,
+        "lift": -44,
+        "verdict": "FAIL",
+        "partial": null,
+        "sign_p": "0.219"
+      },
+      "api-docs": null,
+      "migration-guard": {
+        "w": 5,
+        "l": 0,
+        "t": 2,
+        "n": 7,
+        "lift": 71,
+        "verdict": "PASS",
+        "partial": [
+          7,
+          9
+        ],
+        "sign_p": "0.063"
+      },
+      "test-writer": {
+        "w": 6,
+        "l": 1,
+        "t": 2,
+        "n": 9,
+        "lift": 56,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.125"
+      },
+      "commit-msg": {
+        "w": 2,
+        "l": 2,
+        "t": 5,
+        "n": 9,
+        "lift": 0,
+        "verdict": "NEUTRAL",
+        "partial": null,
+        "sign_p": "1.000"
+      },
+      "onboarding-tour": null,
+      "csv-profiler": {
+        "w": 4,
+        "l": 1,
+        "t": 4,
+        "n": 9,
+        "lift": 33,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.375"
+      },
+      "silent-failure-hunt": {
+        "w": 6,
+        "l": 0,
+        "t": 3,
+        "n": 9,
+        "lift": 67,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.031"
+      },
+      "handoff-note": {
+        "w": 2,
+        "l": 3,
+        "t": 4,
+        "n": 9,
+        "lift": -11,
+        "verdict": "NEUTRAL",
+        "partial": null,
+        "sign_p": "1.000"
+      },
+      "source-check": {
+        "w": 3,
+        "l": 1,
+        "t": 5,
+        "n": 9,
+        "lift": 22,
+        "verdict": "NEUTRAL",
+        "partial": null,
+        "sign_p": "0.625"
+      },
+      "env-audit": {
+        "w": 0,
+        "l": 5,
+        "t": 4,
+        "n": 9,
+        "lift": -56,
+        "verdict": "FAIL",
+        "partial": null,
+        "sign_p": "0.063"
+      },
+      "adr-writer": {
+        "w": 7,
+        "l": 0,
+        "t": 2,
+        "n": 9,
+        "lift": 78,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.016"
+      },
+      "secret-scan": {
+        "w": 7,
+        "l": 1,
+        "t": 1,
+        "n": 9,
+        "lift": 67,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.070"
+      },
+      "a11y-audit": {
+        "w": 5,
+        "l": 1,
+        "t": 3,
+        "n": 9,
+        "lift": 44,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.219"
+      },
+      "storybook-sync": {
+        "w": 3,
+        "l": 2,
+        "t": 4,
+        "n": 9,
+        "lift": 11,
+        "verdict": "NEUTRAL",
+        "partial": null,
+        "sign_p": "1.000"
+      },
+      "bundle-budget": null,
+      "incident-triage is missing 2 files": {
+        "w": 1,
+        "l": 5,
+        "t": 3,
+        "n": 9,
+        "lift": -44,
+        "verdict": "FAIL",
+        "partial": null,
+        "sign_p": "0.219"
+      },
+      "deploy-check fired off-target 5 times": {
+        "w": 11,
+        "l": 3,
+        "t": 4,
+        "n": 18,
+        "lift": 44,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.057"
+      },
+      "ajay shared secret-scan with you": {
+        "w": 7,
+        "l": 1,
+        "t": 1,
+        "n": 9,
+        "lift": 67,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.070"
+      },
+      "pr-review updated to 7e8f9a0b1c2d": {
+        "w": 7,
+        "l": 1,
+        "t": 1,
+        "n": 9,
+        "lift": 67,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.070"
+      },
+      "ryan proposes publishing single-fix": {
+        "w": 6,
+        "l": 1,
+        "t": 2,
+        "n": 9,
+        "lift": 56,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.125"
+      },
+      "Your copy of migration-guard was edited": {
+        "w": 5,
+        "l": 0,
+        "t": 2,
+        "n": 7,
+        "lift": 71,
+        "verdict": "PASS",
+        "partial": [
+          7,
+          9
+        ],
+        "sign_p": "0.063"
+      },
+      "adr-writer updated to c41d0e9f8a27": null,
+      "Eval finished · deploy-check PASS +44%": {
+        "w": 11,
+        "l": 3,
+        "t": 4,
+        "n": 18,
+        "lift": 44,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.057"
+      },
+      "deploy-check · 2 installs, 3 evals, 1 favorite": {
+        "w": 11,
+        "l": 3,
+        "t": 4,
+        "n": 18,
+        "lift": 44,
+        "verdict": "PASS",
+        "partial": null,
+        "sign_p": "0.057"
+      },
+      "env-audit regressed to FAIL": {
+        "w": 0,
+        "l": 5,
+        "t": 4,
+        "n": 9,
+        "lift": -56,
+        "verdict": "FAIL",
+        "partial": null,
+        "sign_p": "0.063"
+      },
+      "mira joined terum": null
+    },
+    "installs": {
+      "deploy-check": 12,
+      "release-notes": 4,
+      "pr-review": 11,
+      "incident-triage": 2,
+      "migration-guard": 8,
+      "test-writer": 10,
+      "commit-msg": 9,
+      "onboarding-tour": 1,
+      "csv-profiler": 6,
+      "silent-failure-hunt": 9,
+      "source-check": 5,
+      "env-audit": 4,
+      "adr-writer": 7,
+      "secret-scan": 5,
+      "a11y-audit": 6,
+      "storybook-sync": 4,
+      "bundle-budget": 3
+    },
+    "tokens": {
+      "deploy-check": 4.2,
+      "release-notes": 2.1,
+      "pr-review": 6.8,
+      "incident-triage": 5.5,
+      "migration-guard": 3.9,
+      "test-writer": 7.4,
+      "commit-msg": 0.9,
+      "onboarding-tour": 3.2,
+      "csv-profiler": 2.8,
+      "silent-failure-hunt": 5.1,
+      "source-check": 2.4,
+      "env-audit": 3.0,
+      "adr-writer": 3.4,
+      "secret-scan": 3.1,
+      "a11y-audit": 2.6,
+      "storybook-sync": 1.8,
+      "bundle-budget": 2.2
+    },
+    "topRated": [
+      "deploy-check",
+      "pr-review",
+      "test-writer",
+      "commit-msg",
+      "silent-failure-hunt",
+      "migration-guard",
+      "adr-writer",
+      "csv-profiler",
+      "a11y-audit",
+      "source-check",
+      "secret-scan",
+      "release-notes",
+      "env-audit",
+      "storybook-sync",
+      "bundle-budget",
+      "incident-triage",
+      "onboarding-tour"
+    ],
+    "verdictCounts": {
+      "PASS": 9,
+      "NEUTRAL": 4,
+      "FAIL": 2,
+      "Not evaluated": 2
+    },
+    "peopleByAdoption": [
+      "ryan",
+      "ajay",
+      "mira",
+      "lena",
+      "kai",
+      "teddy"
+    ],
+    "adoption": {
+      "ryan": 46,
+      "ajay": 21,
+      "mira": 20,
+      "lena": 13,
+      "kai": 6,
+      "teddy": 0,
+      "priya": 0,
+      "jonas": 0,
+      "ana": 0,
+      "tom": 0,
+      "yuki": 0,
+      "omar": 0
+    },
+    "rosterByAdoption": [
+      "ryan",
+      "ajay",
+      "mira",
+      "lena",
+      "kai",
+      "teddy",
+      "priya",
+      "jonas",
+      "ana",
+      "tom",
+      "yuki",
+      "omar"
+    ],
+    "projectsByMembers": [
+      "Terum",
+      "MRF",
+      "Docs",
+      "SSM"
+    ],
+    "projectMembers": {
+      "Terum": [
+        "ryan",
+        "ajay",
+        "mira",
+        "kai",
+        "teddy",
+        "priya",
+        "tom",
+        "omar"
+      ],
+      "SSM": [
+        "mira",
+        "teddy",
+        "yuki"
+      ],
+      "MRF": [
+        "ryan",
+        "ajay",
+        "kai",
+        "priya",
+        "ana",
+        "tom"
+      ],
+      "Docs": [
+        "mira",
+        "lena",
+        "jonas",
+        "yuki"
+      ]
+    },
+    "skillsIn": {
+      "Terum": [
+        "deploy-check",
+        "pr-review",
+        "test-writer",
+        "silent-failure-hunt",
+        "adr-writer",
+        "env-audit",
+        "incident-triage",
+        "onboarding-tour"
+      ],
+      "SSM": [
+        "commit-msg",
+        "source-check",
+        "release-notes"
+      ],
+      "MRF": [
+        "migration-guard",
+        "csv-profiler"
+      ],
+      "Docs": [
+        "a11y-audit",
+        "storybook-sync",
+        "bundle-budget"
+      ]
+    },
+    "personBuckets": {
+      "ryan": [
+        [
+          "Global",
+          [
+            "pr-review",
+            "test-writer",
+            "onboarding-tour",
+            "silent-failure-hunt",
+            "adr-writer"
+          ]
+        ],
+        [
+          "MRF",
+          [
+            "migration-guard"
+          ]
+        ]
+      ],
+      "ajay": [
+        [
+          "Global",
+          [
+            "deploy-check",
+            "secret-scan"
+          ]
+        ],
+        [
+          "Terum",
+          [
+            "env-audit"
+          ]
+        ]
+      ],
+      "mira": [
+        [
+          "Terum",
+          [
+            "incident-triage"
+          ]
+        ],
+        [
+          "SSM",
+          [
+            "release-notes",
+            "commit-msg",
+            "source-check"
+          ]
+        ]
+      ],
+      "lena": [
+        [
+          "Docs",
+          [
+            "a11y-audit",
+            "storybook-sync",
+            "bundle-budget"
+          ]
+        ]
+      ],
+      "kai": [
+        [
+          "MRF",
+          [
+            "csv-profiler"
+          ]
+        ]
+      ],
+      "teddy": []
+    },
+    "categorySkills": {
+      "infra": [
+        "deploy-check",
+        "migration-guard",
+        "env-audit",
+        "bundle-budget"
+      ],
+      "docs": [
+        "adr-writer",
+        "release-notes",
+        "storybook-sync"
+      ],
+      "review": [
+        "pr-review",
+        "silent-failure-hunt",
+        "a11y-audit"
+      ],
+      "ops": [
+        "incident-triage"
+      ],
+      "testing": [
+        "test-writer"
+      ],
+      "data": [
+        "csv-profiler"
+      ],
+      "git": [
+        "commit-msg"
+      ],
+      "onboarding": [
+        "onboarding-tour"
+      ],
+      "research": [
+        "source-check"
+      ],
+      "security": [
+        "secret-scan"
+      ]
+    },
+    "filterCount": 6,
+    "personPlaceNote": {
+      "ryan": "Install places the other 0 on this machine",
+      "ajay": "Install places the other 1 on this machine",
+      "mira": "Install places the other 0 on this machine",
+      "lena": "Placed when you sync in Docs",
+      "kai": "Install places the other 0 on this machine",
+      "teddy": "Install places all 0 on this machine"
+    },
+    "personOnDisk": {
+      "ryan": [
+        6,
+        6
+      ],
+      "ajay": [
+        2,
+        3
+      ],
+      "mira": [
+        4,
+        4
+      ],
+      "lena": [
+        0,
+        3
+      ],
+      "kai": [
+        1,
+        1
+      ],
+      "teddy": [
+        0,
+        0
+      ]
+    },
+    "digest": {
+      "installs": [
+        "teddy",
+        "mira"
+      ],
+      "evals": [
+        "ryan",
+        "teddy",
+        "ajay"
+      ],
+      "favs": [
+        "kai"
+      ],
+      "events": [
+        [
+          "TZ",
+          "<b>teddy</b> and <b>mira</b> installed it to Global",
+          9
+        ],
+        [
+          "RL",
+          "<b>ryan</b> ran an eval on 3b1c9d4e2f70 · PASS +33%",
+          15
+        ],
+        [
+          "KO",
+          "<b>kai</b> favorited it",
+          18
+        ],
+        [
+          "TZ",
+          "<b>teddy</b> ran an eval on 3b1c9d4e2f70 · NEUTRAL +22%",
+          22
+        ],
+        [
+          "AP",
+          "<b>ajay</b> ran an eval on 9d2a7e41c05b · NEUTRAL +11%",
+          31
+        ]
+      ],
+      "title": "deploy-check · 2 installs, 3 evals, 1 favorite",
+      "fact": "teddy, mira installed · ryan, teddy, ajay ran evals · kai favorited"
+    },
+    "digestSentence": "Two teammates installed deploy-check, three ran an eval on it and one favorited it.",
+    "evalEstimate": {
+      "cases": 6,
+      "k": 3,
+      "arms": 3,
+      "runs": 54,
+      "minutes": 40,
+      "dollars": 24,
+      "model": "sonnet"
+    },
+    "evalEstimateText": "6 cases × k=3 reps × 3 arms, 54 agent runs on sonnet from this machine: roughly 40 minutes and about $24 of API spend.",
+    "evalEstimateTip": "About 54 agent runs · 40 minutes · $24 on this machine",
+    "evalCommand": {
+      "deploy-check": "npx -y terum-skills@latest eval deploy-check --k 3 --commit",
+      "migration-guard": "npx -y terum-skills@latest eval migration-guard --k 3 --commit",
+      "onboarding-tour": "npx -y terum-skills@latest eval onboarding-tour --k 3 --commit",
+      "deploy-check-not-installed": "npx -y terum-skills@latest eval deploy-check --k 3 --commit"
+    },
+    "shareCommand": {
+      "deploy-check": "npx -y terum-skills@latest install terum/team-skills/deploy-check@5f0e12ab9c3d",
+      "migration-guard": "npx -y terum-skills@latest install mrf/team-skills/migration-guard@a17c3e9d4b02",
+      "onboarding-tour": "npx -y terum-skills@latest install terum/team-skills/onboarding-tour@c0ffee12ab34",
+      "deploy-check-not-installed": "npx -y terum-skills@latest install terum/team-skills/deploy-check@5f0e12ab9c3d"
+    },
+    "incumbentLift": {
+      "deploy-check": [
+        17,
+        "0.581"
+      ],
+      "deploy-check fired off-target 5 times": [
+        17,
+        "0.581"
+      ],
+      "pr-review updated to 7e8f9a0b1c2d": [
+        22,
+        "0.727"
+      ],
+      "Eval finished · deploy-check PASS +44%": [
+        17,
+        "0.581"
+      ],
+      "deploy-check · 2 installs, 3 evals, 1 favorite": [
+        17,
+        "0.581"
+      ]
+    },
+    "reportNumbers": {
+      "deploy-check": {
+        "holes": 0,
+        "nRounds": 18,
+        "triggerTotal": 5
+      },
+      "migration-guard": {
+        "holes": 2,
+        "nRounds": 9,
+        "triggerTotal": 5
+      },
+      "onboarding-tour": {
+        "holes": 0,
+        "nRounds": 0,
+        "triggerTotal": 0
+      },
+      "deploy-check-not-installed": {
+        "holes": 0,
+        "nRounds": 18,
+        "triggerTotal": 5
+      },
+      "deploy-check fired off-target 5 times": {
+        "holes": 0,
+        "nRounds": 18,
+        "triggerTotal": 5,
+        "precisionObserved": "0.64"
+      }
+    },
+    "bulkInstall": {
+      "docs": {
+        "total": 8,
+        "asking": 2
+      }
+    },
+    "categoryRemaining": {
+      "infra": 2,
+      "docs": 2,
+      "review": 2,
+      "ops": 2,
+      "testing": 2,
+      "data": 2,
+      "git": 1,
+      "onboarding": 0,
+      "research": 0,
+      "security": 0
+    },
+    "libraryTitles": {
+      "Global": "30 skills",
+      "Terum": "22 skills",
+      "SSM": "15 skills",
+      "MRF": "32 skills"
+    }
+  }
+}

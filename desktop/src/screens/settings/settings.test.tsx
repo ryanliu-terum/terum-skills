@@ -1,0 +1,53 @@
+import { afterEach,beforeEach,expect,it,vi } from 'vitest';
+import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
+import { App } from '../../app/App';
+import { Providers } from '../../app/providers';
+import { useUiStore } from '../../app/store';
+import { BackendContext } from '../../backend';
+import { createMockBackend } from '../../backend/mock';
+import { createRun } from '../../backend/mock/run';
+import { design } from '../../backend/mock/data';
+const backend=createMockBackend();
+function open(route:string){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}
+beforeEach(()=>{localStorage.clear();useUiStore.getState().setTheme('dark');});
+afterEach(()=>{cleanup();location.hash='';vi.restoreAllMocks();});
+it.each([['account','Account'],['teams','Teams'],['machine','This machine'],['sync','Sync'],['updates','Updates'],['inbox','Inbox'],['evals','Evals'],['sharing','Sharing'],['appearance','Appearance'],['advanced','Advanced'],['about','About']])('renders the %s settings head and nav',async(section,title)=>{open('#/settings/'+section);expect(await screen.findByRole('heading',{name:title})).toBeInTheDocument();expect(within(screen.getByRole('navigation',{name:'Settings sections'})).getAllByRole('link')).toHaveLength(11);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(screen.queryByText(/S1b builds this/)).toBeNull();});
+it('defaults unknown sections to Account',async()=>{open('#/settings/no-such-section');expect(await screen.findByRole('heading',{name:'Account'})).toBeInTheDocument();});
+it('renders Leave and preanswers its exact confirmation',async()=>{const leave=vi.spyOn(backend,'team');open('#/settings/teams?dialog=leave');const dialog=await screen.findByRole('dialog');expect(within(dialog).getByRole('heading')).toHaveTextContent('Leave Terum on this machine?');expect(dialog).toHaveTextContent('Its placed skills leave ~/.claude/skills and the project checkouts on this machine (30 global, 69 in checkouts)');fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledWith({kind:'leave'});expect(location.hash).toBe('#/settings/teams');});
+it.each([
+  ['0','0 global, 99 in checkouts'],
+  ['99','99 global, 0 in checkouts'],
+  [undefined,'— global, — in checkouts'],
+  ['','— global, — in checkouts'],
+  ['many','— global, — in checkouts'],
+  ['-1','— global, — in checkouts'],
+  ['30.5','— global, — in checkouts'],
+  ['100','— global, — in checkouts'],
+  ['9007199254740992','— global, — in checkouts'],
+])('renders Leave placement counts safely for Global=%s',async(globalCount,expected)=>{
+  const status=await backend.status();
+  if(!status.ok)throw new Error(status.error);
+  if(globalCount===undefined)delete status.value.counts.Global;
+  else status.value.counts.Global=globalCount;
+  vi.spyOn(backend,'status').mockResolvedValue(status);
+  open('#/settings/teams?dialog=leave');
+  expect(await screen.findByRole('dialog')).toHaveTextContent(`(${expected})`);
+});
+it('renders every prune path and preanswers Delete N quarantined items',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/machine?dialog=prune');const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Delete 2 quarantined folders?');for(const [when,name] of design.QUARANTINE)expect(dialog).toHaveTextContent(`quarantine/${when}/${name}`);fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(sync).toHaveBeenCalledWith({prune:true});expect(location.hash).toBe('#/settings/machine');});
+it('keeps failed prune open',async()=>{vi.spyOn(backend,'sync').mockImplementation(()=>createRun(async()=>({ok:false,error:'Prune failed.'})));open('#/settings/machine?dialog=prune');fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('alert')).toHaveTextContent('Prune failed.');expect(screen.getByRole('dialog')).toBeInTheDocument();});
+it('renders the SyntaxError line with hidden counts',async()=>{open('#/settings/account?__mock=error');expect(await screen.findByRole('alert')).toHaveTextContent('SyntaxError: Unexpected token } in JSON at position 412 · ~/.terum/skills/config.json');expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
+it('commits the loading skeleton with hidden sidebar counts',async()=>{open('#/settings/account?__mock=loading');expect(screen.getByTestId('settings-skeleton')).toBeInTheDocument();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
+it('changes data-theme from Appearance and updates an existing URL theme',async()=>{open('#/settings/appearance?theme=dark');fireEvent.click(await screen.findByRole('button',{name:'Light'}));await waitFor(()=>expect(document.documentElement.dataset.theme).toBe('light'));expect(useUiStore.getState().theme).toBe('light');expect(location.hash).toContain('theme=light');});
+it('persists the hook toggle and updates its explanation',async()=>{open('#/settings/sync');fireEvent.click(await screen.findByRole('switch',{name:'Sync at session start'}));expect(backend.prefs.get('sync:hook',true)).toBe(false);expect(screen.getByText(/Not installed. Run sync yourself/)).toBeInTheDocument();});
+it('persists each inbox kind independently',async()=>{open('#/settings/inbox');const controls=await screen.findAllByRole('checkbox');expect(controls).toHaveLength(7);fireEvent.click(screen.getByRole('checkbox',{name:'Alert'}));expect(backend.prefs.get('inbox:kind:alert',true)).toBe(false);expect(backend.prefs.get('inbox:kind:share',true)).toBe(true);});
+it('writes k without deriving a new statistic',async()=>{open('#/settings/evals');fireEvent.click(await screen.findByRole('combobox',{name:'Repetitions per case'}));const option=await screen.findByRole('option',{name:'10'});fireEvent.pointerDown(option,{pointerType:'mouse'});fireEvent.click(option);expect(backend.prefs.get('eval:k','')).toBe('10');});
+it('runs Sync now with an empty argument',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));await waitFor(()=>expect(sync).toHaveBeenCalledWith({}));});
+it('opens the exact update command',async()=>{const editor=vi.spyOn(backend,'openInEditor');open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('npx -y terum-skills@latest update'));});
+it('opens the local storage path in Finder',async()=>{const editor=vi.spyOn(backend,'openInEditor');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Show in Finder'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('~/.terum/skills'));});
+it('declines machine removal and leaves the screen intact',async()=>{const uninstall=vi.spyOn(backend,'uninstallMachine');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));expect(await screen.findByRole('alert')).toHaveTextContent('Remove was declined.');expect(uninstall).toHaveBeenCalledWith({});expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('heading',{name:'Advanced'})).toBeInTheDocument();});
+it('does not change a toggle when its preference write fails',async()=>{open('#/settings/sync');const control=await screen.findByRole('switch',{name:'Sync at session start'});vi.spyOn(backend.prefs,'set').mockImplementation(()=>{throw new Error('Storage denied.');});fireEvent.click(control);expect(await screen.findByRole('alert')).toHaveTextContent('Storage denied.');expect(control).toHaveAttribute('aria-checked','true');});
+it('surfaces failed editor results',async()=>{vi.spyOn(backend,'openInEditor').mockResolvedValue({ok:false,error:'Editor unavailable.'});open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));expect(await screen.findByRole('alert')).toHaveTextContent('Editor unavailable.');});
+it('renders the placement hover selector and every raw placement',async()=>{open('#/settings/machine');expect(await screen.findByTestId('placement-row-1')).toHaveTextContent('pr-review');expect(screen.getAllByTestId(/^placement-row-/)).toHaveLength(design.PLACEMENTS.length);});
+it('rejects malformed placement data with its field path',async()=>{const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);settings.value.PLACEMENTS=[['broken']];vi.spyOn(backend,'settings').mockResolvedValue(settings);const consoleError=vi.spyOn(console,'error').mockImplementation(()=>{ /* React reports the intentionally malformed DTO caught by ErrorBoundary. */ });open('#/settings/machine');expect(await screen.findByRole('alert')).toHaveTextContent('PLACEMENTS');expect(consoleError).toHaveBeenCalled();});
+
+it.each(['teams?dialog=leave','machine?dialog=prune'])('keeps the page landmark accessible for %s',async(route)=>{open('#/settings/'+route);const dialog=await screen.findByRole('dialog');const main=screen.getByRole('main');expect(main).toBeInTheDocument();expect(main.closest('[aria-hidden="true"], [inert]')).toBeNull();expect(main.closest('.shell')).not.toBeNull();expect(dialog.closest('.shell')).toBe(main.closest('.shell'));expect(main).not.toContainElement(dialog);});
