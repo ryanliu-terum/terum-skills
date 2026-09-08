@@ -17,12 +17,12 @@ Our purpose is it make it quick and easy to determine best AI practices through 
 
 Who would find this helpful?
 - Developers in an team looking to discover and share best practices internally
-Individuals looking to evaluate the infinite amount of publicly available skills and decide which ones are best for personal use cases. 
+- Individuals looking to evaluate the infinite amount of publicly available skills and decide which ones are best for personal use cases. 
 
 
 
 Isn't it super easy to share skills by just pushing them to GitHub? 
-- Yes, it is and you should if you only work on one project and don't mind having your .claude in your project. However, if you're working on multiple projects with specialized skills, if the repo does not allow .claude in the repo itself(open source, enterprise projects), if you're trying to manage and separate global and project skills, or replicate a specific teammate's suite of skills quickly, then Terum will hopefully save some time and effort. 
+- Yes, it is, and you should do that if you only work on one project and don't mind having your .claude in your project. However, if you're working on multiple projects with specialized skills, if the repo does not allow .claude in the repo itself(open source, enterprise projects), if you're trying to manage and separate global and project skills, or replicate a specific teammate's suite of skills with one click, then Terum will be useful. 
 
 
 Aren't there open source frameworks for evaluating skills already? 
