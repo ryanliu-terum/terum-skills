@@ -15,6 +15,9 @@ name: Release
 # One-time setup (Ryan): npm Trusted Publisher (ryanliu-terum / terum-skills / release.yml / env npm);
 # GitHub environment `npm` restricted to main with a required reviewer; branch protection on main.
 # Trusted publishing needs npm >= 11.5.1 on Node >= 22.14 (docs.npmjs.com/trusted-publishers).
+# Since 0.1.6 the desktop app (desktop/) is built in the same run on macOS and Windows runners and attached to
+# the Release before anything is tagged; the npm publish waits on those builds. See .planning/decisions/
+# 2026-09-08-desktop-app-cli-decision-walk.md (D2, D3) and docs/frame-protocol.md.
 
 on:
   workflow_dispatch:
@@ -175,8 +178,106 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # Decision walk D2 (2026-09-08): the desktop app is built here, before the npm approval, and attached to the
+  # same Release, so a CLI version can never be published without its app. Section 7 defaults: ad-hoc signing
+  # ("-") plus .app.tar.gz, artifact-exists gate, windows-11-vs2026-arm with NSIS, no updater JSON. Linux is
+  # gated (D3). Runs on dry runs too: that is how the matrix is proven without publishing.
+  desktop:
+    needs: validate
+    if: needs.validate.outputs.state == 'publish'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: app
+            suffix: aarch64.app.tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: app
+            suffix: x64.app.tar.gz
+          - os: windows-11-vs2026-arm
+            target: aarch64-pc-windows-msvc
+            bundles: nsis
+            suffix: arm64-setup.exe
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          key: ${{ matrix.target }}
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      # Build only: no tagName, so tauri-action never touches a Release and never writes updater JSON.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          projectPath: desktop
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      - name: Package and gate (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          V: ${{ needs.validate.outputs.version }}
+          SUFFIX: ${{ matrix.suffix }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          APP=$(find "src-tauri/target/$TARGET/release/bundle/macos" -maxdepth 1 -name '*.app' -print -quit)
+          if [ -z "$APP" ] || [ ! -d "$APP" ]; then echo "::error::no .app produced for $TARGET"; exit 1; fi
+          # The ad-hoc signature must verify, or Gatekeeper shows "damaged" instead of "could not verify".
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -q 'Signature=adhoc' || { echo "::error::expected an ad-hoc signature"; exit 1; }
+          mkdir -p out
+          OUT="out/terum-skills-desktop_${V}_${SUFFIX}"
+          tar -czf "$OUT" -C "$(dirname "$APP")" "$(basename "$APP")"
+          (cd out && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256")
+          ls -la out
+      - name: Package and gate (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          V: ${{ needs.validate.outputs.version }}
+          SUFFIX: ${{ matrix.suffix }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          EXE=$(find "src-tauri/target/$TARGET/release/bundle/nsis" -maxdepth 1 -name '*-setup.exe' -print -quit)
+          if [ -z "$EXE" ] || [ ! -f "$EXE" ]; then echo "::error::no NSIS installer produced for $TARGET"; exit 1; fi
+          mkdir -p out
+          OUT="out/terum-skills-desktop_${V}_${SUFFIX}"
+          cp "$EXE" "$OUT"
+          (cd out && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.suffix }}
+          path: desktop/out/
+          if-no-files-found: error
+          retention-days: 30
+
   publish:
-    needs: [validate, build]
+    needs: [validate, build, desktop]
     if: needs.validate.outputs.state == 'publish' && inputs.dry_run == false
     runs-on: ubuntu-latest
     environment: npm
@@ -213,7 +314,7 @@ jobs:
         run: node scripts/release-plan.mjs --verify-publication --version "$V" --sha "$SHA" --integrity "$EXPECTED_INTEGRITY"
 
   finalize:
-    needs: [validate, build, publish]
+    needs: [validate, build, desktop, publish]
     # Runs for a fresh publish, and for the two recovery states that need no publish. `always()` lets the
     # skipped build/publish jobs pass through; the explicit state test keeps refusals and dry runs out.
     if: >-
@@ -255,7 +356,31 @@ jobs:
           else
             [ "$existing" = "$SHA" ] || { echo "::error::remote $TAG already points at $existing, not $SHA; never moved"; exit 1; }
           fi
-      - name: GitHub Release (created only if missing; never re-marked Latest on retry)
+      - uses: actions/download-artifact@v4
+        # The recovery states (tag-only, release-only) have no desktop artifacts in this run; the gate below then
+        # refuses to create a Release without them, which is the intended failure (re-run a full publish instead).
+        if: needs.validate.outputs.state == 'publish'
+        with:
+          pattern: desktop-*
+          path: desktop-assets/
+          merge-multiple: true
+      - name: Artifact-exists gate (D2). Every desktop asset for this version must be present and non-trivial.
+        env:
+          V: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          fail=0
+          for suffix in aarch64.app.tar.gz x64.app.tar.gz arm64-setup.exe; do
+            f="desktop-assets/terum-skills-desktop_${V}_${suffix}"
+            if [ ! -f "$f" ]; then echo "::error::missing desktop asset $f"; fail=1; continue; fi
+            size=$(wc -c < "$f")
+            [ "$size" -gt 1000000 ] || { echo "::error::desktop asset $f is only $size bytes"; fail=1; }
+            [ -f "$f.sha256" ] || { echo "::error::missing checksum $f.sha256"; fail=1; }
+            (cd desktop-assets && shasum -a 256 -c "$(basename "$f").sha256") || fail=1
+          done
+          [ "$fail" -eq 0 ] || exit 1
+          ls -la desktop-assets
+      - name: GitHub Release with the desktop assets (created only if missing; never re-marked Latest on retry)
         env:
           GH_TOKEN: ${{ github.token }}
           V: ${{ needs.validate.outputs.version }}
@@ -269,10 +394,10 @@ jobs:
           args=(--verify-tag --title "terum-skills $V" --generate-notes --latest="$MARK_LATEST")
           [ -n "$PREVIOUS" ] && args+=(--notes-start-tag "$PREVIOUS")
           [ "$PRERELEASE" = "true" ] && args+=(--prerelease)
-          gh release create "$TAG" "${args[@]}"
+          gh release create "$TAG" "${args[@]}" desktop-assets/*
 
   audit:
-    needs: [validate, build, publish, finalize]
+    needs: [validate, build, desktop, publish, finalize]
     if: always()
     runs-on: ubuntu-latest
     permissions:

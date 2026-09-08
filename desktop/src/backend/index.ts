@@ -1,8 +1,11 @@
 import { createContext, useContext } from 'react';
 import type { Backend } from './Backend';
 import { createMockBackend } from './mock';
+import { isNativeShell } from './tauri/detect';
+import { createTauriBackend } from './tauri';
 export { readScenario as mockScenario } from './mock/scenario';
-const backend=createMockBackend();
+// Inside the Tauri shell the real adapter drives the CLI; in a browser (dev, gates, fidelity) the mock renders every board.
+const backend=isNativeShell()?createTauriBackend():createMockBackend();
 export function pickBackend():Backend{return backend;}
 export const BackendContext=createContext<Backend>(backend);
 export function useBackend():Backend{return useContext(BackendContext);}
