@@ -16,9 +16,9 @@ import './settings.css';
 export function SettingsScreen(){
   const params=useParams(),state=useUrlState(),backend=useBackend(),action=useWorkflow(),navigate=useNavigate(),[search]=useSearchParams();
   const section=settingsSections.find(([key])=>key===params.section)?.[0]??'account';
-  const query=useQuery({queryKey:['settings',state.mock],queryFn:()=>backend.settings()});
-  const status=useQuery({queryKey:['status',state.mock],queryFn:()=>backend.status()});
-  const catalog=useQuery({queryKey:['settings-catalog',state.mock],queryFn:()=>backend.catalog(),enabled:section==='teams'});
+  const query=useQuery({queryKey:['settings',state.mock],queryFn:({signal})=>backend.settings(undefined,{signal})});
+  const status=useQuery({queryKey:['status',state.mock],queryFn:({signal})=>backend.status(undefined,{signal})});
+  const catalog=useQuery({queryKey:['catalog',state.mock],queryFn:({signal})=>backend.catalog(undefined,{signal}),enabled:section==='teams'});
   const data=query.data?.ok?query.data.value:undefined, identity=status.data?.ok?status.data.value:undefined;
   const error=query.data?.ok===false?query.data.error:query.isError?query.error.message:status.data?.ok===false?status.data.error:status.isError?status.error.message:section==='teams'&&catalog.data?.ok===false?catalog.data.error:section==='teams'&&catalog.isError?catalog.error.message:null;
   const loading=!data||!identity||(section==='teams'&&catalog.isPending);

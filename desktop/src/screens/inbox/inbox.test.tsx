@@ -20,7 +20,7 @@ it('renders each FIRED line and the backend precision', async () => { open('#/in
 it('renders the full inbox evaluation report', async () => { open('#/inbox/eval-deploy-check'); expect(await screen.findByText(/Evaluation of deploy-check/)).toBeInTheDocument(); expect(screen.getByText('Coverage and provenance')).toBeInTheDocument(); });
 it('renders the exact derived author digest and bold event actors', async () => { open('#/inbox/author-deploy-check'); expect(await screen.findByText(design.DERIVED.digestSentence)).toBeInTheDocument(); expect(screen.getAllByText('teddy', { selector: 'b' })[0]).toBeInTheDocument(); });
 it('renders the team report with the actual later install date', async () => { open('#/inbox/team-mira'); expect(await screen.findByText(/Since then she installed deploy-check \(2026-08-28\)/)).toBeInTheDocument(); });
-it('renders empty list and zero inbox counts', async () => { open('#/inbox?__mock=empty'); expect(await screen.findByText('No items')).toBeInTheDocument(); expect(screen.getByText('Nothing waiting')).toBeInTheDocument(); expect(screen.queryAllByTestId(/^inbox-row-/)).toHaveLength(0); });
+it('renders empty list and omits empty inbox badges from status', async () => { open('#/inbox?__mock=empty'); expect(await screen.findByText('No items')).toBeInTheDocument(); expect(screen.getByText('Nothing waiting')).toBeInTheDocument(); expect(screen.queryAllByTestId(/^inbox-row-/)).toHaveLength(0); expect(await screen.findByRole('link', { name: 'Global 30' })).toBeInTheDocument(); for (const name of ['Pushes', 'Updates', 'Alerts']) expect(screen.getByRole('link', { name }).querySelector('.nav-count')).toBeNull(); });
 it('renders fatal failures in the centered alert', async () => { open('#/inbox?__mock=error'); expect(await screen.findByRole('alert')).toHaveTextContent("Skipping terum: could not fetch https://github.com/terum/team-skills.git: fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com"); });
 it('installs with consent pre-answered and replaces the document and row state', async () => {
   const install = vi.spyOn(pickBackend(), 'install'); open('#/inbox'); fireEvent.click(await screen.findByRole('button', { name: 'Install to Global' }));
@@ -59,3 +59,13 @@ it.each([
  fireEvent.click(within(pane).getByRole('button', { name: label })); expect(pickBackend().prefs.get(key, !value)).toBe(value); expect(pane.textContent).toBe(before);
 });
 it('surfaces secondary preference failures explicitly', async () => { open('#/inbox'); await screen.findByRole('button', { name: 'Decline' }); vi.spyOn(pickBackend().prefs, 'set').mockImplementation(() => { throw new Error('Preference write failed.'); }); fireEvent.click(screen.getByRole('button', { name: 'Decline' })); expect(await screen.findByRole('alert')).toHaveTextContent('Preference write failed.'); });
+
+it('uses only status-supplied sidebar counts on the empty scenario', async () => {
+  const source = pickBackend();
+  const status = await source.status();
+  if (!status.ok) throw new Error(status.error);
+  vi.spyOn(source, 'status').mockResolvedValue({ ...status, value: { ...status.value, counts: { Global: '71' } } });
+  open('#/inbox?__mock=empty');
+  expect(await screen.findByRole('link', { name: 'Global 71' })).toBeInTheDocument();
+  expect(document.querySelectorAll('.nav-count')).toHaveLength(1);
+});

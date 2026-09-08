@@ -26,9 +26,9 @@ const steps=['boot','welcome','style','basics','team','feedback','done'];
 export function OnboardingScreen(){
   const {step:raw}=useParams(),state=useUrlState(),backend=useBackend();
   const step=steps.includes(raw??'')?raw??'boot':'boot';
-  const query=useQuery({queryKey:['onboarding',state.mock],queryFn:()=>backend.onboarding()});
-  const status=useQuery({queryKey:['status',state.mock],queryFn:()=>backend.status()});
-  const library=useQuery({queryKey:['library','Global',state.mock],queryFn:()=>backend.library({scope:'Global'}),enabled:step==='done'});
+  const query=useQuery({queryKey:['onboarding',state.mock],queryFn:({signal})=>backend.onboarding(undefined,{signal})});
+  const status=useQuery({queryKey:['status',state.mock],queryFn:({signal})=>backend.status(undefined,{signal})});
+  const library=useQuery({queryKey:['library','Global',state.mock],queryFn:({signal})=>backend.library({scope:'Global'},{signal}),enabled:step==='done'});
   const data=query.data?.ok?query.data.value:query.data?.value;
   const error=query.data?.ok===false?query.data.error:query.isError?query.error.message:status.data?.ok===false?status.data.error:status.isError?status.error.message:null;
   const identity=status.data?.ok?status.data.value:undefined;

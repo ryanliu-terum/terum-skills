@@ -17,7 +17,7 @@ it('invites with logins, scope, and role and closes only after success',async()=
 it.each(['','bad/login','@someone','-invalid'])('rejects invalid invite logins %j without starting a run',async(value)=>{const invite=vi.spyOn(backend,'invite');open('#/share?dialog=invite');fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));expect(await screen.findByRole('alert')).toHaveTextContent('Enter valid GitHub logins');expect(invite).not.toHaveBeenCalled();});
 it('keeps the invite open and displays a failed result',async()=>{vi.spyOn(backend,'invite').mockImplementation(()=>createRun(async()=>({ok:false,error:'Invitation denied.'})));open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));expect(await screen.findByRole('alert')).toHaveTextContent('Invitation denied.');expect(screen.getByRole('dialog')).toBeInTheDocument();});
 it('opens a prompt dialog for an unexpected invite question',async()=>{vi.spyOn(backend,'invite').mockImplementation(()=>createRun(async ctx=>{const answer=await ctx.ask('confirm','Allow this invitation?');return answer?{ok:true,value:{invited:['sortiz']}}:{ok:false,error:'Declined.'};}));open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await screen.findByText('Allow this invitation?');fireEvent.click(screen.getByRole('button',{name:'Confirm'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());});
-it('renders the team-of-one state and preserves the board sidebar counts',async()=>{open('#/share?__mock=empty');await screen.findByText('Just you so far');expect(screen.getAllByTestId(/^member-row-/)).toHaveLength(1);expect(screen.queryByTestId('invited-row')).toBeNull();expect(screen.getByRole('link',{name:'Global 30'})).toBeInTheDocument();});
+it('renders the team-of-one state and preserves the board sidebar counts',async()=>{open('#/share?__mock=empty');await screen.findByText('Just you so far');expect(screen.getAllByTestId(/^member-row-/)).toHaveLength(1);expect(screen.queryByTestId('invited-row')).toBeNull();expect(await screen.findByRole('link',{name:'Global 30'})).toBeInTheDocument();for(const name of ['Pushes 3','Updates 3','Alerts 8'])expect(screen.getByRole('link',{name})).toBeInTheDocument();});
 it('renders the exact ENOENT people error',async()=>{open('#/share?__mock=error');expect(await screen.findByRole('alert')).toHaveTextContent("ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'");expect(screen.queryByRole('table')).toBeNull();});
 it('renders thirteen skeletons with settled loading readiness and hidden counts',async()=>{open('#/share?__mock=loading');expect(screen.getAllByTestId('member-skeleton')).toHaveLength(13);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
 it('searches members without changing roster indices',async()=>{open('#/share');await screen.findByTestId('member-row-5');const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');fireEvent.change(screen.getByRole('textbox',{name:'Find members'}),{target:{value:member.handle}});expect(await screen.findByTestId('member-row-5')).toHaveTextContent(member.name);expect(screen.getAllByTestId(/^member-row-/)).toHaveLength(1);});
@@ -48,4 +48,14 @@ it('renders the exact join note and variadic invite placeholder (CP-05/CP-06)',a
  expect(dialog).toHaveTextContent("GitHub emails the invitation. The block runs the joiner's wizard: with gh signed in it accepts the pending invitation, otherwise it asks them to accept it in the browser, and git must have access to this repository.");
  fireEvent.change(input,{target:{value:''}});
  expect(dialog).toHaveTextContent('npx -y terum-skills@latest invite <github-login>...');
+});
+
+it('uses only status-supplied sidebar counts on the empty scenario', async () => {
+  const source = backend;
+  const status = await source.status();
+  if (!status.ok) throw new Error(status.error);
+  vi.spyOn(source, 'status').mockResolvedValue({ ...status, value: { ...status.value, counts: { Global: '71' } } });
+  open('#/share?__mock=empty');
+  expect(await screen.findByRole('link', { name: 'Global 71' })).toBeInTheDocument();
+  expect(document.querySelectorAll('.nav-count')).toHaveLength(1);
 });
