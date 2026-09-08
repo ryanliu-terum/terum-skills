@@ -6,13 +6,24 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Default)]
 pub struct Bridge {
   children: Mutex<HashMap<String, Arc<Mutex<Handle>>>>,
+}
+
+impl Bridge {
+  const MAX_CHILDREN: usize = 8;
+
+  fn has_capacity<T>(children: &HashMap<String, T>) -> bool {
+    children.len() < Self::MAX_CHILDREN
+  }
 }
 
 struct Handle {
@@ -38,9 +49,14 @@ fn event_name(id: &str) -> String {
 #[tauri::command]
 fn cli_spawn(app: AppHandle, bridge: State<'_, Bridge>, id: String, node: String, entry: String, args: Vec<String>, cwd: Option<String>) -> Result<(), String> {
   if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { return Err("bad id".into()); }
-  if bridge.children.lock().map_err(|e| e.to_string())?.contains_key(&id) { return Err("id in use".into()); }
+  // Keep admission and insertion under one lock so concurrent spawns cannot exceed the cap.
+  let mut children = bridge.children.lock().map_err(|e| e.to_string())?;
+  if children.contains_key(&id) { return Err("id in use".into()); }
+  if !Bridge::has_capacity(&children) { return Err("too many pending terum-skills processes (8); wait for one to finish".into()); }
   let mut command = Command::new(&node);
   command.arg(&entry).arg("--frames").args(&args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+  #[cfg(unix)]
+  command.process_group(0);
   if let Some(dir) = cwd.as_deref().filter(|dir| !dir.is_empty()) {
     command.current_dir(dir);
   }
@@ -51,12 +67,13 @@ fn cli_spawn(app: AppHandle, bridge: State<'_, Bridge>, id: String, node: String
   let stderr = child.stderr.take().ok_or("no stderr")?;
   let stdin = child.stdin.take();
   let handle = Arc::new(Mutex::new(Handle { child, stdin }));
-  bridge.children.lock().map_err(|e| e.to_string())?.insert(id.clone(), handle.clone());
+  children.insert(id.clone(), handle.clone());
+  drop(children);
 
   let name = event_name(&id);
   let out_app = app.clone();
   let out_name = name.clone();
-  std::thread::spawn(move || {
+  let out = std::thread::spawn(move || {
     for line in BufReader::new(stdout).lines() {
       match line {
         Ok(line) => { let _ = out_app.emit(&out_name, LineEvent::Stdout { line }); }
@@ -66,7 +83,7 @@ fn cli_spawn(app: AppHandle, bridge: State<'_, Bridge>, id: String, node: String
   });
   let err_app = app.clone();
   let err_name = name.clone();
-  std::thread::spawn(move || {
+  let err = std::thread::spawn(move || {
     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
       let _ = err_app.emit(&err_name, LineEvent::Stderr { line });
     }
@@ -78,6 +95,8 @@ fn cli_spawn(app: AppHandle, bridge: State<'_, Bridge>, id: String, node: String
     loop {
       let status = { wait_bridge.lock().ok().and_then(|mut h| h.child.try_wait().ok().flatten()) };
       if let Some(status) = status {
+        let _ = out.join();
+        let _ = err.join();
         let _ = wait_app.emit(&name, LineEvent::Exit { code: status.code() });
         if let Some(bridge) = wait_app.try_state::<Bridge>() { if let Ok(mut children) = bridge.children.lock() { children.remove(&id); } }
         break;
@@ -97,16 +116,57 @@ fn cli_write(bridge: State<'_, Bridge>, id: String, line: String) -> Result<(), 
   stdin.write_all(line.as_bytes()).and_then(|_| stdin.write_all(b"\n")).and_then(|_| stdin.flush()).map_err(|e| e.to_string())
 }
 
-/// Close stdin (the CLI treats that like cancel) and, if it is still running shortly after, kill it.
+/// Allow stdin-close cancellation 1,500 ms, then terminate the Unix process group.
+/// Windows falls back to Child::kill: it does not terminate descendant processes.
 #[tauri::command]
 fn cli_kill(bridge: State<'_, Bridge>, id: String) -> Result<(), String> {
   let handle = bridge.children.lock().map_err(|e| e.to_string())?.get(&id).cloned().ok_or("no such process")?;
-  let mut guard = handle.lock().map_err(|e| e.to_string())?;
-  guard.stdin.take();
-  if guard.child.try_wait().map_err(|e| e.to_string())?.is_none() {
-    let _ = guard.child.kill();
+  {
+    let mut guard = handle.lock().map_err(|e| e.to_string())?;
+    guard.stdin.take();
+  }
+  let deadline = Instant::now() + Duration::from_millis(1_500);
+  loop {
+    {
+      let mut guard = handle.lock().map_err(|e| e.to_string())?;
+      if guard.child.try_wait().map_err(|e| e.to_string())?.is_some() { return Ok(()); }
+    }
+    if Instant::now() >= deadline { break; }
+    std::thread::sleep(Duration::from_millis(25));
+  }
+  #[cfg(unix)]
+  {
+    let pid = handle.lock().map_err(|e| e.to_string())?.child.id();
+    // SAFETY: spawn made this child a process-group leader; a negative pid targets that group.
+    unsafe { libc::kill(-(pid as i32), libc::SIGTERM); }
+    std::thread::sleep(Duration::from_millis(500));
+    // Escalate the group even if its leader exited: descendants can still hold the pipes open.
+    // SAFETY: this is the same process group targeted above, with no borrowed memory involved.
+    unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
+  }
+  #[cfg(windows)]
+  {
+    let _ = handle.lock().map_err(|e| e.to_string())?.child.kill();
   }
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn child_cap_rejects_eight_pending_entries_and_frees_removed_slots() {
+    let mut children: HashMap<String, ()> = (0..7).map(|id| (id.to_string(), ())).collect();
+    assert!(Bridge::has_capacity(&children));
+    children.insert("7".into(), ());
+    assert!(!Bridge::has_capacity(&children));
+    children.insert("8".into(), ());
+    assert!(!Bridge::has_capacity(&children));
+    children.remove("8");
+    children.remove("7");
+    assert!(Bridge::has_capacity(&children));
+  }
 }
 
 /// The state file `terum-skills app` writes on every launch (decision walk D1): where Node and the CLI are.

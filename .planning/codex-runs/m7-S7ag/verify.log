@@ -1,0 +1,15 @@
+# m7-S7ag: orchestrator's own gates, 2026-09-08 PT, Ryan's Mac (Node 25, cargo 1.98.1, Playwright chromium 1243)
+# Codex: gpt-6-astra, model_reasoning_effort=high, --sandbox workspace-write, stdin prompt (codex-prompt.md); report status "partial"
+# (did not stack on S7af: not a dependency; used a temp cargo target: the sandbox cannot write the shared one). Self-report: lint 0,
+# typecheck 0, vitest 41 files / 433 passed + 88 oracle-skipped, cargo test 1 passed. Hypotheses, re-run below.
+
+cargo check   : rc=0  (CARGO_TARGET_DIR=/Users/ryanliu/Documents/Terum/.m7-cargo-target; 0 warnings)
+cargo test    : rc=0  1 passed (child_cap_rejects_eight_pending_entries_and_frees_removed_slots)
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=0  41 files passed, 521 tests passed (TERUM_DESIGN_DIR set; NODE_OPTIONS=--no-experimental-webstorage)
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (37.4s)
+real-data proof   : n/a for this batch (no read model changes); the lifecycle itself (join before Exit, group kill, the cap) is verified in Step 4 of the launch runbook on the built .app, not here.

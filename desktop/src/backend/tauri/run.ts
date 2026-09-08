@@ -32,6 +32,14 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
   let settle!: (result: Result<TOut>) => void;
   const done = new Promise<Result<TOut>>((resolve) => { settle = resolve; });
   const stderr: string[] = [];
+  let unlisten: (() => void) | undefined;
+  let cleanupRequested = false;
+  const cleanup = () => {
+    cleanupRequested = true;
+    const stop = unlisten;
+    unlisten = undefined;
+    stop?.();
+  };
 
   const push = (frame: Frame) => { if (finished) return; buffer.push(frame); for (const wake of readers) wake(); readers.clear(); };
   const finish = (result: Result<TOut>, frame?: Frame) => {
@@ -45,7 +53,10 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
   };
 
   const onEvent = (event: LineEvent) => {
-    if (finished) return;
+    if (finished && event.kind !== 'exit') {
+      if (event.kind === 'stdout') stderr.push(`stdout after settle: ${event.line}`);
+      return;
+    }
     switch (event.kind) {
       case 'stdout': {
         const frame = parseCliFrame(event.line);
@@ -54,7 +65,13 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
         return;
       }
       case 'stderr': stderr.push(event.line); return;
-      case 'exit': if (cancelled) { finish({ ok: false, error: 'Cancelled.' }); return; } finish({ ok: false, error: `terum-skills exited${event.code === null ? '' : ` with code ${event.code}`} before reporting a result.${stderr.length ? ` ${stderr.slice(-3).join(' ')}` : ''}` }); return;
+      case 'exit': {
+        if (!finished) {
+          finish({ ok: false, error: cancelled ? 'Cancelled.' : `terum-skills exited${event.code === null ? '' : ` with code ${event.code}`} before reporting a result.${stderr.length ? ` ${stderr.slice(-3).join(' ')}` : ''}` });
+        }
+        cleanup();
+        return;
+      }
       case 'error': finish({ ok: false, error: event.message }); return;
     }
   };
@@ -65,6 +82,7 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
       case 'ask': push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }) }); return;
       case 'progress': { const current = frame.current ?? 0; push({ t: 'progress', done: current, total: Math.max(frame.total ?? current, current, 1), label: frame.step }); return; }
       case 'result': {
+        if (cancelled) { finish({ ok: false, error: 'Cancelled.' }); return; }
         if (frame.ok) {
           let mapped: TOut;
           try { mapped = options.map(frame.value as TIn); } catch (error) { finish({ ok: false, error: `terum-skills answered, but the desktop app could not read the result: ${error instanceof Error ? error.message : String(error)}` }); return; }
@@ -86,7 +104,9 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
     if (!resolved) { finish({ ok: false, error: NO_STATE }); return; }
     started = true;
     try {
-      await bridge.spawn(id, resolved, argv, options.cwd, onEvent);
+      unlisten = await bridge.spawn(id, resolved, argv, options.cwd, onEvent);
+      // A short-lived child can exit (or be cancelled) before spawn returns the listener.
+      if (cleanupRequested) cleanup();
     } catch (error) {
       finish({ ok: false, error: `Could not start terum-skills: ${error instanceof Error ? error.message : String(error)}` });
     }
@@ -118,6 +138,7 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
         }
         finish({ ok: false, error: 'Cancelled.' });
       }
+      cleanup();
       await done;
     },
   };

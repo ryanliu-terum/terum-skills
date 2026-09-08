@@ -16,7 +16,7 @@ export type AppState = z.infer<typeof appStateSchema>;
 
 /** Everything the adapter needs from the shell, behind an interface so the adapter is testable without Tauri. */
 export interface Bridge {
-  spawn(id: string, state: AppState, args: readonly string[], cwd: string | undefined, onEvent: (event: LineEvent) => void): Promise<void>;
+  spawn(id: string, state: AppState, args: readonly string[], cwd: string | undefined, onEvent: (event: LineEvent) => void): Promise<() => void>;
   write(id: string, line: string): Promise<void>;
   kill(id: string): Promise<void>;
   readAppState(): Promise<AppState | null>;
@@ -30,10 +30,10 @@ export function tauriBridge(): Bridge {
       // Subscribe first: the id is ours, so no line can be emitted before the listener exists.
       const unlisten = await listen<LineEvent>(`cli:${id}`, (event) => {
         onEvent(event.payload);
-        if (event.payload.kind === 'exit') unlisten();
       });
       try {
         await invoke('cli_spawn', { id, node: state.node, entry: state.entry, args: [...args], cwd: cwd ?? null });
+        return unlisten;
       } catch (error) {
         unlisten();
         throw error;

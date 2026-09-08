@@ -1,0 +1,101 @@
+{
+  "status": "partial",
+  "summary": "Implemented result-before-exit ordering, listener cleanup, graceful cancellation with Unix process-group escalation, and the eight-child cap. Desktop and Rust gates passed using a temporary Cargo target. S7af stacking was not performed; packaged-app lifecycle was NOT reproduced.",
+  "filesChanged": [
+    {
+      "path": "desktop/src-tauri/src/lib.rs",
+      "change": "modified",
+      "why": "Join readers before Exit; implement cancellation escalation and atomic child-cap admission; add cap unit test."
+    },
+    {
+      "path": "desktop/src-tauri/Cargo.toml",
+      "change": "modified",
+      "why": "Add Unix-only libc dependency."
+    },
+    {
+      "path": "desktop/src-tauri/Cargo.lock",
+      "change": "modified",
+      "why": "Record the direct libc dependency."
+    },
+    {
+      "path": "desktop/src/backend/tauri/bridge.ts",
+      "change": "modified",
+      "why": "Return listener cleanup from spawn."
+    },
+    {
+      "path": "desktop/src/backend/tauri/run.ts",
+      "change": "modified",
+      "why": "Clean up once after exit or cancel, retain late stdout diagnostics, and preserve cancellation results."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/run.test.ts",
+      "change": "modified",
+      "why": "Cover event ordering, delayed listener availability, and cancellation."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/index.test.ts",
+      "change": "added",
+      "why": "Verify read calls preserve spawn rejection messages without retries."
+    }
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "ESLint: 0 errors, 0 warnings.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "TypeScript: 0 errors. Offline cargo check passed with 0 warnings using a temporary target.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": true,
+      "output": "Vitest: 41 files passed; 433 tests passed, 88 design-oracle tests skipped, 0 failed. Cargo: 1 test passed, 0 failed; 0 warnings.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [
+    {
+      "question": "S7af's index.test.ts was absent, while git operations were forbidden.",
+      "specSection": "§4 Tests",
+      "conservativeChoice": "Added the named regression test in this checkout. Existing read() already propagates the rejection; its implementation was unchanged."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "Did not stack on S7af.",
+      "why": "Git operations were explicitly forbidden; implementation proceeded against the available adapter."
+    },
+    {
+      "what": "Rust gates used /private/tmp/m7-S7ag-cargo.JkSQ96.",
+      "why": "The specified warm target failed with Operation not permitted. An offline temporary copy allowed both gates to pass."
+    }
+  ],
+  "invariantsTouched": [
+    {
+      "number": 1,
+      "howSatisfied": "Native behavior remains inside the Tauri backend and Rust shell; exactly five commands remain."
+    },
+    {
+      "number": 7,
+      "howSatisfied": "Added regression coverage and strengthened cancellation assertions without removing or weakening tests."
+    },
+    {
+      "number": 8,
+      "howSatisfied": "Ran required gates, read back changes, and used no git, network, installs, or Playwright. App lifecycle remains unverified."
+    }
+  ],
+  "testsModified": [
+    {
+      "path": "desktop/src/backend/tauri/__tests__/run.test.ts",
+      "whatChanged": "Fake spawn returns an unlisten spy; added five lifecycle tests and strengthened the existing cancellation test.",
+      "justification": "Verifies the new cleanup contract, ordering guarantees, and single settlement without weakening existing assertions."
+    }
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Reader joins are bounded in live use: descendants can retain inherited pipes, and packaged-app lifecycle behavior could not be reproduced in the sandbox."
+}
