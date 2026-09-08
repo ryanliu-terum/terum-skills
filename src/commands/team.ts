@@ -497,7 +497,9 @@ async function acceptOrDirect(ownerRepo: string, io: Prompter, runner: Runner, g
   if (invitations.code !== 0) throw new Error(`Could not list GitHub invitations: ${(invitations.stderr || invitations.stdout).trim()}`);
   const list = JSON.parse(invitations.stdout || '[]') as Array<{ id: number; repository?: { full_name?: string } }>;
   const invitation = list.find((item) => item.repository?.full_name?.toLowerCase() === ownerRepo.toLowerCase());
-  if (!invitation) return;
+  // No pending invitation is normal for a collaborator who already accepted; for anyone else it is the one fact that
+  // explains the "repository not found" the clone is about to hit, so say it before the clone rather than after (2026-09-08, D6).
+  if (!invitation) { io.print(`No pending GitHub invitation to ${ownerRepo} for your account. If the next step cannot reach the repository, the person who invited you has not added you on GitHub yet; ask them, then run this again.`); return; }
   const accepted = await runner.run('gh', ['api', '--method', 'PATCH', `user/repository_invitations/${invitation.id}`]);
   if (accepted.code !== 0) throw new Error(`Could not accept the invitation: ${(accepted.stderr || accepted.stdout).trim()}`);
 }
