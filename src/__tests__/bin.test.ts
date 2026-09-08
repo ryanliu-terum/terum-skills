@@ -41,6 +41,20 @@ describe('the built bin (dist/index.js)', () => {
   });
   afterAll(async () => { await rm(out, { recursive: true, force: true }); });
 
+  it('the build bundles the canonical /terum-skills skill where the built wrapper module resolves it, byte for byte, marker intact', async () => {
+    const bundle = await run(process.execPath, [resolve(root, 'scripts', 'bundle-skill.mjs'), '--out', resolve(out, 'dist')], { cwd: root });
+    const bundled = resolve(out, 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');
+    expect(bundle.stderr.trim()).toBe(`Bundled ${resolve(root, '.claude', 'skills', 'terum-skills', 'SKILL.md')} -> ${bundled}`);
+    expect(await readFile(bundled, 'utf8')).toBe(await readFile(resolve(root, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8'));
+    const wrapper = await import(pathToFileURL(resolve(out, 'dist', 'lib', 'wrapper.js')).href) as typeof import('../lib/wrapper.js');
+    expect(wrapper.BUNDLED_WRAPPER).toBe(bundled);
+    expect(wrapper.isManagedWrapper(await readFile(bundled, 'utf8'))).toBe(true);
+    const home = resolve(out, 'bundle-home');
+    expect(await wrapper.wrapperState(wrapper.defaultWrapperOptions(home))).toBe('absent');
+    expect(await wrapper.installWrapper(wrapper.defaultWrapperOptions(home))).toBe('installed');
+    expect(await readFile(resolve(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8')).toBe(await readFile(bundled, 'utf8'));
+  });
+
   async function installedLayout(prefix: string) {
     const packageRoot = resolve(prefix, 'node_modules/terum-skills');
     await mkdir(packageRoot, { recursive: true });
@@ -175,7 +189,7 @@ describe('the built bin (dist/index.js)', () => {
     // ESM: the built file uses import/export, so the shipped manifest must say so (the fixture's own manifest above merely mirrors this).
     expect(manifest.type).toBe('module');
     // The lifecycle that produces dist/ on `npm publish`: prepack runs the build, the build compiles this config.
-    expect(manifest.scripts?.build).toBe('tsc -p tsconfig.build.json');
+    expect(manifest.scripts?.build).toBe('tsc -p tsconfig.build.json && node scripts/bundle-skill.mjs');
     expect(manifest.scripts?.prepack).toBe('npm run build');
   });
 

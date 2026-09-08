@@ -47,6 +47,8 @@ npm install -g terum-skills
 terum-skills setup
 ```
 
+Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/skills/terum-skills/`, so Claude Code can run these commands for you inside a session (and hand you the ones that need a terminal). It ships inside the npm package; re-running `terum-skills setup` after an update refreshes it.
+
 The default setup command will lead you towards creating a team. To join a team, ask the owner of a team to use terum-skills invite <your github username>. They will receive a command that you can paste into your terminal. Or, if you know the organization name and repo name, you can run:
 
 ```sh
@@ -58,7 +60,7 @@ terum-skills setup <org name>/<repo name>
 
 | Group | Command | What it does |
 |---|---|---|
-| Team | `setup [<org>/<repo>]` | Create-or-join wizard; sequences the verbs below |
+| Team | `setup [<org>/<repo>]` | Create-or-join wizard; sequences the verbs below, then offers the session hook and the `/terum-skills` Claude Code skill |
 | | `login` | Check `gh` and record your name, email, and handle |
 | | `team create` / `team join` / `team leave` / `team remove <handle>` | Manage the repo and its roster |
 | | `invite <github-user>…` | Grant repo access and print the join line |
@@ -175,7 +177,7 @@ CI never runs a model and never holds an API key; every eval token is a member's
 - **Global:** `npm install -g terum-skills`. If `terum-skills: command not found`, add `$(npm prefix -g)/bin` (the prefix itself on Windows) to PATH.
 - **Project-local:** `npm install terum-skills` puts the binary under `node_modules/.bin`; run it as `npx terum-skills …` from that folder.
 - **Update:** `terum-skills update` prints this copy's version, the newest advertised release, and the exact command that updates *this* copy. It never runs a package manager. `npx -y terum-skills@latest` fetches the newest release every run and updates nothing else.
-- **Uninstall:** `terum-skills uninstall` removes every team from this machine (placed skills, clones, cache), the session-start hook, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill.
+- **Uninstall:** `terum-skills uninstall` removes every team from this machine (placed skills, clones, cache), the session-start hook, the `/terum-skills` Claude Code skill it placed, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill.
 
 Release notices appear last on stderr, at most once per release per day, and are suppressed in CI, when stderr is piped, or when `NO_UPDATE_NOTIFIER` or `TERUM_SKILLS_NO_UPDATE_NOTIFIER` is set. Version checks read git tags from this repository only, never the npm registry, and only when a configured team is on GitHub.
 

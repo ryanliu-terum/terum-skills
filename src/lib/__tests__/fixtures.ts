@@ -1,6 +1,7 @@
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Launch } from '../launch.js';
 import lockfile from 'proper-lockfile';
 import { CommandResult, Runner, RunOptions, systemRunner } from '../runner.js';
@@ -9,6 +10,13 @@ import { cloneLockPath } from '../teamRepo.js';
 
 /** Every temp dir created through `temporaryDirectory` — removed by setup.ts after each test. */
 export const TEMP_DIRS: string[] = [];
+
+/** The one canonical /terum-skills skill (what `npm run build` bundles); from src/ the built copy does not exist, so tests point at this. */
+export const BUNDLED_SKILL_SOURCE = fileURLToPath(new URL('../../../.claude/skills/terum-skills/SKILL.md', import.meta.url));
+/** Wrapper options that place under a test home's global Claude Code skills root — never the real ~/.claude. */
+export function wrapperFor(home: string): { skillsRoot: string; source: string } {
+  return { skillsRoot: join(home, '.claude', 'skills'), source: BUNDLED_SKILL_SOURCE };
+}
 
 /**
  * A Prompter with scripted answers that records every question it was asked. Like the real

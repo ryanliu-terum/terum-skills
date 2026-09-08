@@ -4,6 +4,7 @@ import { creatorAuthenticationError, detectOrOfferGh, teamByRemote } from '../li
 import { COMMUNITY_URL } from '../lib/community.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
+import { defaultWrapperOptions, offerWrapper as defaultOfferWrapper, WrapperOptions } from '../lib/wrapper.js';
 import { Prompter } from '../lib/prompt.js';
 import { readRoster } from '../lib/skills.js';
 import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
@@ -19,6 +20,7 @@ export interface SetupVerbs {
   connect: (args: ConnectArgs, io: Prompter) => Promise<Result<ConnectOutcome | undefined>>;
   invite: typeof invite;
   offerHook: typeof defaultOfferHook;
+  offerWrapper: typeof defaultOfferWrapper;
 }
 export interface SetupArgs extends WithForm {
   target?: string;
@@ -31,11 +33,13 @@ export interface SetupArgs extends WithForm {
   home?: string;
   cwd?: string;
   hook?: HookOptions;
+  /** Where the bundled /terum-skills Claude Code skill is offered from and placed (test knob). */
+  wrapper?: WrapperOptions;
   communityUrl?: string;
   verbs?: Partial<SetupVerbs>;
 }
 export type StepOutcome = 'done' | 'skipped' | 'printed';
-type Step = 'welcome' | 'role' | 'github' | 'team' | 'actions' | 'invite' | 'community' | 'hook' | 'done';
+type Step = 'welcome' | 'role' | 'github' | 'team' | 'actions' | 'invite' | 'community' | 'hook' | 'wrapper' | 'done';
 export interface SetupResult {
   role: 'creator' | 'joiner';
   team: string;
@@ -47,7 +51,7 @@ export interface SetupResult {
 const WELCOME = [
   'Welcome to terum-skills.',
   "Your team's skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have.",
-  'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook; re-run it any time to continue, and leave the invitation question blank to skip it.',
+  'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',
 ];
 
 export const ROLE_QUESTION = 'Create a team or join one?';
@@ -76,7 +80,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   const role: SetupResult['role'] = args.target === undefined ? 'creator' : 'joiner';
   const store = args.config ?? createConfigStore();
   const runner = args.runner ?? systemRunner;
-  const verbs: SetupVerbs = { team, connect, invite, offerHook: defaultOfferHook, ...args.verbs };
+  const verbs: SetupVerbs = { team, connect, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, ...args.verbs };
   const steps: SetupResult['steps'] = {};
   let teamName = '';
   let remote = '';
@@ -208,6 +212,14 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
 
     const hookOutcome = await verbs.offerHook(io, resolvedHook(store, args.home, args.hook));
     steps.hook = hookOutcome === 'installed' || hookOutcome === 'replaced' ? 'done' : 'skipped';
+
+    // The /terum-skills Claude Code skill ships inside this package, and setup is the one onboarding
+    // step (npm-first, Ryan 2026-09-08), so the skill that lets Claude Code run these verbs is offered
+    // here, right after the hook and in the hook's shape: one offer with its own y/N on the same io,
+    // a copy the tool recognises by its frontmatter marker (refreshed on a re-run without asking,
+    // removed by machine uninstall), and anything else at that path left alone (src/lib/wrapper.ts).
+    const wrapperOutcome = await verbs.offerWrapper(io, { ...defaultWrapperOptions(args.home), ...args.wrapper });
+    steps.wrapper = wrapperOutcome === 'installed' || wrapperOutcome === 'replaced' ? 'done' : 'skipped';
 
     if (args.quiet) steps.done = 'skipped';
     else {

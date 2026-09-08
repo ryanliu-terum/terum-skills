@@ -3,9 +3,10 @@ import { lstat, readFile, readdir, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import YAML from 'yaml';
 import { allowedTools, describeRaw, FRONTMATTER, isSkillName } from './schema.js';
+import { isManagedFrontmatter } from './wrapper.js';
 
 export { FRONTMATTER } from './schema.js';
-export type SourceProblem = 'symlink' | 'not-a-directory' | 'skill-md-missing' | 'skill-md-not-a-file' | 'no-frontmatter' | 'invalid-yaml' | 'illegal-name' | 'name-mismatch' | 'description-missing' | 'unsupported-field' | 'malformed-allowed-tools' | 'nested-symlink' | 'inside-state-root';
+export type SourceProblem = 'symlink' | 'not-a-directory' | 'skill-md-missing' | 'skill-md-not-a-file' | 'no-frontmatter' | 'invalid-yaml' | 'illegal-name' | 'name-mismatch' | 'description-missing' | 'unsupported-field' | 'malformed-allowed-tools' | 'nested-symlink' | 'inside-state-root' | 'managed-wrapper';
 type SourceInspection = { ok: true; description: string } | { ok: false; reason: SourceProblem; detail: string };
 
 /** Terminal rendering only: filesystem paths and ledger values retain their original bytes. */
@@ -46,6 +47,9 @@ function inspect(raw: string, folderName?: string): { ok: true; description: str
     const message = error instanceof Error ? error.message : String(error);
     return reject('invalid-yaml', `SKILL.md frontmatter is not valid YAML: ${message}`, message);
   }
+  // The /terum-skills Claude Code skill ships inside this package and is placed by setup; it is not a
+  // team skill, so discovery never offers it and connect refuses it by name.
+  if (isManagedFrontmatter(parsed)) return reject('managed-wrapper', 'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill', 'This folder is the /terum-skills Claude Code skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');
   const legacyNameMessage = `SKILL.md name must equal folder ${folderName} and description is required.`;
   if (folderName !== undefined && parsed?.name !== folderName) return reject('name-mismatch', `SKILL.md name ${String(parsed?.name)} does not equal folder ${folderName}`, legacyNameMessage);
   if (!parsed || typeof parsed.description !== 'string') return reject('description-missing', 'description is missing', legacyNameMessage);

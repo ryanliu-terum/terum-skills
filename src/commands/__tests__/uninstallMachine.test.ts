@@ -3,9 +3,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { fsForTests as hookFs, installHook } from '../../lib/hook.js';
+import { installWrapper } from '../../lib/wrapper.js';
 import { place } from '../../lib/placer.js';
 import { PromptClosedError } from '../../lib/prompt.js';
-import { bareTeam, cloneWithIdentity, holdCloneLock, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, holdCloneLock, ScriptedPrompter, temporaryDirectory, wrapperFor } from '../../lib/__tests__/fixtures.js';
 import { fsForTests, run } from '../uninstallMachine.js';
 
 const complete = 'Machine cleanup complete. The package itself has not been removed; finish with the package manager that installed it.';
@@ -20,6 +21,7 @@ async function prepared(names = ['team']) {
   const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
   const hook = { settingsFile: join(fixture.root, 'settings.json'), backupDir: join(store.root, 'backups') };
   const placements: string[] = [];
+  const wrapper = wrapperFor(join(fixture.root, 'home')); await installWrapper(wrapper);
   for (const name of names) {
     await cloneWithIdentity(fixture.bare, store.teamClone(name));
     const source = join(fixture.root, `source-${name}`); await mkdir(source);
@@ -32,28 +34,49 @@ async function prepared(names = ['team']) {
     await mkdir(join(store.root, 'cache', name), { recursive: true });
     await mkdir(join(store.root, 'run'), { recursive: true }); await writeFile(join(store.root, 'run', `${name}.stamp`), 'stamp');
   }
-  return { fixture, store, hook, placements };
+  return { fixture, store, hook, wrapper, placements };
 }
 async function gone(path: string) { await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' }); }
 
 describe('machine uninstall', () => {
   it('cleans two teams and the hook, preserves unrelated settings and recovery records, and prints the manual step', async () => {
-    const { store, hook, placements } = await prepared(['team', 'other']);
+    const { store, hook, wrapper, placements } = await prepared(['team', 'other']);
     await writeFile(hook.settingsFile, JSON.stringify({ hooks: { SessionStart: [unrelated] } })); await installHook(hook);
+    const wrapperDir = join(wrapper.skillsRoot, 'terum-skills');
     const before = await store.read(); const io = new ScriptedPrompter([], [true]);
     const launch = { kind: 'global' as const, path: '/opt/homebrew/lib/node_modules/terum-skills/dist/index.js' };
-    const result = await run({ config: store, hook, launch }, io);
-    expect(result).toMatchObject({ ok: true, value: { teams: ['team', 'other'], removedPlacements: 2, hookRemoved: true, configRemoved: true, launch } });
+    const result = await run({ config: store, hook, wrapper, launch }, io);
+    expect(result).toMatchObject({ ok: true, value: { teams: ['team', 'other'], removedPlacements: 2, hookRemoved: true, wrapperRemoved: true, configRemoved: true, launch } });
     if (!result.ok) throw new Error(result.error);
     for (const path of [...placements, store.teamClone('team'), store.teamClone('other'), ...['config.json', 'run', 'cache', 'teams'].map((x) => join(store.root, x))]) await gone(path);
+    await gone(wrapperDir);
     expect(JSON.parse(await readFile(result.value.record, 'utf8'))).toEqual(before);
     expect((await stat(result.value.record)).mode & 0o777).toBe(0o600);
     expect((await readdir(hook.backupDir)).filter((name) => name.startsWith('settings.'))).toHaveLength(1);
     expect(JSON.parse(await readFile(hook.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [unrelated] } });
     await expect(access(store.root)).resolves.toBeUndefined();
     expect(io.lines).toContain(membership);
+    expect(io.lines).toContain(`  /terum-skills Claude Code skill at ${wrapperDir}`);
+    expect(io.lines).toContain(`Removed the /terum-skills Claude Code skill from ${wrapperDir}.`);
     expect(io.lines.slice(-3)).toEqual([complete, `This copy of terum-skills runs from ${launch.path}.`, 'If you installed it with npm: npm uninstall -g terum-skills   (pnpm: pnpm remove -g terum-skills · yarn: yarn global remove terum-skills · bun: bun remove -g terum-skills · Volta: volta uninstall terum-skills)']);
     expect(io.asked).toEqual(['Remove terum-skills from this machine?']);
+  });
+
+  it('leaves a terum-skills folder that is not the bundled skill alone, and says so', async () => {
+    const { store, hook, wrapper } = await prepared(); const wrapperDir = join(wrapper.skillsRoot, 'terum-skills');
+    const theirs = '---\nname: terum-skills\ndescription: someone else\'s skill under our name\n---\n'; await writeFile(join(wrapperDir, 'SKILL.md'), theirs);
+    const io = new ScriptedPrompter([], [true]); const result = await run({ config: store, hook, wrapper }, io);
+    expect(result).toMatchObject({ ok: true, value: { teams: ['team'], wrapperRemoved: false } });
+    expect(await readFile(join(wrapperDir, 'SKILL.md'), 'utf8')).toBe(theirs);
+    expect(io.lines).toContain(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (it is a different skill); left alone`);
+    expect(io.lines.join('\n')).not.toContain('Removed the /terum-skills');
+  });
+
+  it('reports no bundled skill when none was placed', async () => {
+    const { store, hook } = await minimal(); const wrapper = wrapperFor(join(store.root, '..', 'home'));
+    const io = new ScriptedPrompter([], [true]);
+    expect(await run({ config: store, hook, wrapper }, io)).toMatchObject({ ok: true, value: { wrapperRemoved: false } });
+    expect(io.lines).toContain(`  No /terum-skills Claude Code skill at ${join(wrapper.skillsRoot, 'terum-skills')}`);
   });
 
   it('leaves settings with no hook byte-identical and writes no settings backup', async () => {

@@ -1,6 +1,8 @@
 ---
 name: terum-skills
 description: "Run a terum-skills CLI verb from inside the session (ls, ls --local, status, search, validate, update, sync, publish, install, uninstall-skill, invite, eval) and hand the verbs that ask a terminal question (connect, setup, team create/join/leave/remove, uninstall, sync --prune, login) to the user as a ready-to-run command, because the Bash tool has no TTY. Use when the user wants to see team or local skill state, check a skill's hygiene, sync, publish, install, invite, or evaluate a shared skill without leaving Claude Code."
+metadata:
+  managed-by: terum-skills
 ---
 
 Run one `terum-skills` verb on the user's behalf, or prepare it for them when the CLI would
@@ -8,7 +10,9 @@ ask a question the session cannot answer. This is a thin wrapper: the CLI is the
 skill only decides *whether* to run it here and *how* to show the result.
 
 Feasibility, per-verb evidence, and the design this file follows:
-`.planning/reviews/2026-09-07-cli-skill-wrappers-feasibility.md`.
+`.planning/reviews/2026-09-07-cli-skill-wrappers-feasibility.md` in the terum-skills repository. This
+file ships inside the `terum-skills` npm package and is placed at `~/.claude/skills/terum-skills/` by
+`terum-skills setup` (the `metadata.managed-by` marker is how setup and uninstall recognise their copy).
 
 ## The one rule that shapes everything
 

@@ -10,13 +10,13 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/cli.ts",
-    "line": 124,
+    "line": 127,
     "policy": "prose",
-    "pattern": "program.command('uninstall').description('Remove terum-skills from this machine: every team you joined (placed skills, local clones, cache), the session-start hook if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \\`${invocation(context.form, 'uninstall-skill <ref>')}\\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));"
+    "pattern": "program.command('uninstall').description('Remove terum-skills from this machine: every team you joined (placed skills, local clones, cache), the session-start hook and the /terum-skills Claude Code skill if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \\`${invocation(context.form, 'uninstall-skill <ref>')}\\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));"
   },
   {
     "file": "src/commands/eval.ts",
-    "line": 213,
+    "line": 264,
     "policy": "prose",
     "pattern": "// HEAD is not engine provenance (§5.3: \"terum-skills commit of the running CLI\"; review P2)."
   },
@@ -25,6 +25,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 69,
     "policy": "not-a-hint",
     "pattern": "if (checked) io.print(`terum-skills push guard: ${checked} path(s) to ${stripRemoteCredentials(args.url)} are yours.`);"
+  },
+  {
+    "file": "src/commands/install.ts",
+    "line": 31,
+    "policy": "prose",
+    "pattern": "/** Where that bootstrap offers the bundled /terum-skills Claude Code skill (test knob). */"
   },
   {
     "file": "src/commands/invite.ts",
@@ -58,13 +64,13 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/publish.ts",
-    "line": 88,
+    "line": 90,
     "policy": "prose",
     "pattern": "if (teamSource === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');"
   },
   {
     "file": "src/commands/publish.ts",
-    "line": 127,
+    "line": 131,
     "policy": "not-a-hint",
     "pattern": "'--body', `Endorse ${record.name} (${record.id.slice(0, 8)}) for ${team}: ${scopeLabel}.\\n\\nOpened by terum-skills publish; merge to endorse.`,"
   },
@@ -76,9 +82,27 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/setup.ts",
-    "line": 48,
+    "line": 36,
+    "policy": "prose",
+    "pattern": "/** Where the bundled /terum-skills Claude Code skill is offered from and placed (test knob). */"
+  },
+  {
+    "file": "src/commands/setup.ts",
+    "line": 52,
     "policy": "prose",
     "pattern": "'Welcome to terum-skills.',"
+  },
+  {
+    "file": "src/commands/setup.ts",
+    "line": 54,
+    "policy": "prose",
+    "pattern": "'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',"
+  },
+  {
+    "file": "src/commands/setup.ts",
+    "line": 216,
+    "policy": "prose",
+    "pattern": "// The /terum-skills Claude Code skill ships inside this package, and setup is the one onboarding"
   },
   {
     "file": "src/commands/status.ts",
@@ -88,7 +112,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/sync.ts",
-    "line": 109,
+    "line": 138,
     "policy": "not-a-hint",
     "pattern": "if (!args.hook) notice(`Skipping ${team}: another terum-skills sync holds its session lock (${lockPath(store.root, team)}); retry when it finishes.`);"
   },
@@ -202,27 +226,57 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 42,
+    "line": 36,
+    "policy": "prose",
+    "pattern": "// The /terum-skills Claude Code skill setup placed: only a copy carrying our marker is ours to remove."
+  },
+  {
+    "file": "src/commands/uninstallMachine.ts",
+    "line": 49,
     "policy": "prose",
     "pattern": "io.print('terum-skills will be removed from this machine.');"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 56,
+    "line": 58,
+    "policy": "not-a-hint",
+    "pattern": "if (wrapperPresence.kind === 'foreign') io.print(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (${wrapperPresence.why}); left alone`);"
+  },
+  {
+    "file": "src/commands/uninstallMachine.ts",
+    "line": 59,
+    "policy": "not-a-hint",
+    "pattern": "else io.print(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);"
+  },
+  {
+    "file": "src/commands/uninstallMachine.ts",
+    "line": 65,
     "policy": "fixed",
     "pattern": "io.print('Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 58,
+    "line": 67,
     "policy": "prose",
     "pattern": "if (!(await io.confirm('Remove terum-skills from this machine?'))) return failure('Uninstall was cancelled.');"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 64,
+    "line": 73,
     "policy": "prose",
     "pattern": "io.print(`Wrote a record of this machine's terum-skills state to ${record}.`);"
+  },
+  {
+    "file": "src/commands/uninstallMachine.ts",
+    "line": 85,
+    "policy": "not-a-hint",
+    "pattern": "catch (error) { return failure(`${message(error)}; the /terum-skills skill was left in place and nothing else was removed`); }"
+  },
+  {
+    "file": "src/commands/uninstallMachine.ts",
+    "line": 86,
+    "policy": "not-a-hint",
+    "pattern": "if (wrapperRemoved) io.print(`Removed the /terum-skills Claude Code skill from ${wrapperDir}.`);"
   },
   {
     "file": "src/commands/update.ts",
@@ -298,7 +352,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/lib/invocation.ts",
-    "line": 38,
+    "line": 49,
     "policy": "routed",
     "pattern": "return [form === 'bare' ? 'terum-skills' : NPX_PREFIX, verb, ...args.map((arg) => typeof arg === 'string' ? shellQuote(arg) : arg.raw)].join(' ');"
   },
@@ -382,9 +436,21 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/lib/skill-source.ts",
-    "line": 20,
+    "line": 21,
     "policy": "prose",
     "pattern": "throw new Error(`${source} is inside the terum-skills state directory ${stateRoot}; move the folder elsewhere and connect that path.`);"
+  },
+  {
+    "file": "src/lib/skill-source.ts",
+    "line": 50,
+    "policy": "prose",
+    "pattern": "// The /terum-skills Claude Code skill ships inside this package and is placed by setup; it is not a"
+  },
+  {
+    "file": "src/lib/skill-source.ts",
+    "line": 52,
+    "policy": "not-a-hint",
+    "pattern": "if (isManagedFrontmatter(parsed)) return reject('managed-wrapper', 'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill', 'This folder is the /terum-skills Claude Code skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');"
   },
   {
     "file": "src/lib/teamRepo.ts",
@@ -439,5 +505,107 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 170,
     "policy": "fixed",
     "pattern": "return `${prefix}This copy: ${launch?.path ?? 'unknown'}. Run the latest release with npx -y terum-skills@latest <command>.`;"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 12,
+    "policy": "prose",
+    "pattern": "* The `/terum-skills` Claude Code skill: the SKILL.md that teaches Claude Code which verbs it may"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 14,
+    "policy": "prose",
+    "pattern": "* `scripts/bundle-skill.mjs` into dist/claude/skills/terum-skills/SKILL.md at build time, from the"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 15,
+    "policy": "prose",
+    "pattern": "* one canonical copy at .claude/skills/terum-skills/SKILL.md) and is placed under the user's global"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 21,
+    "policy": "not-a-hint",
+    "pattern": "export const WRAPPER_NAME = 'terum-skills';"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 22,
+    "policy": "not-a-hint",
+    "pattern": "export const MANAGED_BY = 'terum-skills';"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 24,
+    "policy": "not-a-hint",
+    "pattern": "export const BUNDLED_WRAPPER = fileURLToPath(new URL('../claude/skills/terum-skills/SKILL.md', import.meta.url));"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 34,
+    "policy": "prose",
+    "pattern": "/** The idempotency key on parsed frontmatter: `name: terum-skills` plus `metadata.managed-by: terum-skills`. */"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 54,
+    "policy": "prose",
+    "pattern": "* What sits at `<skillsRoot>/terum-skills`. Judged without following links (the repo's rule for"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 93,
+    "policy": "not-a-hint",
+    "pattern": "if (bundled === null) throw new Error(`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${options.source}).`);"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 96,
+    "policy": "not-a-hint",
+    "pattern": "if (presence.kind === 'foreign') throw new Error(`${directory} exists and is not the bundled /terum-skills skill (${presence.why}); move it aside and re-run.`);"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 131,
+    "policy": "not-a-hint",
+    "pattern": "if (state === 'unavailable') { io.print(`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${options.source}); skipped.`); return 'unavailable'; }"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 132,
+    "policy": "not-a-hint",
+    "pattern": "if (state === 'foreign') { io.print(`${directory} exists and is not the bundled /terum-skills skill; left alone. Move it aside and re-run setup to install the bundled one.`); return 'foreign'; }"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 133,
+    "policy": "not-a-hint",
+    "pattern": "if (state === 'current') { io.print(`The /terum-skills Claude Code skill at ${directory} is current.`); return 'present'; }"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 134,
+    "policy": "not-a-hint",
+    "pattern": "if (state === 'outdated') { await installWrapper(options); io.print(`Updated the /terum-skills Claude Code skill at ${directory}.`); return 'replaced'; }"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 135,
+    "policy": "not-a-hint",
+    "pattern": "if (!(await io.confirm(`Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${directory})`))) {"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 136,
+    "policy": "not-a-hint",
+    "pattern": "io.print('Skipped the /terum-skills skill; re-run setup to install it later.');"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 140,
+    "policy": "not-a-hint",
+    "pattern": "io.print(`Installed the /terum-skills Claude Code skill at ${directory}.`);"
   }
 ];
