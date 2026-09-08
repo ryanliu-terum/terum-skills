@@ -154,7 +154,7 @@ jobs:
             const out = `integrity=${p.integrity}\nfilename=${p.filename}\n`;
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, out);
             const files = p.files.map(f => f.path);
-            for (const must of ["package.json","README.md","LICENSE","NOTICE","dist/index.js"])
+            for (const must of ["package.json","README.md","LICENSE","NOTICE","dist/index.js","dist/claude/skills/terum-skills/SKILL.md"])
               if (!files.includes(must)) { console.error(`tarball lacks ${must}`); process.exit(1); }
             if (files.some(f => f.includes("__tests__") || f.startsWith("src/"))) { console.error("tarball ships sources/tests"); process.exit(1); }
           '

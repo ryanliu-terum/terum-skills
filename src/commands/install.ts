@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { HookOptions } from '../lib/hook.js';
+import type { WrapperOptions } from '../lib/wrapper.js';
 import { inspect, lockTarget, moveToQuarantine, place, quarantineDrift, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
@@ -27,6 +28,8 @@ export interface InstallArgs extends WithForm {
   home?: string;
   /** Where the §8 hook offer writes when a three-part ref bootstraps a fresh machine (test knob). */
   hook?: HookOptions;
+  /** Where that bootstrap offers the bundled /terum-skills Claude Code skill (test knob). */
+  wrapper?: WrapperOptions;
   /** Injectable retry clock for deterministic recovery tests; authorization remains command-owned. */
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
 }
@@ -66,7 +69,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       // built on team, which is built on this module.
       if (!(error instanceof NotJoinedError) || Object.keys(config.teams).length > 0) throw error;
       const { run: setup } = await import('./setup.js');
-      const bootstrapped = await setup({ form: args.form, target: error.remote.replace(/^github\.com\//, ''), quiet: true, offerConnect: false, config: store, runner, home: args.home, hook: args.hook }, io);
+      const bootstrapped = await setup({ form: args.form, target: error.remote.replace(/^github\.com\//, ''), quiet: true, offerConnect: false, config: store, runner, home: args.home, hook: args.hook, wrapper: args.wrapper }, io);
       if (!bootstrapped.ok) throw new Error(bootstrapped.error);
       return bootstrapped.value.team;
     });

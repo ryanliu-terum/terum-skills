@@ -25,7 +25,7 @@ live in git so a teammate inherits them on clone. Only machine-specific paths, p
 | handoff | skill | Snapshot working context into `.claude/handoff.md` before `/clear`; `hooks/handoff-resume-marker.js` stamps it on read. |
 | state | skill | Present-tense session state report: what changed, where it lives, what's decided, next steps. |
 | ui-ux-pro-max | skill | UI/UX design intelligence (styles, palettes, font pairings, stacks). Third-party content; no LICENSE file shipped with it. |
-| terum-skills | `/terum-skills` | Run a terum-skills CLI verb in-session (`npx -y terum-skills@latest …`) or hand the question-asking verbs to a terminal; the Bash tool has no TTY. Design: `.planning/reviews/2026-09-07-cli-skill-wrappers-feasibility.md`. |
+| terum-skills | `/terum-skills` | Run a terum-skills CLI verb in-session (`npx -y terum-skills@latest …`) or hand the question-asking verbs to a terminal; the Bash tool has no TTY. Design: `.planning/reviews/2026-09-07-cli-skill-wrappers-feasibility.md`. This is the one canonical copy: `npm run build` bundles it (`scripts/bundle-skill.mjs` → `dist/claude/skills/`) and `terum-skills setup` places it at `~/.claude/skills/terum-skills/`; its `metadata.managed-by` marker is how setup and uninstall recognise their copy (`src/lib/wrapper.ts`). |
 
 `/ultraspec` (command only) runs `workflows/ultraspec.js`, the Claude-only spec auditor.
 

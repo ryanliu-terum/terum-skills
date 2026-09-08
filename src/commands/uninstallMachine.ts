@@ -4,6 +4,7 @@ import { access, mkdir, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { defaultHookOptions, HookOptions, hookInstalled, removeHook } from '../lib/hook.js';
+import { defaultWrapperOptions, inspectWrapper, removeWrapper, wrapperDestination, WrapperOptions } from '../lib/wrapper.js';
 import { Launch, packageRemovalLines } from '../lib/launch.js';
 import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
@@ -12,8 +13,8 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { teardownTeam } from './leave.js';
 
 export const fsForTests = { rm, rmdir };
-export interface UninstallMachineArgs extends WithForm { config?: ConfigStore; hook?: HookOptions; launch?: Launch; runner?: Runner; home?: string; }
-export interface MachineUninstallResult { teams: string[]; removedPlacements: number; hookRemoved: boolean; configRemoved: boolean; kept: string[]; record: string; launch: Launch | null; }
+export interface UninstallMachineArgs extends WithForm { config?: ConfigStore; hook?: HookOptions; wrapper?: WrapperOptions; launch?: Launch; runner?: Runner; home?: string; }
+export interface MachineUninstallResult { teams: string[]; removedPlacements: number; hookRemoved: boolean; wrapperRemoved: boolean; configRemoved: boolean; kept: string[]; record: string; launch: Launch | null; }
 
 /** Confirm and remove this machine's tracked state. Package removal is always advice, never executed. */
 export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Result<MachineUninstallResult>> {
@@ -32,6 +33,12 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     let hookPresent: boolean;
     try { hookPresent = await hookInstalled(options.settingsFile); }
     catch (error) { return failure(`${message(error)}; nothing was removed`); }
+    // The /terum-skills Claude Code skill setup placed: only a copy carrying our marker is ours to remove.
+    const wrapper = { ...defaultWrapperOptions(args.home), ...args.wrapper };
+    const wrapperDir = wrapperDestination(wrapper.skillsRoot);
+    let wrapperPresence: Awaited<ReturnType<typeof inspectWrapper>>;
+    try { wrapperPresence = await inspectWrapper(wrapper.skillsRoot); }
+    catch (error) { return failure(`${message(error)}; nothing was removed`); }
     const quarantine = join(store.root, 'quarantine');
     const quarantineCount = (await entries(quarantine)).length;
     const backups = join(store.root, 'backups');
@@ -48,6 +55,8 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     }
     if (bindings.length) io.print('  Version cache and run files for these teams');
     io.print(`  ${hookPresent ? 'Session-start hook in' : 'No session hook in'} ${options.settingsFile}`);
+    if (wrapperPresence.kind === 'foreign') io.print(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (${wrapperPresence.why}); left alone`);
+    else io.print(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);
     io.print(`  ${configPath}`);
     io.print(`Kept: ${quarantineCount ? `${quarantine} (${quarantineCount} items), ` : ''}${backups} (settings backups and a record of this uninstall)`);
     if (quarantineCount) kept.push(quarantine);
@@ -69,6 +78,12 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
       catch (error) { return failure(`${message(error)}; the hook was left in place and nothing else was removed`); }
       hookRemoved = outcome === 'removed';
       io.print(hookRemoved ? `Removed the session hook from ${options.settingsFile}.` : `No session hook in ${options.settingsFile}.`);
+    }
+    let wrapperRemoved = false;
+    if (wrapperPresence.kind === 'managed') {
+      try { wrapperRemoved = (await removeWrapper(wrapper)) === 'removed'; }
+      catch (error) { return failure(`${message(error)}; the /terum-skills skill was left in place and nothing else was removed`); }
+      if (wrapperRemoved) io.print(`Removed the /terum-skills Claude Code skill from ${wrapperDir}.`);
     }
 
     const teams: string[] = [];
@@ -135,7 +150,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     if (directoryFailure) return failure(directoryFailure);
     io.print('Machine cleanup complete. The package itself has not been removed; finish with the package manager that installed it.');
     for (const line of packageRemovalLines(args.launch)) io.print(line);
-    return success({ teams, removedPlacements, hookRemoved, configRemoved, kept, record, launch: args.launch ?? null });
+    return success({ teams, removedPlacements, hookRemoved, wrapperRemoved, configRemoved, kept, record, launch: args.launch ?? null });
   } catch (error) { return failure(message(error)); }
 }
 

@@ -1,11 +1,12 @@
 import * as fs from 'node:fs/promises';
-import { chmod, mkdir, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import YAML from 'yaml';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { candidatesOf, localSkills, localSkillRoots } from '../local-skills.js';
 import { emptyConfig } from '../schema.js';
-import { temporaryDirectory } from './fixtures.js';
+import { assertSkillSource } from '../skill-source.js';
+import { BUNDLED_SKILL_SOURCE, temporaryDirectory } from './fixtures.js';
 
 // Clone the ESM namespace so individual permission failures can be injected and restored.
 vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs/promises')>() }));
@@ -237,5 +238,21 @@ describe('project local discovery (Ryan 2026-09-06)', () => {
     expect(inventory.entries.map((entry) => entry.inspection)).toEqual([0, 1].map(() => ({ kind: 'rejected', reason: 'inside-state-root', detail: `inside the terum-skills state directory ${stateRoot}` })));
     expect(inventory.entries[0]?.shared).toEqual([{ id: 'id', team: 'team' }]);
     expect(candidatesOf(inventory, true)).toEqual([]);
+  });
+});
+
+describe('the bundled /terum-skills Claude Code skill is not a team skill', () => {
+  it('discovery rejects it with its own reason under any folder name, and connect refuses it', async () => {
+    const root = await temporaryDirectory();
+    const bundled = await readFile(BUNDLED_SKILL_SOURCE, 'utf8');
+    await candidate(root, 'terum-skills', bundled);
+    await candidate(root, 'renamed-copy', bundled);
+    await candidate(root, 'plain');
+    const inventory = await localSkills(root, emptyConfig(), { scope: 'global', stateRoot: join(root, '.state') });
+    const rejected = { kind: 'rejected', reason: 'managed-wrapper', detail: 'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill' };
+    expect(inventory.entries.find((entry) => entry.name === 'terum-skills')?.inspection).toEqual(rejected);
+    expect(inventory.entries.find((entry) => entry.name === 'renamed-copy')?.inspection).toEqual(rejected);
+    expect(candidatesOf(inventory, true).map((entry) => entry.name)).toEqual(['plain']);
+    expect(() => assertSkillSource(bundled, 'terum-skills')).toThrow('This folder is the /terum-skills Claude Code skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');
   });
 });
