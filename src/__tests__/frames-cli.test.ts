@@ -1,0 +1,107 @@
+import { PassThrough } from 'node:stream';
+import { describe, expect, it } from 'vitest';
+import { buildProgram, type CliVerbs } from '../cli.js';
+import { createExecute } from '../lib/execute.js';
+import { FRAME_VERBS, frameChannel, type Frame, type ResultFrame } from '../lib/frames.js';
+import type { Prompter } from '../lib/prompt.js';
+import { failure, success } from '../lib/result.js';
+
+/**
+ * Every public verb, driven through commander with the frame channel in place of the terminal: the
+ * verb asks all three question kinds and prints, the "shell" answers over stdin, and the run ends
+ * in exactly one result frame. The verbs are stubs (the real ones need git and a team); what is
+ * under test is that the wiring from argv to Prompter to result frame holds for each of them.
+ */
+const asking = (async (_args: unknown, io: Prompter) => {
+  const go = await io.confirm('Proceed?');
+  const name = await io.text('Name', 'dflt');
+  const pick = await io.select('Pick', ['a', 'b']);
+  io.print(`hello ${name}`);
+  return success({ go, name, pick });
+}) as never;
+
+const INVOCATIONS: Record<string, string[]> = {
+  login: ['login'], setup: ['setup'], 'team create': ['team', 'create', 'x'], 'team join': ['team', 'join', 'o/r'], 'team remove': ['team', 'remove', 'h'], 'team leave': ['team', 'leave', 'n'], 'team workflow-update': ['team', 'workflow-update'],
+  invite: ['invite', 'u'], ls: ['ls'], status: ['status'], publish: ['publish', 'ref'], validate: ['validate', 'x'], eval: ['eval', 'x'], connect: ['connect'], install: ['install', 'ref'], 'uninstall-skill': ['uninstall-skill', 'ref'], uninstall: ['uninstall'], sync: ['sync'], search: ['search', 't'], update: ['update'],
+};
+
+function harness(verbs: CliVerbs) {
+  const input = new PassThrough(); const output = new PassThrough();
+  const frames: Frame[] = []; const stderr: string[] = []; const codes: number[] = [];
+  let buffer = '';
+  output.on('data', (chunk: Buffer) => { buffer += chunk.toString('utf8'); let i = buffer.indexOf('\n'); while (i !== -1) { frames.push(JSON.parse(buffer.slice(0, i)) as Frame); buffer = buffer.slice(i + 1); i = buffer.indexOf('\n'); } });
+  const channel = frameChannel({ input, output, diagnostic: (line) => stderr.push(line) });
+  const execute = createExecute({ io: channel.io, stderr: (line) => stderr.push(line), setExitCode: (code) => codes.push(code), result: (outcome) => channel.result(outcome) });
+  const program = buildProgram(execute, verbs, { noUpdateCheck: true });
+  program.exitOverride();
+  // Answer each ask as it appears, like a shell would.
+  let answered = 0;
+  output.on('data', () => {
+    const asks = frames.filter((frame) => frame.t === 'ask');
+    while (answered < asks.length) {
+      const ask = asks[answered++]!;
+      const value = ask.kind === 'confirm' ? true : ask.kind === 'text' ? '' : 2;
+      input.write(`${JSON.stringify({ t: 'answer', id: ask.id, value })}\n`);
+    }
+  });
+  return { frames, stderr, codes, run: (argv: string[]) => program.parseAsync(['node', 'terum-skills', ...argv]) };
+}
+
+describe('frame mode through commander — every public verb', () => {
+  const verbs: CliVerbs = { login: asking, team: asking, setup: asking, connect: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, receiptCheck: asking, update: asking };
+
+  it('FRAME_VERBS names only registered commands, and every one is covered here', () => {
+    const program = buildProgram(async () => undefined, verbs, {});
+    const names = new Set<string>();
+    for (const command of program.commands) { names.add(command.name()); for (const sub of command.commands) names.add(`${command.name()} ${sub.name()}`); }
+    for (const verb of FRAME_VERBS) { expect(names.has(verb), verb).toBe(true); expect(INVOCATIONS[verb], `no invocation for ${verb}`).toBeDefined(); }
+  });
+
+  for (const verb of FRAME_VERBS) {
+    it(`${verb}: confirm, text, select and print become frames; the run ends in one ok result with the verb's value`, async () => {
+      const h = harness(verbs);
+      await h.run(INVOCATIONS[verb]!);
+      const kinds = h.frames.map((frame) => frame.t === 'ask' ? `ask:${frame.kind}` : frame.t);
+      expect(kinds).toEqual(['ask:confirm', 'ask:text', 'ask:select', 'print', 'result']);
+      const result = h.frames.at(-1) as ResultFrame;
+      expect(result).toMatchObject({ t: 'result', ok: true, exitCode: 0, value: { go: true, name: 'dflt', pick: 'b' } });
+      expect(result.verb.startsWith(verb.split(' ')[0]!)).toBe(true);
+      expect(h.codes).toEqual([]);
+      expect(h.stderr).toEqual([]);
+    });
+  }
+
+  it('a failing Result is a result frame with ok false, exit 1, the error and (for a decline) the declined flag; stderr still gets the one line', async () => {
+    const declining = (async () => failure('Connect was declined.')) as never;
+    const h = harness({ ...verbs, connect: declining });
+    await h.run(['connect']);
+    expect(h.frames).toEqual([{ t: 'result', verb: 'connect', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true }]);
+    expect(h.codes).toEqual([1]);
+    expect(h.stderr).toEqual(['Connect was declined.']);
+  });
+
+  it('a verb that throws (a question cancelled by the shell) ends in a result frame, not a hang', async () => {
+    const cancelling = (async (_args: unknown, io: Prompter) => { await io.confirm('Proceed?'); return success(1); }) as never;
+    const g = harnessWithCancel({ ...verbs, status: cancelling });
+    await g.run(['status']);
+    expect(g.frames.map((frame) => frame.t)).toEqual(['ask', 'result']);
+    expect(g.frames.at(-1)).toMatchObject({ t: 'result', verb: 'status', ok: false, exitCode: 1, error: expect.stringContaining('Input ended before "Proceed?"') });
+  });
+
+  it('the legacy `share` refusal is a result frame too (no prompt, exit 1)', async () => {
+    const h = harness(verbs);
+    await h.run(['share', 'x']);
+    expect(h.frames).toEqual([expect.objectContaining({ t: 'result', verb: 'share', ok: false, exitCode: 1, error: expect.stringContaining('`share` is now `connect`') })]);
+  });
+});
+
+function harnessWithCancel(verbs: CliVerbs) {
+  const input = new PassThrough(); const output = new PassThrough();
+  const frames: Frame[] = [];
+  let buffer = '';
+  output.on('data', (chunk: Buffer) => { buffer += chunk.toString('utf8'); let i = buffer.indexOf('\n'); while (i !== -1) { frames.push(JSON.parse(buffer.slice(0, i)) as Frame); buffer = buffer.slice(i + 1); i = buffer.indexOf('\n'); } if (frames.some((frame) => frame.t === 'ask')) input.write(`${JSON.stringify({ t: 'cancel' })}\n`); });
+  const channel = frameChannel({ input, output });
+  const execute = createExecute({ io: channel.io, stderr: () => undefined, setExitCode: () => undefined, result: (outcome) => channel.result(outcome) });
+  const program = buildProgram(execute, verbs, { noUpdateCheck: true });
+  return { frames, run: (argv: string[]) => program.parseAsync(['node', 'terum-skills', ...argv]) };
+}

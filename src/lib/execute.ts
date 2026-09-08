@@ -2,6 +2,7 @@ import { invocation, type InvocationForm } from './invocation.js';
 import type { Execute } from '../cli.js';
 import type { SyncResult } from '../commands/sync.js';
 import type { Prompter } from './prompt.js';
+import type { ResultOutcome } from './frames.js';
 
 /** What the bin owns: where failure text goes and how the exit code is set. Injected so the contract is testable. */
 export interface ExecuteSink {
@@ -10,6 +11,8 @@ export interface ExecuteSink {
   afterVerb?(): Promise<void>;
   stderr(line: string): void;
   setExitCode(code: number): void;
+  /** Frame mode: the verb's outcome as one terminal frame (ok, error, value, exit code). Absent on a terminal. */
+  result?(outcome: ResultOutcome): void;
 }
 
 /**
@@ -26,10 +29,15 @@ export function createExecute(sink: ExecuteSink): Execute {
       if (!outcome.ok) {
         sink.stderr(outcome.error);
         sink.setExitCode(1);
+        sink.result?.({ verb: meta.verb, ok: false, error: outcome.error, value: outcome.value, exitCode: 1 });
+      } else {
+        sink.result?.({ verb: meta.verb, ok: true, value: outcome.value, exitCode: 0 });
       }
     } catch (error) {
-      sink.stderr(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      sink.stderr(message);
       sink.setExitCode(1);
+      sink.result?.({ verb: meta.verb, ok: false, error: message, exitCode: 1 });
     } finally {
       if (meta.notices) {
         try { await sink.afterVerb?.(); } catch { /* A notice must never replace the verb outcome. */ }
