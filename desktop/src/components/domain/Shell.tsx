@@ -9,7 +9,7 @@ import { Sidebar } from './Sidebar';
 import { DialogContainer } from '../ui/Dialog';
 const ShellReadyContext=createContext(true);
 export function useShellReady(){return useContext(ShellReadyContext);}
-export function Shell({selected='Global',counts,overlay,children}:PropsWithChildren<{selected?:string;counts?:Record<string,string>|null|undefined;overlay?:ReactNode}>){
+export function Shell({selected='Global',counts,overlay,children,projects}:PropsWithChildren<{selected?:string;counts?:Record<string,string>|null|undefined;overlay?:ReactNode;projects?:readonly string[]|undefined}>){
  const [container,setContainer]=useState<HTMLDivElement|null>(null);
  const backend=useBackend();const state=useUrlState();const location=useLocation();
  const capabilities=useQuery({queryKey:['capabilities'],queryFn:()=>backend.capabilities()});
@@ -18,5 +18,5 @@ export function Shell({selected='Global',counts,overlay,children}:PropsWithChild
  const value=status.data?.ok?status.data.value:undefined;
  // Keep the mock scenario when following a real shell link within this page.
  function navigate(event:React.MouseEvent<HTMLDivElement>){const target=event.target;if(!(target instanceof Element))return;const anchor=target.closest<HTMLAnchorElement>('a[href^="#/"]');if(!anchor||state.mock==='default')return;const url=anchor.hash;const [path,query='']=url.split('?');const params=new URLSearchParams(query);params.set('__mock',state.mock);anchor.href=path+'?'+params.toString();}
- return <ShellReadyContext value={!status.isPending}><div ref={setContainer} className="shell" onClickCapture={navigate} data-route={location.pathname}><DialogContainer container={container}><TopBar mode={capabilities.data?.windowChrome??'cosmetic'}/><div className="shell-row"><Sidebar selected={selected} counts={counts===undefined?value?.counts??null:counts} machine={value?.machine} surfaces={surfaces.data}/><main className="panel">{children}</main></div>{overlay}</DialogContainer></div></ShellReadyContext>;
+ return <ShellReadyContext value={!status.isPending}><div ref={setContainer} className="shell" onClickCapture={navigate} data-route={location.pathname}><DialogContainer container={container}><TopBar mode={capabilities.data?.windowChrome??'cosmetic'}/><div className="shell-row"><Sidebar selected={selected} counts={counts===undefined?value?.counts??null:counts} machine={value?.machine} surfaces={surfaces.data} projects={projects??(surfaces.data?.status===false?[]:undefined)}/><main className="panel">{children}</main></div>{overlay}</DialogContainer></div></ShellReadyContext>;
 }

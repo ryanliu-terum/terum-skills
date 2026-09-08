@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
-import { run } from '../ls.js';
+import { run, format } from '../ls.js';
+import { systemRunner } from '../../lib/runner.js';
+import { allowedTools } from '../../lib/schema.js';
 import { candidatesOf, localSkills } from '../../lib/local-skills.js';
 import { ghOnlyRunner } from '../../lib/__tests__/fixtures.js';
 
@@ -54,7 +56,7 @@ describe('ls (§6)', () => {
     expect(result).toMatchObject({ ok: true, value: { skills: [expect.objectContaining({ name: 'ghost', latest: '—' }), expect.objectContaining({ name: 'healthy', latest: tree })] } });
     expect(io.lines.filter((line) => line.startsWith('ghost: Could not resolve the latest version of ghost'))).toHaveLength(1);
     expect(io.lines).toContain('Members:');
-    expect(io.lines).toContain(`  healthy — Seed <seed@example.com>; testing; 0 installs; ${tree}; —`);
+    expect(io.lines).toContain(`  healthy — Seed <seed@example.com>; testing; 0 installs; ${tree}; —; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/healthy'], clone)).trim()}`);
   });
 
   it('supports member and project forms', async () => {
@@ -257,4 +259,65 @@ it('issue 5 names connect in the privileged local-source guidance', async () => 
   const result = await run({ local: true, home, config: createConfigStore(join(home, 'state')) }, io);
   expect(result.ok).toBe(true);
   expect(io.lines).toContain(`  privileged — untracked locally; source problem: contains plugin or hook definitions (connect needs --allow-privileged); path: ${source}`);
+});
+
+
+async function inventoryFixture() {
+  const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
+  const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  return { ...fixture, store, clone };
+}
+const inventorySource = (name: string, grants = 'allowed-tools: [Read, Bash, Read]') => `---\nname: ${name}\ndescription: "A description with <tags> and  spaces"\nlicense: UNLICENSED\n${grants}\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n# Real body\n`;
+it('one malformed folder and one malformed person each cost only their row, with named problems', async () => {
+  const { store, clone } = await inventoryFixture();
+  for (const name of ['good','bad','mismatch']) { await mkdir(join(clone,'skills',name)); await writeFile(join(clone,'skills',name,'SKILL.md'), name==='bad'?'invalid':inventorySource(name==='mismatch'?'other':name)); }
+  await writeFile(join(clone,'people','bad.json'), '{broken');
+  const io = new ScriptedPrompter(); const result = await run({config:store},io);
+  expect(result).toMatchObject({ok:true,value:{skills:[{name:'good',unresolved:true,latest:'—',installs:0}],roster:[{handle:'seed'}]}});
+  if(!result.ok)throw new Error(result.error);
+  expect(result.value.problems.map(p=>p.source).sort()).toEqual(['people/bad.json','skills/bad','skills/good','skills/mismatch']);
+  expect(io.lines.filter(line=>line.startsWith('people/bad.json:'))).toHaveLength(1);
+  for(const kind of ['member','project'] as const) {
+    if(kind==='project') await writeFile(join(clone,'team.json'),JSON.stringify({...TEAM_JSON,projects:{app:{skills:[ID],remotes:[]}}}));
+    const scoped=await run({config:store,kind,value:kind==='member'?'seed':'app'},new ScriptedPrompter());
+    expect(scoped).toMatchObject({ok:true,value:{skills:[{name:'good'}],problems:expect.arrayContaining([{source:'skills/mismatch',message:expect.stringContaining('does not match')}])}});
+  }
+});
+it('an unreadable skills root fails whole, never masquerading as an empty team', async () => {
+  const {store,clone}=await inventoryFixture();const original=fs.readdir;
+  const spy=vi.spyOn(fs,'readdir').mockImplementation((...args)=>{if(args[0]===join(clone,'skills'))return Promise.reject(new Error('EACCES skills root'));return original(...args);});
+  try {expect(await run({config:store},new ScriptedPrompter())).toEqual({ok:false,error:'EACCES skills root'});}finally{spy.mockRestore();}
+});
+it('carries verbatim description, normalized grants, body, installers and date; format adds only the date',async()=>{
+  const {store,clone}=await inventoryFixture();await mkdir(join(clone,'skills','good'));await writeFile(join(clone,'skills','good','SKILL.md'),inventorySource('good'));
+  await writeFile(join(clone,'people','seed.json'),JSON.stringify(person('seed',{installed:[{id:ID,version:null,scope:{kind:'global'},since:'2026-08-01'},{id:ID,version:null,scope:{kind:'project',project:'app'},since:'2026-08-02'}]})));
+  await git(['add','--all'],clone);await git(['commit','-qm','inventory'],clone);
+  const io=new ScriptedPrompter();const result=await run({config:store},io);if(!result.ok)throw new Error(result.error);
+  const row=result.value.skills[0]!;const grants=allowedTools(['Read','Bash','Read']);if(!grants.ok)throw new Error('bad grants');
+  expect(row).toMatchObject({description:'A description with <tags> and  spaces',grants:grants.normalized,grantsHash:grants.hash,body:'# Real body\n',installs:1,unresolved:false,updated:(await git(['log','-1','--format=%cI','--','skills/good'],clone)).trim()});
+  expect(row.installedBy.map(p=>p.scope)).toEqual([{kind:'global'},{kind:'project',project:'app'}]);
+  expect(format(row)).toBe(`  good — Seed <seed@example.com>; testing; 1 installs; ${row.latest}; —; ${row.updated}`);
+  expect(io.lines).toContain(format(row));
+  await writeFile(join(clone,'skills','good','SKILL.md'),inventorySource('good','allowed-tools: {bad: value}'));
+  expect(await run({config:store},new ScriptedPrompter())).toMatchObject({ok:true,value:{skills:[{grants:null,grantsHash:null}]}});
+});
+it('returns sorted passthrough projects including empty projects, member declined only on member, and no registry on local',async()=>{
+  const {store,clone,root}=await inventoryFixture();
+  await writeFile(join(clone,'team.json'),JSON.stringify({...TEAM_JSON,projects:{z:{skills:[],remotes:[]},A:{skills:[ID],remotes:['github.com/acme/a'],description:'Hand maintained'}}}));
+  await writeFile(join(clone,'people','seed.json'),JSON.stringify(person('seed',{declined:[ID]})));
+  for(const args of [{},{kind:'member' as const,value:'seed'},{kind:'project' as const,value:'A'}]) {
+    const result=await run({config:store,...args},new ScriptedPrompter());if(!result.ok)throw new Error(result.error);
+    expect(result.value.projects).toEqual([{name:'A',skills:[ID],remotes:['github.com/acme/a'],description:'Hand maintained'},{name:'z',skills:[],remotes:[]}]);
+    if(args.kind==='member')expect(result.value.member).toEqual({handle:'seed',declined:[ID]});else expect(result.value).not.toHaveProperty('member');
+  }
+  const local=await run({config:store,local:true,home:root},new ScriptedPrompter());expect(local).toMatchObject({ok:true,value:{problems:[]}});expect(local.value).not.toHaveProperty('projects');
+});
+it('uses one version child and at most eight simultaneous date children for a large listing',async()=>{
+  const {store,clone}=await inventoryFixture();
+  for(let i=0;i<19;i++){const name='skill-'+i;await mkdir(join(clone,'skills',name));await writeFile(join(clone,'skills',name,'SKILL.md'),inventorySource(name));}
+  await git(['add','--all'],clone);await git(['commit','-qm','many'],clone);
+  let active=0,peak=0;const calls:string[][]=[];
+  const runner={run:async(command:Parameters<typeof systemRunner.run>[0],args:readonly string[],options?:Parameters<typeof systemRunner.run>[2])=>{active++;peak=Math.max(peak,active);calls.push([...args]);try{return await systemRunner.run(command,args,options);}finally{active--;}}};
+  const result=await run({config:store,runner},new ScriptedPrompter());expect(result.ok).toBe(true);expect(peak).toBeLessThanOrEqual(9);expect(peak).toBeGreaterThan(1);expect(calls.filter(c=>c[0]==='ls-tree')).toEqual([['ls-tree','HEAD:skills']]);expect(calls.filter(c=>c[0]==='log')).toHaveLength(19);
 });
