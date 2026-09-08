@@ -6,8 +6,8 @@ status: complete
 deferred:
   - what: Linux row in the release matrix and Linux download in `terum-skills app` (D3); the .deb/.AppImage build is trivial, opening it is unverified
     gate: the first Linux-desktop teammate, or Teddy having a Linux desktop (not WSLg) to walk C16 and C17 on
-  - what: PR order for issues 51, 49, 50 and the release-workflow desktop matrix, and whether the CLI side lands dark before `desktop/` exists (D9)
-    gate: Teddy's `desktop/` push lands on ryanliu-terum/terum-skills
+  - what: PR order for issues 51, 49, 50 and the release-workflow desktop matrix (D9); resolved 2026-09-08 once #54 landed, kept here only until the PRs merge
+    gate: PRs #53 to #59 merged in the order the overnight handoff lists
 ---
 
 # Desktop app CLI side (issues 49-51) — Decision Walk
@@ -30,7 +30,7 @@ Ratified by Ryan: "that's the right thing to be optimizing for."
 | 6 | What issue 51 is, given join already accepts invitations | LOCK | Two message fixes: join says when no invitation was found and what that means; invite says "no GitHub user named X" on a 404 instead of blaming the invitation cap. Auto-accept already exists. | — |
 | 7 | What `app` says when the download fails | LOCK | Distinct wording per cause (offline, GitHub/auth, checksum mismatch, asset missing), each ending with the same two actions: use the terminal now, run `terum-skills app` later. Half-downloaded or corrupt files are deleted. Download goes through `gh release download`, keeping the only-git-and-gh rule. | — |
 | 8 | Launching after download, including Windows | LOCK | Mac: open the app. Windows: run the per-user NSIS installer silently the first time, then launch the installed app. Already running: bring to front. Windows leg is built blind until Teddy's laptop runs it. | — |
-| 9 | Order of work and what ships together | DEFER | Teddy is about to push `desktop/`; the order of the CLI PRs versus the M5 release-workflow PR is decided once that lands. Meanwhile only CLI work is unblocked. | Teddy's `desktop/` push lands on `ryanliu-terum/terum-skills` |
+| 9 | Order of work and what ships together | DEFER → resolved the same night | Teddy's push (#54) landed at 01:30; everything then landed as stacked PRs the same night. Merge order: #53, #54, #55, #56, #57, #58, then #59 (0.1.6 bump). | `.claude/handoff-desktop-overnight.md` |
 
 ---
 
@@ -242,7 +242,7 @@ Supersedes the section 7 default "public sibling repo `terum-skills-app`" accept
 
 - **LOCKED, ready to build:** D1 state file for Node and package paths; D2 desktop under `desktop/`, built inside `release.yml` before the npm approval; D4 remember a yes, re-ask after a no in setup only; D5 the CLI skips the app question and the `gh auth login` offer in frame mode; D6 two message fixes for 51; D7 per-cause download failure wording with a shared tail, download via `gh release download`, partial files deleted; D8 open on Mac, silent per-user NSIS then launch on Windows.
 - **GATED:** D3 Linux in the release matrix, on the first Linux-desktop teammate or a Linux desktop to test on.
-- **DEFERRED:** D9 PR order, until Teddy's `desktop/` push lands.
+- **DEFERRED:** D9 PR order, until Teddy's `desktop/` push lands. Resolved later the same night: the push landed as #54; M5 and M6 (#55), issue 51 (#56), issue 49 (#57), issue 50 (#58) and the 0.1.6 bump (#59) were opened as stacked PRs; the merge order is in `.claude/handoff-desktop-overnight.md`.
 - **DELEGATED:** none.
 - **Supersedes:** the section 7 default "public sibling repo `terum-skills-app`" (replaced by `desktop/` in this repo per Teddy, 2026-09-08). The earlier Terum decision "auto-accept pending invitations on join" describes behaviour that already existed; D6 narrows 51 to messages.
 - **Outside this batch, surfaced along the way:** the decision-walk skill and CONVENTIONS pointer in this repo describe a DEFERRED-INDEX hook that does not exist here (already noted in `.claude/handoff-harden-forks-walk.md:61`).
