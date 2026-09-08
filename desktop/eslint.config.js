@@ -9,7 +9,7 @@ const ioSyntax={selector:'ImportExpression[source.value=/^(node:|fs$|fs\\u002fpr
 const seamSyntax={selector:'ImportExpression[source.value=/backend\\u002f(mock|tauri)|fixtures\\u002f|@tauri-apps/]',message:'the D23 seam: screens import src/backend/types and src/backend/index only'};
 const seam = 'the D23 seam: screens import src/backend/types and src/backend/index only';
 export default tseslint.config(
- {ignores:['dist/**','node_modules/**','e2e/out/**','src/fixtures/design.json']},
+ {ignores:['dist/**','node_modules/**','e2e/out/**','src/fixtures/design.json','src-tauri/**']},
  js.configs.recommended, tseslint.configs.recommended,
  {rules:{'no-restricted-imports':['error',{paths}]}},
  {files:['e2e/**','tools/**','*.config.*'],languageOptions:{globals:globals.node}},

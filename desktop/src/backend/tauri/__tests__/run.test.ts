@@ -1,0 +1,153 @@
+import { describe, expect, it } from 'vitest';
+import type { Frame } from '../../types';
+import type { AppState, Bridge, LineEvent } from '../bridge';
+import { parseCliFrame } from '../frames';
+import { cliRun, NO_STATE } from '../run';
+import { createTauriBackend } from '../index';
+
+const STATE: AppState = { schema: 1, node: '/usr/local/bin/node', entry: '/usr/local/lib/node_modules/terum-skills/dist/index.js', version: '0.1.6' };
+
+/** A fake shell: records spawns and writes, replays scripted CLI stdout lines, honours cancel/kill. */
+function fakeBridge(script: (args: readonly string[], emit: (e: LineEvent) => void, writes: string[]) => void | Promise<void>, state: AppState | null = STATE) {
+  const spawns: { id: string; args: readonly string[]; cwd: string | undefined }[] = [];
+  const writes: string[] = [];
+  const kills: string[] = [];
+  let emit: ((e: LineEvent) => void) | undefined;
+  const bridge: Bridge = {
+    async spawn(id, _state, args, cwd, onEvent) { spawns.push({ id, args, cwd }); emit = onEvent; await Promise.resolve(); await script(args, onEvent, writes); },
+    async write(_id, line) { writes.push(line); },
+    async kill(id) { kills.push(id); emit?.({ kind: 'exit', code: null }); },
+    async readAppState() { return state; },
+    async hostPlatform() { return 'macos'; },
+  };
+  return { bridge, spawns, writes, kills };
+}
+const line = (frame: object) => JSON.stringify(frame);
+const hello = line({ t: 'hello', protocol: 1, version: '0.1.6', verbs: ['status'], features: {} });
+async function collect(frames: AsyncIterable<Frame>) { const out: Frame[] = []; for await (const f of frames) out.push(f); return out; }
+
+describe('parseCliFrame', () => {
+  it('accepts the five frame kinds and rejects anything else', () => {
+    expect(parseCliFrame(hello)?.t).toBe('hello');
+    expect(parseCliFrame(line({ t: 'print', level: 'warn', line: 'x' }))).toEqual({ t: 'print', level: 'warn', line: 'x' });
+    expect(parseCliFrame(line({ t: 'ask', id: 'q1', kind: 'select', question: 'Pick', choices: ['a', 'b'] }))).toEqual({ t: 'ask', id: 'q1', kind: 'select', question: 'Pick', choices: ['a', 'b'] });
+    expect(parseCliFrame(line({ t: 'progress', step: 'clone', current: 2, total: 5 }))).toEqual({ t: 'progress', step: 'clone', current: 2, total: 5 });
+    expect(parseCliFrame(line({ t: 'result', verb: 'status', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true }))).toEqual({ t: 'result', verb: 'status', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true });
+    for (const bad of ['not json', '{}', line({ t: 'ask', id: 1 }), line({ t: 'print', line: 'no level' }), line({ t: 'nope' })]) expect(parseCliFrame(bad), bad).toBeNull();
+  });
+});
+
+describe('cliRun — a CLI process as a seam Run<T>', () => {
+  it('maps hello/print/ask/progress/result to seam frames, forwards the answer, settles done with the mapped value', async () => {
+    const { bridge, spawns, writes } = fakeBridge(async (_args, emit, w) => {
+      emit({ kind: 'stdout', line: hello });
+      emit({ kind: 'stdout', line: line({ t: 'print', level: 'info', line: 'Installing…' }) });
+      emit({ kind: 'stdout', line: line({ t: 'print', level: 'warn', line: 'careful' }) });
+      emit({ kind: 'stdout', line: line({ t: 'ask', id: 'q1', kind: 'confirm', question: 'Approve?' }) });
+      while (!w.length) await new Promise((r) => setTimeout(r, 1));
+      expect(JSON.parse(w[0]!)).toEqual({ t: 'answer', id: 'q1', value: true });
+      emit({ kind: 'stdout', line: line({ t: 'progress', step: 'place', current: 1, total: 1 }) });
+      emit({ kind: 'stderr', line: 'diagnostic noise' });
+      emit({ kind: 'stdout', line: line({ t: 'result', verb: 'install', ok: true, exitCode: 0, value: [{ id: 'a', team: 't' }] }) });
+      emit({ kind: 'exit', code: 0 });
+    });
+    const run = cliRun<{ id: string }[], string[]>(bridge, Promise.resolve(STATE), ['install', 'a'], { cwd: '/ws', map: (v) => v.map((x) => x.id) });
+    const framesP = collect(run.frames);
+    // answer the question when it appears
+    for await (const f of run.frames) if (f.t === 'ask') run.answer(f.id, true);
+    const frames = await framesP;
+    expect(frames).toEqual([
+      { t: 'print', line: 'Installing…' }, { t: 'print', line: 'warn: careful' },
+      { t: 'ask', id: 'q1', kind: 'confirm', question: 'Approve?' },
+      { t: 'progress', done: 1, total: 1, label: 'place' },
+      { t: 'result', ok: true },
+    ]);
+    expect(await run.done).toEqual({ ok: true, value: ['a'] });
+    expect(spawns).toEqual([{ id: expect.stringMatching(/^r\d+-/), args: ['install', 'a'], cwd: '/ws' }]);
+    expect(writes).toHaveLength(1);
+  });
+
+  it('a failing result frame settles done with the CLI error and ends the frames with ok:false', async () => {
+    const { bridge } = fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'result', verb: 'connect', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true }) }); emit({ kind: 'exit', code: 1 }); });
+    const run = cliRun(bridge, Promise.resolve(STATE), ['connect'], { map: (v) => v });
+    expect(await collect(run.frames)).toEqual([{ t: 'result', ok: false, error: 'Connect was declined.' }]);
+    expect(await run.done).toEqual({ ok: false, error: 'Connect was declined.' });
+  });
+
+  it('exit without a result is a failure that quotes the last stderr lines', async () => {
+    const { bridge } = fakeBridge((_a, emit) => { emit({ kind: 'stderr', line: 'node: cannot find module' }); emit({ kind: 'exit', code: 1 }); });
+    const run = cliRun(bridge, Promise.resolve(STATE), ['status'], { map: (v) => v });
+    expect(await run.done).toEqual({ ok: false, error: expect.stringContaining('exited with code 1 before reporting a result. node: cannot find module') });
+  });
+
+  it('cancel writes a cancel frame, kills the process, and settles Cancelled', async () => {
+    const { bridge, writes, kills } = fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'ask', id: 'q1', kind: 'text', question: 'Name' }) }); });
+    const run = cliRun(bridge, Promise.resolve(STATE), ['setup'], { map: (v) => v });
+    for await (const f of run.frames) { if (f.t === 'ask') { await run.cancel(); } }
+    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
+    expect(writes.map((w) => JSON.parse(w))).toEqual([{ t: 'cancel' }]);
+    expect(kills).toHaveLength(1);
+  });
+
+  it('without the app state file, nothing is spawned and the failure tells the person what to run', async () => {
+    const { bridge, spawns } = fakeBridge(() => undefined, null);
+    const run = cliRun(bridge, bridge.readAppState(), ['status'], { map: (v) => v });
+    expect(await run.done).toEqual({ ok: false, error: NO_STATE });
+    expect(spawns).toEqual([]);
+  });
+
+  it('a result the mapper cannot read is a failure, not a crash', async () => {
+    const { bridge } = fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'result', verb: 'install', ok: true, exitCode: 0, value: 'garbage' }) }); });
+    const run = cliRun<string[], number>(bridge, Promise.resolve(STATE), ['install', 'x'], { map: (v) => { if (!Array.isArray(v)) throw new Error('expected an array'); return v.length; } });
+    expect(await run.done).toEqual({ ok: false, error: expect.stringContaining('could not read the result: expected an array') });
+  });
+});
+
+describe('createTauriBackend — argv and result mapping per verb', () => {
+  const ok = (verb: string, value: unknown) => (_a: readonly string[], emit: (e: LineEvent) => void) => { emit({ kind: 'stdout', line: line({ t: 'result', verb, ok: true, exitCode: 0, value }) }); emit({ kind: 'exit', code: 0 }); };
+  it('capabilities: mac-overlay on macOS, every flagged gap false, editor and clipboard true', async () => {
+    const backend = createTauriBackend(fakeBridge(() => undefined).bridge);
+    expect(await backend.capabilities()).toEqual({ windowChrome: 'mac-overlay', disablePerMachine: false, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: false, openInEditor: true, clipboard: true });
+  });
+  it('install builds the three argv shapes and maps the CLI rows to the seam', async () => {
+    const f = fakeBridge(ok('install', [{ id: 'deploy-check', team: 'terum', path: '/p', version: 'abc' }]));
+    const backend = createTauriBackend(f.bridge);
+    expect(await backend.install({ ref: 'deploy-check', scope: 'SSM', force: true }).done).toEqual({ ok: true, value: [{ id: 'deploy-check', name: 'deploy-check', scope: 'SSM' }] });
+    await backend.install({ ref: '', kind: 'member', member: 'ryan' }).done;
+    await backend.install({ ref: '', kind: 'project', project: 'ssm' }).done;
+    expect(f.spawns.map((s) => s.args)).toEqual([['install', 'deploy-check', '--force'], ['install', 'member', 'ryan'], ['install', 'project', 'ssm']]);
+  });
+  it('team, sync, connect, validate, search argv; sync never passes --hook', async () => {
+    const f = fakeBridge(ok('x', { team: 't', placed: 2, deferred: [], id: 'a', name: 'a', findings: 0, warnings: 1 }));
+    const backend = createTauriBackend(f.bridge);
+    await backend.team({ kind: 'create', name: 'terum', remote: 'git@x:y.git' }).done;
+    await backend.team({ kind: 'join', remote: 'o/r', name: 'local' }).done;
+    await backend.team({ kind: 'leave', name: 'terum' }).done;
+    await backend.team({ kind: 'remove', handle: 'bob', team: 'terum' }).done;
+    await backend.sync({ prune: true, hook: true }).done;
+    await backend.connect({ path: '~/.claude/skills/x', team: 'terum', allowPrivileged: true }).done;
+    expect(f.spawns.map((s) => s.args)).toEqual([
+      ['team', 'create', 'terum', '--remote', 'git@x:y.git'], ['team', 'join', 'o/r', '--as', 'local'], ['team', 'leave', 'terum'], ['team', 'remove', 'bob', '--team', 'terum'],
+      ['sync', '--prune'], ['connect', '~/.claude/skills/x', '--team', 'terum', '--allow-privileged'],
+    ]);
+  });
+  it('search maps CLI hits to seam hits; read models the CLI lacks fail naming GAPS.md; a read that asks is refused', async () => {
+    const hits = [{ team: 't', id: 'i', name: 'deploy-check', author: 'ryan', category: 'ops', installs: 3, latest: 'abc', endorsed: 'x', unresolved: false }];
+    const backend = createTauriBackend(fakeBridge(ok('search', hits)).bridge);
+    expect(await backend.search({ q: 'deploy' })).toEqual({ ok: true, value: [{ kind: 'skill', ref: 'deploy-check', name: 'deploy-check', description: 'ops · by ryan · 3 installs' }] });
+    expect(await backend.library({ scope: 'Global' })).toEqual({ ok: false, error: expect.stringContaining('GAPS.md') });
+    const asking = createTauriBackend(fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'ask', id: 'q1', kind: 'confirm', question: 'Really?' }) }); }).bridge);
+    expect(await asking.search({ q: 'x' })).toEqual({ ok: false, error: expect.stringContaining('asked "Really?" during a read-only call') });
+  });
+  it('subscribe is notified after a successful run and not after a failure', async () => {
+    const f = fakeBridge(ok('sync', { placed: 1, deferred: [] }));
+    const backend = createTauriBackend(f.bridge);
+    const seen: string[] = [];
+    const off = backend.subscribe((source) => seen.push(source));
+    await backend.sync({}).done;
+    expect(seen).toEqual(['clone', 'placed', 'stamp']);
+    off();
+    await backend.sync({}).done;
+    expect(seen).toHaveLength(3);
+  });
+});

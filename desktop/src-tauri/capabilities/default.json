@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window: core window and event access, plus the plugins the seam's capabilities need.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
+    "opener:default",
+    "opener:allow-open-path",
+    "opener:allow-reveal-item-in-dir",
+    "store:default",
+    "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-write-image",
+    "window-state:default"
+  ]
+}

@@ -1,0 +1,4 @@
+self-hosted-runner:
+  # GitHub-hosted, newer than actionlint's bundled list; proven to schedule on 2026-09-08 (release.yml desktop matrix).
+  labels:
+    - windows-11-vs2026-arm

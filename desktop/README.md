@@ -1,13 +1,19 @@
 # terum-skills desktop
 
 The desktop frontend for terum-skills: a Vite + React + TypeScript app that runs in a browser on a mock
-backend today and gets its Tauri shell in a later milestone. Every screen is held pixel-faithful to a private
+backend, and inside its Tauri shell (`src-tauri/`) drives the real `terum-skills` CLI over frames (`src/backend/tauri/`). Every screen is held pixel-faithful to a private
 design canvas; the gate that enforces that runs only where the canvas is present.
 
-Status: preview. Every screen renders on fixture data behind the `src/backend/` seam; nothing calls the CLI
-yet. `GAPS.md` lists what the drawn screens need from the CLI that it does not have.
+Status: preview. In a browser every screen renders on fixture data behind the `src/backend/` seam. In the shell the
+long verbs (install, connect, sync, publish, invite, team, setup, eval) and `search`/`validate` run the real CLI;
+the read models the CLI has no verb for yet render their error boards (`src/backend/tauri/README.md` lists them).
+`GAPS.md` lists what the drawn screens need from the CLI that it does not have.
 
-Run: `npm install`, `npm run dev` (port 1420), open `http://localhost:1420/#/library/global`. Node 24 or newer.
+Run: `npm install`, `npm run dev` (port 1420), open `http://localhost:1420/#/library/global`. Node 24 (Node 25's
+built-in `localStorage` shadows jsdom's in the tests; run them with `NODE_OPTIONS=--no-experimental-webstorage` there).
+Shell: `npm run tauri dev` (needs rustup and the Tauri prerequisites); `npm run tauri build --bundles app` makes the
+ad-hoc-signed `.app` the release workflow ships. The app expects `terum-skills app` to have recorded the CLI's
+location in `~/.terum/skills/run/app.json`.
 
 Gates:
 
