@@ -124,6 +124,43 @@ describe('connect (§5.3)', () => {
     expect((await store.read()).shared[id]!.baseline).toBe(await canonicalDigest(source));
   });
 
+  it('returns a terminal reconciliation kind for every three-way row', async () => {
+    const unchanged = await sharedFixture();
+    expect((await reconcileShared(unchanged.store, systemRunner, new ScriptedPrompter())).map(({ kind }) => ({ kind }))).toEqual([{ kind: 'unchanged' }]);
+
+    const pushed = await sharedFixture();
+    const pushedId = Object.keys((await pushed.store.read()).shared)[0]!;
+    const pushedSource = (await pushed.store.read()).shared[pushedId]!.source;
+    await writeFile(join(pushedSource, 'SKILL.md'), (await readFile(join(pushedSource, 'SKILL.md'), 'utf8')).replace('description: x', 'description: local edit'));
+    expect((await reconcileShared(pushed.store, systemRunner, new ScriptedPrompter())).map(({ kind }) => ({ kind }))).toEqual([{ kind: 'pushed' }]);
+
+    const pulled = await sharedFixture();
+    const pulledId = Object.keys((await pulled.store.read()).shared)[0]!;
+    const pulledSource = (await pulled.store.read()).shared[pulledId]!.source;
+    await pushFromSeed(pulled.fixture.seed, 'skills/sample/SKILL.md', (await git(['show', 'main:skills/sample/SKILL.md'], pulled.fixture.bare)).replace('description: x', 'description: remote edit'));
+    await git(['fetch', 'origin'], pulled.store.teamClone('team')); await git(['reset', '--hard', 'origin/main'], pulled.store.teamClone('team'));
+    expect((await reconcileShared(pulled.store, systemRunner, new ScriptedPrompter())).map(({ kind }) => ({ kind }))).toEqual([{ kind: 'pulled' }]);
+    expect(await readFile(join(pulledSource, 'SKILL.md'), 'utf8')).toContain('description: remote edit');
+
+    const renamed = await sharedFixture();
+    const renamedId = Object.keys((await renamed.store.read()).shared)[0]!;
+    const renamedSource = (await renamed.store.read()).shared[renamedId]!.source;
+    await writeFile(join(renamedSource, 'SKILL.md'), (await readFile(join(renamedSource, 'SKILL.md'), 'utf8')).replace('name: sample', 'name: renamed'));
+    expect((await reconcileShared(renamed.store, systemRunner, new ScriptedPrompter())).map(({ kind }) => ({ kind }))).toEqual([{ kind: 'pushed' }, { kind: 'renamed' }]);
+
+    const repaired = await sharedFixture();
+    await repaired.store.update((config) => { config.email = 'changed@example.com'; });
+    expect((await reconcileShared(repaired.store, systemRunner, new ScriptedPrompter())).map(({ kind }) => ({ kind }))).toEqual([{ kind: 'repaired' }]);
+
+    const deferred = await sharedFixture();
+    const deferredId = Object.keys((await deferred.store.read()).shared)[0]!;
+    const deferredSource = (await deferred.store.read()).shared[deferredId]!.source;
+    await writeFile(join(deferredSource, 'SKILL.md'), (await readFile(join(deferredSource, 'SKILL.md'), 'utf8')).replace('description: x', 'description: local'));
+    await pushFromSeed(deferred.fixture.seed, 'skills/sample/SKILL.md', (await git(['show', 'main:skills/sample/SKILL.md'], deferred.fixture.bare)).replace('description: x', 'description: remote'));
+    await git(['fetch', 'origin'], deferred.store.teamClone('team')); await git(['reset', '--hard', 'origin/main'], deferred.store.teamClone('team'));
+    expect((await reconcileShared(deferred.store, systemRunner, new ScriptedPrompter())).map(({ kind }) => ({ kind }))).toEqual([{ kind: 'deferred' }]);
+  });
+
   it('publishes a source-only reconciliation edit and advances the baseline to the source digest', async () => {
     const { fixture, store } = await sharedFixture();
     const id = Object.keys((await store.read()).shared)[0]!;

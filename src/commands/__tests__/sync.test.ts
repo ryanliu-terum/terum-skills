@@ -1,10 +1,11 @@
-import { expectTypeOf, describe, expect, it } from 'vitest';
+import { expectTypeOf, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { acquireTeamLock, lockPath, removeRunArtifacts, stampPath } from '../../lib/hook.js';
 import { run } from '../sync.js';
+import { run as connect } from '../connect.js';
 import { createExecute } from '../../lib/execute.js';
 import { run as install } from '../install.js';
 import { NonInteractivePrompter } from '../../lib/prompt.js';
@@ -15,6 +16,17 @@ import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-f
 import { systemRunner } from '../../lib/runner.js';
 import { canonicalDigest } from '../../lib/skills.js';
 import { cloneLockPath } from '../../lib/teamRepo.js';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      if (args[0] === (globalThis as { terumPruneFailurePath?: string }).terumPruneFailurePath) throw new Error('deliberately undeletable');
+      return actual.rm(...args);
+    },
+  };
+});
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const SECOND_ID = '22222222-2222-4222-8222-222222222222';
@@ -30,6 +42,19 @@ async function configuredSkill() {
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   return { fixture, store, clone };
+}
+
+async function sharedSyncFixture() {
+  const fixture = await bareTeam();
+  const store = createConfigStore(join(fixture.root, 'state'));
+  const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  const source = join(fixture.root, 'sample');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), skill('shared source'));
+  const connected = await connect({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true]));
+  if (!connected.ok) throw new Error(connected.error);
+  return { fixture, store, clone, source };
 }
 
 describe('sync --hook (§3, §6)', () => {
@@ -498,7 +523,8 @@ describe('sync --hook (§3, §6)', () => {
     const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
     const result = await run({ config: setup.store }, io as never);
     expect(result).toMatchObject({ ok: true, value: { hook: false, deferred: ['sample'], placed: 0 } });
-    expect(io.lines).not.toContain('reloadSkills');
+    expect(io.lines.join('\n')).not.toContain('hookSpecificOutput');
+    expect(io.lines.join('\n')).toContain('1 skills need review');
     expect(await readFile(join(setup.home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
   });
 
@@ -569,10 +595,10 @@ describe('sync --hook (§3, §6)', () => {
     expect(result).toMatchObject({ ok: true, value: { placed: 1, changed: true } });
     expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: new');
     expect((await store.read()).placements[path]!.fingerprint).not.toBe(before);
-    expect(io.lines).toContain('Skills synchronized.');
+    expect(io.lines.at(-1)).toBe('Sync complete: team — 1 updated.');
   });
 
-  it('leaves an up-to-date placement untouched and emits no status line', async () => {
+  it('leaves an up-to-date placement untouched and reports that nothing needs doing', async () => {
     const { fixture, store } = await configuredSkill();
     const home = join(fixture.root, 'home');
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
@@ -581,7 +607,7 @@ describe('sync --hook (§3, §6)', () => {
     const io = new ScriptedPrompter();
     expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, changed: false } });
     expect((await store.read()).placements[path]!.fingerprint).toBe(fingerprint);
-    expect(io.lines).toEqual([]);
+    expect(io.lines).toEqual(['Sync complete: nothing to do (team up to date, 1 skill).']);
   });
 
   it('reports a deleted repository skill as blocked without touching its placement or ledger', async () => {
@@ -704,6 +730,214 @@ describe('sync --hook (§3, §6)', () => {
     await expect(access(quarantined)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(join(outside, 'keep'), 'utf8')).toBe('precious');
     expect(await readFile(join(unrelated, 'SKILL.md'), 'utf8')).toBe('user-owned');
+  });
+
+  it('reports the exact plural prune verdict and changed result after deleting two entries', async () => {
+    const { store } = await configuredSkill();
+    await mkdir(join(store.root, 'quarantine', 'first'), { recursive: true });
+    await mkdir(join(store.root, 'quarantine', 'second'), { recursive: true });
+    const io = new ScriptedPrompter([], [true], true);
+    expect(await run({ prune: true, config: store }, io)).toMatchObject({ ok: true, value: { changed: true } });
+    expect(io.lines.at(-1)).toBe('Deleted 2 quarantined items.');
+  });
+
+  it('reports the truthful prune verdict for an empty quarantine and a declined confirmation', async () => {
+    const empty = await configuredSkill();
+    const emptyIo = new ScriptedPrompter([], [], true);
+    expect(await run({ prune: true, config: empty.store }, emptyIo)).toMatchObject({ ok: true, value: { changed: false } });
+    expect(emptyIo.lines).toEqual(['Quarantine is empty.']);
+
+    const declined = await configuredSkill();
+    const entry = join(declined.store.root, 'quarantine', 'keep');
+    await mkdir(entry, { recursive: true });
+    const declinedIo = new ScriptedPrompter([], [false], true);
+    expect(await run({ prune: true, config: declined.store }, declinedIo)).toMatchObject({ ok: true, value: { changed: false } });
+    expect(declinedIo.lines.at(-1)).toBe('Prune cancelled; nothing deleted.');
+  });
+
+  it('continues a partial prune, reports the first failed path, and exits through execute', async () => {
+    const { store } = await configuredSkill();
+    const first = join(store.root, 'quarantine', 'first'); const second = join(store.root, 'quarantine', 'second');
+    await mkdir(first, { recursive: true }); await mkdir(second, { recursive: true });
+    (globalThis as { terumPruneFailurePath?: string }).terumPruneFailurePath = second;
+    try {
+      const io = new ScriptedPrompter([], [true], true);
+      const result = await run({ prune: true, config: store }, io);
+      expect(result).toMatchObject({ ok: false, error: `Deleted 1 of 2 quarantined item(s); could not delete ${second}: deliberately undeletable`, value: { changed: true, teams: [] } });
+      const errors: string[] = []; const codes: number[] = [];
+      await createExecute({ io, stderr: (line) => errors.push(line), setExitCode: (code) => codes.push(code) })(async () => result, { verb: 'sync', notices: false });
+      expect(errors).toEqual([`Deleted 1 of 2 quarantined item(s); could not delete ${second}: deliberately undeletable`]);
+      expect(codes).toEqual([1]);
+    } finally { delete (globalThis as { terumPruneFailurePath?: string }).terumPruneFailurePath; }
+  });
+
+  it('counts a pending install once by its ledger path, whether it is new or already placed', async () => {
+    const fresh = await configuredSkill();
+    await fresh.store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'global' }, started: '2026-09-08T00:00:00Z' }); });
+    const freshResult = await run({ config: fresh.store }, new ScriptedPrompter());
+    expect(freshResult).toMatchObject({ ok: true, value: { teams: [{ team: 'team', state: 'complete', counts: { placed: 1, unchanged: 0 } }] } });
+
+    const existing = await configuredSkill();
+    expect((await install({ ref: 'sample', config: existing.store }, new ScriptedPrompter())).ok).toBe(true);
+    await existing.store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'global' }, started: '2026-09-08T00:00:00Z' }); });
+    const existingResult = await run({ config: existing.store }, new ScriptedPrompter());
+    expect(existingResult).toMatchObject({ ok: true, value: { teams: [{ team: 'team', state: 'complete', counts: { updated: 1 } }] } });
+  });
+
+  it('counts pending uninstalls by the number of matching placements, including zero', async () => {
+    const zero = await configuredSkill();
+    await zero.store.update((config) => { config.pending.push({ op: 'uninstall', id: ID, team: 'team', scope: { kind: 'global' }, started: '2026-09-08T00:00:00Z' }); });
+    expect(await run({ config: zero.store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { teams: [{ state: 'complete', counts: { removed: 0 } }] } });
+
+    const two = await orphanedPlacement(true);
+    const second = join(two.home, '.claude', 'skills', 'sample-copy');
+    await cp(two.path, second, { recursive: true });
+    const snapshot = await snapshotSkillDirectory(second);
+    await two.store.update((config) => {
+      config.placements[second] = { ...config.placements[two.path]!, fingerprint: snapshot.fingerprint };
+      config.pending.push({ op: 'uninstall', id: ID, team: 'team', scope: { kind: 'global' }, started: '2026-09-08T00:00:00Z' });
+    });
+    expect(await run({ config: two.store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { teams: [{ state: 'complete', counts: { removed: 2 } }] } });
+  });
+
+  it('prints each healthy configured team followed by the complete summary', async () => {
+    const { store } = await configuredSkill();
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { teams: [{ team: 'team', state: 'complete' }, { team: 'other', state: 'complete' }] } });
+    expect(io.lines).toEqual(['team: up to date (0 skills)', 'other: up to date (0 skills)', 'Sync complete.']);
+  });
+
+  it('withholds only the deferred team stamp and uses the review cue even for one skill', async () => {
+    const { fixture, store } = await configuredToolSkill();
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('widened', ['Bash(*)']));
+    const io = new ScriptedPrompter([], [], false);
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { teams: [{ team: 'team', state: 'incomplete', review: ['sample'] }, { team: 'other', state: 'complete' }] } });
+    expect(io.lines.at(-1)).toBe('Sync incomplete: 1 skills need review (sample).');
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+  });
+
+  it('names a skipped endorsed batch as unfinished work and leaves its stamp unwritten', async () => {
+    const { fixture, store } = await configuredSkill();
+    await pushFromSeed(fixture.seed, 'team.json', '{not json}\n');
+    const io = new ScriptedPrompter();
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { teams: [{ state: 'incomplete', review: [], blocked: [], pendingLeft: 0 }] } });
+    expect(io.lines.at(-1)).toBe('Sync incomplete: team has unfinished work (endorsed batch skipped) — see the lines above.');
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('makes a pending install recorded after replay visible in the verdict and withholds the stamp', async () => {
+    const { store } = await configuredSkill();
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    let fetches = 0;
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'global' }, started: '2026-09-08T00:00:00Z' }); });
+      return next();
+    });
+    const io = new ScriptedPrompter();
+    const result = await run({ config: store, runner }, io);
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.teams[0]).toMatchObject({ team: 'team', state: 'incomplete', pendingLeft: 1 });
+    expect(io.lines.at(-1)).toBe('Sync incomplete: team still has 1 pending install; run sync again.');
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('prefixes an interactive stamp-write failure and routes it through execute', async () => {
+    const { store } = await configuredSkill();
+    await mkdir(stampPath(store.root, 'team'), { recursive: true });
+    const result = await run({ config: store }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/^Sync failed: /) });
+    expect(result.value).toBeUndefined();
+    if (result.ok) throw new Error('stamp write unexpectedly succeeded');
+    const errors: string[] = []; const codes: number[] = [];
+    await createExecute({ io: new ScriptedPrompter(), stderr: (line) => errors.push(line), setExitCode: (code) => codes.push(code) })(async () => result, { verb: 'sync', notices: false });
+    expect(errors).toEqual([result.error]);
+    expect(codes).toEqual([1]);
+  });
+
+  it('keeps interactive consent deferrals off hook stdout and labels a TTY decline for review', async () => {
+    const nonTty = await configuredToolSkill();
+    await pushFromSeed(nonTty.fixture.seed, 'skills/sample/SKILL.md', toolSkill('widened', ['Bash(*)']));
+    const nonTtyIo: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    expect(await run({ config: nonTty.store }, nonTtyIo as never)).toMatchObject({ ok: true, value: { deferred: ['sample'] } });
+    expect(nonTtyIo.lines.join('\n')).not.toContain('hookSpecificOutput');
+    expect(nonTtyIo.lines.join('\n')).toContain('1 skills need review');
+
+    const tty = await configuredToolSkill();
+    await pushFromSeed(tty.fixture.seed, 'skills/sample/SKILL.md', toolSkill('widened', ['Bash(*)']));
+    const ttyIo = new ScriptedPrompter([], [false], true);
+    expect(await run({ config: tty.store }, ttyIo)).toMatchObject({ ok: true, value: { deferred: ['sample'] } });
+    expect(ttyIo.lines.join('\n')).toContain('1 skills need review');
+  });
+
+  it('ends a shared-source divergence with the incomplete verdict after its remedy line', async () => {
+    const { fixture, store, source } = await sharedSyncFixture();
+    await writeFile(join(source, 'SKILL.md'), (await readFile(join(source, 'SKILL.md'), 'utf8')).replace('description: shared source', 'description: local'));
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', (await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).replace('description: shared source', 'description: remote'));
+    const io = new ScriptedPrompter();
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { teams: [{ state: 'incomplete', review: ['sample'] }] } });
+    expect(io.lines.at(-2)).toContain('connect --keep-source');
+    expect(io.lines.at(-2)).toContain('connect --keep-repo');
+    expect(io.lines.at(-1)).toBe('Sync incomplete: 1 skills need review (sample) — see the lines above for each remedy.');
+  });
+
+  it('prints no successful verdict when one team is unreachable but another is healthy', async () => {
+    const { fixture, store } = await configuredSkill();
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update((config) => { config.teams.team!.remote = 'github.com/acme/team'; config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    const remote = 'https://github.com/acme/team.git';
+    const runner = wrapRunner(mappedRunner(remote, fixture.bare), async (command, args, options, next) => command === 'git' && args[0] === 'fetch' && options?.cwd === store.teamClone('team') ? { code: 128, stdout: '', stderr: 'remote: Repository not found.' } : next());
+    const io = new ScriptedPrompter();
+    const result = await run({ config: store, runner }, io);
+    expect(result).toMatchObject({ ok: false, error: 'Sync finished with 1 team(s) skipped: team. See the notices above.' });
+    expect(io.lines).toContain('other: up to date (0 skills)');
+    expect(io.lines.join('\n')).not.toContain('Sync complete');
+  });
+
+  it('keeps hook stdout to reload output and never puts verdicts in shared-sync notices', async () => {
+    const pushOnly = await sharedSyncFixture();
+    await writeFile(join(pushOnly.source, 'SKILL.md'), (await readFile(join(pushOnly.source, 'SKILL.md'), 'utf8')).replace('description: shared source', 'description: local edit'));
+    const quiet: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    const quietResult = await run({ hook: true, config: pushOnly.store }, quiet);
+    expect(quietResult).toMatchObject({ ok: true, value: { changed: true, teams: [{ state: 'complete', shared: { pushed: 1 } }] } });
+    expect(quiet.lines).toEqual([]);
+    expect(quietResult.value!.notices.filter((line) => line.startsWith('Sync '))).toEqual([]);
+
+    const both = await sharedSyncFixture();
+    expect((await install({ ref: 'sample', config: both.store }, new ScriptedPrompter())).ok).toBe(true);
+    await writeFile(join(both.source, 'SKILL.md'), (await readFile(join(both.source, 'SKILL.md'), 'utf8')).replace('description: shared source', 'description: local edit'));
+    const directive: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    const directiveResult = await run({ hook: true, config: both.store }, directive);
+    expect(directiveResult).toMatchObject({ ok: true, value: { changed: true, placed: 1, teams: [{ state: 'complete', shared: { pushed: 1 } }] } });
+    expect(directive.lines).toEqual(['{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}']);
+    expect(directiveResult.value!.notices.filter((line) => line.startsWith('Sync '))).toEqual([]);
+  });
+
+  it('reports a pushed shared edit as a completed, stamped interactive sync', async () => {
+    const { store, source } = await sharedSyncFixture();
+    await writeFile(join(source, 'SKILL.md'), (await readFile(join(source, 'SKILL.md'), 'utf8')).replace('description: shared source', 'description: local edit'));
+    const io = new ScriptedPrompter();
+    const result = await run({ config: store }, io);
+    expect(result).toMatchObject({ ok: true, value: { changed: true, teams: [{ team: 'team', state: 'complete', shared: { pushed: 1 } }] } });
+    expect(io.lines.at(-1)).toBe('Sync complete: team — 1 shared edit pushed.');
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
+  });
+
+  it('counts interactive orphan adoption and decline as changes in their terminal categories', async () => {
+    const adopted = await orphanedPlacement();
+    expect(await run({ config: adopted.store }, new ScriptedPrompter([], [true], true))).toMatchObject({ ok: true, value: { changed: true, teams: [{ state: 'complete', counts: { adopted: 1 } }] } });
+    const declined = await orphanedPlacement();
+    expect(await run({ config: declined.store }, new ScriptedPrompter([], [false], true))).toMatchObject({ ok: true, value: { changed: true, teams: [{ state: 'complete', counts: { declined: 1 } }] } });
   });
 });
 
@@ -967,7 +1201,7 @@ describe('release maintenance after sync', () => {
     const f = await releaseFixture(); const io = new ScriptedPrompter([], [], true);
     const runner = wrapRunner(f.runner, async (_command, args, _options, next) => args.includes('ls-remote') ? { code: 1, stdout: '', stderr: 'offline' } : next());
     expect((await run({ config: f.store, runner, upstream: f.fixture.bare, probe: 'github-teams' }, io)).ok).toBe(true);
-    expect(io.lines).toEqual([]);
+    expect(io.lines).toEqual(['Sync complete: nothing to do (team up to date, 0 skills).']);
     expect(JSON.parse(await readFile(join(f.store.root, 'run/latest-version.json'), 'utf8')).attempt).toMatchObject({ ok: false, error: 'offline' });
   });
 });

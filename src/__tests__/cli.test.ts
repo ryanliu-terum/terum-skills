@@ -81,7 +81,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       connect: async (args) => { calls.push(['connect', args]); return success(undefined); },
       install: async (args) => { calls.push(['install', args]); return success([]); },
       uninstall: async (args) => { calls.push(['uninstall', args]); return success([]); },
-      sync: async (args) => { calls.push(['sync', args]); return success({ placed: 0, deferred: [], notices: [], changed: false, hook: Boolean(args.hook) }); },
+      sync: async (args) => { calls.push(['sync', args]); return success({ placed: 0, deferred: [], notices: [], changed: false, hook: Boolean(args.hook), teams: [] }); },
       search: async (args) => { calls.push(['search', args]); return success([]); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
@@ -262,7 +262,7 @@ describe('release command eligibility', () => {
     const calls: unknown[] = []; const launch = { kind: 'unknown' as const, path: '/copy/index.js' };
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
-      sync: async (args) => { calls.push(args); return success({ placed: 0, deferred: [], notices: [], changed: false, hook: Boolean(args.hook) }); },
+      sync: async (args) => { calls.push(args); return success({ placed: 0, deferred: [], notices: [], changed: false, hook: Boolean(args.hook), teams: [] }); },
       update: async (args) => { calls.push(args); return success(undefined); },
     }, { launch, noUpdateCheck: true });
     await program.parseAsync(['sync', '--hook'], { from: 'user' }); await program.parseAsync(['update'], { from: 'user' });

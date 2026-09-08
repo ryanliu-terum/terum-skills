@@ -29,7 +29,14 @@ export interface SyncArgs extends WithForm {
   /** Test knobs for the §8 rate limit (hook mode only) and the team mutex (every mode, R4). */
   now?: () => number; lock?: TeamLockOptions;
 }
-export interface SyncResult { placed: number; deferred: string[]; notices: string[]; changed: boolean; hook: boolean; }
+export interface PlacementCounts { placed: number; updated: number; renamed: number; removed: number; unchanged: number; adopted: number; declined: number; }
+export interface SharedCounts { pushed: number; pulled: number; renamed: number; repaired: number; }
+export type TeamOutcome =
+  | { team: string; state: 'complete'; counts: PlacementCounts; shared: SharedCounts }
+  | { team: string; state: 'incomplete'; counts: PlacementCounts; shared: SharedCounts; review: string[]; blocked: string[]; pendingLeft: number }
+  | { team: string; state: 'skipped'; reason: 'unreachable' | 'locked' | 'busy' | 'error' | 'fresh'; detail: string }
+  | { team: string; state: 'gone' };
+export interface SyncResult { placed: number; deferred: string[]; notices: string[]; changed: boolean; hook: boolean; teams: TeamOutcome[]; }
 
 /** The returned result is complete and every team lock is released before release maintenance. */
 export function run(args: SyncArgs & { hook: true }, io: NonInteractivePrompter): Promise<Result<SyncResult>>;
@@ -57,20 +64,41 @@ function runSync(args: SyncArgs, io: Prompter): Promise<Result<SyncResult>>;
 async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): Promise<Result<SyncResult>> {
   const notices: string[] = [];
   const deferred: string[] = [];
+  const reviews = new Map<string, string[]>();
+  const blocks = new Map<string, string[]>();
+  const placements = new Map<string, Map<string, keyof PlacementCounts>>();
+  const removed = new Map<string, number>();
+  const shared = new Map<string, SharedCounts>();
   // §8: a team this run left work undone in is not stamped, so the next session retries instead of
   // waiting out the hour. Tracked per team: one team's deferral never withholds another's stamp.
   const incomplete = new Set<string>();
-  const defer = (team: string, ...labels: string[]) => { deferred.push(...labels); incomplete.add(team); };
+  const defer = (team: string, ...labels: string[]) => {
+    deferred.push(...labels); incomplete.add(team);
+    if (labels.length) (reviews.get(team) ?? reviews.set(team, []).get(team)!).push(...labels);
+  };
+  const recordPlacement = (team: string, path: string, kind: keyof PlacementCounts) => {
+    const paths = placements.get(team) ?? (placements.set(team, new Map()), placements.get(team)!);
+    if (paths.has(path)) return;
+    paths.set(path, kind);
+  };
+  const countPlacement = (team: string): PlacementCounts => {
+    const counts: PlacementCounts = { placed: 0, updated: 0, renamed: 0, removed: removed.get(team) ?? 0, unchanged: 0, adopted: 0, declined: 0 };
+    for (const kind of placements.get(team)?.values() ?? []) counts[kind]++;
+    return counts;
+  };
+  const countShared = (team: string): SharedCounts => shared.get(team) ?? { pushed: 0, pulled: 0, renamed: 0, repaired: 0 };
   const releases: Array<() => Promise<void>> = [];
   let placed = 0;
   let changed = false;
+  let teams: TeamOutcome[] = [];
   try {
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const interactive = !args.hook && io.interactive && 'confirm' in io;
     const notice = (line: string) => { notices.push(line); if (!args.hook) io.print(line); };
+    const verdict = (line: string) => { if (!args.hook && !args.prune) (io as { print(line: string): void }).print(line); };
     // A blocked placement is reported AND recorded as undone work, so the team is not stamped as fully synced (§8).
-    const blocked = (team: string, label: string, line: string) => { notice(line); defer(team, label); };
+    const blocked = (team: string, label: string, line: string) => { notice(line); (blocks.get(team) ?? blocks.set(team, []).get(team)!).push(label); defer(team, label); };
     // Every verb sync runs on the user's behalf (a pending replay, the endorsed batch, shared-source
     // reconciliation) prints through this channel: in hook mode the lines ride SyncResult.notices to
     // stderr (§8), so stdout carries the reload directive alone; interactively they print as before.
@@ -83,8 +111,9 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
     };
     if (args.prune) {
       if (!interactive) throw new Error('sync prune needs an interactive terminal.');
-      await prune(store, io as Prompter);
-      return success({ placed: 0, deferred: [], notices: [], changed: true, hook: false });
+      const result = await prune(store, io as Prompter);
+      const value = { placed: 0, deferred: [], notices: [], changed: result.deleted > 0, hook: false, teams: [] };
+      return result.error ? failure(result.error, value) : success(value);
     }
     const config = await store.read();
     // A team this run cannot work on costs exactly that team: it is left alone — not refreshed,
@@ -96,34 +125,35 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
     // EVERY sync takes the mutex, not only a hook (rulings walk R4, 2026-09-06): `team leave` holds
     // it while it removes the team's placements, so a sync typed in another terminal can no longer
     // re-place a folder seconds after leave removed it, or pull into a clone being deleted.
-    const skipped = new Set<string>();
+    const skipped = new Map<string, { reason: Extract<TeamOutcome, { state: 'skipped' }>['reason']; detail: string }>();
     const unreachable: string[] = [];
     for (const team of Object.keys(config.teams)) {
       const clone = store.teamClone(team);
       // The gate can throw — a lock file this process cannot read, a refused run/ directory — and
       // that costs this team alone, reported: the shape the CloneBusy handler below already has.
       try {
-        if (args.hook && await stampIsFresh(store.root, team, args.now)) { skipped.add(team); continue; }
+        if (args.hook && await stampIsFresh(store.root, team, args.now)) { skipped.set(team, { reason: 'fresh', detail: '' }); continue; }
         const release = await acquireTeamLock(store.root, team, args.lock);
         if (!release) {
           if (!args.hook) notice(`Skipping ${team}: another terum-skills sync holds its session lock (${lockPath(store.root, team)}); retry when it finishes.`);
-          skipped.add(team); continue;
+          skipped.set(team, { reason: 'locked', detail: lockPath(store.root, team) }); continue;
         }
         releases.push(release);
       } catch (error) {
-        notice(`Skipping ${team}: ${error instanceof Error ? error.message : String(error)}`); skipped.add(team); continue;
+        const detail = error instanceof Error ? error.message : String(error);
+        notice(`Skipping ${team}: ${detail}`); skipped.set(team, { reason: 'error', detail }); continue;
       }
       try {
         await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {}, lockStale: args.lockStale });
       } catch (error) {
         if (error instanceof RemoteAccessError) {
           notice(`Skipping ${team}: could not fetch ${error.origin}: ${error.stderr}\n${error.explanation}`);
-          skipped.add(team); unreachable.push(team); continue;
+          skipped.set(team, { reason: 'unreachable', detail: error.origin }); unreachable.push(team); continue;
         }
         if (!(error instanceof CloneBusy)) throw error;
         // Reported through `notices` alone, which the hook already writes to stderr: `deferred` is
         // rendered as a count of SKILLS needing review (execute.ts), so a team never belongs on it.
-        notice(error.message); skipped.add(team); continue;
+        notice(error.message); skipped.set(team, { reason: 'busy', detail: error.message }); continue;
       }
       await skillRecords(clone, team, { onProblem: (problem) => notice(`Skipping ${team}/${problem.name}: ${problem.message}`) });
       // Pending is intent, never inferred from the filesystem. A replay uses the same command
@@ -133,14 +163,19 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
           // An uninstall replay works from the placement ledger and the people file alone, so it is
           // never gated on the clone: gating it wedged the entry (and the people-file record) forever
           // once the author deleted the skill upstream. Only the install path needs the record.
-          if (pending.op === 'uninstall') { await uninstallOne({ team, id: pending.id, scope: pending.scope, store, runner, cwd: args.cwd }, childIo); changed = true; continue; }
+          if (pending.op === 'uninstall') {
+            const result = await uninstallOne({ team, id: pending.id, scope: pending.scope, store, runner, cwd: args.cwd }, childIo);
+            removed.set(team, (removed.get(team) ?? 0) + result.removed);
+            changed = true; continue;
+          }
           const skill = await findSkill(clone, team, pending.id);
           if (!skill) { defer(team, `${pending.id.slice(0, 8)} is no longer in ${team}`); continue; }
           const version = 'version' in pending && typeof pending.version === 'string' ? pending.version : undefined;
           const source = version ? await materializeVersion(store, team, clone, skill.name, version, runner) : skill.directory;
           const placedSkill = await skillAtSource(source, skill);
           if (!approved((await store.read()), skill.id, placedSkill.grants) && !interactive) { defer(team, skill.name); continue; }
-          await installOne({ team, id: pending.id, scope: pending.scope, version, store, runner, cwd: args.cwd }, childIo);
+          const result = await installOne({ team, id: pending.id, scope: pending.scope, version, store, runner, cwd: args.cwd }, childIo);
+          recordPlacement(team, result.path, config.placements[result.path] ? 'updated' : 'placed');
           placed++; changed = true;
         } catch (error) {
           if (error instanceof PromptClosedError) throw error; // the channel is gone, not this entry
@@ -151,7 +186,14 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
       }
     }
     // Reconciliation never prompts, but it reports — through the same notice channel.
-    await reconcileShared(store, runner, childIo, skipped, defer, args.form);
+    const sharedOutcomes = await reconcileShared(store, runner, childIo, new Set(skipped.keys()), defer, args.form);
+    for (const outcome of sharedOutcomes) {
+      if (outcome.kind === 'unchanged' || outcome.kind === 'deferred') continue;
+      const counts = countShared(outcome.team);
+      counts[outcome.kind]++;
+      shared.set(outcome.team, counts);
+      if (outcome.kind === 'pushed' || outcome.kind === 'pulled' || outcome.kind === 'renamed') changed = true;
+    }
     // Existing ledger paths drive every later decision. A folder merely present on disk is never
     // adopted, quarantined, or deleted without a ledger entry.
     const currentConfig = await store.read();
@@ -206,7 +248,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
         // still surfaces as Blocked.
         const repoSnapshot = await snapshotSkillDirectory(source);
         const placedNow = await inspect(path, true).then((shape) => (shape.kind === 'ours' ? snapshotIfPresent(path) : undefined)).catch(() => undefined);
-        if (placedNow?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
+        if (placedNow?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) { recordPlacement(entry.team, path, 'unchanged'); continue; }
         // The target lock is taken before anything about the destination is decided and held across
         // the collision check, the quarantine move and the placement — install's shape — so the
         // ownership reading that authorizes a destructive `replace` cannot go stale under it.
@@ -224,7 +266,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
           const drift = await quarantineDrift(path, entry.fingerprint, join(store.root, 'quarantine'));
           const current = drift.current;
           if (drift.quarantined) { notice(`Local changes at ${path} moved to ${drift.quarantined}.`); changed = true; }
-          if (current?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) continue;
+          if (current?.fingerprint === entry.fingerprint && repoSnapshot.fingerprint === entry.fingerprint) { recordPlacement(entry.team, path, 'unchanged'); continue; }
           const result = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot, runner, quarantineRoot: join(store.root, 'quarantine') });
           const renamed = basename(path) !== skill.name;
           await store.update((fresh) => {
@@ -238,6 +280,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
             notice(`Renamed placed skill ${basename(path)} to ${skill.name}.`);
           }
           for (const line of result.notices) notice(line);
+          recordPlacement(entry.team, result.path, renamed ? 'renamed' : 'updated');
         } finally { await release(); }
         placed++; changed = true;
       } catch (error) {
@@ -265,7 +308,11 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
           // One candidate that cannot be placed (a foreign folder at its target, a busy lock) is
           // deferred by name; the others still land, and the orphan pass and the stamps still run.
           for (const skill of candidates) {
-            try { await installOne({ team, id: skill.id, store, runner, cwd: args.cwd }, childIo); placed++; changed = true; }
+            try {
+              const result = await installOne({ team, id: skill.id, store, runner, cwd: args.cwd }, childIo);
+              recordPlacement(team, result.path, config.placements[result.path] ? 'updated' : 'placed');
+              placed++; changed = true;
+            }
             catch (error) {
               if (error instanceof PromptClosedError) throw error; // the channel is gone, not this candidate
               defer(team, skill.name); notice(`Deferred endorsed ${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
@@ -274,8 +321,9 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
         }
       }
     }
-    await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, defer, notice, skipped);
-    if (changed && !args.hook) (io as { print(line: string): void }).print('Skills synchronized.');
+    await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, defer, notice, new Set(skipped.keys()), (team, path, kind) => {
+      recordPlacement(team, path, kind); changed = true;
+    });
     if (args.hook && placed) (io as { print(line: string): void }).print('{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}');
     // §8: the stamp means "this team is fully synced". A failed run throws past this line; a team this
     // run skipped, or left work undone in (a deferral, a blocked placement a later run can still clear), keeps its old stamp, so
@@ -285,21 +333,38 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
     // is work this run never saw. A project placement outside its checkout is not undone work: that
     // placement belongs to another session.
     const final = await store.read();
+    teams = [];
     for (const team of Object.keys(config.teams)) {
-      if (skipped.has(team) || incomplete.has(team) || !Object.hasOwn(final.teams, team)) continue;
-      if (final.pending.some((entry) => entry.team === team)) continue;
+      const skip = skipped.get(team);
+      if (skip) { teams.push({ team, state: 'skipped', ...skip }); continue; }
+      if (!Object.hasOwn(final.teams, team)) { teams.push({ team, state: 'gone' }); continue; }
+      const pendingLeft = final.pending.filter((entry) => entry.team === team).length;
+      const counts = countPlacement(team);
+      const sharedCounts = countShared(team);
+      if (incomplete.has(team) || pendingLeft > 0) {
+        teams.push({ team, state: 'incomplete', counts, shared: sharedCounts, review: reviews.get(team) ?? [], blocked: blocks.get(team) ?? [], pendingLeft });
+        continue;
+      }
       await writeStamp(store, team);
+      teams.push({ team, state: 'complete', counts, shared: sharedCounts });
     }
-    if (unreachable.length) return failure(`Sync finished with ${unreachable.length} team(s) skipped: ${unreachable.join(', ')}. See the notices above.`, args.hook ? { placed, deferred, notices, changed, hook: true } : undefined);
-    return success({ placed, deferred, notices, changed, hook: Boolean(args.hook) });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error), args.hook ? { placed, deferred, notices, changed, hook: true } : undefined); }
+    if (unreachable.length) {
+      if (Object.keys(config.teams).length > 1) for (const team of teams) if (team.state === 'complete') verdict(teamLine(team));
+      return failure(`Sync finished with ${unreachable.length} team(s) skipped: ${unreachable.join(', ')}. See the notices above.`, args.hook ? { placed, deferred, notices, changed, hook: true, teams } : undefined);
+    }
+    if (!args.hook) printVerdict(config, teams, changed, verdict);
+    return success({ placed, deferred, notices, changed, hook: Boolean(args.hook), teams });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return failure(args.hook ? message : `Sync failed: ${message}`, args.hook ? { placed, deferred, notices, changed, hook: true, teams } : undefined);
+  }
   finally { for (const release of releases) await release().catch(() => undefined); }
 }
 
 function approved(config: Awaited<ReturnType<ConfigStore['read']>>, id: string, grants: ReturnType<typeof allowedTools>): boolean {
   return grants.ok && (grants.normalized === 'none' || config.approvals[id]?.grants === grants.hash);
 }
-async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, defer: (team: string, label: string) => void, notice: (line: string) => void, skipTeams: ReadonlySet<string>): Promise<void> {
+async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, defer: (team: string, label: string) => void, notice: (line: string) => void, skipTeams: ReadonlySet<string>, record: (team: string, path: string, kind: 'adopted' | 'declined') => void): Promise<void> {
   const config = await store.read();
   for (const [path, placement] of Object.entries(config.placements)) {
     // A team this run skipped is left alone here too: a clone another process holds may be
@@ -328,6 +393,7 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
         }
       }, { action: 'install', handle: binding.handle, message: `${binding.handle}: adopt ${placement.id.slice(0, 8)}` });
       notice(`Adopted orphaned placement at ${path}.`);
+      record(placement.team, path, 'adopted');
     } else {
       await repo.safeWrite((tree) => {
         const personPath = `people/${binding.handle}.json`;
@@ -338,6 +404,7 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
         tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
       }, { action: 'uninstall', handle: binding.handle, message: `${binding.handle}: decline ${placement.id.slice(0, 8)}` });
       notice(`Declined orphaned placement at ${path}.`);
+      record(placement.team, path, 'declined');
     }
   }
 }
@@ -357,13 +424,92 @@ async function matchingProjectRoot(clone: string, project: string, runner: Runne
 }
 
 /** The only destructive operation: named entries immediately under our quarantine root. */
-async function prune(store: ConfigStore, io: Prompter): Promise<void> {
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string { return `${count} ${count === 1 ? singular : pluralForm}`; }
+function countsPhrase(counts: PlacementCounts, shared: SharedCounts): string {
+  const phrases: string[] = [];
+  if (counts.placed) phrases.push(`${counts.placed} placed`);
+  if (counts.updated) phrases.push(`${counts.updated} updated`);
+  if (counts.renamed) phrases.push(`${counts.renamed} renamed`);
+  if (counts.removed) phrases.push(`${counts.removed} removed`);
+  if (counts.adopted) phrases.push(`${counts.adopted} adopted`);
+  if (counts.declined) phrases.push(`${counts.declined} declined`);
+  if (shared.pushed) phrases.push(`${plural(shared.pushed, 'shared edit')} pushed`);
+  if (shared.pulled) phrases.push(`${plural(shared.pulled, 'shared edit')} pulled`);
+  if (counts.unchanged) phrases.push(`${counts.unchanged} unchanged`);
+  return phrases.join(', ');
+}
+function unique(labels: string[]): string[] { return [...new Set(labels)]; }
+function incompleteClauses(team: Extract<TeamOutcome, { state: 'incomplete' }>, includeTail: boolean): string[] {
+  const clauses: string[] = [];
+  if (team.review.length) clauses.push(`${team.review.length} skills need review (${unique(team.review).join(', ')})`);
+  if (team.blocked.length) clauses.push(`${plural(team.blocked.length, 'placement')} blocked (${unique(team.blocked).join(', ')})`);
+  if (!team.review.length && !team.blocked.length && team.pendingLeft === 0) clauses.push(`${team.team} has unfinished work (endorsed batch skipped)`);
+  if (team.pendingLeft) clauses.push(`${team.team} still has ${plural(team.pendingLeft, 'pending install')}; run sync again`);
+  if (includeTail && (team.review.length || team.blocked.length || (!team.review.length && !team.blocked.length && team.pendingLeft === 0))) {
+    clauses[clauses.length - (team.pendingLeft ? 2 : 1)] += team.review.length ? ' — see the lines above for each remedy' : ' — see the lines above';
+  }
+  return clauses;
+}
+function skippedClause(team: Extract<TeamOutcome, { state: 'skipped' }>): string | undefined {
+  if (team.reason === 'fresh' || team.reason === 'unreachable') return undefined;
+  if (team.reason === 'locked') return `${team.team} skipped (another sync holds its lock) — retry when it finishes`;
+  return `${team.team} skipped (${team.detail})`;
+}
+function teamLine(team: TeamOutcome): string {
+  if (team.state === 'complete') {
+    const phrase = countsPhrase(team.counts, team.shared);
+    return phrase ? `${team.team}: ${phrase}` : `${team.team}: up to date (${plural((team.counts.unchanged || 0), 'skill')})`;
+  }
+  if (team.state === 'incomplete') {
+    const phrase = countsPhrase(team.counts, team.shared);
+    const clauses = incompleteClauses(team, false);
+    return `${team.team}: ${[phrase, ...clauses].filter(Boolean).join('; ')}`;
+  }
+  if (team.state === 'skipped') return team.reason === 'locked' ? `${team.team}: skipped (another sync holds its lock)` : `${team.team}: skipped (${team.detail})`;
+  return `${team.team}: no longer configured`;
+}
+function printVerdict(config: Awaited<ReturnType<ConfigStore['read']>>, teams: TeamOutcome[], changed: boolean, verdict: (line: string) => void): void {
+  const configured = Object.keys(config.teams);
+  if (configured.length === 1) {
+    const team = teams[0]!;
+    if (team.state === 'complete') {
+      const phrase = countsPhrase(team.counts, team.shared);
+      if (!changed) {
+        const repairs = team.shared.repaired ? `; ${plural(team.shared.repaired, 'managed-field repair')}` : '';
+        verdict(`Sync complete: nothing to do (${team.team} up to date, ${plural(team.counts.unchanged, 'skill')}${repairs}).`);
+      } else verdict(`Sync complete: ${team.team}${phrase ? ` — ${phrase}` : ''}.`);
+      return;
+    }
+    const clause = team.state === 'incomplete' ? incompleteClauses(team, true).join('; ') : team.state === 'skipped' ? skippedClause(team) ?? `${team.team} skipped (${team.detail})` : `${team.team} is no longer configured`;
+    const phrase = team.state === 'incomplete' ? countsPhrase(team.counts, team.shared) : '';
+    verdict(`Sync incomplete: ${phrase ? `${team.team} — ${phrase}; ` : ''}${clause}.`);
+    return;
+  }
+  for (const team of teams) verdict(teamLine(team));
+  const bad = teams.filter((team) => team.state === 'incomplete' || (team.state === 'skipped' && team.reason !== 'fresh'));
+  if (!bad.length) { verdict('Sync complete.'); return; }
+  const clauses: string[] = [];
+  for (const team of bad) {
+    if (team.state === 'incomplete') clauses.push(...incompleteClauses(team, false));
+    else if (team.state === 'skipped') { const clause = skippedClause(team); if (clause) clauses.push(clause); }
+  }
+  verdict(`Sync incomplete: ${clauses.join('; ')}.`);
+}
+
+async function prune(store: ConfigStore, io: Prompter): Promise<{ deleted: number; declined: boolean; error?: string }> {
   const root = resolve(store.root, 'quarantine');
   let entries: string[];
-  try { entries = await readdir(root); } catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') { io.print('Quarantine is empty.'); return; } throw error; }
+  try { entries = await readdir(root); } catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') { io.print('Quarantine is empty.'); return { deleted: 0, declined: false }; } throw error; }
   const paths = entries.map((entry) => resolve(root, entry)).filter((path) => path.startsWith(`${root}/`));
-  if (!paths.length) { io.print('Quarantine is empty.'); return; }
+  if (!paths.length) { io.print('Quarantine is empty.'); return { deleted: 0, declined: false }; }
   for (const path of paths) io.print(path);
-  if (!(await io.confirm(`Delete ${paths.length} quarantined item(s)?`))) return;
-  for (const path of paths) await rm(path, { recursive: true, force: false });
+  if (!(await io.confirm(`Delete ${paths.length} quarantined item(s)?`))) { io.print('Prune cancelled; nothing deleted.'); return { deleted: 0, declined: true }; }
+  let deleted = 0; let firstFailure: { path: string; message: string } | undefined;
+  for (const path of paths) {
+    try { await rm(path, { recursive: true, force: false }); deleted++; }
+    catch (error) { firstFailure ??= { path, message: error instanceof Error ? error.message : String(error) }; }
+  }
+  if (firstFailure) return { deleted, declined: false, error: `Deleted ${deleted} of ${paths.length} quarantined item(s); could not delete ${firstFailure.path}: ${firstFailure.message}` };
+  io.print(`Deleted ${plural(deleted, 'quarantined item')}.`);
+  return { deleted, declined: false };
 }
