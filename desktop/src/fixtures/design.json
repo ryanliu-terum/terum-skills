@@ -1,6 +1,6 @@
 {
   "generatedFrom": {
-    "buildPy": "e98f519ede67c94ecc1979cf8ead469d",
+    "buildPy": "232ed6ae2be083b9d0a0fc4f563a2175",
     "today": "2026-09-06"
   },
   "TOKENS": {
@@ -152,7 +152,7 @@
   },
   "SKILLS": [
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "infra",
       "name": "deploy-check",
       "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
@@ -167,7 +167,7 @@
       "favorite": true
     },
     {
-      "origin": "ssm",
+      "project": "ssm",
       "category": "docs",
       "name": "release-notes",
       "desc": "Drafts release notes from merged PR titles and the changelog convention in CONTRIBUTING.",
@@ -180,7 +180,7 @@
       "installs": "4 installs"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "review",
       "name": "pr-review",
       "desc": "Reviews a pull request the way Ryan does: contract drift first, then silent failures, then style.",
@@ -200,7 +200,7 @@
       }
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "ops",
       "name": "incident-triage",
       "desc": "Walks a production alert to a root-cause hypothesis using the runbook and recent deploys.",
@@ -219,7 +219,7 @@
       }
     },
     {
-      "origin": "local",
+      "project": "local",
       "category": "docs",
       "name": "api-docs",
       "desc": "Generates endpoint docs from the Zod contracts and keeps the examples in sync with fixtures.",
@@ -228,7 +228,7 @@
       "enabled": false
     },
     {
-      "origin": "mrf",
+      "project": "mrf",
       "category": "infra",
       "name": "migration-guard",
       "desc": "Refuses to apply a Supabase migration without a dry run, a numbered file, and a rollback note.",
@@ -248,7 +248,7 @@
       ]
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "testing",
       "name": "test-writer",
       "desc": "Writes the failing test first, then the smallest change that passes it, then the edge cases.",
@@ -262,7 +262,7 @@
       "favorite": true
     },
     {
-      "origin": "ssm",
+      "project": "ssm",
       "category": "git",
       "name": "commit-msg",
       "desc": "Formats commit messages to the repo convention and adds the session attribution trailer.",
@@ -276,7 +276,7 @@
       "enabled": false
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "onboarding",
       "name": "onboarding-tour",
       "desc": "Explains the team repo layout to a new member and installs the starter set of skills.",
@@ -284,7 +284,7 @@
       "installs": "1 install"
     },
     {
-      "origin": "mrf",
+      "project": "mrf",
       "category": "data",
       "name": "csv-profiler",
       "desc": "Profiles a CSV before import: types, nulls, outliers, and the columns that will break the schema.",
@@ -297,7 +297,7 @@
       "installs": "6 installs"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "review",
       "name": "silent-failure-hunt",
       "desc": "Finds catch blocks that only log, fallbacks that hide errors, and retries without a budget.",
@@ -310,7 +310,7 @@
       "installs": "9 installs"
     },
     {
-      "origin": "local",
+      "project": "local",
       "category": "writing",
       "name": "handoff-note",
       "desc": "Writes the end-of-session handoff: state, decisions, gotchas, and the next step in one page.",
@@ -323,7 +323,7 @@
       "installs": "3 installs"
     },
     {
-      "origin": "ssm",
+      "project": "ssm",
       "category": "research",
       "name": "source-check",
       "desc": "Verifies every cited URL resolves and actually says what the claim attributes to it before a report ships.",
@@ -336,7 +336,7 @@
       "installs": "5 installs"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "infra",
       "name": "env-audit",
       "desc": "Lists every environment variable a service reads and flags the ones missing from Vercel or the example file.",
@@ -349,7 +349,7 @@
       "installs": "4 installs"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "docs",
       "name": "adr-writer",
       "desc": "Turns a design discussion into an architecture decision record: the options weighed, the one chosen, and why.",
@@ -370,7 +370,7 @@
   ],
   "INBOX": [
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "ops",
       "name": "incident-triage",
       "desc": "Walks a production alert to a root-cause hypothesis using the runbook and recent deploys.",
@@ -417,7 +417,7 @@
       "date": "2026-09-06"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "infra",
       "name": "deploy-check",
       "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
@@ -601,7 +601,7 @@
           ]
         ],
         "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
-        "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057; 12 rounds settled by checks, 2 by judge). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
+        "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
         "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
         "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
         "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
@@ -783,8 +783,8 @@
     {
       "kind": "share",
       "name": "secret-scan",
-      "origin": "terum",
-      "category": "infra",
+      "project": "terum",
+      "category": "security",
       "days": 1,
       "actor": {
         "handle": "ajay",
@@ -822,7 +822,7 @@
       "date": "2026-09-05"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "review",
       "name": "pr-review",
       "desc": "Reviews a pull request the way Ryan does: contract drift first, then silent failures, then style.",
@@ -891,7 +891,7 @@
     {
       "kind": "review",
       "name": "single-fix",
-      "origin": "terum",
+      "project": "terum",
       "category": "review",
       "days": 3,
       "actor": {
@@ -928,7 +928,7 @@
       "date": "2026-09-03"
     },
     {
-      "origin": "mrf",
+      "project": "mrf",
       "category": "infra",
       "name": "migration-guard",
       "desc": "Refuses to apply a Supabase migration without a dry run, a numbered file, and a rollback note.",
@@ -978,7 +978,7 @@
       "date": "2026-09-02"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "docs",
       "name": "adr-writer",
       "desc": "Turns a design discussion into an architecture decision record: the options weighed, the one chosen, and why.",
@@ -1025,7 +1025,7 @@
       "date": "2026-09-01"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "infra",
       "name": "deploy-check",
       "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
@@ -1209,7 +1209,7 @@
           ]
         ],
         "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
-        "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057; 12 rounds settled by checks, 2 by judge). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
+        "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
         "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
         "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
         "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
@@ -1369,7 +1369,7 @@
       "date": "2026-08-29"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "infra",
       "name": "deploy-check",
       "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
@@ -1553,7 +1553,7 @@
           ]
         ],
         "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
-        "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057; 12 rounds settled by checks, 2 by judge). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
+        "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
         "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
         "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
         "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
@@ -1778,7 +1778,7 @@
       "date": "2026-08-28"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "infra",
       "name": "env-audit",
       "desc": "Lists every environment variable a service reads and flags the ones missing from Vercel or the example file.",
@@ -1828,7 +1828,7 @@
     {
       "kind": "team",
       "name": "mira",
-      "origin": "terum",
+      "project": "terum",
       "category": "people",
       "days": 12,
       "actor": {
@@ -1867,7 +1867,7 @@
   ],
   "CATALOG": [
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "infra",
       "name": "deploy-check",
       "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
@@ -1882,7 +1882,7 @@
       "favorite": true
     },
     {
-      "origin": "ssm",
+      "project": "ssm",
       "category": "docs",
       "name": "release-notes",
       "desc": "Drafts release notes from merged PR titles and the changelog convention in CONTRIBUTING.",
@@ -1895,7 +1895,7 @@
       "installs": "4 installs"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "review",
       "name": "pr-review",
       "desc": "Reviews a pull request the way Ryan does: contract drift first, then silent failures, then style.",
@@ -1915,7 +1915,7 @@
       }
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "ops",
       "name": "incident-triage",
       "desc": "Walks a production alert to a root-cause hypothesis using the runbook and recent deploys.",
@@ -1934,7 +1934,7 @@
       }
     },
     {
-      "origin": "mrf",
+      "project": "mrf",
       "category": "infra",
       "name": "migration-guard",
       "desc": "Refuses to apply a Supabase migration without a dry run, a numbered file, and a rollback note.",
@@ -1954,7 +1954,7 @@
       ]
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "testing",
       "name": "test-writer",
       "desc": "Writes the failing test first, then the smallest change that passes it, then the edge cases.",
@@ -1968,7 +1968,7 @@
       "favorite": true
     },
     {
-      "origin": "ssm",
+      "project": "ssm",
       "category": "git",
       "name": "commit-msg",
       "desc": "Formats commit messages to the repo convention and adds the session attribution trailer.",
@@ -1982,7 +1982,7 @@
       "enabled": false
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "onboarding",
       "name": "onboarding-tour",
       "desc": "Explains the team repo layout to a new member and installs the starter set of skills.",
@@ -1990,7 +1990,7 @@
       "installs": "1 install"
     },
     {
-      "origin": "mrf",
+      "project": "mrf",
       "category": "data",
       "name": "csv-profiler",
       "desc": "Profiles a CSV before import: types, nulls, outliers, and the columns that will break the schema.",
@@ -2003,7 +2003,7 @@
       "installs": "6 installs"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "review",
       "name": "silent-failure-hunt",
       "desc": "Finds catch blocks that only log, fallbacks that hide errors, and retries without a budget.",
@@ -2016,7 +2016,7 @@
       "installs": "9 installs"
     },
     {
-      "origin": "ssm",
+      "project": "ssm",
       "category": "research",
       "name": "source-check",
       "desc": "Verifies every cited URL resolves and actually says what the claim attributes to it before a report ships.",
@@ -2029,7 +2029,7 @@
       "installs": "5 installs"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "infra",
       "name": "env-audit",
       "desc": "Lists every environment variable a service reads and flags the ones missing from Vercel or the example file.",
@@ -2042,7 +2042,7 @@
       "installs": "4 installs"
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "docs",
       "name": "adr-writer",
       "desc": "Turns a design discussion into an architecture decision record: the options weighed, the one chosen, and why.",
@@ -2061,7 +2061,7 @@
       }
     },
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "security",
       "name": "secret-scan",
       "desc": "Scans a diff for credentials and private keys before a share or a publish, and blocks the commit with the exact line.",
@@ -2080,7 +2080,7 @@
       ]
     },
     {
-      "origin": "docs",
+      "project": "docs",
       "category": "review",
       "name": "a11y-audit",
       "desc": "Walks a page with the accessibility tree and lists every control a screen reader cannot name or reach.",
@@ -2097,7 +2097,7 @@
       ]
     },
     {
-      "origin": "docs",
+      "project": "docs",
       "category": "docs",
       "name": "storybook-sync",
       "desc": "Regenerates the component stories from the props tables and flags a story whose example no longer compiles.",
@@ -2112,7 +2112,7 @@
       "grants": []
     },
     {
-      "origin": "docs",
+      "project": "docs",
       "category": "infra",
       "name": "bundle-budget",
       "desc": "Fails the build when a route's client bundle grows past its budget and names the import that did it.",
@@ -2127,7 +2127,7 @@
   ],
   "MARKET_EXTRA": [
     {
-      "origin": "terum",
+      "project": "terum",
       "category": "security",
       "name": "secret-scan",
       "desc": "Scans a diff for credentials and private keys before a share or a publish, and blocks the commit with the exact line.",
@@ -2146,7 +2146,7 @@
       ]
     },
     {
-      "origin": "docs",
+      "project": "docs",
       "category": "review",
       "name": "a11y-audit",
       "desc": "Walks a page with the accessibility tree and lists every control a screen reader cannot name or reach.",
@@ -2163,7 +2163,7 @@
       ]
     },
     {
-      "origin": "docs",
+      "project": "docs",
       "category": "docs",
       "name": "storybook-sync",
       "desc": "Regenerates the component stories from the props tables and flags a story whose example no longer compiles.",
@@ -2178,7 +2178,7 @@
       "grants": []
     },
     {
-      "origin": "docs",
+      "project": "docs",
       "category": "infra",
       "name": "bundle-budget",
       "desc": "Fails the build when a route's client bundle grows past its budget and names the import that did it.",
@@ -2653,7 +2653,7 @@
     ]
   ],
   "DETAIL": {
-    "origin": "terum",
+    "project": "terum",
     "category": "infra",
     "name": "deploy-check",
     "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
@@ -2837,7 +2837,7 @@
         ]
       ],
       "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
-      "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057; 12 rounds settled by checks, 2 by judge). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
+      "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
       "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
       "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
       "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
@@ -2983,7 +2983,7 @@
     ]
   },
   "DETAIL_PARTIAL": {
-    "origin": "mrf",
+    "project": "mrf",
     "category": "infra",
     "name": "migration-guard",
     "desc": "Refuses to apply a Supabase migration without a dry run, a numbered file, and a rollback note.",
@@ -3021,7 +3021,7 @@
       "role": "founder",
       "initials": "RL"
     },
-    "repo": "mrf/team-skills",
+    "repo": "terum/team-skills",
     "path": "skills/migration-guard",
     "receipt": {
       "when": "2 days ago",
@@ -3102,7 +3102,7 @@
         ]
       ],
       "abstract": "Three execution cases were run at k = 3 repetitions across two arms (baseline, candidate; no prior version exists), with trigger selection measured against the team catalog of 30 skills. Two rounds hit the agent timeout after one retry and stay unscored, so the run is partial: 7 of 9 rounds scored. The candidate outperformed baseline in 5 of the 7 scored rounds (net lift +0.71, sign test p = 0.063) and missed one of five should-trigger prompts. Verdict: PASS, greyed for the partial run.",
-      "results": "Mean deterministic-check pass rate was 0.88 for the candidate and 0.57 for baseline over the scored rounds (Fig. 1). Against baseline the candidate won 5, lost 0, and tied 2 of 7 scored rounds (net lift +0.71, p = 0.063; 4 rounds settled by checks, 1 by judge) (Fig. 2). no-rollback carries both unscored rounds (Table 1).",
+      "results": "Mean deterministic-check pass rate was 0.88 for the candidate and 0.57 for baseline over the scored rounds (Fig. 1). Against baseline the candidate won 5, lost 0, and tied 2 of 7 scored rounds (net lift +0.71, p = 0.063) (Fig. 2). no-rollback carries both unscored rounds (Table 1).",
       "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 4 of 5 should-trigger prompts (recall 0.80) and on 0 of 5 near-miss distractors (precision 1.00).",
       "efficiency_text": "The candidate was cheaper and faster than baseline on every measure (Table 2).",
       "coverage": "7 of 9 rounds scored: 2 rounds in no-rollback hit the 600 s agent timeout twice and stay unscored, never averaged. All 6 hygiene screens passed. The sign test is informational at k = 3. Raw transcripts and sandboxes remain on teddy's machine under run 20260904T091200Z; all committed content passed secret redaction."
@@ -3191,7 +3191,7 @@
     ]
   },
   "DETAIL_NO_RECEIPT": {
-    "origin": "terum",
+    "project": "terum",
     "category": "onboarding",
     "name": "onboarding-tour",
     "desc": "Explains the team repo layout to a new member and installs the starter set of skills.",
@@ -3284,7 +3284,7 @@
     "flags": []
   },
   "DETAIL_NOT_INSTALLED": {
-    "origin": "terum",
+    "project": "terum",
     "category": "infra",
     "name": "deploy-check",
     "desc": "Runs the pre-deploy checklist against the current branch and blocks on missing migrations or unpinned env vars.",
@@ -3468,7 +3468,7 @@
         ]
       ],
       "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
-      "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057; 12 rounds settled by checks, 2 by judge). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
+      "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
       "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
       "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
       "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
@@ -3812,6 +3812,7 @@
   "INVITEE": "sortiz",
   "TEAM_REPO": "terum/team-skills",
   "INVITE_TIP": "GitHub emails the invitation; the block runs the joiner&#39;s wizard",
+  "JOIN_BLOCK_NOTE": "GitHub emails the invitation. The block runs the joiner&#39;s wizard: with gh signed in it accepts the pending invitation, otherwise it asks them to accept it in the browser, and git must have access to this repository.",
   "VERDICT_STYLE": {
     "PASS": {
       "dark": [
@@ -4150,7 +4151,7 @@
     "onboarding-tour",
     "secret-scan"
   ],
-  "ONBOARD_PLACED": 4,
+  "BOOT_STEPS": 4,
   "ONBOARD_LATER": [
     [
       "Install from Slack with one click",
@@ -4182,9 +4183,9 @@
     "More to come": "Three things the sharing spec defers until the basics prove themselves. Ask for what you need under Feedback and requests."
   },
   "BASICS_HINT": {
-    "Manage": "npx -y terum-skills@latest install &lt;skill&gt;",
+    "Manage": "npx -y terum-skills@latest install &lt;ref&gt;",
     "Eval": "npx -y terum-skills@latest eval deploy-check --commit",
-    "Share": "npx -y terum-skills@latest share",
+    "Share": "npx -y terum-skills@latest connect",
     "Search": "npx -y terum-skills@latest search deploy",
     "More to come": null
   },
@@ -4279,7 +4280,7 @@
   },
   "LIBRARY_OVERVIEW": {
     "skills": "30",
-    "skills_delta": "+3 this month",
+    "skills_note": "7 endorsed to Global",
     "evaluated": "27 of 30",
     "meter": {
       "pass_": 20,
@@ -4289,21 +4290,7 @@
     },
     "meter_text": "20 pass · 5 neutral · 2 fail",
     "installs": "148",
-    "installs_delta": "+9 this week · 12 teammates · last 12 weeks",
-    "sparkline": [
-      4,
-      6,
-      3,
-      8,
-      5,
-      9,
-      7,
-      11,
-      8,
-      12,
-      10,
-      9
-    ],
+    "installs_note": "across every people file · 12 active teammates",
     "attention": "8",
     "attention_lines": [
       "2 failing evals",
@@ -4807,9 +4794,9 @@
           [
             "pr-review",
             "test-writer",
-            "onboarding-tour",
             "silent-failure-hunt",
-            "adr-writer"
+            "adr-writer",
+            "onboarding-tour"
           ]
         ],
         [
@@ -4844,9 +4831,9 @@
         [
           "SSM",
           [
-            "release-notes",
             "commit-msg",
-            "source-check"
+            "source-check",
+            "release-notes"
           ]
         ]
       ],
@@ -5007,7 +4994,7 @@
     },
     "shareCommand": {
       "deploy-check": "npx -y terum-skills@latest install terum/team-skills/deploy-check@5f0e12ab9c3d",
-      "migration-guard": "npx -y terum-skills@latest install mrf/team-skills/migration-guard@a17c3e9d4b02",
+      "migration-guard": "npx -y terum-skills@latest install terum/team-skills/migration-guard@a17c3e9d4b02",
       "onboarding-tour": "npx -y terum-skills@latest install terum/team-skills/onboarding-tour@c0ffee12ab34",
       "deploy-check-not-installed": "npx -y terum-skills@latest install terum/team-skills/deploy-check@5f0e12ab9c3d"
     },
