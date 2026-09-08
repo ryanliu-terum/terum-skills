@@ -1,6 +1,6 @@
 # FIDELITY.md — Gate A status per board
 
-One row per in-scope board (87: every canvas board except the nine *States/*Hovers/*Panes/SkillCard sheets, FigmaDark and MarketplaceNoHero). Status is `todo` | `in-progress` | `locked`; only `locked` rows are asserted by `e2e/fidelity`, and a row is set to `locked` only after its diff passed in the orchestrator's own run. The tolerance column is informational: the authoritative per-class map lives in `e2e/fidelity/tolerance.ts` (screen 0.0030, dialog 0.0035, empty/loading/error 0.0020, full-page 0.0025; Main and Light are exact at 0 differing pixels). Masks: none. A mask may be added only with a written reason in the note column, and a test never reads a tolerance or a mask from this file.
+One row per in-scope board (88: every canvas board except the nine *States/*Hovers/*Panes/SkillCard sheets, FigmaDark and MarketplaceNoHero). Status is `todo` | `in-progress` | `locked`; only `locked` rows are asserted by `e2e/fidelity`, and a row is set to `locked` only after its diff passed in the orchestrator's own run. The tolerance column is informational: the authoritative per-class map lives in `e2e/fidelity/tolerance.ts` (screen 0.0030, dialog 0.0035, empty/loading/error 0.0020, full-page 0.0025; Main and Light are exact at 0 differing pixels). Masks: none. A mask may be added only with a written reason in the note column, and a test never reads a tolerance or a mask from this file.
 
 | Board | route+state | status | tolerance | note |
 |---|---|---|---|---|
@@ -27,6 +27,7 @@ One row per in-scope board (87: every canvas board except the nine *States/*Hove
 | SkillDetailDisabled | `#/skill/deploy-check?__mock=disabled` | locked | 0.0030 | status switch off |
 | SkillDetailNotInstalled | `#/skill/deploy-check?__mock=not-installed` | locked | 0.0030 | reached from Marketplace: crumb root Marketplace, sidebar Marketplace selected |
 | SkillDetailInstall | `#/skill/deploy-check?__mock=not-installed&dialog=install` | locked | 0.0035 |  |
+| SkillDetailInstallLight | `#/skill/deploy-check?__mock=not-installed&dialog=install&theme=light` | locked | 0.0035 | the 88th board, locked 2026-09-08 after the other 87 (63 differing pixels, 0.00005) |
 | SkillDetailRemove | `#/skill/deploy-check?dialog=remove` | locked | 0.0035 |  |
 | SkillDetailRunEval | `#/skill/deploy-check?tab=evals&dialog=run-eval` | locked | 0.0035 |  |
 | SkillDetailLoading | `#/skill/deploy-check?__mock=loading` | locked | 0.0020 |  |
@@ -92,7 +93,11 @@ One row per in-scope board (87: every canvas board except the nine *States/*Hove
 | OnboardingLight | `#/onboarding/style?theme=light` | locked | 0.0030 | Light picked (the picked card is the current theme) |
 | OnboardingError | `#/onboarding/boot?__mock=error` | locked | 0.0020 | the first sync failed |
 
-Out of Gate A's scope tonight (not counted above): SkillDetailInstallLight = `#/skill/deploy-check?__mock=not-installed&dialog=install&theme=light`, 1440x900, dialog class; lock it only if everything else is locked.
+Out of Gate A's scope (the canvas has 99 `.shots`; 88 have a row above): the nine specimen sheets (SkillCard, SkillDetailStates, SkillDetailHovers, InboxPanes, InboxStates, MarketplaceStates, ShareStates, SettingsStates, OnboardingStates), FigmaDark (a third token theme the app does not ship) and MarketplaceNoHero (no route draws the marketplace without its hero). None of the eleven is reachable from an app route, so none can be asserted by `e2e/fidelity`; they stay design-only. SkillDetailInstallLight joined the gate on 2026-09-08 once the other 87 were locked.
+
+## Oracle provenance (2026-09-08, the M7 takeover)
+
+The 99 `.shots/*.png` were re-rendered on Ryan's Mac on 2026-09-08 through the canvas's `render-mac.mjs` (a Playwright renderer using the same Chromium channel, device scale, colour scheme, locale and timezone as `playwright.config.ts`) from the unchanged `.dc.html` boards. Teddy's original renders (snap Chromium on Linux, FreeType) differed from the macOS raster (CoreText) in glyph anti-aliasing only, about 3,700 pixels on every board, which alone exceeded the exact and `state` tolerances (85 of 87 locked boards failed here before the re-render; 87 of 87 passed after it, worst 0.00269). The tolerance map and the no-mask rule did not change. Consequence: the oracle is now a macOS raster; a Linux gate machine would have to re-render it there. Teddy's renders are kept beside the canvas as `.shots-linux-teddy-2026-09-08/`.
 
 ## Oracle defects found while locking (recorded; the oracle was re-shot, never worked around)
 

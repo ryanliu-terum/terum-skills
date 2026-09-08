@@ -19,6 +19,7 @@ function fakeBridge(script: (args: readonly string[], emit: (e: LineEvent) => vo
     async kill(id) { kills.push(id); emit?.({ kind: 'exit', code: null }); },
     async readAppState() { return state; },
     async hostPlatform() { return 'macos'; },
+    async homeDirectory() { return '/Users/teddy'; },
   };
   return { bridge, spawns, writes, kills };
 }
@@ -149,5 +150,42 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     off();
     await backend.sync({}).done;
     expect(seen).toHaveLength(3);
+  });
+});
+
+
+describe('D13 home abbreviation at the native backend seam', () => {
+  it('abbreviates every print level, result frame and done error', async () => {
+    const { bridge } = fakeBridge((_args, emit) => {
+      for (const level of ['info', 'warn', 'error']) emit({ kind: 'stdout', line: line({ t: 'print', level, line: 'Reading /Users/teddy/.terum/skills' }) });
+      emit({ kind: 'stdout', line: line({ t: 'result', verb: 'sync', ok: false, exitCode: 1, error: 'Invalid /Users/teddy/.terum/skills/config.json' }) });
+    });
+    const run = createTauriBackend(bridge).sync({});
+    expect(await collect(run.frames)).toEqual([
+      { t: 'print', line: 'Reading ~/.terum/skills' },
+      { t: 'print', line: 'warn: Reading ~/.terum/skills' },
+      { t: 'print', line: 'error: Reading ~/.terum/skills' },
+      { t: 'result', ok: false, error: 'Invalid ~/.terum/skills/config.json' },
+    ]);
+    expect(await run.done).toEqual({ ok: false, error: 'Invalid ~/.terum/skills/config.json' });
+  });
+  it('abbreviates read errors and startup errors without requiring frame consumption', async () => {
+    const { bridge } = fakeBridge((_args, emit) => {
+      emit({ kind: 'stderr', line: 'Cannot read /Users/teddy/.terum/skills' });
+      emit({ kind: 'exit', code: 1 });
+    });
+    expect(await createTauriBackend(bridge).validate({ ref: 'a' })).toEqual({ ok: false, error: 'terum-skills exited with code 1 before reporting a result. Cannot read ~/.terum/skills' });
+    bridge.readAppState = async () => { throw new Error('Missing /Users/teddy/.terum/skills/run/app.json'); };
+    expect(await createTauriBackend(bridge).sync({}).done).toEqual({ ok: false, error: 'Missing ~/.terum/skills/run/app.json' });
+  });
+  it('preserves messages when the platform home is unavailable', async () => {
+    const { bridge } = fakeBridge((_args, emit) => {
+      emit({ kind: 'stdout', line: line({ t: 'print', level: 'info', line: '/Users/teddy/file' }) });
+      emit({ kind: 'stdout', line: line({ t: 'result', verb: 'sync', ok: false, exitCode: 1, error: '/Users/teddy/file' }) });
+    });
+    bridge.homeDirectory = async () => { throw new Error('Unavailable'); };
+    const run = createTauriBackend(bridge).sync({});
+    expect(await collect(run.frames)).toEqual([{ t: 'print', line: '/Users/teddy/file' }, { t: 'result', ok: false, error: '/Users/teddy/file' }]);
+    expect(await run.done).toEqual({ ok: false, error: '/Users/teddy/file' });
   });
 });

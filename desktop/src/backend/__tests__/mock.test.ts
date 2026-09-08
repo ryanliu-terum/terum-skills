@@ -6,17 +6,18 @@ afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.resto
 async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
 it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect((await b.library({scope:'Global'})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:'Global'});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
 it.each([
- ['library',"ENOENT: no such file or directory, scandir '~/.terum/skills'"],
+ ['library',"EACCES: permission denied, scandir '~/.terum/skills'"],
  ['skill',"ENOENT: no such file or directory, open '~/.claude/skills/deploy-check/SKILL.md'"],
- ['inbox',"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com"],
+ ['inbox',"Skipping terum: could not fetch https://github.com/terum/team-skills.git: fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com"],
  ['marketplace',"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com"],
  ['share',"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'"],
- ['settings',"SyntaxError: Unexpected token } in JSON at position 412 · ~/.terum/skills/config.json"],
+ ['settings',"Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)"],
  ['onboarding',"Skipping terum: could not fetch https://github.com/terum/team-skills.git: fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com"],
 ] as const)('returns the exact %s board error',async(family,error)=>{
- location.hash='#/frame?__mock=error';const b=createMockBackend();
+ const b=createMockBackend();const onboarding=await b.onboarding();
+ location.hash='#/frame?__mock=error';
  const reads={library:()=>b.library({scope:'Global'}),skill:()=>b.skill({ref:'deploy-check'}),inbox:()=>b.inbox(),marketplace:()=>b.catalog(),share:()=>b.roster(),settings:()=>b.settings(),onboarding:()=>b.onboarding()};
- expect(await reads[family]()).toEqual({ok:false,error});
+ expect(await reads[family]()).toEqual({ok:false,error,...(family==='onboarding'&&onboarding.ok?{value:onboarding.value}:{})});
  if(family==='marketplace')expect(await b.search({q:'deploy'})).toEqual({ok:false,error});
  if(family==='settings')expect(await b.update()).toEqual({ok:false,error});
  if(family==='onboarding')expect(await b.sync({}).done).toEqual({ok:false,error});
@@ -54,11 +55,22 @@ it('returns isolated Settings and Onboarding constants without reshaping them',a
  expect(settings.ok).toBe(true);expect(onboarding.ok).toBe(true);
  if(!settings.ok||!onboarding.ok)throw new Error('Expected fixture reads');
  for(const [key,value] of Object.entries(settings.value))expect(value).toEqual(Reflect.get(design,key));
- for(const key of ['ONBOARD_STEPS','ONBOARD_BASICS','GLOBAL_SET','ONBOARD_PLACED','ONBOARD_LATER','ONBOARD_COMMUNITY','ONBOARD_FETCH_ERROR','WELCOME_LINES','BASICS_COPY','BASICS_HINT','THEME_OPTIONS','LIBRARY_OVERVIEW','INVITEE','TEAM_REPO','INVITE_TIP'])expect(Reflect.get(onboarding.value,key)).toEqual(Reflect.get(design,key));
- expect(onboarding.value.skill.name).toBe(design.SKILLS[0]?.name);expect(onboarding.value.summary?.lift).toBe(44);expect(onboarding.value.arm).toEqual(design.DETAIL.receipt?.arm);expect(onboarding.value.rosterInitials).toEqual(design.ROSTER.map(q=>q.initials));expect(onboarding.value.bootRows).toHaveLength(4);expect(onboarding.value.failedBootRows[1]?.[0]).toBe('failed');
+ for(const key of ['ONBOARD_STEPS','ONBOARD_BASICS','GLOBAL_SET','BOOT_STEPS','ONBOARD_LATER','ONBOARD_COMMUNITY','ONBOARD_FETCH_ERROR','WELCOME_LINES','BASICS_COPY','BASICS_HINT','THEME_OPTIONS','LIBRARY_OVERVIEW','INVITEE','TEAM_REPO','INVITE_TIP','JOIN_BLOCK_NOTE'])expect(Reflect.get(onboarding.value,key)).toEqual(Reflect.get(design,key));
+ expect(onboarding.value.skill.name).toBe(design.SKILLS[0]?.name);expect(onboarding.value.summary?.lift).toBe(44);expect(onboarding.value.arm).toEqual(design.DETAIL.receipt?.arm);expect(onboarding.value.rosterInitials).toEqual(design.ROSTER.map(q=>q.initials));expect(onboarding.value.bootRows).toHaveLength(5);expect(onboarding.value.failedBootRows[1]?.[0]).toBe('failed');
  expect(settings.value.SETTINGS_NAV).toEqual(design.SETTINGS_NAV);expect(onboarding.value.ONBOARD_STEPS).toEqual(design.ONBOARD_STEPS);
  settings.value.TEAMS.pop();onboarding.value.ONBOARD_STEPS.pop();
  const nextSettings=await b.settings();const nextOnboarding=await b.onboarding();
  expect(nextSettings.ok&&nextSettings.value.TEAMS).toEqual(design.TEAMS);
  expect(nextOnboarding.ok&&nextOnboarding.value.ONBOARD_STEPS).toEqual(design.ONBOARD_STEPS);
+});
+
+
+it('reads skill refs from the configured remote, never project membership (CP-34/CP-44)',async()=>{
+ const b=createMockBackend();const partial=await b.skill({ref:'migration-guard'});if(!partial.ok)throw new Error(partial.error);
+ expect(partial.value.project).toBe('mrf');
+ expect(partial.value.skillRef).toBe('terum/team-skills/migration-guard');
+ expect(partial.value.shareCommand).toContain('install terum/team-skills/migration-guard@');
+ const inbox=await b.inbox();if(!inbox.ok)throw new Error(inbox.error);
+ expect(inbox.value.find(it=>it.name==='secret-scan')?.category).toBe('security');
+ for(const item of inbox.value)expect(item.skillRef).toBe(`${item.repo||design.TEAM_REPO}/${item.name}`);
 });

@@ -1,0 +1,8 @@
+# design-strings app half (S1d): notes
+
+- What: the app side of Teddy's 2026-09-08 design-strings walk (D14's 28 rows, CP-19, D11, D13, D17). The canvas side is `.patches/patch_ak.py` in the design canvas (copied here); the fixture export is commit ee5fa73; the manifest and oracle-provenance commit is d45e140.
+- Codex (gpt-6-astra, high, workspace-write) reported complete with one open question: the D13 home-abbreviation helper needs the home directory; it added `homeDirectory()` to the Bridge backed by `@tauri-apps/api/path` homeDir (covered by `core:default`; a failed lookup is the identity, so messages stay unchanged). Accepted: no Rust, no capability change, testable with the fake Bridge.
+- Orchestrator gates (verify.log): every gate green; 87 locked boards pass on the first run against the re-rendered oracle, the 88th (SkillDetailInstallLight) passes at 63 px and is locked in this PR.
+- Diff read: no eslint suppressions, no skipped or deleted tests; test changes are assertion updates to the new board truth plus 21 new tests (abbreviateHome, history rail, Analytics notes, share/onboarding coverage). The `run()` wrapper in `tauri/index.ts` re-yields frames through the home abbreviation; `read()` now routes through `run()` with no change notifications.
+- Not applied (design walk residue, recorded in patch_ak.py's docstring): CP-08 inventory JSON (not on this machine), CP-10 (d) gate, CP-46 value change (D14 locked identical output), RM-43 (6), CP-O1 Share→Connect tab label, TJ-O2 (3), CP-S5 second wrap specimen, the eleven D9/D10 boards.
+- Real-data proof: not applicable (no read model changed; the ten `gap()`s stand). The first batch with a proof is S7af.

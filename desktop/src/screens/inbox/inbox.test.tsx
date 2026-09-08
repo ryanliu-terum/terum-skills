@@ -21,7 +21,7 @@ it('renders the full inbox evaluation report', async () => { open('#/inbox/eval-
 it('renders the exact derived author digest and bold event actors', async () => { open('#/inbox/author-deploy-check'); expect(await screen.findByText(design.DERIVED.digestSentence)).toBeInTheDocument(); expect(screen.getAllByText('teddy', { selector: 'b' })[0]).toBeInTheDocument(); });
 it('renders the team report with the actual later install date', async () => { open('#/inbox/team-mira'); expect(await screen.findByText(/Since then she installed deploy-check \(2026-08-28\)/)).toBeInTheDocument(); });
 it('renders empty list and zero inbox counts', async () => { open('#/inbox?__mock=empty'); expect(await screen.findByText('No items')).toBeInTheDocument(); expect(screen.getByText('Nothing waiting')).toBeInTheDocument(); expect(screen.queryAllByTestId(/^inbox-row-/)).toHaveLength(0); });
-it('renders fatal failures in the centered alert', async () => { open('#/inbox?__mock=error'); expect(await screen.findByRole('alert')).toHaveTextContent("fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com"); });
+it('renders fatal failures in the centered alert', async () => { open('#/inbox?__mock=error'); expect(await screen.findByRole('alert')).toHaveTextContent("Skipping terum: could not fetch https://github.com/terum/team-skills.git: fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com"); });
 it('installs with consent pre-answered and replaces the document and row state', async () => {
   const install = vi.spyOn(pickBackend(), 'install'); open('#/inbox'); fireEvent.click(await screen.findByRole('button', { name: 'Install to Global' }));
   expect(await screen.findByRole('status')).toHaveTextContent('Installed to Global just now · 8b2f6c1e0d94 in ~/.claude/skills/secret-scan');
@@ -48,7 +48,7 @@ it('opens a dialog for an unexpected run prompt', async () => {
 });
 it('keeps secondary decline pixels unchanged', async () => { open('#/inbox'); const pane = await screen.findByRole('region', { name: 'Inbox report' }); const before = pane.textContent; fireEvent.click(within(pane).getByRole('button', { name: 'Decline' })); expect(pane.textContent).toBe(before); });
 
-it('retains the installed score when an update has no new receipt', async () => { open('#/inbox/update-adr-writer'); expect(await screen.findByText(/No receipt for c41d0e9f8a27 yet/)).toHaveTextContent('The installed version b7a2c15d4e9f scored +78% PASS on its last run.'); });
+it('retains the installed score when an update has no new receipt', async () => { open('#/inbox/update-adr-writer'); expect(await screen.findByText(/No receipt for c41d0e9f8a27 yet\./)).toHaveTextContent('The installed version b7a2c15d4e9f scored +78% PASS on its last run.'); });
 
 it.each([
  ['#/inbox', 'Decline', 'declined:secret-scan', true],
