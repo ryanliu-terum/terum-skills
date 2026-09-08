@@ -1,6 +1,6 @@
 # FIDELITY.md — Gate A status per board
 
-One row per in-scope board (87: every canvas board except the nine *States/*Hovers/*Panes/SkillCard sheets, FigmaDark and MarketplaceNoHero). Status is `todo` | `in-progress` | `locked`; only `locked` rows are asserted by `e2e/fidelity`, and a row is set to `locked` only after its diff passed in the orchestrator's own run. The tolerance column is informational: the authoritative per-class map lives in `e2e/fidelity/tolerance.ts` (screen 0.0030, dialog 0.0035, empty/loading/error 0.0020, full-page 0.0025; Main and Light are exact at 0 differing pixels). Masks: none. A mask may be added only with a written reason in the note column, and a test never reads a tolerance or a mask from this file.
+One row per in-scope board (88: every canvas board except the nine *States/*Hovers/*Panes/SkillCard sheets, FigmaDark and MarketplaceNoHero). Status is `todo` | `in-progress` | `locked`; only `locked` rows are asserted by `e2e/fidelity`, and a row is set to `locked` only after its diff passed in the orchestrator's own run. The tolerance column is informational: the authoritative per-class map lives in `e2e/fidelity/tolerance.ts` (screen 0.0030, dialog 0.0035, empty/loading/error 0.0020, full-page 0.0025; Main and Light are exact at 0 differing pixels). Masks: none. A mask may be added only with a written reason in the note column, and a test never reads a tolerance or a mask from this file.
 
 | Board | route+state | status | tolerance | note |
 |---|---|---|---|---|
