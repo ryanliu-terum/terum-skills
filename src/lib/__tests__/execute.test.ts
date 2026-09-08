@@ -42,6 +42,14 @@ describe('execute — the bin contract (§3)', () => {
     await quiet.execute(async () => success({ placed: 1, deferred: ['a'], notices: ['note'], changed: true, hook: false }));
     expect(quiet.lines).toEqual([]);
   });
+
+  it('keeps an unreachable sync failure after hook notices and before the release tail', async () => {
+    const lines: string[] = []; const codes: number[] = [];
+    const execute = createExecute({ io: new ScriptedPrompter(), stderr: (line) => lines.push(line), setExitCode: (code) => codes.push(code), afterVerb: async () => { lines.push('notice'); } });
+    await execute(async () => failure('Sync finished with 1 team(s) skipped: team. See the notices above.', { placed: 0, deferred: [], notices: ['Skipping team: could not fetch https://example.test/team.git'], changed: false, hook: true, teams: [{ team: 'team', state: 'skipped', reason: 'unreachable', detail: 'https://example.test/team.git' }] }), { verb: 'sync', notices: true });
+    expect(lines).toEqual(['Skipping team: could not fetch https://example.test/team.git', 'Sync finished with 1 team(s) skipped: team. See the notices above.', 'notice']);
+    expect(codes).toEqual([1]);
+  });
 });
 
 

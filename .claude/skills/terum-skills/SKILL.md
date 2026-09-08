@@ -48,7 +48,7 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 | `search <term> [--category] [--author] [--project]` | nothing | show stdout; `No skills found.` is a result |
 | `validate <abs-path or name> [--team <t>]` | nothing | exits 1 on error findings; a `warning HYG6` line with rc=0 is the size guideline, not a failure; show the lines verbatim. A local folder that has never been connected fails HYG1 on the missing `license` field, which `connect` injects; say so instead of calling the skill broken |
 | `update` | nothing | show stdout; it prints the update command and never runs it |
-| `sync` | say it will pull every configured team, place approved skills, and defer any skill whose `allowed-tools` grant needs consent | show stdout; a `N skills need review` line means the user must run `npx -y terum-skills@latest sync` in a terminal to answer the consent questions. Long on a cold clone: use `run_in_background` |
+| `sync` | say it will pull every configured team, place approved skills, and defer any skill whose `allowed-tools` grant needs consent | show stdout verbatim; the last line is the verdict. `Sync complete: …` means every team was stamped; `Sync incomplete: …` names why — a `N skills need review` cue means the user must run `npx -y terum-skills@latest sync` in a terminal to answer consent questions, a divergence line needs `connect --keep-source <id>` or `connect --keep-repo <id>`, a privileged-content line needs `connect --keep-source <id> --allow-privileged`. Never report success unless the verdict says complete. Long on a cold clone: use `run_in_background` |
 | `sync --hook` | do not run by hand; the SessionStart hook already runs it hourly | n/a |
 | `publish <ref> [--project <p>] [--team <t>]` | **confirm with the user**: this opens a pull request on the team repository (policy `pr`) in their name. State the skill and scope | show the PR URL. If stderr says `needs an interactive terminal`, the team is on `push` policy or an endorsement is already open; hand off (Table B) |
 | `install <ref>[@<version>]`, `install member <h>`, `install project <n>` | **confirm with the user**: places files under `.claude/skills` and records the install in the team repo. Never add `--force` unless the user asked for it by name | show what was placed. If stderr says `needs an interactive terminal`, the skill requests `allowed-tools` and a human must approve in a terminal; hand off. That consent question is deliberate (Ajay, 2026-09-03) |
@@ -60,8 +60,8 @@ Output handling for every verb in Table A:
 
 - stdout is the result. Show it in a fenced code block, verbatim, subject only to the
   `ls --local` summarising rule above.
-- stderr carries at most one failure line (exit 1); for `sync` it also carries notices and the
-  review count. Quote the failure line and say what it means in one sentence.
+- stderr carries at most one failure line (exit 1); for `sync --hook` it also carries notices and the
+  review count (interactive `sync` prints those on stdout, ending with the verdict). Quote the failure line and say what it means in one sentence.
 - Exit code 1 with a failure line is the verb declining, not the wrapper failing. Do not retry.
 - No update-notice tail appears (the CLI only prints it when stderr is a TTY).
 
