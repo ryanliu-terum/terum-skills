@@ -228,17 +228,35 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
  * count includes it — the same rule the placement loop follows (rulings walk R6, 2026-09-06). Before,
  * a diverged shared skill printed its remedy once and the hourly stamp silenced it.
  */
-export async function reconcileShared(store: ConfigStore, runner: Runner, io: Prompter, skipTeams: ReadonlySet<string> = new Set(), defer: (team: string, label: string) => void = () => undefined, form?: InvocationForm): Promise<void> {
+/** An eval-confirmed reconciliation is one skill and must surface every failure to its caller. */
+export interface ReconcileSharedOptions {
+  readonly ids?: ReadonlySet<string>;
+  readonly failFast?: boolean;
+}
+
+export async function reconcileShared(store: ConfigStore, runner: Runner, io: Prompter, skipTeams: ReadonlySet<string> = new Set(), defer: (team: string, label: string) => void = () => undefined, form?: InvocationForm, options: ReconcileSharedOptions = {}): Promise<void> {
   const config = await store.read();
   for (const [id, tracked] of Object.entries(config.shared)) {
+    if (options.ids !== undefined && !options.ids.has(id)) continue;
     if (skipTeams.has(tracked.team)) continue;
     try {
       const clone = store.teamClone(tracked.team);
-      if (!(await exists(tracked.source))) { io.print(`Connected source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use ${invocation(form, 'connect --relocate')} or ${invocation(form, 'connect --forget')}.`); defer(tracked.team, id.slice(0, 8)); continue; }
+      if (!(await exists(tracked.source))) {
+        const message = `Connected source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use ${invocation(form, 'connect --relocate')} or ${invocation(form, 'connect --forget')}.`;
+        if (options.failFast) throw new Error(message);
+        io.print(message); defer(tracked.team, id.slice(0, 8)); continue;
+      }
       let record;
       try { record = (await skillRecords(clone, tracked.team)).find((item) => item.id === id); }
-      catch (error) { io.print(`Could not read connected ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, id.slice(0, 8)); continue; }
-      if (!record) { io.print(`Repository copy for connected ${id.slice(0, 8)} is missing; run ${invocation(form, 'connect')} again to restore it.`); defer(tracked.team, id.slice(0, 8)); continue; }
+      catch (error) {
+        if (options.failFast) throw error;
+        io.print(`Could not read connected ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, id.slice(0, 8)); continue;
+      }
+      if (!record) {
+        const message = `Repository copy for connected ${id.slice(0, 8)} is missing; run ${invocation(form, 'connect')} again to restore it.`;
+        if (options.failFast) throw new Error(message);
+        io.print(message); defer(tracked.team, id.slice(0, 8)); continue;
+      }
       const team = await readTeamPolicy(clone);
       const fresh = await store.read();
       const author = `${fresh.display_name ?? ''} <${fresh.email ?? ''}>`;
@@ -252,7 +270,11 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const repairedRepo = injectManagedFields(repoContents, { license: team.license, id, author });
     // The existing privileged-content consent gate is orthogonal to HYG4. Keep its actionable
     // remediation ahead of hygiene; either refusal occurs before any source or team-repo write.
-    if ((await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) { io.print(`Connected skill ${record.name} now contains plugin or hook definitions; run ${invocation(form, 'connect --keep-source', id)} --allow-privileged after reviewing them.`); defer(tracked.team, record.name); continue; }
+    if ((await scanSkillFolder(tracked.source)).privileged && !((await scanSkillFolder(record.directory)).privileged)) {
+      const message = `Connected skill ${record.name} now contains plugin or hook definitions; run ${invocation(form, 'connect --keep-source', id)} --allow-privileged after reviewing them.`;
+      if (options.failFast) throw new Error(message);
+      io.print(message); defer(tracked.team, record.name); continue;
+    }
     // §5.3: a changed `name` is a rename, not a new skill — the ID carries across it. The source's
     // declared name is the target; the repository folder follows on the local-edit row below.
     // (The folder basename is not consulted: `connect --relocate` may legitimately point anywhere.)
@@ -264,7 +286,11 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     // additions were already deferred to `connect --keep-source --allow-privileged` above (walk D5).
     let assessment: HygieneAssessment;
     try { assessment = assessHygiene(targetName, candidate, team.license, (await scanSkillFolder(record.directory)).privileged); }
-    catch (error) { if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment); io.print(`Connected skill ${record.name} failed hygiene:\n${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, record.name); continue; }
+    catch (error) {
+      if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment);
+      if (options.failFast) throw error;
+      io.print(`Connected skill ${record.name} failed hygiene:\n${error instanceof Error ? error.message : String(error)}`); defer(tracked.team, record.name); continue;
+    }
     if (repaired !== sourceContents) await writeFile(sourceSkill, repaired, 'utf8');
     if (targetName !== record.name) {
       if (!isSkillName(targetName)) { io.print(`Connected skill ${record.name}: cannot rename to ${targetName}; a skill name is 1–64 lowercase alphanumerics or single hyphens.`); defer(tracked.team, record.name); continue; }
@@ -273,8 +299,10 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const sourceDigest = await canonicalDigest(tracked.source);
     const repoDigest = await canonicalDigest(record.directory);
     const baseline = tracked.baseline;
-    if (!baseline || (sourceDigest !== baseline && repoDigest !== baseline)) {
-      io.print(`Connected skill ${record.name} diverged (source ${sourceDigest}, repo ${repoDigest}); choose ${invocation(form, 'connect --keep-source', id)} or ${invocation(form, 'connect --keep-repo', id)}.`);
+      if (!baseline || (sourceDigest !== baseline && repoDigest !== baseline)) {
+      const message = `Connected skill ${record.name} diverged (source ${sourceDigest}, repo ${repoDigest}); choose ${invocation(form, 'connect --keep-source', id)} or ${invocation(form, 'connect --keep-repo', id)}.`;
+      if (options.failFast) throw new Error(message);
+      io.print(message);
       defer(tracked.team, record.name);
       continue;
     }
@@ -318,6 +346,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
         await store.update((next) => { if (next.shared[id]) next.shared[id].baseline = repoDigest; });
       }
     } catch (error) {
+      if (options.failFast) throw error;
       io.print(`Could not reconcile connected ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`);
       defer(tracked.team, id.slice(0, 8));
     }

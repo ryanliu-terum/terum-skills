@@ -5,6 +5,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
+import { reconcileShared } from './connect.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
@@ -73,14 +74,15 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const clone = store.teamClone(teamName);
     await refreshClone(runner, clone, { label: teamName });
     const team = await readTeam(clone);
-    const record = await findSkill(clone, teamName, args.ref);
+    let record = await findSkill(clone, teamName, args.ref);
     if (!record) return failure(`No skill named or identified by ${args.ref} exists in team ${teamName}.`);
 
     // Pin the evaluated version and materialize its immutable snapshot BEFORE anything reads
     // skill content: a concurrent sync can refresh the clone mid-run, and the receipt's tree
     // hash must pin the exact skill text AND cases evaluated (§4.1; review P1). A concurrent
     // update may make this an older (but still exact) historical receipt.
-    const version = await resolveVersion(clone, record.name, undefined, runner);
+    const originalVersion = await resolveVersion(clone, record.name, undefined, runner);
+    let version = originalVersion;
     let candidateDir: string;
     if (args.working) {
       const shared = config.shared[record.id];
@@ -92,7 +94,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     }
 
     // This is intentionally before preflight, trigger selection, run-tree creation, or any agent call.
-    const candidateFiles = await sourceFiles(candidateDir);
+    let candidateFiles = await sourceFiles(candidateDir);
     try {
       // A store copy passed connect's consent gate. A working source remains subject to its own mode.
       reportHygieneWarnings((line) => io.print(line), assessHygiene(record.name, candidateFiles, team.policy.skill_license, !args.working));
@@ -116,8 +118,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
 
     const wantsCases = !args.triggersOnly;
     const wantsTriggers = !args.executionOnly;
-    const authoredCasesDir = join(candidateDir, 'evals', 'cases');
-    const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
+    let authoredCasesDir = join(candidateDir, 'evals', 'cases');
+    let authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
     const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
     const authoredSelected = args.case === undefined ? authoredCaseFiles : authoredCaseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
     // A named case is an authored assertion; it intentionally never causes a model call.
@@ -125,6 +127,9 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const generateCases = wantsCases && !args.noGen && (Boolean(args.gen) || authoredCaseFiles.length === 0);
     const generateTriggers = wantsTriggers && !args.noGen && (Boolean(args.gen) || !authoredTrigger);
     let generated: GeneratedAssets = {};
+    let generatedRoot = join(runDir, 'generated');
+    let commit = Boolean(args.commit);
+    let announcedGenerated = false;
     if (generateCases || generateTriggers) {
       const records = await skillRecords(clone, teamName);
       const catalog = await endorsedCatalog(team, records, record.id, runner);
@@ -141,17 +146,49 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       });
       if (!built.ok) return failure(built.error);
       generated = built.value;
-      await writeGeneratedAssets(join(runDir, 'generated'), generated);
+      await writeGeneratedAssets(generatedRoot, generated);
       if (args.save) {
         const shared = config.shared[record.id]!;
         const saved = await saveGeneratedAssets(shared.source, generated);
         if (!saved.ok) return saved;
       }
-      if (args.commit) return failure(`--commit is refused for generated eval assets. Review ${join(runDir, 'generated')}, save or copy the reviewed files into the skill's evals/, publish them, then rerun eval --commit at the committed version.`);
+      const shared = config.shared[record.id];
+      // Forced regeneration is always review-only: it must never replace an authored dataset.
+      const authorCanConfirm = commit && !args.gen && shared?.team === teamName;
+      if (commit && !authorCanConfirm) {
+        return failure(`--commit is refused for generated eval assets. Review ${join(runDir, 'generated')}, save or copy the reviewed files into the skill's evals/, publish them, then rerun eval --commit at the committed version.`);
+      }
+      if (authorCanConfirm) {
+        announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, generatedRoot);
+        announcedGenerated = true;
+        const confirmed = io.interactive ? await io.confirm(`Commit generated eval assets for ${record.name}?`) : false;
+        if (!confirmed) commit = false;
+        else {
+          const saved = await saveGeneratedAssets(shared!.source, generated);
+          if (!saved.ok) return saved;
+          // Reuse sync's only skill-content mutation. Its strict one-skill mode makes a failed
+          // hygiene/network/guard pass fail this run instead of leaving a receipt at the old tree.
+          await reconcileShared(store, runner, io, new Set(), () => undefined, args.form, { ids: new Set([record.id]), failFast: true });
+          // The reconcile is the ordinary sync path, so it may also have committed the author's
+          // pending source edits — a rename included (review P2). Re-resolve the record by its
+          // stable id and re-read EVERY asset from the committed tree the receipt will pin, so the
+          // run never evaluates a stale snapshot against a fresh hash (review P1).
+          const reconciled = await findSkill(clone, teamName, record.id);
+          if (!reconciled) throw new Error(`Skill ${record.name} disappeared from the clone after reconciliation; refusing to write a receipt.`);
+          record = reconciled;
+          version = await resolveVersion(clone, record.name, undefined, runner);
+          if (version === originalVersion) throw new Error(`Generated eval assets for ${record.name} were not committed; refusing to write a receipt at the pre-generation version.`);
+          candidateDir = await materializeVersion(store, teamName, clone, record.name, version, runner);
+          candidateFiles = await sourceFiles(candidateDir);
+          generatedRoot = join(candidateDir, 'evals');
+          authoredCasesDir = join(candidateDir, 'evals', 'cases');
+          authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
+        }
+      }
     }
 
-    const casesDir = generated.cases === undefined ? authoredCasesDir : join(runDir, 'generated', 'cases');
-    const triggerPath = generated.triggers === undefined ? join(candidateDir, 'evals', 'triggers.yaml') : join(runDir, 'generated', 'triggers.yaml');
+    const casesDir = generated.cases === undefined ? authoredCasesDir : join(generatedRoot, 'cases');
+    const triggerPath = generated.triggers === undefined ? join(candidateDir, 'evals', 'triggers.yaml') : join(generatedRoot, 'triggers.yaml');
     let triggers: TriggerSummary | null = null;
     if (wantsTriggers) {
       const source = await optionalText(triggerPath);
@@ -200,17 +237,10 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       arm_skill_lists: Object.fromEntries([...new Set(arms.map((arm) => arm.arm))].map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null])),
       ...(generated.cases !== undefined || generated.triggers !== undefined ? { generated_assets: { cases: generated.cases !== undefined, triggers: generated.triggers !== undefined } } : {}),
     }, [...rows, ...arms, ...(triggers === null ? [] : [triggers])]);
-    if (generated.cases !== undefined || generated.triggers !== undefined) {
-      const sets = [
-        wantsCases ? `cases: ${generated.cases === undefined ? 'authored' : `generated (${generated.cases.names.length})`}` : null,
-        wantsTriggers ? `triggers: ${generated.triggers === undefined ? 'authored' : 'generated'}` : null,
-      ].filter((line): line is string => line !== null);
-      io.print(`eval assets: ${sets.join(' · ')}`);
-      io.print(`Generated assets: ${join(runDir, 'generated')} — review before trusting; save or copy reviewed files into the skill before committing a receipt.`);
-    }
+    if ((generated.cases !== undefined || generated.triggers !== undefined) && !announcedGenerated) announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, join(runDir, 'generated'));
     io.print(renderReport(summary, triggers));
     let committedPath: string | undefined;
-    if (args.commit) {
+    if (commit) {
       const armSkillLists = Object.fromEntries([...new Set(arms.map((arm) => arm.arm))]
         .map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null]));
       // Source checkouts record their running product commit. Published packages have no checkout;
@@ -274,6 +304,15 @@ async function optionalText(path: string): Promise<string | undefined> {
 }
 async function optionalDirectory(path: string): Promise<string[]> {
   try { return await readdir(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
+}
+
+function announceGeneratedAssets(io: Prompter, wantsCases: boolean, wantsTriggers: boolean, generated: GeneratedAssets, root: string): void {
+  const sets = [
+    wantsCases ? `cases: ${generated.cases === undefined ? 'authored' : `generated (${generated.cases.names.length})`}` : null,
+    wantsTriggers ? `triggers: ${generated.triggers === undefined ? 'authored' : 'generated'}` : null,
+  ].filter((line): line is string => line !== null);
+  io.print(`eval assets: ${sets.join(' · ')}`);
+  io.print(`Generated assets: ${root} — review before trusting; save or copy reviewed files into the skill before committing a receipt.`);
 }
 
 /** Generated files first land in the run tree, keeping §6.0's team/store write invariant intact. */
