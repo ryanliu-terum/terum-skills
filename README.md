@@ -11,6 +11,8 @@ Core beliefs of the project:
 
 As a result, we built Terum, a free, fully open source tool that lets you evaluate and share the best skills/workflows among a team! Two line terminal installation that installs a CLI package and a lightweight application for a simple UI that wraps the CLI. Fully self-hosted, no server, all skills live in a private GitHub repository that the CLI package calls from. 
 
+Our purpose is it make it quick and easy to determine best AI practices through skills and share your findings with your team. 
+
 ## Why should I use this? Who would find this helpful?
 
 Who would find this helpful?
@@ -20,7 +22,7 @@ Individuals looking to evaluate the infinite amount of publicly available skills
 
 
 Isn't it super easy to share skills by just pushing them to GitHub? 
-- Yes, it is and you should if you only work on one project and don't mind having your .claude in your project. However, if you're working on multiple projects with specialized skills, if the repo does not allow .claude in the repo itself(open source, enterprise projects), if you're trying to manage and separate global and project skills, or replicate a specific teammate's suite of skills quickly, then Terum will increase efficiency and save time compared to pushing to GitHub. 
+- Yes, it is and you should if you only work on one project and don't mind having your .claude in your project. However, if you're working on multiple projects with specialized skills, if the repo does not allow .claude in the repo itself(open source, enterprise projects), if you're trying to manage and separate global and project skills, or replicate a specific teammate's suite of skills quickly, then Terum will hopefully save some time and effort. 
 
 
 Aren't there open source frameworks for evaluating skills already? 
