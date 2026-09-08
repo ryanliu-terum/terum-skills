@@ -75,6 +75,8 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 
 `npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option.
 
+For a program driving the CLI (the desktop app, a script), `--frames` turns any verb into one JSON object per line on stdout and stdin, questions included. See [docs/frame-protocol.md](docs/frame-protocol.md).
+
 ## How it works
 
 **One repo, one copy of each skill.** The team repo holds `skills/<name>/` (the flat store, folder name equals frontmatter `name`, unique repo-wide), `team.json` (endorsed lists and policy), `people/<handle>.json` (each member's identity and installed list, the only file that member's installs touch), and `evals/` (committed receipts, keyed by skill id). A generated GitHub workflow runs the eval checks on PRs.

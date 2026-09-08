@@ -12,6 +12,7 @@ import { CommanderError } from 'commander';
 import { buildProgram } from './cli.js';
 import { createExecute } from './lib/execute.js';
 import { terminalPrompter } from './lib/prompt.js';
+import { FRAMES_FLAG, frameChannel } from './lib/frames.js';
 
 // A reader that closes early (`terum-skills ls | head -5`) surfaces as an asynchronous 'error' on
 // the stream, reachable by no try/catch below, and a broken pipe is not a failure of the verb. A
@@ -34,19 +35,37 @@ const launch = await describeLaunch({
   readJson: async (path) => { try { return JSON.parse(await readFile(path, 'utf8')) as unknown; } catch { return null; } },
 });
 const form = await resolveInvocationForm({ launch, env: process.env, platform: process.platform, pathEntries: (process.env.PATH ?? '').split(path.delimiter), access: (p) => access(p, constants.X_OK), realpath, stat });
-const noUpdateCheck = Boolean(process.env.CI || process.env.NO_UPDATE_NOTIFIER || process.env.TERUM_SKILLS_NO_UPDATE_NOTIFIER);
+// Frame mode (docs/frame-protocol.md): a program is on the other end, not a person. The flag is
+// global and position-independent, so it is taken off argv before commander sees it; the same
+// Result → exit-code contract applies, plus one terminal `result` frame per run. The session hook
+// is refused here: its stdout is the reload directive, which is not a frame.
+const frames = process.argv.includes(FRAMES_FLAG);
+const argv = frames ? process.argv.filter((argument) => argument !== FRAMES_FLAG) : process.argv;
+const channel = frames ? frameChannel({ input: process.stdin, output: process.stdout, diagnostic: (line) => { process.stderr.write(`${line}\n`); } }) : undefined;
+const noUpdateCheck = frames || Boolean(process.env.CI || process.env.NO_UPDATE_NOTIFIER || process.env.TERUM_SKILLS_NO_UPDATE_NOTIFIER);
 const afterVerb = process.stderr.isTTY && !noUpdateCheck
   ? async () => updateNotice({ state: createReleaseState(createConfigStore().root), launch, running: packageVersion(), stderr: (line) => { process.stderr.write(`${line}\n`); } })
   : undefined;
 const execute = createExecute({
   afterVerb, form,
-  io: terminalPrompter({ outputClosed }),
+  io: channel?.io ?? terminalPrompter({ outputClosed }),
   stderr: (line) => { process.stderr.write(`${line}\n`); },
   setExitCode: (code) => { process.exitCode = code; },
+  result: channel ? (outcome) => channel.result(outcome) : undefined,
 });
 
 try {
-  await buildProgram(execute, undefined, { launch, form, noUpdateCheck }).parseAsync();
+  if (channel) {
+    channel.hello(packageVersion());
+    if (argv.includes('--hook')) {
+      channel.result({ verb: 'sync', ok: false, error: '`sync --hook` is the session hook and is not available over frames; run plain `sync`.', exitCode: 1 });
+      process.exitCode = 1;
+    } else {
+      await buildProgram(execute, undefined, { launch, form, noUpdateCheck }).parseAsync(argv);
+    }
+  } else {
+    await buildProgram(execute, undefined, { launch, form, noUpdateCheck }).parseAsync();
+  }
 } catch (error) {
   // commander's own exits (help, version, usage errors) — it has already printed; keep its code.
   process.exitCode = error instanceof CommanderError ? error.exitCode : 1;
