@@ -23,6 +23,9 @@ import { execCommand, systemRunner, type Exec, type Runner } from '../lib/runner
 export const APP_REPOSITORY = 'ryanliu-terum/terum-skills';
 export const APP_SLUG = 'terum-skills-desktop';
 export const APP_PRODUCT = 'Terum Skills';
+/** The opt-in wording setup shows first (decision walk D4, Ryan's words, 2026-09-08). */
+export const APP_OFFER = ["Terum Skills also has a desktop app. It is a wrapper around these same commands with a visual view of your team's skills. Everything works from the terminal without it."];
+export const APP_QUESTION = 'Download and open the app?';
 
 export interface AppArgs extends WithForm {
   config?: ConfigStore;
@@ -35,6 +38,8 @@ export interface AppArgs extends WithForm {
   /** The absolute Node binary and CLI entry the app will be told to run; defaults to this process. */
   node?: string;
   entry?: string;
+  /** Ask first (setup's opt-in, default no). A no is recorded and returns `action: 'declined'` without touching the network. */
+  offer?: boolean;
   /** Test knob: skip opening the app (everything else runs). */
   open?: boolean;
   /** Test knob: where the Windows per-user install lands. */
@@ -44,7 +49,7 @@ export interface AppArgs extends WithForm {
 export interface AppResult {
   platform: AppPlatform;
   version: string;
-  action: 'launched' | 'installed-and-launched' | 'unavailable';
+  action: 'launched' | 'installed-and-launched' | 'unavailable' | 'declined';
   appPath: string | null;
   statePath: string | null;
 }
@@ -69,6 +74,14 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
   }
 
   const store = args.config ?? createConfigStore();
+  if (args.offer) {
+    for (const line of APP_OFFER) io.print(line);
+    if (!(await io.confirm(APP_QUESTION))) {
+      // D4: a no is remembered as a fact, not as a suppression; setup asks again next run.
+      await store.update((config) => { config.app = { choice: 'declined', at: new Date().toISOString() }; });
+      return success({ platform, version, action: 'declined', appPath: null, statePath: null });
+    }
+  }
   const runner = args.runner ?? systemRunner;
   const exec = args.exec ?? execCommand;
   const root = store.root;

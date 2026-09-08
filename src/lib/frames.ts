@@ -141,6 +141,7 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
 
   const io: Prompter = {
     interactive: true,
+    channel: 'frames',
     async confirm(question) {
       const answer = await ask('confirm', question);
       return typeof answer === 'boolean' ? answer : /^(y|yes|true)$/i.test(String(answer).trim());

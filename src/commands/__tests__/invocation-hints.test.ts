@@ -131,7 +131,7 @@ describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (f
 
   it('routes setup authentication failure through its nested helper', async () => {
     const config = createConfigStore(join(await temporaryDirectory(), 'state'));
-    const result = await setup({ config, form, runner: ghOnlyRunner(fakeGh('seed', {}, false)) }, new ScriptedPrompter(['Create a new team']));
+    const result = await setup({ app: false, config, form, runner: ghOnlyRunner(fakeGh('seed', {}, false)) }, new ScriptedPrompter(['Create a new team']));
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`\`${prefix} team create <name> --remote <url>\``) });
   });
 });

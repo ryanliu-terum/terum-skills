@@ -13,6 +13,12 @@ import { stdin as processStdin, stdout as processStdout } from 'node:process';
  */
 export interface Prompter {
   readonly interactive: boolean;
+  /**
+   * What is on the other end: a terminal, or a program over frames (docs/frame-protocol.md). Verbs read it
+   * only for the two questions that need a terminal and make no sense to a program: the app opt-in in
+   * setup and the `gh auth login` offer (decision walk D5, 2026-09-08). Absent means terminal.
+   */
+  readonly channel?: 'terminal' | 'frames';
   confirm(question: string): Promise<boolean>;
   text(question: string, defaultValue?: string): Promise<string>;
   select(question: string, choices: readonly string[]): Promise<string>;
@@ -84,6 +90,7 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
 
   return {
     interactive,
+    channel: 'terminal',
     async confirm(question) {
       const answer = await ask(`${question} [y/N] `);
       return /^(y|yes)$/i.test(answer.trim());

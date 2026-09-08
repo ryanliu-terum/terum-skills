@@ -136,3 +136,22 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     expect(calls.map((call) => [call.command.endsWith('-setup.exe') ? 'installer' : call.command, [...call.args]])).toEqual([['installer', ['/S']], [join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe'), []]]);
   });
 });
+
+describe('the offer (setup asks through the verb, D4)', () => {
+  it('offer:true prints the wording and asks; a no records declined and touches nothing; a yes proceeds to download', async () => {
+    const root = await temporaryDirectory();
+    const store = createConfigStore(root);
+    const no = new ScriptedPrompter([], [false]);
+    const declined = await run({ config: store, runner: fakeGhRelease(), exec: fakeExec().exec, version: V, evidence: mac, offer: true }, no);
+    expect(declined).toMatchObject({ ok: true, value: { action: 'declined', appPath: null, statePath: null } });
+    expect(no.lines[0]).toBe("Terum Skills also has a desktop app. It is a wrapper around these same commands with a visual view of your team's skills. Everything works from the terminal without it.");
+    expect(no.asked).toEqual(['Download and open the app?']);
+    expect((await store.read()).app).toMatchObject({ choice: 'declined' });
+    expect(await readdir(join(root, 'app')).catch(() => 'absent')).toBe('absent');
+    const yes = new ScriptedPrompter([], [true]);
+    const runner = fakeGhRelease();
+    expect(await run({ config: store, runner, exec: fakeExec().exec, version: V, evidence: mac, offer: true }, yes)).toMatchObject({ ok: true, value: { action: 'installed-and-launched' } });
+    expect(runner.calls.some((call) => call.args[0] === 'release')).toBe(true);
+    expect((await store.read()).app).toMatchObject({ choice: 'opted-in' });
+  });
+});

@@ -4,6 +4,7 @@ import { ConfigStore } from '../config.js';
 import { emptyConfig } from '../schema.js';
 import { Runner } from '../runner.js';
 import { fakeGh, ghOnlyRunner, noGhRunner, ScriptedPrompter } from './fixtures.js';
+import type { Prompter } from '../prompt.js';
 
 const memoryStore = (seed = emptyConfig()): ConfigStore => ({ root: '', read: async () => seed, update: async (mutate) => { await mutate(seed); return seed; }, remove: async () => 'absent', ensureRoot: async () => undefined, teamClone: (team) => team });
 
@@ -219,4 +220,11 @@ describe('one-line identity confirmation (acceptance A2, 2026-09-06)', () => {
     expect(identity.github).toBe('');
     expect(io.lines).toEqual(['Identity: @me — Me <me@x.test> (no GitHub login)']);
   });
+});
+
+it('over frames, the gh login offer is not a question: one line says what to run in a terminal (D5, 2026-09-08)', async () => {
+  const lines: string[] = [];
+  const frames: Prompter = { interactive: true, channel: 'frames', confirm: async () => { throw new Error('asked over frames'); }, text: async () => '', select: async () => '', print: (line: string) => { lines.push(line); } };
+  expect(await detectOrOfferGh(frames, ghOnlyRunner(fakeGh('me', {}, false)))).toEqual({ installed: true, authenticated: false });
+  expect(lines).toEqual(['GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again.']);
 });
