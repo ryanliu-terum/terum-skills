@@ -26,7 +26,7 @@ Isn't it super easy to share skills by just pushing them to GitHub?
 
 
 Aren't there open source frameworks for evaluating skills already? 
-- Yes, there are! Like Nvidia's SkillEvaluator or the SkillsBench paper. Our evaluation methods are heavily based off of these proven methods. Terum doesn't try to reinvent the wheel, it just adopts these methods to for ease of use. SkillEvaluator requires Docker and an API key; SkillsBench requires you to bring your own tests. Terum runs using your subscription plan, with one terminal installation, using dynamically generated tests for the specific skill being tested. 
+- Yes, there are! Like Nvidia's SkillEvaluator or the SkillsBench paper. Our evaluation methods are heavily based off of these proven methods. Terum doesn't try to reinvent the wheel, it just adopts the methods so that they're fully plug and play. SkillEvaluator requires Docker and an API key; SkillsBench requires you to bring your own tests. Terum runs using your subscription plan, with one terminal installation, using dynamically generated tests for the specific skill being tested(we're currently looking into dynamic generation along with category-specific tests). 
 
 How are you evaluating skills?
 - Answered above. For more specific notes on methodology, scroll to the bottom. 
