@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Frame } from '../../types';
 import type { AppState, Bridge, LineEvent } from '../bridge';
 import { parseCliFrame } from '../frames';
@@ -12,16 +12,17 @@ function fakeBridge(script: (args: readonly string[], emit: (e: LineEvent) => vo
   const spawns: { id: string; args: readonly string[]; cwd: string | undefined }[] = [];
   const writes: string[] = [];
   const kills: string[] = [];
+  const unlisten = vi.fn();
   let emit: ((e: LineEvent) => void) | undefined;
   const bridge: Bridge = {
-    async spawn(id, _state, args, cwd, onEvent) { spawns.push({ id, args, cwd }); emit = onEvent; await Promise.resolve(); await script(args, onEvent, writes); },
+    async spawn(id, _state, args, cwd, onEvent) { spawns.push({ id, args, cwd }); emit = onEvent; await Promise.resolve(); await script(args, onEvent, writes); return unlisten; },
     async write(_id, line) { writes.push(line); },
     async kill(id) { kills.push(id); emit?.({ kind: 'exit', code: null }); },
     async readAppState() { return state; },
     async hostPlatform() { return 'macos'; },
     async homeDirectory() { return '/Users/teddy'; },
   };
-  return { bridge, spawns, writes, kills };
+  return { bridge, spawns, writes, kills, unlisten, emit: (event: LineEvent) => emit?.(event) };
 }
 const line = (frame: object) => JSON.stringify(frame);
 const hello = line({ t: 'hello', protocol: 1, version: '0.1.6', verbs: ['status'], features: {} });
@@ -39,6 +40,55 @@ describe('parseCliFrame', () => {
 });
 
 describe('cliRun — a CLI process as a seam Run<T>', () => {
+  it('settles from result before exit and unlistens exactly once after exit', async () => {
+    const f = fakeBridge(() => undefined);
+    const map = vi.fn((value: unknown) => value);
+    const onSettled = vi.fn();
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['status'], { map, onSettled });
+    await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
+    f.emit({ kind: 'stdout', line: line({ t: 'result', verb: 'status', ok: true, exitCode: 0, value: 'ready' }) });
+    expect(await run.done).toEqual({ ok: true, value: 'ready' });
+    expect(f.unlisten).not.toHaveBeenCalled();
+    // Trailing stdout is diagnostic only, even if it looks like another result.
+    f.emit({ kind: 'stdout', line: line({ t: 'result', verb: 'status', ok: false, exitCode: 1, error: 'late' }) });
+    f.emit({ kind: 'stderr', line: 'late diagnostic' });
+    f.emit({ kind: 'exit', code: 0 });
+    f.emit({ kind: 'exit', code: 0 });
+    expect(f.unlisten).toHaveBeenCalledTimes(1);
+    expect(map).toHaveBeenCalledTimes(1);
+    expect(onSettled).toHaveBeenCalledExactlyOnceWith({ ok: true, value: 'ready' });
+    expect(await collect(run.frames)).toEqual([{ t: 'result', ok: true }]);
+  });
+
+  it('ignores a late result after exit without throwing or settling twice (the old race)', async () => {
+    const f = fakeBridge(() => undefined);
+    const map = vi.fn(() => { throw new Error('must not map a late result'); });
+    const onSettled = vi.fn();
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['status'], { map, onSettled });
+    await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
+    f.emit({ kind: 'exit', code: 0 });
+    const expected = { ok: false, error: 'terum-skills exited with code 0 before reporting a result.' };
+    expect(await run.done).toEqual(expected);
+    expect(() => f.emit({ kind: 'stdout', line: line({ t: 'result', verb: 'status', ok: true, exitCode: 0, value: 'late' }) })).not.toThrow();
+    expect(await run.done).toEqual(expected);
+    expect(map).not.toHaveBeenCalled();
+    expect(onSettled).toHaveBeenCalledExactlyOnceWith(expected);
+    expect(await collect(run.frames)).toEqual([{ t: 'result', ...expected }]);
+    expect(f.unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('unlistens when spawn returns after result and exit already arrived', async () => {
+    const f = fakeBridge((_args, emit) => {
+      emit({ kind: 'stdout', line: line({ t: 'result', verb: 'status', ok: true, exitCode: 0, value: 'ready' }) });
+      emit({ kind: 'exit', code: 0 });
+    });
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['status'], { map: (value) => value });
+    expect(await run.done).toEqual({ ok: true, value: 'ready' });
+    await vi.waitFor(() => expect(f.unlisten).toHaveBeenCalledTimes(1));
+    await run.cancel();
+    expect(f.unlisten).toHaveBeenCalledTimes(1);
+  });
+
   it('maps hello/print/ask/progress/result to seam frames, forwards the answer, settles done with the mapped value', async () => {
     const { bridge, spawns, writes } = fakeBridge(async (_args, emit, w) => {
       emit({ kind: 'stdout', line: hello });
@@ -82,12 +132,45 @@ describe('cliRun — a CLI process as a seam Run<T>', () => {
   });
 
   it('cancel writes a cancel frame, kills the process, and settles Cancelled', async () => {
-    const { bridge, writes, kills } = fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'ask', id: 'q1', kind: 'text', question: 'Name' }) }); });
-    const run = cliRun(bridge, Promise.resolve(STATE), ['setup'], { map: (v) => v });
+    const { bridge, writes, kills, unlisten, emit } = fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'ask', id: 'q1', kind: 'text', question: 'Name' }) }); });
+    const onSettled = vi.fn();
+    const run = cliRun(bridge, Promise.resolve(STATE), ['setup'], { map: (v) => v, onSettled });
     for await (const f of run.frames) { if (f.t === 'ask') { await run.cancel(); } }
     expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
     expect(writes.map((w) => JSON.parse(w))).toEqual([{ t: 'cancel' }]);
     expect(kills).toHaveLength(1);
+    emit({ kind: 'exit', code: null });
+    expect(onSettled).toHaveBeenCalledExactlyOnceWith({ ok: false, error: 'Cancelled.' });
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Cancelled when the CLI sends a result during graceful cancellation', async () => {
+    const f = fakeBridge(() => undefined);
+    f.bridge.kill = async () => {
+      f.emit({ kind: 'stdout', line: line({ t: 'result', verb: 'setup', ok: true, exitCode: 0, value: 'stopped' }) });
+    };
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['setup'], { map: (value) => value });
+    await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
+    await run.cancel();
+    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
+    expect(f.unlisten).toHaveBeenCalledTimes(1);
+    f.emit({ kind: 'exit', code: 0 });
+    expect(f.unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the listener once when cancellation finishes before spawn returns', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const f = fakeBridge(() => pending);
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['setup'], { map: (value) => value });
+    await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
+    await run.cancel();
+    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
+    expect(f.unlisten).not.toHaveBeenCalled();
+    release();
+    await vi.waitFor(() => expect(f.unlisten).toHaveBeenCalledTimes(1));
+    f.emit({ kind: 'exit', code: null });
+    expect(f.unlisten).toHaveBeenCalledTimes(1);
   });
 
   it('without the app state file, nothing is spawned and the failure tells the person what to run', async () => {
