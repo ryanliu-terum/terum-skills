@@ -1,0 +1,15 @@
+# design-strings app half (S1d): orchestrator's own gates, 2026-09-08 PT, Ryan's Mac (Node 25, Playwright chromium 1243)
+# Codex: gpt-6-astra, model_reasoning_effort=high, --sandbox workspace-write, stdin prompt (codex-prompt.md), 324,668 tokens, status complete.
+# Codex self-report (hypotheses): typecheck 0, lint 0, vitest 40 files / 426 passed + 87 oracle tests skipped (no TERUM_DESIGN_DIR in the sandbox).
+
+desktop typecheck   : rc=0
+desktop lint        : rc=0 (eslint . --max-warnings 0)
+desktop vitest      : rc=0  40 files passed, 514 tests passed (TERUM_DESIGN_DIR set, so the 87 oracle tests ran; NODE_OPTIONS=--no-experimental-webstorage)
+desktop build       : rc=0
+e2e routes          : rc=0  91 passed (28.5s)  [was 90 at f8557c4: SkillDetailInstallLight joined boards.ts]
+export:check        : rc=0  tokens.css and design.json current
+e2e fidelity        : rc=0  87 locked boards passed (34.8s); worst InboxAlert 3488 px 0.00269 (tol 0.003), InboxUpdate 0.00242, SettingsEvals 0.00232, MarketplaceLight 0.00226
+                      oracle = the 2026-09-08 macOS re-render (render-mac.mjs); 57 boards re-rendered after patch AK
+e2e fidelity (88th)  : rc=0  SkillDetailInstallLight 63 px, ratio 0.00005 (tol 0.0035), FIDELITY_ALL=1 single-board run; row flipped to locked
+root lint           : rc=0
+root typecheck      : rc=0

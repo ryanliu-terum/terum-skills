@@ -1,0 +1,83 @@
+{
+  "status": "complete",
+  "summary": "Implemented S1d across desktop copy, fixture types, mock data, history rendering, and native message abbreviation. Final gates passed: typecheck and lint reported zero errors; Vitest reported 426 passed and 87 skipped across 40 files. Playwright was not run, as instructed.",
+  "filesChanged": [
+    {"path":"desktop/src/backend/paths.ts","change":"added","why":"Pure home-path abbreviation helper (§1)."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Project fields, onboarding constants, and backend-owned skill references (§0)."},
+    {"path":"desktop/src/fixtures/schema.ts","change":"modified","why":"Validate the patched fixture fields (§0)."},
+    {"path":"desktop/src/backend/mock/data.ts","change":"modified","why":"Expose configured-remote skill references (§2.2)."},
+    {"path":"desktop/src/backend/mock/derive.ts","change":"modified","why":"Project rename, configured-remote references, and install-sorted person buckets."},
+    {"path":"desktop/src/backend/mock/onboarding.ts","change":"modified","why":"Updated boot rows, BOOT_STEPS, and JOIN_BLOCK_NOTE."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Updated errors, library counts, and error-board onboarding data."},
+    {"path":"desktop/src/backend/tauri/bridge.ts","change":"modified","why":"Obtain the platform home directory behind the backend seam."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Abbreviate forwarded print lines and Result errors (§1)."},
+    {"path":"desktop/src/components/domain/Analytics.tsx","change":"modified","why":"Render population notes and remove Delta/Sparkline (§2.1)."},
+    {"path":"desktop/src/components/domain/Analytics.css","change":"modified","why":"Remove unused delta styling."},
+    {"path":"desktop/src/components/domain/Primitives.css","change":"modified","why":"Apply the specified ErrorLine wrapping rules."},
+    {"path":"desktop/src/components/domain/SkillCard.tsx","change":"modified","why":"Render project membership instead of origin."},
+    {"path":"desktop/src/components/domain/EvaluationReport.tsx","change":"modified","why":"W–L–T record labels and first-row-only history figures."},
+    {"path":"desktop/src/components/domain/EvaluationReport.css","change":"modified","why":"76px record cells and showing-state history styling."},
+    {"path":"desktop/src/screens/library/LibraryScreen.tsx","change":"modified","why":"Updated library copy, install placeholder, and Finder action."},
+    {"path":"desktop/src/screens/skill/SkillScreen.tsx","change":"modified","why":"Updated removal, quality, installs, facepile, and no-receipt copy."},
+    {"path":"desktop/src/screens/inbox/reports.tsx","change":"modified","why":"Updated evaluation/connect wording and repository references."},
+    {"path":"desktop/src/screens/inbox/InboxScreen.tsx","change":"modified","why":"Updated network error copy and Copy error action."},
+    {"path":"desktop/src/screens/marketplace/MarketplaceScreen.tsx","change":"modified","why":"Sample-count subtitles and immediate project-placement copy."},
+    {"path":"desktop/src/screens/marketplace/market-components.tsx","change":"modified","why":"Updated uninstalled project status."},
+    {"path":"desktop/src/screens/marketplace/market-filters.tsx","change":"modified","why":"Clamp slider fill ratios to one."},
+    {"path":"desktop/src/screens/share/ShareScreen.tsx","change":"modified","why":"Remove member facets, retain Invite on errors, and update empty-state copy."},
+    {"path":"desktop/src/screens/share/ShareInvite.tsx","change":"modified","why":"Render JOIN_BLOCK_NOTE and variadic invite placeholders."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"Updated leave, release, local-state, and connect disclosures."},
+    {"path":"desktop/src/screens/settings/SettingsDialogs.tsx","change":"modified","why":"Render all five ordered leave consequences."},
+    {"path":"desktop/src/screens/onboarding/OnboardingScreen.tsx","change":"modified","why":"Updated mock progress and join-block caption; preserve no-data fallback behavior."},
+    {"path":"desktop/src/screens/onboarding/OnboardingBasics.tsx","change":"modified","why":"Updated installed-teammate wording."},
+    {"path":"desktop/src/screens/onboarding/OnboardingDone.tsx","change":"modified","why":"Append the session-start hook disclosure."},
+    {"path":"desktop/src/backend/__tests__/paths.test.ts","change":"added","why":"Test home abbreviation across platforms and token boundaries."},
+    {"path":"desktop/src/components/domain/Analytics.test.tsx","change":"added","why":"Verify population notes, absent arrows/sparkline, and unchanged zero state."},
+    {"path":"desktop/src/components/domain/HistoryRail.test.tsx","change":"added","why":"Verify only the first history row displays figures and strips."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"Assert updated errors, onboarding shape, and configured-remote references."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"Test native print/error abbreviation and unavailable-home fallback."},
+    {"path":"desktop/src/components/domain/Shell.test.tsx","change":"modified","why":"Assert the new LibraryError EACCES message."},
+    {"path":"desktop/src/screens/library/library-skill.test.tsx","change":"modified","why":"Assert sample-count and no-receipt wording."},
+    {"path":"desktop/src/screens/inbox/inbox.test.tsx","change":"modified","why":"Assert updated fetch errors and distinguish the two no-receipt captions."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","change":"modified","why":"Assert the new project placement note."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","change":"modified","why":"Assert the CLI config error and all five leave bullets."},
+    {"path":"desktop/src/screens/onboarding/onboarding.test.tsx","change":"modified","why":"Assert updated counts, boot progress, and fixture command hints."},
+    {"path":"desktop/src/screens/share/share.test.tsx","change":"modified","why":"Verify retained Invite, absent facets, join caption, and variadic placeholder."}
+  ],
+  "gates": {
+    "lint": {"ran":true,"passed":true,"output":"npm run lint: exit 0; 0 errors, 0 warnings.","preExistingFailures":""},
+    "typecheck": {"ran":true,"passed":true,"output":"npm run typecheck: exit 0; 0 errors. Initial typecheck also passed.","preExistingFailures":""},
+    "test": {"ran":true,"passed":true,"output":"40 files passed; 426 tests passed, 87 skipped, 0 failed (513 total). Existing oracle tests skip without TERUM_DESIGN_DIR. NODE_OPTIONS=--no-experimental-webstorage was used.","preExistingFailures":""}
+  },
+  "openQuestions": [
+    {
+      "question":"§1 references host_platform() for home information, but its existing contract returns only the OS name.",
+      "specSection":"§1 Home abbreviation",
+      "conservativeChoice":"Used the installed Tauri core homeDir API through the backend Bridge; failed home lookup preserves messages unchanged. No native Rust or capability files changed."
+    }
+  ],
+  "deviations": [],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Kept platform home lookup and message normalization inside backend; screens consume backend DTOs."},
+    {"number":2,"howSatisfied":"Added no capability flags and preserved all real-adapter read-model gaps."},
+    {"number":3,"howSatisfied":"Updated schema/readers without editing generated files; decoded fixture captions and errors."},
+    {"number":4,"howSatisfied":"Preserved oracle files, tolerances, and e2e tests; used specified command strings."},
+    {"number":5,"howSatisfied":"Applied specified wrapping and record-cell geometry while preserving existing tokens and typography."},
+    {"number":6,"howSatisfied":"Only the first history row renders receipt numbers; older runs remain textual and non-interactive."},
+    {"number":7,"howSatisfied":"Updated assertions to board truth, added 21 test cases, and removed no existing tests or assertions to bypass failures."},
+    {"number":8,"howSatisfied":"Ran all required gates, read back every write, and used no git, network, installation, or Playwright commands."}
+  ],
+  "testsModified": [
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","whatChanged":"Updated exact errors, onboarding constants/rows and error payload; added reference assertions.","justification":"CP-36, CP-S5, D11, TJ-O2, CP-27, CP-34, CP-44."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","whatChanged":"Extended fake Bridge with home lookup and added three normalization tests.","justification":"D13 native message abbreviation."},
+    {"path":"desktop/src/components/domain/Shell.test.tsx","whatChanged":"Replaced the old ENOENT expectation with exact EACCES copy.","justification":"LibraryError CP-36."},
+    {"path":"desktop/src/screens/library/library-skill.test.tsx","whatChanged":"Updated library subtitle and no-receipt assertions; selected the state title explicitly.","justification":"CP-10 and CP-45."},
+    {"path":"desktop/src/screens/inbox/inbox.test.tsx","whatChanged":"Updated fetch-error expectation and matched the period-ended no-receipt paragraph specifically.","justification":"CP-22/CP-36 and CP-45; both required no-receipt captions now coexist."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","whatChanged":"Updated the exact Docs placement-note expectation.","justification":"CP-03/D17."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","whatChanged":"Updated config-error copy and strengthened Leave assertions to all five ordered bullets.","justification":"CP-S5 and CP-S6."},
+    {"path":"desktop/src/screens/onboarding/onboarding.test.tsx","whatChanged":"Updated library counts and failed progress; added successful progress and command-hint coverage.","justification":"CP-10, D11/CP-O1, and CP-06."},
+    {"path":"desktop/src/screens/share/share.test.tsx","whatChanged":"Added tests for Invite on errors, absent member facets, join caption, and variadic placeholder.","justification":"CP-18, CP-05, and CP-06."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Exact pixel parity with the patched boards remains unverified because the fidelity oracle and Playwright were unavailable by instruction."
+}
