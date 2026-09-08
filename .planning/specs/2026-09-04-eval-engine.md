@@ -543,6 +543,7 @@ surface.
   *Exit:* one publish PR on a real team repo carrying a green receipt end-to-end.
 - **ME5 (deferred) — `eval-gen`**: model-authored cases/triggers with the four-bucket
   taxonomy, `# generated — review before trusting` header, check-kind whitelist.
+  Superseded by `.planning/specs/2026-09-07-eval-gen.md`.
 
 ## 15. Acceptance
 
