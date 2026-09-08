@@ -11,6 +11,10 @@ import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripR
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { describeClone } from '../lib/teamRepo.js';
+import { readFile } from 'node:fs/promises';
+import type { Launch } from '../lib/launch.js';
+import { assetSuffix, detectPlatform, type PlatformEvidence } from '../lib/platform.js';
+import { run as runApp } from './app.js';
 import { joinCommand, run as invite } from './invite.js';
 import { ConnectArgs, ConnectOutcome, run as connect } from './connect.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
@@ -18,12 +22,18 @@ import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './t
 export interface SetupVerbs {
   team: typeof team;
   connect: (args: ConnectArgs, io: Prompter) => Promise<Result<ConnectOutcome | undefined>>;
+  app: typeof runApp;
   invite: typeof invite;
   offerHook: typeof defaultOfferHook;
   offerWrapper: typeof defaultOfferWrapper;
 }
 export interface SetupArgs extends WithForm {
   target?: string;
+  /** Desktop app opt-in (D4, 2026-09-08): `true` opens it without asking, `false` never asks; absent asks (default no) unless a yes was remembered. */
+  app?: boolean;
+  /** Test knob for the platform table; defaults to this machine. */
+  evidence?: PlatformEvidence;
+  launch?: Launch;
   /** §6 install bootstrap: the print-only steps (welcome, hints, community, closing summary) are suppressed; every prompt still happens. */
   quiet?: boolean;
   /** Offer local skills independently of print-only suppression. */
@@ -39,7 +49,7 @@ export interface SetupArgs extends WithForm {
   verbs?: Partial<SetupVerbs>;
 }
 export type StepOutcome = 'done' | 'skipped' | 'printed';
-type Step = 'welcome' | 'role' | 'github' | 'team' | 'actions' | 'invite' | 'community' | 'hook' | 'wrapper' | 'done';
+type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'actions' | 'invite' | 'community' | 'hook' | 'wrapper' | 'done';
 export interface SetupResult {
   role: 'creator' | 'joiner';
   team: string;
@@ -80,7 +90,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   const role: SetupResult['role'] = args.target === undefined ? 'creator' : 'joiner';
   const store = args.config ?? createConfigStore();
   const runner = args.runner ?? systemRunner;
-  const verbs: SetupVerbs = { team, connect, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, ...args.verbs };
+  const verbs: SetupVerbs = { team, connect, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, ...args.verbs };
   const steps: SetupResult['steps'] = {};
   let teamName = '';
   let remote = '';
@@ -89,6 +99,24 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   try {
     for (const line of WELCOME) say(line);
     steps.welcome = args.quiet ? 'skipped' : 'printed';
+
+    // The desktop app, first and opt-in (D4/D5, 2026-09-08). Asked only where an app exists for this machine, only to a
+    // person at an interactive terminal (never over a pipe, never over frames, never in install's quiet bootstrap). The question itself belongs to the
+    // `app` verb (setup orchestrates, verbs ask): a remembered yes or --app skips it, a no is recorded and asked again
+    // next run, --no-app never asks. A failed hand-off is printed and the terminal wizard continues.
+    if (args.quiet || !io.interactive || io.channel === 'frames' || args.app === false || assetSuffix(detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, procVersion: await readProcVersion() })) === null) {
+      steps.app = 'skipped';
+    } else {
+      const wanted = args.app === true || (await store.read()).app?.choice === 'opted-in';
+      const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, offer: !wanted }, io);
+      if (opened.ok && (opened.value.action === 'launched' || opened.value.action === 'installed-and-launched')) {
+        io.print(args.target === undefined ? 'Continuing in the app.' : `Continuing in the app. Join ${args.target} there.`);
+        steps.app = 'done';
+        return success({ role, team: teamName, remote, steps });
+      }
+      if (!opened.ok) io.print(opened.error);
+      steps.app = 'skipped';
+    }
 
     // The fork the argument used to decide silently. A target names a team to join; a configured
     // machine resumes its first team and is told how to reach another; only a fresh machine with no
@@ -244,4 +272,9 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     }
     return success({ role, team: teamName, remote, steps });
   } catch (error) { return failed(error, role, teamName, remote, steps); }
+}
+
+async function readProcVersion(): Promise<string | null> {
+  if (process.platform !== 'linux') return null;
+  try { return await readFile('/proc/version', 'utf8'); } catch { return null; }
 }

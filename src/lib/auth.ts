@@ -40,6 +40,8 @@ async function ghAuthenticated(runner: Runner): Promise<boolean> {
 export async function detectOrOfferGh(io: Prompter, runner: Runner = systemRunner, known?: GhState): Promise<GhState> {
   const state = known ?? (await ghState(runner));
   if (state.authenticated || !state.installed || !io.interactive) return state;
+  // Over frames the caller is a program with no terminal to hand gh; say what to do instead of asking (D5, 2026-09-08).
+  if (io.channel === 'frames') { io.print('GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again.'); return state; }
   if (!(await io.confirm('GitHub CLI is installed but logged out. Run `gh auth login` now?'))) return state;
   try { await runner.run('gh', ['auth', 'login'], { stdio: 'inherit' }); } catch { return state; }
   return { installed: true, authenticated: await ghAuthenticated(runner) };

@@ -35,6 +35,7 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
     const s = shell();
     const io = s.channel.io;
     expect(io.interactive).toBe(true);
+    expect(io.channel).toBe('frames');
     const confirm = io.confirm('Proceed?');
     expect(await s.answer(true)).toEqual({ t: 'ask', id: 'q1', kind: 'confirm', question: 'Proceed?' });
     expect(await confirm).toBe(true);

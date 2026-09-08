@@ -31,7 +31,7 @@ Closing stdin behaves like `cancel`. Malformed lines and answers to unknown ids 
 
 ## Rules a shell must follow
 
-1. **Answer the `gh auth login` offer with `false`.** When `gh` is installed but logged out, verbs that need GitHub ask `GitHub CLI is installed but logged out. Run \`gh auth login\` now?`. Confirming hands the CLI's stdio to `gh`, which in frame mode means the frame pipes. Answer `false` and show the person the command to run in a terminal instead.
+1. **The `gh auth login` offer never arrives over frames.** When `gh` is installed but logged out, the CLI in frame mode prints `GitHub CLI is installed but logged out. Run \`gh auth login\` in a terminal, then try again.` instead of asking (it would otherwise hand its stdio to `gh`, which here means the frame pipes). Likewise `setup` never asks the desktop-app opt-in question over frames. If a shell ever does see that confirm, the CLI is older than 0.1.6: answer `false`.
 2. **Never use `sync --hook` over frames.** Its stdout is the Claude Code reload directive, not frames; the CLI refuses it with a `result` frame and exit 1. Call plain `sync`.
 3. **Never ask the CLI for `--help` or `--version` in frame mode.** Commander prints those as text.
 4. **Set `cwd` deliberately.** Project-scoped skills exist only relative to the working directory the CLI is started in; a shell passes the chosen workspace as the child's cwd.
