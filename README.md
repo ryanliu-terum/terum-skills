@@ -1,32 +1,50 @@
 # terum-skills
 
-Share private Claude Code skills across a team through one private git repo. No server.
+I've been searching for best skills and practices for using the amazing AI tools we have today from Claude Code to Cursor. While searching for best practices, I ended up personally evaluating skills I found via social media like superpowers or Matt Pocock by creating my own test framework. Then, when I wanted to share them with my team, I found myself having to manually zip files, send them over from my global folder(which I didn't want to link to my team's shared repo). All of this took quite a while, so I made this project, and hope it saves some time for others. 
 
-Every skill lives once in a git repository your team owns. Members install copies into their Claude Code skill folders, a session-start hook keeps those copies current, and every change is an ordinary git commit with an author. Skills can carry evals, and a committed eval receipt is what a `publish` PR has to show before the team endorses a skill.
+## Quick start
+Core beliefs of the project:
+Skills are extremely impactful at increasing efficiency with AI.
+The most impactful skills only work in the context of the project they were created for
+It should be easy to evaluate the best skills that work for a project and easy to distribute them among the contributors of that project.
+
+As a result, we built Terum, a free, fully open source tool that lets you evaluate and share the best skills/workflows among a team! Two line terminal installation that installs a CLI package and a lightweight application for a simple UI that wraps the CLI. Fully self-hosted, no server, all skills live in a private GitHub repository that the CLI package calls from. 
+
+## Why should I use this? Who would find this helpful?
+
+Who would find this helpful?
+Developers in an team looking to discover and share best practices internally
+Individuals looking to evaluate the infinite amount of publicly available skills and decide which ones are best for personal use cases. 
+
+Isn't it super easy to share skills by just pushing them to GitHub? 
+Yes, it is! However, if you're working on multiple projects with specialized skills, if the repo does not allow .claude in the repo itself(open source, enterprise projects), if you're trying to manage and separate global and project skills, or replicate a specific teammate's suite of skills quickly, then Terum will increase efficiency and save time compared to pushing to GitHub. 
+
+Aren't there open source frameworks for evaluating skills already? 
+Yes, there are! Like Nvidia's SkillEvaluator or the SkillsBench paper. Our evaluation methods are heavily based off of these proven methods. Terum doesn't try to reinvent the wheel, it just adopts these methods to for ease of use. SkillEvaluator requires Docker and an API key; SkillsBench requires you to bring your own tests. Terum runs using your subscription plan, with one terminal installation, using dynamically generated tests for the specific skill being tested. 
+
+How are you evaluating skills?
+Answered above. For more specific notes on methodology, scroll to the bottom. 
+
+Does any private information including skill usage, metadata, or information get out? 
+Nope! Fully open source, locally hosted. All skill data is yours and your team's. 
+
+
+
 
 ## Quick start
 
-Requires Node 22.12+ and `git`. Creating a team on GitHub also needs an authenticated GitHub CLI (`gh auth login`).
-
-Create a team (first person):
+Requires Node 22.12+, `git`, and an authenticated GitHub CLI (`gh auth login`).
 
 ```sh
+npm install -g terum-skills
 npx -y terum-skills@latest setup
 ```
 
-Join a team you were invited to (`invite` prints this exact line for you to paste):
+The default setup command will lead you towards creating a team. To join a team, ask the owner of a team to use terum-skills invite <your github username>. They will receive a command that you can paste into your terminal. Or, if you know the organization name and repo name, you can run. 
 
 ```sh
-npx -y terum-skills@latest setup <org>/<repo>
+terum-skills setup <org name>/<repo name>
 ```
-
-Install one skill from a teammate's command, even before you have set anything up:
-
-```sh
-npx -y terum-skills@latest install <org>/<repo>/<skill>
-```
-
-The wizard asks before every write: which team, which skills to connect, whether to add the session-start hook. Re-run `setup` to resume. Prefer a bare `terum-skills` command? `npm install -g terum-skills`.
 
 ## Commands
 
