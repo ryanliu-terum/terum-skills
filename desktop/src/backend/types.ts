@@ -6,6 +6,8 @@ export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly 
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
 export interface Capabilities {windowChrome:'mac-overlay'|'drawn-controls'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
+export interface Surfaces {status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean}
+export interface ReadOptions {signal?:AbortSignal}
 export type Theme='dark'|'light'|'system';
 export type Scope=string;
 export type TokenKey=keyof Design['TOKENS'];
@@ -27,29 +29,29 @@ export interface Roster {members:Member[];invited:Design['INVITED'];member:Recor
 export interface Library {skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string}
 export interface StatusResult {machine:Design['MACHINE'];me:Design['ME'];teams:Design['TEAMS'];counts:Record<string,string>}
 export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project')[]}
-export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string}
-export interface InstallArgs {ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}
+export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null;endorsed:string|null;unresolved:boolean|null}
+export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}
 export interface InstalledResult {id:string;name:string;scope:Scope}
-export interface UninstallArgs {ref:string}
+export interface UninstallArgs {team?:string;ref:string}
 export interface UninstalledResult {id:string;name:string}
 export interface MachineUninstallResult {removed:string[]}
 export interface ConnectArgs {path?:string;home?:string;cwd?:string;team?:string;keepSource?:boolean;keepRepo?:boolean;relocate?:boolean;forget?:boolean;allowPrivileged?:boolean}
 export interface ConnectResult {id:string;name:string;reconciled?:boolean}
 export interface ConnectBatch {kind:'batch';shared:ConnectResult[];declined:string[];refused:{name:string;reason:string}[]}
 export type ConnectOutcome=ConnectResult|ConnectBatch;
-export interface PublishArgs {ref:string;message?:string}
-export interface PublishResult {name:string;version:string}
-export interface SyncArgs {prune?:boolean;hook?:boolean}
+export interface PublishArgs {team?:string;ref:string;message?:string}
+export interface PublishResult {name:string;version:string|null;changed:boolean}
+export interface SyncArgs {team?:string;prune?:boolean;hook?:boolean}
 export interface SyncResult {placed:string[];removed:string[]}
-export interface InviteArgs {logins:string[];scope?:Scope;role?:string}
+export interface InviteArgs {team?:string;logins:string[];scope?:Scope;role?:string}
 export interface InviteResult {invited:string[]}
 export interface TeamArgs {kind:'create'|'join'|'remove'|'leave';name?:string;team?:string;remote?:string;handle?:string}
 export interface TeamResult {name:string;kind:TeamArgs['kind']}
 export interface SetupArgs {target?:string;offerConnect?:boolean}
 export interface SetupResult {team:string;role:'creator'|'joiner';connected?:ConnectOutcome}
-export interface EvalArgs {ref:string;commit?:boolean;cases?:number}
+export interface EvalArgs {team?:string;ref:string;commit?:boolean;cases?:number}
 export interface EvalResult {name:string;receipt:Receipt|null}
-export interface ValidateArgs {ref?:string;cwd?:string}
+export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
 export interface ValidateResult {name:string;findings:number;warnings:number}
 export interface UpdateAdvice {current:string;latest:string;available:boolean}
 export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void}

@@ -23,7 +23,7 @@ it('retains footer identity while Library error counts are hidden',async()=>{
 it.each([
  ['/library/global','loading',null],['/library/global','error',null],['/library/global','empty',['0','22','15','32','3','3','8']],
  ['/skill/deploy-check','loading',null],['/skill/deploy-check','error',['30','22','15','32','3','3','8']],
- ['/inbox','loading',null],['/inbox','error',null],['/inbox','empty',['30','22','15','32','0','0','0']],
+ ['/inbox','loading',null],['/inbox','error',null],['/inbox','empty',['30','22','15','32']],
  ['/marketplace','loading',null],['/marketplace','error',['30','22','15','32','3','3','8']],
  ['/marketplace?q=missing','default',['30','22','15','32','3','3','8']],
  ['/share','loading',null],['/share','error',null],['/share','empty',['30','22','15','32','3','3','8']],

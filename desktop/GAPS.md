@@ -1,4 +1,6 @@
-# GAPS.md — drawn affordances the CLI on `main` (pinned at b5c0507) does not have yet
+# GAPS.md — drawn affordances the CLI on `main` (re-anchored at b7be3c5, 2026-09-08; first pinned at b5c0507) does not have yet
+
+M7 status (2026-09-08): the real adapter declares which read models it serves (`Backend.surfaces()`, S7af); a surface whose model is still a gap is hidden from the sidebar rather than stubbed, and every line below that names a read model closes in the batch that first serves it from real data (S7f library/skill, S7k status/settings, S7b roster/catalog, S7n receipts, S7e update, S7r inbox/onboarding).
 
 One line each: screen or board: affordance or printed string — what changed at b5c0507 or what the CLI would need. Design-side calls (printed strings) are Teddy's; seam-side gaps are asks to Ryan's repo. The app builds every affordance as drawn on the mock backend; the four capability-flagged gaps are listed last.
 
@@ -22,6 +24,8 @@ One line each: screen or board: affordance or printed string — what changed at
 - (not drawn) `login`, `readme`, `guard-push` exist at b5c0507 and have no seam method: no board invokes them (SettingsAccount's gh row draws a "Sign in" button whose copy says it opens gh's own login in a terminal, build.py:3539-3540; the mock treats it as openInEditor-style hand-off, not a verb).
 - InboxPanes (review pane): a publish/ PR now runs two blocking CI jobs in the team-repo workflow template (`hygiene` and `receipt-check`, team.ts:559/578; only newly scaffolded repos get it, existing repos need `team workflow-update`); the drawn review pane (report_review build.py:2090-2103, row fact build.py:1811 "hygiene 6 of 6") predates them. Recorded only; no check-run UI invented.
 - (seam only) every verb's args at b5c0507 carries `form?: InvocationForm` (WithForm, 1d5e3f9); the seam's DTOs omit it (a CLI launch detail); `validate` args gained `cwd?: string` (kept in the seam); `setup` args gained `offerConnect?: boolean` (kept, default true).
+
+- Settings ▸ Sharing (PF-08, opt out of publishing install records): HARD; ships as drawn. Install records are the team's one adoption signal (D38) and a per-person opt-out would need a committed people-file field, a sync rule and a UI state; nothing in the CLI supports it and no batch builds it.
 
 ## Capability-flagged gaps (Teddy, 2026-09-07: the only affordances behind a flag; the mock reports them as supported)
 
