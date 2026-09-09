@@ -5,9 +5,12 @@ import { createTauriBackend } from '../index';
 import { fakeBridge } from './fake-bridge';
 
 const directory = resolve('../.planning/codex-runs/m7-S7c');
+function recorded(name: string) {
+  return readFileSync(resolve(directory, 'frames', name + '.jsonl'), 'utf8').trim().split('\n');
+}
+// status() reads `status` and `ls --local` together (S7k); the local inventory is this batch's own recording.
 function replay(name: string) {
-  const lines = readFileSync(resolve(directory, 'frames', name + '.jsonl'), 'utf8').trim().split('\n');
-  return fakeBridge((_args, emit) => { for (const line of lines) emit({ kind: 'stdout', line }); });
+  return fakeBridge((args, emit) => { for (const line of recorded(args[0] === 'ls' ? 'ls-local' : name)) emit({ kind: 'stdout', line }); });
 }
 
 it('replays the real login write and proves that only display_name bytes changed', async () => {
