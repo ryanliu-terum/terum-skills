@@ -11,7 +11,7 @@ export type Inspection =
   | { kind: 'candidate'; description: string; privileged: boolean }
   | { kind: 'rejected'; reason: SourceProblem; detail: string }
   | { kind: 'failed'; reason: string };
-export interface LocalEntry { name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; inspection: Inspection; }
+export interface LocalEntry { name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; placementFingerprint?: string; inspection: Inspection; }
 export interface LocalInventory {
   root: string;
   scope: 'global' | 'project';
@@ -75,17 +75,25 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') inventory.rootState = 'absent';
     else { inventory.rootState = 'unreadable'; inventory.problems.push({ path: root, reason: error instanceof Error ? error.message : String(error) }); }
-    return inventory;
+    names = [];
   }
   const sharedPaths = await Promise.all(Object.entries(config.shared).map(async ([id, ref]) => ({ id, ref, canonical: await canonicalParentPath(resolve(ref.source)) })));
   const placementPaths = await Promise.all(Object.entries(config.placements).map(async ([target, ref]) => ({ target, ref, canonical: await canonicalParentPath(resolve(target)) })));
+  const canonicalRoot = await realpath(root).catch(() => root);
+  for (const { target, canonical } of placementPaths) {
+    if (dirname(resolve(target)) !== root && (canonical === undefined || dirname(canonical) !== canonicalRoot)) continue;
+    try { await lstat(target); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') inventory.problems.push({ path: target, reason: 'placement recorded in the ledger but the folder is missing' });
+    }
+  }
   for (const name of names) {
     const path = join(root, name);
     const canonical = await canonicalParentPath(path);
     const shared = sharedPaths.filter(({ ref, canonical: reference }) => resolve(ref.source) === path || (canonical !== undefined && reference === canonical)).map(({ id, ref }) => ({ id, team: ref.team }));
     const placement = placementPaths.find(({ target, canonical: reference }) => resolve(target) === path || (canonical !== undefined && reference === canonical))?.ref;
     const tracked = shared.length > 0 || placement !== undefined;
-    const entry: LocalEntry = { name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version } } : {}), inspection: { kind: 'failed', reason: '' } };
+    const entry: LocalEntry = { name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
     const reject = (reason: SourceProblem, detail: string): void => { entry.inspection = { kind: 'rejected', reason, detail }; };
     try {
       const details = await lstat(path);

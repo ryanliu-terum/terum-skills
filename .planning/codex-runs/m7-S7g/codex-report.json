@@ -1,0 +1,62 @@
+{
+  "status": "complete",
+  "summary": "Implemented typed local health and ledger references, real Settings placement/shared rows, and provenance-based Library/Skill mappings. Re-recorded CLI fixtures and added regression/replay coverage. Root build and all required gates passed on the final runs.",
+  "filesChanged": [
+    {"path":"src/commands/ls.ts","change":"modified","why":"Emit tracked, shared, placement and read-only health fields."},
+    {"path":"src/lib/local-skills.ts","change":"modified","why":"Retain ledger fingerprints and report missing placement folders."},
+    {"path":"src/commands/__tests__/ls.test.ts","change":"modified","why":"Cover health states, provenance, missing folders and unchanged printed sentences."},
+    {"path":"src/lib/__tests__/local-skills.test.ts","change":"modified","why":"Assert the added internal fingerprint field."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"Document the S7g local-row contract."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Define typed placement rows and the local Settings subset."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Narrow mock Settings typing while preserving its output."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Validate typed local rows, serve Settings and replace prose-based placement lookup."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Test health mappings, typed provenance and schema rejection."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","change":"modified","why":"Replay S7g frames and verify real Settings provenance."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay-screens.test.tsx","change":"modified","why":"Verify the real machine placement screen."},
+    {"path":"desktop/src/screens/settings/SettingsScreen.tsx","change":"modified","why":"Render supported local Settings without requiring full status."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"Reuse the placement table while preserving mock markup."},
+    {"path":"desktop/src/screens/settings/SettingsDialogs.tsx","change":"modified","why":"Constrain existing dialogs to full Settings data."},
+    {"path":"desktop/src/screens/settings/PlacementTable.tsx","change":"added","why":"Provide one placement-table renderer for both data models."},
+    {"path":"desktop/src/screens/settings/LocalSettingsContent.tsx","change":"added","why":"Display real placements, shared references and inspection problems."},
+    {"path":".planning/codex-runs/m7-S7g/fixture.sh","change":"added","why":"Reproduce offline fixtures with an actual ledger fingerprint."},
+    {"path":".planning/codex-runs/m7-S7g/frames/ls-local.jsonl","change":"modified","why":"Record rebuilt typed local rows."},
+    {"path":".planning/codex-runs/m7-S7g/frames/ls.jsonl","change":"modified","why":"Refresh inventory replay evidence."},
+    {"path":".planning/codex-runs/m7-S7g/frames/ls-member-mira.jsonl","change":"modified","why":"Refresh member replay evidence."},
+    {"path":".planning/codex-runs/m7-S7g/frames/ls-project-terum.jsonl","change":"modified","why":"Refresh project replay evidence."},
+    {"path":".planning/codex-runs/m7-S7g/frames/search.jsonl","change":"modified","why":"Refresh search replay evidence."}
+  ],
+  "gates": {
+    "lint": {"ran":true,"passed":true,"output":"Root and desktop: exit 0; no lint errors.","preExistingFailures":""},
+    "typecheck": {"ran":true,"passed":true,"output":"Root and desktop: exit 0; no TypeScript errors.","preExistingFailures":""},
+    "test": {"ran":true,"passed":true,"output":"Root: 72 files, 1159 passed; build exit 0. Desktop final isolated run: 51 files, 629 passed, 88 skipped. Initial overlapping desktop run: 624 passed, 5 failed, 88 skipped.","preExistingFailures":""}
+  },
+  "openQuestions": [
+    {
+      "question":"How should the existing full Settings model expose the newly served local subset?",
+      "specSection":"§2 App half",
+      "conservativeChoice":"Added a local Settings variant exposing This machine and Sharing; retained fixture output, hid unavailable sections, and displayed unknown aggregate counts as —."
+    },
+    {
+      "question":"The adapter README still describes Settings as entirely unavailable.",
+      "specSection":"Standing constraints; desktop/AGENTS.md",
+      "conservativeChoice":"Left maintainer-owned documentation unchanged; it needs a follow-up status update."
+    }
+  ],
+  "deviations": [],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"All native reads and mappings remain behind the backend seam; CLI health uses filesystem reads without added git calls."},
+    {"number":2,"howSatisfied":"Preserved feature gates and exposed only the supported Settings subset."},
+    {"number":5,"howSatisfied":"Reused placement markup and preserved mock output; provenance comes exclusively from ledger references."},
+    {"number":7,"howSatisfied":"Added meaningful regression coverage without deleting or weakening assertions; vendored fingerprint code remains unchanged."},
+    {"number":8,"howSatisfied":"Ran required gates, verified writes, and used no repository git, network, installs or Playwright."}
+  ],
+  "testsModified": [
+    {"path":"src/commands/__tests__/ls.test.ts","whatChanged":"Added 12 health/provenance cases.","justification":"Required S7g coverage; existing assertions retained."},
+    {"path":"src/lib/__tests__/local-skills.test.ts","whatChanged":"Added placementFingerprint to one exact expected object.","justification":"Assert the new internal ledger data without weakening equality."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Updated typed fixtures and served-Settings expectations; added mapping/schema cases.","justification":"Reflect the new contract while preserving remaining gap assertions."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","whatChanged":"Switched to S7g recordings and added Settings provenance proof.","justification":"Exercise rebuilt CLI payloads."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay-screens.test.tsx","whatChanged":"Switched recordings and added machine-screen coverage.","justification":"Verify real placements render without fabricated Settings data."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim":"Mock rendering remains pixel-neutral: output and table markup were preserved, but visual fidelity was not measured because Playwright was explicitly excluded."
+}
