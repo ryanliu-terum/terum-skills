@@ -10,11 +10,12 @@ import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
 import { fromError, cancelled, failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
+import { APP_PRODUCT } from './app.js';
 import { teardownTeam } from './leave.js';
 
 export const fsForTests = { rm, rmdir };
-export interface UninstallMachineArgs extends WithForm { config?: ConfigStore; hook?: HookOptions; wrapper?: WrapperOptions; launch?: Launch; runner?: Runner; home?: string; }
-export interface MachineUninstallResult { teams: string[]; removedPlacements: number; hookRemoved: boolean; wrapperRemoved: boolean; configRemoved: boolean; kept: string[]; record: string; launch: Launch | null; }
+export interface UninstallMachineArgs extends WithForm { config?: ConfigStore; hook?: HookOptions; wrapper?: WrapperOptions; launch?: Launch; runner?: Runner; home?: string; platform?: NodeJS.Platform; }
+export interface MachineUninstallResult { teams: string[]; removedPlacements: number; hookRemoved: boolean; wrapperRemoved: boolean; configRemoved: boolean; kept: string[]; record: string; launch: Launch | null; advice: string[]; }
 
 /** Confirm and remove this machine's tracked state. Package removal is always advice, never executed. */
 export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Result<MachineUninstallResult>> {
@@ -50,31 +51,35 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     const evals = join(store.root, 'evals');
     const evalsPresent = await exists(evals);
 
-    io.print('terum-skills will be removed from this machine.');
-    if (bindings.length === 0) io.print('  No team');
+    const launchStateFiles = ['app.json', 'latest-version.json'].map(name => join(store.root, 'run', name));
+    const launchStatePresent = (await Promise.all(launchStateFiles.map(exists))).some(Boolean);
+    const detail: string[] = [];
+    detail.push('terum-skills will be removed from this machine.');
+    if (bindings.length === 0) detail.push('  No team');
     else if (bindings.length === 1) {
       const [name, binding] = bindings[0]!;
-      io.print(`  Team: ${name} (${stripRemoteCredentials(binding.remote)}, ${binding.handle === null ? 'no handle' : `handle ${binding.handle}`})`);
-    } else io.print(`  Teams (${bindings.length})${bindings.length ? `: ${bindings.map(([name, binding]) => `${name} (${stripRemoteCredentials(binding.remote)}, ${binding.handle === null ? 'no handle' : `handle ${binding.handle}`})`).join(', ')}` : ''}`);
-    if (placements.length) io.print(`  Placed skills (${placements.length}): ${placements.join(', ')}`);
+      detail.push(`  Team: ${name} (${stripRemoteCredentials(binding.remote)}, ${binding.handle === null ? 'no handle' : `handle ${binding.handle}`})`);
+    } else detail.push(`  Teams (${bindings.length})${bindings.length ? `: ${bindings.map(([name, binding]) => `${name} (${stripRemoteCredentials(binding.remote)}, ${binding.handle === null ? 'no handle' : `handle ${binding.handle}`})`).join(', ')}` : ''}`);
+    if (placements.length) detail.push(`  Placed skills (${placements.length}): ${placements.join(', ')}`);
     if (clones.length) {
-      io.print(`  Local clones (${clones.length}): ${clones.join(', ')}`);
-      io.print(`    (a clone holding uncommitted or unpushed work is moved to ${quarantine} instead)`);
+      detail.push(`  Local clones (${clones.length}): ${clones.join(', ')}`);
+      detail.push(`    (a clone holding uncommitted or unpushed work is moved to ${quarantine} instead)`);
     }
-    if (bindings.length) io.print('  Version cache and run files for these teams');
-    io.print(`  ${hookPresent ? 'Session-start hook in' : 'No session hook in'} ${options.settingsFile}`);
-    if (wrapperPresence.kind === 'foreign') io.print(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (${wrapperPresence.why}); left alone`);
-    else io.print(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);
-    if (appPresent) io.print(`  Downloaded desktop app bundle at ${app} (all versions)`);
-    io.print(`  ${configPath}`);
-    io.print(`Kept: ${quarantineCount ? `${quarantine} (${quarantineCount} items), ` : ''}${backups} (settings backups and a record of this uninstall)${evalsPresent ? `, ${evals} (eval runs and transcripts)` : ''}`);
+    if (bindings.length) detail.push('  Version cache and run files for these teams');
+    detail.push(`  ${hookPresent ? 'Session-start hook in' : 'No session hook in'} ${options.settingsFile}`);
+    if (wrapperPresence.kind === 'foreign') detail.push(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (${wrapperPresence.why}); left alone`);
+    else detail.push(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);
+    if (appPresent) detail.push(`  Downloaded desktop app bundle at ${app} (all versions)`);
+    if (launchStatePresent) detail.push(`  Desktop launch state in ${join(store.root, 'run')} (app.json, latest-version.json)`);
+    detail.push(`  ${configPath}`);
+    detail.push(`Kept: ${quarantineCount ? `${quarantine} (${quarantineCount} items), ` : ''}${backups} (settings backups and a record of this uninstall)${evalsPresent ? `, ${evals} (eval runs and transcripts)` : ''}`);
     if (quarantineCount) kept.push(quarantine);
     kept.push(backups);
     if (evalsPresent) kept.push(evals);
-    if (shared.length) io.print(`Connected-skill sources stay where they are: ${shared.map(({ source }) => `${basename(source)}: ${source}`).join(', ')}`);
-    io.print('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
-    io.print('The package itself is not removed by this command; the last line tells you how.');
-    if (!(await io.confirm('Remove terum-skills from this machine?'))) return cancelled('Uninstall was cancelled.');
+    if (shared.length) detail.push(`Connected-skill sources stay where they are: ${shared.map(({ source }) => `${basename(source)}: ${source}`).join(', ')}`);
+    detail.push('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
+    detail.push('The package itself is not removed by this command; the last line tells you how.');
+    if (!(await io.confirm('Remove terum-skills from this machine?', { detail }))) return cancelled('Uninstall was cancelled.');
 
     await mkdir(backups, { recursive: true, mode: 0o700 });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -142,6 +147,14 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     if (configRemoved) io.print(`Removed ${configPath}.`);
 
     let directoryFailure: string | undefined;
+    for (const path of launchStateFiles) {
+      try { await fsForTests.rm(path, { force: true }); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        io.print(`Kept ${path}: ${message(error)}`); kept.push(path);
+        directoryFailure ??= `Could not remove ${path}: ${message(error)}. Everything else was removed; re-run \`${invocation(args.form, 'uninstall')}\` to retry.`;
+      }
+    }
     for (const path of ['app', 'run', 'cache', 'teams', 'quarantine'].map((name) => join(store.root, name)).concat(store.root)) {
       try { if (path === app) await fsForTests.rm(path, { recursive: true, force: true }); else await fsForTests.rmdir(path); }
       catch (error) {
@@ -158,9 +171,17 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
       }
     }
     if (directoryFailure) return failure(directoryFailure);
+    const appLines: string[] = [];
+    if (appPresent) {
+      const platform = args.platform ?? process.platform;
+      if (platform === 'darwin') appLines.push(`The desktop app was deleted from ${app}. A copy that is running keeps running until you quit it; it cannot be reopened from the Dock. \`${invocation(args.form, 'app')}\` downloads it again (needs gh and the release).`);
+      if (platform === 'win32') appLines.push(`The desktop app under %LOCALAPPDATA%\\${APP_PRODUCT} stays installed; remove it from Windows Settings ▸ Apps. Only its download record under ${app} was removed.`);
+      appLines.push("This app's own preferences (theme, layout) are kept by the app and were not touched.");
+    }
+    const advice = [...packageRemovalLines(args.launch), ...appLines];
     io.print('Machine cleanup complete. The package itself has not been removed; finish with the package manager that installed it.');
-    for (const line of packageRemovalLines(args.launch)) io.print(line);
-    return success({ teams, removedPlacements, hookRemoved, wrapperRemoved, configRemoved, kept, record, launch: args.launch ?? null });
+    for (const line of advice) io.print(line);
+    return success({ teams, removedPlacements, hookRemoved, wrapperRemoved, configRemoved, kept, record, advice, launch: args.launch ?? null });
   } catch (error) { return fromError(error); }
 }
 

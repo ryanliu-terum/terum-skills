@@ -147,6 +147,7 @@ describe('read-only calls preserve spawn rejection', () => {
     const spawn = vi.fn<Bridge['spawn']>().mockRejectedValue(error);
     const bridge: Bridge = {
       spawn,
+      quit: vi.fn(async () => {}),
       onLaunchRequest: async () => () => {},
       write: vi.fn<Bridge['write']>(),
       kill: vi.fn<Bridge['kill']>(),
@@ -398,10 +399,10 @@ it.each(['octo',''])('uses GitHub login for the footer, falling back to the team
  const status=await createTauriBackend(f.bridge).status();
  expect(status.value?.me).toMatchObject({handle:'mira',footerLabel:github||'mira'});
 });
-it.each(['setup','team'] as const)('invalidates every affected read model when %s fails',async verb=>{
+it.each(['setup','team','uninstall'] as const)('invalidates every affected read model when %s fails',async verb=>{
  const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:JSON.stringify({t:'result',verb,ok:false,exitCode:1,error:'Stopped after a partial write.'})}));
  const b=createTauriBackend(f.bridge),notify=vi.fn();b.subscribe(notify);
- await (verb==='setup'?b.setup({offerConnect:true}):b.team({kind:'create',name:'acme'})).done;
+ await (verb==='setup'?b.setup({offerConnect:true}):verb==='uninstall'?b.uninstallMachine({}):b.team({kind:'create',name:'acme'})).done;
  expect(notify.mock.calls).toEqual([['config'],['clone'],['placed']]);
 });
 
@@ -526,4 +527,15 @@ it('streams diagnostics as a status run without a read-model projection',async()
  for await(const frame of run.frames)if(frame.t==='print')lines.push(frame.line);
  expect(lines).toEqual(['CLI version','Team state']);expect(await run.done).toEqual({ok:true,value:undefined});
  expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status']]);
+});
+
+
+it('maps the entire machine cleanup result without leaking launch provenance', async () => {
+ const { teams, ...outcome } = { teams:['acme','other'], removedPlacements:3, hookRemoved:true, wrapperRemoved:false, configRemoved:true, kept:['/state/backups'], record:'/state/backups/uninstall.json', advice:['Package advice.', 'App advice.'] };
+ const f=replay({teams,...outcome,launch:{kind:'npx',path:'/cache/index.js'}});
+ expect(await createTauriBackend(f.bridge).uninstallMachine({}).done).toEqual({ok:true,value:{removed:teams,...outcome}});
+});
+it('quits through the native bridge exactly once', async () => {
+ const f=replay(undefined);await createTauriBackend(f.bridge).quit();
+ expect(f.quit).toHaveBeenCalledExactlyOnceWith();expect(f.spawns).toEqual([]);
 });

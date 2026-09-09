@@ -1,3 +1,4 @@
+import { useMachineRemoval } from '../../app/machine-removal-context';
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
@@ -29,9 +30,22 @@ export function SettingsDialogs({section,data:d,status}:{section:string;data:Set
     `Your people file in the team repo stays: you remain a member (an admin archives that with team remove ${team.handle}), and setup brings this machine back`,
   ].map(line=><div className="settings-bullet settings-leave-bullet" key={line}><span>·</span><span>{line}</span></div>)}{action.lines.map((line,index)=><div key={index}>{line}</div>)}</WorkflowDialog>;
   if(section==='machine'&&name==='prune')return <WorkflowDialog title={`Delete ${d.QUARANTINE.length} quarantined folder${d.QUARANTINE.length===1?'':'s'}?`} body="Prune deletes only inside ~/.terum/skills/quarantine, and only what is listed here. Nothing else on this machine is touched." primary="Delete" danger command="npx -y terum-skills@latest sync --prune" close={close} busy={action.busy} error={action.error} submit={()=>void action.run(()=>backend.sync({prune:true}),{[`Delete ${d.QUARANTINE.length} quarantined item(s)?`]:true},close)}><div className="prune-list">{rows.QUARANTINE.map(([when,name,,size])=><div key={when+name}><span>quarantine/{when}/{name}</span><span>{size}</span></div>)}</div></WorkflowDialog>;
+  if(section==='advanced'&&name==='remove')return <RemoveTrigger close={close}/>;
   if(section==='advanced'&&name==='status')return <StatusDialog close={close}/>;
   if(showJoin)return <JoinDialog close={close} action={action}/>;
   return action.notice?<div role="status">{action.notice}</div>:null;
+}
+
+function RemoveTrigger({close}:{close:()=>void}){
+  const removal=useMachineRemoval();
+  const start=useRef(()=>{removal.start();close();});
+  useEffect(()=>{
+    // Start only on the committed mount, including StrictMode's effect replay.
+    let mounted=true;
+    void Promise.resolve().then(()=>{if(mounted)start.current();});
+    return ()=>{mounted=false;};
+  },[]);
+  return null;
 }
 
 function StatusDialog({close}:{close:()=>void}){

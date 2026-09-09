@@ -1,14 +1,21 @@
+import { useMachineRemoval, type MachineRemovalApi } from '../../app/machine-removal-context';
+import { StrictMode } from 'react';
+import { MachineRemovalProvider } from '../../app/MachineRemovalProvider';
+import { EvalRunContext, type EvalRunApi } from '../../app/eval-run-context';
 import { afterEach,beforeEach,expect,it,vi } from 'vitest';
 import { act,cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
 import { BackendContext } from '../../backend';
-import { createMockBackend } from '../../backend/mock';
+import { createMockBackend, MOCK_REMOVE_DETAIL, MOCK_REMOVE_ADVICE } from '../../backend/mock';
 import { createRun } from '../../backend/mock/run';
 import { design } from '../../backend/mock/data';
 const backend=createMockBackend();
-function open(route:string){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}
+function open(route:string,evalRun?:EvalRunApi){
+ location.hash=route;const app=<MachineRemovalProvider><App/></MachineRemovalProvider>;
+ return render(<Providers><BackendContext value={backend}>{evalRun?<EvalRunContext value={evalRun}>{app}</EvalRunContext>:app}</BackendContext></Providers>);
+}
 beforeEach(()=>{localStorage.clear();useUiStore.getState().setTheme('dark');});
 afterEach(()=>{cleanup();location.hash='';vi.restoreAllMocks();});
 it.each([['account','Account'],['teams','Team'],['machine','This machine'],['sync','Sync'],['updates','Updates'],['inbox','Inbox'],['evals','Evals'],['sharing','Sharing'],['appearance','Appearance'],['advanced','Advanced'],['about','About']])('renders the %s settings head and nav',async(section,title)=>{open('#/settings/'+section);expect(await screen.findByRole('heading',{name:title})).toBeInTheDocument();expect(within(screen.getByRole('navigation',{name:'Settings sections'})).getAllByRole('link')).toHaveLength(11);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(screen.queryByText(/S1b builds this/)).toBeNull();});
@@ -40,7 +47,63 @@ it('renders update advice verbatim from the DTO without opening a command in an 
  fireEvent.click(within(dialog).getByRole('button',{name:'Close'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
 });
 it('opens the local storage path in Finder',async()=>{const editor=vi.spyOn(backend,'revealPath');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Show in Finder'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('~/.terum/skills'));});
-it('declines machine removal and leaves the screen intact',async()=>{const uninstall=vi.spyOn(backend,'uninstallMachine');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));await waitFor(()=>expect(screen.getByRole('button',{name:'Remove…'})).toBeEnabled());expect(uninstall).toHaveBeenCalledWith({});expect(screen.queryByRole('alert')).toBeNull();expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('heading',{name:'Advanced'})).toBeInTheDocument();});
+it('declines machine removal after showing the CLI disclosure and keeps Advanced intact',async()=>{
+ const uninstall=vi.spyOn(backend,'uninstallMachine');open('#/settings/advanced');
+ fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));
+ const dialog=await screen.findByRole('dialog',{name:'Remove terum-skills from this machine?'});
+ await waitFor(()=>expect([...dialog.querySelectorAll('.settings-bullet')].map(n=>n.textContent)).toEqual(MOCK_REMOVE_DETAIL));
+ expect(uninstall).toHaveBeenCalledExactlyOnceWith({});
+ const run=uninstall.mock.results[0]!.value;const answer=vi.spyOn(run,'answer');
+ fireEvent.click(within(dialog).getByRole('button',{name:'Cancel'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ expect(answer).toHaveBeenCalledExactlyOnceWith(expect.any(String),false);
+ expect(await run.done).toEqual({ok:false,cancelled:true,error:'Uninstall was cancelled.'});
+ expect(screen.queryByRole('alert')).toBeNull();expect(screen.getByRole('status')).toHaveTextContent('Uninstall was cancelled.');
+ expect(screen.getByRole('heading',{name:'Advanced'})).toBeInTheDocument();expect(screen.getByRole('button',{name:'Remove…'})).toBeEnabled();
+});
+it('accepts machine removal once, renders the complete CLI outcome, and quits',async()=>{
+ const uninstall=vi.spyOn(backend,'uninstallMachine'),quit=vi.spyOn(backend,'quit').mockResolvedValue(),reveal=vi.spyOn(backend,'revealPath');
+ open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));
+ const dialog=await screen.findByRole('dialog',{name:'Remove terum-skills from this machine?'});
+ const remove=await within(dialog).findByRole('button',{name:'Remove'});
+ const run=uninstall.mock.results[0]!.value,answer=vi.spyOn(run,'answer');fireEvent.click(remove);
+ const region=await screen.findByRole('region',{name:'terum-skills was removed from this machine'});
+ expect(uninstall).toHaveBeenCalledExactlyOnceWith({});expect(answer).toHaveBeenCalledExactlyOnceWith(expect.any(String),true);
+ for(const line of [`Left: ${design.TEAMS.map(t=>t.key).join(', ')}`,`Placed skills removed: ${design.PLACEMENTS_N}`,'Hook: removed','/terum-skills skill: removed','config.json: removed','Kept: ~/.terum/skills/backups','Record: ~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json',...MOCK_REMOVE_ADVICE])expect(within(region).getByText(line,{exact:true})).toBeInTheDocument();
+ const lines=["Wrote a record of this machine's terum-skills state to ~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json.",...design.TEAMS.flatMap(t=>[`Leaving ${t.key}…`,`Left ${t.key}.`])];
+ expect(within(region).getByRole('log').textContent).toBe(lines.join('\n'));
+ fireEvent.click(within(region).getByRole('button',{name:'Show in Finder'}));expect(reveal).toHaveBeenCalledWith('~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json');
+ fireEvent.click(within(region).getByRole('button',{name:'Quit'}));expect(quit).toHaveBeenCalledOnce();
+});
+it('renders a partial removal failure and allows closing it',async()=>{
+ const error='Done: a\nRemaining: b, config.json\nRe-run `npx -y terum-skills@latest uninstall` to continue.';
+ vi.spyOn(backend,'uninstallMachine').mockImplementation(()=>createRun(async ctx=>{
+  await ctx.ask('confirm','Remove terum-skills from this machine?',{detail:['x']});ctx.print('Done: a');return {ok:false,error};
+ }));
+ open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Remove'}));
+ expect((await screen.findByRole('alert')).textContent).toBe(error);expect(screen.getByRole('log')).toHaveTextContent('Done: a');
+ fireEvent.click(screen.getByRole('button',{name:'Close'}));await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
+ expect(screen.getByRole('button',{name:'Remove…'})).toBeEnabled();
+});
+it('refuses removal while an eval is running and offers to show it',async()=>{
+ const uninstall=vi.spyOn(backend,'uninstallMachine'),show=vi.fn();
+ open('#/settings/advanced',{current:{state:'running',ref:'deploy-check',name:'deploy-check',team:undefined,run:createRun(async()=>({ok:true,value:{name:'deploy-check',runDir:'/eval',executionStatus:'complete',commit:null}})),lines:[],startedAt:0,commit:false},dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},show});
+ fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));
+ const dialog=await screen.findByRole('dialog',{name:'Stop the running eval first'});expect(uninstall).not.toHaveBeenCalled();
+ fireEvent.click(within(dialog).getByRole('button',{name:'Show eval'}));expect(show).toHaveBeenCalledOnce();
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+});
+it('starts a removal URL only once under StrictMode replay',async()=>{
+ const uninstall=vi.spyOn(backend,'uninstallMachine');let removal!:MachineRemovalApi;
+ function RemovalAccess(){removal=useMachineRemoval();return null;}
+ location.hash='#/settings/advanced?dialog=remove';
+ render(<StrictMode><Providers><BackendContext value={backend}><MachineRemovalProvider><RemovalAccess/><App/></MachineRemovalProvider></BackendContext></Providers></StrictMode>);
+ await waitFor(()=>expect(removal.current?.phase).toBe('asking'));
+ expect(uninstall).toHaveBeenCalledExactlyOnceWith({});expect(location.hash).toBe('#/settings/advanced');
+ await act(async()=>{removal.answer(false);expect(await uninstall.mock.results[0]!.value.done).toMatchObject({ok:false,cancelled:true});});
+ expect(removal.current).toBeNull();expect(removal.notice).toBe('Uninstall was cancelled.');
+});
 it('does not change a toggle when its preference write fails',async()=>{open('#/settings/sync');const control=await screen.findByRole('switch',{name:'Sync at session start'});vi.spyOn(backend.prefs,'set').mockImplementation(()=>{throw new Error('Storage denied.');});fireEvent.click(control);expect(await screen.findByRole('alert')).toHaveTextContent('Storage denied.');expect(control).toHaveAttribute('aria-checked','true');});
 it('renders the placement hover selector and every raw placement',async()=>{open('#/settings/machine');expect(await screen.findByTestId('placement-row-1')).toHaveTextContent('pr-review');expect(screen.getAllByTestId(/^placement-row-/)).toHaveLength(design.PLACEMENTS.length);});
 it('rejects malformed placement data with its field path',async()=>{const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);settings.value.PLACEMENTS=[['broken']];vi.spyOn(backend,'settings').mockResolvedValue(settings);const consoleError=vi.spyOn(console,'error').mockImplementation(()=>{ /* React reports the intentionally malformed DTO caught by ErrorBoundary. */ });open('#/settings/machine');expect(await screen.findByRole('alert')).toHaveTextContent('PLACEMENTS');expect(consoleError).toHaveBeenCalled();});

@@ -5,6 +5,7 @@ import { createConfigStore } from '../../lib/config.js';
 import { fsForTests as hookFs, installHook } from '../../lib/hook.js';
 import { installWrapper } from '../../lib/wrapper.js';
 import { place } from '../../lib/placer.js';
+import { packageRemovalLines } from '../../lib/launch.js';
 import { PromptClosedError } from '../../lib/prompt.js';
 import { bareTeam, cloneWithIdentity, holdCloneLock, ScriptedPrompter, temporaryDirectory, wrapperFor } from '../../lib/__tests__/fixtures.js';
 import { fsForTests, run } from '../uninstallMachine.js';
@@ -49,6 +50,7 @@ describe('machine uninstall', () => {
     const result = await run({ config: store, hook, wrapper, launch }, io);
     expect(result).toMatchObject({ ok: true, value: { teams: ['team', 'other'], removedPlacements: 2, hookRemoved: true, wrapperRemoved: true, configRemoved: true, launch } });
     if (!result.ok) throw new Error(result.error);
+    expect(result.value.advice).toEqual(packageRemovalLines(launch));
     for (const path of [...placements, store.teamClone('team'), store.teamClone('other'), ...['config.json', 'run', 'cache', 'teams'].map((x) => join(store.root, x))]) await gone(path);
     await gone(wrapperDir);
     expect(JSON.parse(await readFile(result.value.record, 'utf8'))).toEqual(before);
@@ -56,8 +58,8 @@ describe('machine uninstall', () => {
     expect((await readdir(hook.backupDir)).filter((name) => name.startsWith('settings.'))).toHaveLength(1);
     expect(JSON.parse(await readFile(hook.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [unrelated] } });
     await expect(access(store.root)).resolves.toBeUndefined();
-    expect(io.lines).toContain(membership);
-    expect(io.lines).toContain(`  /terum-skills Claude Code skill at ${wrapperDir}`);
+    expect(io.details['Remove terum-skills from this machine?']).toContain(membership);
+    expect(io.details['Remove terum-skills from this machine?']).toContain(`  /terum-skills Claude Code skill at ${wrapperDir}`);
     expect(io.lines).toContain(`Removed the /terum-skills Claude Code skill from ${wrapperDir}.`);
     expect(io.lines.slice(-3)).toEqual([complete, `This copy of terum-skills runs from ${launch.path}.`, 'If you installed it with npm: npm uninstall -g terum-skills   (pnpm: pnpm remove -g terum-skills · yarn: yarn global remove terum-skills · bun: bun remove -g terum-skills · Volta: volta uninstall terum-skills)']);
     expect(io.asked).toEqual(['Remove terum-skills from this machine?']);
@@ -69,7 +71,7 @@ describe('machine uninstall', () => {
     const io = new ScriptedPrompter([], [true]); const result = await run({ config: store, hook, wrapper }, io);
     expect(result).toMatchObject({ ok: true, value: { teams: ['team'], wrapperRemoved: false } });
     expect(await readFile(join(wrapperDir, 'SKILL.md'), 'utf8')).toBe(theirs);
-    expect(io.lines).toContain(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (it is a different skill); left alone`);
+    expect(io.details['Remove terum-skills from this machine?']).toContain(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (it is a different skill); left alone`);
     expect(io.lines.join('\n')).not.toContain('Removed the /terum-skills');
   });
 
@@ -77,14 +79,14 @@ describe('machine uninstall', () => {
     const { store, hook } = await minimal(); const wrapper = wrapperFor(join(store.root, '..', 'home'));
     const io = new ScriptedPrompter([], [true]);
     expect(await run({ config: store, hook, wrapper }, io)).toMatchObject({ ok: true, value: { wrapperRemoved: false } });
-    expect(io.lines).toContain(`  No /terum-skills Claude Code skill at ${join(wrapper.skillsRoot, 'terum-skills')}`);
+    expect(io.details['Remove terum-skills from this machine?']).toContain(`  No /terum-skills Claude Code skill at ${join(wrapper.skillsRoot, 'terum-skills')}`);
   });
 
   it('leaves settings with no hook byte-identical and writes no settings backup', async () => {
     const { store, hook } = await prepared(); const source = '{ "theme": "dark" }'; await writeFile(hook.settingsFile, source);
     const io = new ScriptedPrompter([], [true]); expect((await run({ config: store, hook }, io)).ok).toBe(true);
     expect(await readFile(hook.settingsFile, 'utf8')).toBe(source);
-    expect(io.lines).toContain(`  No session hook in ${hook.settingsFile}`);
+    expect(io.details['Remove terum-skills from this machine?']).toContain(`  No session hook in ${hook.settingsFile}`);
     expect((await readdir(hook.backupDir)).filter((name) => name.startsWith('settings.'))).toEqual([]);
   });
 
@@ -134,7 +136,7 @@ describe('machine uninstall', () => {
     await writeFile(join(store.teamClone('team'), 'untracked.txt'), 'local work');
     const io = new ScriptedPrompter([], [true]); const result = await run({ config: store, hook }, io);
     expect(result.ok).toBe(true); await expect(access(path)).resolves.toBeUndefined(); expect((await store.read()).placements).toEqual({});
-    expect(io.lines).toContain(`Connected-skill sources stay where they are: team: ${path}`);
+    expect(io.details['Remove terum-skills from this machine?']).toContain(`Connected-skill sources stay where they are: team: ${path}`);
     expect(io.lines).toContain(`${path} is also the authoring source of team; left in place.`);
     if (!result.ok) throw new Error(result.error);
     const destination = result.value.kept.find((item) => item.endsWith('teams-team'))!;
@@ -231,9 +233,9 @@ it.each([false, true])('discloses the app and evals before consent, removing onl
   await mkdir(bundle, { recursive: true }); await writeFile(join(bundle, 'terum'), 'bundle');
   await mkdir(evals); await writeFile(join(evals, 'transcript.json'), 'retained');
   const io = new ScriptedPrompter();
-  io.confirm = async () => {
-    expect(io.lines).toContain(`  Downloaded desktop app bundle at ${join(store.root, 'app')} (all versions)`);
-    expect(io.lines.find(line => line.startsWith('Kept:'))).toContain(`${evals} (eval runs and transcripts)`);
+  io.confirm = async (_question, options) => {
+    expect(options?.detail).toContain(`  Downloaded desktop app bundle at ${join(store.root, 'app')} (all versions)`);
+    expect(options?.detail?.find(line => line.startsWith('Kept:'))).toContain(`${evals} (eval runs and transcripts)`);
     expect(await readFile(join(bundle, 'terum'), 'utf8')).toBe('bundle');
     return accepted;
   };
@@ -253,4 +255,83 @@ it('removes a config whose only remaining content is the machine checkout regist
   const result = await run({ config: store, hook, wrapper: wrapperFor(join(root, 'home')) }, new ScriptedPrompter([], [true]));
   expect(result).toMatchObject({ ok: true, value: { configRemoved: true } });
   await gone(join(store.root, 'config.json'));
+});
+
+
+it('carries the complete former inventory only in the confirm detail, in order', async () => {
+  const { store, hook, wrapper, placements, fixture } = await prepared(['team', 'other']);
+  await installHook(hook);
+  const io = new ScriptedPrompter([], [true]);
+  const result = await run({ config: store, hook, wrapper }, io);
+  expect(result.ok).toBe(true);
+  const detail = [
+    'terum-skills will be removed from this machine.',
+    `  Teams (2): team (${fixture.bare}, handle seed), other (${fixture.bare}, handle seed)`,
+    `  Placed skills (2): ${placements.join(', ')}`,
+    `  Local clones (2): ${store.teamClone('team')}, ${store.teamClone('other')}`,
+    `    (a clone holding uncommitted or unpushed work is moved to ${join(store.root, 'quarantine')} instead)`,
+    '  Version cache and run files for these teams',
+    `  Session-start hook in ${hook.settingsFile}`,
+    `  /terum-skills Claude Code skill at ${join(wrapper.skillsRoot, 'terum-skills')}`,
+    `  ${join(store.root, 'config.json')}`,
+    `Kept: ${join(store.root, 'backups')} (settings backups and a record of this uninstall)`,
+    membership,
+    'The package itself is not removed by this command; the last line tells you how.',
+  ];
+  expect(io.details['Remove terum-skills from this machine?']).toEqual(detail);
+  for (const line of detail) expect(io.lines).not.toContain(line);
+});
+
+it.each([[], ['app.json'], ['latest-version.json'], ['app.json', 'latest-version.json']])('sweeps only launch-state files and keeps a sibling live lock (%j)', async (...files) => {
+  const { root, store, hook } = await minimal();
+  const runDir = join(store.root, 'run'); await mkdir(runDir, { recursive: true });
+  const lock = join(runDir, 'team.lock'); await writeFile(lock, 'live lock');
+  for (const file of files) await writeFile(join(runDir, file), '{}');
+  const io = new ScriptedPrompter([], [true]);
+  const result = await run({ config: store, hook, wrapper: wrapperFor(join(root, 'home')) }, io);
+  expect(result.ok).toBe(true);
+  await gone(join(runDir, 'app.json')); await gone(join(runDir, 'latest-version.json'));
+  expect(await readFile(lock, 'utf8')).toBe('live lock');
+  expect(io.lines).toContain(`Kept ${runDir} (not empty).`);
+  expect(result.value?.kept).toContain(runDir);
+  const line = `  Desktop launch state in ${runDir} (app.json, latest-version.json)`;
+  const detail = io.details['Remove terum-skills from this machine?']!;
+  expect(detail.includes(line)).toBe(files.length > 0);
+  if (files.length) expect(detail.indexOf(line)).toBe(detail.indexOf(`  ${join(store.root, 'config.json')}`) - 1);
+});
+
+it.each(['darwin', 'win32', 'linux'] as const)('returns and prints CLI package and app advice for %s', async platform => {
+  const { root, store, hook } = await minimal(); const app = join(store.root, 'app');
+  const bundle = join(app, '0.1.6', 'Terum.app', 'Contents', 'MacOS');
+  await mkdir(bundle, { recursive: true }); await writeFile(join(bundle, 'terum'), 'bundle');
+  await mkdir(join(store.root, 'run')); await writeFile(join(store.root, 'run', 'app.json'), '{}');
+  const launch = { kind: 'npx' as const, path: '/cache/dist/index.js', cacheDir: '/cache', request: 'terum-skills@latest' };
+  const io = new ScriptedPrompter([], [true]);
+  const result = await run({ config: store, hook, wrapper: wrapperFor(join(root, 'home')), launch, platform }, io);
+  if (!result.ok) throw new Error(result.error);
+  const platformLines = platform === 'darwin'
+    ? [`The desktop app was deleted from ${app}. A copy that is running keeps running until you quit it; it cannot be reopened from the Dock. \`npx -y terum-skills@latest app\` downloads it again (needs gh and the release).`]
+    : platform === 'win32' ? [`The desktop app under %LOCALAPPDATA%\\Terum Skills stays installed; remove it from Windows Settings ▸ Apps. Only its download record under ${app} was removed.`] : [];
+  const advice = [...packageRemovalLines(launch), ...platformLines, "This app's own preferences (theme, layout) are kept by the app and were not touched."];
+  const detail = io.details['Remove terum-skills from this machine?']!;
+  expect(detail[detail.indexOf(`  Downloaded desktop app bundle at ${app} (all versions)`) + 1]).toBe(`  Desktop launch state in ${join(store.root, 'run')} (app.json, latest-version.json)`);
+  expect(result.value.advice).toEqual(advice);
+  expect(io.lines.slice(-advice.length)).toEqual(advice);
+});
+
+it('continues the directory sweep after a launch-state removal error', async () => {
+  const { root, store, hook } = await minimal(); const runDir = join(store.root, 'run');
+  await mkdir(runDir, { recursive: true });
+  const appState = join(runDir, 'app.json'), latest = join(runDir, 'latest-version.json');
+  await writeFile(appState, '{}'); await writeFile(latest, '{}');
+  const original = fsForTests.rm;
+  fsForTests.rm = async (path, options) => { if (path === appState) throw Object.assign(new Error('busy'), { code: 'EBUSY' }); return original(path, options); };
+  try {
+    const io = new ScriptedPrompter([], [true]);
+    const result = await run({ config: store, hook, wrapper: wrapperFor(join(root, 'home')) }, io);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`Could not remove ${appState}: busy`) });
+    expect(io.lines).toContain(`Kept ${appState}: busy`);
+    expect(io.lines).toContain(`Kept ${runDir} (not empty).`);
+    await gone(latest); expect(await readFile(appState, 'utf8')).toBe('{}');
+  } finally { fsForTests.rm = original; }
 });

@@ -224,7 +224,7 @@ describe('machine uninstall wiring', () => {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
       team: async () => success({ team: 't', remote: 'r' }),
       uninstall: async (args) => { calls.push(args); return success([]); },
-      uninstallMachine: async (args) => { calls.push(args); return success({ teams: [], removedPlacements: 0, hookRemoved: false, wrapperRemoved: false, configRemoved: false, kept: [], record: '', launch: args.launch ?? null }); },
+      uninstallMachine: async (args) => { calls.push(args); return success({ teams: [], removedPlacements: 0, hookRemoved: false, wrapperRemoved: false, configRemoved: false, kept: [], record: '', advice: [], launch: args.launch ?? null }); },
     }, launch ? { launch } : {});
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     return { program, calls, outcomes, errors };
