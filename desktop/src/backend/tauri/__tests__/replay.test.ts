@@ -6,7 +6,7 @@ import { createTauriBackend, read } from '../index';
 import { cliRun } from '../run';
 import { fakeBridge, STATE } from './fake-bridge';
 
-const directory = resolve('../.planning/codex-runs/m7-S7af/frames');
+const directory = resolve('../.planning/codex-runs/m7-S7d/frames');
 function recorded(name: string) {
   return readFileSync(resolve(directory, name + '.jsonl'), 'utf8').trim().split('\n');
 }
@@ -49,4 +49,21 @@ it('serves all three recorded search hits with real metadata and no fabricated d
   expect(hits.map(hit => hit.team)).toEqual(['acme', 'acme', 'acme']);
   const result = await createTauriBackend(replay(lines).bridge).search({ q: '' });
   expect(result).toEqual({ ok: true, value: hits.map(hit => ({ ...hit, kind: 'skill', ref: `${hit.team}/${hit.name}`, description: '' })) });
+});
+
+it.each([
+  ['usage-error', false, "error: unknown option '-x'"],
+  ['decline', true, 'Connect was declined.'],
+])('replays the rebuilt CLI %s result without inferring cancellation', async (name, cancelled, error) => {
+  const f = replay(recorded(name));
+  const run = cliRun(f.bridge, Promise.resolve(STATE), [name], { map: value => value });
+  expect(await run.done).toEqual({ ok: false, error, ...(cancelled ? { cancelled: true } : {}) });
+  const frames = []; for await (const frame of run.frames) frames.push(frame);
+  expect(frames.at(-1)).toEqual({ t: 'result', ok: false, error, ...(cancelled ? { declined: true } : {}) });
+});
+it('replays the rebuilt ls recording through the read consumer', async () => {
+  const f = replay(recorded('ls'));
+  const result = await read(cliRun(f.bridge, Promise.resolve(STATE), ['ls'], { map: value => value }));
+  expect(result.ok).toBe(true);
+  expect(result.value).toBeDefined();
 });

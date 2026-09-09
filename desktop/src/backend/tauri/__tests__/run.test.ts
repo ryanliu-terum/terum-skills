@@ -103,8 +103,8 @@ describe('cliRun — a CLI process as a seam Run<T>', () => {
   it('a failing result frame settles done with the CLI error and ends the frames with ok:false', async () => {
     const { bridge } = fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'result', verb: 'connect', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true }) }); emit({ kind: 'exit', code: 1 }); });
     const run = cliRun(bridge, Promise.resolve(STATE), ['connect'], { map: (v) => v });
-    expect(await collect(run.frames)).toEqual([{ t: 'result', ok: false, error: 'Connect was declined.' }]);
-    expect(await run.done).toEqual({ ok: false, error: 'Connect was declined.' });
+    expect(await collect(run.frames)).toEqual([{ t: 'result', ok: false, error: 'Connect was declined.', declined: true }]);
+    expect(await run.done).toEqual({ ok: false, error: 'Connect was declined.', cancelled: true });
   });
 
   it('exit without a result is a failure that quotes the last stderr lines', async () => {
@@ -181,7 +181,7 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     expect(await backend.install({ ref: 'deploy-check', scope: 'SSM', force: true }).done).toEqual({ ok: true, value: [{ id: 'deploy-check', name: 'deploy-check', scope: 'SSM' }] });
     await backend.install({ ref: '', kind: 'member', member: 'ryan' }).done;
     await backend.install({ ref: '', kind: 'project', project: 'ssm' }).done;
-    expect(f.spawns.map((s) => s.args)).toEqual([['install', 'deploy-check', '--force'], ['install', 'member', 'ryan'], ['install', 'project', 'ssm']]);
+    expect(f.spawns.map((s) => s.args)).toEqual([['install', '--force', '--', 'deploy-check'], ['install', '--', 'member', 'ryan'], ['install', '--', 'project', 'ssm']]);
   });
   it('team, sync, connect, validate, search argv; sync never passes --hook', async () => {
     const f = fakeBridge(ok('x', { team: 't', placed: 2, deferred: [], id: 'a', name: 'a', findings: 0, warnings: 1 }));
@@ -193,8 +193,8 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     await backend.sync({ prune: true, hook: true }).done;
     await backend.connect({ path: '~/.claude/skills/x', team: 'terum', allowPrivileged: true }).done;
     expect(f.spawns.map((s) => s.args)).toEqual([
-      ['team', 'create', 'terum', '--remote', 'git@x:y.git'], ['team', 'join', 'o/r', '--as', 'local'], ['team', 'leave', 'terum'], ['team', 'remove', 'bob', '--team', 'terum'],
-      ['sync', '--prune'], ['connect', '~/.claude/skills/x', '--team', 'terum', '--allow-privileged'],
+      ['team', 'create', '--remote', 'git@x:y.git', '--', 'terum'], ['team', 'join', '--as', 'local', '--', 'o/r'], ['team', 'leave', '--', 'terum'], ['team', 'remove', '--team', 'terum', '--', 'bob'],
+      ['sync', '--prune'], ['connect', '--team', 'terum', '--allow-privileged', '--', '~/.claude/skills/x'],
     ]);
   });
   it('search maps CLI hits to seam hits; read models the CLI lacks fail naming GAPS.md; a read that asks is refused', async () => {
@@ -269,4 +269,15 @@ it.each([
   } });
   expect(await run.done).toEqual({ ok: false, error: 'Unreadable clone.', ...expected });
   expect(await collect(run.frames)).toEqual([{ t: 'result', ok: false, error: 'Unreadable clone.' }]);
+});
+
+it.each([true, false, undefined])('maps only a typed wire decline into both seam outcomes (%s)', async declined => {
+  const error = 'Publish was cancelled.';
+  const f = fakeBridge((_args, emit) => {
+    emit({ kind: 'stdout', line: line({ t: 'result', verb: 'publish', ok: false, exitCode: 1, error, declined, value: 3 }) });
+    emit({ kind: 'exit', code: 1 });
+  });
+  const run = cliRun(f.bridge, Promise.resolve(STATE), ['publish'], { map: value => value });
+  expect(await run.done).toEqual({ ok: false, error, value: 3, ...(declined === true ? { cancelled: true } : {}) });
+  expect(await collect(run.frames)).toEqual([{ t: 'result', ok: false, error, ...(declined === true ? { declined: true } : {}) }]);
 });

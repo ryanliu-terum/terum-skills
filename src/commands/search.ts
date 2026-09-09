@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { staleLine } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, failure, Result, success } from '../lib/result.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { installCounts, latestTree, shortHash, skillEndorsement } from '../lib/readme.js';
 import { Runner, systemRunner } from '../lib/runner.js';
@@ -76,7 +76,7 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
     if (failures.length === Object.keys(config.teams).length && failures.length) return failure(failures.join('\n'));
     if (!hits.length) io.print('No skills found.');
     return success(hits);
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 function isMissing(error: unknown): boolean { return error instanceof Error && 'code' in error && error.code === 'ENOENT'; }
