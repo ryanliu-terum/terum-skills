@@ -4,7 +4,7 @@ import { design } from '../mock/data';
 import type { Run, Frame } from '../types';
 afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();});
 async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
-it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true});expect((await b.library({scope:'Global'})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:'Global'});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
+it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,evalCommitChoice:false,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true});expect((await b.library({scope:'Global'})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:'Global'});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
 it.each([
  ['library',"EACCES: permission denied, scandir '~/.terum/skills'"],
  ['skill',"ENOENT: no such file or directory, open '~/.claude/skills/deploy-check/SKILL.md'"],
@@ -44,13 +44,13 @@ it.each(['loading','error','slow','disabled','not-installed','default'])('status
  expect(status.ok&&status.value.machine.gh_login).toBe('teniroo');
  expect(vi.getTimerCount()).toBe(0);
 });
-it('clones status and successful long results, including nested receipts',async()=>{
- const b=createMockBackend();const first=await b.eval({ref:'deploy-check'}).done;
- if(!first.ok||!first.value.receipt)throw new Error('Expected receipt');
- const original=structuredClone(first.value.receipt);
- Reflect.set(first.value.receipt,'catalog','mutated');
- const next=await b.eval({ref:'deploy-check'}).done;
- expect(next.ok&&next.value.receipt).toEqual(original);
+it('clones status and successful long results, including nested commit outcomes',async()=>{
+ const b=createMockBackend();const first=await b.eval({ref:'deploy-check',commit:true}).done;
+ if(!first.ok||!first.value.commit)throw new Error('Expected commit');
+ const original=structuredClone(first.value.commit);
+ Reflect.set(first.value.commit,'receiptPath','mutated');
+ const next=await b.eval({ref:'deploy-check',commit:true}).done;
+ expect(next.ok&&next.value.commit).toEqual(original);
  const status=await b.status();if(!status.ok)throw new Error(status.error);status.value.machine.gh_login='mutated';
  const fresh=await b.status();expect(fresh.ok&&fresh.value.machine.gh_login).toBe('teniroo');
 });

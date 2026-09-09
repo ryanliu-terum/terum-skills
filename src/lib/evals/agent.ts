@@ -4,7 +4,7 @@
  * Ported from skilldeck `evals/runner.py` (commit 42084dc). The binary name comes from
  * `TERUM_SKILLS_AGENT_CMD` (default `claude`) so tests can substitute a stub.
  */
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { writeFile, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -107,13 +107,25 @@ export class Transcript {
 
 interface SpawnOutcome { code: number; stdout: string; stderr: string; timedOut: boolean; }
 
+const liveChildren = new Set<ChildProcess>();
+let terminationHandlerInstalled = false;
+
 function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Record<string, string>; timeoutMs: number }): Promise<SpawnOutcome> {
+  if (!terminationHandlerInstalled) {
+    terminationHandlerInstalled = true;
+    process.once('SIGTERM', () => {
+      for (const child of liveChildren) child.kill('SIGKILL');
+      // eslint-disable-next-line no-restricted-properties -- C6: the agent trust boundary must kill children before terminating the leader.
+      process.exit(143);
+    });
+  }
   return new Promise((resolvePromise, reject) => {
     const child = spawn(agentCmd(), [...args], {
       cwd: options.cwd,
       env: { ...process.env, ...options.env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    liveChildren.add(child);
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let timedOut = false;
@@ -122,6 +134,7 @@ function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Re
     child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
     child.on('error', (error) => { clearTimeout(timer); reject(error); });
     child.on('close', (code) => {
+      liveChildren.delete(child);
       clearTimeout(timer);
       resolvePromise({ code: code ?? 1, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8'), timedOut });
     });

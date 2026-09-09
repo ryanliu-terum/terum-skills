@@ -24,7 +24,7 @@ const INVOCATIONS: Record<string, string[]> = {
   'checkout add': ['checkout', 'add'], 'checkout remove': ['checkout', 'remove', '/checkout'], 'checkout list': ['checkout', 'list'],
   app: ['app'], profile: ['profile', '--role', 'Platform'], decline: ['decline', 'ref'],
   login: ['login'], setup: ['setup'], 'team create': ['team', 'create', 'x'], 'team join': ['team', 'join', 'o/r'], 'team remove': ['team', 'remove', 'h'], 'team leave': ['team', 'leave', 'n'], 'team workflow-update': ['team', 'workflow-update'],
-  invite: ['invite', 'u'], ls: ['ls'], status: ['status'], publish: ['publish', 'ref'], validate: ['validate', 'x'], eval: ['eval', 'x'], connect: ['connect'], install: ['install', 'ref'], 'uninstall-skill': ['uninstall-skill', 'ref'], uninstall: ['uninstall'], sync: ['sync'], search: ['search', 't'], update: ['update'],
+  invite: ['invite', 'u'], ls: ['ls'], status: ['status'], publish: ['publish', 'ref'], validate: ['validate', 'x'], eval: ['eval', 'x'], 'eval-report': ['eval-report', 'x'], connect: ['connect'], install: ['install', 'ref'], 'uninstall-skill': ['uninstall-skill', 'ref'], uninstall: ['uninstall'], sync: ['sync'], search: ['search', 't'], update: ['update'],
 };
 
 function harness(verbs: CliVerbs) {
@@ -50,7 +50,7 @@ function harness(verbs: CliVerbs) {
 }
 
 describe('frame mode through commander — every public verb', () => {
-  const verbs: CliVerbs = { checkout: asking, app: asking, profile: asking, decline: asking, login: asking, team: asking, setup: asking, connect: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, receiptCheck: asking, update: asking };
+  const verbs: CliVerbs = { checkout: asking, app: asking, profile: asking, decline: asking, login: asking, team: asking, setup: asking, connect: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, evalReport: asking, receiptCheck: asking, update: asking };
 
   it('FRAME_VERBS names only registered commands, and every one is covered here', () => {
     const program = buildProgram(async () => undefined, verbs, {});
@@ -107,3 +107,29 @@ function harnessWithCancel(verbs: CliVerbs) {
   const program = buildProgram(execute, verbs, { noUpdateCheck: true });
   return { frames, run: (argv: string[]) => program.parseAsync(['node', 'terum-skills', ...argv]) };
 }
+
+
+it('forwards a completed eval value on receipt commit failure through execute and frames', async () => {
+  const { run } = await import('../commands/eval.js');
+  const { createConfigStore } = await import('../lib/config.js');
+  const { bareTeam, cloneWithIdentity, pushFromSeed, wrapRunner } = await import('../lib/__tests__/fixtures.js');
+  const { systemRunner } = await import('../lib/runner.js');
+  const { Transcript } = await import('../lib/evals/agent.js');
+  const { join } = await import('node:path');
+  const { readFile } = await import('node:fs/promises');
+  const { existsSync } = await import('node:fs');
+  const fixture = await bareTeam();
+  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', '---\nname: sample\ndescription: useful\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nbody\n');
+  await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: test\nchecks:\n  - transcript_mentions: ok\n');
+  const config = createConfigStore(join(fixture.root, 'state'));
+  await cloneWithIdentity(fixture.bare, config.teamClone('team'));
+  await config.update(c => { c.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  const runner = wrapRunner(systemRunner, async (cmd, args, _options, next) => cmd === 'git' && args[0] === 'push' ? { code: 1, stdout: '', stderr: 'remote: permission denied' } : next());
+  const h = harness({ login: asking, team: asking, eval: (args, io) => run({ ...args, config, runner, k: 1, preflight: async () => success({ ccVersion: 'stub' }), agent: { runAgent: async (_task, cwd) => new Transcript([{ type: 'system', subtype: 'init', skills: existsSync(join(cwd, '.claude', 'skills', 'sample')) ? ['sample'] : [] }], 'ok'), askJson: async () => ({}) } }, io) });
+  await h.run(['eval', '--commit', '--no-gen', 'sample']);
+  const result = h.frames.at(-1) as ResultFrame;
+  expect(result, JSON.stringify(result)).toMatchObject({ t: 'result', verb: 'eval', ok: false, exitCode: 1, value: { runDir: expect.any(String), executionStatus: 'complete', commit: { ok: false, error: expect.any(String) } } });
+  const value = result.value as { runDir: string; commit: { error: string } };
+  expect(result.error).toBe(value.commit.error);
+  expect(await readFile(join(value.runDir, 'receipt.json'), 'utf8')).toContain('"schema_version": 1');
+});

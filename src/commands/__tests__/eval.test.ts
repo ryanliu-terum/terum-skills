@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { type AgentApi, Transcript } from '../../lib/evals/agent.js';
+import { systemRunner } from '../../lib/runner.js';
 import { success } from '../../lib/result.js';
-import { bareTeam, cloneWithIdentity, git, pushFromSeed, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { run } from '../eval.js';
 
@@ -212,4 +213,58 @@ it.each([false, true])('size warning reaches eval preflight unless accompanied b
   expect(io.lines[0]).toMatch(/^warning HYG6/);
   if (mixed) { expect(agentCalls).toBe(0); expect(result).toMatchObject({ error: expect.stringContaining('HYG2') }); }
   else { expect(agentCalls).toBeGreaterThan(0); expect(result).toMatchObject({ value: { executionStatus: 'complete' } }); }
+});
+
+
+describe('eval-in-app completion and eligibility', () => {
+  async function setup(kind: 'cases' | 'triggers' | 'both') {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    if (kind !== 'triggers') await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    if (kind !== 'cases') await pushFromSeed(fixture.seed, 'skills/sample/evals/triggers.yaml', 'should_trigger: [deploy]\nshould_not_trigger: [chat]\n');
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update(c => { c.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    return store;
+  }
+
+  it.each(['cases', 'triggers'] as const)('refuses generated %s before preflight or agent work', async missing => {
+    const store = await setup(missing === 'cases' ? 'triggers' : 'cases');
+    let preflightCalls = 0; let agentCalls = 0;
+    const agent: AgentApi = { runAgent: async () => { agentCalls++; return transcript([]); }, askJson: async () => { agentCalls++; return {}; } };
+    const result = await run({ ref: 'sample', config: store, commit: true, agent, preflight: async () => { preflightCalls++; return success({ ccVersion: 'stub' }); } }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('--commit') });
+    if (!result.ok) { expect(result.error).toContain('review'); expect(result.error).toContain('Either'); expect(result.error).toContain('or publish'); }
+    expect(preflightCalls).toBe(0); expect(agentCalls).toBe(0);
+    expect(existsSync(join(store.root, 'evals'))).toBe(false);
+  });
+
+  it('--no-gen permits committing cases without triggers', async () => {
+    const store = await setup('cases'); let preflightCalls = 0;
+    const result = await run({ ref: 'sample', config: store, commit: true, noGen: true, k: 1, agent: generationAgent([]), preflight: async () => { preflightCalls++; return success({ ccVersion: 'stub' }); } }, new ScriptedPrompter());
+    expect(preflightCalls).toBe(1);
+    expect(result).toMatchObject({ ok: true, value: { commit: { ok: true, receiptPath: expect.any(String) } } });
+    if (result.ok) expect(await readFile(join(result.value.runDir, 'receipt.json'), 'utf8')).toBe(await readFile(join(store.teamClone('team'), result.value.receiptPath!), 'utf8'));
+  });
+
+  it('keeps the completed evaluation and local receipt when the remote refuses its commit', async () => {
+    const store = await setup('cases'); let pushCalls = 0;
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command === 'git' && args[0] === 'push') { pushCalls++; return { code: 1, stdout: '', stderr: 'remote: permission denied' }; }
+      return next();
+    });
+    const result = await run({ ref: 'sample', config: store, runner, commit: true, noGen: true, k: 1, agent: generationAgent([]), preflight: async () => success({ ccVersion: 'stub' }) }, new ScriptedPrompter());
+    expect(pushCalls).toBeGreaterThan(0);
+    expect(result).toMatchObject({ ok: false, error: expect.any(String), value: { team: 'team', id: ID, name: 'sample', runDir: expect.any(String), ccVersion: 'stub', executionStatus: 'complete', commit: { ok: false, error: expect.any(String) } } });
+    expect(result.value).not.toHaveProperty('receiptPath');
+    expect(receiptSchema.parse(JSON.parse(await readFile(join(result.value!.runDir, 'receipt.json'), 'utf8'))).execution_status).toBe('complete');
+  });
+
+  it('writes a schema-valid local receipt without --commit', async () => {
+    const store = await setup('cases');
+    const result = await run({ ref: 'sample', config: store, noGen: true, k: 1, agent: generationAgent([]), preflight: async () => success({ ccVersion: 'stub' }) }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { commit: null } });
+    const receipt = receiptSchema.parse(JSON.parse(await readFile(join(result.value!.runDir, 'receipt.json'), 'utf8')));
+    expect(receipt.provenance.runner_handle).toBe('seed');
+  });
 });

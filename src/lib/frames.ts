@@ -29,7 +29,7 @@ export interface CancelFrame { t: 'cancel'; }
 export type InboundFrame = AnswerFrame | CancelFrame;
 
 /** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed). */
-export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline'] as const;
+export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline'] as const;
 
 /**
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
@@ -40,7 +40,7 @@ export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   checkouts: true,
   memberRole: true, localIdentity: true,
   favorites: false, follow: false, roles: false, lastSeen: false, installScope: true, inviteScoping: false,
-  disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: false, perCase: false, progress: false,
+  disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: false,
 });
 
 export const COMMANDER_NON_ERRORS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);
@@ -62,6 +62,7 @@ export interface FrameStreams {
   output: NodeJS.WritableStream;
   /** Where malformed or unexpected inbound lines are reported (the bin passes stderr). */
   diagnostic?(line: string): void;
+  onCancel?(): void;
 }
 
 export interface ResultOutcome { verb: string; ok: boolean; error?: string; cancelled?: true; refused?: true; value?: unknown; exitCode: 0 | 1; }
@@ -134,7 +135,7 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
     for (const [id, ask] of pending) { pending.delete(id); ask.reject(new PromptClosedError(ask.question, closedReason)); }
   };
   const stop = readFrames(input, (frame) => {
-    if (frame.t === 'cancel') { closed = true; failPending(); return; }
+    if (frame.t === 'cancel') { closed = true; failPending(); streams.onCancel?.(); return; }
     const ask = pending.get(frame.id);
     if (!ask) { diagnostic(`frames: answer for unknown question id ${JSON.stringify(frame.id)} ignored`); return; }
     const value = frame.value ?? ask.defaultChoice;

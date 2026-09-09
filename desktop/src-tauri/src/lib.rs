@@ -2,6 +2,7 @@
 //! macOS overlay chrome (tauri.conf.json), the plugins the seam's capabilities need (opener, clipboard,
 //! store, window-state), and the CLI bridge below: spawn the globally installed `terum-skills` bin under
 //! the Node the CLI recorded, pipe its stdout lines to the webview as events, write answers to its stdin.
+//! Sleep/resume is not handled; window destruction and application exit terminate every child.
 //! Frame parsing stays in TypeScript (desktop/src/backend/tauri/); Rust never interprets a line.
 
 use std::collections::HashMap;
@@ -154,6 +155,34 @@ fn cli_kill(bridge: State<'_, Bridge>, id: String) -> Result<(), String> {
   Ok(())
 }
 
+/// Stop all admitted children while holding admission closed. Unix descendants share the group.
+fn kill_all(bridge: &Bridge) {
+  if let Ok(mut children) = bridge.children.lock() {
+    if children.is_empty() { return; }
+    #[cfg(unix)]
+    {
+      for handle in children.values() {
+        if let Ok(guard) = handle.lock() {
+          // SAFETY: cli_spawn created this child's process group; negative pid addresses that group.
+          unsafe { libc::kill(-(guard.child.id() as i32), libc::SIGTERM); }
+        }
+      }
+      std::thread::sleep(Duration::from_millis(300));
+      for handle in children.values() {
+        if let Ok(guard) = handle.lock() {
+          // SAFETY: escalate the same group even when its leader has already exited.
+          unsafe { libc::kill(-(guard.child.id() as i32), libc::SIGKILL); }
+        }
+      }
+    }
+    #[cfg(windows)]
+    for handle in children.values() {
+      if let Ok(mut guard) = handle.lock() { let _ = guard.child.kill(); }
+    }
+    children.clear();
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -209,12 +238,20 @@ pub fn run() {
       }
       Ok(())
     })
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::Destroyed = event {
+        if let Some(bridge) = window.try_state::<Bridge>() { kill_all(&bridge); }
+      }
+    })
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
     .run(|app, event| {
       #[cfg(target_os = "macos")]
       if let tauri::RunEvent::Reopen { .. } = event {
         let _ = app.emit("launch:reopen", ());
+      }
+      if let tauri::RunEvent::Exit = event {
+        if let Some(bridge) = app.try_state::<Bridge>() { kill_all(&bridge); }
       }
       let _ = (app, &event);
     });

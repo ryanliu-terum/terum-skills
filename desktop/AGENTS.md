@@ -56,8 +56,8 @@ specs; the maintainers write the specs, run every gate themselves, and do all gi
    `-webkit-font-smoothing: antialiased`. Icons are the design's inlined `ICON_PATHS` (24-viewBox, stroke
    1.5, `currentColor`), never Lucide. Theme is `data-theme="dark" | "light"` on `<html>`, stamped before
    React mounts (default dark).
-6. **The eval report is components over the receipt JSON.** The UI never runs evals and never derives a
-   statistic: no list is sorted or ranked by a receipt number, no lift-style decimal at card level beyond
+6. **The eval report is components over the receipt JSON.** The UI never runs an eval itself — it drives the
+   CLI's `eval` verb over `--frames` and renders its frames — and never derives a statistic: no list is sorted or ranked by a receipt number, no lift-style decimal at card level beyond
    what the board draws, `—` when there is no receipt, a greyed verdict when the run is partial, and numbers
    from different `model` / `cc_version` never share one comparison surface.
 7. **No shortcuts in tests or lint.** Never delete or weaken a test to make a suite pass (declare any test
