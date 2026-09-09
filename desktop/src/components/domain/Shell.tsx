@@ -15,8 +15,8 @@ export function Shell({selected='Global',counts,overlay,children}:PropsWithChild
  const capabilities=useQuery({queryKey:['capabilities'],queryFn:()=>backend.capabilities()});
  const surfaces=useQuery({queryKey:['surfaces'],queryFn:()=>backend.surfaces()});
  const status=useQuery({queryKey:['status',state.mock],queryFn:({signal})=>backend.status(undefined,{signal})});
- const value=status.data?.ok?status.data.value:undefined;
+ const value=status.data?.value;
  // Keep the mock scenario when following a real shell link within this page.
  function navigate(event:React.MouseEvent<HTMLDivElement>){const target=event.target;if(!(target instanceof Element))return;const anchor=target.closest<HTMLAnchorElement>('a[href^="#/"]');if(!anchor||state.mock==='default')return;const url=anchor.hash;const [path,query='']=url.split('?');const params=new URLSearchParams(query);params.set('__mock',state.mock);anchor.href=path+'?'+params.toString();}
- return <ShellReadyContext value={!status.isPending}><div ref={setContainer} className="shell" onClickCapture={navigate} data-route={location.pathname}><DialogContainer container={container}><TopBar mode={capabilities.data?.windowChrome??'cosmetic'}/><div className="shell-row"><Sidebar selected={selected} counts={counts===undefined?value?.counts??null:counts} machine={value?.machine} surfaces={surfaces.data}/><main className="panel">{children}</main></div>{overlay}</DialogContainer></div></ShellReadyContext>;
+ return <ShellReadyContext value={!status.isPending}><div ref={setContainer} className="shell" onClickCapture={navigate} data-route={location.pathname}><DialogContainer container={container}><TopBar mode={capabilities.data?.windowChrome??'cosmetic'}/><div className="shell-row"><Sidebar selected={selected} counts={counts===undefined?value?.counts??null:counts} machine={value?.machine} me={value?.me} surfaces={surfaces.data}/><main className="panel">{status.data?.ok===false&&<div role="alert">{status.data.error}</div>}{children}</main></div>{overlay}</DialogContainer></div></ShellReadyContext>;
 }

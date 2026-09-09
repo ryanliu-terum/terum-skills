@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { ScriptedPrompter, fakeGh, ghOnlyRunner, noGhRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
-import { joinCommand, run } from '../invite.js';
+import { joinLines, slackBlock, joinCommand, run } from '../invite.js';
 
 describe('invite (§6 host scoping)', () => {
   it('formats the setup command the owner sends to a teammate', () => {
@@ -97,3 +97,5 @@ it('issue 5 labels the teammate invitation as Send', async () => {
   expect(result.ok).toBe(true);
   expect(io.lines.join('\n').split('\n')).toContain('Send this to your teammate:');
 });
+
+it('join lines preserve the portable invite block byte for byte', () => { expect(joinLines('acme/team').join('\n')).toBe(slackBlock('acme/team')); });
