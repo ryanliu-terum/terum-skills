@@ -151,3 +151,11 @@ it('shows tool presence without claiming an authenticated GitHub account',async(
  expect(await screen.findByText('git present · gh present')).toBeInTheDocument();
  expect(screen.queryByText(/Signed in as/)).toBeNull();
 });
+
+it('does not claim agent authentication when the adapter reports unknown',async()=>{
+ const result=await backend.settings();if(!result.ok)throw new Error('Expected settings');
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...result.value,AGENT_CLI_AUTH:'unknown'}});
+ open('#/settings/evals');await screen.findByRole('heading',{name:'Evals'});
+ expect(screen.getByText(result.value.AGENT_CLI)).toBeInTheDocument();
+ expect(screen.queryByText(/· signed in/)).toBeNull();
+});

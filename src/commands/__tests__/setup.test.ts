@@ -694,11 +694,11 @@ describe('the desktop app question (decision walk D4/D5, 2026-09-08)', () => {
     expect(result.ok && result.value.steps.role).toBeUndefined();
     expect(io.lines.at(-1)).toBe('Continuing in the app.');
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ form: 'bare', evidence: mac, offer: true });
+    expect(calls[0]).toMatchObject({ form: 'bare', evidence: mac, offer: true, intent: 'setup' });
     const joiner = new SP([], [true]);
     await run({ target: 'alice/team', config: store, evidence: mac, verbs: { app: appOk(calls) } }, joiner);
     expect(joiner.lines.at(-1)).toBe('Continuing in the app. Join alice/team there.');
-    expect(calls[1]).toMatchObject({ target: 'alice/team' });
+    expect(calls[1]).toMatchObject({ target: 'alice/team', intent: 'setup' });
   });
 
   it('a remembered yes is not asked again and hands off; --app hands off without asking; --no-app never asks', async () => {
@@ -739,4 +739,11 @@ describe('the desktop app question (decision walk D4/D5, 2026-09-08)', () => {
     expect(io.lines.some((line) => line.startsWith('Could not reach GitHub'))).toBe(true);
     expect(io.asked).toEqual([APP_QUESTION, ROLE_QUESTION]);
   });
+});
+
+it.each([undefined,'alice/team'])('preserves a delegated team cancellation (target=%s)',async target=>{
+ const store=createConfigStore(join(await temporaryDirectory(),'state'));
+ const io=new ScriptedPrompter(target?[]:['Create a new team']);
+ const result=await run({app:false,config:store,runner:mappedRunner('/unused/remote','/unused/bare',fakeGh('alice')),...(target?{target}:{}),verbs:{team:async()=>({...failure('Team was declined.'),cancelled:true})}},io);
+ expect(result).toMatchObject({ok:false,error:'Team was declined.',cancelled:true,value:{role:target?'joiner':'creator',team:''}});
 });

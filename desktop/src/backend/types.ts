@@ -1,5 +1,7 @@
 import type { Design } from '../fixtures/schema';
-export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;value?:T};
+export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;reason?:'no-team'|'ambiguous-team';value?:T};
+export interface LaunchContext { writtenAt: string; target?: string; intent?: 'setup' }
+export class PromptCancelledError extends Error { readonly cancelled = true as const; }
 export interface Prompter {readonly interactive:boolean;confirm(question:string):Promise<boolean>;text(question:string,defaultValue?:string):Promise<string>;select(question:string,choices:readonly string[]):Promise<string>;print(line:string):void}
 export type AskKind='confirm'|'text'|'select';
 export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string}
@@ -83,5 +85,5 @@ export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value
 export type Subscription=()=>void;
 export type ChangeSource='config'|'clone'|'placed'|'stamp';
 
-export type Settings = Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'QUARANTINE'|'LOCAL_UNSHARED'|'HOOK'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'STORAGE'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'CLI_LATEST'|'FOLLOWING' > & {K:number|null;MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{publish:string|null;license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED:[string,string,string,string][];SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
+export type Settings = Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'QUARANTINE'|'LOCAL_UNSHARED'|'HOOK'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'STORAGE'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'CLI_LATEST'|'FOLLOWING' > & {K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{publish:string|null;license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED:[string,string,string,string][];SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};

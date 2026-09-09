@@ -58,7 +58,9 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program
     .command('setup [target]')
     .description('Onboarding wizard: on a new machine, asks whether to create a team or join one; re-run to resume; pass <org>/<repo> or a remote URL to join directly')
-    .action(async (target: string | undefined) => execute((io) => active.setup({ form: context.form, target, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
+    .option('--app', 'open the desktop app without asking')
+    .option('--no-app', 'never ask about the desktop app')
+    .action(async (target: string | undefined, options: { app?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
   const team = program.command('team').description(`Create, join, leave, and admin settings for a team; run \`${invocation(context.form, 'team')}\` to see all options`);
   team

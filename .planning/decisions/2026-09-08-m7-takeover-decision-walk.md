@@ -310,3 +310,6 @@ Ratified by Ryan: "Yes, ratify it."
 - **Grounding findings:** `tauri.conf.json` read at f8557c4: width 1440, height 900, minWidth 960, minHeight 600.
 
 ---
+
+
+**2026-09-09 — Ryan, first run in the app (LOCK).** B with A-fallback: the app drives target-less setup for an `intent:'setup'` hand-off or a zero-team machine, with the honest no-team Library board as fallback. The footer identifies the GitHub login. One team per machine is the model to follow in its own batch. A joiner never types a target in the app (Teddy's D-BM-3 rider).

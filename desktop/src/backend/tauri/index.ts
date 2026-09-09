@@ -113,7 +113,7 @@ function statusModel(value:CliStatus, _local:CliLocal|null, platform:string):Sta
  return {
   ledger:value.ledger??null,
   machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
-  me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:handle||value.identity?.default_handle||''},
+  me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:[value.identity?.github,handle,value.identity?.default_handle].find(v=>v)??''},
   teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath??null,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{publish:team.policy.publish==='pr'?'Pull request':'Push',license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
   counts:placementCounts(value.ledger.placements),tools:value.tools,projects:null,
  };
@@ -130,7 +130,7 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
   SHARED:value.ledger.shared.map(item=>[item.id,item.source,item.team,'—']),
   QUARANTINE:[],LOCAL_UNSHARED:[],HOOK:{installed:false,file:'',timeout:0},
-  APP_VERSION:appPackage.version,AGENT_CLI:'—',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
+  APP_VERSION:appPackage.version,AGENT_CLI:'—',AGENT_CLI_AUTH:'unknown',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
   STORAGE:{cache:'—',cache_n:0,evals:'—',evals_n:0,quarantine:'—'},PINNED_N:value.ledger.placements.filter(p=>p.version!==null).length,
   CLI_VERSION:value.version??'—',CLI_LATEST:'—',FOLLOWING:[],SHARED_SPECIMEN:null,
   SETTINGS_NAV:[],SHORTCUTS:[],INBOX_KIND_TEXT:{share:'Shared with you',update:'Update',alert:'Alert',eval:'Eval finished',review:'Review request',author:'Your skill',team:'Team'},THEME_OPTIONS:['System','Light','Dark'],
@@ -160,13 +160,35 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   let featuresOnce: Promise<void> | undefined;
   const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { hello = frame; };
   let stateOnce: Promise<AppState | null> | undefined;
-  const state = () => (stateOnce ??= bridge.readAppState().then((value) => {
-    if (value === null) stateOnce = undefined;
-    return value;
-  }, (error: unknown) => {
-    stateOnce = undefined;
-    throw error;
-  }));
+  let inFlight: Promise<AppState | null> | undefined;
+  let generation = 0;
+  let launchListenerReady: Promise<unknown> = Promise.resolve();
+  const state = (): Promise<AppState | null> => {
+    if (stateOnce) return stateOnce;
+    if (inFlight) return stateOnce = inFlight;
+    const request = (async () => {
+      for (;;) {
+        const readingGeneration = generation;
+        try {
+          const value = await bridge.readAppState();
+          if (readingGeneration !== generation) continue;
+          return value;
+        } catch (error) {
+          if (readingGeneration !== generation) continue;
+          throw error;
+        }
+      }
+    })();
+    inFlight = stateOnce = request;
+    void request.then(value => {
+      if (inFlight === request) inFlight = undefined;
+      if (value === null && stateOnce === request) stateOnce = undefined;
+    }, () => {
+      if (inFlight === request) inFlight = undefined;
+      if (stateOnce === request) stateOnce = undefined;
+    });
+    return request;
+  };
   let homeOnce: Promise<string> | undefined;
   const home = () => (homeOnce ??= bridge.homeDirectory().catch(() => ''));
   async function localPath(path:string):Promise<string> {
@@ -185,7 +207,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const cwd = () => backend.prefs.get<string>('workspace', '') || undefined;
 
   function run<TIn, TOut>(argv: readonly string[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut, touches: ChangeSource[] = ['config', 'placed']): Run<TOut> {
-    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), onHello, map: (value) => map(schema.parse(value)), onSettled: (result) => { if (result.ok) notify(...touches); } });
+    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), onHello, map: (value) => map(schema.parse(value)), onSettled: (result) => { if (argv[0] === 'setup' || argv[0] === 'team') notify('config', 'clone', 'placed'); else if (result.ok) notify(...touches); } });
     return {
       done: job.done.then(result),
       answer: (id, value) => job.answer(id, value),
@@ -218,8 +240,9 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   async function inventoryTeam(team: string | undefined, options?: ReadOptions): Promise<Result<InventoryTeam>> {
     const status = await read(run(['status', ...(team ? ['--team', team] : [])], cliStatusTeams, value => value, []), options);
     if (!status.ok) return { ok: false, error: status.error };
+    if (status.value.teams.length === 0) return { ok: false, error: 'No team is configured on this machine.', reason: 'no-team' };
     const selected = team ? status.value.teams.find(value => value.team === team) : status.value.teams.length === 1 ? status.value.teams[0] : undefined;
-    if (!selected) return fail('Select a team explicitly to read its skills.');
+    if (!selected) return { ok: false, error: 'Select a team explicitly to read its skills.', reason: 'ambiguous-team' };
     if (!selected.readable) return fail(`Team ${selected.team} could not be read.`);
     return { ok: true, value: selected };
   }
@@ -234,10 +257,23 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   }
   const backend: Backend = {
     async setWindowBackground(color) { try { await getCurrentWindow().setBackgroundColor(color); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
-    async launchTarget() {
+    async launchContext() {
       const launch = await state();
-      const target = launch?.target ?? null;
-      return launch && target !== null ? { target, writtenAt: launch.writtenAt } : null;
+      return launch ? { writtenAt: launch.writtenAt, ...(launch.target ? { target: launch.target } : {}), ...(launch.intent ? { intent: launch.intent } : {}) } : null;
+    },
+    async refreshLaunch() {
+      await launchListenerReady;
+      stateOnce = undefined;
+      generation++;
+      return backend.launchContext();
+    },
+    onLaunchRequest(listener) {
+      let disposed = false;
+      let unlisten: (() => void) | undefined;
+      launchListenerReady = bridge.onLaunchRequest(listener).then(stop => {
+        if (disposed) stop(); else unlisten = stop;
+      });
+      return () => { disposed = true; unlisten?.(); };
     },
     async features(): Promise<Features> {
       if (!hello) await (featuresOnce ??= read(run(['status'], z.unknown(), value => value, [])).then(() => undefined));
@@ -256,7 +292,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     onboarding: async () => gap('Onboarding data'),
     async library({ scope, team }, options) {
       const selected = await inventoryTeam(team, options);
-      if (!selected.ok) return fail(selected.error);
+      if (!selected.ok) return { ok: false, error: selected.error, ...(selected.reason ? { reason: selected.reason } : {}) };
       const args = scope.toLowerCase() === 'global' || scope.toLowerCase() === 'installed' ? [] : ['project', scope];
       const inventory = await read(run(['ls', ...args, '--team', selected.value.team], cliLs, value => value, []), options);
       if (!inventory.ok) return fail(inventory.error);
@@ -274,7 +310,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const explicitTeam = team ?? (parts.length === 2 ? parts[0] : undefined);
       const name = parts.length === 2 ? parts[1]! : ref;
       const selected = await inventoryTeam(explicitTeam, options);
-      if (!selected.ok) return fail(selected.error);
+      if (!selected.ok) return { ok: false, error: selected.error, ...(selected.reason ? { reason: selected.reason } : {}) };
       const inventory = await read(run(['ls', '--team', selected.value.team], cliLs, value => value, []), options);
       if (!inventory.ok) return fail(inventory.error);
       const matches = inventory.value.skills.filter(row => row.name === name || row.id.startsWith(name));

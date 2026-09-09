@@ -145,6 +145,7 @@ describe('read-only calls preserve spawn rejection', () => {
     const spawn = vi.fn<Bridge['spawn']>().mockRejectedValue(error);
     const bridge: Bridge = {
       spawn,
+      onLaunchRequest: async () => () => {},
       write: vi.fn<Bridge['write']>(),
       kill: vi.fn<Bridge['kill']>(),
       readAppState: async () => ({ schema: 1, node: '/usr/local/bin/node', entry: '/cli/index.js', version: '0.1.6', writtenAt: '2026-09-08T00:00:00Z' }),
@@ -257,7 +258,7 @@ it('does not infer installation from an untracked or other-team same-name folder
 });
 it('refuses multi-team ambiguity before ls and discovers a single configured team without a prompt',async()=>{
   const f=inventoryBridge({teams:['one','two']});
-  expect(await createTauriBackend(f.bridge).library({scope:'Global'})).toEqual({ok:false,error:'Select a team explicitly to read its skills.'});
+  expect(await createTauriBackend(f.bridge).library({scope:'Global'})).toEqual({ok:false,error:'Select a team explicitly to read its skills.',reason:'ambiguous-team'});
   expect(f.spawns.map(s=>s.args)).toEqual([['status']]);
   expect((await createTauriBackend(inventoryBridge().bridge).skill({ref:'a'})).ok).toBe(true);
 });
@@ -379,4 +380,25 @@ it('rejects undeclared local row keys and missing typed provenance',async()=>{
     const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'x',tracked:true,shared:[],placement:null,health:'unknown',...extra}],notOffered:[],problems:[]}]};
     expect((await createTauriBackend(inventoryBridge({local}).bridge).library({scope:'installed',team:'acme'})).ok).toBe(false);
   }
+});
+
+it('classifies successful zero-team inventory without spawning ls',async()=>{
+ const f=inventoryBridge({teams:[]});
+ expect(await createTauriBackend(f.bridge).library({scope:'Global'})).toEqual({ok:false,reason:'no-team',error:'No team is configured on this machine.'});
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status']]);
+});
+it.each(['octo',''])('uses GitHub login for the footer, falling back to the team handle (%s)',async github=>{
+ const f=statusReplay(false,(frame,verb)=>{
+  if(verb!=='status')return;
+  const value=frame.value as {identity:{github:string};teams:{handle:string}[]};
+  value.identity.github=github;value.teams[0]!.handle='mira';
+ });
+ const status=await createTauriBackend(f.bridge).status();
+ expect(status.value?.me).toMatchObject({handle:'mira',footerLabel:github||'mira'});
+});
+it.each(['setup','team'] as const)('invalidates every affected read model when %s fails',async verb=>{
+ const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:JSON.stringify({t:'result',verb,ok:false,exitCode:1,error:'Stopped after a partial write.'})}));
+ const b=createTauriBackend(f.bridge),notify=vi.fn();b.subscribe(notify);
+ await (verb==='setup'?b.setup({offerConnect:true}):b.team({kind:'create',name:'acme'})).done;
+ expect(notify.mock.calls).toEqual([['config'],['clone'],['placed']]);
 });

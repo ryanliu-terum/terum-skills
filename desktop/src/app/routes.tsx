@@ -1,4 +1,6 @@
-import { useLaunchTarget, usePreference, useBackend } from '../backend';
+import { useLaunchContext, usePreference, useBackend } from '../backend';
+import { useUrlState } from './url-state';
+import { decide, needsLaunchStatus } from './launch-decision';
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { FrameScreen } from '../screens/frame/FrameScreen';
@@ -20,9 +22,11 @@ function NotFoundScreen(){return <Shell><ScreenFrame><div className="not-found">
 // Settings defaults to Account. Marketplace skill links carry ?root=marketplace, including copied deep links.
 // The tour order is boot → welcome → style → basics → team → feedback → done; only Boot has a real setup read model.
 function LaunchRoute(){
- const launch=useLaunchTarget(),consumed=usePreference('launch:consumedWrittenAt','');
- if(launch.isPending)return <ScreenFrame ready={false}/>;
- return <Navigate to={launch.data&&launch.data.writtenAt!==consumed?'/onboarding/boot':'/library/global'} replace/>;
+ const backend=useBackend(),{mock}=useUrlState(),launch=useLaunchContext(),consumed=usePreference('launch:consumedWrittenAt','');
+ const ctx=launch.data??null,needsStatus=needsLaunchStatus(ctx,consumed);
+ const status=useQuery({queryKey:['status',mock],queryFn:({signal})=>backend.status(undefined,{signal}),enabled:needsStatus});
+ if(launch.isPending||(needsStatus&&status.isPending))return <ScreenFrame ready={false}/>;
+ return <Navigate to={decide(ctx,consumed,status.data)==='boot'?'/onboarding/boot':'/library/global'} replace/>;
 }
 function InboxRoute({children}:{children:ReactNode}){
  const backend=useBackend(),surfaces=useQuery({queryKey:['surfaces'],queryFn:()=>backend.surfaces()});

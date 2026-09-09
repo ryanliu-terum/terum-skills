@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
-import { useBackend, useLaunchTarget, usePreference, existingSetupSession } from '../../backend';
+import { useBackend, useLaunchContext, usePreference, existingSetupSession } from '../../backend';
 import type { Onboarding, StatusResult, Theme } from '../../backend/types';
 import { useUrlState } from '../../app/url-state';
 import { useUiStore } from '../../app/store';
@@ -19,19 +19,30 @@ import { OnboardingBasics } from './OnboardingBasics';
 import { OnboardingDone } from './OnboardingDone';
 import { ThemeCards } from './ThemeCards';
 import { useOnboardingStore } from './onboarding-store';
+import { decide, needsLaunchStatus } from '../../app/launch-decision';
+import type { LaunchContext } from '../../backend/types';
 import { SetupBoot } from './SetupBoot';
 import './onboarding.css';
 const basicsRows=z.array(z.tuple([z.enum(['Manage','Eval','Share','Search','More to come']),z.string()]));
 const steps=['boot','welcome','style','basics','team','feedback','done'];
 
 export function OnboardingScreen(){
- const backend=useBackend(),launch=useLaunchTarget(),{step}=useParams();
- const consumed=usePreference('launch:consumedWrittenAt','');
+ const backend=useBackend(),launch=useLaunchContext(),{step}=useParams();
+ const consumed=usePreference('launch:consumedWrittenAt',''),[search]=useSearchParams(),{mock}=useUrlState();
+ const manual=step==='boot'&&search.get('start')==='1';
+ const ctx=launch.data??null,needsStatus=needsLaunchStatus(ctx,consumed);
+ const status=useQuery({queryKey:['status',mock],queryFn:({signal})=>backend.status(undefined,{signal}),enabled:needsStatus});
  const surfaces=useQuery({queryKey:['surfaces'],queryFn:()=>backend.surfaces()});
  if(launch.isPending||surfaces.isPending)return <ScreenFrame ready={false}><Frame current={null} steps={[]} skipped={[]}><Column><Tile/><Title>Setting up your workspace</Title></Column></Frame></ScreenFrame>;
- if(step==='boot'&&launch.data&&(launch.data.writtenAt!==consumed||existingSetupSession(backend,launch.data)))return <SetupBoot launch={launch.data}/>;
+ if(step==='boot'&&manual)return <ManualSetup launch={ctx}/>;
+ if(step==='boot'&&needsStatus&&status.isPending)return <ScreenFrame ready={false}/>;
+ if(step==='boot'&&ctx&&(decide(ctx,consumed,status.data)==='boot'||existingSetupSession(backend,ctx)))return <SetupBoot key={ctx.writtenAt} launch={ctx}/>;
  if(!surfaces.data?.onboarding)return <Navigate to="/library/global" replace/>;
  return <OnboardingReadScreen/>;
+}
+function ManualSetup({launch}:{launch:LaunchContext|null}){
+ const [request]=useState(()=>launch??{writtenAt:`manual:${Date.now()}`});
+ return <SetupBoot key={request.writtenAt} launch={request} restart/>;
 }
 function OnboardingReadScreen(){
   const {step:raw}=useParams(),state=useUrlState(),backend=useBackend();
