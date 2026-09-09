@@ -315,12 +315,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "// A reader that closes early (`terum-skills ls | head -5`) surfaces as an asynchronous 'error' on"
   },
   {
-    "file": "src/lib/community.ts",
-    "line": 2,
-    "policy": "not-a-hint",
-    "pattern": "export const COMMUNITY_URL = 'https://github.com/ryanliu-terum/terum-skills/issues';"
-  },
-  {
     "file": "src/lib/evals/generate.ts",
     "line": 11,
     "policy": "not-a-hint",

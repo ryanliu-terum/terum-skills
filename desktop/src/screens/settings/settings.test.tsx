@@ -1,5 +1,5 @@
 import { afterEach,beforeEach,expect,it,vi } from 'vitest';
-import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
+import { act,cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
@@ -48,16 +48,43 @@ it('persists the hook toggle and updates its explanation',async()=>{open('#/sett
 it('persists each inbox kind independently',async()=>{open('#/settings/inbox');const controls=await screen.findAllByRole('checkbox');expect(controls).toHaveLength(7);fireEvent.click(screen.getByRole('checkbox',{name:'Alert'}));expect(backend.prefs.get('inbox:kind:alert',true)).toBe(false);expect(backend.prefs.get('inbox:kind:share',true)).toBe(true);});
 it('writes k without deriving a new statistic',async()=>{open('#/settings/evals');fireEvent.click(await screen.findByRole('combobox',{name:'Repetitions per case'}));const option=await screen.findByRole('option',{name:'10'});fireEvent.pointerDown(option,{pointerType:'mouse'});fireEvent.click(option);expect(backend.prefs.get('eval:k','')).toBe('10');});
 it('runs Sync now with an empty argument',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));await waitFor(()=>expect(sync).toHaveBeenCalledWith({}));});
-it('opens the exact update command',async()=>{const editor=vi.spyOn(backend,'openInEditor');open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('npx -y terum-skills@latest update'));});
+it('renders update advice verbatim from the DTO without opening a command in an editor',async()=>{
+ const report=await backend.update();if(!report.ok)throw new Error(report.error);
+ report.value.advice=['Running from a source checkout.','  custom build <command> & preserve spacing'];
+ vi.spyOn(backend,'update').mockResolvedValue(report);const editor=vi.spyOn(backend,'openInEditor');
+ open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));
+ const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('pre')?.textContent).toBe(report.value.advice.join('\n')));
+ expect(editor).not.toHaveBeenCalled();expect(location.hash).toContain('dialog=update');
+ fireEvent.click(within(dialog).getByRole('button',{name:'Close'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+});
 it('opens the local storage path in Finder',async()=>{const editor=vi.spyOn(backend,'revealPath');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Show in Finder'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('~/.terum/skills'));});
 it('declines machine removal and leaves the screen intact',async()=>{const uninstall=vi.spyOn(backend,'uninstallMachine');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));await waitFor(()=>expect(screen.getByRole('button',{name:'Remove…'})).toBeEnabled());expect(uninstall).toHaveBeenCalledWith({});expect(screen.queryByRole('alert')).toBeNull();expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('heading',{name:'Advanced'})).toBeInTheDocument();});
 it('does not change a toggle when its preference write fails',async()=>{open('#/settings/sync');const control=await screen.findByRole('switch',{name:'Sync at session start'});vi.spyOn(backend.prefs,'set').mockImplementation(()=>{throw new Error('Storage denied.');});fireEvent.click(control);expect(await screen.findByRole('alert')).toHaveTextContent('Storage denied.');expect(control).toHaveAttribute('aria-checked','true');});
-it('surfaces failed editor results',async()=>{vi.spyOn(backend,'openInEditor').mockResolvedValue({ok:false,error:'Editor unavailable.'});open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));expect(await screen.findByRole('alert')).toHaveTextContent('Editor unavailable.');});
 it('renders the placement hover selector and every raw placement',async()=>{open('#/settings/machine');expect(await screen.findByTestId('placement-row-1')).toHaveTextContent('pr-review');expect(screen.getAllByTestId(/^placement-row-/)).toHaveLength(design.PLACEMENTS.length);});
 it('rejects malformed placement data with its field path',async()=>{const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);settings.value.PLACEMENTS=[['broken']];vi.spyOn(backend,'settings').mockResolvedValue(settings);const consoleError=vi.spyOn(console,'error').mockImplementation(()=>{ /* React reports the intentionally malformed DTO caught by ErrorBoundary. */ });open('#/settings/machine');expect(await screen.findByRole('alert')).toHaveTextContent('PLACEMENTS');expect(consoleError).toHaveBeenCalled();});
 
 it.each(['teams?dialog=leave','machine?dialog=prune'])('keeps the page landmark accessible for %s',async(route)=>{open('#/settings/'+route);const dialog=await screen.findByRole('dialog');const main=screen.getByRole('main');expect(main).toBeInTheDocument();expect(main.closest('[aria-hidden="true"], [inert]')).toBeNull();expect(main.closest('.shell')).not.toBeNull();expect(dialog.closest('.shell')).toBe(main.closest('.shell'));expect(main).not.toContainElement(dialog);});
 
+it('reads the app version from capabilities rather than settings',async()=>{
+ const capabilities=await backend.capabilities();vi.spyOn(backend,'capabilities').mockResolvedValue({...capabilities,appVersion:'9.8.7'});
+ open('#/settings/updates');expect(await screen.findByText('9.8.7 · no update channel yet.')).toBeInTheDocument();
+});
+it('shows an update failure without substituting fixture advice',async()=>{
+ vi.spyOn(backend,'update').mockResolvedValue({ok:false,error:'Cannot read release state.'});
+ open('#/settings/updates?dialog=update');const dialog=await screen.findByRole('dialog');
+ await waitFor(()=>expect(dialog).toHaveTextContent('Cannot read release state.'));
+ expect(within(dialog).getByRole('alert')).toHaveTextContent('Cannot read release state.');
+ expect((await screen.findByRole('dialog')).querySelector('pre')).toBeNull();
+});
+
+it('waits for update data before declaring the Updates board ready',async()=>{
+ const report=await backend.update();let finish!:(value:typeof report)=>void;
+ vi.spyOn(backend,'update').mockReturnValue(new Promise(resolve=>{finish=resolve;}));
+ open('#/settings/updates');expect(await screen.findByRole('button',{name:'Show update command'})).toBeInTheDocument();
+ expect(document.documentElement.dataset.appReady).not.toBe('true');
+ await act(async()=>{finish(report);});
+ await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));
+});
 
 it('renders team category strings without reading the catalog',async()=>{
  const status=await backend.status(),settings=await backend.settings();

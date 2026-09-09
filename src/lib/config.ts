@@ -1,4 +1,4 @@
-import { invocation, type InvocationForm } from './invocation.js';
+import { getStartedLines, type InvocationForm } from './invocation.js';
 import { access, open, readFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -25,7 +25,7 @@ export function selectTeam<T extends { remote: string }>(teams: Record<string, T
   if (requested) { if (!Object.hasOwn(teams, requested)) throw new Error(`Team ${requested} is not configured.`); return [requested, teams[requested]!]; }
   const entries = Object.entries(teams);
   if (entries.length === 1) return entries[0]!;
-  if (entries.length === 0) throw new Error(`No team is configured. Run \`${invocation(form, 'team join')}\` first.`);
+  if (entries.length === 0) throw new Error(getStartedLines(form).join('\n'));
   throw new Error(`More than one team is configured; pass --team <name> (${entries.map(([name]) => name).join(', ')}).`);
 }
 

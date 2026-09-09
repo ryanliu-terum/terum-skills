@@ -3,7 +3,7 @@ import { createConfigStore } from '../../lib/config.js';
 import { APPROVED_UPSTREAM, PACKAGE_NAME } from '../../lib/package.js';
 import { createReleaseState } from '../../lib/update.js';
 import { denyingRunner, fakeLaunch, ScriptedPrompter, stateFileAt, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
-import { run } from '../update.js';
+import { advice, run } from '../update.js';
 
 const at = '2026-09-06T21:10:00.000Z';
 const now = () => Date.parse(at);
@@ -17,15 +17,18 @@ async function setup() {
 describe('print-only update', () => {
   it.each(['global', 'local', 'npx', 'source', 'unknown'] as const)('prints the exact %s template', async (kind) => {
     const args = await setup(); const launch = fakeLaunch(kind); const io = new ScriptedPrompter();
-    expect((await run({ ...args, launch }, io)).ok).toBe(true);
+    const result = await run({ ...args, launch }, io);
+    expect(result.ok).toBe(true);
     const expected = {
       global: ['terum-skills 0.1.0', 'This copy: /opt/homebrew/lib/node_modules/terum-skills', `Latest advertised release: 0.1.1 (observed ${at})`, 'If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'],
       local: ['terum-skills 0.1.0', 'This copy: /work/app/node_modules/terum-skills', 'Declared dependency of: /work/app', `Latest advertised release: 0.1.1 (observed ${at})`, 'If managed with npm, run in /work/app:', '  npm install terum-skills@latest'],
-      npx: ['terum-skills 0.1.0', 'This copy: /cache/_npx/hash/node_modules/terum-skills', 'Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'],
-      source: ['terum-skills 0.1.0', 'This copy: /work/terum-skills/dist/index.js', 'Running from a source checkout.', 'Update the checkout through its normal git workflow, then run:', '  npm run build', "The checkout's version does not establish npm publication."],
-      unknown: ['terum-skills 0.1.0', 'This copy: /unknown/index.js', 'Installation method could not be established.', 'Update this copy with the tool that installed it.', "To run the registry's latest release:", '  npx -y terum-skills@latest <command>'],
+      npx: ['terum-skills 0.1.0', 'This copy: /cache/_npx/hash/node_modules/terum-skills', `Latest advertised release: 0.1.1 (observed ${at})`, 'Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'],
+      source: ['terum-skills 0.1.0', 'This copy: /work/terum-skills/dist/index.js', `Latest advertised release: 0.1.1 (observed ${at})`, 'Running from a source checkout.', 'Update the checkout through its normal git workflow, then run:', '  npm run build', "The checkout's version does not establish npm publication."],
+      unknown: ['terum-skills 0.1.0', 'This copy: /unknown/index.js', `Latest advertised release: 0.1.1 (observed ${at})`, 'Installation method could not be established.', 'Update this copy with the tool that installed it.', "To run the registry's latest release:", '  npx -y terum-skills@latest <command>'],
     };
     expect(io.lines).toEqual(expected[kind]);
+    expect(result).toEqual({ ok: true, value: { running: '0.1.0', latest: '0.1.1', observation: 'newer', launch: kind, description: `Latest advertised release: 0.1.1 (observed ${at})`, advice: expected[kind].slice(kind === 'local' ? 4 : 3), lines: expected[kind] } });
+    expect(advice(launch)).toEqual(expected[kind].slice(kind === 'local' ? 4 : 3));
   });
   it('keeps the dev dependency flag', async () => {
     const args = await setup(); const io = new ScriptedPrompter();
@@ -35,7 +38,7 @@ describe('print-only update', () => {
   it.each(['terum-skills@0.1.0', 'terum-skills', null])('preserves the npx request without calling it pinned: %s', async (request) => {
     const args = await setup(); const io = new ScriptedPrompter();
     await run({ ...args, launch: { kind: 'npx', path: '/cache/_npx/hash/node_modules/terum-skills/dist/index.js', cacheDir: '/cache/_npx/hash', request } }, io);
-    expect(io.lines[2]).toBe(`Cache request recorded as: ${request ?? 'unknown'}`);
+    expect(io.lines[3]).toBe(`Cache request recorded as: ${request ?? 'unknown'}`);
     expect(io.lines.join('\n')).not.toContain('pinned');
   });
   it('prints the exact matching advertisement template', async () => {
@@ -71,4 +74,33 @@ it('labels a registry observation newer than the advertisement even when this ru
   const args = await setup(); await stateFileAt(args.config.root, { schema: 1, package: PACKAGE_NAME, upstream: APPROVED_UPSTREAM, running: null, registry: { version: '0.2.0', at, source: 'npx-latest-cache', entry: '/cache' }, advertisement, attempt: null, ack: null });
   const io = new ScriptedPrompter(); await run({ ...args, running: '0.3.0', launch: fakeLaunch('global') }, io);
   expect(io.lines).toContain(`Latest observed registry release: 0.2.0 (npx cache, ${at})`);
+});
+
+it.each([['0.1.0', 'newer'], ['0.1.1', 'same'], ['0.2.0', 'older'], [null, 'unknown']] as const)('returns comparison and advice even when running=%s', async (running, observation) => {
+  const args = await setup(); const io = new ScriptedPrompter(); const launch = fakeLaunch('global');
+  const result = await run({ ...args, running, launch }, io);
+  expect(result).toMatchObject({ ok: true, value: { running, latest: '0.1.1', observation, advice: advice(launch), lines: io.lines } });
+});
+it('returns explicit nulls for an unprobed copy and never fabricates a current release', async () => {
+  const args = await setup(); const io = new ScriptedPrompter();
+  expect(await run({ ...args, running: null, probe: 'nobody', runner: denyingRunner([]) }, io)).toMatchObject({ ok: true, value: { running: null, latest: null, observation: 'unknown', description: 'Release advertisements are not checked on this machine.', lines: io.lines } });
+});
+it('returns cached release data and advice when a fresh check fails', async () => {
+  const args = await setup();
+  await stateFileAt(args.config.root, { schema: 1, package: PACKAGE_NAME, upstream: APPROVED_UPSTREAM, running: null, registry: null, advertisement, attempt: null, ack: null });
+  const io = new ScriptedPrompter(); const launch = fakeLaunch('source');
+  const result = await run({ ...args, launch, runner: denyingRunner([]) }, io);
+  expect(result).toMatchObject({ ok: true, value: { latest: '0.1.1', observation: 'newer', advice: advice(launch), lines: io.lines } });
+  expect(result.ok && result.value.description).toContain('Could not check release advertisements:');
+});
+it('exports local development dependency advice without losing --save-dev', () => {
+  expect(advice({ kind: 'local', path: '/work/node_modules/terum-skills', root: '/work', dependencyKind: 'devDependencies' })).toEqual(['If managed with npm, run in /work:', '  npm install --save-dev terum-skills@latest']);
+});
+
+it('uses the existing release selection when a registry observation is newer than the tag', async () => {
+  const args = await setup();
+  await stateFileAt(args.config.root, { schema: 1, package: PACKAGE_NAME, upstream: APPROVED_UPSTREAM, running: null, registry: { version: '0.2.0', at, source: 'npx-latest-cache', entry: '/cache' }, advertisement, attempt: null, ack: null });
+  const result = await run({ ...args, launch: fakeLaunch('global') }, new ScriptedPrompter());
+  expect(result).toMatchObject({ ok: true, value: { latest: '0.2.0', observation: 'newer' } });
+  expect(result.ok && result.value.description).toContain('Latest observed registry release: 0.2.0');
 });

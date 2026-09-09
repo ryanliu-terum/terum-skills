@@ -1,0 +1,9 @@
+{"t":"hello","protocol":1,"version":"0.1.6","verbs":["login","setup","team create","team join","team remove","team leave","team workflow-update","invite","ls","status","publish","validate","eval","connect","install","uninstall-skill","uninstall","sync","search","update"],"features":{"favorites":false,"follow":false,"roles":false,"lastSeen":false,"installScope":false,"inviteScoping":false,"disablePerMachine":false,"projectMembers":false,"liftOnCards":false,"runEvalInApp":false,"perCase":false,"progress":false}}
+{"t":"print","level":"info","line":"terum-skills 0.1.6"}
+{"t":"print","level":"info","line":"This copy: /Users/ryanliu/Documents/Terum/terum-codex/m7-S7e/dist/index.js"}
+{"t":"print","level":"info","line":"Release advertisements are not checked on this machine."}
+{"t":"print","level":"info","line":"Running from a source checkout."}
+{"t":"print","level":"info","line":"Update the checkout through its normal git workflow, then run:"}
+{"t":"print","level":"info","line":"  npm run build"}
+{"t":"print","level":"info","line":"The checkout's version does not establish npm publication."}
+{"t":"result","verb":"update","ok":true,"exitCode":0,"value":{"running":"0.1.6","latest":null,"observation":"unknown","launch":"source","description":"Release advertisements are not checked on this machine.","advice":["Running from a source checkout.","Update the checkout through its normal git workflow, then run:","  npm run build","The checkout's version does not establish npm publication."],"lines":["terum-skills 0.1.6","This copy: /Users/ryanliu/Documents/Terum/terum-codex/m7-S7e/dist/index.js","Release advertisements are not checked on this machine.","Running from a source checkout.","Update the checkout through its normal git workflow, then run:","  npm run build","The checkout's version does not establish npm publication."]}}
