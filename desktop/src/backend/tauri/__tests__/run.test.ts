@@ -172,7 +172,7 @@ describe('cliRun — a CLI process as a seam Run<T>', () => {
 describe('createTauriBackend — argv and result mapping per verb', () => {
   const ok = (verb: string, value: unknown) => (_a: readonly string[], emit: (e: LineEvent) => void) => { emit({ kind: 'stdout', line: line({ t: 'result', verb, ok: true, exitCode: 0, value }) }); emit({ kind: 'exit', code: 0 }); };
   it('capabilities: mac-overlay on macOS, every flagged gap false, editor and clipboard true', async () => {
-    const backend = createTauriBackend(fakeBridge(() => undefined).bridge);
+    const backend = createTauriBackend(fakeBridge(ok('status', {})).bridge);
     expect(await backend.capabilities()).toEqual({ windowChrome: 'mac-overlay', disablePerMachine: false, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: false, openInEditor: true, clipboard: true });
   });
   it('install builds the three argv shapes and maps the CLI rows to the seam', async () => {
