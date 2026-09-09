@@ -263,7 +263,7 @@ describe('release command eligibility', () => {
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
       sync: async (args) => { calls.push(args); return success({ placed: 0, deferred: [], notices: [], changed: false, hook: Boolean(args.hook), teams: [] }); },
-      update: async (args) => { calls.push(args); return success(undefined); },
+      update: async (args) => { calls.push(args); return success({ running: null, latest: null, observation: 'unknown', launch: 'unknown', description: 'Latest advertised release: unknown', advice: ['Update this copy with the tool that installed it.'], lines: [] }); },
     }, { launch, noUpdateCheck: true });
     await program.parseAsync(['sync', '--hook'], { from: 'user' }); await program.parseAsync(['update'], { from: 'user' });
     expect(calls).toEqual([{ hook: true, prune: undefined, launch, noUpdateCheck: true }, { launch, noUpdateCheck: true }]);
@@ -374,4 +374,20 @@ it('registers repeatable login --set once with no default and forwards only expl
     await program.parseAsync(['login', ...pairs.flatMap(pair => ['--set', pair])], { from: 'user' });
     expect(calls).toEqual([{ form: undefined, ...(pairs.length ? { set: pairs } : {}) }]);
   }
+});
+it('documents every public command path in a README code span and excludes hidden paths', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8');
+  const spans = [...readme.matchAll(/(?<!`)`([^`\n]+)`(?!`)/g)].map(match => match[1]!.replaceAll('\\|', '|'));
+  const program = buildProgram(async () => undefined);
+  function check(parent: typeof program, prefix = '') {
+    const visible = new Set(parent.createHelp().visibleCommands(parent));
+    for (const command of parent.commands) {
+      const path = prefix + command.name();
+      const documented = spans.some(span => span === path || span.startsWith(path + ' '));
+      expect(documented, path).toBe(visible.has(command));
+      if (visible.has(command)) check(command, path + ' ');
+    }
+  }
+  check(program);
 });

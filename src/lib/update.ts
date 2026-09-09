@@ -75,7 +75,7 @@ export function createReleaseState(root: string, upstream = APPROVED_UPSTREAM): 
 }
 
 /** Stable-channel comparison without a dependency or numeric precision loss. */
-function compare(a: string | null | undefined, b: string | null | undefined): number | null {
+export function compare(a: string | null | undefined, b: string | null | undefined): number | null {
   if (!a || !b || !/^\d+\.\d+\.\d+$/.test(a) || !/^\d+\.\d+\.\d+$/.test(b)) return null;
   const left = a.split('.').map(BigInt); const right = b.split('.').map(BigInt);
   for (let i = 0; i < 3; i++) { if (left[i]! > right[i]!) return 1; if (left[i]! < right[i]!) return -1; }
@@ -161,7 +161,7 @@ export function describeUpdate(state: ReleaseState | null, running: string | nul
   const registry = state?.registry && validStamp(state.registry.at, now) && compare(state.registry.version, state.registry.version) === 0 ? state.registry : null;
   const highest = registry && (!advertisement || compare(registry.version, advertisement.version) === 1) ? registry : advertisement;
   const candidate: ReleaseCandidate | null = highest && compare(highest.version, running) === 1 ? highest : null;
-  return { advertisement, registry, candidate, registryNewer: Boolean(registry && (!advertisement || compare(registry.version, advertisement.version) === 1)), matches: Boolean(advertisement && compare(advertisement.version, running) === 0) };
+  return { advertisement, registry, candidate, latest: highest, registryNewer: Boolean(registry && (!advertisement || compare(registry.version, advertisement.version) === 1)), matches: Boolean(advertisement && compare(advertisement.version, running) === 0) };
 }
 export function noticeLine(candidate: ReleaseCandidate, running: string, launch?: Launch): string {
   const prefix = `Newer terum-skills release ${candidate.source === 'git-tags' ? 'advertised' : 'observed'}: ${candidate.version} (running ${running}). `;

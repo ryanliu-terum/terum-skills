@@ -1,0 +1,79 @@
+{
+  "status": "complete",
+  "summary": "Implemented structured update reports, verbatim desktop advice, app-version propagation, uninstall disclosure and bundle cleanup, README coverage, and the four spec corrections. Both packages’ gates passed, including the root build; recorded offline frames verify the update contract.",
+  "filesChanged": [
+    {"path":"src/commands/update.ts","change":"modified","why":"Return UpdateReport, export advice, and apply MC-12."},
+    {"path":"src/lib/update.ts","change":"modified","why":"Reuse existing comparison and release-source selection."},
+    {"path":"src/commands/uninstallMachine.ts","change":"modified","why":"Disclose retained evals and recursively remove app bundles after consent."},
+    {"path":"src/lib/constants.ts","change":"modified","why":"Remove duplicate COMMUNITY_URL."},
+    {"path":"src/lib/community.ts","change":"modified","why":"Use the specified Discord invite."},
+    {"path":"src/lib/config.ts","change":"modified","why":"Render shared setup hints for zero teams."},
+    {"path":"src/__tests__/cli.test.ts","change":"modified","why":"Update stub and enforce README command coverage."},
+    {"path":"src/commands/__tests__/update.test.ts","change":"modified","why":"Verify exact output, advice, comparisons, and unknown observations."},
+    {"path":"src/commands/__tests__/uninstallMachine.test.ts","change":"modified","why":"Verify disclosure, cancellation, recursive removal, and retained evals."},
+    {"path":"src/commands/__tests__/install.test.ts","change":"modified","why":"Expect shared setup hints."},
+    {"path":"src/commands/__tests__/uninstall.test.ts","change":"modified","why":"Expect shared setup hints."},
+    {"path":"src/commands/__tests__/invocation-hints.test.ts","change":"modified","why":"Update additional zero-team assertions for both invocation forms."},
+    {"path":"src/commands/__tests__/setup.test.ts","change":"modified","why":"Pin the Discord destination."},
+    {"path":"src/lib/__tests__/config.test.ts","change":"modified","why":"Prevent zero-team hint spellings from diverging."},
+    {"path":"src/lib/__tests__/invocation-catalog.ts","change":"modified","why":"Remove the retired Issues URL entry."},
+    {"path":"README.md","change":"modified","why":"Document missing commands, shipped desktop behavior, and teardown."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"Remove stale eval bans from the four specified sections."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Widen UpdateAdvice and add appVersion."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Serve strictly validated update reports and the build version."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Return fixture-backed versions and the report shape."},
+    {"path":"desktop/vite.config.ts","change":"modified","why":"Inject the desktop package version."},
+    {"path":"desktop/vitest.config.ts","change":"modified","why":"Provide the same version constant during tests."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"Display DTO advice verbatim and appVersion through the seam."},
+    {"path":"desktop/src/screens/settings/SettingsScreen.tsx","change":"modified","why":"Read update data and wait for it before declaring readiness."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","change":"modified","why":"Verify advice, version provenance, errors, and readiness."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"Assert complete mock capabilities and update report."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Verify served update surface and strict report mapping."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"Include appVersion in capability expectations."},
+    {"path":"desktop/src/backend/tauri/__tests__/update-replay.test.ts","change":"added","why":"Replay rebuilt update and status frames."},
+    {"path":".planning/codex-runs/m7-S7e/fixture.sh","change":"added","why":"Provide the reproducible offline fixture."},
+    {"path":".planning/codex-runs/m7-S7e/frames/status.jsonl","change":"modified","why":"Re-record status using the rebuilt CLI."},
+    {"path":".planning/codex-runs/m7-S7e/frames/update.jsonl","change":"added","why":"Prove nonempty advice and exact printed-line equality."},
+    {"path":".planning/codex-runs/m7-S7e/pr-body.md","change":"added","why":"Name Ryan for spec review and record validation and choices."}
+  ],
+  "gates": {
+    "lint":{"ran":true,"passed":true,"output":"Root and desktop passed with 0 errors and 0 warnings.","preExistingFailures":""},
+    "typecheck":{"ran":true,"passed":true,"output":"Root and desktop passed with 0 errors.","preExistingFailures":""},
+    "test":{"ran":true,"passed":true,"output":"Root: 72 files, 1144 passed. Desktop: 46 files, 548 passed, 88 skipped. Root build also passed.","preExistingFailures":""}
+  },
+  "openQuestions": [
+    {"question":"What prose should description contain, and which release observation should latest select?","specSection":"§1 RM-08","conservativeChoice":"Reuse printed release-status lines and describeUpdate’s existing highest valid advertisement/registry selection."},
+    {"question":"What layout should display advice when no dialog board is specified?","specSection":"§2 RM-08","conservativeChoice":"Reuse the existing dialog wrapper at ?dialog=update; preserve advice whitespace and existing board CSS."},
+    {"question":"Should native Settings’ remaining read-model dependencies be served in this batch?","specSection":"§2","conservativeChoice":"Only flip update as specified. Preserve existing settings/status gaps and leave maintainer-owned desktop documentation unchanged."}
+  ],
+  "deviations": [
+    {"what":"Final test runs used four root workers and one desktop worker.","why":"Heavy host contention caused timing failures; final full suites passed without changing timeouts or skip conditions."},
+    {"what":"The recording fixture uses a local bare remote.","why":"Ensure explicit update cannot attempt network access."},
+    {"what":"Updated invocation-hints.test.ts beyond the named CP-37 test files.","why":"It also pinned the retired zero-team wording; only those assertions changed."}
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Native capabilities and report mapping remain behind the backend seam."},
+    {"number":2,"howSatisfied":"Only the real update surface was enabled; no additional gap flags or fabricated native data."},
+    {"number":3,"howSatisfied":"Generated fixtures and tokens were read without modification."},
+    {"number":5,"howSatisfied":"Existing board CSS remains unchanged; readiness waits for version and update data."},
+    {"number":7,"howSatisfied":"No tests were deleted or weakened; advice and failure states are URL-reachable."},
+    {"number":8,"howSatisfied":"Ran required gates, verified writes, and avoided repository git, network, installs, commits, and Playwright."}
+  ],
+  "testsModified": [
+    {"path":"src/__tests__/cli.test.ts","whatChanged":"Updated update stub and added README coverage.","justification":"Required report contract and CP-24."},
+    {"path":"src/commands/__tests__/update.test.ts","whatChanged":"Adjusted three templates and request index; added report assertions.","justification":"Required MC-12 output change and RM-08 coverage."},
+    {"path":"src/commands/__tests__/uninstallMachine.test.ts","whatChanged":"Added consent, removal, and retention cases.","justification":"Verify the new destructive operation and disclosure."},
+    {"path":"src/commands/__tests__/install.test.ts","whatChanged":"Replaced zero-team expected text with shared hints.","justification":"CP-37 changes the required message."},
+    {"path":"src/commands/__tests__/uninstall.test.ts","whatChanged":"Replaced zero-team expected text with shared hints.","justification":"CP-37 changes the required message."},
+    {"path":"src/commands/__tests__/invocation-hints.test.ts","whatChanged":"Updated zero-team expectations for both forms.","justification":"Preserve invocation coverage against the new required wording."},
+    {"path":"src/commands/__tests__/setup.test.ts","whatChanged":"Added exact Discord URL assertion.","justification":"CP-O3 destination requirement."},
+    {"path":"src/lib/__tests__/config.test.ts","whatChanged":"Added shared-hint assertions for both forms.","justification":"Prevent future wording divergence."},
+    {"path":"src/lib/__tests__/invocation-catalog.ts","whatChanged":"Deleted the obsolete Issues literal entry.","justification":"Explicitly required because the replacement lacks the scanned substring."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","whatChanged":"Updated capabilities and added report equality.","justification":"New DTO contracts."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Updated surface expectations and added strict mapping cases.","justification":"Update is now served rather than a gap."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","whatChanged":"Included appVersion in capability equality.","justification":"AC-17 contract."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","whatChanged":"Replaced editor-based update assertion with verbatim advice checks; retained editor-error coverage on Finder; added version, failure, and readiness cases.","justification":"Verify the specified behavior without removing existing error coverage."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Visual fidelity is preserved: existing CSS and fixture captions remain unchanged, but Playwright was explicitly excluded and the advice dialog had no supplied board."
+}

@@ -222,3 +222,25 @@ it('keeps local uninstall advice with the entry-based launch shape', async () =>
   expect(await run({ config: store, hook, launch }, io)).toMatchObject({ ok: true, value: { launch } });
   expect(io.lines.slice(-2)).toEqual([`This copy of terum-skills runs from ${launch.path}.`, 'It is a dependency of /work/app: run npm uninstall terum-skills there, or remove it from that package.json.']);
 });
+
+it.each([false, true])('discloses the app and evals before consent, removing only the app when accepted=%s', async accepted => {
+  const { root, store, hook } = await minimal();
+  const bundle = join(store.root, 'app', '0.1.6', 'Terum.app', 'Contents', 'MacOS');
+  const evals = join(store.root, 'evals');
+  await mkdir(bundle, { recursive: true }); await writeFile(join(bundle, 'terum'), 'bundle');
+  await mkdir(evals); await writeFile(join(evals, 'transcript.json'), 'retained');
+  const io = new ScriptedPrompter();
+  io.confirm = async () => {
+    expect(io.lines).toContain(`  Downloaded desktop app bundle at ${join(store.root, 'app')} (all versions)`);
+    expect(io.lines.find(line => line.startsWith('Kept:'))).toContain(`${evals} (eval runs and transcripts)`);
+    expect(await readFile(join(bundle, 'terum'), 'utf8')).toBe('bundle');
+    return accepted;
+  };
+  const result = await run({ config: store, hook, wrapper: wrapperFor(join(root, 'home')) }, io);
+  expect(result.ok).toBe(accepted);
+  expect(await readFile(join(evals, 'transcript.json'), 'utf8')).toBe('retained');
+  if (accepted) {
+    await gone(join(store.root, 'app'));
+    expect(result.ok && result.value.kept).toContain(evals);
+  } else expect(await readFile(join(bundle, 'terum'), 'utf8')).toBe('bundle');
+});
