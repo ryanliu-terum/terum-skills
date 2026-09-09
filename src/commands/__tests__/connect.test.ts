@@ -24,6 +24,22 @@ describe('connect (§5.3)', () => {
     expect(Object.keys((await store.read()).shared)).toHaveLength(1);
   });
 
+  it('direct-path connect keeps the pushed-but-untracked recovery advice when the ledger write fails', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const source = join(fixture.root, 'sample'); await mkdir(source);
+    await writeFile(join(source, 'SKILL.md'), '---\nname: sample\ndescription: x\nmetadata:\n  terum-category: testing\n---\n');
+    // The only update through this wrapped store is connect's own ledger write, after the push landed.
+    const config = { ...store, update: async () => { throw new Error('ledger unavailable'); } };
+    const result = await run({ path: source, team: 'team', config }, new ScriptedPrompter([], [true]));
+    const bytes = await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare);
+    const id = /id: ([0-9a-f-]{36})/.exec(bytes)![1]!;
+    expect(result).toMatchObject({ ok: false, error: `Stopped: ledger unavailable. sample was pushed to team team as ${id} but is not tracked on this machine; run \`npx -y terum-skills@latest sync\` and, if it is still not listed by \`ls --local\`, report this — the local ledger entry is missing.` });
+    expect((await store.read()).shared).toEqual({});
+  });
+
   it('shares an off-the-shelf SKILL.md with no metadata block: the tool generates all four fields, shows the category default before the y/N, and the repository copy parses', async () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));

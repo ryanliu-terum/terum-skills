@@ -67,7 +67,18 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
     if (args.keepSource || args.keepRepo) return success(await resolveDivergence(store, runner, args.team, args.keepSource ?? args.keepRepo!, Boolean(args.keepSource), Boolean(args.allowPrivileged), io));
     const initial = await store.read();
     const [team, binding] = selectTeam(initial.teams, args.team, args.form);
-    if (args.path) return success(await connectOne(resolve(args.path), { args, store, runner, config: initial, team, binding, io }));
+    if (args.path) {
+      const source = resolve(args.path);
+      try {
+        return success(await connectOne(source, { args, store, runner, config: initial, team, binding, io }));
+      } catch (error) {
+        // The same recovery advice the batch loop gives: a half-completed connect (source written,
+        // or pushed without a ledger entry) must never surface as its bare cause alone.
+        const advice = phaseAdvice(error, source, team, args.form);
+        if (advice === undefined) throw error;
+        return failure(advice);
+      }
+    }
 
     const batch: ConnectBatch = { kind: 'batch', shared: [], declined: [], refused: [] };
     const attempted = new Map<string, 'declined' | 'refused'>();
@@ -140,12 +151,7 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
       // Discovery/non-TTY failures before the first menu retain their existing output contract.
       if (!menuStarted) throw error;
       const detail = error instanceof Error ? error.message : String(error);
-      let message = `Stopped: ${detail}${detail.endsWith('.') ? '' : '.'}`;
-      if (error instanceof ConnectStepError && error.phase === 'source-mutated') {
-        message = `Stopped: ${detail}. ${basename(selectedPath!)}'s SKILL.md at ${selectedPath} already carries the managed fields (license, metadata.id, metadata.author); the team repository was not changed. Fix the cause and run \`${invocation(args.form, 'connect', selectedPath!)}\` again.`;
-      } else if (error instanceof ConnectStepError && error.phase === 'pushed') {
-        message = `Stopped: ${detail}. ${basename(selectedPath!)} was pushed to team ${team} as ${error.id} but is not tracked on this machine; run \`${invocation(args.form, 'sync')}\` and, if it is still not listed by \`ls --local\`, report this — the local ledger entry is missing.`;
-      }
+      const message = (selectedPath === undefined ? undefined : phaseAdvice(error, selectedPath, team, args.form)) ?? `Stopped: ${detail}${detail.endsWith('.') ? '' : '.'}`;
       io.print(message);
       summarize();
       // Preserve the existing first-menu unknown-choice error for callers, too.
@@ -413,6 +419,23 @@ async function relocate(store: ConfigStore, value: { id: string; path: string } 
 }
 function splitRelocate(value: string): { id: string; path: string } { const index = value.indexOf(':'); if (index < 1) throw new Error('Use --relocate <id>:<path>.'); return { id: value.slice(0, index), path: value.slice(index + 1) }; }
 function mirrorToTree(tree: MutableTree, destination: string, files: Map<string, Buffer>): void { for (const path of tree.paths(`${destination}/`)) if (!files.has(path.slice(destination.length + 1))) tree.remove(path); for (const [path, content] of files) tree.set(`${destination}/${path}`, content); }
+/**
+ * Recovery advice for a connect that failed after it started writing: the source already carries
+ * the managed fields (`source-mutated`), or the push landed but the local ledger write failed
+ * (`pushed`). One formatting path for both entry forms — the interactive batch loop and
+ * `connect <path>`. Any other failure returns undefined and keeps its existing output contract.
+ */
+function phaseAdvice(error: unknown, path: string, team: string, form: InvocationForm | undefined): string | undefined {
+  if (!(error instanceof ConnectStepError)) return undefined;
+  if (error.phase === 'source-mutated') {
+    return `Stopped: ${error.message}. ${basename(path)}'s SKILL.md at ${path} already carries the managed fields (license, metadata.id, metadata.author); the team repository was not changed. Fix the cause and run \`${invocation(form, 'connect', path)}\` again.`;
+  }
+  if (error.phase === 'pushed') {
+    return `Stopped: ${error.message}. ${basename(path)} was pushed to team ${team} as ${error.id} but is not tracked on this machine; run \`${invocation(form, 'sync')}\` and, if it is still not listed by \`ls --local\`, report this — the local ledger entry is missing.`;
+  }
+  return undefined;
+}
+
 /** The batch summary's one-line reason for a hygiene refusal: `Not connected: <name> (hygiene: …)`. */
 function hygieneReason(refused: HygieneRefused): string {
   return `hygiene: ${refused.assessment.errors.map((finding) => finding.message.replace(/\.$/, '')).join('; ')}`;
