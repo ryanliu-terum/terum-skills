@@ -1,0 +1,48 @@
+{
+  "status-before": {
+    "exitCode": 0,
+    "frameTypes": [
+      "hello",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "result"
+    ]
+  },
+  "login-set-name": {
+    "exitCode": 0,
+    "frameTypes": [
+      "hello",
+      "print",
+      "result"
+    ]
+  },
+  "status-after": {
+    "exitCode": 0,
+    "frameTypes": [
+      "hello",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "print",
+      "result"
+    ]
+  },
+  "onlyDisplayNameBytesChanged": true,
+  "recordedFrom": "the merged CLI (main through S7d + S7c), fixture cwd = the seed repo"
+}

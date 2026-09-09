@@ -1,0 +1,19 @@
+lock acquired Wed Sep  9 01:45:16 UTC 2026
+root lint: rc=0
+root typecheck: rc=0
+root test: rc=0
+root build: rc=0
+desktop typecheck: rc=0
+desktop lint: rc=0
+desktop vitest: rc=0
+desktop build: rc=0
+e2e routes: rc=0
+export:check: rc=0
+e2e fidelity: rc=0
+done Wed Sep  9 01:49:33 UTC 2026
+ Test Files  73 passed (73)
+      Tests  1239 passed (1239)
+ Test Files  55 passed (55)
+      Tests  789 passed (789)
+  91 passed (46.3s)
+  88 passed (36.7s)

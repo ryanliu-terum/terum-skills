@@ -32,6 +32,7 @@ export interface Roster {members:Member[];invited:Design['INVITED'];member:Recor
 export interface Library {skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;provenance?:string|null;projects?:readonly {name:string;skills:readonly string[];remotes:readonly string[];[key:string]:unknown}[];problems?:readonly {source:string;message:string}[]}
 /** attention = failingEvals + updatesAvailable + notEvaluated; counts.Alerts = attention, counts.Updates = updatesAvailable. Absent CLI counters are omitted. */
 export type CloneState = {state:'absent'} | {state:'incomplete';reason:'not-a-repository'|'no-team-json'|'unverifiable';error?:string} | {state:'foreign'|'ok';origin:string};
+/** name comes from team.json via status; key is the config identifier. They may differ; there is no label. */
 export interface TeamStatus {
  name:string;key:string;remote:string|null;handle:string;clone:string|null;members:number|null;skills:number|null;
  last_sync:string|null;stamp:string|null;policy:{publish:string;license:string}|null;categories:string[]|null;
@@ -45,6 +46,8 @@ export type Identity=Design['ME'] & {initials:string;footerLabel:string};
 export interface StatusResult {machine:Machine;me:Identity;teams:TeamStatus[];counts:Record<string,string>;tools:{git:boolean;gh:boolean};projects:string[]|null}
 export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project')[]}
 export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null;endorsed:string|null;unresolved:boolean|null}
+export interface IdentityArgs {name?:string;email?:string;defaultHandle?:string}
+export interface IdentityWrite {updated:{key:string;value:string}[];notice:string|null}
 export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}
 export interface InstalledResult {id:string;name:string;scope:Scope}
 export interface UninstallArgs {team?:string;ref:string}
