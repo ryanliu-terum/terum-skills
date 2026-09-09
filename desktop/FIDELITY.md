@@ -1,6 +1,6 @@
 # FIDELITY.md — Gate A status per board
 
-One row per in-scope board (88: every canvas board except the nine *States/*Hovers/*Panes/SkillCard sheets, FigmaDark and MarketplaceNoHero). Status is `todo` | `in-progress` | `locked`; only `locked` rows are asserted by `e2e/fidelity`, and a row is set to `locked` only after its diff passed in the orchestrator's own run. The tolerance column is informational: the authoritative per-class map lives in `e2e/fidelity/tolerance.ts` (screen 0.0030, dialog 0.0035, empty/loading/error 0.0020, full-page 0.0025; Main and Light are exact at 0 differing pixels). Masks: none. A mask may be added only with a written reason in the note column, and a test never reads a tolerance or a mask from this file.
+One row per in-scope board (91: every canvas board except the nine *States/*Hovers/*Panes/SkillCard sheets, FigmaDark and MarketplaceNoHero). Status is `todo` | `in-progress` | `locked`; only `locked` rows are asserted by `e2e/fidelity`, and a row is set to `locked` only after its diff passed in the orchestrator's own run. The tolerance column is informational: the authoritative per-class map lives in `e2e/fidelity/tolerance.ts` (screen 0.0030, dialog 0.0035, empty/loading/error 0.0020, full-page 0.0025; Main and Light are exact at 0 differing pixels). Masks: none. A mask may be added only with a written reason in the note column, and a test never reads a tolerance or a mask from this file.
 
 | Board | route+state | status | tolerance | note |
 |---|---|---|---|---|
@@ -12,6 +12,9 @@ One row per in-scope board (88: every canvas board except the nine *States/*Hove
 | LibraryNoResults | `#/library/global?q=deploy%20prod` | locked | 0.0020 |  |
 | LibraryLoading | `#/library/global?__mock=loading` | locked | 0.0020 | sidebar counts hidden |
 | LibraryCollapsed | `#/library/global?overview=0` | locked | 0.0030 | overview hidden |
+| LibrarySidebarHidden | `#/library/global?sidebar=hidden` | locked | 0.0030 | D9: sidebar hidden (240 → 0), reopen button in the top bar |
+| LibraryProjectsCollapsed | `#/library/global?projects=collapsed` | locked | 0.0030 | D9: Projects chevron-right, project rows folded |
+| LibraryInboxCollapsed | `#/library/global?inbox=collapsed` | locked | 0.0030 | D9: Inbox chevron-right, Pushes / Updates / Alerts folded |
 | LibraryError | `#/library/global?__mock=error` | locked | 0.0020 | sidebar counts hidden |
 | SkillDetail | `#/skill/deploy-check` | locked | 0.0030 |  |
 | SkillDetailLight | `#/skill/deploy-check?theme=light` | locked | 0.0030 |  |
