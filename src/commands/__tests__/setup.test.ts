@@ -697,6 +697,7 @@ describe('the desktop app question (decision walk D4/D5, 2026-09-08)', () => {
     const joiner = new SP([], [true]);
     await run({ target: 'alice/team', config: store, evidence: mac, verbs: { app: appOk(calls) } }, joiner);
     expect(joiner.lines.at(-1)).toBe('Continuing in the app. Join alice/team there.');
+    expect(calls[1]).toMatchObject({ target: 'alice/team' });
   });
 
   it('a remembered yes is not asked again and hands off; --app hands off without asking; --no-app never asks', async () => {

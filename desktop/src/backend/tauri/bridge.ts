@@ -2,6 +2,7 @@ import { homeDir } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { z } from 'zod';
+import { NO_STATE } from './run';
 
 /** One line or lifecycle event from the child process, as the Rust bridge emits it on `cli:<id>`. */
 export type LineEvent =
@@ -11,7 +12,7 @@ export type LineEvent =
   | { kind: 'error'; message: string };
 
 /** `~/.terum/skills/run/app.json`, written by `terum-skills app` on every launch (decision walk D1). */
-export const appStateSchema = z.object({ schema: z.literal(1), node: z.string().min(1), entry: z.string().min(1), version: z.string().min(1), writtenAt: z.string().optional() });
+export const appStateSchema = z.object({ schema: z.literal(1), node: z.string().min(1), entry: z.string().min(1), path: z.string().nullable().optional(), version: z.string().min(1), writtenAt: z.string(), target: z.string().optional() });
 export type AppState = z.infer<typeof appStateSchema>;
 
 /** Everything the adapter needs from the shell, behind an interface so the adapter is testable without Tauri. */
@@ -32,7 +33,7 @@ export function tauriBridge(): Bridge {
         onEvent(event.payload);
       });
       try {
-        await invoke('cli_spawn', { id, node: state.node, entry: state.entry, args: [...args], cwd: cwd ?? null });
+        await invoke('cli_spawn', { id, node: state.node, entry: state.entry, path: state.path ?? null, args: [...args], cwd: cwd ?? null });
         return unlisten;
       } catch (error) {
         unlisten();
@@ -44,9 +45,13 @@ export function tauriBridge(): Bridge {
     async readAppState() {
       const text = await invoke<string | null>('read_app_state');
       if (text === null) return null;
-      const parsed = appStateSchema.safeParse(JSON.parse(text));
-      if (!parsed.success) throw new Error(`app.json is not a state file this app understands: ${parsed.error.issues.map((issue) => issue.path.join('.') + ' ' + issue.message).join('; ')}`);
-      return parsed.data;
+      try {
+        const parsed = appStateSchema.safeParse(JSON.parse(text));
+        if (!parsed.success) throw new Error(parsed.error.issues.map((issue) => issue.path.join('.') + ' ' + issue.message).join('; '));
+        return parsed.data;
+      } catch (error) {
+        throw new Error(`${NO_STATE} app.json could not be parsed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+      }
     },
     hostPlatform: () => invoke<string>('host_platform'),
     homeDirectory: homeDir,

@@ -1,0 +1,27 @@
+lock acquired Wed Sep  9 00:26:36 UTC 2026
+root lint: rc=0
+root typecheck: rc=0
+root test: rc=0
+root build: rc=0
+desktop typecheck: rc=0
+desktop lint: rc=0
+desktop vitest: rc=0
+desktop build: rc=0
+e2e routes: rc=0
+export:check: rc=1
+e2e fidelity: rc=1
+cargo check: rc=0
+done Wed Sep  9 00:30:18 UTC 2026
+ Test Files  1 failed | 71 passed (72)
+      Tests  1 failed | 1148 passed (1149)
+ Test Files  72 passed (72)
+      Tests  1149 passed (1149)
+ Test Files  52 passed (52)
+      Tests  721 passed (721)
+  91 passed (32.3s)
+      29 |  write(`${dir}/rows/${board.name}.json`,JSON.stringify({name:board.name,route:board.route,klass:board.klass,width:board.width,height:board.height,diffPixels,ratio,tolerance,pass,locked,hoverTargetMissing},null,2)+'\n');
+    > 30 |  if(locked)expect(pass,`${board.name}: ${diffPixels} pixels, ratio ${ratio}, tolerance ${tolerance}; ${dir}/${board.name}.diff.png`).toBe(true);
+      29 |  write(`${dir}/rows/${board.name}.json`,JSON.stringify({name:board.name,route:board.route,klass:board.klass,width:board.width,height:board.height,diffPixels,ratio,tolerance,pass,locked,hoverTargetMissing},null,2)+'\n');
+    > 30 |  if(locked)expect(pass,`${board.name}: ${diffPixels} pixels, ratio ${ratio}, tolerance ${tolerance}; ${dir}/${board.name}.diff.png`).toBe(true);
+  2 failed
+  86 passed (43.5s)

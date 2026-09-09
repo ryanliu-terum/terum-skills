@@ -1,0 +1,13 @@
+{"t":"hello","protocol":1,"version":"0.1.6","verbs":["login","setup","team create","team join","team remove","team leave","team workflow-update","invite","ls","status","publish","validate","eval","connect","install","uninstall-skill","uninstall","sync","search","update"],"features":{"favorites":false,"follow":false,"roles":false,"lastSeen":false,"installScope":false,"inviteScoping":false,"disablePerMachine":false,"projectMembers":false,"liftOnCards":false,"runEvalInApp":false,"perCase":false,"progress":false}}
+{"t":"print","level":"info","line":"terum-skills 0.1.6"}
+{"t":"print","level":"info","line":"Team acme (you are @seed)"}
+{"t":"print","level":"info","line":"  Repository: https://github.com/acme/team"}
+{"t":"print","level":"info","line":"  From the local clone; GitHub access is not checked."}
+{"t":"print","level":"info","line":"  Members: 3"}
+{"t":"print","level":"info","line":"    @mira — Mira Chen"}
+{"t":"print","level":"info","line":"    @ravi — Ravi Patel"}
+{"t":"print","level":"info","line":"    @seed — Seed (you)"}
+{"t":"print","level":"info","line":"  Shared skills: 3"}
+{"t":"print","level":"info","line":"  Evaluated skills: not yet available"}
+{"t":"print","level":"info","line":"  acme may be stale; run `npx -y terum-skills@latest sync`."}
+{"t":"result","verb":"status","ok":true,"exitCode":0,"value":{"version":"0.1.6","teams":[{"team":"acme","handle":"seed","repository":"https://github.com/acme/team","clone":{"state":"ok","origin":"github.com/acme/team"},"readable":true,"members":[{"handle":"mira","displayName":"Mira Chen"},{"handle":"ravi","displayName":"Ravi Patel"},{"handle":"seed","displayName":"Seed"}],"memberCount":3,"unreadableMembers":0,"sharedSkills":3,"unreadableSkills":0,"membership":"active","stale":true}]}}

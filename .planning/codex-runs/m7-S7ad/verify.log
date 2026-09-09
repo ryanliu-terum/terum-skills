@@ -1,0 +1,40 @@
+# m7-S7ad: orchestrator's own gates, Ryan's Mac (Node 25, Playwright chromium)
+# Codex: gpt-6-astra, high, workspace-write, one pass (codex-prompt.md -> codex-report.json "complete"; its root gate was red only on the
+# sandbox-blocked process-group kill in runner.test.ts; green outside the sandbox).
+# Self-report (hypothesis): root 1132 passed / 1 failed; desktop 46 files / 552 passed + 88 oracle-skipped; cargo check in a temp target.
+
+battery 1 (23:52-00:05 UTC, tree = S7ad on main 2d6f247, load 50-110 with three Codex runs live)
+root lint/typecheck/test/build : rc=0  72 files, 1133 tests (the runner.test sleeping-child case passes here)
+desktop typecheck / lint / build : rc=0
+desktop vitest    : rc=1  18 red = 16 five-second timeouts + 2 findBy misses in screen tests this batch does not touch (load)
+e2e routes        : rc=0  91 passed
+export:check      : rc=1  the canvas md5 had moved with patch AL (fixed by taking the regenerated fixture from main)
+e2e fidelity      : rc=0  88 passed against the AL oracle
+cargo check       : rc=0
+
+battery 2 (00:26-00:3x UTC, after merging main = S7f + S7q; a merge slip dropped one brace, caught by typecheck, fixed, battery re-run)
+root lint/typecheck/test/build : rc=0
+desktop typecheck / lint / vitest / build : rc=0 / 0 / 0 / 0
+e2e routes        : rc=0  91 passed
+export:check      : rc=1  the canvas md5 had moved again with patch AM (S7k's fixture)
+e2e fidelity      : rc=1  2 failed: Settings, SettingsLight (34k px) — the AM Account-row copy that S7k's tree carries; 86 passed
+cargo check       : rc=0
+
+battery 3 (00:45-00:49 UTC, after merging main = S7k; clean merge)
+root lint         : rc=0
+root typecheck    : rc=0
+root test         : rc=0  72 files, 1167 tests passed
+root build        : rc=0
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=0  52 files passed, 730 tests passed (TERUM_DESIGN_DIR set; NODE_OPTIONS=--no-experimental-webstorage)
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (34.9s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (46.0s)
+cargo check       : rc=0  (lib.rs: cli_spawn gains path: Option<String>; five commands)
+real-data proof   : three run/app.json captures from the rebuilt CLI under the fixture HOME (prove-app-state.mjs, the open:false knob):
+                    app.json (plain launch: the shell's PATH, no target), setup-app.json (the setup -> app hand-off: same PATH + target
+                    acme/team), plain-after-setup-app.json (the next plain launch clears the target). bridge.test.ts pins the NO_STATE
+                    wrapping, legacy-file parsing and the cli_spawn payload; run.test.ts pins the retry-on-failure / memoise-on-success
+                    state read and launchTarget(). Not verifiable here: the Rust replay into a child under the Dock's environment (Step 4).
