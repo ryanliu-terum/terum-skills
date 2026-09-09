@@ -36,3 +36,38 @@ it.each([
 ])('reaches the real board content at %s',async(route,text)=>{open(route);expect(await screen.findByText(text)).toBeInTheDocument();expect(screen.queryByText(/S1b builds this/)).toBeNull();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));});
 it('can reopen persisted collapsed overview and rail',async()=>{useUiStore.setState({overviewHidden:true});open('#/library/global');await screen.findByText('15 of 30 skills');fireEvent.click(screen.getByRole('button',{name:'Show overview'}));expect(await screen.findByText('Team installs')).toBeInTheDocument();cleanup();useUiStore.setState({railOpen:false});open('#/skill/deploy-check');await screen.findByRole('heading',{name:'deploy-check'});fireEvent.click(screen.getByRole('button',{name:'Open details rail'}));expect(await screen.findByText('Status')).toBeInTheDocument();});
 it('binds the inbox placeholder to the share selection and clears unknown ids',async()=>{const view=open('#/inbox');await waitFor(()=>expect(view.container.querySelector('[data-selected-id="share-secret-scan"]')).not.toBeNull());cleanup();const unknown=open('#/inbox/unknown');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(unknown.container.querySelector('[data-selected-id]')).toBeNull();});
+
+it('keeps the skill title as the only link without making the article interactive',async()=>{
+ open('#/library/global');
+ const card=await screen.findByTestId('skill-card-deploy-check');
+ expect(within(card).getAllByRole('link')).toHaveLength(1);
+ expect(within(card).getByRole('link',{name:'deploy-check'})).toHaveAttribute('href','#/skill/deploy-check');
+ expect(card.tagName).toBe('ARTICLE');
+ expect(card).not.toHaveAttribute('role');
+ expect(card).not.toHaveAttribute('tabindex');
+});
+it('keeps switch and favorite clicks on the library route',async()=>{
+ open('#/library/global');
+ const card=await screen.findByTestId('skill-card-deploy-check');
+ const toggle=within(card).getByRole('switch');
+ expect(toggle.closest('a')).toBeNull();
+ fireEvent.click(toggle);
+ expect(toggle).toHaveAttribute('aria-checked','false');
+ expect(location.hash).toBe('#/library/global');
+ const favorite=within(card).getByRole('button',{name:'Favorite deploy-check'});
+ expect(favorite.tagName).toBe('BUTTON');
+ expect(favorite.closest('a')).toBeNull();
+ fireEvent.click(favorite);
+ expect(favorite).toHaveAttribute('aria-pressed','false');
+ expect(location.hash).toBe('#/library/global');
+});
+it('keeps the marketplace skill link and install button destinations distinct',async()=>{
+ open('#/marketplace/people/lena');
+ const card=await screen.findByTestId('skill-card-a11y-audit');
+ expect(within(card).getAllByRole('link')).toHaveLength(1);
+ expect(within(card).getByRole('link',{name:'a11y-audit'})).toHaveAttribute('href','#/skill/a11y-audit?root=marketplace');
+ const install=within(card).getByRole('button',{name:'Install'});
+ expect(install).toHaveClass('card-install');
+ fireEvent.click(install);
+ await waitFor(()=>expect(location.hash).toBe('#/skill/a11y-audit?__mock=not-installed&dialog=install&root=marketplace'));
+});
