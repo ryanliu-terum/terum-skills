@@ -18,14 +18,20 @@ export interface GhState { installed: boolean; authenticated: boolean; }
 export const MAX_ATTEMPTS = 3;
 const GITHUB_LOGIN_RULE = 'a GitHub login is 1-39 letters, digits, or single internal hyphens; enter - if you have none';
 
-export async function ghState(runner: Runner = systemRunner): Promise<GhState> {
+/** Offline executable presence; never probes credentials. */
+export async function gitState(runner: Runner = systemRunner): Promise<{ installed: boolean }> {
+  try { return { installed: (await runner.run('git', ['--version'])).code === 0 }; }
+  catch { return { installed: false }; }
+}
+
+export async function ghState(runner: Runner = systemRunner, options: { presenceOnly?: boolean } = {}): Promise<GhState> {
   try {
     const version = await runner.run('gh', ['--version']);
     if (version.code !== 0) return { installed: false, authenticated: false };
   } catch {
     return { installed: false, authenticated: false };
   }
-  return { installed: true, authenticated: await ghAuthenticated(runner) };
+  return { installed: true, authenticated: options.presenceOnly ? false : await ghAuthenticated(runner) };
 }
 
 async function ghAuthenticated(runner: Runner): Promise<boolean> {

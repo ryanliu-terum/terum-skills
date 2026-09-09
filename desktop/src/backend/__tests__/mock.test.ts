@@ -33,10 +33,13 @@ it('handles unknown refs, invalid preferences, storage corruption and unavailabl
 
 it('filters project scopes and isolates returned data from the source fixtures',async()=>{const b=createMockBackend();const mrf=await b.library({scope:'MRF'});expect(mrf.ok&&mrf.value.skills.every(s=>['migration-guard','csv-profiler'].includes(s.name))).toBe(true);expect(mrf.ok&&mrf.value.skills.length).toBeGreaterThan(0);const first=await b.library({scope:'Global'});if(!first.ok)throw new Error(first.error);const n=first.value.skills.length;first.value.skills.pop();const next=await b.library({scope:'Global'});expect(next.ok&&next.value.skills.length).toBe(n);});
 
+const expectedMachine={...design.MACHINE,hostname:design.MACHINE.name};
+const expectedMe={...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login};
+const expectedTeams=design.TEAMS.map(team=>({...team,policy:design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),pending:[],joinCommand:null,joinBlock:null}));
 it.each(['loading','error','slow','disabled','not-installed','default'])('status resolves immediately with identity during %s',async scenario=>{
  location.hash='#/library/global?__mock='+scenario;vi.useFakeTimers();
  const status=await createMockBackend({latencyMs:500}).status();
- expect(status).toEqual({ok:true,value:{machine:design.MACHINE,me:design.ME,teams:design.TEAMS,counts:design.COUNTS}});
+ expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true},projects:['Terum','SSM','MRF']}});
  expect(status.ok&&status.value.machine.gh_login).toBe('teniroo');
  expect(vi.getTimerCount()).toBe(0);
 });
@@ -50,17 +53,18 @@ it('clones status and successful long results, including nested receipts',async(
  const status=await b.status();if(!status.ok)throw new Error(status.error);status.value.machine.gh_login='mutated';
  const fresh=await b.status();expect(fresh.ok&&fresh.value.machine.gh_login).toBe('teniroo');
 });
-it('returns isolated Settings and Onboarding constants without reshaping them',async()=>{
+it('returns isolated Settings DTO additions while preserving drawn fixture constants',async()=>{
  const b=createMockBackend();const settings=await b.settings();const onboarding=await b.onboarding();
  expect(settings.ok).toBe(true);expect(onboarding.ok).toBe(true);
  if(!settings.ok||!onboarding.ok)throw new Error('Expected fixture reads');
- for(const [key,value] of Object.entries(settings.value))expect(value).toEqual(Reflect.get(design,key));
+ const additions={MACHINE:expectedMachine,ME:expectedMe,TEAMS:expectedTeams,TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null};
+ for(const [key,value] of Object.entries(settings.value))expect(value).toEqual(Object.hasOwn(additions,key)?Reflect.get(additions,key):Reflect.get(design,key));
  for(const key of ['ONBOARD_STEPS','ONBOARD_BASICS','GLOBAL_SET','BOOT_STEPS','ONBOARD_LATER','ONBOARD_COMMUNITY','ONBOARD_FETCH_ERROR','WELCOME_LINES','BASICS_COPY','BASICS_HINT','THEME_OPTIONS','LIBRARY_OVERVIEW','INVITEE','TEAM_REPO','INVITE_TIP','JOIN_BLOCK_NOTE'])expect(Reflect.get(onboarding.value,key)).toEqual(Reflect.get(design,key));
  expect(onboarding.value.skill.name).toBe(design.SKILLS[0]?.name);expect(onboarding.value.summary?.lift).toBe(44);expect(onboarding.value.arm).toEqual(design.DETAIL.receipt?.arm);expect(onboarding.value.rosterInitials).toEqual(design.ROSTER.map(q=>q.initials));expect(onboarding.value.bootRows).toHaveLength(5);expect(onboarding.value.failedBootRows[1]?.[0]).toBe('failed');
  expect(settings.value.SETTINGS_NAV).toEqual(design.SETTINGS_NAV);expect(onboarding.value.ONBOARD_STEPS).toEqual(design.ONBOARD_STEPS);
  settings.value.TEAMS.pop();onboarding.value.ONBOARD_STEPS.pop();
  const nextSettings=await b.settings();const nextOnboarding=await b.onboarding();
- expect(nextSettings.ok&&nextSettings.value.TEAMS).toEqual(design.TEAMS);
+ expect(nextSettings.ok&&nextSettings.value.TEAMS).toEqual(expectedTeams);
  expect(nextOnboarding.ok&&nextOnboarding.value.ONBOARD_STEPS).toEqual(design.ONBOARD_STEPS);
 });
 

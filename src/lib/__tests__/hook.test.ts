@@ -1,7 +1,7 @@
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { staleLine, stampPath, fsForTests, HOOK_COMMAND, HOOK_ENTRY, hookInstalled, installHook, offerHook, removeHook } from '../hook.js';
+import { stampedAt, staleLine, stampPath, fsForTests, HOOK_COMMAND, HOOK_ENTRY, hookInstalled, installHook, offerHook, removeHook } from '../hook.js';
 import { ScriptedPrompter, temporaryDirectory } from './fixtures.js';
 
 async function options() {
@@ -111,4 +111,20 @@ describe('mixed session hook groups', () => {
     expect(await installHook(target)).toBe('replaced');
     expect(JSON.parse(await readFile(target.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [{ matcher: 'other', extra: 'keep', hooks: [unrelated] }, { matcher: 'startup', hooks: [unrelated] }, HOOK_ENTRY] } });
   });
+});
+
+
+it.each(['2026-09-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z'])('reads stamp mtime verbatim (%s), not its body', async iso => {
+  const { root } = await options();
+  expect(await stampedAt(root, 'acme')).toBeNull();
+  await mkdir(join(root, 'run'));
+  const path = stampPath(root, 'acme');
+  await writeFile(path, 'not a timestamp');
+  await utimes(path, new Date(iso), new Date(iso));
+  expect(await stampedAt(root, 'acme')).toBe(iso);
+});
+it('stampedAt rethrows filesystem failures other than ENOENT', async () => {
+  const { root } = await options();
+  await writeFile(join(root, 'run'), 'not a directory');
+  await expect(stampedAt(root, 'acme')).rejects.toMatchObject({ code: 'ENOTDIR' });
 });

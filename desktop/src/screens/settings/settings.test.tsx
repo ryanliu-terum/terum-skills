@@ -57,3 +57,38 @@ it('renders the placement hover selector and every raw placement',async()=>{open
 it('rejects malformed placement data with its field path',async()=>{const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);settings.value.PLACEMENTS=[['broken']];vi.spyOn(backend,'settings').mockResolvedValue(settings);const consoleError=vi.spyOn(console,'error').mockImplementation(()=>{ /* React reports the intentionally malformed DTO caught by ErrorBoundary. */ });open('#/settings/machine');expect(await screen.findByRole('alert')).toHaveTextContent('PLACEMENTS');expect(consoleError).toHaveBeenCalled();});
 
 it.each(['teams?dialog=leave','machine?dialog=prune'])('keeps the page landmark accessible for %s',async(route)=>{open('#/settings/'+route);const dialog=await screen.findByRole('dialog');const main=screen.getByRole('main');expect(main).toBeInTheDocument();expect(main.closest('[aria-hidden="true"], [inert]')).toBeNull();expect(main.closest('.shell')).not.toBeNull();expect(dialog.closest('.shell')).toBe(main.closest('.shell'));expect(main).not.toContainElement(dialog);});
+
+
+it('renders team category strings without reading the catalog',async()=>{
+ const status=await backend.status(),settings=await backend.settings();
+ if(!status.ok||!settings.ok)throw new Error('mock data expected');
+ status.value.teams[0]!.categories=['ops','engineering','debugging'];
+ settings.value.TEAM_POLICY.categoriesNote='From team.json; an admin extends it by pull request.';
+ vi.spyOn(backend,'status').mockResolvedValue(status);vi.spyOn(backend,'settings').mockResolvedValue(settings);
+ const catalog=vi.spyOn(backend,'catalog').mockResolvedValue({ok:false,error:'Catalog unavailable.'});
+ open('#/settings/teams');
+ expect(await screen.findByText('From team.json; an admin extends it by pull request.')).toBeInTheDocument();
+ const row=screen.getByText('Categories').closest('.setting-row')??screen.getByText('Categories').parentElement!.parentElement!;
+ for(const category of ['ops','engineering','debugging'])expect(within(row as HTMLElement).getByText(category)).toBeInTheDocument();
+ expect(catalog).not.toHaveBeenCalled();
+});
+it('serves Settings alongside the status error and discloses absent stamps and unfinished work',async()=>{
+ const status=await backend.status(),settings=await backend.settings();
+ if(!status.ok||!settings.ok)throw new Error('mock data expected');
+ status.value.teams[0]!.last_sync=null;status.value.teams[0]!.stamp=null;
+ status.value.teams[0]!.pending=[{op:'install',id:'id',scope:{kind:'global'},version:null,started:'2026-09-01'}];
+ settings.value.syncNote='The recorded timestamp is shown without clock-skew correction.';
+ vi.spyOn(backend,'status').mockResolvedValue({ok:false,error:'Unreadable clone.',value:status.value});
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:false,error:'Unreadable clone.',value:settings.value});
+ open('#/settings/sync');
+ expect(await screen.findByRole('heading',{name:'Sync'})).toBeInTheDocument();
+ expect(screen.getByText(/Last sync No sync recorded on this machine/)).toBeInTheDocument();
+ expect(screen.getByText('Work left undone; run sync')).toBeInTheDocument();
+ expect(screen.getByText(/without clock-skew correction/)).toBeInTheDocument();
+ expect(screen.getAllByText('Unreadable clone.').length).toBeGreaterThan(0);
+});
+it('shows tool presence without claiming an authenticated GitHub account',async()=>{
+ open('#/settings/account');
+ expect(await screen.findByText('git present · gh present')).toBeInTheDocument();
+ expect(screen.queryByText(/Signed in as/)).toBeNull();
+});

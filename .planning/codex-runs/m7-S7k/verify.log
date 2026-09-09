@@ -1,0 +1,39 @@
+# m7-S7k: orchestrator's own gates, 2026-09-09 00:31-00:40 UTC, Ryan's Mac (Node 25, Playwright chromium)
+# Codex: gpt-6-astra, high, workspace-write, one pass (codex-prompt.md -> codex-report.json "partial": the Account-row fork, ruled in NOTES.md).
+# Self-report (hypothesis): root 72 files / 1149 tests (four workers); desktop 45 files / 546 passed + 88 oracle-skipped.
+# Gated on the tree after: the S7k code commit, the merge of main (S7f + S7q; nine conflicts folded), canvas patch AM + re-render +
+# export, the ledger-edit revert, the two Account-wording test updates, then (battery 2) the sidebar-projects fix.
+
+battery 1 (00:31-00:36 UTC)
+root lint         : rc=0
+root typecheck    : rc=0
+root test         : rc=0  72 files, 1165 tests passed
+root build        : rc=0
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=1  1 failed / 714 passed: Sidebar.test "renders only Global navigation for the real adapter" — a REAL finding:
+                    with status now served, the Sidebar fell back to the design's project names on the real adapter. Fixed in 2f1cbe0
+                    (StatusResult.projects; the Sidebar never invents a list).
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed
+export:check      : rc=0  current (AM fixture md5)
+e2e fidelity      : rc=0  88 locked boards passed — Settings and SettingsLight pass against the AM oracle (presence-only Account row)
+cargo check       : rc=0
+
+battery 2 (00:36-00:39 UTC, after 2f1cbe0)
+root lint/typecheck/test/build : rc=0  72 files, 1165 tests
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=1  the same Sidebar test, now a synchronisation slip in the test itself (it waited on a row that no longer renders
+                    and read the nav before the surfaces query settled); the wait moved to the nav's link count, assertions unchanged
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (28.2s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (36.8s)
+cargo check       : rc=0
+desktop unit trio re-run (00:39-00:40 UTC, after the test fix): typecheck rc=0, lint rc=0, vitest rc=0  51 files, 715 tests passed
+real-data proof   : index.test.ts replays .planning/codex-runs/m7-S7k/frames/{status,ls-local}.jsonl, recorded by Codex from the rebuilt
+                    CLI under the fixture team (fixture.sh beside this file): served handle, repository, member count, clone path, policy
+                    pr -> "Pull request", categories [ops, engineering, debugging], the deploy-check placement, identity seed, tools,
+                    counts = {Global} only; a failing status frame with a value still serves its teams; the approval join for a stale,
+                    current and missing grants hash.
