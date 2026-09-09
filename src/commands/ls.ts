@@ -18,9 +18,9 @@ import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from
 import { skillVersions } from '../lib/teamRepo.js';
 
 export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
-export interface LsSkill { id: string; name: string; author: string; category: string; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; updated: string; unresolved: boolean; }
+export interface LsSkill { id: string; name: string; author: string; category: string; characters: number; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; updated: string; unresolved: boolean; }
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
-export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string }[]; problems: { path: string; reason: string }[]; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; description: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string; description: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
@@ -77,7 +77,7 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
         const message = date.reason instanceof Error ? date.reason.message : String(date.reason);
         problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`);
       }
-      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], installs: counts.get(id) ?? 0, latest: shortHash(latest ?? '—'), endorsement: skillEndorsement(team, id), unresolved: latest === undefined, grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, updated });
+      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: shortHash(latest ?? '—'), endorsement: skillEndorsement(team, id), unresolved: latest === undefined, grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, updated });
     }
   }
   return skills;
@@ -105,6 +105,16 @@ async function showProject(projectName: string | undefined, team: ReturnType<typ
 /** One skill per line, the §6 `ls` format; `search` prints hits through the same function. */
 export function format(skill: LsSkill): string { return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${skill.latest}; ${skill.endorsement}; ${skill.updated}`; }
 
+
+/**
+ * The description a row can honestly show. A candidate has one; a rejection carries the one its
+ * frontmatter parsed to, when it got that far (skill-source.ts). Nothing is reconstructed: a folder
+ * whose YAML never parsed reports null, and a blank description is then the honest report.
+ */
+function describedBy(inspection: LocalEntry['inspection']): string | null {
+  if (inspection.kind === 'candidate') return inspection.description;
+  return inspection.kind === 'rejected' ? inspection.description ?? null : null;
+}
 
 /** Local discovery is independent of team selection, and only enriches ledger references. */
 async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: string, form?: InvocationForm): Promise<Result<LsResult>> {
@@ -180,8 +190,8 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
       const inspection = entry.inspection;
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (connect needs --allow-privileged)' : undefined;
-        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: await healthOf(entry), ...(problem === undefined ? {} : { problem }) });
-      } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail });
+        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: await healthOf(entry), description: describedBy(inspection), characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });
+      } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail, description: inspection.description ?? null, characters: entry.characters ?? null });
       if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
     }
     for (const row of local.rows) io.print(`  ${printable(row.name)} — ${printable(row.state)}${row.problem === undefined ? '' : `; source problem: ${printable(row.problem)}`}; path: ${printable(row.path)}`);

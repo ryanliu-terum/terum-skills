@@ -9,9 +9,9 @@ export interface SharedRef { id: string; team: string; }
 export interface PlacementRef { id: string; team: string; version: string | null; }
 export type Inspection =
   | { kind: 'candidate'; description: string; privileged: boolean }
-  | { kind: 'rejected'; reason: SourceProblem; detail: string }
+  | { kind: 'rejected'; reason: SourceProblem; detail: string; description?: string }
   | { kind: 'failed'; reason: string };
-export interface LocalEntry { skillId: string | null; name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; placementFingerprint?: string; inspection: Inspection; }
+export interface LocalEntry { skillId: string | null; name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; placementFingerprint?: string; characters?: number; inspection: Inspection; }
 export interface LocalInventory {
   root: string;
   scope: 'global' | 'project';
@@ -124,7 +124,7 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
     const placement = placementPaths.find(({ target, canonical: reference }) => resolve(target) === path || (canonical !== undefined && reference === canonical))?.ref;
     const tracked = shared.length > 0 || placement !== undefined;
     const entry: LocalEntry = { skillId: null, name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
-    const reject = (reason: SourceProblem, detail: string): void => { entry.inspection = { kind: 'rejected', reason, detail }; };
+    const reject = (reason: SourceProblem, detail: string, description?: string): void => { entry.inspection = { kind: 'rejected', reason, detail, ...(description === undefined ? {} : { description }) }; };
     try {
       const details = await lstat(path);
       if (details.isSymbolicLink()) {
@@ -150,8 +150,12 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
           reject('skill-md-missing', 'SKILL.md missing');
         } else if (!skill.isFile()) reject('skill-md-not-a-file', 'SKILL.md is not a regular file');
         else {
-          const inspection = inspectSkillSource(await readFile(join(path, 'SKILL.md'), 'utf8'), tracked ? undefined : name);
-          if (!inspection.ok) reject(inspection.reason, inspection.detail);
+          const raw = await readFile(join(path, 'SKILL.md'), 'utf8');
+          // String.prototype.length counts UTF-16 code units, the same basis HYG6's 20,000-character
+          // guideline uses; the file is already in hand, so the count costs no extra read.
+          entry.characters = raw.length;
+          const inspection = inspectSkillSource(raw, tracked ? undefined : name);
+          if (!inspection.ok) reject(inspection.reason, inspection.detail, inspection.description);
           else {
             const scan = await scanSkillFolder(path);
             if (scan.symlink) reject('nested-symlink', `contains symlink ${scan.symlink}`);

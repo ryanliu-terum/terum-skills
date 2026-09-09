@@ -21,7 +21,9 @@ it('replays roots and authoritative skill-folder counts, including a name mismat
  const {backend}=replay();const status=await backend.status();
  expect(status).toMatchObject({ok:true,value:{counts:{Global:'2'},roots:[{id:'global',kind:'global',root:'~/.claude/skills',count:'2'},{id:path,kind:'checkout',label:'app',root:path,registered:true,detected:false,count:'2',rootState:'scanned'}]}});
  const library=await backend.library({scope:{kind:'global'}});
- expect(library).toMatchObject({ok:true,value:{root:{id:'global',count:'2'},title:'2 skill folders in Global',team:{kind:'none'},skills:[{name:'alpha',project:'local',path:home+'/.claude/skills/alpha',flags:['local'],placed:false,connectedSources:[]},{name:'beta',project:'local',flags:['broken'],flagText:{broken:'Not connectable · SKILL.md name not-beta does not equal folder beta'}}]}});
+ expect(library).toMatchObject({ok:true,value:{root:{id:'global',count:'2'},title:'2 skill folders in Global',team:{kind:'none'},skills:[{name:'alpha',project:'Global',path:home+'/.claude/skills/alpha',flags:['local'],placed:false,connectedSources:[]},{name:'beta',project:'Global',flags:['broken'],flagText:{broken:'Not connectable · SKILL.md name not-beta does not equal folder beta'}}]}});
+ // Recorded before the CLI carried description/characters: the skew degrades to a dash, never a throw.
+ expect(library.value?.skills.every(s=>s.size==='—'&&s.desc===''&&s.installs==='0 installs')).toBe(true);
  const checkout=await backend.library({scope:{kind:'checkout',root:path}});
  expect(checkout.value?.skills.map(s=>s.name)).toEqual(['delta','gamma']);
  expect(checkout.value?.skills.every(s=>!s.placed&&s.connectedSources?.length===0)).toBe(true);

@@ -251,13 +251,42 @@ describe('the bundled /terum-skills Claude Code skill is not a team skill', () =
     await candidate(root, 'plain');
     const inventory = await localSkills(root, emptyConfig(), { scope: 'global', stateRoot: join(root, '.state') });
     const rejected = { kind: 'rejected', reason: 'managed-wrapper', detail: 'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill' };
-    expect(inventory.entries.find((entry) => entry.name === 'terum-skills')?.inspection).toEqual(rejected);
-    expect(inventory.entries.find((entry) => entry.name === 'renamed-copy')?.inspection).toEqual(rejected);
+    for (const name of ['terum-skills', 'renamed-copy']) {
+      const inspection = inventory.entries.find((entry) => entry.name === name)?.inspection;
+      expect(inspection).toMatchObject(rejected);
+      // Refused for connect, still readable: the wrapper's frontmatter parsed, so the description
+      // it found survives the rejection. Its wording is the shipped file's and is not pinned here.
+      expect(inspection?.kind === 'rejected' && inspection.description).toBeTruthy();
+    }
     expect(candidatesOf(inventory, true).map((entry) => entry.name)).toEqual(['plain']);
     expect(() => assertSkillSource(bundled, 'terum-skills')).toThrow('This folder is the /terum-skills Claude Code skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');
   });
 });
 
+
+describe('a rejected folder reports the description its frontmatter parsed to', () => {
+  it('recovers it for a name mismatch, and leaves it undefined when nothing parsed', async () => {
+    const root = await temporaryDirectory();
+    // The gsd-* shape: legal YAML, a real description, a namespaced name the folder cannot match.
+    await candidate(root, 'name-mismatch', '---\nname: gsd:add-backlog\ndescription: "Add an idea to the backlog"\n---\n');
+    await candidate(root, 'unsupported', '---\nname: unsupported\ndescription: Has an extra field\nargument-hint: "<x>"\n---\n');
+    const brokenYaml = '---\nname: broken-yaml\ndescription: Args: <spec-path> unquoted\n---\n';
+    await candidate(root, 'broken-yaml', brokenYaml);
+    await candidate(root, 'no-description', '---\nname: no-description\n---\n');
+    const inventory = await localSkills(root, emptyConfig(), { scope: 'global', stateRoot: join(root, '.state') });
+    const described = (name: string): string | undefined => {
+      const inspection = inventory.entries.find((entry) => entry.name === name)?.inspection;
+      return inspection?.kind === 'rejected' ? inspection.description : undefined;
+    };
+    expect(described('name-mismatch')).toBe('Add an idea to the backlog');
+    expect(described('unsupported')).toBe('Has an extra field');
+    // Nothing parsed, so nothing is reconstructed; a blank description is the honest report.
+    expect(described('broken-yaml')).toBeUndefined();
+    expect(described('no-description')).toBeUndefined();
+    // The character count is the whole SKILL.md, recorded even when the folder is rejected.
+    expect(inventory.entries.find((entry) => entry.name === 'broken-yaml')?.characters).toBe(brokenYaml.length);
+  });
+});
 
 describe('checkout discovery CLI-1', () => {
   it('orders registered roots before detected cwd and deduplicates aliases and home', async () => {
