@@ -1,0 +1,40 @@
+# m7-S7g: orchestrator's own gates, 2026-09-09 01:15-01:27 UTC, Ryan's Mac (Node 25, Playwright chromium)
+# Codex: gpt-6-astra, high, workspace-write, one pass (codex-prompt.md -> codex-report.json "complete"; two open questions ruled in NOTES.md).
+# Self-report (hypothesis): root 72 files / 1159 tests; desktop 51 files / 629 passed + 88 oracle-skipped.
+# Gated on the tree after: the S7g code commit f62a6ec, the merge of main through S7ad (1be2c6c; six conflicts folded: main's Settings
+# screens/types/mock, S7g's LocalSettings variant dropped), the fold e8ff535 (typed rows into S7k's settingsModel, drawn vocabulary,
+# frames re-recorded), then (battery 2) the merge of main through S7d (5c25233; one test-file conflict folded).
+
+battery 1 (01:15-01:19 UTC, on e8ff535's tree before the S7d merge)
+root lint/typecheck/test/build : rc=0  72 files, 1179 tests
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=1  1 failed / 741 passed: replay.test.ts "replays older status ... rejects it as an incomplete served schema" —
+                    the test's premise needs an OLDER recording, and this batch re-recorded status from the merged (S7k-shaped) CLI, so
+                    status() now succeeds. Fixed by pointing that one test at S7f's still-committed frames (the older schema it needs);
+                    assertions unchanged.
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (pixel-neutral: the mock's placement table markup is unchanged)
+
+battery 2 (01:23-01:27 UTC, on 5c25233 = main through S7d merged)
+root lint         : rc=0
+root typecheck    : rc=0
+root test         : rc=1  1 failed / 1214 passed: runner.test.ts "kills a sleeping git alias and its child" — the known load flake
+                    (load 22-26: a Codex run plus this battery); re-run alone: 6/6 passed. Not a regression; nothing changed.
+root build        : rc=0
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=0  53 files, 763 tests passed
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (31.2s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (37.4s)
+real-data proof   : replay.test.ts and replay-screens.test.tsx replay frames/{status,ls-local,ls,ls-project-terum,ls-member-mira,search,
+                    validate-deploy-check}.jsonl recorded from the rebuilt CLI under the fixture team (fixture.sh beside this file; cwd =
+                    the fixture's seed repo): the one placed skill deploy-check (health up-to-date, ledger version 43bf...) is served as
+                    PLACEMENTS [path, deploy-check, Global, <12 hex>, —, up to date] with PLACEMENTS_N 1, PINNED_N 1 and SHARED
+                    [tdd id, source, acme, —]; the Settings ▸ This machine screen renders the row with "up to date" and no alert;
+                    Skill detail's installed/path/version come from the ledger row; index.test.ts drives every health value through the
+                    same replay and the strict row schema rejects an undeclared key or a missing placement.
