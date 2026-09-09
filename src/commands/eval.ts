@@ -15,7 +15,7 @@ import { aggregate, renderReport, runIdFrom, writeRunTree } from '../lib/evals/r
 import { packageVersion } from '../lib/package.js';
 import { parseTriggers, runTriggerEvals, type TriggerSummary } from '../lib/evals/triggers.js';
 import { Prompter } from '../lib/prompt.js';
-import { failure, type Result, success } from '../lib/result.js';
+import { fromError, failure, type Result, success } from '../lib/result.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { type Runner, systemRunner } from '../lib/runner.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
@@ -254,7 +254,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       io.print(`Committed eval receipt ${committedPath}.`);
     }
     return success({ team: teamName, id: record.id, name: record.name, runDir, ccVersion: preflight.value.ccVersion, executionStatus: summary.execution_status, ...(committedPath === undefined ? {} : { receiptPath: committedPath }) });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 /** Product provenance is read-only and never falls back to the team clone's unrelated HEAD. */

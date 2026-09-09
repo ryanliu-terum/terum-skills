@@ -250,20 +250,20 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     inbox: async () => gap('The Inbox'),
     catalog: async () => gap('The Marketplace catalog'),
     roster: async () => gap('The roster'),
-    search: (args: SearchArgs, options?: ReadOptions) => read(run(['search', args.q], cliSearch, (hits): SearchHit[] => hits.map((hit) => ({ kind: 'skill', ref: hit.team === undefined ? hit.name : `${hit.team}/${hit.name}`, name: hit.name, description: hit.description, team: hit.team ?? null, category: hit.category ?? null, author: hit.author ?? null, installs: hit.installs ?? null, latest: hit.latest ?? null, endorsed: hit.endorsed ?? null, unresolved: hit.unresolved ?? null })), []), options).then(result),
+    search: (args: SearchArgs, options?: ReadOptions) => read(run(['search', '--', args.q], cliSearch, (hits): SearchHit[] => hits.map((hit) => ({ kind: 'skill', ref: hit.team === undefined ? hit.name : `${hit.team}/${hit.name}`, name: hit.name, description: hit.description, team: hit.team ?? null, category: hit.category ?? null, author: hit.author ?? null, installs: hit.installs ?? null, latest: hit.latest ?? null, endorsed: hit.endorsed ?? null, unresolved: hit.unresolved ?? null })), []), options).then(result),
     // Long verbs: one process each, questions become dialogs, the CLI's own decline messages come back as `ok:false`.
-    install: (args: InstallArgs) => run([...(args.kind === 'member' && args.member ? ['install', 'member', args.member] : args.kind === 'project' && args.project ? ['install', 'project', args.project] : ['install', args.ref, ...(args.force ? ['--force'] : [])]), ...(args.team ? ['--team', args.team] : [])], cliInstalled, (installed): InstalledResult[] => installed.map((item) => ({ id: item.id, name: item.id, scope: args.scope ?? 'Global' }))),
-    uninstallSkill: (args: UninstallArgs) => run(['uninstall-skill', args.ref, ...(args.team ? ['--team', args.team] : [])], cliUninstalled, (removed): UninstalledResult[] => removed.map((item) => ({ id: item.id, name: item.id }))),
+    install: (args: InstallArgs) => run(['install', ...(!(args.kind === 'member' && args.member || args.kind === 'project' && args.project) && args.force ? ['--force'] : []), ...(args.team ? ['--team', args.team] : []), '--', ...(args.kind === 'member' && args.member ? ['member', args.member] : args.kind === 'project' && args.project ? ['project', args.project] : [args.ref])], cliInstalled, (installed): InstalledResult[] => installed.map((item) => ({ id: item.id, name: item.id, scope: args.scope ?? 'Global' }))),
+    uninstallSkill: (args: UninstallArgs) => run(['uninstall-skill', ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliUninstalled, (removed): UninstalledResult[] => removed.map((item) => ({ id: item.id, name: item.id }))),
     uninstallMachine: () => run(['uninstall'], cliMachine, (value): MachineUninstallResult => ({ removed: value.teams })),
-    connect: (args: ConnectArgs) => run<z.infer<typeof cliConnect>, ConnectOutcome | undefined>(['connect', ...(args.path ? [args.path] : []), ...(args.team ? ['--team', args.team] : []), ...(args.allowPrivileged ? ['--allow-privileged'] : [])], cliConnect, (value) => value as ConnectOutcome | undefined, ['config', 'clone']),
-    publish: (args: PublishArgs) => run(['publish', args.ref, ...(args.team ? ['--team', args.team] : [])], cliPublish, (value): PublishResult => ({ name: value.name, version: value.prUrl ?? value.branch ?? null, changed: value.changed ?? true }), ['clone']),
+    connect: (args: ConnectArgs) => run<z.infer<typeof cliConnect>, ConnectOutcome | undefined>(['connect', ...(args.team ? ['--team', args.team] : []), ...(args.allowPrivileged ? ['--allow-privileged'] : []), ...(args.path ? ['--', args.path] : [])], cliConnect, (value) => value as ConnectOutcome | undefined, ['config', 'clone']),
+    publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, version: value.prUrl ?? value.branch ?? null, changed: value.changed ?? true }), ['clone']),
     // Never `--hook` from the app: its stdout is the reload directive (frame mode refuses it anyway).
     sync: (args: SyncArgs) => run(['sync', ...(args.prune ? ['--prune'] : []), ...(args.team ? ['--team', args.team] : [])], cliSync, (value): SyncResult => ({ placed: value.deferred.length || value.placed ? [] : [], removed: [] }), ['clone', 'placed', 'stamp']),
-    invite: (args: InviteArgs) => run(['invite', ...args.logins, ...(args.team ? ['--team', args.team] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited] }), ['clone']),
+    invite: (args: InviteArgs) => run(['invite', ...(args.team ? ['--team', args.team] : []), ...(args.logins.length ? ['--', ...args.logins] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited] }), ['clone']),
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
-    setup: (args: SetupArgs) => run(['setup', ...(args.target ? [args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role }), ['config', 'clone', 'placed']),
-    eval: (args: EvalArgs) => run(['eval', args.ref, ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : [])], cliEval, (value): EvalResult => ({ name: value.name, receipt: null }), ['clone']),
-    validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', args.ref || args.cwd || '', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : [])], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
+    setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role }), ['config', 'clone', 'placed']),
+    eval: (args: EvalArgs) => run(['eval', ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name: value.name, receipt: null }), ['clone']),
+    validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
     // `update` prints its advice and returns no value; the printed lines are the advice. The seam wants numbers the CLI does not return.
     update: async () => gap('Update advice as structured data'),
     async windowAction(action) { try { const window = getCurrentWindow(); if (action === 'toggle-maximize') await window.toggleMaximize(); else await window.startDragging(); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
@@ -281,10 +281,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
 
 function teamArgv(args: TeamArgs): string[] {
   switch (args.kind) {
-    case 'create': return ['team', 'create', ...(args.name ? [args.name] : []), ...(args.remote ? ['--remote', args.remote] : [])];
-    case 'join': return ['team', 'join', args.remote ?? args.name ?? '', ...(args.remote && args.name ? ['--as', args.name] : [])];
-    case 'remove': return ['team', 'remove', args.handle ?? '', ...(args.team ? ['--team', args.team] : [])];
-    case 'leave': return ['team', 'leave', args.name ?? args.team ?? ''];
+    case 'create': return ['team', 'create', ...(args.remote ? ['--remote', args.remote] : []), ...(args.name ? ['--', args.name] : [])];
+    case 'join': return ['team', 'join', ...(args.remote && args.name ? ['--as', args.name] : []), '--', args.remote ?? args.name ?? ''];
+    case 'remove': return ['team', 'remove', ...(args.team ? ['--team', args.team] : []), '--', args.handle ?? ''];
+    case 'leave': return ['team', 'leave', '--', args.name ?? args.team ?? ''];
   }
 }
 

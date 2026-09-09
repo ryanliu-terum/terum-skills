@@ -10,7 +10,7 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
 import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, shortHash, skillEndorsement } from '../lib/readme.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
 
@@ -48,7 +48,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     for (const skill of skills) io.print(format(skill));
     io.print(`Local skills: ${invocation(args.form, 'ls --local')}`);
     return success({ roster, skills, projects, problems });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awaited<ReturnType<typeof readPeople>>, clone: string, runner: Runner, io: Prompter, teamName: string, problems: { source: string; message: string }[]): Promise<LsSkill[]> {

@@ -1,3 +1,4 @@
+import { fromError } from './result.js';
 import { invocation, type InvocationForm } from './invocation.js';
 import type { Execute } from '../cli.js';
 import type { SyncResult } from '../commands/sync.js';
@@ -29,15 +30,17 @@ export function createExecute(sink: ExecuteSink): Execute {
       if (!outcome.ok) {
         sink.stderr(outcome.error);
         sink.setExitCode(1);
-        sink.result?.({ verb: meta.verb, ok: false, error: outcome.error, value: outcome.value, exitCode: 1 });
+        sink.result?.({ verb: meta.verb, ok: false, error: outcome.error, ...(outcome.cancelled ? { cancelled: true } : {}), value: outcome.value, exitCode: 1 });
       } else {
         sink.result?.({ verb: meta.verb, ok: true, value: outcome.value, exitCode: 0 });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const outcome = fromError(error);
+      if (outcome.ok) return;
+      const message = outcome.error;
       sink.stderr(message);
       sink.setExitCode(1);
-      sink.result?.({ verb: meta.verb, ok: false, error: message, exitCode: 1 });
+      sink.result?.({ verb: meta.verb, ok: false, error: message, ...(outcome.cancelled ? { cancelled: true } : {}), exitCode: 1 });
     } finally {
       if (meta.notices) {
         try { await sink.afterVerb?.(); } catch { /* A notice must never replace the verb outcome. */ }

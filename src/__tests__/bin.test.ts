@@ -41,6 +41,49 @@ describe('the built bin (dist/index.js)', () => {
   });
   afterAll(async () => { await rm(out, { recursive: true, force: true }); });
 
+  function framedRun(args: string[]) {
+    const result = run(process.execPath, [bin, ...args], { cwd: out, env });
+    result.child.stdin?.end();
+    return result;
+  }
+
+  it.each([
+    ['install', '-x'], ['install', '--declined'], ['install'], ['unknown'], [], ['team'], ['sync', '--', '--hook'],
+  ])('reports exactly one framed usage failure for %j', async (...args) => {
+    const failed = await framedRun(['--frames', ...args]).then(
+      () => { throw new Error('expected failure'); },
+      (error: { code: number; stdout: string; stderr: string }) => error,
+    );
+    expect(failed.code).toBe(1);
+    const frames = failed.stdout.trim().split('\n').map(line => JSON.parse(line));
+    expect(frames[0].t).toBe('hello');
+    expect(frames.filter(frame => frame.t === 'result')).toHaveLength(1);
+    expect(frames.at(-1)).toMatchObject({ t: 'result', ok: false, exitCode: 1 });
+    expect(frames.at(-1)).not.toHaveProperty('declined');
+    expect(frames.at(-1).error).not.toBe('(outputHelp)');
+  });
+
+  it('scans frames and hook only before the separator, removing every frames flag in that prefix', async () => {
+    const framed = await framedRun(['--frames', 'search', '--frames', '--', '--hook']);
+    expect(framed.stdout.trim().split('\n').map(line => JSON.parse(line)).at(-1)).toEqual({ t: 'result', verb: 'search', ok: true, exitCode: 0, value: [] });
+    const plain = await run(process.execPath, [bin, 'search', '--', '--frames'], { cwd: out, env });
+    const ordinary = await run(process.execPath, [bin, 'search', '--', '--hook'], { cwd: out, env });
+    expect(plain.stdout).toBe(ordinary.stdout);
+    expect(plain.stdout).not.toContain('"t":');
+    const hook = await run(process.execPath, [bin, 'sync', '--hook'], { cwd: out, env });
+    expect(hook.stdout).not.toContain('"t":');
+  });
+
+  it('keeps successful framed version and help requests as commander text without a result', async () => {
+    const plain = await run(process.execPath, [bin, '--version'], { cwd: out, env });
+    const framed = await framedRun(['--frames', '--version']);
+    expect(framed.stdout.split('\n').slice(1).join('\n')).toBe(plain.stdout);
+    expect(framed.stdout).not.toContain('"t":"result"');
+    const help = await framedRun(['--frames', '--help']);
+    expect(help.stdout).toContain('Usage:');
+    expect(help.stdout).not.toContain('"t":"result"');
+  });
+
   it('the build bundles the canonical /terum-skills skill where the built wrapper module resolves it, byte for byte, marker intact', async () => {
     const bundle = await run(process.execPath, [resolve(root, 'scripts', 'bundle-skill.mjs'), '--out', resolve(out, 'dist')], { cwd: root });
     const bundled = resolve(out, 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');

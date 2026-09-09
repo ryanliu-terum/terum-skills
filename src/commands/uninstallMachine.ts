@@ -8,7 +8,7 @@ import { defaultWrapperOptions, inspectWrapper, removeWrapper, wrapperDestinatio
 import { Launch, packageRemovalLines } from '../lib/launch.js';
 import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, cancelled, failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { teardownTeam } from './leave.js';
 
@@ -64,7 +64,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     if (shared.length) io.print(`Connected-skill sources stay where they are: ${shared.map(({ source }) => `${basename(source)}: ${source}`).join(', ')}`);
     io.print('Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
     io.print('The package itself is not removed by this command; the last line tells you how.');
-    if (!(await io.confirm('Remove terum-skills from this machine?'))) return failure('Uninstall was cancelled.');
+    if (!(await io.confirm('Remove terum-skills from this machine?'))) return cancelled('Uninstall was cancelled.');
 
     await mkdir(backups, { recursive: true, mode: 0o700 });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -151,7 +151,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     io.print('Machine cleanup complete. The package itself has not been removed; finish with the package manager that installed it.');
     for (const line of packageRemovalLines(args.launch)) io.print(line);
     return success({ teams, removedPlacements, hookRemoved, wrapperRemoved, configRemoved, kept, record, launch: args.launch ?? null });
-  } catch (error) { return failure(message(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }

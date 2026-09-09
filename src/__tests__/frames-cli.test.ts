@@ -4,7 +4,7 @@ import { buildProgram, type CliVerbs } from '../cli.js';
 import { createExecute } from '../lib/execute.js';
 import { FRAME_VERBS, frameChannel, type Frame, type ResultFrame } from '../lib/frames.js';
 import type { Prompter } from '../lib/prompt.js';
-import { failure, success } from '../lib/result.js';
+import { cancelled, success } from '../lib/result.js';
 
 /**
  * Every public verb, driven through commander with the frame channel in place of the terminal: the
@@ -72,7 +72,7 @@ describe('frame mode through commander — every public verb', () => {
   }
 
   it('a failing Result is a result frame with ok false, exit 1, the error and (for a decline) the declined flag; stderr still gets the one line', async () => {
-    const declining = (async () => failure('Connect was declined.')) as never;
+    const declining = (async () => cancelled('Connect was declined.')) as never;
     const h = harness({ ...verbs, connect: declining });
     await h.run(['connect']);
     expect(h.frames).toEqual([{ t: 'result', verb: 'connect', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true }]);

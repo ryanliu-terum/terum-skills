@@ -1,7 +1,7 @@
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { run } from '../uninstall.js';
+import { run, ledgerScopes } from '../uninstall.js';
 import { run as install } from '../install.js';
 import { run as sync } from '../sync.js';
 import { createConfigStore } from '../../lib/config.js';
@@ -260,4 +260,20 @@ describe('uninstall (§6 pending)', () => {
     expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).declined).not.toContain(id);
     expect((await store.read()).placements).toEqual({});
   });
+});
+
+it('unions people scopes and matching ledger scopes without borrowing another team or skill', async () => {
+  const store = createConfigStore(await temporaryDirectory());
+  const id = '11111111-1111-4111-8111-111111111111';
+  await store.update(config => {
+    for (const [name, team, skillId, project] of [
+      ['mine', 'acme', id, 'local'], ['other-team', 'other', id, 'foreign'],
+      ['other-skill', 'acme', '22222222-2222-4222-8222-222222222222', 'unrelated'],
+    ]) config.placements[join(store.root, name!)] = { id: skillId!, team: team!, version: null, scope: { kind: 'project', project: project! }, placed_at: '2026-09-08', fingerprint: 'fixture' };
+  });
+  const before = await store.read();
+  expect(await ledgerScopes(store, 'acme', id, [{ kind: 'global' }, { kind: 'project', project: 'people-only' }, { kind: 'project', project: 'local' }])).toEqual([
+    { kind: 'global' }, { kind: 'project', project: 'people-only' }, { kind: 'project', project: 'local' },
+  ]);
+  expect(await store.read()).toEqual(before);
 });

@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { Prompter } from '../lib/prompt.js';
 import { applyReadme, generateReadme, inlineText, readReadmeData } from '../lib/readme.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { parseJson, teamSchema } from '../lib/schema.js';
 
@@ -35,5 +35,5 @@ export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ chan
     const next = applyReadme(existing, generateReadme(data));
     if (next !== existing) await writeFile(path, next, 'utf8');
     return success({ changed: next !== existing });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }

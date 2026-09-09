@@ -7,7 +7,7 @@ import { moveDirectory } from '../lib/placer.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, CancelledError, Result, success } from '../lib/result.js';
 import { parseOrExplain, teamNameSchema } from '../lib/schema.js';
 import { withCloneLock } from '../lib/teamRepo.js';
 import { removePlacements } from './uninstall.js';
@@ -35,7 +35,7 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
     if (pending.length) io.print(`${pending.length} pending operation(s) will be removed.`);
     const remote = stripRemoteCredentials(binding.remote);
     if (!(await io.confirm(`Leave ${name}? This removes ${matching.length} placed skill(s) and the local clone; your membership in ${remote} is unchanged.`))) {
-      throw new Error('Leave was cancelled.');
+      throw new CancelledError('Leave was cancelled.');
     }
 
     const { removedPaths, cloneRemoved, kept } = await teardownTeam(store, name, io, args.runner);
@@ -49,7 +49,7 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
     const removed = removedPaths.length;
     io.print(`Left ${name}. You are still an active member of ${remote}; an admin archives membership with team remove ${binding.handle ?? '<handle>'}.`);
     return success({ team: name, remote, handle: binding.handle, removed, cloneRemoved, kept });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 

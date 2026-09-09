@@ -1,0 +1,144 @@
+{
+  "status": "partial",
+  "summary": "Implemented typed declines, terminal usage-error frames, separator-safe mode detection, safe adapter argv ordering, and the ledgerScopes export. All final gates passed, including 1,167 CLI tests and 558 desktop tests with 88 design-dependent skips. Cancellation closes the workflow dialog quietly, but displaying its retained CLI message awaits a specified location.",
+  "filesChanged": [
+    {"path":"src/lib/frames.ts","change":"modified","why":"Typed decline frames, commander classification, and attemptedVerb."},
+    {"path":"src/lib/result.ts","change":"modified","why":"Added cancelled, CancelledError, and fromError."},
+    {"path":"src/lib/execute.ts","change":"modified","why":"Preserve typed cancellation through execution."},
+    {"path":"src/index.ts","change":"modified","why":"Emit usage-error results once and stop mode scans at --."},
+    {"path":"src/commands/connect.ts","change":"modified","why":"Type declines and preserve cancellation through the existing error wrapper."},
+    {"path":"src/commands/install.ts","change":"modified","why":"Type both consent declines."},
+    {"path":"src/commands/publish.ts","change":"modified","why":"Type publish cancellation."},
+    {"path":"src/commands/leave.ts","change":"modified","why":"Type leave cancellation."},
+    {"path":"src/commands/team.ts","change":"modified","why":"Type removal and invitation declines."},
+    {"path":"src/commands/uninstallMachine.ts","change":"modified","why":"Return typed uninstall cancellation."},
+    {"path":"src/commands/uninstall.ts","change":"modified","why":"Export unchanged ledgerScopes and adopt fromError."},
+    {"path":"src/commands/login.ts","change":"modified","why":"Adopt the shared error conversion helper."},
+    {"path":"src/commands/eval.ts","change":"modified","why":"Adopt the shared error conversion helper."},
+    {"path":"src/commands/search.ts","change":"modified","why":"Adopt the shared error conversion helper."},
+    {"path":"src/commands/validate.ts","change":"modified","why":"Adopt the shared error conversion helper."},
+    {"path":"src/commands/ls.ts","change":"modified","why":"Adopt the shared error conversion helper."},
+    {"path":"src/commands/invite.ts","change":"modified","why":"Adopt the shared error conversion helper."},
+    {"path":"src/commands/receiptCheck.ts","change":"modified","why":"Adopt the shared error conversion helper."},
+    {"path":"src/commands/readme.ts","change":"modified","why":"Adopt the shared error conversion helper."},
+    {"path":"src/commands/update.ts","change":"modified","why":"Adopt the shared error conversion helper."},
+    {"path":"src/lib/__tests__/result.test.ts","change":"added","why":"Verify typed cancellation and ordinary failure conversion."},
+    {"path":"src/lib/__tests__/frames.test.ts","change":"modified","why":"Pin the feature map and test all nine decline messages and attemptedVerb."},
+    {"path":"src/lib/__tests__/execute.test.ts","change":"modified","why":"Verify cancellation propagation without changing stderr or exit codes."},
+    {"path":"src/__tests__/bin.test.ts","change":"modified","why":"Cover commander errors, separators, help, and version."},
+    {"path":"src/__tests__/frames-cli.test.ts","change":"modified","why":"Use a typed decline in the integration fixture."},
+    {"path":"src/commands/__tests__/connect.test.ts","change":"modified","why":"Assert typed connect and forget declines."},
+    {"path":"src/commands/__tests__/uninstall.test.ts","change":"modified","why":"Verify scope union, deduplication, and team/skill filtering."},
+    {"path":"src/commands/__tests__/uninstallMachine.test.ts","change":"modified","why":"Distinguish typed decline from closed input."},
+    {"path":"src/lib/__tests__/invocation-catalog.ts","change":"modified","why":"Catalog the exact changed uninstall literal and required verb fallback."},
+    {"path":"docs/frame-protocol.md","change":"modified","why":"Document typed declines, usage-error results, and separator boundaries."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Add optional cancellation and decline fields to the seam."},
+    {"path":"desktop/src/backend/tauri/run.ts","change":"modified","why":"Map wire declines to both seam outcomes."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Order argv as verbs, flags, separator, and positionals."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Type mock declines and preserve prune's success-path behavior."},
+    {"path":"desktop/src/backend/mock/run.ts","change":"modified","why":"Expose typed mock declines in terminal frames."},
+    {"path":"desktop/src/components/domain/useWorkflow.ts","change":"modified","why":"Close cancelled dialogs without errors and retain the CLI line."},
+    {"path":"desktop/src/components/domain/useWorkflow.test.tsx","change":"added","why":"Verify quiet cancellation, retained message, and ordinary failure handling."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Verify every argv builder and leading-dash operands."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"Verify typed decline propagation and updated argv contracts."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","change":"modified","why":"Replay rebuilt S7d recordings, including usage errors and declines."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"Verify typed mock declines and successful declined prune."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","change":"modified","why":"Assert machine-removal decline leaves no error alert."},
+    {"path":".planning/codex-runs/m7-S7d/fixture.sh","change":"added","why":"Preserve the scratch-fixture setup with this worktree's CLI path."},
+    {"path":".planning/codex-runs/m7-S7d/NOTES.md","change":"added","why":"Record PR notes, scope limitation, unresolved display question, and gate evidence."},
+    {"path":".planning/codex-runs/m7-S7d/frames/status.jsonl","change":"modified","why":"Refresh recording from the rebuilt CLI."},
+    {"path":".planning/codex-runs/m7-S7d/frames/ls.jsonl","change":"modified","why":"Refresh recording from the rebuilt CLI."},
+    {"path":".planning/codex-runs/m7-S7d/frames/ls--local.jsonl","change":"modified","why":"Refresh recording from the rebuilt CLI."},
+    {"path":".planning/codex-runs/m7-S7d/frames/ls-member-mira.jsonl","change":"modified","why":"Refresh recording from the rebuilt CLI."},
+    {"path":".planning/codex-runs/m7-S7d/frames/ls-project-terum.jsonl","change":"modified","why":"Refresh recording from the rebuilt CLI."},
+    {"path":".planning/codex-runs/m7-S7d/frames/search.jsonl","change":"modified","why":"Refresh recording from the rebuilt CLI."},
+    {"path":".planning/codex-runs/m7-S7d/frames/usage-error.jsonl","change":"added","why":"Prove install -x emits one failed result without declined."},
+    {"path":".planning/codex-runs/m7-S7d/frames/decline.jsonl","change":"added","why":"Prove connect answered false emits declined:true."}
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop exited 0.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop exited 0. Root build also exited 0.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": true,
+      "output": "Final CLI: 73 files, 1167 passed, 0 failed. Final desktop: 46 files, 558 passed, 88 skipped, 0 failed. Earlier failures and their resolutions are documented in NOTES.md.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [
+    {
+      "question": "Where should the CLI cancellation line appear after the popup closes?",
+      "specSection": "§1 RM-09, app half",
+      "conservativeChoice": "Close the URL dialog, retain the exact line in useWorkflow.notice, and render no error. No unspecified notification layout was added."
+    },
+    {
+      "question": "BM-06 excludes commander.help by code but explicitly requires an exit-1 commander.help result.",
+      "specSection": "§2 BM-06",
+      "conservativeChoice": "Follow the explicit exit-code correction: only exit-0 help/version are exempt."
+    },
+    {
+      "question": "GAPS.md's typed-decline clause now needs maintainer reconciliation.",
+      "specSection": "§5 CP-35",
+      "conservativeChoice": "Recorded that the typed-decline clause is closed; left GAPS.md untouched."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "The retained neutral cancellation message is not rendered.",
+      "why": "The spec supplies no display location, and the app has no shared neutral notification surface. Clarification remains pending."
+    },
+    {
+      "what": "Final test runs used four CLI workers and one desktop worker.",
+      "why": "Unrestricted runs encountered resource contention and UI timeouts. Assertions and timeouts were not relaxed."
+    }
+  ],
+  "invariantsTouched": [
+    {
+      "number": 1,
+      "howSatisfied": "Native mapping stays inside the backend seam; useWorkflow consumes only seam APIs."
+    },
+    {
+      "number": 2,
+      "howSatisfied": "No capability values or served surfaces changed; all FRAME_FEATURES values remain false."
+    },
+    {
+      "number": 5,
+      "howSatisfied": "Existing Remove dialog geometry and corrected copy remain unchanged; ledgerScopes preserves provenance filtering."
+    },
+    {
+      "number": 7,
+      "howSatisfied": "Added regressions and updated assertions only to the specified contracts; declared every existing test change."
+    },
+    {
+      "number": 8,
+      "howSatisfied": "Ran required gates, verified writes, and used no repository git commands, network, installs, commits, or Playwright."
+    }
+  ],
+  "testsModified": [
+    {"path":"src/lib/__tests__/frames.test.ts","whatChanged":"Replaced the all-false invariant with the full map snapshot; replaced regex tests with typed-decline tests; added attemptedVerb cases.","justification":"Explicit D13 and RM-09/BM-06 requirements."},
+    {"path":"src/lib/__tests__/execute.test.ts","whatChanged":"Added cancellation propagation tests.","justification":"Verify typed results and thrown cancellations preserve stderr and exit behavior."},
+    {"path":"src/__tests__/bin.test.ts","whatChanged":"Added usage-error, separator, help, and version tests with closed stdin.","justification":"BM-06/BM-07 regression coverage."},
+    {"path":"src/__tests__/frames-cli.test.ts","whatChanged":"Changed the declining stub from failure() to cancelled().","justification":"The typed field now authorizes the unchanged declined-frame assertion."},
+    {"path":"src/commands/__tests__/connect.test.ts","whatChanged":"Added cancelled:true to connect and forget expectations.","justification":"Pin typed declines through the existing error wrapper."},
+    {"path":"src/commands/__tests__/uninstall.test.ts","whatChanged":"Added direct ledgerScopes behavior coverage.","justification":"Verify the exported helper retains its union and filtering behavior."},
+    {"path":"src/commands/__tests__/uninstallMachine.test.ts","whatChanged":"Expect cancelled:true only for an explicit decline, capturing the case before answers are consumed.","justification":"Closed input remains an ordinary failure; no-write assertions remain intact."},
+    {"path":"src/lib/__tests__/invocation-catalog.ts","whatChanged":"Updated one exact literal and added the exact protocol fallback literal.","justification":"Required source changes; the tripwire implementation and matching strictness remain unchanged."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Updated argv expectations and added missing builder variants.","justification":"AD-17 requires flags before separator-protected positionals."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","whatChanged":"Updated decline/argv expectations and added propagation cases.","justification":"Assert the new wire-to-seam contract."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","whatChanged":"Switched to rebuilt S7d recordings and added ls, usage-error, and decline replay coverage.","justification":"Required real-data proof."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","whatChanged":"Updated typed decline expectations and tested declined prune separately as success.","justification":"Keep mock and CLI semantics aligned."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","whatChanged":"Wait for completion and assert no error alert after declining removal.","justification":"Cancellation must leave the screen intact without error styling."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Retaining the CLI cancellation line in notice state may not satisfy the intended meaning of “with the CLI's line”; its visible presentation remains unresolved."
+}
