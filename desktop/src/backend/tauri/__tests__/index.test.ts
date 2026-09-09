@@ -98,8 +98,8 @@ it.each([true, false])('maps every search field including its real description (
 it('serves status, settings, library, skill, update, roster and catalog while the other three surfaces stay typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true });
-  for (const result of await Promise.all([b.onboarding(), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox()])) {
+  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true });
+  for (const result of await Promise.all([b.onboarding(), b.inbox()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }
   expect(f.spawns).toHaveLength(0);
@@ -244,7 +244,7 @@ it.each(['Global','ops','installed'])('maps the %s library from real counts and 
 it('maps the detail body, grants and all install records without fabricating missing values',async()=>{
   const f=inventoryBridge();const result=await createTauriBackend(f.bridge).skill({ref:'acme/a'});
   expect(result).toMatchObject({ok:true,value:{desc:'Live description',skillMd:{frontmatter:'',body:[],markdown:'# Live body\n'},favorites:null,lines:null,receipt:null,summary:null,wlt:null,evalEstimate:null,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},hygiene:[],hygieneCaption:'Hygiene checks · pass on connect',grants:['Bash','Read'],grants_approved:'',history:[],activity:[],files:['SKILL.md'],used_by:['MC'],users:[['mira','MC','Global · since 2026-08-01'],['mira','MC','ops · since 2026-08-02']],path:'/home/.claude/skills/a',repo:'https://github.com/acme/team'}});
-  expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--team','acme'],['ls','--local'],['validate','--team','acme','--','a']]);
+  expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--team','acme'],['ls','--local'],['validate','--team','acme','--','a'],['eval-report','--team','acme','--','a']]);
 });
 it('retains null grants/body/date and marks unresolved skills broken, with a failed validation caption',async()=>{
   const f=inventoryBridge({row:{grants:null,grantsHash:null,body:null,updated:'—',unresolved:true} as unknown as Partial<typeof lsRow>,validation:{name:'a',findings:2,warnings:0},validateOk:false});

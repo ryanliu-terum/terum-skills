@@ -130,3 +130,6 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 
 .prompt-field {width:100%;height:30px;padding:0 8px;background:var(--tk-bg2);border:1px solid var(--tk-border2);border-radius:6px;color:var(--tk-text1);font-size:13px;}
 .prompt-actions {display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+
+.eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); }
+.workflow-lines { font-size: 12px; max-height: 220px; overflow: auto; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; }

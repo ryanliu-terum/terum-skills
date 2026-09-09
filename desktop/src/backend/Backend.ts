@@ -1,4 +1,4 @@
-import type { LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, Scope, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, Scope, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   features(): Promise<Features>;
@@ -15,6 +15,7 @@ export interface Backend {
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;
   library(q: { scope: Scope; team?: string }, options?: ReadOptions): Promise<Result<Library>>;
   skill(q: { ref: string; team?: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
+  evalReport(q: { ref: string; team?: string }, options?: ReadOptions): Promise<Result<EvalReportModel>>;
   receipts(q: { skillId: string; version: string }, options?: ReadOptions): Promise<Result<Receipt | null>>;
   inbox(q?: undefined, options?: ReadOptions): Promise<Result<InboxItem[]>>;
   catalog(q?: { q?: string }, options?: ReadOptions): Promise<Result<Catalog>>;

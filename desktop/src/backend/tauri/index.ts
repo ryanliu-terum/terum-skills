@@ -12,6 +12,7 @@ import type { Backend } from '../Backend';
 import type { IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
+import { cliEvalReport, mapEvalReport } from './eval-report';
 import { abbreviateHome } from '../paths';
 
 /**
@@ -36,7 +37,7 @@ const cliSync = z.object({ placed: z.number(), deferred: z.array(z.string()) }).
 const cliInvite = z.object({ team: z.string(), invited: z.array(z.string()) }).passthrough();
 const cliTeam = z.object({ team: z.string() }).passthrough();
 const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(), steps: z.partialRecord(z.enum(SETUP_STEP_KEYS), z.enum(['done','skipped','printed'])).nullish().transform(value => value ?? null) });
-const cliEval = z.object({ name: z.string() }).passthrough();
+const cliEval = z.object({ name:z.string(),runDir:z.string(),executionStatus:z.enum(['complete','partial','failed']),commit:z.union([z.object({ok:z.literal(true),receiptPath:z.string()}),z.object({ok:z.literal(false),error:z.string()})]).nullable() }).passthrough();
 const cliValidate = z.object({ name: z.string(), findings: z.number(), warnings: z.number() });
 const cliSearch = z.array(z.object({ team: z.string().optional(), endorsed: z.string().optional(), id: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), unresolved: z.boolean(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string() }));
 
@@ -69,7 +70,7 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
   const installers = row.installedBy;
   return { ...card, team: team.team, installScopes: [], projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: null, skillRef: `${team.team}/${row.name}`, root: 'Global', desc_long: row.description, files: ['SKILL.md'], size_bytes: '—', version: placed?.placement?.version?.slice(0, 12) ?? '—', version_full: placed?.placement?.version ?? null, scope: placed?.scope === 'global' ? 'Global' : placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
     used_by: [...new Map(installers.map(person => [person.handle, initials(person.displayName)])).values()], users: installers.map(person => [person.handle, initials(person.displayName), `${person.scope.kind === 'global' ? 'Global' : person.scope.project} · since ${person.since}`]),
-    author: { name, handle: '', role: '', initials: initials(name) }, repo: team.repository ?? null, path: placed?.path ?? `skills/${row.name}`, grants_approved: '', receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: validation.value === undefined ? null : `Hygiene checks · ${validation.ok && validation.value.findings === 0 ? 'pass' : 'fail'} on connect`,
+    author: { name, handle: '', role: '', initials: initials(name) }, repo: team.repository ?? null, path: placed?.path ?? `skills/${row.name}`, grants_approved: '', versions:null,latestState:'none',invalidReceiptFile:null,localRuns:[],evalReportError:null, receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: validation.value === undefined ? null : `Hygiene checks · ${validation.ok && validation.value.findings === 0 ? 'pass' : 'fail'} on connect`,
     skillMd: { frontmatter: '', body: [], markdown: row.body ?? null }, evalEstimate: null, evalEstimateText: '', evalEstimateTip: '', evalCommand: `npx -y terum-skills@latest eval ${row.name}`, shareCommand: `npx -y terum-skills@latest install ${team.team}/${row.name}`, incumbentLift: null, reportNumbers: null, scoreFractions: { routesExpected: null, roi: null, quality: null }, method: '',
   };
 }
@@ -207,7 +208,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const cwd = () => backend.prefs.get<string>('workspace', '') || undefined;
 
   function run<TIn, TOut>(argv: readonly string[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut, touches: ChangeSource[] = ['config', 'placed']): Run<TOut> {
-    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), onHello, map: (value) => map(schema.parse(value)), onSettled: (result) => { if (argv[0] === 'setup' || argv[0] === 'team') notify('config', 'clone', 'placed'); else if (result.ok) notify(...touches); } });
+    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), onHello, map: (value) => map(schema.parse(value)), onSettled: (result) => { if (argv[0] === 'setup' || argv[0] === 'team') notify('config', 'clone', 'placed'); else if (result.ok || result.value !== undefined) notify(...touches); } });
     return {
       done: job.done.then(result),
       answer: (id, value) => job.answer(id, value),
@@ -261,6 +262,11 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     const inventory = await read(run(['ls', '--team', team.team], cliLs, value => value, []), options);
     return inventory.ok ? { ok: true as const, value: { team, inventory: inventory.value } } : inventory;
   }
+  async function readEvalReport(ref:string,team:string|undefined,options?:ReadOptions) {
+    const lines:string[]=[];
+    const report=await read(run(['eval-report',...(team?['--team',team]:[]),'--',ref],cliEvalReport,value=>value,[]),options,lines);
+    return {report,lines};
+  }
   const backend: Backend = {
     async setWindowBackground(color) { try { await getCurrentWindow().setBackgroundColor(color); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async launchContext() {
@@ -287,10 +293,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     },
     async capabilities(): Promise<Capabilities> {
       const [platform, features] = await Promise.all([bridge.hostPlatform().catch(() => 'unknown'), backend.features()]);
-      return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, openInEditor: true, clipboard: true };
+      return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, evalCommitChoice: features.runEvalInApp, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
-      return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true };
+      return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true };
     },
     // Status and Settings are offline reads; the remaining surfaces retain their explicit gaps.
     status: (_, options) => readModels(options, (value, local, platform) => statusModel(value, local, platform)),
@@ -327,9 +333,19 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const validation = await backend.validate({ ref: row.name, team: selected.value.team }, options);
       // A hygiene failure has a parsed value; an unreadable/cancelled validation is a read failure.
       if (!validation.ok && validation.value === undefined) return fail(validation.error);
-      return { ok: true, value: inventoryDetail(row, local.value, selected.value, validation, inventory.value) };
+      const detail = inventoryDetail(row, local.value, selected.value, validation, inventory.value);
+      const report = await backend.evalReport({ref:row.name,team:selected.value.team},options);
+      return {ok:true,value:report.ok?{...detail,...report.value}:{...detail,evalReportError:report.error}};
     },
-    receipts: async () => gap('Eval receipts'),
+    async evalReport({ref,team},options) {
+      const {report,lines}=await readEvalReport(ref,team,options);
+      return report.ok?{ok:true,value:mapEvalReport(report.value,lines)}:{ok:false,error:report.error};
+    },
+    async receipts({skillId,version},options) {
+      const {report,lines}=await readEvalReport(skillId,undefined,options);
+      if(!report.ok)return {ok:false,error:report.error};
+      return {ok:true,value:report.value.latestState==='ok'&&report.value.latest?.version===version?mapEvalReport(report.value,lines).receipt:null};
+    },
     inbox: async () => gap('The Inbox'),
     async roster(_, options) {
       const data = await peopleInventory(options);
@@ -372,7 +388,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     invite: (args: InviteArgs) => run(['invite', ...(args.team ? ['--team', args.team] : []), ...(args.logins.length ? ['--', ...args.logins] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited] }), ['clone']),
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
-    eval: (args: EvalArgs) => run(['eval', ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name: value.name, receipt: null }), ['clone']),
+    eval: (args: EvalArgs) => run(['eval', ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,commit:value.commit }), ['clone']),
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
     update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
     diagnostics: () => run(['status'], z.unknown(), () => undefined, []),
@@ -399,12 +415,11 @@ function teamArgv(args: TeamArgs): string[] {
 }
 
 /** Drive a read-only run without answering questions, retaining diagnostics and partial values. */
-export async function read<T>(job: Run<T>, options?: ReadOptions): Promise<Result<T>> {
+export async function read<T>(job: Run<T>, options?: ReadOptions, lines: string[] = []): Promise<Result<T>> {
   const signal = options?.signal;
   const cancel = () => { void job.cancel(); };
   signal?.addEventListener('abort', cancel, { once: true });
   if (signal?.aborted) cancel();
-  const lines: string[] = [];
   try {
     for await (const frame of job.frames) {
       if (frame.t === 'print') lines.push(frame.line);

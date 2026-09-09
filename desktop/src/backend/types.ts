@@ -7,7 +7,7 @@ export type AskKind='confirm'|'text'|'select';
 export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string}
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
-export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
+export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;evalCommitChoice:boolean;openInEditor:boolean;clipboard:boolean}
 export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
@@ -23,7 +23,12 @@ export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
 export interface ReportNumbers {holes:number;nRounds:number;triggerTotal:number;precisionObserved?:string}
 export interface EvalEstimate {cases:number;k:number;arms:number;runs:number;minutes:number;dollars:number;model:string}
-export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'> & SkillCard & {repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null;quality:[number,number]|null};method:string};
+export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'> & SkillCard & {repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null;local?:true})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null;quality:[number,number]|null};method:string;
+ versions:{placed:string|null;teamCurrent:string|null;evaluated:string|null}|null;
+ latestState:'ok'|'none'|'invalid';invalidReceiptFile:string|null;evalReportError:string|null;
+ localRuns:{runId:string;runDir:string;executionStatus:'complete'|'partial'|'failed'|'unknown';committed:boolean;receipt:Receipt|null;summary:ReceiptSummary|null}[];
+};
+export type EvalReportModel=Pick<SkillDetail,'receipt'|'summary'|'incumbentLift'|'reportNumbers'|'history'|'versions'|'latestState'|'invalidReceiptFile'|'localRuns'|'evalEstimate'|'evalEstimateText'|'evalEstimateTip'|'scoreFractions'|'wlt'>;
 export type InboxKind='share'|'update'|'alert'|'eval'|'review'|'author'|'team';
 export type InboxItem=Omit<Design['INBOX'][number],'kind'> & {id:string;skillRef:string;kind:InboxKind;summary:ReceiptSummary|null;incumbentLift:[number,string]|null;reportNumbers?:ReportNumbers};
 export type Person=Omit<Design['ROSTER'][number], 'followers'> & {followers:number|null;projects:string[];declined:string[];organization:string|null;lastPublish:string;skills:string[];adoption:number;publishLine:string;teamsLine:string;buckets:[string,string[]][];placeNote:string;onDisk:[number,number]};
@@ -77,7 +82,7 @@ export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','actions'
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
 export interface SetupResult {team:string;role:'creator'|'joiner';connected?:ConnectOutcome;steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'>>|null}
 export interface EvalArgs {team?:string;ref:string;commit?:boolean;cases?:number}
-export interface EvalResult {name:string;receipt:Receipt|null}
+export interface EvalResult {name:string;runDir:string;executionStatus:'complete'|'partial'|'failed';commit:{ok:true;receiptPath:string}|{ok:false;error:string}|null}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
 export interface ValidateResult {name:string;findings:number;warnings:number}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
