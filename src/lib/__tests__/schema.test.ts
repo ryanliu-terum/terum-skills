@@ -75,3 +75,11 @@ it.each(['\n','\r\n'])('returns the exact body after the closing frontmatter, in
   expect(parseSkillFrontmatter(source.slice(0, source.indexOf(newline+'# Title')).trimEnd())).toMatchObject({ ok: true, body: '' });
   expect(parseSkillFrontmatter('no frontmatter')).not.toHaveProperty('body');
 });
+
+it('keeps optional people metadata absent on round trip and validates present values', () => {
+  const person = { handle: 'me', display_name: 'Me', email: 'me@example.com', github: '', bio: '', installed: [], declined: [] };
+  expect(JSON.parse(JSON.stringify(personSchema.parse(person)))).toEqual(person);
+  expect(personSchema.parse({ ...person, role: 'Platform', projects: ['terum'] })).toMatchObject({ role: 'Platform', projects: ['terum'] });
+  expect(personSchema.safeParse({ ...person, role: 'x'.repeat(33) }).success).toBe(false);
+  expect(personSchema.safeParse({ ...person, projects: [''] }).success).toBe(false);
+});

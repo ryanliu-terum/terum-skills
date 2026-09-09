@@ -404,3 +404,9 @@ it.each([false, true])('preserves invitation handling without gh authentication 
   }
   expect(runner.calls.some((call) => call.args.includes('setup-git') || call.args.includes('ls-remote'))).toBe(false);
 });
+
+it('reclaim preserves owner role and projects while refreshing identity', async () => {
+  const { fixture, store, runner } = await setup({ people: { me: person('me', { role: 'Platform', projects: ['terum'], bio: 'Owner bio' }) } });
+  expect(await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()))).toMatchObject({ ok: true });
+  expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare))).toMatchObject({ role: 'Platform', projects: ['terum'], bio: 'Owner bio' });
+});

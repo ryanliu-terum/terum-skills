@@ -7,7 +7,7 @@ import { canonicalSkillDigest } from './skills.js';
  * nothing else is writable. It runs inside the safeWrite loop against the tree the mutation
  * actually produced; teamRepo additionally proves the staged diff equals that tree's changes.
  */
-export type GuardAction = 'connect' | 'sync' | 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'eval';
+export type GuardAction = 'connect' | 'sync' | 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'eval' | 'profile' | 'decline';
 
 export interface GuardContext {
   action: GuardAction;
@@ -33,7 +33,7 @@ export class GuardError extends Error {
   constructor(message: string) { super(message); this.name = 'GuardError'; }
 }
 
-const PEOPLE_ACTIONS: readonly GuardAction[] = ['join', 'install', 'uninstall', 'sync'];
+const PEOPLE_ACTIONS: readonly GuardAction[] = ['join', 'install', 'uninstall', 'sync', 'profile', 'decline'];
 const SKILL_ACTIONS: readonly GuardAction[] = ['connect', 'sync'];
 // Skill uuids are case-tolerant (z.uuid() admits both; callers pass metadata.id verbatim), but the
 // version segment is the receipt schema's 40-char LOWERCASE tree hash — an uppercase-hash directory

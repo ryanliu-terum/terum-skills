@@ -57,7 +57,7 @@ export function InboxScreen() {
     try {
       if (label === 'Open in editor') { const result = await backend.openInEditor(`~/.claude/skills/${item.name}`); if (!result.ok) setActionError(result.error); }
       else if (label === 'Disable') backend.prefs.set('enabled:' + item.name, false);
-      else if (label === 'Decline') backend.prefs.set('declined:' + item.name, true);
+      else if (label === 'Decline') { const result = await driveRun(backend.decline({ ref: item.skillRef }), {}, prompt, print); if (!result.ok) setActionError(result.error); }
       else if (label === 'Later') backend.prefs.set('inbox-later:' + item.id, true);
       // These preferences do not change the inbox document or row until a new backend event arrives.
     } catch (e) { setActionError(e instanceof Error ? e.message : 'Could not complete the inbox action.'); }

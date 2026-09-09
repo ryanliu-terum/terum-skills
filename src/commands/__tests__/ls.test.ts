@@ -309,7 +309,7 @@ it('returns sorted passthrough projects including empty projects, member decline
   for(const args of [{},{kind:'member' as const,value:'seed'},{kind:'project' as const,value:'A'}]) {
     const result=await run({config:store,...args},new ScriptedPrompter());if(!result.ok)throw new Error(result.error);
     expect(result.value.projects).toEqual([{name:'A',skills:[ID],remotes:['github.com/acme/a'],description:'Hand maintained'},{name:'z',skills:[],remotes:[]}]);
-    if(args.kind==='member')expect(result.value.member).toEqual({handle:'seed',declined:[ID]});else expect(result.value).not.toHaveProperty('member');
+    if(args.kind==='member')expect(result.value.member).toEqual({handle:'seed',declined:[ID],role:null,projects:[]});else expect(result.value).not.toHaveProperty('member');
   }
   const local=await run({config:store,local:true,home:root},new ScriptedPrompter());expect(local).toMatchObject({ok:true,value:{problems:[]}});expect(local.value).not.toHaveProperty('projects');
 });

@@ -92,7 +92,7 @@ it('readRoster checks filename identity before archives, reports bad files, and 
   await writeFile(join(seed, 'people', 'old.json'), JSON.stringify(person('new')));
   await writeFile(join(seed, 'people', 'broken.json'), '{');
   const result = await readRoster(seed);
-  expect(result.roster).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => ({ handle, displayName: handle })));
+  expect(result.roster).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => ({ handle, displayName: handle, role: null, projects: [] })));
   expect(result.problems.map((problem) => problem.file)).toEqual(['people/broken.json', 'people/old.json']);
   expect(result.problems.every((problem) => problem.message.length > 0)).toBe(true);
 });
