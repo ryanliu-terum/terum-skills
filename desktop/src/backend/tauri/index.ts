@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import appPackage from '../../../package.json';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { nativePrefs } from './prefs';
 import { SETUP_STEP_KEYS, FEATURE_KEYS } from '../types';
@@ -131,7 +130,7 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
   SHARED:value.ledger.shared.map(item=>[item.id,item.source,item.team,'—']),
   QUARANTINE:[],LOCAL_UNSHARED:[],HOOK:{installed:false,file:'',timeout:0},
-  APP_VERSION:appPackage.version,AGENT_CLI:'—',AGENT_CLI_AUTH:'unknown',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
+  APP_VERSION:import.meta.env.VITE_APP_VERSION,AGENT_CLI:'—',AGENT_CLI_AUTH:'unknown',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
   STORAGE:{cache:'—',cache_n:0,evals:'—',evals_n:0,quarantine:'—'},PINNED_N:value.ledger.placements.filter(p=>p.version!==null).length,
   CLI_VERSION:value.version??'—',CLI_LATEST:'—',FOLLOWING:[],SHARED_SPECIMEN:null,
   SETTINGS_NAV:[],SHORTCUTS:[],INBOX_KIND_TEXT:{share:'Shared with you',update:'Update',alert:'Alert',eval:'Eval finished',review:'Review request',author:'Your skill',team:'Team'},THEME_OPTIONS:['System','Light','Dark'],

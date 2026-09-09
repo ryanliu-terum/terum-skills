@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { version as releaseVersion } from '../../../../../package.json' with { type: 'json' };
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Bridge } from '../bridge';
 import type { Backend } from '../../Backend';
@@ -199,7 +200,7 @@ it.each([false,true])('serves recorded status and settings with real team data (
  expect(Object.keys(status.value?.counts??{})).toEqual(['Global']);
  expect(status.value?.teams[0]?.clone).toContain('/fx/home/.terum/skills/teams/acme');
  expect(status.value?.teams[0]?.joinBlock?.join('\n')).toContain('npx -y terum-skills@latest setup acme/team');
- expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,PINNED_N:1,APPROVALS:[],QUARANTINE:[],HOOK:{installed:false},AGENT_CLI:'—',CLI_LATEST:'—'});
+ expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,PINNED_N:1,APPROVALS:[],QUARANTINE:[],HOOK:{installed:false},APP_VERSION:releaseVersion,AGENT_CLI:'—',CLI_LATEST:'—'});
  expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'2026-09-01T00:00:00Z','up to date']);
  expect(settings.value?.SHARED[0]).toEqual(['22222222-2222-4222-8222-222222222222',expect.stringContaining('/skills/tdd'),'acme','—']);
  expect(status.value?.tools).toEqual(settings.value?.tools);
