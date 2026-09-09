@@ -5,8 +5,8 @@ export interface Backend {
   status(q?: undefined, options?: ReadOptions): Promise<Result<StatusResult>>;
   settings(q?: undefined, options?: ReadOptions): Promise<Result<Settings>>;
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;
-  library(q: { scope: Scope }, options?: ReadOptions): Promise<Result<Library>>;
-  skill(q: { ref: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
+  library(q: { scope: Scope; team?: string }, options?: ReadOptions): Promise<Result<Library>>;
+  skill(q: { ref: string; team?: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
   receipts(q: { skillId: string; version: string }, options?: ReadOptions): Promise<Result<Receipt | null>>;
   inbox(q?: undefined, options?: ReadOptions): Promise<Result<InboxItem[]>>;
   catalog(q?: { q?: string }, options?: ReadOptions): Promise<Result<Catalog>>;

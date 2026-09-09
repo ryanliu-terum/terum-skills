@@ -67,3 +67,11 @@ describe('handles and team names (§5.4)', () => {
     for (const bad of ['../x', '.hidden', 'a/b', '', 'a b', 'x'.repeat(101)]) expect(teamNameSchema.safeParse(bad).success, bad).toBe(false);
   });
 });
+
+
+it.each(['\n','\r\n'])('returns the exact body after the closing frontmatter, including %j line endings', newline => {
+  const source = FRONT().replaceAll('\n', newline).trimEnd();
+  expect(parseSkillFrontmatter(source)).toMatchObject({ ok: true, body: newline+'# Title'+newline+newline+'Body: with a colon'+newline+'- and a list' });
+  expect(parseSkillFrontmatter(source.slice(0, source.indexOf(newline+'# Title')).trimEnd())).toMatchObject({ ok: true, body: '' });
+  expect(parseSkillFrontmatter('no frontmatter')).not.toHaveProperty('body');
+});

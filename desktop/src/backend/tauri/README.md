@@ -11,7 +11,7 @@ Nothing else in `src/` may import `@tauri-apps/*`; this directory is the whole n
 How the adapter finds the CLI: `~/.terum/skills/run/app.json` (`{schema:1, node, entry, version}`), written by `terum-skills app` on every launch (decision walk 2026-09-08, D1). Without it every call fails with one sentence telling the person to run `terum-skills app` once.
 
 Honest gaps in this first adapter (each is a seam ask, not a bug to paper over):
-- `status`, `settings`, `onboarding`, `library`, `skill`, `receipts`, `inbox`, `catalog`, `roster`, `update` fail with a GAPS.md message. The CLI's `status`/`ls` results exist but are not in the design's shape.
+- `library` and `skill` are served from `ls`, `ls --local`, `status` and `validate` (S7f): every field the CLI does not return is `null` or `—`, never a design constant. `status`, `settings`, `onboarding`, `receipts`, `inbox`, `catalog`, `roster`, `update` still fail with a GAPS.md message and are hidden by `surfaces()`; each closes in the batch that first serves it (S7k status/settings, S7b roster/catalog, S7n receipts, S7e update, S7r inbox/onboarding).
 - `sync` returns empty `placed`/`removed` lists: the CLI returns counts, the seam wants names. The run's `print` frames carry the story.
 - `publish.version` is the PR URL or branch; `eval.receipt` is null (the CLI writes receipts to the repo, it does not return them).
 - `install.scope`, `invite.scope`/`role`, `connect.keepSource`/`keepRepo`/`relocate`/`forget` are not passed: the CLI has no such options or wants ids the seam does not carry (GAPS.md).

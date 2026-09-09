@@ -411,3 +411,17 @@ describe('install (§6 refs)', () => {
 async function readdirRecursive(root: string): Promise<string[]> {
   return (await readdir(root, { recursive: true })).map(String);
 }
+
+
+it('skillAtSource carries the materialized source body rather than the clone body', async () => {
+  const { skillAtSource } = await import('../install.js');
+  const { skillRecords } = await import('../../lib/skills.js');
+  const fixture = await bareTeam();
+  const source = '---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n';
+  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', source+'clone prose');
+  const record = (await skillRecords(fixture.seed, 'team'))[0]!;
+  expect(record.body).toBe('clone prose');
+  const pinned = join(fixture.root, 'pinned'); await mkdir(pinned);
+  await writeFile(join(pinned, 'SKILL.md'), source+'pinned prose');
+  expect((await skillAtSource(pinned, record)).body).toBe('pinned prose');
+});

@@ -1,6 +1,6 @@
 # GAPS.md — drawn affordances the CLI on `main` (re-anchored at b7be3c5, 2026-09-08; first pinned at b5c0507) does not have yet
 
-M7 status (2026-09-08): the real adapter declares which read models it serves (`Backend.surfaces()`, S7af); a surface whose model is still a gap is hidden from the sidebar rather than stubbed, and every line below that names a read model closes in the batch that first serves it from real data (S7f library/skill, S7k status/settings, S7b roster/catalog, S7n receipts, S7e update, S7r inbox/onboarding).
+M7 status (2026-09-08): the real adapter declares which read models it serves (`Backend.surfaces()`, S7af); a surface whose model is still a gap is hidden from the sidebar rather than stubbed, and every line below that names a read model closes in the batch that first serves it from real data (S7f library/skill — served since PR m7-S7f, S7k status/settings, S7b roster/catalog, S7n receipts, S7e update, S7r inbox/onboarding).
 
 One line each: screen or board: affordance or printed string — what changed at b5c0507 or what the CLI would need. Design-side calls (printed strings) are Teddy's; seam-side gaps are asks to Ryan's repo. The app builds every affordance as drawn on the mock backend; the four capability-flagged gaps are listed last.
 
