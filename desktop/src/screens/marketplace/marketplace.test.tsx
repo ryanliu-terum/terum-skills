@@ -96,7 +96,7 @@ it('asks once per project run, writes nothing before Yes, and keeps No silent', 
   if (second.type !== 'return') throw new Error('Missing run.');
   expect(await second.value.done).toEqual({ ok: true, value: project.skillsIn.filter(name => targets.some(s => s.name === name)).map(name => ({ id: name, name })) });
   expect(remove).toHaveBeenCalledTimes(2); expect(seen.mock.calls).toEqual([['placed'], ['config']]);
-  const after = await backend.catalog(), library = await backend.library({ scope: 'Global' });
+  const after = await backend.catalog(), library = await backend.library({ scope: { kind: 'global' } });
   if (!after.ok || !library.ok) throw new Error('Fixture unavailable.');
   for (const target of targets) {
     expect(after.value.skills.find(s => s.name === target.name)).toMatchObject({ installed: false, placed: false, onDiskOnly: false, paths: [] });
@@ -111,14 +111,14 @@ it('shows failures from install in the centered error layout', async () => { vi.
 
 it.each(['-1', 'abc', '9'.repeat(400)])('treats invalid active facet count %s as zero', async active => { open('#/marketplace?q=deploy%20prod&active=' + active); expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument(); expect(screen.queryByText(/with .* filters on/)).toBeNull(); });
 
-it('uses only status-supplied sidebar counts on the empty scenario', async () => {
+it('uses status Global and checkout root counts on the empty scenario', async () => {
   const source = pickBackend();
   const status = await source.status();
   if (!status.ok) throw new Error(status.error);
   vi.spyOn(source, 'status').mockResolvedValue({ ...status, value: { ...status.value, counts: { Global: '71' } } });
   open('#/marketplace?__mock=empty');
   expect(await screen.findByRole('link', { name: 'Global 71' })).toBeInTheDocument();
-  expect(document.querySelectorAll('.nav-count')).toHaveLength(1);
+  expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(['71','8','3','2']);
 });
 
 it('keeps one person link and follows without leaving the people list', async () => {

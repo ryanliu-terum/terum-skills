@@ -323,3 +323,28 @@ it('leaves the keyed team, renders inventory and delegates confirmation to the r
  const prompt=await screen.findByRole('dialog',{name:'Really leave acme-key on this machine?'});expect(completed).not.toHaveBeenCalled();fireEvent.click(within(prompt).getByRole('button',{name:'Yes'}));
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledExactlyOnceWith({kind:'leave',name:'acme-key'});expect(completed).toHaveBeenCalledWith(true);expect(location.hash).not.toContain('dialog=');
 });
+
+it('hides Checkouts on the mock machine board',async()=>{
+ open('#/settings/machine');await screen.findByRole('heading',{name:'This machine'});
+ expect(screen.queryByText('Checkouts')).toBeNull();expect(screen.queryByRole('textbox',{name:'Checkout path'})).toBeNull();
+});
+it('lists checkout paths and forgets only the selected root',async()=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});const remove=vi.spyOn(backend.checkouts,'remove');
+ open('#/settings/machine');await screen.findByText('Checkouts');
+ for(const name of ['terum','ssm','mrf'])expect(screen.getByText('/Users/you/code/'+name)).toBeVisible();
+ fireEvent.click(screen.getAllByRole('button',{name:'Remove'})[0]!);await waitFor(()=>expect(remove).toHaveBeenCalledWith('/Users/you/code/terum'));
+ expect(screen.getByText(/Registering a folder is not sharing/)).toHaveTextContent('connects nothing and approves no tool grant');
+ expect(screen.getByText(/Registering a folder is not sharing/)).toHaveTextContent('Detected · not registered');
+});
+it.each(['click','enter'])('adds a typed checkout by %s and clears the field',async mode=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});const add=vi.spyOn(backend.checkouts,'add');
+ open('#/settings/machine');const field=await screen.findByRole('textbox',{name:'Checkout path'});fireEvent.change(field,{target:{value:'  /tmp/x  '}});
+ if(mode==='click')fireEvent.click(screen.getByRole('button',{name:'Add'}));else fireEvent.keyDown(field,{key:'Enter'});
+ await waitFor(()=>expect(add).toHaveBeenCalledWith('/tmp/x'));await waitFor(()=>expect(field).toHaveValue(''));
+});
+it('adds a detected checkout and reports one action error',async()=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});const add=vi.spyOn(backend.checkouts,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Registration denied'})));
+ open('#/settings/machine?__mock=detected-root');await screen.findByText('Checkouts');
+ fireEvent.click(within(screen.getByText('/Users/you/code/ssm').closest('.setting-row')!).getByRole('button',{name:'Add'}));
+ expect(add).toHaveBeenCalledWith('/Users/you/code/ssm');expect(await screen.findByRole('alert')).toHaveTextContent('Registration denied');expect(screen.getAllByRole('alert')).toHaveLength(1);
+});

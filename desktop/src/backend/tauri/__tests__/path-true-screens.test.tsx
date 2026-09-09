@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext } from '../../index';
@@ -34,15 +34,11 @@ it('uses the placed scope for Remove and its dialog location', async () => {
  expect(await screen.findByRole('dialog')).toHaveTextContent('/work/project/.claude/skills');
  expect(screen.getByRole('dialog')).not.toHaveTextContent('~/.claude/skills');
 });
-it.each(['terum', 'ssm', 'mrf'])('keeps an unknown Library route scope as typed: %s', async scope => {
- const backend = createTauriBackend(installedReplay().bridge), library = backend.library;
- vi.spyOn(backend, 'library').mockImplementation(async () => {
-  const result = await library({ scope: 'Global' });
-  return result.ok ? { ok: true, value: { ...result.value, projects: [] } } : result;
- });
- open('#/library/project/' + scope, backend);
- await screen.findByText('Scanned:', { exact: false });
- expect(within(document.querySelector('.board-view-header') as HTMLElement).getByText(scope, { exact: true })).toBeInTheDocument();
+it.each(['/nowhere/x','/nowhere/ssm','/nowhere/mrf'])('renders the No such checkout error for an unregistered root: %s',async root=>{
+ const f=installedReplay(),backend=createTauriBackend(f.bridge);
+ open('#/library/checkout?root='+encodeURIComponent(root),backend);
+ expect(await screen.findByRole('alert')).toHaveTextContent('No such checkout: '+root);
+ expect(f.spawns.some(spawn=>spawn.args[1]==='project')).toBe(false);
 });
 it('shows the installed person action when the real catalog has scan roots', async () => {
  const backend = createTauriBackend(installedReplay('placed', 'installed').bridge), catalog = backend.catalog;

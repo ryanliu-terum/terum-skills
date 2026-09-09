@@ -76,7 +76,7 @@ it.each(cases)('$key: $route hides/degrades false and restores the true DOM',asy
  await waitFor(()=>expect(html(c.selector)).toBe(before));
 });
 it('never reads a favorite preference when favorites are false',async()=>{
- const backend=createMockBackend();const library=await backend.library({scope:'Global'});if(!library.ok)throw new Error(library.error);
+ const backend=createMockBackend();const library=await backend.library({scope:{kind:'global'}});if(!library.ok)throw new Error(library.error);
  vi.spyOn(backend,'library').mockResolvedValue(library);const pref=vi.spyOn(backend.prefs,'get');
  const client=new QueryClient({defaultOptions:{queries:{staleTime:Infinity}}});client.setQueryData(['features'],{...await backend.features(),favorites:false});
  location.hash='#/library/global';render(<QueryClientProvider client={client}><BackendContext value={backend}><App/></BackendContext></QueryClientProvider>);

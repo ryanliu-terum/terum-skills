@@ -3,6 +3,9 @@ import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
+import { BackendContext } from '../../backend';
+import { createMockBackend } from '../../backend/mock';
+import type { Backend } from '../../backend/Backend';
 import { design } from '../../backend/mock/data';
 function open(route:string){location.hash=route;return render(<Providers><App/></Providers>);}
 beforeEach(()=>{localStorage.clear();useUiStore.setState({railOpen:true,overviewHidden:false,theme:'dark'});});
@@ -76,4 +79,72 @@ it('keeps the marketplace skill link and install button destinations distinct',a
  expect(install).toHaveClass('card-install');
  fireEvent.click(install);
  await waitFor(()=>expect(location.hash).toBe('#/skill/a11y-audit?__mock=not-installed&dialog=install&root=marketplace'));
+});
+
+function openWith(route:string,backend:Backend){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}
+it('preserves checkout root and URL state across search and overview changes',async()=>{
+ const root='/Users/you/code/mrf';open('#/library/checkout?root='+encodeURIComponent(root)+'&q=migration&overview=0&__mock=detected-root&theme=light');
+ expect(await screen.findByRole('link',{name:'MRF 2'})).toHaveAttribute('aria-current','page');
+ await screen.findByText('2 skills');
+ fireEvent.change(screen.getByRole('textbox'),{target:{value:'csv'}});
+ fireEvent.click(screen.getByRole('button',{name:'Show overview'}));
+ await waitFor(()=>{const params=new URLSearchParams(location.hash.split('?')[1]);expect(params.get('root')).toBe(root);expect(params.get('q')).toBe('csv');expect(params.get('overview')).toBeNull();expect(params.get('__mock')).toBe('detected-root');expect(params.get('theme')).toBe('light');});
+ fireEvent.click(screen.getByRole('button',{name:'Hide overview'}));
+ await waitFor(()=>expect(new URLSearchParams(location.hash.split('?')[1]).get('overview')).toBe('0'));
+});
+it('requires a checkout root before calling library',async()=>{
+ const backend=createMockBackend(),library=vi.spyOn(backend,'library');openWith('#/library/checkout',backend);
+ expect(await screen.findByRole('alert')).toHaveTextContent('No checkout selected.');expect(library).not.toHaveBeenCalled();
+ await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));
+});
+it('opens a local card and its Open menu by folder path',async()=>{
+ const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
+ const path='/a folder/.claude/skills/deploy-check';result.value.skills=[{...result.value.skills[0]!,name:'deploy-check',project:'local',path}];
+ vi.spyOn(backend,'library').mockResolvedValue(result);openWith('#/library/global',backend);
+ const card=await screen.findByTestId('skill-card-deploy-check');expect(within(card).getByRole('link')).toHaveAttribute('href','#/skill/local?path='+encodeURIComponent(path));
+ fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));fireEvent.click(await screen.findByRole('menuitem',{name:'Open'}));
+ await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent(path)));
+});
+it.each([true,false])('keeps a local error honest and never offers checkout removal (typed=%s)',async typed=>{
+ const backend=createMockBackend(),error='Raw CLI failure for /tmp/a';
+ vi.spyOn(backend,'localSkill').mockResolvedValue({ok:false,error,...(typed?{reason:'not-in-library' as const}:{})});
+ const remove=vi.spyOn(backend.checkouts,'remove');openWith('#/skill/local?path=%2Ftmp%2Fa',backend);
+ expect(await screen.findByText(typed?'Not in your library':"Couldn't read a")).toBeVisible();
+ expect(screen.getByRole('alert')).toHaveTextContent(error);
+ expect(screen.queryByRole('button',{name:/Remove|Forget/i})).toBeNull();expect(remove).not.toHaveBeenCalled();
+ const board=document.querySelector('.centered-state')??screen.getByText(typed?'Not in your library':"Couldn't read a").parentElement!;
+ expect(within(board as HTMLElement).getByRole('button',{name:'Back to library'})).toBeVisible();
+ expect(screen.queryByRole('button',{name:'Try again'})!==null).toBe(!typed);
+ if(!typed){fireEvent.click(screen.getByRole('button',{name:'Try again'}));await waitFor(()=>expect(backend.localSkill).toHaveBeenCalledTimes(2));}
+});
+it('selects the longest registered checkout for local details and uses its label in crumbs',async()=>{
+ const backend=createMockBackend(),status=await backend.status();if(!status.ok)throw new Error(status.error);
+ vi.spyOn(backend,'status').mockResolvedValue({ok:true,value:{...status.value,roots:['/repo','/repo/nested'].map(root=>({id:root,root,label:root==='/repo'?'Outer':'Inner',kind:'checkout',registered:true,detected:false}))}});
+ openWith('#/skill/local?path='+encodeURIComponent('/repo/nested/.claude/skills/deploy-check'),backend);
+ await screen.findByRole('heading',{name:'deploy-check'});expect(screen.getByRole('link',{name:'Inner'})).toHaveAttribute('aria-current','page');expect(screen.getByRole('link',{name:'Outer'})).not.toHaveAttribute('aria-current');expect(document.querySelector('.detail-crumbs')).toHaveTextContent('Inner');
+});
+
+it.each(['none-with-skills','none-empty','unreadable'] as const)('shows the appropriate Library board for %s',async mode=>{
+ const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
+ result.value.team=mode==='unreadable'?{kind:'unreadable',message:'clone denied'}:{kind:'none'};
+ if(mode==='none-empty')result.value.skills=[];
+ vi.spyOn(backend,'library').mockResolvedValue(result);openWith('#/library/global',backend);
+ if(mode==='none-empty'){expect(await screen.findByText('No team on this machine')).toBeVisible();expect(screen.getByRole('button',{name:'Start setup'})).toBeVisible();}
+ else {expect(await screen.findByTestId('skill-card-deploy-check')).toBeVisible();expect(screen.queryByText('No team on this machine')).toBeNull();}
+ if(mode==='unreadable')expect(screen.getByText('Team unreadable: clone denied · cards show local state only')).toBeVisible();
+});
+it('removes a placed local detail by the skill name, never the local route token',async()=>{
+ const backend=createMockBackend(),remove=vi.spyOn(backend,'uninstallSkill');
+ openWith('#/skill/local?path=%2Ftmp%2Fdeploy-check&dialog=remove',backend);
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Remove'}));
+ await waitFor(()=>expect(remove).toHaveBeenCalledWith({ref:'deploy-check'}));
+ await waitFor(()=>expect(location.hash).toBe('#/library/global'));
+});
+it('resets a local action error when navigating to another path',async()=>{
+ const backend=createMockBackend();vi.spyOn(backend,'openInEditor').mockResolvedValue({ok:false,error:'Editor refused first folder'});
+ openWith('#/skill/local?path=%2Ffirst%2Fdeploy-check',backend);
+ fireEvent.click(await screen.findByRole('button',{name:'Edit'}));expect(await screen.findByRole('alert')).toHaveTextContent('Editor refused first folder');
+ location.hash='#/skill/local?path=%2Fsecond%2Fdeploy-check';fireEvent(window,new HashChangeEvent('hashchange'));
+ expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeVisible();expect(screen.queryByRole('alert')).toBeNull();
+ expect(document.querySelector('.detail-repo')).toHaveTextContent('/second/deploy-check');
 });

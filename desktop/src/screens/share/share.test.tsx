@@ -50,14 +50,14 @@ it('renders the exact join note and variadic invite placeholder (CP-05/CP-06)',a
  expect(dialog).toHaveTextContent('npx -y terum-skills@latest invite <github-login>...');
 });
 
-it('uses only status-supplied sidebar counts on the empty scenario', async () => {
+it('uses status Global and checkout root counts on the empty scenario', async () => {
   const source = backend;
   const status = await source.status();
   if (!status.ok) throw new Error(status.error);
   vi.spyOn(source, 'status').mockResolvedValue({ ...status, value: { ...status.value, counts: { Global: '71' } } });
   open('#/share?__mock=empty');
   expect(await screen.findByRole('link', { name: 'Global 71' })).toBeInTheDocument();
-  expect(document.querySelectorAll('.nav-count')).toHaveLength(1);
+  expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(['71','8','3','2']);
 });
 
 it('keeps job labels separate from permission preferences and preserves removal without roles',async()=>{
