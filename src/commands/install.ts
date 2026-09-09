@@ -238,4 +238,13 @@ function selectScope(team: Team, id: string, matching: string | undefined, expli
   return { kind: 'global' };
 }
 function samePending(a: { op: string; id: string; team: string; scope: unknown }, b: { op: string; id: string; team: string; scope: unknown }): boolean { return a.op === b.op && a.id === b.id && a.team === b.team && sameScope(a.scope, b.scope); }
-function placementHome(store: ConfigStore): string { return store.root.endsWith('/.terum/skills') ? dirname(dirname(store.root)) : store.root; }
+/**
+ * HOME for a global placement: the default store root is `~/.terum/skills`, so HOME is two path
+ * segments up — judged segment-wise, because win32 roots are backslash-separated and a hard-coded
+ * `/.terum/skills` suffix silently placed skills inside the store where Claude Code never looks.
+ * A custom or test root is its own placement home. Exported with an injectable path flavour so the
+ * win32 shape is provable from any host.
+ */
+export function placementHome(store: Pick<ConfigStore, 'root'>, path: Pick<typeof import('node:path'), 'basename' | 'dirname'> = { basename, dirname }): string {
+  return path.basename(store.root) === 'skills' && path.basename(path.dirname(store.root)) === '.terum' ? path.dirname(path.dirname(store.root)) : store.root;
+}

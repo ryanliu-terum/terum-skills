@@ -4,7 +4,7 @@ import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, utimes, write
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { acquireTeamLock, lockPath, removeRunArtifacts, stampPath } from '../../lib/hook.js';
-import { approved, run } from '../sync.js';
+import { approved, run, underQuarantine } from '../sync.js';
 import { allowedTools, emptyConfig } from '../../lib/schema.js';
 import { run as connect } from '../connect.js';
 import { createExecute } from '../../lib/execute.js';
@@ -770,6 +770,15 @@ describe('sync --hook (§3, §6)', () => {
       expect(errors).toEqual([`Deleted 1 of 2 quarantined item(s); could not delete ${second}: deliberately undeletable`]);
       expect(codes).toEqual([1]);
     } finally { delete (globalThis as { terumPruneFailurePath?: string }).terumPruneFailurePath; }
+  });
+
+  it('prune recognizes quarantine entries under a backslash-separated root: the guard is built from the host separator, not a hard-coded `/`', () => {
+    // On win32 every resolved entry is backslash-separated, so the old `${root}/` prefix matched
+    // nothing and prune reported an occupied quarantine as empty.
+    expect(underQuarantine('C:\\Users\\me\\.terum\\skills\\quarantine', 'C:\\Users\\me\\.terum\\skills\\quarantine\\stamp', '\\')).toBe(true);
+    expect(underQuarantine('C:\\Users\\me\\.terum\\skills\\quarantine', 'C:\\Users\\me\\.terum\\skills\\quarantine-sibling', '\\')).toBe(false);
+    expect(underQuarantine('/state/quarantine', '/state/quarantine/stamp', '/')).toBe(true);
+    expect(underQuarantine('/state/quarantine', '/state/quarantine', '/')).toBe(false);
   });
 
   it('counts a pending install once by its ledger path, whether it is new or already placed', async () => {

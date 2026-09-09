@@ -3,7 +3,7 @@ import type { Launch } from '../lib/launch.js';
 import { packageVersion } from '../lib/package.js';
 import { createReleaseState, maintainReleaseState, ProbePolicy, probePolicy, recordRunningAndRegistry, ReleaseStateStore } from '../lib/update.js';
 import { readdir, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { mkdirPrivate } from '../lib/fs.js';
 import { acquireTeamLock, lockPath, stampIsFresh, stampPath, TeamLockOptions } from '../lib/hook.js';
@@ -496,11 +496,14 @@ function printVerdict(config: Awaited<ReturnType<ConfigStore['read']>>, teams: T
   verdict(`Sync incomplete: ${clauses.join('; ')}.`);
 }
 
+/** Prune's roster guard: only paths strictly under the quarantine root, judged with the host separator — a hard-coded `/` left win32 prune inert. Exported with an injectable separator so the win32 shape is provable from any host. */
+export function underQuarantine(root: string, path: string, separator: string = sep): boolean { return path.startsWith(root + separator); }
+
 async function prune(store: ConfigStore, io: Prompter): Promise<{ deleted: number; declined: boolean; error?: string }> {
   const root = resolve(store.root, 'quarantine');
   let entries: string[];
   try { entries = await readdir(root); } catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') { io.print('Quarantine is empty.'); return { deleted: 0, declined: false }; } throw error; }
-  const paths = entries.map((entry) => resolve(root, entry)).filter((path) => path.startsWith(`${root}/`));
+  const paths = entries.map((entry) => resolve(root, entry)).filter((path) => underQuarantine(root, path));
   if (!paths.length) { io.print('Quarantine is empty.'); return { deleted: 0, declined: false }; }
   for (const path of paths) io.print(path);
   if (!(await io.confirm(`Delete ${paths.length} quarantined item(s)?`))) { io.print('Prune cancelled; nothing deleted.'); return { deleted: 0, declined: true }; }
