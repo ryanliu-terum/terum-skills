@@ -5,6 +5,8 @@ export type Result<T = undefined> =
 export const success = <T>(value: T): Result<T> => ({ ok: true, value });
 export const failure = <T = never>(error: string, value?: T): Result<T> => value === undefined ? { ok: false, error } : { ok: false, error, value };
 
+export const failureWith = <T>(value: T, error: string): Result<T> => ({ ok: false, error, value });
+
 /** A person declined the operation; the message remains the terminal-facing explanation. */
 export function cancelled(message: string): Result<never> {
   return { ok: false, error: message, cancelled: true };

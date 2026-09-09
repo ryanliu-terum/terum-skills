@@ -89,7 +89,7 @@ async function checkSkill(input: { cwd: string; base: string; id: string; name: 
 }
 
 /** Receipts select by filename order. A malformed newest file fails closed rather than hiding behind an older run. */
-async function receiptFiles(directory: string): Promise<string[]> {
+export async function receiptFiles(directory: string): Promise<string[]> {
   let names: string[];
   try { names = (await readdir(directory, { withFileTypes: true })).filter((entry) => entry.isFile() && entry.name.endsWith('.json')).map((entry) => entry.name).sort(); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
@@ -97,7 +97,7 @@ async function receiptFiles(directory: string): Promise<string[]> {
 }
 
 /** The displayed/gating receipt is the lexicographically latest run for this exact version. */
-async function newestReceiptAt(directory: string): Promise<CheckedReceipt | undefined> {
+export async function newestReceiptAt(directory: string): Promise<CheckedReceipt | undefined> {
   const file = (await receiptFiles(directory)).at(-1);
   if (file === undefined) return undefined;
   let raw: unknown;

@@ -1,5 +1,5 @@
 import { invocation } from '../lib/invocation.js';
-import type { WithForm } from '../lib/invocation.js';
+import type { WithForm, InvocationForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -15,7 +15,7 @@ import { aggregate, renderReport, runIdFrom, writeRunTree } from '../lib/evals/r
 import { packageVersion } from '../lib/package.js';
 import { parseTriggers, runTriggerEvals, type TriggerSummary } from '../lib/evals/triggers.js';
 import { Prompter } from '../lib/prompt.js';
-import { fromError, failure, type Result, success } from '../lib/result.js';
+import { fromError, failure, failureWith, type Result, success } from '../lib/result.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { type Runner, systemRunner } from '../lib/runner.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
@@ -52,12 +52,12 @@ export interface EvalResult {
   ccVersion: string;
   executionStatus: 'complete' | 'partial' | 'failed';
   receiptPath?: string;
+  commit: { ok: true; receiptPath: string } | { ok: false; error: string } | null;
 }
 
 /** §6: fetch/read only from the team clone; --commit adds exactly one immutable receipt via safeWrite. */
 export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResult>> {
   try {
-    if (args.working && args.commit) return failure('--working --commit is refused: receipts pin committed skill trees only.');
     if (args.save && !args.working) return failure('--save is only available with --working; generated assets may only be saved to your shared source.');
     // A named case asserts an authored expectation; forcing regeneration contradicts it, and a
     // generated case sharing the stem would silently evaluate something else (review P2).
@@ -69,7 +69,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const [teamName, binding] = selectTeam(config.teams, args.team, args.form);
-    if (args.commit && !binding.handle) return failure(`Team ${teamName} has no joined handle; run \`${invocation(args.form, 'team join')}\` before committing an eval receipt.`);
+    const eligibility = commitEligibility({ ...args, team: teamName }, binding, args.form);
+    if (eligibility !== null) return failure(eligibility);
     const clone = store.teamClone(teamName);
     await refreshClone(runner, clone, { label: teamName });
     const team = await readTeam(clone);
@@ -102,6 +103,14 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       return failure(`Hygiene failed for ${record.name}:\n${error.message}`);
     }
 
+    const wantsCases = !args.triggersOnly;
+    const wantsTriggers = !args.executionOnly;
+    const authoredCasesDir = join(candidateDir, 'evals', 'cases');
+    const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
+    const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
+    const assetEligibility = commitEligibility(args, binding, args.form, { name: record.name, wantsCases, wantsTriggers, authoredCaseFiles, authoredTrigger });
+    if (assetEligibility !== null) return failure(assetEligibility);
+
     const model = args.model ?? DEFAULT_MODEL;
     const preflight = await (args.preflight ?? systemPreflight)(model);
     if (!preflight.ok) return failure(preflight.error);
@@ -114,11 +123,6 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     await mkdir(transcriptDir, { recursive: true, mode: 0o700 });
     await mkdir(scratch, { recursive: true, mode: 0o700 });
 
-    const wantsCases = !args.triggersOnly;
-    const wantsTriggers = !args.executionOnly;
-    const authoredCasesDir = join(candidateDir, 'evals', 'cases');
-    const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
-    const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
     const authoredSelected = args.case === undefined ? authoredCaseFiles : authoredCaseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
     // A named case is an authored assertion; it intentionally never causes a model call.
     if (wantsCases && args.case !== undefined && authoredSelected.length === 0) return failure(`No eval case named ${args.case} for ${record.name}.`);
@@ -200,6 +204,42 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       arm_skill_lists: Object.fromEntries([...new Set(arms.map((arm) => arm.arm))].map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null])),
       ...(generated.cases !== undefined || generated.triggers !== undefined ? { generated_assets: { cases: generated.cases !== undefined, triggers: generated.triggers !== undefined } } : {}),
     }, [...rows, ...arms, ...(triggers === null ? [] : [triggers])]);
+    const armSkillLists = Object.fromEntries([...new Set(arms.map((arm) => arm.arm))]
+      .map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null]));
+    // Source checkouts record their running product commit. Published packages have no checkout;
+    // in that case the explicit unknown is more honest than a team-repo commit.
+    const engineCommit = await runningEngineCommit(runner);
+    const receipt = buildReceipt({
+      skill_id: record.id,
+      skill_name: record.name,
+      version,
+      run_id: runId,
+      verdict: summary.verdict,
+      attribution: summary.attribution,
+      execution_status: summary.execution_status,
+      expected_rows: summary.expected_rows,
+      scored_rows: summary.scored_rows,
+      comparisons: summary.comparisons,
+      arm_scores: summary.arm_scores,
+      environment_skips: summary.environment_skips,
+      triggers: triggers === null ? null : { recall: triggers.recall, precision: triggers.precision, tp: triggers.tp, fn: triggers.fn, fp: triggers.fp, tn: triggers.tn },
+      efficiency: summary.efficiency,
+      provenance: {
+        engine_version: packageVersion() ?? 'unknown',
+        engine_commit: engineCommit,
+        cc_version: preflight.value.ccVersion,
+        model,
+        judge_model: args.judgeModel ?? model,
+        k,
+        cases: caseNames,
+        arm_skill_lists: armSkillLists,
+        timestamp: runAt.toISOString(),
+        runner_handle: binding.handle ?? 'local',
+      },
+    });
+    if (!receipt.ok) return failure(receipt.error);
+    const source = `${JSON.stringify(receipt.value, null, 2)}\n`;
+    await writeFile(join(runDir, 'receipt.json'), source, 'utf8');
     if (generated.cases !== undefined || generated.triggers !== undefined) {
       const sets = [
         wantsCases ? `cases: ${generated.cases === undefined ? 'authored' : `generated (${generated.cases.names.length})`}` : null,
@@ -209,52 +249,41 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       io.print(`Generated assets: ${join(runDir, 'generated')} — review before trusting; save or copy reviewed files into the skill before committing a receipt.`);
     }
     io.print(renderReport(summary, triggers));
-    let committedPath: string | undefined;
+
+    const value: EvalResult = { team: teamName, id: record.id, name: record.name, runDir, ccVersion: preflight.value.ccVersion, executionStatus: summary.execution_status, commit: null };
     if (args.commit) {
-      const armSkillLists = Object.fromEntries([...new Set(arms.map((arm) => arm.arm))]
-        .map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null]));
-      // Source checkouts record their running product commit. Published packages have no checkout;
-      // in that case the explicit unknown is more honest than a team-repo commit.
-      const engineCommit = await runningEngineCommit(runner);
-      const receipt = buildReceipt({
-        skill_id: record.id,
-        skill_name: record.name,
-        version,
-        run_id: runId,
-        verdict: summary.verdict,
-        attribution: summary.attribution,
-        execution_status: summary.execution_status,
-        expected_rows: summary.expected_rows,
-        scored_rows: summary.scored_rows,
-        comparisons: summary.comparisons,
-        arm_scores: summary.arm_scores,
-        environment_skips: summary.environment_skips,
-        triggers: triggers === null ? null : { recall: triggers.recall, precision: triggers.precision, tp: triggers.tp, fn: triggers.fn, fp: triggers.fp, tn: triggers.tn },
-        efficiency: summary.efficiency,
-        provenance: {
-          engine_version: packageVersion() ?? 'unknown',
-          engine_commit: engineCommit,
-          cc_version: preflight.value.ccVersion,
-          model,
-          judge_model: args.judgeModel ?? model,
-          k,
-          cases: caseNames,
-          arm_skill_lists: armSkillLists,
-          timestamp: runAt.toISOString(),
-          runner_handle: binding.handle,
-        },
-      });
-      if (!receipt.ok) return failure(receipt.error);
-      committedPath = receiptPath(record.id, version, runId);
-      const source = `${JSON.stringify(receipt.value, null, 2)}\n`;
-      await openTeamRepo(clone, binding.remote, runner).safeWrite(
-        (tree) => tree.set(committedPath!, source),
-        { action: 'eval', handle: binding.handle, message: `${binding.handle}: eval ${record.name}` },
-      );
-      io.print(`Committed eval receipt ${committedPath}.`);
+      try {
+        const committedPath = receiptPath(record.id, version, runId);
+        await openTeamRepo(clone, binding.remote, runner).safeWrite(
+          (tree) => tree.set(committedPath, source),
+          { action: 'eval', handle: binding.handle, message: `${binding.handle}: eval ${record.name}` },
+        );
+        io.print(`Committed eval receipt ${committedPath}.`);
+        return success({ ...value, receiptPath: committedPath, commit: { ok: true, receiptPath: committedPath } });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return failureWith({ ...value, commit: { ok: false as const, error: message } }, message);
+      }
     }
-    return success({ team: teamName, id: record.id, name: record.name, runDir, ccVersion: preflight.value.ccVersion, executionStatus: summary.execution_status, ...(committedPath === undefined ? {} : { receiptPath: committedPath }) });
+    return success(value);
   } catch (error) { return fromError(error); }
+}
+
+/** Deterministic refusal before refresh (identity) or any paid work (asset generation). */
+function commitEligibility(args: EvalArgs, binding: { handle?: string }, form: InvocationForm | undefined, assets?: { name: string; wantsCases: boolean; wantsTriggers: boolean; authoredCaseFiles: string[]; authoredTrigger: boolean }): string | null {
+  if (assets === undefined) {
+    if (args.commit && !binding.handle) return `Team ${args.team} has no joined handle; run \`${invocation(form, 'team join')}\` before committing an eval receipt.`;
+    if (args.working && args.commit) return '--working --commit is refused: receipts pin committed skill trees only.';
+    return null;
+  }
+  const { name, wantsCases, wantsTriggers, authoredCaseFiles, authoredTrigger } = assets;
+  const generateCases = wantsCases && !args.noGen && (Boolean(args.gen) || authoredCaseFiles.length === 0);
+  const generateTriggers = wantsTriggers && !args.noGen && (Boolean(args.gen) || !authoredTrigger);
+  if (args.commit && (generateCases || generateTriggers)) {
+    const kinds = generateCases && generateTriggers ? 'eval cases or triggers.yaml' : generateCases ? 'eval cases' : 'triggers.yaml';
+    return `--commit is refused for generated eval assets: ${name} would generate ${kinds}. Either run \`${invocation(form, `eval ${name}`)}\` without --commit to generate and review them, or publish the reviewed assets into the skill's evals/ and then run \`${invocation(form, `eval ${name} --commit`)}\`.`;
+  }
+  return null;
 }
 
 /** Product provenance is read-only and never falls back to the team clone's unrelated HEAD. */
