@@ -59,6 +59,7 @@ describe('config store (§5.4)', () => {
     expect(JSON.parse(written).teams).toEqual({ t: { remote: 'github.com/a/t', handle: 'me' } });
   });
 
+  // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
   it('serializes concurrent updates so neither is lost', async () => {
     const store = createConfigStore(join(await temporaryDirectory(), 'skills'));
     await Promise.all(Array.from({ length: 6 }, (_, index) => store.update(async (config) => {

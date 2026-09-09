@@ -39,6 +39,7 @@ describe('candidateSummary', () => {
     expect(await candidateSummary(root, emptyConfig())).toEqual({ names: ['alpha', 'zebra'], omitted: [], unreadable: 0 });
   });
 
+  // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
   it('excludes a shared source even when it belongs to another team', async () => {
     const root = await temporaryDirectory();
     const path = await candidate(root, 'mine');
