@@ -29,6 +29,7 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
   const readers = new Set<() => void>();
   let finished = false;
   let started = false;
+  let spawnSettled: Promise<void> | undefined;
   let cancelled = false;
   let settle!: (result: Result<TOut>) => void;
   const done = new Promise<Result<TOut>>((resolve) => { settle = resolve; });
@@ -83,17 +84,31 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
       case 'ask': push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }), ...(frame.detail === undefined ? {} : { detail: frame.detail }) }); return;
       case 'progress': { const current = frame.current ?? 0; push({ t: 'progress', done: current, total: Math.max(frame.total ?? current, current, 1), label: frame.step }); return; }
       case 'result': {
-        if (cancelled) { finish({ ok: false, error: 'Cancelled.' }); return; }
         if (frame.ok) {
-          let mapped: TOut;
-          try { mapped = options.map(frame.value as TIn); } catch (error) { finish({ ok: false, error: `terum-skills answered, but the desktop app could not read the result: ${error instanceof Error ? error.message : String(error)}` }); return; }
-          finish({ ok: true, value: mapped }, { t: 'result', ok: true });
+          let mapped: TOut | undefined;
+          let unreadable: string | undefined;
+          try { mapped = options.map(frame.value as TIn); } catch (error) { unreadable = error instanceof Error ? error.message : String(error); }
+          if (cancelled) {
+            // The verb finished before the cancel landed: its mutation is on disk, so the settle must say so
+            // (and carry the value so invalidation still runs), never report a clean cancellation.
+            const error = `Cancelled, but ${frame.verb} had already finished; its changes are on disk.`;
+            finish({ ok: false, error, ...(unreadable === undefined && mapped !== undefined ? { value: mapped } : {}) }, { t: 'result', ok: false, error });
+            return;
+          }
+          if (unreadable !== undefined) { finish({ ok: false, error: `terum-skills answered, but the desktop app could not read the result: ${unreadable}` }); return; }
+          finish({ ok: true, value: mapped as TOut }, { t: 'result', ok: true });
         } else {
-          const error = frame.error ?? 'terum-skills reported a failure.';
           let value: TOut | undefined;
           if (frame.value !== undefined) {
             try { value = options.map(frame.value as TIn); } catch { value = undefined; }
           }
+          if (cancelled) {
+            // A failing result during cancellation is still a cancellation, but a partial value (eval's
+            // completed run whose receipt commit failed) has mutated disk and must reach invalidation.
+            finish({ ok: false, error: 'Cancelled.', ...(value === undefined ? {} : { value }) }, { t: 'result', ok: false, error: 'Cancelled.' });
+            return;
+          }
+          const error = frame.error ?? 'terum-skills reported a failure.';
           finish({ ok: false, error, ...(frame.refused === true ? { refused: true } : {}), ...(frame.declined === true ? { cancelled: true } : {}), ...(value === undefined ? {} : { value }) }, { t: 'result', ok: false, error, ...(frame.refused === true ? { refused: true } : {}), ...(frame.declined === true ? { declined: true } : {}) });
         }
         return;
@@ -108,13 +123,15 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
     if (finished) return;
     if (!resolved) { finish({ ok: false, error: NO_STATE }); return; }
     started = true;
-    try {
-      unlisten = await bridge.spawn(id, resolved, argv, options.cwd, onEvent);
-      // A short-lived child can exit (or be cancelled) before spawn returns the listener.
-      if (cleanupRequested) cleanup();
-    } catch (error) {
-      finish({ ok: false, error: `Could not start terum-skills: ${error instanceof Error ? error.message : String(error)}` });
-    }
+    spawnSettled = (async () => {
+      try {
+        unlisten = await bridge.spawn(id, resolved, argv, options.cwd, onEvent);
+        // A short-lived child can exit (or be cancelled) before spawn returns the listener.
+        if (cleanupRequested) cleanup();
+      } catch (error) {
+        finish({ ok: false, error: `Could not start terum-skills: ${error instanceof Error ? error.message : String(error)}` });
+      }
+    })();
   });
 
   return {
@@ -138,8 +155,14 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
       if (!finished) {
         cancelled = true;
         if (started) {
-          await bridge.write(id, JSON.stringify({ t: 'cancel' })).catch(() => undefined);
-          await bridge.kill(id).catch(() => undefined);
+          // A spawn still in flight has no registered child to signal: write and kill would both miss it
+          // ("no such process") and the just-spawned verb would run to completion behind a "Cancelled." settle.
+          // Wait for the spawn to resolve, then signal the child it registered.
+          await spawnSettled;
+          if (!finished) {
+            await bridge.write(id, JSON.stringify({ t: 'cancel' })).catch(() => undefined);
+            await bridge.kill(id).catch(() => undefined);
+          }
         }
         finish({ ok: false, error: 'Cancelled.' });
       }

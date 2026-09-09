@@ -126,33 +126,74 @@ describe('cliRun — a CLI process as a seam Run<T>', () => {
     expect(unlisten).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps Cancelled when the CLI sends a result during graceful cancellation', async () => {
+  it('reports the finished mutation, not a clean Cancelled, when the CLI result outruns cancellation', async () => {
     const f = fakeBridge(() => undefined);
     f.bridge.kill = async () => {
       f.emit({ kind: 'stdout', line: line({ t: 'result', verb: 'setup', ok: true, exitCode: 0, value: 'stopped' }) });
     };
-    const run = cliRun(f.bridge, Promise.resolve(STATE), ['setup'], { map: (value) => value });
+    const onSettled = vi.fn();
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['setup'], { map: (value) => value, onSettled });
     await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
     await run.cancel();
-    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
+    const error = 'Cancelled, but setup had already finished; its changes are on disk.';
+    expect(await run.done).toEqual({ ok: false, error, value: 'stopped' });
+    expect(onSettled).toHaveBeenCalledExactlyOnceWith({ ok: false, error, value: 'stopped' });
     expect(f.unlisten).toHaveBeenCalledTimes(1);
     f.emit({ kind: 'exit', code: 0 });
     expect(f.unlisten).toHaveBeenCalledTimes(1);
   });
 
-  it('releases the listener once when cancellation finishes before spawn returns', async () => {
+  it('cancel during a spawn in flight waits for the child, then signals it (the spawn race)', async () => {
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
     const f = fakeBridge(() => pending);
-    const run = cliRun(f.bridge, Promise.resolve(STATE), ['setup'], { map: (value) => value });
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['install', 'x'], { map: (value) => value });
     await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
-    await run.cancel();
-    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
-    expect(f.unlisten).not.toHaveBeenCalled();
+    const cancelling = run.cancel();
+    // The child is not registered yet: nothing may be written or killed until the spawn resolves.
+    expect(f.writes).toEqual([]);
+    expect(f.kills).toEqual([]);
     release();
-    await vi.waitFor(() => expect(f.unlisten).toHaveBeenCalledTimes(1));
+    await cancelling;
+    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
+    expect(f.writes.map((w) => JSON.parse(w))).toEqual([{ t: 'cancel' }]);
+    expect(f.kills).toEqual([f.spawns[0]!.id]);
+    expect(f.unlisten).toHaveBeenCalledTimes(1);
     f.emit({ kind: 'exit', code: null });
     expect(f.unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('a verb that completes while its spawn is still in flight is not settled as a clean Cancelled (P6)', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const f = fakeBridge(async (_a, emit) => {
+      await pending;
+      emit({ kind: 'stdout', line: line({ t: 'result', verb: 'install', ok: true, exitCode: 0, value: [{ id: 'a' }] }) });
+      emit({ kind: 'exit', code: 0 });
+    });
+    const onSettled = vi.fn();
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['install', 'a'], { map: (value) => value, onSettled });
+    await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
+    const cancelling = run.cancel();
+    release();
+    await cancelling;
+    const error = 'Cancelled, but install had already finished; its changes are on disk.';
+    expect(await run.done).toEqual({ ok: false, error, value: [{ id: 'a' }] });
+    expect(onSettled).toHaveBeenCalledExactlyOnceWith({ ok: false, error, value: [{ id: 'a' }] });
+    expect(await collect(run.frames)).toEqual([{ t: 'result', ok: false, error }]);
+    await vi.waitFor(() => expect(f.unlisten).toHaveBeenCalledTimes(1));
+  });
+
+  it('cancel before the app state resolves prevents the spawn entirely', async () => {
+    let resolveState!: (state: typeof STATE) => void;
+    const state = new Promise<typeof STATE>((resolve) => { resolveState = resolve; });
+    const f = fakeBridge(() => undefined);
+    const run = cliRun(f.bridge, state, ['install', 'x'], { map: (value) => value });
+    await run.cancel();
+    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
+    resolveState(STATE);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.spawns).toEqual([]);
   });
 
   it('without the app state file, nothing is spawned and the failure tells the person what to run', async () => {
