@@ -18,6 +18,7 @@ it('renders backend failures as visible alerts',async()=>{location.hash='#/libra
 it('retains footer identity while Library error counts are hidden',async()=>{
  location.hash='#/library/global?__mock=error';render(<Providers><App/></Providers>);
  expect(await screen.findByText('teniroo')).toBeInTheDocument();expect(screen.getByText('teddy-mbp')).toBeInTheDocument();
+ expect(screen.getByRole('link',{name:'Your profile'})).toHaveAttribute('href','#/marketplace/people/teddy');
  expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
 });
 it.each([
