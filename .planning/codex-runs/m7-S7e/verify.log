@@ -30,3 +30,13 @@ real-data proof   : update-replay.test.ts replays frames/update.jsonl and frames
                     team (offline: a local bare remote, so update cannot probe the registry): the served UpdateReport carries the four
                     non-empty advice lines, seven printed lines equal to value.lines, latest null and observation unknown; nothing from
                     the design fixture reaches the DTO.
+
+battery 2 (01:32-01:37 UTC, on 41b2150 = main through S7g merged, a clean auto-merge)
+root lint/typecheck/test/build : rc=0  73 files, 1228 tests
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=0  54 files, 773 tests passed
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (35.2s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (49.8s)
