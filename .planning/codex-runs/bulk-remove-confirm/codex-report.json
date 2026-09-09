@@ -1,0 +1,110 @@
+{
+  "status": "complete",
+  "summary": "Implemented CLI removal previews and confirmation, desktop bulk removal, partial-failure refresh, documentation, and tests. All final gates pass; protected files remain unchanged.",
+  "filesChanged": [
+    {"path":"src/commands/uninstall.ts","change":"modified","why":"Read-only previews, confirmation, cancellation, and partial-failure results; replay remains prompt-free."},
+    {"path":"src/commands/__tests__/uninstall.test.ts","change":"modified","why":"CLI acceptance coverage for tests 1–8."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Member and project uninstall arguments."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Bulk argv, partial-result notifications, and project-scope installed predicate."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Bulk confirmation, observable removals, and explicit test-fixture reset."},
+    {"path":"desktop/src/backend/mock/data.ts","change":"modified","why":"Populate card paths from existing placement fixtures."},
+    {"path":"desktop/src/screens/marketplace/MarketplaceScreen.tsx","change":"modified","why":"One backend run, provider confirmation, status-derived identity, and silent cancellation."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","change":"modified","why":"Desktop acceptance tests 9–11."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"Test 12 and bulk argv coverage."},
+    {"path":"desktop/src/backend/tauri/__tests__/path-true-screens.test.tsx","change":"modified","why":"Align existing assertion with the required person-button label."},
+    {"path":"desktop/src/backend/test-setup.ts","change":"added","why":"Reset mock removals between independent tests without changing protected tests."},
+    {"path":"desktop/src/test/setup.ts","change":"modified","why":"Register backend-owned fixture isolation."},
+    {"path":"README.md","change":"modified","why":"Document uninstall confirmation in the verb table."},
+    {"path":"docs/frame-protocol.md","change":"modified","why":"Document uninstall confirmation detail."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"Append the specified confirmation contract and align teardown wording."}
+  ],
+  "gates": {
+    "lint": {
+      "ran":true,
+      "passed":true,
+      "output":"Root and desktop: exit 0, no lint errors or warnings.",
+      "preExistingFailures":""
+    },
+    "typecheck": {
+      "ran":true,
+      "passed":true,
+      "output":"Root and desktop: exit 0, no TypeScript diagnostics.",
+      "preExistingFailures":""
+    },
+    "test": {
+      "ran":true,
+      "passed":true,
+      "output":"Root: 1334 passed across 76 files (--configLoader native --maxWorkers=2). Desktop: 1066 passed, 91 skipped across 75 files (--maxWorkers=1, required NODE_OPTIONS). Earlier parallel desktop runs had timing failures; final full run passed. Playwright was not run.",
+      "preExistingFailures":""
+    }
+  },
+  "openQuestions": [
+    {
+      "question":"Which paths should mock confirmation display when existing cards have empty path arrays?",
+      "specSection":"Decision 10; test 9",
+      "conservativeChoice":"Populate only paths already recorded in design.PLACEMENTS; invent no paths."
+    },
+    {
+      "question":"How should persistent mock removals be isolated while library-skill.test.tsx remains frozen?",
+      "specSection":"Scope exclusions; Decision 10",
+      "conservativeChoice":"Reset removal state between tests through backend-owned test setup. Preserve state throughout each test and during application use."
+    }
+  ],
+  "deviations": [
+    {
+      "what":"project.installed = any project-scope placement per skill; no checkout↔project mapping in ls --local",
+      "why":"Required fallback in decision 8."
+    },
+    {
+      "what":"Mock confirmation omits the Not offered again lines.",
+      "why":"The mock has no endorsement model, as specified."
+    },
+    {
+      "what":"Added fixture-path projection and shared mock test isolation; updated one additional existing label assertion.",
+      "why":"Required to provide meaningful mock detail and preserve independent tests without editing protected files or weakening assertions."
+    },
+    {
+      "what":"Used native config loading for root tests and constrained test workers.",
+      "why":"Default root config loading attempted a forbidden write through symlinked node_modules; parallel runs encountered UI timing failures."
+    }
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Desktop operations remain behind the backend seam; no new runtime tools or network paths."},
+    {"number":2,"howSatisfied":"Team writes still use safeWrite; confirmation occurs before mutation. Desktop argv mirrors existing CLI forms."},
+    {"number":3,"howSatisfied":"Existing authorization guard remains active; generated and protected files were not edited."},
+    {"number":4,"howSatisfied":"Approval semantics remain unchanged, and hook replay never prompts."},
+    {"number":5,"howSatisfied":"Removal paths come exclusively from the placement ledger; existing quarantine behavior remains intact."},
+    {"number":6,"howSatisfied":"Existing placement removal and target-lock primitives retain their behavior."},
+    {"number":7,"howSatisfied":"All test edits are declared; assertions and timeout limits were not weakened."},
+    {"number":8,"howSatisfied":"Both packages passed final lint, typecheck, and test runs within the sandbox; writes were read back."}
+  ],
+  "testsModified": [
+    {
+      "path":"src/commands/__tests__/uninstall.test.ts",
+      "whatChanged":"Added explicit yes queues to 12 uninstall invocations across the qualified-ref, member batch, interrupted replay, upstream-deletion replay, endorsed decline/reinstall, project-versus-personal decline, project/global preservation, two-checkout removal, two-machine removal, and incidental-description tests. Extended own-title and interrupted-result/frame/hook assertions; added six cases.",
+      "justification":"Existing successful removals now require confirmation; added assertions cover the locked acceptance requirements."
+    },
+    {
+      "path":"desktop/src/screens/marketplace/marketplace.test.tsx",
+      "whatChanged":"Replaced the no-dialog bulk-removal test with confirmation, cancellation, own-handle, and observable-removal coverage.",
+      "justification":"Explicitly required by tests 9–11."
+    },
+    {
+      "path":"desktop/src/backend/tauri/__tests__/run.test.ts",
+      "whatChanged":"Added partial-failure notification, cancellation, and bulk argv tests; existing cases unchanged.",
+      "justification":"Test 12 and seam argument verification."
+    },
+    {
+      "path":"desktop/src/backend/tauri/__tests__/path-true-screens.test.tsx",
+      "whatChanged":"Expected label now reads Remove mira's 2 installed skills from this machine.",
+      "justification":"Matches the exact required wording."
+    },
+    {
+      "path":"desktop/src/test/setup.ts",
+      "whatChanged":"Registers a backend-owned beforeEach reset for mock removals.",
+      "justification":"Prevents an earlier removal test from changing later tests' initial fixtures. All protected assertions remain unchanged."
+    }
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Earlier desktop timing failures were caused by resource contention; the unchanged suite passed with one worker, but no pre-change baseline established their cause."
+}
