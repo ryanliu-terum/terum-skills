@@ -1,0 +1,22 @@
+lock acquired Wed Sep  9 01:36:25 UTC 2026
+root lint: rc=0
+root typecheck: rc=0
+root test: rc=1
+root build: rc=0
+desktop typecheck: rc=0
+desktop lint: rc=0
+desktop vitest: rc=1
+desktop build: rc=0
+e2e routes: rc=0
+export:check: rc=0
+e2e fidelity: rc=0
+done Wed Sep  9 01:42:23 UTC 2026
+ ❯ src/lib/__tests__/runner.test.ts (6 tests | 1 failed) 748ms
+ Test Files  1 failed | 72 passed (73)
+      Tests  1 failed | 1225 passed (1226)
+ ❯ src/screens/share/share.test.tsx (26 tests | 1 failed) 42654ms
+ ❯ src/backend/tauri/__tests__/identity-replay.test.ts (3 tests | 2 failed) 14ms
+ Test Files  2 failed | 52 passed (54)
+      Tests  3 failed | 776 passed (779)
+  91 passed (30.1s)
+  88 passed (41.2s)
