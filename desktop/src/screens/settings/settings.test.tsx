@@ -14,15 +14,17 @@ afterEach(()=>{cleanup();location.hash='';vi.restoreAllMocks();});
 it.each([['account','Account'],['teams','Teams'],['machine','This machine'],['sync','Sync'],['updates','Updates'],['inbox','Inbox'],['evals','Evals'],['sharing','Sharing'],['appearance','Appearance'],['advanced','Advanced'],['about','About']])('renders the %s settings head and nav',async(section,title)=>{open('#/settings/'+section);expect(await screen.findByRole('heading',{name:title})).toBeInTheDocument();expect(within(screen.getByRole('navigation',{name:'Settings sections'})).getAllByRole('link')).toHaveLength(11);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(screen.queryByText(/S1b builds this/)).toBeNull();});
 it('defaults unknown sections to Account',async()=>{open('#/settings/no-such-section');expect(await screen.findByRole('heading',{name:'Account'})).toBeInTheDocument();});
 it('renders Leave and preanswers its exact confirmation',async()=>{const leave=vi.spyOn(backend,'team');open('#/settings/teams?dialog=leave');const dialog=await screen.findByRole('dialog');expect(within(dialog).getByRole('heading')).toHaveTextContent('Leave Terum on this machine?');expect([...dialog.querySelectorAll('.settings-leave-bullet>span:last-child')].map(node=>node.textContent)).toEqual([
- "Its placed skills leave ~/.claude/skills and the project checkouts on this machine (30 global, 69 in checkouts) — a copy you edited by hand is moved to quarantine instead of deleted, and a folder that is also a skill's authoring source is left where it is",
+ "Its placed skills leave ~/.claude/skills and the project checkouts on this machine (15 global, 13 in checkouts) — a copy you edited by hand is moved to quarantine instead of deleted, and a folder that is also a skill's authoring source is left where it is",
  `The clone at ${design.TEAMS[0]?.clone} and this team's entry in config.json — a clone holding uncommitted or unpushed work is moved to quarantine instead`,
  'Its connected skill records and any pending operations on this machine',
  'This is your last team here, so the session-start hook is removed from ~/.claude/settings.json; if that file cannot be written the leave still finishes and says so',
  `Your people file in the team repo stays: you remain a member (an admin archives that with team remove ${design.ME.handle}), and setup brings this machine back`,
 ]);fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledWith({kind:'leave'});expect(location.hash).toBe('#/settings/teams');});
 it.each([
-  ['0','0 global, 99 in checkouts'],
-  ['99','99 global, 0 in checkouts'],
+  ['0','0 global, 28 in checkouts'],
+  ['28','28 global, 0 in checkouts'],
+  ['29','— global, — in checkouts'],
+  ['99','— global, — in checkouts'],
   [undefined,'— global, — in checkouts'],
   ['','— global, — in checkouts'],
   ['many','— global, — in checkouts'],

@@ -1,1 +1,1 @@
-.library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 20px 16px;flex-grow:1;min-height:0;align-content:start}
+.library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 20px 16px;flex-grow:1;min-height:0;align-content:start;overflow:auto;scrollbar-width:none}

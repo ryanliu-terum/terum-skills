@@ -238,7 +238,7 @@ function inventoryBridge(overrides: { row?: Partial<typeof lsRow>; validation?: 
 }
 it.each(['Global','ops','installed'])('maps the %s library from real counts and registry, with scoped argv',async scope=>{
   const f=inventoryBridge();const result=await createTauriBackend(f.bridge).library({scope,team:'acme'});
-  expect(result).toMatchObject({ok:true,value:{title:'1 of 3 skills',projects:lsValue.projects,skills:[{name:'a',desc:'Live description',project:'Global',installs:'1 installs',installsN:1,installed:true,updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}],overview:{skills:'1',installs:'1',evaluated:'—',attention:'—',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:'1 endorsed to Global',installs_note:'across every readable people file · 1 active teammate'},provenance:null}});
+  expect(result).toMatchObject({ok:true,value:{title:'1 skills',projects:lsValue.projects,skills:[{name:'a',desc:'Live description',project:'Global',installs:'1 installs',installsN:1,installed:true,updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}],overview:{skills:'1',installs:'1',evaluated:'—',attention:'—',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:scope==='ops'?'1 also on Global':'1 endorsed to Global',installs_note:'across every readable people file · 1 active teammate'},provenance:null}});
   expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls',...(scope==='ops'?['project','ops']:[]),'--team','acme'],['ls','--local']]);
 });
 it('maps the detail body, grants and all install records without fabricating missing values',async()=>{
@@ -253,7 +253,7 @@ it('retains null grants/body/date and marks unresolved skills broken, with a fai
 it('does not infer installation from an untracked or other-team same-name folder',async()=>{
   for(const state of ['untracked locally','placement recorded from other @abc','connected source for acme; endorsed (global)']){
     const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state,tracked:state!=='untracked locally',shared:state.startsWith('connected')?[{id:'id-a',team:'acme'}]:[],placement:state.includes('other')?{id:'id-a',team:'other',version:null}:null,health:'unknown'}],notOffered:[],problems:[]}]}});
-    expect(await createTauriBackend(f.bridge).library({scope:'installed',team:'acme'})).toMatchObject({ok:true,value:{skills:[],title:'0 of 3 skills'}});
+    expect(await createTauriBackend(f.bridge).library({scope:'installed',team:'acme'})).toMatchObject({ok:true,value:{skills:[],title:'0 skills'}});
   }
 });
 it('refuses multi-team ambiguity before ls and discovers a single configured team without a prompt',async()=>{

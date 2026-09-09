@@ -79,6 +79,27 @@ export const BOARDS:readonly Board[]=[
     "height": 900
   },
   {
+    "name": "LibrarySidebarHidden",
+    "route": "#/library/global?sidebar=hidden",
+    "klass": "screen",
+    "width": 1440,
+    "height": 900
+  },
+  {
+    "name": "LibraryProjectsCollapsed",
+    "route": "#/library/global?projects=collapsed",
+    "klass": "screen",
+    "width": 1440,
+    "height": 900
+  },
+  {
+    "name": "LibraryInboxCollapsed",
+    "route": "#/library/global?inbox=collapsed",
+    "klass": "screen",
+    "width": 1440,
+    "height": 900
+  },
+  {
     "name": "LibraryError",
     "route": "#/library/global?__mock=error",
     "klass": "state",

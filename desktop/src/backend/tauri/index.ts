@@ -124,7 +124,7 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
  const rows=local?.local.flatMap(root=>root.rows)??[];
  const policy=status.teams[0]?.policy??null;
  return {
-  MACHINE:status.machine,ME:status.me,TEAMS:status.teams,tools:status.tools,
+  K:null,MACHINE:status.machine,ME:status.me,TEAMS:status.teams,tools:status.tools,
   TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams[0]?.categories??null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'},
   PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [p.path,row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,p.version?.slice(0,12)??null,p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
@@ -300,8 +300,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       if (!local.ok) return fail(local.error);
       const skills = inventory.value.skills.map(row => inventoryCard(row, local.value, selected.value.team)).filter(row => scope.toLowerCase() !== 'installed' || row.installed);
       const installs = skills.reduce((sum, row) => sum + row.installsN, 0);
-      const value: Library = { skills, title: `${skills.length} of ${selected.value.sharedSkills ?? inventory.value.skills.length} skills`, projects: inventory.value.projects ?? [], problems: inventory.value.problems, provenance: null,
-        overview: { skills: String(skills.length), skills_note: `${inventory.value.skills.filter(row => row.endorsement === 'global').length} endorsed to Global`, evaluated: '—', meter: { pass_: 0, neutral: 0, fail: 0, total: 0 }, meter_text: '', installs: String(installs), installs_note: `across every readable people file · ${inventory.value.roster.filter(person => person.active).length} active teammate${inventory.value.roster.filter(person => person.active).length === 1 ? '' : 's'}`, attention: '—', attention_lines: [], attention_link: '', zero: { skills: '', evaluated: '', installs: '', attention: '' } },
+      const value: Library = { skills, title: `${skills.length} skills`, projects: inventory.value.projects ?? [], problems: inventory.value.problems, provenance: null,
+        overview: { skills: String(skills.length), skills_note: `${inventory.value.skills.filter(row => row.endorsement === 'global').length} ${args.length===0?'endorsed to Global':'also on Global'}`, evaluated: '—', meter: { pass_: 0, neutral: 0, fail: 0, total: 0 }, meter_text: '', installs: String(installs), installs_note: `across every readable people file · ${inventory.value.roster.filter(person => person.active).length} active teammate${inventory.value.roster.filter(person => person.active).length === 1 ? '' : 's'}`, attention: '—', attention_lines: [], attention_link: '', zero: { skills: '', evaluated: '', installs: '', attention: '' } },
       };
       return { ok: true, value };
     },
