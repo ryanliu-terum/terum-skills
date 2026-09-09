@@ -54,7 +54,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/invite.ts",
     "line": 54,
     "policy": "fixed",
-    "pattern": "return [`Send this to your teammate:`, '```', GLOBAL_INSTALL, joinCommand(ownerRepo), '', `Bare equivalent: npx -y terum-skills@latest team join ${ownerRepo}`, '```', 'If you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.'].join('\\n');"
+    "pattern": "return [`Send this to your teammate:`, '```', GLOBAL_INSTALL, joinCommand(ownerRepo), '', `Bare equivalent: npx -y terum-skills@latest team join ${ownerRepo}`, '```', 'If you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.'];"
   },
   {
     "file": "src/commands/leave.ts",

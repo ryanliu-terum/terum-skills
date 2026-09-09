@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { askUntilValid, assertBindable, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, identityForJoiner, teamByRemote } from '../auth.js';
+import { gitState, ghState, askUntilValid, assertBindable, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, identityForJoiner, teamByRemote } from '../auth.js';
 import { ConfigStore } from '../config.js';
 import { emptyConfig } from '../schema.js';
 import { Runner } from '../runner.js';
@@ -227,4 +227,17 @@ it('over frames, the gh login offer is not a question: one line says what to run
   const frames: Prompter = { interactive: true, channel: 'frames', confirm: async () => { throw new Error('asked over frames'); }, text: async () => '', select: async () => '', print: (line: string) => { lines.push(line); } };
   expect(await detectOrOfferGh(frames, ghOnlyRunner(fakeGh('me', {}, false)))).toEqual({ installed: true, authenticated: false });
   expect(lines).toEqual(['GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again.']);
+});
+
+
+it.each([0, 1, 127, 'spawn'] as const)('git presence reports exit %s without throwing', async code => {
+  const calls: unknown[] = [];
+  const runner: Runner = { async run(command, args) { calls.push([command, args]); if (code === 'spawn') throw new Error('ENOENT'); return { code, stdout: '', stderr: '' }; } };
+  expect(await gitState(runner)).toEqual({ installed: code === 0 });
+  expect(calls).toEqual([['git', ['--version']]]);
+});
+it('status gh presence never probes authentication', async () => {
+  const runner = ghOnlyRunner(fakeGh('seed'));
+  expect(await ghState(runner, { presenceOnly: true })).toEqual({ installed: true, authenticated: false });
+  expect(runner.calls.map(call => call.args)).toEqual([['--version']]);
 });

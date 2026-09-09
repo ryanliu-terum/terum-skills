@@ -75,7 +75,7 @@ function OnboardingFlow({step,data:d}:{step:string;data:Onboarding}){
 }
 function BootError({error,data,status,retry}:{error:string;data:Onboarding|undefined;status:StatusResult|undefined;retry:()=>void}){
   const backend=useBackend(),navigate=useNavigate(),action=useWorkflow();
-  const team=status?.teams[0],repo=data?.TEAM_REPO??team?.remote.replace(/^github\.com\//,'')??'—';
+  const team=status?.teams[0],repo=data?.TEAM_REPO??team?.remote?.replace(/^github\.com\//,'')??'—';
   const rows:Onboarding['bootRows']=data?.failedBootRows??[['done',`Team ${team?.key??'—'} found on this machine`,`@${status?.me.handle??'—'}`],['failed',`Couldn't fetch ${repo}`,'not reached'],['pending',"Placing the team's Global set into ~/.claude/skills",'0 of —'],['pending','Recording the sync','']];
   function offline(){navigate('/library/global');}
   function again(){void action.run(()=>backend.sync({}),{},retry);}
