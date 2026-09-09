@@ -267,6 +267,15 @@ describe('connect (§5.3)', () => {
     await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
   });
 
+  it('refuses --keep-source/--keep-repo under a --team the skill is not tracked in, and honors the matching team', async () => {
+    const { store } = await sharedFixture();
+    const id = Object.keys((await store.read()).shared)[0]!;
+    expect(await run({ keepRepo: id, team: 'other', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `Connected skill ${id} is tracked in team team, not other; rerun with --team team or without --team.` });
+    expect(await run({ keepSource: id, team: 'other', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('is tracked in team team, not other') });
+    // The matching override behaves exactly like no override.
+    expect((await run({ keepSource: id, team: 'team', config: store }, new ScriptedPrompter())).ok).toBe(true);
+  });
+
   it('treats a missing baseline as divergence without changing either copy or restoring the baseline', async () => {
     const { fixture, store } = await sharedFixture();
     const id = Object.keys((await store.read()).shared)[0]!;

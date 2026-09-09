@@ -366,7 +366,10 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
   const config = await store.read();
   const tracked = config.shared[id];
   if (!tracked) throw new Error(`No connected skill ${id}.`);
-  const clone = store.teamClone(teamOverride ?? tracked.team);
+  // The connected ledger already binds this id to one team; a different --team cannot be honored,
+  // and silently resolving against its clone reported a misleading missing repository copy.
+  if (teamOverride !== undefined && teamOverride !== tracked.team) throw new Error(`Connected skill ${id} is tracked in team ${tracked.team}, not ${teamOverride}; rerun with --team ${tracked.team} or without --team.`);
+  const clone = store.teamClone(tracked.team);
   const record = (await skillRecords(clone, tracked.team)).find((skill) => skill.id === id);
   if (!record) throw new Error(`Repository copy for ${id} is missing.`);
   if (keepSource) {
