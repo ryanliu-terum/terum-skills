@@ -1,7 +1,8 @@
 import { invocation, type InvocationForm, type WithForm } from './invocation.js';
 import { ConfigStore, createConfigStore } from './config.js';
 import { Prompter } from './prompt.js';
-import { normalizeRemote } from './remote.js';
+import { normalizeRemote, stripRemoteCredentials } from './remote.js';
+import { RefusedError } from './result.js';
 import { Runner, systemRunner } from './runner.js';
 import { Config, emailSchema, githubLoginSchema, HANDLE_RULE, handleSchema, TeamConfig } from './schema.js';
 
@@ -191,7 +192,8 @@ export function setIdentity(config: Config, identity: Partial<Identity>): void {
  * handle they proved against the roster (rev 9, Decision 4). Unknown keys are kept, except a stale
  * `token` from before Decision 2, which is dropped rather than carried forward.
  */
-export function bindTeam(config: Config, name: string, entry: { remote: string; handle: string }): TeamConfig {
+export function bindTeam(config: Config, name: string, entry: { remote: string; handle: string }, options: { form?: InvocationForm; retry?: string } = {}): TeamConfig {
+  assertBindable(config, name, entry.remote, options);
   const current: Record<string, unknown> = { ...(Object.hasOwn(config.teams, name) ? config.teams[name] : {}) };
   delete current.token;
   const bound: TeamConfig = { ...current, remote: normalizeRemote(entry.remote), handle: entry.handle };
@@ -202,7 +204,24 @@ export function bindTeam(config: Config, name: string, entry: { remote: string; 
 /** The config entry already bound to a remote, if any (§6: a second join never duplicates a team). */
 export function teamByRemote(config: Config, remote: string): [string, TeamConfig] | undefined {
   const normalized = normalizeRemote(remote);
-  return Object.entries(config.teams).find(([, team]) => team.remote === normalized);
+  return Object.entries(config.teams).find(([, team]) => {
+    let stored = team.remote;
+    try { stored = normalizeRemote(stored); } catch { /* Legacy malformed stored remotes retain raw comparison. */ }
+    return stored === normalized;
+  });
+}
+
+/** One team per machine (Ryan, 2026-09-08). Throws RefusedError before any side effect when binding `target` would add a second team. */
+export function refuseSecondTeam(config: Config, target: { remote?: string; create?: true }, retry: string, form?: InvocationForm): void {
+  const entries = Object.entries(config.teams);
+  if (entries.length === 0) return;
+  if (target.remote !== undefined && teamByRemote(config, target.remote)) return;
+  if (target.remote === undefined && target.create === undefined && entries.length === 1) return;
+  if (entries.length > 1) {
+    throw new RefusedError(`One team per machine: This machine is configured for teams ${entries.map(([name]) => name).join(', ')}; Terum Skills keeps one team per machine. Run \`${invocation(form, 'team leave', { raw: '<name>' })}\` for each team you no longer want, then re-run.`);
+  }
+  const [name, binding] = entries[0]!;
+  throw new RefusedError(`One team per machine: This machine is on team ${name} (${stripRemoteCredentials(binding.remote)}). Terum Skills keeps one team per machine: run \`${invocation(form, 'team leave', name)}\` first, then re-run \`${retry}\`.`);
 }
 
 /**
@@ -210,12 +229,16 @@ export function teamByRemote(config: Config, remote: string): [string, TeamConfi
  * prompt AND again under the config lock right before binding, so a verb that ran in between
  * cannot leave two entries for one repository.
  */
-export function assertBindable(config: Config, team: string, remote: string): void {
+export function assertBindable(config: Config, team: string, remote: string, options: { form?: InvocationForm; retry?: string } = {}): void {
   const normalized = normalizeRemote(remote);
+  const isNewKey = !Object.hasOwn(config.teams, team);
+  if (isNewKey && Object.keys(config.teams).length > 0) {
+    refuseSecondTeam(config, { create: true }, options.retry ?? invocation(options.form, 'team join', remote), options.form);
+  }
   const byRemote = teamByRemote(config, normalized);
   if (byRemote && byRemote[0] !== team) throw new Error(`${normalized} is already configured as team ${byRemote[0]}.`);
   // An own key only: the teams record inherits Object.prototype, so `constructor` or `toString` would
   // otherwise read as a configured team — after the GitHub repo exists or the roster entry is pushed.
   const existing = Object.hasOwn(config.teams, team) ? config.teams[team] : undefined;
-  if (existing && existing.remote !== normalized) throw new Error(`Team ${team} is configured for ${existing.remote}, not ${normalized}; pass --as <other-name>.`);
+  if (existing && byRemote?.[0] !== team) throw new Error(`Team ${team} is configured for ${existing.remote}, not ${normalized}.`);
 }

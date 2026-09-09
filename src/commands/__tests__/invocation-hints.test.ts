@@ -73,7 +73,7 @@ describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (f
     const candidate = join(home, '.claude/skills/sample'); await mkdir(candidate, { recursive: true });
     await writeFile(join(candidate, 'SKILL.md'), '---\nname: sample\ndescription: example\n---\n');
     const picker = new ScriptedPrompter();
-    expect(await connect({ config, home, form }, picker)).toMatchObject({ ok: false, error: expect.stringContaining(`run \`${prefix} connect --team 'team'\``) });
+    expect(await connect({ config, home, form }, picker)).toMatchObject({ ok: false, error: expect.stringContaining(`run \`${prefix} connect\``) });
     const clone = config.teamClone('team'); await mkdir(join(clone, 'skills/sample'), { recursive: true });
     await writeFile(join(clone, 'team.json'), JSON.stringify(TEAM_JSON)); await writeFile(join(clone, 'skills/sample/SKILL.md'), sourceText);
     const source = join(root, 'source');
@@ -124,10 +124,10 @@ describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (f
   it('routes configured-team create recovery and keeps the post-removal instruction fixed', async () => {
     const config = createConfigStore(join(await temporaryDirectory(), 'state'));
     await config.update((c) => { c.teams.team = { remote: 'github.com/acme/team', handle: 'seed' }; });
-    expect(await team({ kind: 'create', name: 'team', config, form }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`run \`${prefix} team join\``) });
+    expect(await team({ kind: 'create', name: 'team', config, form }, new ScriptedPrompter())).toMatchObject({ ok: false, refused: true, error: expect.stringContaining(`run \`${prefix} team leave 'team'\` first`) });
     const io = new ScriptedPrompter([], [false]);
     await uninstallMachine({ config, form, hook: { settingsFile: join(config.root, 'settings.json') } }, io);
-    expect(io.lines).toContain('Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
+    expect(io.lines).toContain('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
   });
 
   it('routes setup authentication failure through its nested helper', async () => {

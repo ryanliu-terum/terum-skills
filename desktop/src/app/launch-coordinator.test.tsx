@@ -19,12 +19,12 @@ function harness(initial:LaunchContext|null=null){
  return {backend,setup,open,reopen};
 }
 it('delivers a new target from Library once, deduplicates events, and ignores consumed requests',async()=>{
- const h=harness();h.open();await screen.findByText('15 of 30 skills');
+ const h=harness();h.open();await screen.findByText('15 skills');
  const ctx={writtenAt:'B',target:'terum/team-skills'};await h.reopen(ctx);
  await screen.findByRole('heading',{name:'Setup finished'});
  expect(location.hash).toBe('#/onboarding/boot');expect(h.setup).toHaveBeenCalledExactlyOnceWith({target:'terum/team-skills',offerConnect:true});
  await h.reopen(ctx);expect(h.setup).toHaveBeenCalledTimes(1);
- fireEvent.click(screen.getByRole('button',{name:'Open the Library'}));await screen.findByText('15 of 30 skills');
+ fireEvent.click(screen.getByRole('button',{name:'Open the Library'}));await screen.findByText('15 skills');
  h.backend.prefs.set('launch:consumedWrittenAt','consumed');await h.reopen({writtenAt:'consumed',target:'other/team'});
  expect(location.hash).toBe('#/library/global');expect(h.setup).toHaveBeenCalledTimes(1);
 });

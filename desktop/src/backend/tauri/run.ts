@@ -94,7 +94,7 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
           if (frame.value !== undefined) {
             try { value = options.map(frame.value as TIn); } catch { value = undefined; }
           }
-          finish({ ok: false, error, ...(frame.declined === true ? { cancelled: true } : {}), ...(frame.refused === true ? { refused: true } : {}), ...(value === undefined ? {} : { value }) }, { t: 'result', ok: false, error, ...(frame.declined === true ? { declined: true } : {}), ...(frame.refused === true ? { refused: true } : {}) });
+          finish({ ok: false, error, ...(frame.refused === true ? { refused: true } : {}), ...(frame.declined === true ? { cancelled: true } : {}), ...(value === undefined ? {} : { value }) }, { t: 'result', ok: false, error, ...(frame.refused === true ? { refused: true } : {}), ...(frame.declined === true ? { declined: true } : {}) });
         }
         return;
       }

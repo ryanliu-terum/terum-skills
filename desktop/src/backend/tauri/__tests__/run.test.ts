@@ -360,3 +360,9 @@ it('maps a typed refusal into the settled result and seam result frame',async()=
  expect(await run.done).toEqual({ok:false,error,refused:true});
  expect(await collect(run.frames)).toEqual([{t:'result',ok:false,error,refused:true}]);
 });
+it('forwards a refused result on both the promise and seam frame',async()=>{
+ const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:line({t:'result',verb:'setup',ok:false,exitCode:1,error:'Leave first.',refused:true})}));
+ const run=cliRun(f.bridge,Promise.resolve(STATE),['setup'],{map:value=>value});
+ expect(await run.done).toEqual({ok:false,error:'Leave first.',refused:true});
+ expect(await collect(run.frames)).toEqual([{t:'result',ok:false,error:'Leave first.',refused:true}]);
+});

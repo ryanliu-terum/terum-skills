@@ -50,6 +50,7 @@ export function parseCliFrame(line: string): CliFrame | null {
       if (!str(f['verb']) || typeof f['ok'] !== 'boolean') return null;
       const frame: Extract<CliFrame, { t: 'result' }> = { t: 'result', verb: f['verb'], ok: f['ok'], exitCode: f['ok'] ? 0 : 1 };
       if (str(f['error'])) frame.error = f['error'];
+      if (typeof f['refused'] === 'boolean') frame.refused = f['refused'];
       if (f['declined'] === true) frame.declined = true;
       if (f['refused'] === true) frame.refused = true;
       if ('value' in f && f['value'] !== undefined) frame.value = f['value'];

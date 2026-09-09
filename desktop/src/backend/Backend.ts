@@ -35,6 +35,7 @@ export interface Backend {
   eval(args: EvalArgs): Run<EvalResult>;
   validate(args: ValidateArgs, options?: ReadOptions): Promise<Result<ValidateResult>>;
   update(q?: undefined, options?: ReadOptions): Promise<Result<UpdateAdvice>>;
+  diagnostics(): Run<void>;
   openInEditor(path: string): Promise<Result<void>>;
   copyToClipboard(text: string): Promise<Result<void>>;
   copyImage(png: Blob): Promise<Result<void>>;

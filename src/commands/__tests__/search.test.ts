@@ -42,6 +42,7 @@ describe('search (§6)', () => {
     expect(result).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'target' })] });
   });
 
+  // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
   it('groups hits below their configured team headers when more than one team is searched', async () => {
     const first = await searchFixture('alpha', [{ name: 'alpha-skill', description: 'needle', category: 'docs', author: 'Alice <alice@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
     const second = await searchFixture('beta', [{ name: 'beta-skill', description: 'needle', category: 'testing', author: 'Bob <bob@example.com>', id: '22222222-2222-4222-8222-222222222222' }], undefined, first.store);
