@@ -48,7 +48,7 @@ const cases:Case[]=[
  {key:'perCaseEvalTables',cap:true,route:'/inbox/eval-deploy-check',selector:'.report-block:has(.report-caption) .board-table',falseText:'per-case'},
  {key:'offtargetKind',cap:true,route:'/inbox',selector:'[data-testid="inbox-row-alert-offtarget-deploy-check"]'},
  {key:'offtargetKind',cap:true,route:'/settings/inbox',selector:'[aria-label="Alert"]'},
- {key:'machineRegistry',cap:true,route:'/settings/machine',selector:'.footer-machine',falseText:'—',absentText:'Other machines'},
+ {key:'machineRegistry',cap:true,route:'/settings/machine',selector:'.settings-group:first-of-type .setting-row:nth-child(2)',absentText:'Other machines'},
 ];
 it.each(cases)('$key: $route hides/degrades false and restores the true DOM',async c=>{
  const {client}=await open(c.route);
