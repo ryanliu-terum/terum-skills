@@ -74,6 +74,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `publish <skill>` | Endorse a skill for the team: a PR (default policy) or a direct commit |
 | Evals | `validate <path\|name>` | Deterministic safety and formatting checks, no model |
 | | `eval <skill>` | Run the skill's evals on your own Claude Code login; `--commit` files a receipt |
+| | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |
 | Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
 | | `app` | Install and open the desktop app for this CLI version |
 

@@ -46,11 +46,12 @@ export function InboxScreen() {
     if (!item || busy) return;
     const kind = item.sub ?? item.kind;
     if (acted[item.id] || kind === 'eval' || kind === 'author') { navigate('/skill/' + item.name); return; }
+    if (kind === 'offtarget') { navigate('/skill/' + encodeURIComponent(item.name) + '?tab=evals&dialog=run-eval'); return; }
     if (kind === 'regression') { navigate('/skill/' + item.name + '?tab=evals'); return; }
     if (kind === 'team') { navigate('/share'); return; }
     setBusy(true);
     try {
-      const run = kind === 'share' ? backend.install({ ref: item.name, scope: item.scope }) : kind === 'offtarget' ? backend.eval({ ref: item.name }) : kind === 'review' ? backend.publish({ ref: item.name }) : backend.sync({});
+      const run = kind === 'share' ? backend.install({ ref: item.name, scope: item.scope }) : kind === 'review' ? backend.publish({ ref: item.name }) : backend.sync({});
       const result = await driveRun<unknown>(run, { [`Approve these tools for ${item.name}?`]: true }, prompt, print);
       if (!result.ok) setActionError(result.error);
       else if (kind === 'share') setActed(old => ({ ...old, [item.id]: `Installed to ${item.scope} just now · ${item.version} in ~/.claude/skills/${item.name}` }));
