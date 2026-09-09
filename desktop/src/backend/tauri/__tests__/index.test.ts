@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { version as releaseVersion } from '../../../../../package.json' with { type: 'json' };
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Bridge } from '../bridge';
 import type { Backend } from '../../Backend';
@@ -199,7 +200,7 @@ it.each([false,true])('serves recorded status and settings with real team data (
  expect(Object.keys(status.value?.counts??{})).toEqual(['Global']);
  expect(status.value?.teams[0]?.clone).toContain('/fx/home/.terum/skills/teams/acme');
  expect(status.value?.teams[0]?.joinBlock?.join('\n')).toContain('npx -y terum-skills@latest setup acme/team');
- expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,PINNED_N:1,APPROVALS:[],QUARANTINE:[],HOOK:{installed:false},AGENT_CLI:'—',CLI_LATEST:'—'});
+ expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,PINNED_N:1,APPROVALS:[],QUARANTINE:[],HOOK:{installed:false},APP_VERSION:releaseVersion,AGENT_CLI:'—',CLI_LATEST:'—'});
  expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'2026-09-01T00:00:00Z','up to date']);
  expect(settings.value?.SHARED[0]).toEqual(['22222222-2222-4222-8222-222222222222',expect.stringContaining('/skills/tdd'),'acme','—']);
  expect(status.value?.tools).toEqual(settings.value?.tools);
@@ -239,7 +240,7 @@ function inventoryBridge(overrides: { row?: Partial<typeof lsRow>; validation?: 
 }
 it.each(['Global','ops','installed'])('maps the %s library from real counts and registry, with scoped argv',async scope=>{
   const f=inventoryBridge();const result=await createTauriBackend(f.bridge).library({scope,team:'acme'});
-  expect(result).toMatchObject({ok:true,value:{title:'1 skills · 1 in ~/.claude/skills',projects:lsValue.projects,skills:[{name:'a',desc:'Live description',project:'Global',installs:'1 installs',installsN:1,installed:true,updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}],overview:{skills:'1',installs:'1',evaluated:'—',attention:'—',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:scope==='ops'?'1 also on Global':'1 endorsed to Global',installs_note:'across every readable people file · 1 active teammate'},provenance:null}});
+  expect(result).toMatchObject({ok:true,value:{title:'1 skills · 1 in ~/.claude/skills',projects:lsValue.projects,skills:[{name:'a',desc:'Live description',project:'Global',installs:'1 install',installsN:1,installed:true,updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}],overview:{skills:'1',installs:'1',evaluated:'—',attention:'—',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:scope==='ops'?'1 also on Global':'1 endorsed to Global',installs_note:'across every readable people file · 1 active teammate'},provenance:null}});
   expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls',...(scope==='ops'?['project','ops']:[]),'--team','acme'],['ls','--local']]);
 });
 it('maps the detail body, grants and all install records without fabricating missing values',async()=>{
