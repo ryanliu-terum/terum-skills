@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { place } from '../../lib/placer.js';
 import { bareTeam, cloneWithIdentity, git, holdCloneLock, originSha, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
-import { run } from '../leave.js';
-import { installHook, lockPath } from '../../lib/hook.js';
+import { run, teardownTeam } from '../leave.js';
+import { acquireTeamLock, installHook, lockPath } from '../../lib/hook.js';
 
 async function prepared() {
   const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -33,11 +33,13 @@ describe('team leave (§6)', () => {
     const io = new ScriptedPrompter([], [true]);
     await expect(run({ name: 'team', config: store }, io)).resolves.toMatchObject({ ok: true, value: { removed: 1, cloneRemoved: true } });
     expect(io.lines).toContain('1 connected skill record(s) will be removed.');
+    expect(io.lines).toContain('Skill consent records will be cleared (1); the next team asks again for skills that need tool permissions.');
+    expect(io.asked[0]).toContain('skill consent records');
     await expect(access(placed.path)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(cache)).rejects.toMatchObject({ code: 'ENOENT' }); await expect(access(stamp)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(lock)).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await readdir(join(store.root, 'run'))).filter((name) => name.startsWith('team.')).sort()).toEqual(['team.lock.stale-neighbour.lock', 'team.lock.stale-neighbour.stamp']);
-    const config = await store.read(); expect(config.teams).toEqual({}); expect(config.placements).toEqual({}); expect(config.pending).toEqual([]); expect(config.shared).toEqual({}); expect(config.approvals.keep).toBeDefined();
+    const config = await store.read(); expect(config.teams).toEqual({}); expect(config.placements).toEqual({}); expect(config.pending).toEqual([]); expect(config.shared).toEqual({}); expect(config.approvals).toEqual({});
     expect(await originSha(fixture.bare)).toBe(before);
     expect(await git(['show', 'main:people/seed.json'], fixture.bare)).toBe(personBefore);
   });
@@ -76,9 +78,13 @@ describe('team leave (§6)', () => {
       config.teams.other = { remote: other.bare, handle: 'seed' };
       config.placements[otherPlaced.path] = { id: '33333333-3333-4333-8333-333333333333', team: 'other', version: null, scope: { kind: 'global' }, placed_at: '2026-01-01', fingerprint: otherPlaced.snapshot.fingerprint };
     });
-    await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { team: 'team' } });
+    const legacyIo = new ScriptedPrompter([], [true]);
+    await expect(run({ name: 'team', config: store }, legacyIo)).resolves.toMatchObject({ ok: true, value: { team: 'team' } });
+    expect(legacyIo.asked[0]).not.toContain('consent');
+    expect(legacyIo.lines.join('\n')).not.toContain('Skill consent records');
     await expect(access(otherPlaced.path)).resolves.toBeUndefined(); await expect(access(otherClone)).resolves.toBeUndefined();
     expect((await store.read()).teams.other).toEqual({ remote: other.bare, handle: 'seed' });
+    expect((await store.read()).approvals.keep).toBeDefined();
     await expect(run({ name: 'other', config: store }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true, value: { team: 'other' } });
     await expect(access(otherPlaced.path)).rejects.toMatchObject({ code: 'ENOENT' }); await expect(access(otherClone)).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await store.read()).teams).toEqual({});
@@ -181,4 +187,19 @@ it('a placement that is also a shared source is dropped from the ledger and left
   await expect(access(join(placed.path, 'SKILL.md'))).resolves.toBeUndefined();
   expect((await store.read()).placements).toEqual({});
   expect(io.lines).toContain(`${placed.path} is also the authoring source of sample; left in place.`);
+});
+
+it('last-team cleanup runs after the config update while the team mutex is still held', async () => {
+  const store = createConfigStore(await temporaryDirectory());
+  await store.update(config => { config.teams.team = { remote: 'github.com/acme/team', handle: 'me' }; });
+  let called = false;
+  await teardownTeam(store, 'team', new ScriptedPrompter(), undefined, undefined, async () => {
+    called = true;
+    expect((await store.read()).teams).toEqual({});
+    expect(await acquireTeamLock(store.root, 'team')).toBeNull();
+  });
+  expect(called).toBe(true);
+  const released = await acquireTeamLock(store.root, 'team');
+  expect(released).not.toBeNull();
+  await released?.();
 });

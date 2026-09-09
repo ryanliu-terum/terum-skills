@@ -1,6 +1,6 @@
 {
   "generatedFrom": {
-    "buildPy": "4da2f241a7fd302554b09980fcecaf01",
+    "buildPy": "75f0f438bc51bde903a24af2506d1d7f",
     "today": "2026-09-06"
   },
   "TOKENS": {
@@ -600,9 +600,9 @@
             ]
           ]
         ],
-        "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
+        "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 17 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
         "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
-        "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
+        "trigger_text": "Selecting from the team catalog of 17 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
         "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
         "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
       },
@@ -1208,9 +1208,9 @@
             ]
           ]
         ],
-        "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
+        "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 17 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
         "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
-        "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
+        "trigger_text": "Selecting from the team catalog of 17 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
         "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
         "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
       },
@@ -1552,9 +1552,9 @@
             ]
           ]
         ],
-        "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
+        "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 17 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
         "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
-        "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
+        "trigger_text": "Selecting from the team catalog of 17 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
         "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
         "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
       },
@@ -2419,7 +2419,7 @@
       "key": "terum",
       "ico": "box",
       "desc": "The product monorepo: web app, API and the deploy pipeline.",
-      "skills": 22,
+      "skills": 8,
       "members": 8,
       "remote": "github.com/terum/terum",
       "installed": true,
@@ -2432,14 +2432,14 @@
         "role": "founder",
         "initials": "RL"
       },
-      "evaluated": 19
+      "evaluated": 7
     },
     {
       "name": "SSM",
       "key": "ssm",
       "ico": "sparkle",
       "desc": "Teddy's skills workshop: goal setup, research and onboarding studies.",
-      "skills": 15,
+      "skills": 3,
       "members": 3,
       "remote": "github.com/terum/ssm",
       "installed": true,
@@ -2452,14 +2452,14 @@
         "role": "design",
         "initials": "TZ"
       },
-      "evaluated": 11
+      "evaluated": 3
     },
     {
       "name": "MRF",
       "key": "mrf",
       "ico": "database",
       "desc": "Data pipelines and the migration framework behind the warehouse.",
-      "skills": 32,
+      "skills": 2,
       "members": 6,
       "remote": "github.com/terum/mrf",
       "installed": true,
@@ -2472,14 +2472,14 @@
         "role": "platform",
         "initials": "AP"
       },
-      "evaluated": 27
+      "evaluated": 2
     },
     {
       "name": "Docs",
       "key": "docs",
       "ico": "book-open",
       "desc": "The public docs site, its component stories and the style guide.",
-      "skills": 8,
+      "skills": 3,
       "members": 4,
       "remote": "github.com/terum/docs",
       "installed": false,
@@ -2492,7 +2492,7 @@
         "role": "web",
         "initials": "LF"
       },
-      "evaluated": 5
+      "evaluated": 2
     }
   ],
   "MEMBER": {
@@ -2604,41 +2604,36 @@
     [
       "infra",
       "box",
-      6
+      4
     ],
     [
       "docs",
       "book-open",
-      5
+      3
     ],
     [
       "review",
       "eye",
-      5
-    ],
-    [
-      "ops",
-      "terminal",
-      3
-    ],
-    [
-      "testing",
-      "flask",
       3
     ],
     [
       "data",
       "database",
-      3
+      1
     ],
     [
       "git",
       "git-commit",
-      2
+      1
     ],
     [
       "onboarding",
       "users",
+      1
+    ],
+    [
+      "ops",
+      "terminal",
       1
     ],
     [
@@ -2649,6 +2644,11 @@
     [
       "security",
       "shield",
+      1
+    ],
+    [
+      "testing",
+      "flask",
       1
     ]
   ],
@@ -2836,9 +2836,9 @@
           ]
         ]
       ],
-      "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
+      "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 17 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
       "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
-      "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
+      "trigger_text": "Selecting from the team catalog of 17 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
       "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
       "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
     },
@@ -3101,9 +3101,9 @@
           2
         ]
       ],
-      "abstract": "Three execution cases were run at k = 3 repetitions across two arms (baseline, candidate; no prior version exists), with trigger selection measured against the team catalog of 30 skills. Two rounds hit the agent timeout after one retry and stay unscored, so the run is partial: 7 of 9 rounds scored. The candidate outperformed baseline in 5 of the 7 scored rounds (net lift +0.71, sign test p = 0.063) and missed one of five should-trigger prompts. Verdict: PASS, greyed for the partial run.",
+      "abstract": "Three execution cases were run at k = 3 repetitions across two arms (baseline, candidate; no prior version exists), with trigger selection measured against the team catalog of 17 skills. Two rounds hit the agent timeout after one retry and stay unscored, so the run is partial: 7 of 9 rounds scored. The candidate outperformed baseline in 5 of the 7 scored rounds (net lift +0.71, sign test p = 0.063) and missed one of five should-trigger prompts. Verdict: PASS, greyed for the partial run.",
       "results": "Mean deterministic-check pass rate was 0.88 for the candidate and 0.57 for baseline over the scored rounds (Fig. 1). Against baseline the candidate won 5, lost 0, and tied 2 of 7 scored rounds (net lift +0.71, p = 0.063) (Fig. 2). no-rollback carries both unscored rounds (Table 1).",
-      "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 4 of 5 should-trigger prompts (recall 0.80) and on 0 of 5 near-miss distractors (precision 1.00).",
+      "trigger_text": "Selecting from the team catalog of 17 skills, the agent chose the candidate on 4 of 5 should-trigger prompts (recall 0.80) and on 0 of 5 near-miss distractors (precision 1.00).",
       "efficiency_text": "The candidate was cheaper and faster than baseline on every measure (Table 2).",
       "coverage": "7 of 9 rounds scored: 2 rounds in no-rollback hit the 600 s agent timeout twice and stay unscored, never averaged. All 6 hygiene screens passed. The sign test is informational at k = 3. Raw transcripts and sandboxes remain on teddy's machine under run 20260904T091200Z; all committed content passed secret redaction."
     },
@@ -3467,9 +3467,9 @@
           ]
         ]
       ],
-      "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 30 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
+      "abstract": "Six execution cases were run at k = 3 repetitions across three arms (baseline, candidate, incumbent), with trigger selection measured against the team catalog of 17 skills. The candidate outperformed baseline in 11 of 18 rounds (net lift +0.44, exact two-sided sign test p = 0.057) and routed correctly on all should-trigger prompts with no false fires. Verdict: PASS.",
       "results": "Mean deterministic-check pass rate was 0.82 for the candidate, 0.74 for the incumbent, and 0.61 for baseline (Fig. 1). Against baseline the candidate won 11, lost 3, and tied 4 of 18 rounds (net lift +0.44, p = 0.057). Against the incumbent the record was 8–5–5 (net lift +0.17, p = 0.581) (Fig. 2). Per-case separations were largest for migration-drift and rollback-plan; dns-cutover-order showed none (Table 1).",
-      "trigger_text": "Selecting from the team catalog of 30 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
+      "trigger_text": "Selecting from the team catalog of 17 skills, the agent chose the candidate on 6 of 6 should-trigger prompts (recall 1.00) and on 0 of 5 near-miss distractors (precision 1.00).",
       "efficiency_text": "The candidate was cheaper and faster than both comparators on every measure (Table 2).",
       "coverage": "All 36 of 36 rounds scored; all 6 hygiene screens passed. The sign test is informational at k = 3 and did not gate the verdict. Raw transcripts and sandboxes remain on ajay's machine under run 20260829T221500Z; all committed content passed secret redaction."
     },
@@ -3694,10 +3694,10 @@
     ]
   },
   "COUNTS": {
-    "Global": "30",
-    "Terum": "22",
-    "SSM": "15",
-    "MRF": "32",
+    "Global": "15",
+    "Terum": "8",
+    "SSM": "3",
+    "MRF": "2",
     "Pushes": "3",
     "Updates": "3",
     "Alerts": "8"
@@ -3739,7 +3739,7 @@
       "text3"
     ]
   },
-  "CATALOG_N": 30,
+  "CATALOG_N": 17,
   "TEAM_N": 12,
   "HOVER_INDEX": 2,
   "INBOX_UNREAD": 6,
@@ -3894,7 +3894,7 @@
       "handle": "teddy",
       "clone": "~/.terum/skills/teams/terum",
       "members": 12,
-      "skills": 30,
+      "skills": 17,
       "last_sync": "12 minutes ago",
       "stamp": "2026-09-06 14:02"
     }
@@ -3953,7 +3953,7 @@
       "up to date"
     ]
   ],
-  "PLACEMENTS_N": 99,
+  "PLACEMENTS_N": 28,
   "PINNED_N": 2,
   "APPROVALS": [
     [
@@ -4279,23 +4279,23 @@
     "FIELDS_GAP": 20
   },
   "LIBRARY_OVERVIEW": {
-    "skills": "30",
+    "skills": "15",
     "skills_note": "7 endorsed to Global",
-    "evaluated": "27 of 30",
+    "evaluated": "13 of 15",
     "meter": {
-      "pass_": 20,
-      "neutral": 5,
+      "pass_": 7,
+      "neutral": 4,
       "fail": 2,
-      "total": 30
+      "total": 15
     },
-    "meter_text": "20 pass · 5 neutral · 2 fail",
-    "installs": "148",
+    "meter_text": "7 pass · 4 neutral · 2 fail",
+    "installs": "91",
     "installs_note": "across every people file · 12 active teammates",
-    "attention": "8",
+    "attention": "6",
     "attention_lines": [
       "2 failing evals",
-      "3 updates available",
-      "3 not evaluated"
+      "2 updates available",
+      "2 not evaluated"
     ],
     "attention_link": "Open alerts",
     "zero": {
@@ -4303,6 +4303,112 @@
       "evaluated": "Nothing evaluated yet",
       "installs": "Share a skill to see installs here",
       "attention": "All clear"
+    }
+  },
+  "OVERVIEW_BY_SCOPE": {
+    "Global": {
+      "skills": "15",
+      "skills_note": "7 endorsed to Global",
+      "evaluated": "13 of 15",
+      "meter": {
+        "pass_": 7,
+        "neutral": 4,
+        "fail": 2,
+        "total": 15
+      },
+      "meter_text": "7 pass · 4 neutral · 2 fail",
+      "installs": "91",
+      "installs_note": "across every people file · 12 active teammates",
+      "attention": "6",
+      "attention_lines": [
+        "2 failing evals",
+        "2 updates available",
+        "2 not evaluated"
+      ],
+      "attention_link": "Open alerts",
+      "zero": {
+        "skills": "Nothing added yet",
+        "evaluated": "Nothing evaluated yet",
+        "installs": "Share a skill to see installs here",
+        "attention": "All clear"
+      }
+    },
+    "Terum": {
+      "skills": "8",
+      "skills_note": "6 also on Global",
+      "evaluated": "7 of 8",
+      "meter": {
+        "pass_": 5,
+        "neutral": 0,
+        "fail": 2,
+        "total": 8
+      },
+      "meter_text": "5 pass · 0 neutral · 2 fail",
+      "installs": "56",
+      "installs_note": "across every people file · 12 active teammates",
+      "attention": "5",
+      "attention_lines": [
+        "2 failing evals",
+        "2 updates available",
+        "1 not evaluated"
+      ],
+      "attention_link": "Open alerts",
+      "zero": {
+        "skills": "Nothing added yet",
+        "evaluated": "Nothing evaluated yet",
+        "installs": "Share a skill to see installs here",
+        "attention": "All clear"
+      }
+    },
+    "SSM": {
+      "skills": "3",
+      "skills_note": "0 also on Global",
+      "evaluated": "3 of 3",
+      "meter": {
+        "pass_": 0,
+        "neutral": 3,
+        "fail": 0,
+        "total": 3
+      },
+      "meter_text": "0 pass · 3 neutral · 0 fail",
+      "installs": "18",
+      "installs_note": "across every people file · 12 active teammates",
+      "attention": "0",
+      "attention_lines": [
+        "All clear"
+      ],
+      "attention_link": "Open alerts",
+      "zero": {
+        "skills": "Nothing added yet",
+        "evaluated": "Nothing evaluated yet",
+        "installs": "Share a skill to see installs here",
+        "attention": "All clear"
+      }
+    },
+    "MRF": {
+      "skills": "2",
+      "skills_note": "0 also on Global",
+      "evaluated": "2 of 2",
+      "meter": {
+        "pass_": 2,
+        "neutral": 0,
+        "fail": 0,
+        "total": 2
+      },
+      "meter_text": "2 pass · 0 neutral · 0 fail",
+      "installs": "14",
+      "installs_note": "across every people file · 12 active teammates",
+      "attention": "0",
+      "attention_lines": [
+        "All clear"
+      ],
+      "attention_link": "Open alerts",
+      "zero": {
+        "skills": "Nothing added yet",
+        "evaluated": "Nothing evaluated yet",
+        "installs": "Share a skill to see installs here",
+        "attention": "All clear"
+      }
     }
   },
   "SKILL_MD_ID": "5f0e12ab-9c3d-4e7a-b1f2-8a6d0c3e9b47",
@@ -4874,12 +4980,6 @@
         "silent-failure-hunt",
         "a11y-audit"
       ],
-      "ops": [
-        "incident-triage"
-      ],
-      "testing": [
-        "test-writer"
-      ],
       "data": [
         "csv-profiler"
       ],
@@ -4889,11 +4989,17 @@
       "onboarding": [
         "onboarding-tour"
       ],
+      "ops": [
+        "incident-triage"
+      ],
       "research": [
         "source-check"
       ],
       "security": [
         "secret-scan"
+      ],
+      "testing": [
+        "test-writer"
       ]
     },
     "filterCount": 6,
@@ -5050,27 +5156,27 @@
     },
     "bulkInstall": {
       "docs": {
-        "total": 8,
+        "total": 3,
         "asking": 2
       }
     },
     "categoryRemaining": {
-      "infra": 2,
-      "docs": 2,
-      "review": 2,
-      "ops": 2,
-      "testing": 2,
-      "data": 2,
-      "git": 1,
+      "infra": 0,
+      "docs": 0,
+      "review": 0,
+      "data": 0,
+      "git": 0,
       "onboarding": 0,
+      "ops": 0,
       "research": 0,
-      "security": 0
+      "security": 0,
+      "testing": 0
     },
     "libraryTitles": {
-      "Global": "30 skills",
-      "Terum": "22 skills",
-      "SSM": "15 skills",
-      "MRF": "32 skills"
+      "Global": "15 skills",
+      "Terum": "8 skills",
+      "SSM": "3 skills",
+      "MRF": "2 skills"
     }
   }
 }

@@ -39,6 +39,7 @@ Ratified by Ryan: "Yes, ratify it."
 | 11 | Who amends the eval-engine §12 rule (S7v) | LOCK | Ryan amends it himself as product owner; Ajay is informed in the PR body. S7m, S7n, S7u proceed on the same footing. | — |
 | 12 | Who merges | LOCK | Implementers self-merge every M7 PR after green gates and CI (Teddy's rule kept). The queue's automated final reviewer and the per-batch real-data proof are the only human-free checks, so both stay mandatory. Ryan reviews after the fact. | — |
 | 13 | The frames.ts file four batches edit | LOCK | S7d goes first and rewrites the all-false test into a snapshot of the switch map; S7b, S7ae and S7l then stack on the previous editor's branch and change one line each. | — |
+| 14 | One team per machine (F1-F8; MC-07 cancelled) | LOCK | Refuse a second binding before side effects; leave then join. Clear consent on last leave; preserve legacy reads, syncs, leave and explicit writes. | Ryan, 2026-09-08/09 |
 
 ---
 
@@ -313,3 +314,26 @@ Ratified by Ryan: "Yes, ratify it."
 
 
 **2026-09-09 — Ryan, first run in the app (LOCK).** B with A-fallback: the app drives target-less setup for an `intent:'setup'` hand-off or a zero-team machine, with the honest no-team Library board as fallback. The footer identifies the GitHub login. One team per machine is the model to follow in its own batch. A joiner never types a target in the app (Teddy's D-BM-3 rider).
+
+---
+
+## Decision 14 — One team per machine (F1-F8; MC-07 cancelled)
+
+**Verdict: LOCK** (Ryan, 2026-09-08/09)
+
+### Plain English
+
+- **F1:** One team per machine.
+- **F2:** REFUSE model: a second binding is refused before any side effect, never auto-left or switched. Leave the current team, then join.
+- **F3:** Leaving the last team clears every `approvals` record, so the next team asks again for tool permissions.
+- **F4:** No forced sync on leave.
+- **F5:** Legacy 2+ machines retain reads, syncs and leave with a hint; only new bindings are refused. Writes naming a team explicitly also keep working, as the locked ruling specifies.
+- **F6:** `--team` and `--as` are hidden but accepted and validated.
+- **F7:** The `teams` record stays; no migration.
+- **F8:** The session hook is unchanged.
+
+MC-07 (`--team` everywhere as a product feature) is cancelled; its argv half remains as S7af AD-06.
+
+### Technical
+
+`src/lib/auth.ts` owns `refuseSecondTeam`, the locked `assertBindable`/`bindTeam` check, and normalized matching through `teamByRemote`. `src/lib/result.ts` adds `RefusedError`; `src/lib/frames.ts` carries `refused` without a protocol bump, and `src/lib/execute.ts` forwards it. Setup, team create/join and install call the shared pre-flight before side effects; setup and install preserve child typed outcomes. Leave clears approvals on the last team and removes the hook inside the team mutex. `src/cli.ts` uses `hideHelp()` for the accepted overrides. Config selection, connect/publish/uninstall hints, README, the bundled skill, frame documentation and regression tests follow the one-team wording. The desktop half is a separate PR.

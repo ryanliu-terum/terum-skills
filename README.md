@@ -76,7 +76,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
 | | `app` | Install and open the desktop app for this CLI version |
 
-`npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option.
+`npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option you are expected to use.
 
 For a program driving the CLI (the desktop app, a script), `--frames` turns any verb into one JSON object per line on stdout and stdin, questions included. See [docs/frame-protocol.md](docs/frame-protocol.md).
 
@@ -183,7 +183,7 @@ CI never runs a model and never holds an API key; every eval token is a member's
 - **Global:** `npm install -g terum-skills`. If `terum-skills: command not found`, add `$(npm prefix -g)/bin` (the prefix itself on Windows) to PATH.
 - **Project-local:** `npm install terum-skills` puts the binary under `node_modules/.bin`; run it as `npx terum-skills …` from that folder.
 - **Update:** `terum-skills update` prints this copy's version, the newest advertised release, and the exact command that updates *this* copy. It never runs a package manager. `npx -y terum-skills@latest` fetches the newest release every run and updates nothing else.
-- **Uninstall:** `terum-skills uninstall` removes every team from this machine (placed skills, clones, cache), the session-start hook, the `/terum-skills` Claude Code skill it placed, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`) and local eval runs (`evals/`); it also removes the downloaded desktop app bundle (`app/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill.
+- **Uninstall:** `terum-skills uninstall` removes your team from this machine (placed skills, clone, cache), the session-start hook, the `/terum-skills` Claude Code skill it placed, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`) and local eval runs (`evals/`); it also removes the downloaded desktop app bundle (`app/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill.
 
 Release notices appear last on stderr, at most once per release per day, and are suppressed in CI, when stderr is piped, or when `NO_UPDATE_NOTIFIER` or `TERUM_SKILLS_NO_UPDATE_NOTIFIER` is set. Version checks read git tags from this repository only, never the npm registry, and only when a configured team is on GitHub.
 
@@ -205,7 +205,7 @@ A release is one deliberate action. Bump `version` in `package.json` and both `v
 
 ## Troubleshooting
 
-- **Created a team by mistake?** Join the right one with the line its owner sent you. If its repository name collides with a local team, `npx -y terum-skills@latest team join <org>/<repo> --as <other-name>`. `team leave <accidental>` removes it from this machine; delete the repository on GitHub yourself.
+- **Created a team by mistake?** `npx -y terum-skills@latest team leave <accidental>` removes it from this machine, then run the setup command its owner sent you. Delete the repository on GitHub yourself.
 - **git and gh signed in differently?** `gh auth setup-git --hostname github.com` makes git use gh's account.
 - **A never-connected folder fails `validate` on HYG1.** The managed fields (`license`, `metadata.id`, `metadata.author`) are what `connect` adds; connect it first.
 - **`sync` printed a divergence line.** Your source and the repo copy both changed. Pick `connect --keep-source <id>` or `connect --keep-repo <id>`; nothing moves until you do.

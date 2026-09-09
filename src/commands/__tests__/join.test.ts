@@ -1,3 +1,4 @@
+import { run as leave } from '../leave.js';
 import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -20,9 +21,13 @@ async function setup(extra?: { archived?: string[]; people?: Record<string, obje
 }
 
 describe('team join (§6, §5.4 identity)', () => {
-  it('a live collision re-prompts, the per-team handle diverges, and team one is untouched', async () => {
+  it('after leaving the previous team, a live collision re-prompts without changing its roster', async () => {
     const { fixture, store, runner } = await setup({ people: { ajay: person('ajay', { display_name: 'Existing' }) } });
-    await store.update((config) => { config.default_handle = 'ajay'; config.github = 'me'; config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.first = { remote: 'github.com/example/first', handle: 'ajay' }; });
+    const first = await bareTeam();
+    await pushFromSeed(first.seed, 'people/ajay.json', JSON.stringify(person('ajay')) + '\n');
+    const firstRoster = await git(['show', 'main:people/ajay.json'], first.bare);
+    await store.update((config) => { config.default_handle = 'ajay'; config.github = 'me'; config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.first = { remote: first.bare, handle: 'ajay' }; });
+    expect(await leave({ name: 'first', config: store }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true });
     // The machine already knows an identity (A2): n to the one-line confirmation, then the four questions as before.
     const io = new ScriptedPrompter(['me', 'ajay', 'Ajay Two', 'ajay.two@example.com', 'ajay-t'], [false]);
     const result = await join({ target: REMOTE, config: store, runner }, io);
@@ -30,7 +35,8 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(result.value).toMatchObject({ team: 'team', handle: 'ajay-t', rejoined: false });
     expect(io.lines).toContain('Handle ajay is already in use by an active member.');
     const after = await store.read();
-    expect(after.teams.first?.handle).toBe('ajay');
+    expect(after.teams.first).toBeUndefined();
+    expect(await git(['show', 'main:people/ajay.json'], first.bare)).toBe(firstRoster);
     expect(after.teams.team).toEqual({ remote: 'git.example/team', handle: 'ajay-t' });
     expect(JSON.parse(await git(['show', 'main:people/ajay-t.json'], fixture.bare)).email).toBe('ajay.two@example.com');
     expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).display_name).toBe('Existing');
@@ -111,6 +117,17 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare)).display_name).toBe('Me Again');
   });
 
+  it('a legacy two-team machine can rejoin its existing remote without adding a team or roster file', async () => {
+    const { fixture, store, runner } = await setup();
+    expect(await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()))).toMatchObject({ ok: true });
+    // Legacy config written directly: new bindings can no longer create a second team.
+    await store.update((config) => { config.teams.other = { remote: 'github.com/other/repo', handle: 'me' }; });
+    expect(await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true });
+    expect(Object.keys((await store.read()).teams).sort()).toEqual(['other', 'team']);
+    expect((await readdir(pathJoin(store.teamClone('team'), 'people'))).sort()).toEqual(['me.json', 'seed.json']);
+    expect((await git(['ls-tree', '--name-only', 'main:people'], fixture.bare)).trim().split('\n').sort()).toEqual(['me.json', 'seed.json']);
+  });
+
   it('a handle taken between the preflight read and the push is caught inside the replayed mutation, never overwritten', async () => {
     const { fixture, store } = await setup();
     let pushes = 0;
@@ -136,7 +153,7 @@ describe('team join (§6, §5.4 identity)', () => {
     expect((await git(['ls-tree', '--name-only', 'main:people'], fixture.bare))).not.toContain('me.json');
     const store2 = createConfigStore(pathJoin(fixture.root, 'local2'));
     await store2.update((config) => { config.teams.team = { remote: 'github.com/someone/team', handle: 'me' }; });
-    expect(await join({ target: REMOTE, config: store2, runner }, new ScriptedPrompter(answers()))).toMatchObject({ ok: false, error: expect.stringContaining('--as') });
+    expect(await join({ target: REMOTE, config: store2, runner }, new ScriptedPrompter(answers()))).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine') });
   });
 
   it('GitHub targets: with gh, list-then-PATCH the invitation; without gh, print the URL and wait for a y', async () => {
@@ -219,19 +236,20 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(JSON.parse(await git(['show', 'main:people/ajay.json'], fixture.bare)).display_name).toBe('Ajay Three');
   });
 
-  it('joins a second remote whose basename collides under --as, keeping two teams with distinct clones and remotes', async () => {
-    const { fixture, store, runner } = await setup();
+  it('refuses a second remote before invitations, cloning or pushing, including with --as', async () => {
+    const { store, runner } = await setup();
     expect((await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()))).ok).toBe(true);
     const other = await bareTeam();
     const otherRemote = 'https://git.example/other/team.git';
-    expect(await join({ target: otherRemote, config: store, runner: mappedRunner(otherRemote, other.bare) }, new ScriptedPrompter(answers()))).toMatchObject({ ok: false, error: expect.stringContaining('--as') });
-    const result = await join({ target: otherRemote, config: store, runner: mappedRunner(otherRemote, other.bare), as: 'team-two' }, new ScriptedPrompter(answers(), [false]));
-    if (!result.ok) throw new Error(result.error);
-    expect(result.value.team).toBe('team-two');
-    expect((await store.read()).teams).toEqual({ team: { remote: 'git.example/team', handle: 'me' }, 'team-two': { remote: 'git.example/other/team', handle: 'me' } });
-    expect((await git(['remote', 'get-url', 'origin'], store.teamClone('team'))).trim()).toBe(fixture.bare);
-    expect((await git(['remote', 'get-url', 'origin'], store.teamClone('team-two'))).trim()).toBe(other.bare);
-    expect(await git(['ls-tree', '--name-only', 'main:people'], other.bare)).toContain('me.json');
+    const secondRunner = mappedRunner(otherRemote, other.bare, fakeGh('me'));
+    for (const as of [undefined, 'team-two']) {
+      const io = new ScriptedPrompter();
+      expect(await join({ target: otherRemote, config: store, runner: secondRunner, as }, io)).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine') });
+      expect(io.asked).toEqual([]);
+    }
+    expect(secondRunner.calls).toEqual([]);
+    expect((await store.read()).teams).toEqual({ team: { remote: 'git.example/team', handle: 'me' } });
+    expect(await git(['ls-tree', '--name-only', 'main:people'], other.bare)).not.toContain('me.json');
   });
 
   it.each([undefined, 'bare'] as const)('re-checks remote uniqueness under the config lock, so a remote bound by another process while we prompted is not bound twice (form=%s)', async (form) => {
@@ -241,7 +259,7 @@ describe('team join (§6, §5.4 identity)', () => {
       return next();
     });
     const result = await join({ form, target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()));
-    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/already configured as team other[\s\S]*people\/me\.json was already pushed[\s\S]*team remove me/) });
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/One team per machine[\s\S]*people\/me\.json was already pushed[\s\S]*team remove me/) });
     expect(result.ok ? '' : result.error).toContain(`run \`${form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest'} team join '${REMOTE}'\` again`);
     expect(result.ok ? '' : result.error).toContain('ask an admin to `team remove me`');
     expect(Object.keys((await store.read()).teams)).toEqual(['other']);

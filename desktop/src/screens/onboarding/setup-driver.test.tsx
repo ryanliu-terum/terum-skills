@@ -123,6 +123,6 @@ it.each([false,true])('manual Start setup works regardless of consumption (file=
 it('Back leaves an unconsumed failure on Library until an explicit retry or new request',async()=>{
  const b=backend(),setup=vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:false,error:'Not ready.'})));
  open(b);await screen.findByRole('heading',{name:"Couldn't finish setup"});
- fireEvent.click(screen.getByRole('button',{name:'Back'}));await screen.findByText('15 of 30 skills');
+ fireEvent.click(screen.getByRole('button',{name:'Back'}));await screen.findByText('15 skills');
  expect(location.hash).toBe('#/library/global');expect(setup).toHaveBeenCalledTimes(1);
 });

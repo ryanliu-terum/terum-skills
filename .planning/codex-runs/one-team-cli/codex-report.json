@@ -1,0 +1,107 @@
+{
+  "status": "partial",
+  "summary": "Implemented CLI one-team refusals, typed frame outcomes, last-team consent cleanup, hidden flags, documentation amendments, and regression coverage. All gates passed with the sandbox-compatible test loader. C1 and C2 conflict on legacy same-remote rejoins; the literal C1 restriction remains pending clarification.",
+  "filesChanged": [
+    {"path": "src/lib/auth.ts", "change": "modified", "why": "C1/C2 shared refusal, locked binding enforcement, and normalized remote matching."},
+    {"path": "src/lib/result.ts", "change": "modified", "why": "C3 typed RefusedError and failure results."},
+    {"path": "src/lib/frames.ts", "change": "modified", "why": "C3 additive refused frame field."},
+    {"path": "src/lib/execute.ts", "change": "modified", "why": "C3 refusal propagation."},
+    {"path": "src/lib/config.ts", "change": "modified", "why": "C5 legacy selection guidance."},
+    {"path": "src/commands/setup.ts", "change": "modified", "why": "C2 pre-flight before app and prompts; preserve typed failures and progress."},
+    {"path": "src/commands/team.ts", "change": "modified", "why": "C2 create/join pre-flights and C6 recovery guidance."},
+    {"path": "src/commands/install.ts", "change": "modified", "why": "C2 shared reference matching, refusal, and typed bootstrap propagation."},
+    {"path": "src/commands/leave.ts", "change": "modified", "why": "C4 consent cleanup and hook removal inside the team mutex."},
+    {"path": "src/commands/connect.ts", "change": "modified", "why": "C6 remove hidden flag from guidance."},
+    {"path": "src/commands/publish.ts", "change": "modified", "why": "C6 remove hidden flags from recovery commands."},
+    {"path": "src/commands/uninstallMachine.ts", "change": "modified", "why": "C6 singular-team inventory and membership wording."},
+    {"path": "src/cli.ts", "change": "modified", "why": "C6 hide accepted overrides and update help."},
+    {"path": "docs/frame-protocol.md", "change": "modified", "why": "C3 refusal documentation and example."},
+    {"path": "README.md", "change": "modified", "why": "C6 one-team instructions."},
+    {"path": ".claude/skills/terum-skills/SKILL.md", "change": "modified", "why": "C6 bundled skill guidance; frontmatter preserved."},
+    {"path": ".planning/specs/2026-09-02-phase-1-build.md", "change": "modified", "why": "Requested build-spec amendments."},
+    {"path": ".planning/specs/2026-09-05-m3-publish-leave.md", "change": "modified", "why": "Requested consent and legacy amendments."},
+    {"path": ".planning/specs/2026-09-05-m3-setup-hook.md", "change": "modified", "why": "Requested setup resume amendments."},
+    {"path": ".planning/specs/m7-S7af.md", "change": "modified", "why": "Document hidden but emitted --team."},
+    {"path": ".planning/specs/m7-S7c.md", "change": "modified", "why": "Record MC-07 cancellation."},
+    {"path": ".planning/decisions/2026-09-08-m7-takeover-decision-walk.md", "change": "modified", "why": "Add Decision 14 and F1–F8 rulings."},
+    {"path": "src/__tests__/cli.test.ts", "change": "modified", "why": "Hidden-help assertions and updated hints."},
+    {"path": "src/__tests__/cli-hints.test.ts", "change": "modified", "why": "Updated share guidance."},
+    {"path": "src/commands/__tests__/connect.test.ts", "change": "modified", "why": "Updated connect guidance assertion."},
+    {"path": "src/commands/__tests__/create.test.ts", "change": "modified", "why": "Configured-machine refusal and recovery tests."},
+    {"path": "src/commands/__tests__/install.test.ts", "change": "modified", "why": "Refusal, bootstrap typing, execution propagation, and legacy coverage."},
+    {"path": "src/commands/__tests__/invocation-hints.test.ts", "change": "modified", "why": "Updated form-aware recovery guidance."},
+    {"path": "src/commands/__tests__/join.test.ts", "change": "modified", "why": "Invert second-binding expectations and retain collision coverage after leave."},
+    {"path": "src/commands/__tests__/leave.test.ts", "change": "modified", "why": "Consent, legacy retention, and mutex callback regressions."},
+    {"path": "src/commands/__tests__/publish.test.ts", "change": "modified", "why": "Updated recovery-command assertions."},
+    {"path": "src/commands/__tests__/search.test.ts", "change": "modified", "why": "Requested legacy fixture comment."},
+    {"path": "src/commands/__tests__/setup.test.ts", "change": "modified", "why": "Pre-effect refusal, resume, legacy, and typed-result regressions."},
+    {"path": "src/commands/__tests__/sync.test.ts", "change": "modified", "why": "Requested legacy fixture comments."},
+    {"path": "src/commands/__tests__/uninstallMachine.test.ts", "change": "modified", "why": "Legacy comment and membership wording assertion."},
+    {"path": "src/lib/__tests__/auth.test.ts", "change": "modified", "why": "Binding refusal and remote normalization regressions."},
+    {"path": "src/lib/__tests__/config.test.ts", "change": "modified", "why": "Requested legacy fixture comment."},
+    {"path": "src/lib/__tests__/frames.test.ts", "change": "modified", "why": "Refused frame without declined."},
+    {"path": "src/lib/__tests__/invocation-catalog.ts", "change": "modified", "why": "Update exact changed source patterns without exemptions."},
+    {"path": "src/lib/__tests__/local-skills.test.ts", "change": "modified", "why": "Requested legacy fixture comment."}
+  ],
+  "gates": {
+    "lint": {"ran": true, "passed": true, "output": "npm run lint: exit 0, 0 errors, 0 warnings.", "preExistingFailures": ""},
+    "typecheck": {"ran": true, "passed": true, "output": "npm run typecheck: exit 0, 0 errors.", "preExistingFailures": ""},
+    "test": {"ran": true, "passed": true, "output": "npm test -- --configLoader native --no-cache: 75 files passed, 1281 tests passed, 267.93 seconds. Selected regressions against original source: 21 failed, 234 skipped.", "preExistingFailures": ""}
+  },
+  "openQuestions": [
+    {
+      "question": "Should assertBindable permit updating an existing legacy team with the same remote? C1 forbids any other own team key, while C2 requires this rejoin to work.",
+      "specSection": "C1 versus C2 legacy same-remote rejoin",
+      "conservativeChoice": "Applied C1 literally: the locked binding check rejects another own team key. The pre-flight still permits matching legacy remotes as C2 specifies."
+    },
+    {
+      "question": "Should bare team create refuse before its name prompt, despite C2 placing the check after that question?",
+      "specSection": "Locked ruling versus C2 call site 3",
+      "conservativeChoice": "Followed the explicit no-prompt ruling: refuse before asking and render bare team create as the retry command."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "Legacy same-remote team join can fail at the locked binding check after its roster write.",
+      "why": "C1's literal restriction conflicts with C2's required legacy rejoin behavior; clarification remains outstanding."
+    },
+    {
+      "what": "Create pre-flight runs before the optional name question.",
+      "why": "The locked ruling explicitly forbids prompts on configured machines."
+    },
+    {
+      "what": "Tests used --configLoader native --no-cache.",
+      "why": "The default Vite loader attempted a forbidden write through the shared node_modules symlink. No dependency or repository test configuration was changed."
+    }
+  ],
+  "invariantsTouched": [
+    {"number": 1, "howSatisfied": "No network client or executable path added; refusal tests verify no runner calls."},
+    {"number": 2, "howSatisfied": "Existing safeWrite paths preserved; binding pre-flights precede repository work."},
+    {"number": 3, "howSatisfied": "No repository write bypasses the existing guard."},
+    {"number": 4, "howSatisfied": "Last-team leave clears approvals; remaining legacy teams retain them."},
+    {"number": 5, "howSatisfied": "Existing placement-ledger cleanup, quarantine, and authoring-source protection preserved."},
+    {"number": 8, "howSatisfied": "Bundled skill frontmatter and its identifying metadata remain intact."}
+  ],
+  "testsModified": [
+    {"path": "src/__tests__/cli.test.ts", "whatChanged": "Updated hints and added hidden-help assertions.", "justification": "C6; existing parsing tests retained."},
+    {"path": "src/__tests__/cli-hints.test.ts", "whatChanged": "Removed --team from expected share notice.", "justification": "C6 exact new wording."},
+    {"path": "src/commands/__tests__/connect.test.ts", "whatChanged": "Removed --team from expected guidance.", "justification": "C6 exact new wording."},
+    {"path": "src/commands/__tests__/create.test.ts", "whatChanged": "Changed configured-machine and race expectations; added refusal-before-prompts tests.", "justification": "C1/C2 replace previously permitted bindings; C6 changes recovery commands."},
+    {"path": "src/commands/__tests__/install.test.ts", "whatChanged": "Changed unjoined-repository expectations to typed refusals; added propagation tests and legacy comment.", "justification": "C2/C3; legacy explicit installs remain tested."},
+    {"path": "src/commands/__tests__/invocation-hints.test.ts", "whatChanged": "Updated connect, create-refusal, and uninstall membership wording.", "justification": "C2/C6 invocation-aware guidance."},
+    {"path": "src/commands/__tests__/join.test.ts", "whatChanged": "Inverted second-team test; updated refusal/race wording; collision fixture now leaves first and verifies its roster remains unchanged.", "justification": "Second bindings are forbidden; handle-collision coverage remains meaningful under leave-then-join."},
+    {"path": "src/commands/__tests__/leave.test.ts", "whatChanged": "Expect empty approvals after last leave; added consent copy, legacy retention, and mutex callback assertions.", "justification": "C4 explicitly changes consent lifecycle and hook timing."},
+    {"path": "src/commands/__tests__/publish.test.ts", "whatChanged": "Removed hidden flags from expected recovery commands.", "justification": "C6; behavioral assertions retained."},
+    {"path": "src/commands/__tests__/search.test.ts", "whatChanged": "Added legacy fixture comment only.", "justification": "Explicitly requested fixture annotation."},
+    {"path": "src/commands/__tests__/setup.test.ts", "whatChanged": "Updated resume wording and added refusal, unchanged-config, same-remote, legacy, and typed-result tests.", "justification": "C2/C3/C6."},
+    {"path": "src/commands/__tests__/sync.test.ts", "whatChanged": "Added legacy fixture comments only.", "justification": "Explicitly requested annotations; sync expectations unchanged."},
+    {"path": "src/commands/__tests__/uninstallMachine.test.ts", "whatChanged": "Added legacy comment and updated membership wording.", "justification": "C5/C6; teardown assertions retained."},
+    {"path": "src/lib/__tests__/auth.test.ts", "whatChanged": "Expect typed refusal for second bindings; added normalization and predicate tests.", "justification": "C1/C2 intentionally replace permissive binding behavior."},
+    {"path": "src/lib/__tests__/config.test.ts", "whatChanged": "Added legacy fixture comment only.", "justification": "Requested annotation; schema and concurrency expectations unchanged."},
+    {"path": "src/lib/__tests__/frames.test.ts", "whatChanged": "Added refused-without-declined assertion.", "justification": "C3 additive protocol requirement."},
+    {"path": "src/lib/__tests__/invocation-catalog.ts", "whatChanged": "Updated exact patterns for changed uninstall source lines.", "justification": "C6 tripwire maintenance; no exemptions added."},
+    {"path": "src/lib/__tests__/local-skills.test.ts", "whatChanged": "Added legacy fixture comment only.", "justification": "Requested annotation; discovery assertions unchanged."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The literal C1 restriction is the intended treatment of legacy rejoins: C2 explicitly says otherwise, so this remains unresolved."
+}

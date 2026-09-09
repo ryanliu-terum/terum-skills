@@ -173,3 +173,9 @@ it('CP-19: every feature is named in the protocol features sentence', () => {
   expect(sentence).toBeDefined();
   for (const key of Object.keys(FRAME_FEATURES)) expect(sentence).toContain(`\`${key}\``);
 });
+
+it('a typed refusal emits refused without declined', () => {
+  const s = shell();
+  s.channel.result({ verb: 'setup', ok: false, error: 'One team per machine: stop', refused: true, exitCode: 1 });
+  expect(s.frames).toEqual([{ t: 'result', verb: 'setup', ok: false, error: 'One team per machine: stop', refused: true, exitCode: 1 }]);
+});
