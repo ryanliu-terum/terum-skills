@@ -41,7 +41,8 @@ export interface TeamStatus {
 }
 export type Machine=Design['MACHINE'] & {hostname:string};
 export type Identity=Design['ME'] & {initials:string;footerLabel:string};
-export interface StatusResult {machine:Machine;me:Identity;teams:TeamStatus[];counts:Record<string,string>;tools:{git:boolean;gh:boolean}}
+/** `projects`: the sidebar's project rows; the mock draws the design's list, the real adapter serves null until a project read model exists (a screen with real registry data passes its own). */
+export interface StatusResult {machine:Machine;me:Identity;teams:TeamStatus[];counts:Record<string,string>;tools:{git:boolean;gh:boolean};projects:string[]|null}
 export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project')[]}
 export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null;endorsed:string|null;unresolved:boolean|null}
 export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}

@@ -100,7 +100,7 @@ function statusModel(value:CliStatus, local:CliLocal|null, platform:string):Stat
   machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
   me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:handle||value.identity?.default_handle||''},
   teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath??null,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{publish:team.policy.publish==='pr'?'Pull request':'Push',license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
-  counts:local===null?{}:{Global:String(local.local.filter(root=>root.scope==='global').reduce((n,root)=>n+root.rows.length,0))},tools:value.tools,
+  counts:local===null?{}:{Global:String(local.local.filter(root=>root.scope==='global').reduce((n,root)=>n+root.rows.length,0))},tools:value.tools,projects:null,
  };
 }
 function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult):Settings {

@@ -39,7 +39,7 @@ const expectedTeams=design.TEAMS.map(team=>({...team,policy:design.TEAM_POLICY,c
 it.each(['loading','error','slow','disabled','not-installed','default'])('status resolves immediately with identity during %s',async scenario=>{
  location.hash='#/library/global?__mock='+scenario;vi.useFakeTimers();
  const status=await createMockBackend({latencyMs:500}).status();
- expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true}}});
+ expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true},projects:['Terum','SSM','MRF']}});
  expect(status.ok&&status.value.machine.gh_login).toBe('teniroo');
  expect(vi.getTimerCount()).toBe(0);
 });
