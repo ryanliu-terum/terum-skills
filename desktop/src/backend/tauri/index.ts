@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { openPath } from '@tauri-apps/plugin-opener';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { FEATURE_KEYS } from '../types';
+import type { Features } from '../types';
+import type { CliFrame } from './frames';
+import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
@@ -65,6 +69,9 @@ const PREF = 'terum-skills-app:pref:';
 
 export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   // Share in-flight reads and cache success; a terminal launch can repair a missing or broken file.
+  let hello: Extract<CliFrame, { t: 'hello' }> | null = null;
+  let featuresOnce: Promise<void> | undefined;
+  const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { hello = frame; };
   let stateOnce: Promise<AppState | null> | undefined;
   const state = () => (stateOnce ??= bridge.readAppState().then((value) => {
     if (value === null) stateOnce = undefined;
@@ -75,6 +82,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   }));
   let homeOnce: Promise<string> | undefined;
   const home = () => (homeOnce ??= bridge.homeDirectory().catch(() => ''));
+  async function localPath(path:string):Promise<string> {
+    if(path!=='~'&&!path.startsWith('~/'))return path;
+    const directory=await home();
+    if(!directory)throw new Error('Could not determine the home directory.');
+    return directory+path.slice(1);
+  }
   async function result<T>(value: Result<T>): Promise<Result<T>> {
     return value.ok ? value : { ...value, error: abbreviateHome(value.error, await home()) };
   }
@@ -85,7 +98,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const cwd = () => backend.prefs.get<string>('workspace', '') || undefined;
 
   function run<TIn, TOut>(argv: readonly string[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut, touches: ChangeSource[] = ['config', 'placed']): Run<TOut> {
-    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), map: (value) => map(schema.parse(value)), onSettled: (result) => { if (result.ok) notify(...touches); } });
+    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), onHello, map: (value) => map(schema.parse(value)), onSettled: (result) => { if (result.ok) notify(...touches); } });
     return {
       done: job.done.then(result),
       answer: (id, value) => job.answer(id, value),
@@ -117,9 +130,13 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const target = launch?.target ?? null;
       return launch && target !== null ? { target, writtenAt: launch.writtenAt } : null;
     },
+    async features(): Promise<Features> {
+      if (!hello) await (featuresOnce ??= read(run(['status'], z.unknown(), value => value, [])).then(() => undefined));
+      return Object.fromEntries(FEATURE_KEYS.map(key => [key, hello?.features[key] ?? false])) as Features;
+    },
     async capabilities(): Promise<Capabilities> {
-      const platform = await bridge.hostPlatform().catch(() => 'unknown');
-      return { windowChrome: platform === 'macos' ? 'mac-overlay' : 'drawn-controls', disablePerMachine: false, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: false, openInEditor: true, clipboard: true };
+      const [platform, features] = await Promise.all([bridge.hostPlatform().catch(() => 'unknown'), backend.features()]);
+      return { windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
       return { status: false, settings: false, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: false, roster: false, update: false };
@@ -181,7 +198,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', args.ref || args.cwd || '', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : [])], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
     // `update` prints its advice and returns no value; the printed lines are the advice. The seam wants numbers the CLI does not return.
     update: async () => gap('Update advice as structured data'),
-    async openInEditor(path) { try { await openPath(path); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
+    async windowAction(action) { try { const window = getCurrentWindow(); if (action === 'toggle-maximize') await window.toggleMaximize(); else await window.startDragging(); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
+    async openUrl(url) { try { await openUrl(url); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
+    async revealPath(path) { try { await revealItemInDir(await localPath(path)); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
+    async openInEditor(path) { try { await openPath(await localPath(path)); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyToClipboard(text) { try { await writeText(text); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyImage(png) { try { await writeImage(await Image.fromBytes(new Uint8Array(await png.arrayBuffer()))); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     // The webview's own storage is app-owned and survives relaunches; same key scheme as the mock so a preference set in one mode reads in the other.

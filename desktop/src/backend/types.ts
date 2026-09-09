@@ -5,7 +5,10 @@ export type AskKind='confirm'|'text'|'select';
 export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string}
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
-export interface Capabilities {windowChrome:'mac-overlay'|'drawn-controls'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
+export interface Capabilities {windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole'] as const;
+export type FeatureKey = typeof FEATURE_KEYS[number];
+export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean}
 export interface ReadOptions {signal?:AbortSignal}
 export type Theme='dark'|'light'|'system';
@@ -23,11 +26,14 @@ export type InboxKind='share'|'update'|'alert'|'eval'|'review'|'author'|'team';
 export type InboxItem=Omit<Design['INBOX'][number],'kind'> & {id:string;skillRef:string;kind:InboxKind;summary:ReceiptSummary|null;incumbentLift:[number,string]|null;reportNumbers?:ReportNumbers};
 export type Person=Design['ROSTER'][number] & {lastPublish:string;skills:string[];adoption:number;publishLine:string;teamsLine:string;buckets:[string,string[]][];placeNote:string;onDisk:[number,number]};
 export type Project=Design['PROJECTS'][number] & {memberHandles:string[];memberInitials:string[];skillsIn:string[]};
-export interface Catalog {skills:SkillCard[];extras:SkillCard[];people:Person[];projects:Project[];categories:Design['CATEGORIES'];categoryRemaining:Record<string,number>;topRated:string[];peopleByAdoption:string[];projectsByMembers:string[];categorySkills:Record<string,string[]>;filterDefault:Design['FILTER_DEFAULT'];filterCount:number;verdictCounts:Record<'PASS'|'NEUTRAL'|'FAIL'|'Not evaluated',number>;catalogN:number;teamN:number;bulkInstall:Record<string,{total:number;asking:number}>}
+export interface Catalog {repository:string|null;skills:SkillCard[];extras:SkillCard[];people:Person[];projects:Project[];categories:Design['CATEGORIES'];categoryRemaining:Record<string,number>;topRated:string[];peopleByAdoption:string[];projectsByMembers:string[];categorySkills:Record<string,string[]>;filterDefault:Design['FILTER_DEFAULT'];filterCount:number;verdictCounts:Record<'PASS'|'NEUTRAL'|'FAIL'|'Not evaluated',number>;catalogN:number;teamN:number;bulkInstall:Record<string,{total:number;asking:number}>}
 export type Member=Design['ROSTER'][number] & {status:string;projects:string[];lastSeen:string;lastPublish:string};
 export interface Roster {members:Member[];invited:Design['INVITED'];member:Record<string,{status:string;projects:string[];lastSeen:string}>;byAdoption:string[]}
 export interface Library {skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;provenance?:string|null;projects?:readonly {name:string;skills:readonly string[];remotes:readonly string[];[key:string]:unknown}[];problems?:readonly {source:string;message:string}[]}
-export interface StatusResult {machine:Design['MACHINE'];me:Design['ME'];teams:Design['TEAMS'];counts:Record<string,string>}
+/** attention = failingEvals + updatesAvailable + notEvaluated; counts.Alerts = attention, counts.Updates = updatesAvailable. Absent CLI counters are omitted. */
+export type CloneState = {state:'absent'} | {state:'incomplete';reason:'not-a-repository'|'no-team-json'|'unverifiable';error?:string} | {state:'foreign'|'ok';origin:string};
+export type TeamStatus = Design['TEAMS'][number] & {cloneState?:CloneState|null;readable?:boolean|null};
+export interface StatusResult {machine:Design['MACHINE'];me:Design['ME'];teams:TeamStatus[];counts:Record<string,string>}
 export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project')[]}
 export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null;endorsed:string|null;unresolved:boolean|null}
 export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}
