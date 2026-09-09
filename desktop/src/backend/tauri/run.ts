@@ -4,6 +4,15 @@ import { parseCliFrame, type CliFrame } from './frames';
 
 export const NO_STATE = 'The desktop app could not find where terum-skills is installed. Run `terum-skills app` from a terminal once; it records the location and opens this app.';
 
+/**
+ * Frame-protocol rule 1: a CLI older than 0.1.6 asks this confirm instead of printing (src/lib/auth.ts at
+ * 0.1.5). A yes would run `gh auth login` with inherited stdio — here the frame pipes — and wedge the run
+ * forever, so the shell answers no itself and never shows the question.
+ */
+export const GH_LOGIN_OFFER = 'GitHub CLI is installed but logged out. Run `gh auth login` now?';
+/** What a 0.1.6+ CLI prints in frame mode instead of asking; shown in place of the swallowed confirm. */
+export const GH_LOGIN_REMEDY = 'GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again.';
+
 let serial = 0;
 function nextId(): string {
   serial += 1;
@@ -30,6 +39,7 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
   let finished = false;
   let started = false;
   let spawnSettled: Promise<void> | undefined;
+  let sawHello = false;
   let cancelled = false;
   let settle!: (result: Result<TOut>) => void;
   const done = new Promise<Result<TOut>>((resolve) => { settle = resolve; });
@@ -69,7 +79,10 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
       case 'stderr': stderr.push(event.line); return;
       case 'exit': {
         if (!finished) {
-          finish({ ok: false, error: cancelled ? 'Cancelled.' : `terum-skills exited${event.code === null ? '' : ` with code ${event.code}`} before reporting a result.${stderr.length ? ` ${stderr.slice(-3).join(' ')}` : ''}` });
+          // No hello means the CLI never spoke the protocol at all — almost always a pre-0.1.5 bin with no
+          // --frames support, which Commander rejects as text. Name the remedy instead of a cryptic per-verb failure.
+          const why = sawHello ? 'before reporting a result.' : 'without a hello frame — this terum-skills is probably older than 0.1.5, before frame mode existed. Update terum-skills, then run `terum-skills app` from a terminal again.';
+          finish({ ok: false, error: cancelled ? 'Cancelled.' : `terum-skills exited${event.code === null ? '' : ` with code ${event.code}`} ${why}${stderr.length ? ` ${stderr.slice(-3).join(' ')}` : ''}` });
         }
         cleanup();
         return;
@@ -79,9 +92,29 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
   };
   const onFrame = (frame: CliFrame) => {
     switch (frame.t) {
-      case 'hello': options.onHello?.(frame); return;
+      case 'hello': {
+        sawHello = true;
+        if (frame.protocol !== 1) {
+          // The protocol number only moves when the meaning of an existing field changes (docs/frame-protocol.md
+          // §Versioning), so a mismatch means this app cannot read this CLI. Stop before a verb misbehaves.
+          finish({ ok: false, error: `terum-skills${frame.version === null ? '' : ` ${frame.version}`} speaks frame protocol ${frame.protocol}; this app speaks protocol 1. ${frame.protocol > 1 ? 'Update the desktop app.' : 'Update terum-skills, then run `terum-skills app` from a terminal again.'}` });
+          void bridge.kill(id).catch(() => undefined);
+          return;
+        }
+        options.onHello?.(frame);
+        return;
+      }
       case 'print': push({ t: 'print', line: frame.level === 'info' ? frame.line : `${frame.level}: ${frame.line}` }); return;
-      case 'ask': push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }), ...(frame.detail === undefined ? {} : { detail: frame.detail }) }); return;
+      case 'ask': {
+        if (frame.kind === 'confirm' && frame.question === GH_LOGIN_OFFER) {
+          // Rule 1: only a pre-0.1.6 CLI asks this over frames; answer no for the person and say what to do.
+          push({ t: 'print', line: GH_LOGIN_REMEDY });
+          void bridge.write(id, JSON.stringify({ t: 'answer', id: frame.id, value: false })).catch((error: unknown) => finish({ ok: false, error: `Could not answer terum-skills: ${error instanceof Error ? error.message : String(error)}` }));
+          return;
+        }
+        push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }), ...(frame.detail === undefined ? {} : { detail: frame.detail }) });
+        return;
+      }
       case 'progress': { const current = frame.current ?? 0; push({ t: 'progress', done: current, total: Math.max(frame.total ?? current, current, 1), label: frame.step }); return; }
       case 'result': {
         if (frame.ok) {
