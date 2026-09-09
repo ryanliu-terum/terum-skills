@@ -1,0 +1,49 @@
+launch Wed Sep  9 02:29:20 UTC 2026 HOME=/Users/ryanliu/Documents/Terum/m7-step4/fx/home
+app pid 4309
+t=3s children:  4348 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames status| 4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=4s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=5s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=6s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=7s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=8s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=9s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=10s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=11s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=12s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=13s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=14s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=15s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=16s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=17s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=18s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=19s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=20s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=21s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=22s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=23s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=24s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=25s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=26s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=27s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=28s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=29s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=30s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=31s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=32s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=33s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=34s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=35s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=36s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=37s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=38s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=39s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=40s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=41s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=42s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=43s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=44s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=45s children:  4349 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames setup |
+t=45s app still up
+quit Wed Sep  9 02:30:07 UTC 2026
+orphaned CLI children after quit: none
+app stderr lines:        0
