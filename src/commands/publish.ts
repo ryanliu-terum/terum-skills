@@ -233,7 +233,7 @@ async function notInTeam(args: PublishArgs, config: Config, team: string, name: 
   const retry = invocation(args.form, 'publish', args.ref) + (args.project === undefined ? '' : ` --project ${shellQuote(args.project)}`);
   const note = unreadable ? ` (${unreadable} local folder(s) under ${discovery.roots.map((root) => root.root).join(' or ')} could not be read.)` : '';
   if (found.length) {
-    return found.map(({ path, label }) => `No skill ${args.ref} in team ${team}. Found a local folder at ${path}${found.length > 1 ? ` (${label})` : ''} that is not tracked as a connected source or placement on this machine. To connect it to ${team}, run \`${invocation(args.form, 'connect', path)}\`, then retry \`${retry}\`.`).join('\n') + note;
+    return found.map(({ path, scope }) => `No skill ${args.ref} in team ${team}. Found a local folder at ${path}${found.length > 1 ? ` (${scope})` : ''} that is not tracked as a connected source or placement on this machine. To connect it to ${team}, run \`${invocation(args.form, 'connect', path)}\`, then retry \`${retry}\`.`).join('\n') + note;
   }
   return `No skill ${args.ref} in team ${team}. Run \`${invocation(args.form, 'ls')}\` to check the team's skill names. To add a local skill, run \`${invocation(args.form, 'connect', { raw: '<path-to-skill>' })}\`, then publish its name.${note}`;
 }

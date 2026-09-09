@@ -3,7 +3,7 @@ import type { Launch } from '../lib/launch.js';
 import { packageVersion } from '../lib/package.js';
 import { createReleaseState, maintainReleaseState, ProbePolicy, probePolicy, recordRunningAndRegistry, ReleaseStateStore } from '../lib/update.js';
 import { readdir, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { mkdirPrivate } from '../lib/fs.js';
 import { acquireTeamLock, lockPath, stampIsFresh, stampPath, TeamLockOptions } from '../lib/hook.js';
@@ -112,9 +112,9 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
     const childIo: Prompter = {
       interactive: 'confirm' in io ? io.interactive : false,
       print: notice,
-      confirm: (question) => ('confirm' in io ? io.confirm(question) : Promise.resolve(false)),
-      text: (question, defaultValue) => ('text' in io ? io.text(question, defaultValue) : Promise.reject(new Error('sync --hook cannot prompt'))),
-      select: (question, choices, defaultChoice) => ('select' in io ? io.select(question, choices, defaultChoice) : Promise.reject(new Error('sync --hook cannot prompt'))),
+      confirm: (question, options) => ('confirm' in io ? io.confirm(question, options) : Promise.resolve(false)),
+      text: (question, defaultValue, options) => ('text' in io ? io.text(question, defaultValue, options) : Promise.reject(new Error('sync --hook cannot prompt'))),
+      select: (question, choices, defaultChoice, options) => ('select' in io ? io.select(question, choices, defaultChoice, options) : Promise.reject(new Error('sync --hook cannot prompt'))),
     };
     if (args.prune) {
       if (!interactive) throw new Error('sync prune needs an interactive terminal.');
@@ -245,8 +245,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
         if (!approved((await store.read()), skill.id, grants)) {
           if (!grants.ok) { blocked(entry.team, skill.name, `Blocked ${skill.name}: allowed-tools is malformed.`); continue; }
           if (!interactive) { defer(entry.team, skill.name); continue; }
-          (io as Prompter).print(`allowed-tools changed for ${skill.name}:\n${grants.normalized}`);
-          if (!(await (io as Prompter).confirm(`Approve updated tools for ${skill.name}?`))) { defer(entry.team, skill.name); continue; }
+          if (!(await (io as Prompter).confirm(`Approve updated tools for ${skill.name}?`, { detail: [`allowed-tools changed for ${skill.name}:`, ...grants.normalized.split('\n')] }))) { defer(entry.team, skill.name); continue; }
           await store.update((fresh) => { fresh.approvals[skill.id] = { grants: grants.hash, approved_at: new Date().toISOString().slice(0, 10) }; });
         }
         // The ledger is provenance for the exact placement, including a particular project checkout.
@@ -395,40 +394,50 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
     // be wrong; and a §8 rate-limited hook run defers nothing, so it stays a silent no-op.
     if (skipTeams.has(placement.team)) continue;
     if (!(await eligible(path))) continue;
-    if (config.pending.some((entry) => entry.id === placement.id && entry.team === placement.team && sameScope(entry.scope, placement.scope))) continue;
-    const binding = config.teams[placement.team];
-    if (!binding?.handle) continue;
-    const person = await actorPerson(store, placement.team, binding.handle);
-    if (!person) continue;
-    if (person.declined.includes(placement.id)) continue;
-    if (person.installed.some((entry) => entry.id === placement.id && sameScope(entry.scope, placement.scope))) continue;
-    if (!io) { defer(placement.team, basename(path)); continue; }
-    const adopt = await io.confirm(`Adopt orphaned placement at ${path}?`);
-    const repo = openTeamRepo(store.teamClone(placement.team), binding.remote, runner);
-    if (adopt) {
-      await repo.safeWrite((tree) => {
-        const personPath = `people/${binding.handle}.json`;
-        const raw = tree.before(personPath);
-        if (!raw) throw new Error(`Missing ${personPath}.`);
-        const fresh = parseJson(personSchema, treeText(raw), personPath);
-        if (!fresh.installed.some((entry) => entry.id === placement.id && sameScope(entry.scope, placement.scope))) {
-          fresh.installed.push({ id: placement.id, version: placement.version, scope: placement.scope, since: new Date().toISOString().slice(0, 10) });
+    // One failed adoption or decline (a refused push, a busy clone lock, a dropped network) costs
+    // only itself, reported — the shape every other sync loop already has. The entry is deferred, so
+    // its team stays unstamped (§8: a stamp means a fully completed sync) while other entries and
+    // every other team's outcome and stamp still land.
+    try {
+      if (config.pending.some((entry) => entry.id === placement.id && entry.team === placement.team && sameScope(entry.scope, placement.scope))) continue;
+      const binding = config.teams[placement.team];
+      if (!binding?.handle) continue;
+      const person = await actorPerson(store, placement.team, binding.handle);
+      if (!person) continue;
+      if (person.declined.includes(placement.id)) continue;
+      if (person.installed.some((entry) => entry.id === placement.id && sameScope(entry.scope, placement.scope))) continue;
+      if (!io) { defer(placement.team, basename(path)); continue; }
+      const adopt = await io.confirm(`Adopt orphaned placement at ${path}?`);
+      const repo = openTeamRepo(store.teamClone(placement.team), binding.remote, runner);
+      if (adopt) {
+        await repo.safeWrite((tree) => {
+          const personPath = `people/${binding.handle}.json`;
+          const raw = tree.before(personPath);
+          if (!raw) throw new Error(`Missing ${personPath}.`);
+          const fresh = parseJson(personSchema, treeText(raw), personPath);
+          if (!fresh.installed.some((entry) => entry.id === placement.id && sameScope(entry.scope, placement.scope))) {
+            fresh.installed.push({ id: placement.id, version: placement.version, scope: placement.scope, since: new Date().toISOString().slice(0, 10) });
+            tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
+          }
+        }, { action: 'install', handle: binding.handle, message: `${binding.handle}: adopt ${placement.id.slice(0, 8)}` });
+        notice(`Adopted orphaned placement at ${path}.`);
+        record(placement.team, path, 'adopted');
+      } else {
+        await repo.safeWrite((tree) => {
+          const personPath = `people/${binding.handle}.json`;
+          const raw = tree.before(personPath);
+          if (!raw) throw new Error(`Missing ${personPath}.`);
+          const fresh = parseJson(personSchema, treeText(raw), personPath);
+          if (!fresh.declined.includes(placement.id)) fresh.declined.push(placement.id);
           tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
-        }
-      }, { action: 'install', handle: binding.handle, message: `${binding.handle}: adopt ${placement.id.slice(0, 8)}` });
-      notice(`Adopted orphaned placement at ${path}.`);
-      record(placement.team, path, 'adopted');
-    } else {
-      await repo.safeWrite((tree) => {
-        const personPath = `people/${binding.handle}.json`;
-        const raw = tree.before(personPath);
-        if (!raw) throw new Error(`Missing ${personPath}.`);
-        const fresh = parseJson(personSchema, treeText(raw), personPath);
-        if (!fresh.declined.includes(placement.id)) fresh.declined.push(placement.id);
-        tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
-      }, { action: 'uninstall', handle: binding.handle, message: `${binding.handle}: decline ${placement.id.slice(0, 8)}` });
-      notice(`Declined orphaned placement at ${path}.`);
-      record(placement.team, path, 'declined');
+        }, { action: 'uninstall', handle: binding.handle, message: `${binding.handle}: decline ${placement.id.slice(0, 8)}` });
+        notice(`Declined orphaned placement at ${path}.`);
+        record(placement.team, path, 'declined');
+      }
+    } catch (error) {
+      if (error instanceof PromptClosedError) throw error; // the channel is gone, not this entry
+      defer(placement.team, basename(path));
+      notice(`Deferred orphaned placement at ${path}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
@@ -517,11 +526,14 @@ function printVerdict(config: Awaited<ReturnType<ConfigStore['read']>>, teams: T
   verdict(`Sync incomplete: ${clauses.join('; ')}.`);
 }
 
+/** Prune's roster guard: only paths strictly under the quarantine root, judged with the host separator — a hard-coded `/` left win32 prune inert. Exported with an injectable separator so the win32 shape is provable from any host. */
+export function underQuarantine(root: string, path: string, separator: string = sep): boolean { return path.startsWith(root + separator); }
+
 async function prune(store: ConfigStore, io: Prompter): Promise<{ deleted: number; declined: boolean; error?: string }> {
   const root = resolve(store.root, 'quarantine');
   let entries: string[];
   try { entries = await readdir(root); } catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') { io.print('Quarantine is empty.'); return { deleted: 0, declined: false }; } throw error; }
-  const paths = entries.map((entry) => resolve(root, entry)).filter((path) => path.startsWith(`${root}/`));
+  const paths = entries.map((entry) => resolve(root, entry)).filter((path) => underQuarantine(root, path));
   if (!paths.length) { io.print('Quarantine is empty.'); return { deleted: 0, declined: false }; }
   for (const path of paths) io.print(path);
   if (!(await io.confirm(`Delete ${paths.length} quarantined item(s)?`))) { io.print('Prune cancelled; nothing deleted.'); return { deleted: 0, declined: true }; }

@@ -1,0 +1,80 @@
+{
+  "status": "partial",
+  "summary": "Applied the specified overflow changes in two CSS files and added seven scroll regression cases in one e2e spec. Sandbox gates pass after a transient unit-test failure, but scrolling behavior and pixel fidelity remain unverified pending the orchestrator’s browser gates.",
+  "filesChanged": [
+    {
+      "path": "desktop/src/screens/library/library.css",
+      "change": "modified",
+      "why": "Makes the Library grid scroll with hidden scrollbars."
+    },
+    {
+      "path": "desktop/src/screens/skill/skill.css",
+      "change": "modified",
+      "why": "Makes the main detail column scroll and relaxes non-full Evals body overflow and minimum height."
+    },
+    {
+      "path": "desktop/e2e/routes/scroll.spec.ts",
+      "change": "added",
+      "why": "Covers both libraries, SKILL.md, Evals, Quality, Activity, and full Evals; checks clipping, pinned elements, and browser errors."
+    }
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "npm run lint: exit 0; no diagnostics.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "npm run typecheck: exit 0; no diagnostics.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": true,
+      "output": "Final npm test: 67 files passed; 926 tests passed, 88 skipped. Initial run: 925 passed, 1 failed, 88 skipped. The failing replay-screens test file passed separately: 4/4 tests.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [
+    {
+      "question": "Will the nested overflow:hidden/min-height:0 rules on skill-md-tab, skill-md-blocks, and evals-tab still clip content inside the main scroller?",
+      "specSection": "Change — detail tab reachability",
+      "conservativeChoice": "Retained the explicitly prescribed CSS changes and added wheel-based assertions that expose remaining clipping. Additional tab changes await browser evidence."
+    },
+    {
+      "question": "Does full-mode document height mean the main column’s content extent or the root document height inside the fixed, overflow-hidden shell?",
+      "specSection": "E2E case 5",
+      "conservativeChoice": "Asserted visible overflow and complete report content extent in detail-main without changing the shell or asserting scrollTop."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "Playwright route tests, export checking, and the 88-board fidelity gate were not run.",
+      "why": "Explicitly reserved for the orchestrator outside the sandbox; browser reachability and unchanged pixels cannot yet be claimed."
+    }
+  ],
+  "invariantsTouched": [
+    {
+      "number": 4,
+      "howSatisfied": "Oracle files and tolerances untouched; fidelity verification remains pending."
+    },
+    {
+      "number": 5,
+      "howSatisfied": "Preserved existing dimensions, padding, gaps, rail rules, and full-mode overrides; changed only specified overflow behavior."
+    },
+    {
+      "number": 7,
+      "howSatisfied": "Added regression assertions without modifying existing tests; browser errors and missing bounding boxes fail explicitly."
+    },
+    {
+      "number": 8,
+      "howSatisfied": "Ran all required sandbox commands, read every edited file back, and used no git, network, installation, or browser-launch commands."
+    }
+  ],
+  "testsModified": [],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The specified detail-column CSS alone makes all tab content reachable: nested clipping rules remain, and browser execution was unavailable."
+}

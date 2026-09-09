@@ -1,0 +1,103 @@
+{
+  "status": "partial",
+  "summary": "Implemented Part A A–E, Part B 1–6, and the CLI and desktop test scenarios using the existing prompt, frame, and setup-session paths. Root and desktop lint/typecheck passed, and root build passed. One terminal-test assertion was adapted for existing readline control bytes; test execution limitations are reported below.",
+  "filesChanged": [
+    {"path": ".planning/specs/2026-09-02-phase-1-build.md", "change": "modified", "why": "Part A.C: inserted the prescribed decision-context amendment."},
+    {"path": "docs/frame-protocol.md", "change": "modified", "why": "Part A.B: documented optional detail and protocol 1 compatibility."},
+    {"path": "src/lib/prompt.ts", "change": "modified", "why": "Part A.A: added AskOptions and terminal detail output."},
+    {"path": "src/lib/frames.ts", "change": "modified", "why": "Part A.B: carried nonempty detail on ask frames and re-asks."},
+    {"path": "src/lib/auth.ts", "change": "modified", "why": "Part A.C: moved identity context into confirmation detail."},
+    {"path": "src/commands/install.ts", "change": "modified", "why": "Part A.C: moved normal and malformed grant context into detail."},
+    {"path": "src/commands/sync.ts", "change": "modified", "why": "Part A.C: moved updated-tool context into detail and forwarded child options."},
+    {"path": "src/lib/__tests__/fixtures.ts", "change": "modified", "why": "CLI tests: record question detail in ScriptedPrompter."},
+    {"path": "src/lib/__tests__/auth.test.ts", "change": "modified", "why": "CLI tests: verify identity detail replaces printed output."},
+    {"path": "src/lib/__tests__/frames.test.ts", "change": "modified", "why": "CLI tests: cover detail, empty omission, and select re-asks."},
+    {"path": "src/lib/__tests__/prompt.test.ts", "change": "modified", "why": "CLI tests: cover once-only detail, exact visible output, and byte parity."},
+    {"path": "src/commands/__tests__/install.test.ts", "change": "modified", "why": "CLI tests: assert normal and malformed consent details."},
+    {"path": "src/commands/__tests__/sync.test.ts", "change": "modified", "why": "CLI tests: assert updated-tool detail and endorsed-batch passthrough."},
+    {"path": "desktop/src/backend/types.ts", "change": "modified", "why": "Part A.D and Part B.3: added seam detail and refused fields."},
+    {"path": "desktop/src/backend/tauri/frames.ts", "change": "modified", "why": "Part A.D: parse string-only detail and typed refusal."},
+    {"path": "desktop/src/backend/tauri/run.ts", "change": "modified", "why": "Part A.D: map detail and refusal into seam frames/results."},
+    {"path": "desktop/src/backend/prompter.ts", "change": "modified", "why": "Part A.D: forward nonempty detail to unexpected questions."},
+    {"path": "desktop/src/backend/drive.ts", "change": "modified", "why": "Part A.D: forward detail and invoke onAsk before answering."},
+    {"path": "desktop/src/backend/mock/run.ts", "change": "modified", "why": "Part A.D: support mock ask detail and refused result frames."},
+    {"path": "desktop/src/app/providers.tsx", "change": "modified", "why": "Part A.E: render descriptions, use Yes/No, and ignore confirm dismissal."},
+    {"path": "desktop/src/backend/paths.ts", "change": "modified", "why": "Part B.2: normalize repository identities with shared stripping."},
+    {"path": "desktop/src/backend/setup-session.ts", "change": "modified", "why": "Part A.D and Part B.1–4: track identity asks, pre-flight targets, and consume refusals."},
+    {"path": "desktop/src/screens/onboarding/SetupBoot.tsx", "change": "modified", "why": "Part B.5: render refusal actions and navigate after cancellation consumption."},
+    {"path": "desktop/src/backend/__tests__/drive.test.ts", "change": "modified", "why": "Desktop tests: verify detail forwarding and onAsk ordering."},
+    {"path": "desktop/src/backend/__tests__/prompter.test.ts", "change": "modified", "why": "Desktop tests: verify detail forwarding and empty omission."},
+    {"path": "desktop/src/backend/__tests__/setup-steps.test.ts", "change": "modified", "why": "Desktop tests: verify askedSetupStep mapping."},
+    {"path": "desktop/src/backend/__tests__/paths.test.ts", "change": "modified", "why": "Desktop tests: verify repository normalization."},
+    {"path": "desktop/src/app/providers.test.tsx", "change": "modified", "why": "Desktop tests: verify descriptions, Yes/No, Escape, and backdrop behavior."},
+    {"path": "desktop/src/backend/tauri/__tests__/run.test.ts", "change": "modified", "why": "Desktop tests: verify parsed detail, seam forwarding, and typed refusal."},
+    {"path": "desktop/src/app/launch-coordinator.test.tsx", "change": "modified", "why": "Part B.6: re-anchor requests to equivalent configured remotes."},
+    {"path": "desktop/src/screens/onboarding/setup-driver.test.tsx", "change": "modified", "why": "Part B tests: cover refusal, status failure, cancellation persistence, and identity cues."},
+    {"path": "desktop/src/backend/tauri/__tests__/setup-replay.test.tsx", "change": "modified", "why": "Part A.F and Part B.6: assert new recording shape and add refusal replay."},
+    {"path": "desktop/src/screens/inbox/inbox.test.tsx", "change": "modified", "why": "Part A.E: re-anchor generic confirm cancellation to No."},
+    {"path": "desktop/src/screens/library/library-skill.test.tsx", "change": "modified", "why": "Part A.E: re-anchor generic tool approval to Yes."},
+    {"path": "desktop/src/screens/share/share.test.tsx", "change": "modified", "why": "Part A.E: re-anchor generic invitation confirmation to Yes."}
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Root npm run lint: exit 0. Desktop npm run lint: exit 0.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Root npm run typecheck: exit 0. Desktop npm run typecheck: exit 0. Separate required root npm run build: exit 0.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": false,
+      "output": "Root: 0 tests executed; startup sandbox failure: Error: EPERM: operation not permitted, open '/Users/ryanliu/Documents/Terum/skill-management-software-wt-detail/node_modules/.vite-temp/vitest.config.ts.timestamp-1788931920081-345efa017c2228.mjs'. No workaround attempted. Latest full desktop run: 968 passed, 4 failed, 88 skipped (1060); 65 test files passed, 3 failed. Two S7r setup replays are expected red until the orchestrator re-records the frames (Part A.F): Expected element to have text content: Identity: @seed — Seed <seed@example.com> (GitHub: seed); Received: Use this identity?NoYes. The other failures were loading timeouts in unchanged replay-screens and s7b-screens tests; those files subsequently passed unchanged with --maxWorkers=1: 7 passed, 0 failed. An earlier full run had 6 additional timing failures; no assertions or timeouts were weakened.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [
+    {
+      "question": "Does the terminal test's exact output mean visible prompt text? Existing readline emits ANSI cursor controls and echoes the answer, so raw output cannot equal the specified plain string while remaining byte-identical.",
+      "specSection": "Part A.A; CLI terminal prompt test",
+      "conservativeChoice": "Preserved terminal behavior. Asserted the exact visible prompt after stripping control bytes, plus raw byte equality against the previous print-then-confirm behavior."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "Adapted the literal terminal-output assertion to exact visible text plus raw byte parity.",
+      "why": "The specified plain raw-output string conflicts with the existing readline behavior that Part A.A requires preserving."
+    }
+  ],
+  "invariantsTouched": [
+    {"number": 1, "howSatisfied": "Desktop capabilities remain behind the backend seam; Prompter retains its five members."},
+    {"number": 4, "howSatisfied": "Root consent predicates and hook behavior remain unchanged. Desktop fidelity references and recordings were not edited."},
+    {"number": 5, "howSatisfied": "Reused DialogDescription and existing styles; added no CSS or board geometry changes."},
+    {"number": 7, "howSatisfied": "Added behavioral coverage and declared every existing test-file modification; no tests or timeouts were weakened."},
+    {"number": 8, "howSatisfied": "Ran required gates in the sandbox, read back edits, and used no git commands, network, installs, commits, or recording edits."}
+  ],
+  "testsModified": [
+    {"path": "src/lib/__tests__/fixtures.ts", "whatChanged": "Added detail recording to question methods.", "justification": "CLI fixture test bullet."},
+    {"path": "src/lib/__tests__/auth.test.ts", "whatChanged": "Moved three identity assertions from lines to details and asserted empty output.", "justification": "Part A.C and CLI identity test bullet."},
+    {"path": "src/lib/__tests__/frames.test.ts", "whatChanged": "Added detail, empty omission, text, and select re-ask coverage; existing assertions retained.", "justification": "Part A.B and CLI frame test bullet."},
+    {"path": "src/lib/__tests__/prompt.test.ts", "whatChanged": "Added terminal detail and byte-parity tests; existing assertions retained.", "justification": "Part A.A and CLI terminal test bullet; output interpretation recorded above."},
+    {"path": "src/commands/__tests__/install.test.ts", "whatChanged": "Asserted consent context in details and its absence from printed lines.", "justification": "Part A.C and CLI install test bullet."},
+    {"path": "src/commands/__tests__/sync.test.ts", "whatChanged": "Moved updated-tool assertion to details and added endorsed-batch passthrough coverage.", "justification": "Part A.C and CLI sync test bullet."},
+    {"path": "desktop/src/backend/__tests__/drive.test.ts", "whatChanged": "Added full-question detail and callback-order tests.", "justification": "Part A.D and desktop drive test bullet."},
+    {"path": "desktop/src/backend/__tests__/prompter.test.ts", "whatChanged": "Added detail forwarding and empty omission assertions.", "justification": "Part A.D and desktop prompter test bullet."},
+    {"path": "desktop/src/backend/__tests__/setup-steps.test.ts", "whatChanged": "Added identity-ask step mapping assertions.", "justification": "Part A.D and desktop setup-step test bullet."},
+    {"path": "desktop/src/backend/__tests__/paths.test.ts", "whatChanged": "Added repository identity normalization cases.", "justification": "Part B.2 and desktop paths test bullet."},
+    {"path": "desktop/src/app/providers.test.tsx", "whatChanged": "Changed Confirm to Yes and added description, No, Escape, and backdrop coverage; text cancellation retained.", "justification": "Part A.E and desktop dialog test bullet."},
+    {"path": "desktop/src/backend/tauri/__tests__/run.test.ts", "whatChanged": "Added parser detail, seam detail, and refusal tests.", "justification": "Part A.D and desktop adapter test bullet."},
+    {"path": "desktop/src/app/launch-coordinator.test.tsx", "whatChanged": "Changed request targets to equivalent configured-team remotes.", "justification": "Part B.6."},
+    {"path": "desktop/src/screens/onboarding/setup-driver.test.tsx", "whatChanged": "Re-anchored targets and confirm labels; replaced post-cancellation rendering assertions with navigation, session snapshots, and consumption checks; added refusal and detail tests.", "justification": "Part B.5, Part B.6, and desktop setup-driver test bullet."},
+    {"path": "desktop/src/backend/tauri/__tests__/setup-replay.test.tsx", "whatChanged": "Re-anchored targets and Yes/No buttons; asserted identity description, active cue, transcript exclusion; added refusal replay.", "justification": "Part A.F, Part B.6, and desktop replay test bullet. Recordings untouched."},
+    {"path": "desktop/src/screens/inbox/inbox.test.tsx", "whatChanged": "Changed the generic confirm's Cancel selector to No.", "justification": "Part A.E; outcome assertion retained."},
+    {"path": "desktop/src/screens/library/library-skill.test.tsx", "whatChanged": "Changed the generic approval's Confirm selector to Yes.", "justification": "Part A.E; workflow and installation assertions retained."},
+    {"path": "desktop/src/screens/share/share.test.tsx", "whatChanged": "Changed the generic invitation prompt's Confirm selector to Yes.", "justification": "Part A.E; workflow assertions retained."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The new CLI regression tests will pass at runtime: they typecheck, but the required root Vitest run was blocked before executing any tests."
+}

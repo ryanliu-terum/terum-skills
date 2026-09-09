@@ -4,7 +4,7 @@ import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, utimes, write
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { acquireTeamLock, lockPath, removeRunArtifacts, stampPath } from '../../lib/hook.js';
-import { approved, run } from '../sync.js';
+import { approved, run, underQuarantine } from '../sync.js';
 import { allowedTools, emptyConfig } from '../../lib/schema.js';
 import { run as connect } from '../connect.js';
 import { createExecute } from '../../lib/execute.js';
@@ -692,7 +692,8 @@ describe('sync --hook (§3, §6)', () => {
     await pushFromSeed(accepted.fixture.seed, 'skills/sample/SKILL.md', toolSkill('added', ['Bash(ls)', 'Read(*)']));
     const approved = new ScriptedPrompter([], [true], true);
     expect(await run({ config: accepted.store }, approved)).toMatchObject({ ok: true, value: { placed: 1, deferred: [] } });
-    expect(approved.lines.join('\n')).toContain('allowed-tools changed');
+    expect(approved.lines.join('\n')).not.toContain('allowed-tools changed');
+    expect(approved.details['Approve updated tools for sample?']).toEqual(['allowed-tools changed for sample:', 'Bash(ls)', 'Read(*)']);
     expect(await readFile(join(accepted.home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: added');
     expect((await accepted.store.read()).approvals[ID]!.grants).not.toBe(accepted.oldApproval);
 
@@ -760,6 +761,15 @@ describe('sync --hook (§3, §6)', () => {
       expect(errors).toEqual([`Deleted 1 of 2 quarantined item(s); could not delete ${second}: deliberately undeletable`]);
       expect(codes).toEqual([1]);
     } finally { delete (globalThis as { terumPruneFailurePath?: string }).terumPruneFailurePath; }
+  });
+
+  it('prune recognizes quarantine entries under a backslash-separated root: the guard is built from the host separator, not a hard-coded `/`', () => {
+    // On win32 every resolved entry is backslash-separated, so the old `${root}/` prefix matched
+    // nothing and prune reported an occupied quarantine as empty.
+    expect(underQuarantine('C:\\Users\\me\\.terum\\skills\\quarantine', 'C:\\Users\\me\\.terum\\skills\\quarantine\\stamp', '\\')).toBe(true);
+    expect(underQuarantine('C:\\Users\\me\\.terum\\skills\\quarantine', 'C:\\Users\\me\\.terum\\skills\\quarantine-sibling', '\\')).toBe(false);
+    expect(underQuarantine('/state/quarantine', '/state/quarantine/stamp', '/')).toBe(true);
+    expect(underQuarantine('/state/quarantine', '/state/quarantine', '/')).toBe(false);
   });
 
   it('counts a pending install once by its ledger path, whether it is new or already placed', async () => {
@@ -930,6 +940,29 @@ describe('sync --hook (§3, §6)', () => {
     expect(await run({ config: adopted.store }, new ScriptedPrompter([], [true], true))).toMatchObject({ ok: true, value: { changed: true, teams: [{ state: 'complete', counts: { adopted: 1 } }] } });
     const declined = await orphanedPlacement();
     expect(await run({ config: declined.store }, new ScriptedPrompter([], [false], true))).toMatchObject({ ok: true, value: { changed: true, teams: [{ state: 'complete', counts: { declined: 1 } }] } });
+  });
+
+  it('one failed orphan write costs only that entry: it is deferred, its team left unstamped (§8: a stamp means a fully completed sync), and the other team still completes and stamps', async () => {
+    const orphan = await orphanedPlacement();
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, orphan.store.teamClone('other'));
+    await orphan.store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    // The adoption's people-file push is refused (permissions, a dropped network); every other pass already ran.
+    const refusing = wrapRunner(systemRunner, async (command, args, options, next) => command === 'git' && args[0] === 'push' && options?.cwd === orphan.store.teamClone('team')
+      ? { code: 1, stdout: '', stderr: 'remote: Permission denied' }
+      : next());
+    const io = new ScriptedPrompter([], [true], true);
+    const result = await run({ config: orphan.store, runner: refusing }, io);
+    expect(result).toMatchObject({ ok: true, value: { deferred: ['sample'], teams: [
+      { team: 'team', state: 'incomplete', review: ['sample'] },
+      { team: 'other', state: 'complete' },
+    ] } });
+    expect(io.lines.filter((line) => line.startsWith(`Deferred orphaned placement at ${orphan.path}: `))).toHaveLength(1);
+    await expect(access(stampPath(orphan.store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(stampPath(orphan.store.root, 'other'))).resolves.toBeUndefined();
+    // Nothing was recorded as adopted: the placement stays an orphan for the next run to retry.
+    expect(JSON.parse(await readFile(join(orphan.clone, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
+    expect((await orphan.store.read()).placements[orphan.path]).toBeDefined();
   });
 });
 
@@ -1296,4 +1329,14 @@ describe('Library sync destinations', () => {
     expect(io.offeredDefaults).toEqual(['Global (~/.claude/skills)']);
     expect(Object.keys((await f.store.read()).placements)).toEqual(expect.arrayContaining([join(placementHome(f.store), '.claude', 'skills', 'sample'), join(placementHome(f.store), '.claude', 'skills', 'second')]));
   });
+});
+
+it('forwards allowed-tools decision detail through the endorsed batch child prompter', async () => {
+  const { fixture, store } = await configuredSkill();
+  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('endorsed', ['Bash(ls)', 'Read(*)']));
+  await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+  const io = new ScriptedPrompter([], [true, true], true);
+  expect(await run({ config: store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { placed: 1 } });
+  expect(io.details['Approve these tools for sample?']).toEqual(['sample requests allowed-tools:', 'Bash(ls)', 'Read(*)']);
+  expect(io.lines.join('\n')).not.toContain('sample requests allowed-tools:');
 });

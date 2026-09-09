@@ -4,7 +4,7 @@ import { design } from '../mock/data';
 import type { Run, Frame } from '../types';
 afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();});
 async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
-it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true});expect((await b.library({scope:'Global'})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:'Global'});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
+it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true});expect((await b.library({scope:'Global'})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:'Global'});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
 it.each([
  ['library',"EACCES: permission denied, scandir '~/.terum/skills'"],
  ['skill',"ENOENT: no such file or directory, open '~/.claude/skills/deploy-check/SKILL.md'"],
@@ -24,6 +24,7 @@ it.each([
  if(family==='skill')expect(await b.skill({ref:'migration-guard'})).toEqual({ok:false,error:"ENOENT: no such file or directory, open '~/.claude/skills/migration-guard/SKILL.md'"});
 });
 it('returns disabled and not-installed details without changing fixture data',async()=>{const b=createMockBackend();location.hash='#/skill/deploy-check?__mock=disabled';const off=await b.skill({ref:'deploy-check'});expect(off.ok).toBe(true);if(!off.ok)throw new Error(off.error);expect(off.value.enabled).toBe(false);location.hash='#/skill/deploy-check?__mock=not-installed';const absent=await b.skill({ref:'deploy-check'});expect(absent.ok&&absent.value.root).toBe('Marketplace');expect(absent.ok&&absent.value.installed).toBe(false);});
+it('treats any requested skill as not installed under the not-installed scenario',async()=>{const b=createMockBackend();location.hash='#/skill/a11y-audit?__mock=not-installed&dialog=install&root=marketplace';const absent=await b.skill({ref:'a11y-audit'});expect(absent.ok).toBe(true);if(!absent.ok)throw new Error(absent.error);expect(absent.value).toMatchObject({name:'a11y-audit',installed:false,placed:false,onDiskOnly:false,root:'Marketplace',flags:[]});location.hash='#/skill/a11y-audit';const present=await b.skill({ref:'a11y-audit'});expect(present.ok&&present.value.installed).toBe(true);});
 it('honours latency, slow, and deliberately pending loading reads',async()=>{vi.useFakeTimers();const b=createMockBackend({latencyMs:50});const resolved=vi.fn();void b.inbox().then(resolved);await vi.advanceTimersByTimeAsync(49);expect(resolved).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(resolved).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=slow';const slow=vi.fn();void b.inbox().then(slow);await vi.advanceTimersByTimeAsync(1999);expect(slow).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(slow).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=loading';const loading=vi.fn();void b.inbox().then(loading);await vi.advanceTimersByTimeAsync(10000);expect(loading).not.toHaveBeenCalled();});
 it('models connect selection, a declined skill, an accepted skill and Done',async()=>{const run=createMockBackend().connect({});let selected=0;const result=await answerAll(run,frame=>frame.kind==='select'?(selected++===0?'api-docs':selected===2?'handoff-note':'Done'):frame.question==='Connect handoff-note?');expect(result).toEqual({ok:true,value:{kind:'batch',shared:[{id:'handoff-note',name:'handoff-note'}],declined:['api-docs'],refused:[]}});});
 it('returns the required decline for Skip and a single result for path connect',async()=>{const b=createMockBackend();expect(await answerAll(b.connect({}),()=> 'Skip')).toEqual({ok:false,error:'Connect was declined.',cancelled:true});expect(await answerAll(b.connect({path:'/skills/api-docs'}),()=>true)).toEqual({ok:true,value:{id:'api-docs',name:'api-docs'}});});
@@ -113,3 +114,18 @@ it('marks a mock connect decline on both the result and the terminal frame',asyn
  expect(frames.at(-1)).toEqual({t:'result',ok:false,error:'Connect was declined.',declined:true});
 });
 it('has no launch target in the mock',async()=>{expect(await createMockBackend().launchContext()).toBeNull();});
+
+it('accepts only local editor paths, never CLI commands',async()=>{
+ const backend=createMockBackend();
+ expect(await backend.openInEditor('npx -y terum-skills@latest status')).toEqual({ok:false,error:'An editor path is required.'});
+ for(const path of ['~/.claude/skills/x','/abs','~'])expect(await backend.openInEditor(path)).toEqual({ok:true,value:undefined});
+});
+it('prints diagnostics from the fixture and reports status read failures',async()=>{
+ const backend=createMockBackend(),run=backend.diagnostics(),lines:string[]=[];
+ for await(const frame of run.frames)if(frame.t==='print')lines.push(frame.line);
+ expect(await run.done).toEqual({ok:true,value:undefined});
+ expect(lines).toHaveLength(design.TEAMS.length+1);expect(lines[0]).toContain(design.CLI_VERSION);
+ for(const [index,team] of design.TEAMS.entries())for(const fact of [team.name,team.remote,team.handle,String(team.members),String(team.skills),team.last_sync])expect(lines[index+1]).toContain(fact);
+ location.hash='#/settings/advanced?__mock=error';
+ expect(await backend.diagnostics().done).toEqual({ok:false,error:'Could not read ~/.terum/skills/config.json.'});
+});

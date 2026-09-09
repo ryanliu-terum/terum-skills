@@ -1,5 +1,5 @@
 import type { AskKind, Frame, Result, Run } from '../types';
-export interface RunContext {print(line:string):void;progress(done:number,total:number,label?:string):void;ask(kind:AskKind,question:string,opts?:{default?:string;choices?:readonly string[]}):Promise<string|boolean>;sleep(ms:number):Promise<void>}
+export interface RunContext {print(line:string):void;progress(done:number,total:number,label?:string):void;ask(kind:AskKind,question:string,opts?:{default?:string;choices?:readonly string[];detail?:readonly string[]}):Promise<string|boolean>;sleep(ms:number):Promise<void>}
 export function createRun<T>(script:(ctx:RunContext)=>Promise<Result<T>>):Run<T> {
  const buffer:Frame[]=[];
  const readers=new Set<()=>void>();
@@ -11,7 +11,7 @@ export function createRun<T>(script:(ctx:RunContext)=>Promise<Result<T>>):Run<T>
  const push=(frame:Frame)=>{if(finished)return;buffer.push(frame);for(const wake of readers)wake();readers.clear();};
  const finish=(result:Result<T>)=>{
   if(finished)return;
-  push({t:'result',ok:result.ok,...(result.ok?{}:{error:result.error,...(result.cancelled?{declined:true}:{})})});finished=true;
+  push({t:'result',ok:result.ok,...(result.ok?{}:{error:result.error,...(result.cancelled?{declined:true}:{}),...(result.refused?{refused:true}:{})})});finished=true;
   for(const ask of asks.values())ask.reject(new Error(result.ok?'Run completed.':result.error));asks.clear();
   for(const stop of sleepers)stop();sleepers.clear();
   for(const wake of readers)wake();readers.clear();

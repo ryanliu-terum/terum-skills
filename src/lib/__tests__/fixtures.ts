@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Launch } from '../launch.js';
 import lockfile from 'proper-lockfile';
 import { CommandResult, Runner, RunOptions, systemRunner } from '../runner.js';
-import { Prompter, PromptClosedError } from '../prompt.js';
+import { type AskOptions, Prompter, PromptClosedError } from '../prompt.js';
 import { cloneLockPath } from '../teamRepo.js';
 
 /** Every temp dir created through `temporaryDirectory` — removed by setup.ts after each test. */
@@ -25,6 +25,7 @@ export function wrapperFor(home: string): { skillsRoot: string; source: string }
  */
 export class ScriptedPrompter implements Prompter {
   readonly lines: string[] = [];
+  readonly details: Record<string, string[]> = {};
   readonly asked: string[] = [];
   readonly offeredDefaults: (string | undefined)[] = [];
   readonly offered: (readonly string[])[] = [];
@@ -35,14 +36,15 @@ export class ScriptedPrompter implements Prompter {
     if (answer === undefined) throw new PromptClosedError(question, 'closed');
     return answer;
   }
-  async confirm(question: string): Promise<boolean> {
+  async confirm(question: string, options?: AskOptions): Promise<boolean> {
+    if (options?.detail) this.details[question] = [...options.detail];
     this.asked.push(question);
     const answer = this.confirms.shift();
     if (answer === undefined) throw new PromptClosedError(question, 'closed');
     return answer;
   }
-  async text(question: string, defaultValue?: string): Promise<string> { return this.next(question) || (defaultValue ?? ''); }
-  async select(question: string, choices: readonly string[], defaultChoice?: string): Promise<string> { this.offered.push([...choices]); this.offeredDefaults.push(defaultChoice); return this.next(question) || defaultChoice || choices[0] || ''; }
+  async text(question: string, defaultValue?: string, options?: AskOptions): Promise<string> { if (options?.detail) this.details[question] = [...options.detail]; return this.next(question) || (defaultValue ?? ''); }
+  async select(question: string, choices: readonly string[], defaultChoice?: string, options?: AskOptions): Promise<string> { if (options?.detail) this.details[question] = [...options.detail]; this.offered.push([...choices]); this.offeredDefaults.push(defaultChoice); return this.next(question) || defaultChoice || choices[0] || ''; }
   print(line: string): void { this.lines.push(line); }
   askedAbout(fragment: string): boolean { return this.asked.some((question) => question.includes(fragment)); }
   countAsked(fragment: string): number { return this.asked.filter((question) => question.includes(fragment)).length; }

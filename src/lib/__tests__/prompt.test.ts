@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { PassThrough } from 'node:stream';
 import { ESLint } from 'eslint';
 import { describe, expect, expectTypeOf, it } from 'vitest';
@@ -168,6 +169,28 @@ describe('terminalPrompter behaviour', () => {
     expect(await io.select('Install to', ['Global', 'Checkout'], 'Checkout')).toBe('Checkout');
     expect(out()).toContain('1. Global');
     expect(out()).toContain('2. Checkout');
+  });
+
+  it('prints identity detail once immediately before its confirm question', async () => {
+    const { io, out } = channel(['y']);
+    const pending = io.confirm('Use this identity?', { detail: ['Identity: @me — Me <me@x.test> (GitHub: octocat)'] });
+    // Readline adds cursor-control bytes and echoes the answer; assert the exact prompt before typing.
+    expect(stripVTControlCharacters(out())).toBe('Identity: @me — Me <me@x.test> (GitHub: octocat)\nUse this identity? [y/N] ');
+    expect(await pending).toBe(true);
+    expect(stripVTControlCharacters(out())).toBe('Identity: @me — Me <me@x.test> (GitHub: octocat)\nUse this identity? [y/N] y\r\n');
+    const previous = channel(['y']);
+    previous.io.print('Identity: @me — Me <me@x.test> (GitHub: octocat)');
+    expect(await previous.io.confirm('Use this identity?')).toBe(true);
+    expect(out()).toBe(previous.out()); // Byte-identical to the preceding-print path, including readline controls.
+
+  });
+
+  it('prints text and select detail once, including across select retries', async () => {
+    const { io, out } = channel(['name', 'bad', '1']);
+    expect(await io.text('Name', '', { detail: ['Text context'] })).toBe('name');
+    expect(await io.select('Pick', ['a'], undefined, { detail: ['Select context'] })).toBe('a');
+    expect(out().match(/Text context\n/g)).toHaveLength(1);
+    expect(out().match(/Select context\n/g)).toHaveLength(1);
   });
 
   it('print writes one line to the output stream', () => {

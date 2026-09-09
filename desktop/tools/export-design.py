@@ -24,7 +24,7 @@ def serialise(value):
         return list(value)
     raise TypeError(f'Unsupported design value: {type(value).__name__}')
 
-EXTRA_NAMES = ['LIBRARY_OVERVIEW', 'SKILL_MD_ID', 'SKILL_MD_BODY', 'CLI_VERSION', 'CLI_LATEST', 'FOLLOWING', 'SHARED_SPECIMEN', 'WORDS', 'P_BASE', 'P_INC', 'P_PARTIAL']
+EXTRA_NAMES = ['LIBRARY_OVERVIEW', 'OVERVIEW_BY_SCOPE', 'SKILL_MD_ID', 'SKILL_MD_BODY', 'CLI_VERSION', 'CLI_LATEST', 'FOLLOWING', 'SHARED_SPECIMEN', 'WORDS', 'P_BASE', 'P_INC', 'P_PARTIAL']
 
 def derived(b):
     names = lambda rows: [s['name'] for s in rows]

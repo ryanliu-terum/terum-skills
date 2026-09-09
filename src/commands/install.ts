@@ -161,15 +161,13 @@ export async function installOne(input: { team: string; destination: Destination
 
 async function ensureConsent(store: ConfigStore, skill: SkillRecord, io: Prompter): Promise<void> {
   if (!skill.grants.ok) {
-    io.print(`allowed-tools for ${skill.name} could not be parsed: ${describeRaw(skill.grants.raw)}`);
-    if (!(await io.confirm(`Install ${skill.name} despite malformed allowed-tools?`))) throw new CancelledError(`Consent was declined for malformed allowed-tools on ${skill.name}.`);
+    if (!(await io.confirm(`Install ${skill.name} despite malformed allowed-tools?`, { detail: [`allowed-tools for ${skill.name} could not be parsed: ${describeRaw(skill.grants.raw)}`] }))) throw new CancelledError(`Consent was declined for malformed allowed-tools on ${skill.name}.`);
     return;
   }
   if (skill.grants.normalized === 'none') return;
   const config = await store.read();
   if (config.approvals[skill.id]?.grants === skill.grants.hash) return;
-  io.print(`${skill.name} requests allowed-tools:\n${skill.grants.normalized}`);
-  if (!(await io.confirm(`Approve these tools for ${skill.name}?`))) throw new CancelledError(`Consent was declined for ${skill.name}.`);
+  if (!(await io.confirm(`Approve these tools for ${skill.name}?`, { detail: [`${skill.name} requests allowed-tools:`, ...skill.grants.normalized.split('\n')] }))) throw new CancelledError(`Consent was declined for ${skill.name}.`);
   await store.update((fresh) => { fresh.approvals[skill.id] = { grants: skill.grants.ok ? skill.grants.hash : '', approved_at: new Date().toISOString().slice(0, 10) }; });
 }
 
@@ -273,4 +271,13 @@ export async function resolveDestination(store: ConfigStore, teamJson: Team, pac
 export function samePending(a: { op: string; id: string; team: string; scope: unknown; destination?: Destination }, b: { op: string; id: string; team: string; scope: unknown; destination?: Destination }): boolean {
   return a.op === b.op && a.id === b.id && a.team === b.team && sameScope(a.scope, b.scope) && a.destination?.kind === b.destination?.kind && (a.destination?.kind !== 'checkout' || (b.destination?.kind === 'checkout' && a.destination.root === b.destination.root));
 }
-export function placementHome(store: ConfigStore): string { return store.root.endsWith('/.terum/skills') ? dirname(dirname(store.root)) : store.root; }
+/**
+ * HOME for a global placement: the default store root is `~/.terum/skills`, so HOME is two path
+ * segments up — judged segment-wise, because win32 roots are backslash-separated and a hard-coded
+ * `/.terum/skills` suffix silently placed skills inside the store where Claude Code never looks.
+ * A custom or test root is its own placement home. Exported with an injectable path flavour so the
+ * win32 shape is provable from any host.
+ */
+export function placementHome(store: Pick<ConfigStore, 'root'>, path: Pick<typeof import('node:path'), 'basename' | 'dirname'> = { basename, dirname }): string {
+  return path.basename(store.root) === 'skills' && path.basename(path.dirname(store.root)) === '.terum' ? path.dirname(path.dirname(store.root)) : store.root;
+}

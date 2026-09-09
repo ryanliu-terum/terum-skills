@@ -99,7 +99,7 @@ it.each([true, false])('maps every search field including its real description (
 it('serves status, settings, library, skill, update, roster and catalog while the other three surfaces stay typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true });
+  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true });
   for (const result of await Promise.all([b.onboarding(), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }
@@ -239,7 +239,7 @@ function inventoryBridge(overrides: { row?: Partial<typeof lsRow>; validation?: 
 }
 it.each(['Global','ops','installed'])('maps the %s library from real counts and registry, with scoped argv',async scope=>{
   const f=inventoryBridge();const result=await createTauriBackend(f.bridge).library({scope,team:'acme'});
-  expect(result).toMatchObject({ok:true,value:{title:'1 of 3 skills · 1 in ~/.claude/skills',projects:lsValue.projects,skills:[{name:'a',desc:'Live description',project:'Global',installs:'1 installs',installsN:1,installed:true,updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}],overview:{skills:'1',installs:'1',evaluated:'—',attention:'—',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:'1 endorsed to Global',installs_note:'across every readable people file · 1 active teammate'},provenance:null}});
+  expect(result).toMatchObject({ok:true,value:{title:'1 skills · 1 in ~/.claude/skills',projects:lsValue.projects,skills:[{name:'a',desc:'Live description',project:'Global',installs:'1 installs',installsN:1,installed:true,updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}],overview:{skills:'1',installs:'1',evaluated:'—',attention:'—',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:scope==='ops'?'1 also on Global':'1 endorsed to Global',installs_note:'across every readable people file · 1 active teammate'},provenance:null}});
   expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls',...(scope==='ops'?['project','ops']:[]),'--team','acme'],['ls','--local']]);
 });
 it('maps the detail body, grants and all install records without fabricating missing values',async()=>{
@@ -254,12 +254,12 @@ it('retains null grants/body/date and marks unresolved skills broken, with a fai
 it('does not infer installation from an untracked or other-team same-name folder',async()=>{
   for(const state of ['untracked locally','placement recorded from other @abc','connected source for acme; endorsed (global)']){
     const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state,tracked:state!=='untracked locally',shared:state.startsWith('connected')?[{id:'id-a',team:'acme'}]:[],placement:state.includes('other')?{id:'id-a',team:'other',version:null}:null,health:'unknown'}],notOffered:[],problems:[]}]}});
-    expect(await createTauriBackend(f.bridge).library({scope:'installed',team:'acme'})).toMatchObject({ok:true,value:{skills:[],title:'0 of 3 skills · 0 in ~/.claude/skills'}});
+    expect(await createTauriBackend(f.bridge).library({scope:'installed',team:'acme'})).toMatchObject({ok:true,value:{skills:[],title:'0 skills · 0 in ~/.claude/skills'}});
   }
 });
 it('refuses multi-team ambiguity before ls and discovers a single configured team without a prompt',async()=>{
   const f=inventoryBridge({teams:['one','two']});
-  expect(await createTauriBackend(f.bridge).library({scope:'Global'})).toEqual({ok:false,error:'Select a team explicitly to read its skills.',reason:'ambiguous-team'});
+  expect(await createTauriBackend(f.bridge).library({scope:'Global'})).toEqual({ok:false,error:'This machine is configured for teams one, two; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.',reason:'ambiguous-team'});
   expect(f.spawns.map(s=>s.args)).toEqual([['status']]);
   expect((await createTauriBackend(inventoryBridge().bridge).skill({ref:'a'})).ok).toBe(true);
 });
@@ -497,11 +497,32 @@ it.each(['on-disk-only','project'])('includes only scanned roots and this librar
  });
  const library=await createTauriBackend(f.bridge).library({scope:'installed'});
  expect(library.ok).toBe(true);
- expect(library.value?.title).toBe('1 of 3 skills · 1 in ~/.claude/skills'+(mode==='project'?' · 1 in project':''));
+ expect(library.value?.title).toBe('1 skills · 1 in ~/.claude/skills'+(mode==='project'?' · 1 in project':''));
  expect(library.value?.scanned).toEqual(mode==='project'?['~/.claude/skills','/work/project']:['~/.claude/skills']);
 });
 it('abbreviates catalog card display paths',async()=>{
  const catalog=await createTauriBackend(installedReplay().bridge).catalog();
  expect(catalog.ok).toBe(true);
  expect(catalog.value?.skills[0]?.paths).toEqual([['~/.claude/skills/deploy-check','global']]);
+});
+it.each([[[]],[['one','two']]])('refuses people inventory before ls for teams %j',async teams=>{
+ const f=peopleReplay((frame,name)=>{
+  if(name==='status'&&frame.t==='result'){
+   const value=frame.value as {teams:{team:string}[]};
+   value.teams=teams.map(team=>({...value.teams[0]!,team}));
+  }
+ });
+ expect(await createTauriBackend(f.bridge).roster()).toEqual(teams.length?{ok:false,error:'This machine is configured for teams one, two; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.',reason:'ambiguous-team'}:{ok:false,error:'No team is configured on this machine.',reason:'no-team'});
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status']]);
+});
+it('syncs with the bare CLI verb and leaves by the supplied team key',async()=>{
+ const f=replay(undefined,false),backend=createTauriBackend(f.bridge);
+ await backend.sync({}).done;await backend.team({kind:'leave',name:'acme-key'}).done;
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['sync'],['team','leave','--','acme-key']]);
+});
+it('streams diagnostics as a status run without a read-model projection',async()=>{
+ const f=replay(undefined,true,['CLI version','Team state']),run=createTauriBackend(f.bridge).diagnostics(),lines:string[]=[];
+ for await(const frame of run.frames)if(frame.t==='print')lines.push(frame.line);
+ expect(lines).toEqual(['CLI version','Team state']);expect(await run.done).toEqual({ok:true,value:undefined});
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status']]);
 });

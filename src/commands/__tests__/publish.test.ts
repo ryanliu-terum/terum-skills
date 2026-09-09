@@ -368,7 +368,7 @@ describe('publish project recovery hints', () => {
     expect(result.error).toContain(`Found a local folder at ${project}${duplicated ? ' (project)' : ''} that`);
     expect(result.error).toContain(`${V} connect '${project}'`);
     expect(result.error).toContain(`${V} publish 'local' --project 'p'`);
-    if (duplicated) { expect(result.error).toContain(`Found a local folder at ${global} (Global) that`); expect(result.error).toContain(`${V} connect '${global}'`); }
+    if (duplicated) { expect(result.error).toContain(`Found a local folder at ${global} (global) that`); expect(result.error).toContain(`${V} connect '${global}'`); }
     expect(io.asked).toEqual([]); expect((await store.read()).shared).toEqual({});
     expect(runner.calls.some((call) => call.args[0] === 'push')).toBe(false);
   });

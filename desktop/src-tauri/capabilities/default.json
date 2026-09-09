@@ -12,12 +12,22 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",
-    "opener:allow-open-path",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        }
+      ]
+    },
     {
       "identifier": "opener:allow-open-url",
       "allow": [
         {
           "url": "https://github.com/*"
+        },
+        {
+          "url": "https://discord.gg/*"
         }
       ]
     },

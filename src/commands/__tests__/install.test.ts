@@ -2,11 +2,11 @@ import { createExecute } from '../../lib/execute.js';
 import type { ResultOutcome } from '../../lib/frames.js';
 import { getStartedLines } from '../../lib/invocation.js';
 import { access, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as setup from '../setup.js';
 import { installHook } from '../../lib/hook.js';
-import { run } from '../install.js';
+import { placementHome, run } from '../install.js';
 import { run as sync } from '../sync.js';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, temporaryDirectory, wrapRunner, wrapperFor } from '../../lib/__tests__/fixtures.js';
@@ -118,6 +118,8 @@ describe('install (§6 refs)', () => {
     const io = new ScriptedPrompter([], [true]);
     expect(await run({ ref: `helper@${pinned}`, config: store, home: join(fixture.root, 'home') }, io)).toMatchObject({ ok: true });
     expect(io.askedAbout('Approve these tools')).toBe(true);
+    expect(io.lines.join('\n')).not.toContain('helper requests allowed-tools:');
+    expect(io.details['Approve these tools for helper?']).toEqual(['helper requests allowed-tools:', 'Bash(*)']);
     const grants = allowedTools('Bash(*)'); if (!grants.ok) throw new Error('test grant must normalize');
     expect((await store.read()).approvals[id]?.grants).toBe(grants.hash);
   });
@@ -165,7 +167,9 @@ describe('install (§6 refs)', () => {
     const io = new ScriptedPrompter([], [false]);
     const result = await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, io);
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('malformed allowed-tools') });
-    expect(io.lines.join('\n')).toContain('{"Bash":"*"}');
+    expect(io.lines.join('\n')).not.toContain('{"Bash":"*"}');
+    expect(io.details['Install sample despite malformed allowed-tools?']).toEqual([expect.stringMatching(/^allowed-tools for sample could not be parsed: /)]);
+    expect(io.details['Install sample despite malformed allowed-tools?']![0]).toContain('{"Bash":"*"}');
     expect(io.askedAbout('despite malformed')).toBe(true);
     expect((await store.read()).approvals).toEqual({});
     expect((await store.read()).pending).toEqual([]);
@@ -182,7 +186,8 @@ describe('install (§6 refs)', () => {
     const io = new ScriptedPrompter([], [false]);
     expect(await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, io)).toMatchObject({ ok: false, error: expect.stringContaining('malformed allowed-tools') });
     expect(io.askedAbout('despite malformed')).toBe(true);
-    expect(io.lines.join('\n')).toContain('allowed-tools for sample could not be parsed: ');
+    expect(io.lines.join('\n')).not.toContain('allowed-tools for sample could not be parsed: ');
+    expect(io.details['Install sample despite malformed allowed-tools?']).toEqual([expect.stringMatching(/^allowed-tools for sample could not be parsed: /)]);
   });
 
   it('keeps an earlier matching pending install when this attempt declines consent', async () => {
@@ -428,6 +433,17 @@ it('skillAtSource carries the materialized source body rather than the clone bod
   const pinned = join(fixture.root, 'pinned'); await mkdir(pinned);
   await writeFile(join(pinned, 'SKILL.md'), source+'pinned prose');
   expect((await skillAtSource(pinned, record)).body).toBe('pinned prose');
+});
+
+it('placementHome finds HOME two segments above the default store root on either separator, and keeps a custom root as its own home', () => {
+  // win32 store roots are backslash-separated; a hard-coded `/.terum/skills` suffix missed them and
+  // sent global placements to ~\.terum\skills\.claude\skills, where Claude Code never looks.
+  expect(placementHome({ root: win32.join('C:\\Users\\me', '.terum', 'skills') }, win32)).toBe('C:\\Users\\me');
+  expect(placementHome({ root: 'C:\\Users\\me\\state' }, win32)).toBe('C:\\Users\\me\\state');
+  expect(placementHome({ root: posix.join('/home/me', '.terum', 'skills') }, posix)).toBe('/home/me');
+  expect(placementHome({ root: '/tmp/terum-test/state' }, posix)).toBe('/tmp/terum-test/state');
+  // A test store root that merely LOOKS like the default shape keeps the two-levels-up intent.
+  expect(placementHome({ root: posix.join('/tmp/fixture', '.terum', 'skills') }, posix)).toBe('/tmp/fixture');
 });
 
 it.each(['refused', 'cancelled'] as const)('zero-team install bootstrap preserves setup %s', async flag => {

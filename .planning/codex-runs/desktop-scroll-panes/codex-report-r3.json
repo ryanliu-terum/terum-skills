@@ -1,0 +1,50 @@
+{
+  "status": "complete",
+  "summary": "Removed only `;min-height:auto` from the specified CSS rule and read the file back to verify `{overflow:visible}`. All three requested gates passed.",
+  "filesChanged": [
+    {
+      "path": "desktop/src/screens/skill/skill.css",
+      "change": "modified",
+      "why": "Preserve pane sizing while retaining visible overflow, addressing the reported 1 px vertical shift."
+    }
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "npm run lint: exit 0, 0 errors or warnings.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "npm run typecheck: exit 0, 0 errors.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": true,
+      "output": "npm test: 67 files passed; 926 tests passed, 88 skipped (1014 total).",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [],
+  "deviations": [],
+  "invariantsTouched": [
+    {
+      "number": 5,
+      "howSatisfied": "Applied the exact requested geometry correction."
+    },
+    {
+      "number": 7,
+      "howSatisfied": "No tests or lint rules changed."
+    },
+    {
+      "number": 8,
+      "howSatisfied": "Ran all requested gates from desktop, verified the write by reading back, and used no git or network."
+    }
+  ],
+  "testsModified": [],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The visual shift is resolved based on the orchestrator’s supplied evidence; fidelity and browser tests were not rerun in this pass."
+}
