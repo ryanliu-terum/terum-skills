@@ -32,6 +32,8 @@ specs; the maintainers write the specs, run every gate themselves, and do all gi
    invents a flag. Gaps are recorded by the maintainers in `GAPS.md`; an implementing agent never edits `GAPS.md`,
    `FIDELITY.md`, `AGENTS.md`, `README.md` or `package.json` — describe what you found in the report's
    `openQuestions` / `deviations` instead.
+   A new `ls --local` key is declared optional in the app before or with the CLI that emits it, never after.
+
 3. **Generated files.** `src/styles/tokens.css` and `src/fixtures/design.json` are written only by
    `python3 tools/export-design.py` (which imports the design canvas's `build.py` from `TERUM_DESIGN_DIR` or
    `--design`, and exits 2 with one line when neither is given; `--check` exits 1 when either file is stale). Never hand-edit them; regenerate them. Fixture strings are `build.py`'s values

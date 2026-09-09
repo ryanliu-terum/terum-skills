@@ -112,13 +112,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
   // A lock lost after the stale window (another process took it) is recorded and aborts the attempt
   // before anything is pushed, instead of two writers reset-and-committing over one working tree.
   let compromised = false;
-  const release = await lockfile.lock(root, {
-    lockfilePath: cloneLockPath(root),
-    realpath: false,
-    stale: options.lockStale ?? 60_000,
-    retries: { retries: 10, minTimeout: 50, maxTimeout: 500 },
-    onCompromised: () => { compromised = true; },
-  });
+  const release = await acquireCloneLock(root, { lockStale: options.lockStale, onCompromised: () => { compromised = true; } });
   try {
     while (now() <= deadline) {
       if (compromised) throw new Error(lostLock(root));
@@ -480,31 +474,41 @@ export async function refreshClone(runner: Runner, clone: string, options: { lab
   // report "everything up-to-date" for a write that never left the machine. The lock is re-checked
   // before the reset: a fetch that outlives the stale window can lose the lock to a second writer,
   // whose commit the reset would otherwise rewind.
-  try {
-    await withCloneLock(clone, async (assertHeld) => {
-      for (const args of [['fetch', 'origin'], ['reset', '--hard', 'origin/main']]) {
-        assertHeld();
-        const result = await runner.run('git', args, { cwd: clone, env: options.env });
-        if (result.code !== 0) {
-          const stderr = (result.stderr || result.stdout).trim();
-          const message = `Could not refresh ${options.label ?? clone}: ${stderr}`;
-          if (args[0] === 'fetch') {
-            const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: clone, env: options.env });
-            const copy = origin.code === 0 ? explainGitAccessFailure(origin.stdout.trim(), result.stderr) : null;
-            if (copy) throw new RemoteAccessError(message, stripRemoteCredentials(origin.stdout), stderr, copy);
-          }
-          throw new Error(message);
+  await withCloneLock(clone, async (assertHeld) => {
+    for (const args of [['fetch', 'origin'], ['reset', '--hard', 'origin/main']]) {
+      assertHeld();
+      const result = await runner.run('git', args, { cwd: clone, env: options.env });
+      if (result.code !== 0) {
+        const stderr = (result.stderr || result.stdout).trim();
+        const message = `Could not refresh ${options.label ?? clone}: ${stderr}`;
+        if (args[0] === 'fetch') {
+          const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: clone, env: options.env });
+          const copy = origin.code === 0 ? explainGitAccessFailure(origin.stdout.trim(), result.stderr) : null;
+          if (copy) throw new RemoteAccessError(message, stripRemoteCredentials(origin.stdout), stderr, copy);
         }
+        throw new Error(message);
       }
-    }, options);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ELOCKED') throw new CloneBusy(`Another terum-skills operation holds the write lock on ${options.label ?? clone}; retry when it finishes.`);
-    throw error;
-  }
+    }
+  }, options);
 }
 
 export function cloneLockPath(root: string): string {
   return join(dirname(root), `.${basename(root)}.safewrite.lock`);
+}
+
+/**
+ * The one acquisition of the per-clone writer lock: a second process waits briefly, then fails
+ * rather than racing. proper-lockfile reports that contention as ELOCKED, and every acquisition
+ * site classifies it into the same CloneBusy message here — the contract the CloneBusy class
+ * promises — so no caller leaks the raw "Lock file is already being held".
+ */
+async function acquireCloneLock(root: string, options: { lockStale?: number; label?: string; onCompromised: () => void }): Promise<() => Promise<void>> {
+  try {
+    return await lockfile.lock(root, { lockfilePath: cloneLockPath(root), realpath: false, stale: options.lockStale ?? 60_000, retries: { retries: 10, minTimeout: 50, maxTimeout: 500 }, onCompromised: options.onCompromised });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOCKED') throw new CloneBusy(`Another terum-skills operation holds the write lock on ${options.label ?? root}; retry when it finishes.`);
+    throw error;
+  }
 }
 
 /**
@@ -513,9 +517,9 @@ export function cloneLockPath(root: string): string {
  * (proper-lockfile's default would crash the CLI): `action` calls `assertHeld` before each step
  * that must not run on a clone another process now owns.
  */
-export async function withCloneLock<T>(root: string, action: (assertHeld: () => void) => Promise<T>, options: { lockStale?: number } = {}): Promise<T> {
+export async function withCloneLock<T>(root: string, action: (assertHeld: () => void) => Promise<T>, options: { lockStale?: number; label?: string } = {}): Promise<T> {
   let compromised = false;
-  const release = await lockfile.lock(root, { lockfilePath: cloneLockPath(root), realpath: false, stale: options.lockStale ?? 60_000, retries: { retries: 10, minTimeout: 50, maxTimeout: 500 }, onCompromised: () => { compromised = true; } });
+  const release = await acquireCloneLock(root, { ...options, onCompromised: () => { compromised = true; } });
   // The same situation as never acquiring it — another process owns this clone now — so it is the
   // same class: a per-team caller (sync) skips the team, a single-clone verb fails with the message.
   const assertHeld = (): void => { if (compromised) throw new CloneBusy(lostLock(root)); };

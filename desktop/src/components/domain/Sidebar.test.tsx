@@ -59,3 +59,15 @@ it('passes the query signal to status and aborts it when the shell unmounts', as
   view.unmount();
   expect(signal?.aborted).toBe(true);
 });
+
+it('renders no Global number when the served status omits its count', async () => {
+ const backend=createMockBackend();
+ const status=await backend.status();
+ if(!status.ok)throw new Error(status.error);
+ vi.spyOn(backend,'status').mockResolvedValue({ok:true,value:{...status.value,counts:{Pushes:'2'}}});
+ render(<QueryClientProvider client={new QueryClient()}><BackendContext value={backend}><HashRouter><Shell/></HashRouter></BackendContext></QueryClientProvider>);
+ await screen.findByRole('link',{name:'Pushes 2'});
+ const global=screen.getByRole('link',{name:'Global'});
+ expect(global).toHaveTextContent(/^Global$/);
+ expect(global.querySelector('.nav-count')).toBeNull();
+});

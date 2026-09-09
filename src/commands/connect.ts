@@ -5,7 +5,7 @@ import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { candidatesOf, localSkillRoots, localSkills } from '../lib/local-skills.js';
-import { assertNotInsideStateRoot, assertSkillDirectory, printable, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
+import { assertNotInsideStateRoot, assertSkillDirectory, inspectSkillSource, printable, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
@@ -30,7 +30,7 @@ export interface ConnectArgs extends WithForm {
   config?: ConfigStore;
   runner?: Runner;
 }
-export interface ConnectResult { id: string; name: string; reconciled?: boolean; }
+export interface ConnectResult { id: string; name: string; reconciled?: boolean; adopted?: boolean; }
 export interface ReconcileOutcome { id: string; team: string; name: string; kind: 'pushed' | 'pulled' | 'renamed' | 'repaired' | 'unchanged' | 'deferred'; }
 
 export interface ConnectBatch { kind: 'batch'; shared: ConnectResult[]; declined: string[]; refused: { name: string; reason: string }[]; }
@@ -184,6 +184,19 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
     await repo.safeWrite(() => undefined, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}` });
     const records = await skillRecords(clone, team);
     phase = 'validate'; recoverable = true;
+    const inspection = inspectSkillSource(raw);
+    const existing = inspection.ok && inspection.id ? records.find(record => record.id === inspection.id) : undefined;
+    if (existing) {
+      if (existing.name !== name || !inspectSkillSource(raw, name).ok) throw new Error(`This folder's id belongs to ${existing.name} in team ${team}; its name must match before connecting.`);
+      phase = 'consent'; recoverable = false;
+      if (!(await io.confirm(`This folder already carries the id of ${name} in team ${team}. Record it as your connected source on this machine? (y/N)`))) {
+        recoverable = true;
+        throw new CancelledError('Connect was declined.');
+      }
+      const baseline = await canonicalDigest(source);
+      await store.update(current => { current.shared[existing.id] = { source, team, baseline }; });
+      return { id: existing.id, name, reconciled: false, adopted: true };
+    }
     if (records.some((record) => record.name === name)) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
     recoverable = false;
     id = randomUUID(); // minted before safeWrite, never inside its re-applied mutation

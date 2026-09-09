@@ -37,7 +37,7 @@ export const FRAME_VERBS = ['login', 'setup', 'team create', 'team join', 'team 
  * a frame-mode change.
  */
 export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
-  memberRole: true,
+  memberRole: true, localIdentity: true,
   favorites: false, follow: false, roles: false, lastSeen: false, installScope: false, inviteScoping: false,
   disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: false,
 });

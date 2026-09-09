@@ -1,0 +1,60 @@
+{
+  "status": "partial",
+  "summary": "Reverted §5, removed the dead checkout link, and fixed scope resolution, Remove copy, real detail-path rendering, and person installed actions. Six new regression tests pass. Home abbreviation and the conflicting mock path contract remain unresolved.",
+  "filesChanged": [
+    {"path":"desktop/src/backend/prefs.ts","change":"modified","why":"Remove the §5 preference."},
+    {"path":"desktop/src/backend/tauri/run.ts","change":"modified","why":"Restore synchronous cwd and original spawn sequence."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Revert §5 cwd split, subscription, surface, and settings changes."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Remove §5 DTO fields."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Remove §5 fields and expose the drawn Library projects."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"Remove the checkout settings group and state."},
+    {"path":"desktop/src/screens/settings/SettingsScreen.tsx","change":"modified","why":"Remove the checkout surface prop."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"Delete §5-only cwd coverage."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Delete §5-only expectations and coverage."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"Remove §5 DTO expectations."},
+    {"path":"desktop/src/backend/tauri/__tests__/installed-screens.test.tsx","change":"modified","why":"Delete the §5 checkout settings test."},
+    {"path":"desktop/GAPS.md","change":"modified","why":"Insert the requested checkout-registration deferral."},
+    {"path":"desktop/src/components/domain/ScanCoverage.tsx","change":"modified","why":"Remove the dead checkout link."},
+    {"path":"desktop/src/screens/skill/SkillScreen.tsx","change":"modified","why":"Render resolved real detail paths and scope-aware Remove labels/copy."},
+    {"path":"desktop/src/screens/library/LibraryScreen.tsx","change":"modified","why":"Remove fixture names from scope resolution."},
+    {"path":"desktop/src/screens/marketplace/MarketplaceScreen.tsx","change":"modified","why":"Allow real person pages to reach installed state."},
+    {"path":"desktop/src/backend/tauri/__tests__/path-true-screens.test.tsx","change":"added","why":"Add six path, scope, and person-state regressions."}
+  ],
+  "gates": {
+    "lint":{"ran":true,"passed":true,"output":"Root and desktop lint exited 0.","preExistingFailures":""},
+    "typecheck":{"ran":true,"passed":true,"output":"Root and desktop typecheck exited 0. Root build also exited 0.","preExistingFailures":""},
+    "test":{"ran":true,"passed":false,"output":"Root: 1270 passed. Desktop full run before the final path fix: 941 passed, 88 skipped, 3 failed. Both existing screen failures passed in isolation; all 6 new regressions passed after the final fix. No final full-suite green is claimed.","preExistingFailures":""}
+  },
+  "openQuestions": [
+    {
+      "question":"May adapter detail paths be home-abbreviated and their existing absolute-path expectations updated? Contrary to §9.2's premise, the adapter currently returns absolute detail paths.",
+      "specSection":"B / §9.2",
+      "conservativeChoice":"Preserved absolute DTO paths and rendered the resolved path for real detail data; clarification remains pending."
+    },
+    {
+      "question":"May the mock separate its repo-display path from its occurrence path? Its locked rail displays skills/deploy-check while its meta line displays ~/.claude/skills/deploy-check.",
+      "specSection":"B / §9.2 and locked-board preservation",
+      "conservativeChoice":"Preserved the existing mock rendering branch pending clarification."
+    }
+  ],
+  "deviations": [
+    {"what":"§9.2 home abbreviation and removal of the mock's literal installed-path expression remain incomplete.","why":"The existing path contracts conflict with the spec's premise and fidelity requirement; clarification was requested."},
+    {"what":"Tests used --configLoader runner and limited workers.","why":"Default test commands encountered sandbox EPERM writing .vite-temp; unrestricted runs encountered heavy CPU contention."}
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Kept platform I/O within the backend seam."},
+    {"number":2,"howSatisfied":"Removed the obsolete surface flag and preference; retained CLI feature handling."},
+    {"number":4,"howSatisfied":"Did not alter fidelity oracles, tolerances, or run Playwright."},
+    {"number":5,"howSatisfied":"Preserved existing mock strings and drawn sidebar project names; no styling changes."},
+    {"number":7,"howSatisfied":"Deleted only authorized §5 coverage and added six regressions."},
+    {"number":8,"howSatisfied":"Ran gates within the sandbox without git commands, network access, or dependency installation; reported actual results."}
+  ],
+  "testsModified": [
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","whatChanged":"Deleted the known-home adapter cwd test.","justification":"§5 removed from scope by Ryan's 2026-09-09 ruling"},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Deleted project preference invalidation/cwd coverage and removed the projectRoot surface expectation.","justification":"§5 removed from scope by Ryan's 2026-09-09 ruling"},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","whatChanged":"Removed projectRoot surface and settings expectations.","justification":"§5 removed from scope by Ryan's 2026-09-09 ruling"},
+    {"path":"desktop/src/backend/tauri/__tests__/installed-screens.test.tsx","whatChanged":"Deleted the checkout writer/Clear screen test and its unused import.","justification":"§5 removed from scope by Ryan's 2026-09-09 ruling"}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim":"Locked mock boards remain pixel-identical: rendering inputs were checked, but Playwright verification was prohibited."
+}
