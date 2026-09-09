@@ -57,6 +57,9 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
     const person = await readPerson(store.teamClone(team), handle);
     const installed = person.installed.filter((entry) => entry.id === record.id);
     const targets = (await ledgerScopes(store, team, record.id, installed.map((entry) => entry.scope))).map((scope) => ({ id: record.id, scope }));
+    // A real team skill that was never installed here resolves to no targets; uninstallMany's
+    // per-target print never runs, so say it here instead of exiting 0 in silence.
+    if (!targets.length) io.print(`${record.id.slice(0, 8)} is not placed on this machine.`);
     return success(await uninstallMany({ team, targets, from: args.from, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
   } catch (error) { return fromError(error); }
 }
