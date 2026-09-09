@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
@@ -368,7 +368,7 @@ describe('publish project recovery hints', () => {
     expect(result.error).toContain(`Found a local folder at ${project}${duplicated ? ' (project)' : ''} that`);
     expect(result.error).toContain(`${V} connect '${project}' --team 'team'`);
     expect(result.error).toContain(`${V} publish 'local' --team 'team' --project 'p'`);
-    if (duplicated) { expect(result.error).toContain(`Found a local folder at ${global} (global) that`); expect(result.error).toContain(`${V} connect '${global}' --team 'team'`); }
+    if (duplicated) { expect(result.error).toContain(`Found a local folder at ${global} (Global) that`); expect(result.error).toContain(`${V} connect '${global}' --team 'team'`); }
     expect(io.asked).toEqual([]); expect((await store.read()).shared).toEqual({});
     expect(runner.calls.some((call) => call.args[0] === 'push')).toBe(false);
   });
@@ -455,4 +455,20 @@ describe('publish HYG6 warnings', () => {
     expect(await run({ ref: 'sample', config: store, runner }, io)).toMatchObject({ ok: true, value: { changed: false } });
     expect(io.lines).toEqual(['sample is already endorsed (global) in team.']);
   });
+});
+
+
+it.each([true, false])('registers a checkout only after successful publish (consent: %s)', async consent => {
+  const { fixture, store } = await prepared('push');
+  const root = join(await realpath(fixture.root), 'checkout'); const cwd = join(root, 'src');
+  await mkdir(cwd, { recursive: true }); await mkdir(join(root, '.git'));
+  const args = { ref: 'sample', config: store, runner: mappedRunner(REMOTE, fixture.bare), cwd, home: fixture.root };
+  const io = new ScriptedPrompter([], [consent]);
+  expect((await run(args, io)).ok).toBe(consent);
+  expect((await store.read()).checkouts ?? []).toEqual(consent ? [root] : []);
+  expect(io.lines.filter(line => line.startsWith('Registered '))).toEqual(consent ? [`Registered ${root} in your library.`] : []);
+  if (consent) {
+    const again = new ScriptedPrompter(); expect((await run(args, again)).ok).toBe(true);
+    expect(again.lines.filter(line => line.startsWith('Registered '))).toEqual([]);
+  }
 });

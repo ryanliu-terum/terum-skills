@@ -1,11 +1,12 @@
 import { invocation, type InvocationForm } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { cp, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { candidatesOf, localSkillRoots, localSkills } from '../lib/local-skills.js';
+import { canonicalLedger, localRootLabel, candidatesOf, localSkillRoots, localSkills } from '../lib/local-skills.js';
 import { assertNotInsideStateRoot, assertSkillDirectory, inspectSkillSource, printable, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
+import { registerCheckout, writableCheckout } from '../lib/checkouts.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
@@ -92,9 +93,10 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
       while (true) {
         selectedPath = undefined;
         const config = await store.read();
-        const { roots } = await localSkillRoots(args.home ?? homedir(), args.cwd);
-        const inventories = await Promise.all(roots.map((root) => localSkills(root.root, config, { scope: root.scope, stateRoot: store.root })));
-        const candidates = inventories.flatMap((inventory) => candidatesOf(inventory, args.allowPrivileged).map((entry) => ({ ...entry, scope: inventory.scope })));
+        const { roots } = await localSkillRoots(args.home ?? homedir(), args.cwd, config.checkouts ?? []);
+        const ledger = await canonicalLedger(config);
+        const inventories = await Promise.all(roots.map((root) => localSkills(root.root, config, { scope: root.scope, stateRoot: store.root, ledger })));
+        const candidates = inventories.flatMap((inventory, index) => candidatesOf(inventory, args.allowPrivileged).map((entry) => ({ ...entry, scope: inventory.scope, label: localRootLabel(roots[index]!), repoRoot: roots[index]!.repoRoot })));
         if (!qualify) {
           const omitted = inventories.flatMap((inventory) => {
             const offered = candidatesOf(inventory, args.allowPrivileged);
@@ -112,10 +114,11 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
             }
             throw new Error(`No skill selected. In an interactive terminal, run \`${printable(invocation(args.form, 'connect'))} --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
           }
-          qualify = new Set(candidates.filter((candidate) => candidates.some((other) => other.name === candidate.name && other.scope !== candidate.scope)).map((candidate) => candidate.name));
+          qualify = new Set();
         }
+        for (const candidate of candidates) if (candidates.some(other => other.name === candidate.name && other.path !== candidate.path)) qualify.add(candidate.name);
         if (!candidates.length) break;
-        const choices = new Map(candidates.map((candidate) => [`Connect ${printable(candidate.name)}${qualify!.has(candidate.name) ? ` (${candidate.scope})` : ''}`, candidate.path]));
+        const choices = new Map(candidates.map((candidate) => [`Connect ${printable(candidate.name)}${qualify!.has(candidate.name) ? ` (${printable(candidate.label)}${candidates.some(other => other.path !== candidate.path && other.name === candidate.name && other.label === candidate.label) ? `: ${printable(candidate.path)}` : ''})` : ''}`, candidate.path]));
         const exit = batch.shared.length ? 'Done' : 'Skip';
         menuStarted = true;
         const choice = await io.select(`Connect a local skill folder to team ${printable(team)}?`, [...choices.keys(), exit]);
@@ -194,7 +197,10 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
         throw new CancelledError('Connect was declined.');
       }
       const baseline = await canonicalDigest(source);
-      await store.update(current => { current.shared[existing.id] = { source, team, baseline }; });
+      const root = await writableCheckout(dirname(source), args.home ?? homedir(), store.root);
+      const mutate = (current: ConnectContext['config']) => { current.shared[existing.id] = { source, team, baseline }; };
+      if (root) await registerCheckout(store, root, io, { home: args.home ?? homedir(), mutate });
+      else await store.update(mutate);
       return { id: existing.id, name, reconciled: false, adopted: true };
     }
     if (records.some((record) => record.name === name)) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
@@ -227,7 +233,10 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
     }, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}` });
     phase = 'pushed';
     const baseline = await canonicalDigest(source);
-    await store.update((fresh) => { fresh.shared[id!] = { source, team, baseline }; });
+    const root = await writableCheckout(dirname(source), args.home ?? homedir(), store.root);
+    const mutate = (fresh: ConnectContext['config']) => { fresh.shared[id!] = { source, team, baseline }; };
+    if (root) await registerCheckout(store, root, io, { home: args.home ?? homedir(), mutate });
+    else await store.update(mutate);
     return { id, name, reconciled: description.length > 0 };
   } catch (cause) {
     if (cause instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), cause.assessment);

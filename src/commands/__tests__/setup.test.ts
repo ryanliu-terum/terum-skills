@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { realpath, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { COMMUNITY_URL } from '../../lib/community.js';
@@ -91,7 +91,11 @@ describe('setup (§6.1)', () => {
     expect(result, JSON.stringify(result)).toMatchObject({ ok: true, value: { role: 'joiner', steps: { actions: 'done', invite: 'skipped' } } });
     expect(io.offered).toEqual([['Connect alpha', 'Connect beta', 'Skip'], ['Connect beta', 'Done']]);
     expect(io.asked).toEqual(['Connect a local skill folder to team team?', 'Connect alpha?', 'Connect a local skill folder to team team?', 'Connect beta?']);
-    expect(Object.values((await store.read()).shared).map((entry) => entry.source)).toEqual(['alpha', 'beta'].map((name) => join(cwd, '.claude', 'skills', name)));
+    expect((await store.read()).checkouts).toEqual([await realpath(cwd)]);
+    // Alpha registers the canonical checkout; the next picker scan uses that registered root.
+    expect(Object.values((await store.read()).shared).map((entry) => entry.source)).toEqual([
+      join(cwd, '.claude', 'skills', 'alpha'), await realpath(join(cwd, '.claude', 'skills', 'beta')),
+    ]);
   });
 
   it('12 quiet alone still offers connect; offerConnect false skips without asking', async () => {

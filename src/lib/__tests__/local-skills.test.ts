@@ -170,8 +170,8 @@ describe('project local discovery (Ryan 2026-09-06)', () => {
     if (kind === 'file') await writeFile(join(repo, '.git'), 'not a readable gitdir reference');
     else await mkdir(join(repo, '.git'));
     expect(await localSkillRoots(home, cwd)).toEqual({ roots: [
-      { root: join(home, '.claude', 'skills'), scope: 'global' },
-      { root: join(repo, '.claude', 'skills'), scope: 'project', repoRoot: repo },
+      { root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false },
+      { root: join(repo, '.claude', 'skills'), scope: 'project', repoRoot: repo, registered: false, detected: true },
     ], problems: [] });
   });
 
@@ -180,18 +180,18 @@ describe('project local discovery (Ryan 2026-09-06)', () => {
     await mkdir(cwd, { recursive: true }); await mkdir(join(outer, '.git')); await writeFile(join(inner, '.git'), 'gitdir: ignored');
     await candidate(join(cwd, '.claude', 'skills'), 'intermediate');
     expect((await localSkillRoots(home, cwd)).roots).toEqual([
-      { root: join(home, '.claude', 'skills'), scope: 'global' }, { root: join(inner, '.claude', 'skills'), scope: 'project', repoRoot: inner },
+      { root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false }, { root: join(inner, '.claude', 'skills'), scope: 'project', repoRoot: inner, registered: false, detected: true },
     ]);
   });
 
   it('reports the explicitly supplied cwd when no ancestor is a repository', async () => {
     const home = await temporaryDirectory(); const cwd = join(home, 'outside'); await mkdir(cwd);
-    expect(await localSkillRoots(home, cwd)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global' }], noRepository: cwd, problems: [] });
+    expect(await localSkillRoots(home, cwd)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false }], noRepository: cwd, problems: [] });
   });
 
   it('keeps undefined cwd global-only (regression: never uses the process cwd)', async () => {
     const home = await temporaryDirectory(); await mkdir(join(home, '.git'));
-    expect(await localSkillRoots(home)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global' }], problems: [] });
+    expect(await localSkillRoots(home)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false }], problems: [] });
   });
 
   it('reports EACCES in the upward walk without a project or no-repository claim', async () => {
@@ -201,14 +201,14 @@ describe('project local discovery (Ryan 2026-09-06)', () => {
       if (args[0] === marker) throw Object.assign(new Error('EACCES: blocked marker'), { code: 'EACCES' });
       return original(...args);
     });
-    try { expect(await localSkillRoots(home, cwd)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global' }], problems: [{ path: marker, reason: 'EACCES: blocked marker' }] }); }
+    try { expect(await localSkillRoots(home, cwd)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false }], problems: [{ path: marker, reason: 'EACCES: blocked marker' }] }); }
     finally { spy.mockRestore(); }
   });
 
   it('deduplicates a home repository with global precedence', async () => {
     const home = await temporaryDirectory(); await mkdir(join(home, '.git'));
     await candidate(join(home, '.claude', 'skills'), 'local');
-    expect(await localSkillRoots(home, home)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global' }], problems: [] });
+    expect(await localSkillRoots(home, home)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false }], problems: [] });
   });
 
   it.each(['alias-to-real', 'real-to-alias', 'deduplicated-alias'])('joins both ledgers through canonical parents: %s', async (direction) => {
@@ -220,7 +220,7 @@ describe('project local discovery (Ryan 2026-09-06)', () => {
     const scannedRoot = direction === 'real-to-alias' ? aliasRoot : root;
     const config = emptyConfig(); config.shared.id = { source: reference, team: 'one' };
     config.placements[reference] = { id: 'placed', team: 'two', version: null, scope: { kind: 'global' }, fingerprint: '', placed_at: '' };
-    if (direction === 'deduplicated-alias') expect((await localSkillRoots(home, alias)).roots).toEqual([{ root, scope: 'global' }]);
+    if (direction === 'deduplicated-alias') expect((await localSkillRoots(home, alias)).roots).toEqual([{ root, scope: 'global', registered: false, detected: false }]);
     await symlink(path, join(root, 'child-link'));
     const inventory = await localSkills(scannedRoot, config, { scope: 'global', stateRoot: join(base, 'state') });
     expect(inventory.entries.find((entry) => entry.name === 'tracked')).toMatchObject({ shared: [{ id: 'id', team: 'one' }], placement: { id: 'placed', team: 'two' } });
@@ -254,5 +254,28 @@ describe('the bundled /terum-skills Claude Code skill is not a team skill', () =
     expect(inventory.entries.find((entry) => entry.name === 'renamed-copy')?.inspection).toEqual(rejected);
     expect(candidatesOf(inventory, true).map((entry) => entry.name)).toEqual(['plain']);
     expect(() => assertSkillSource(bundled, 'terum-skills')).toThrow('This folder is the /terum-skills Claude Code skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');
+  });
+});
+
+
+describe('checkout discovery CLI-1', () => {
+  it('orders registered roots before detected cwd and deduplicates aliases and home', async () => {
+    const home = await temporaryDirectory();
+    const a = join(home, 'a'), b = join(home, 'b'), cwd = join(home, 'cwd');
+    for (const root of [a, b, cwd]) await mkdir(join(root, '.git'), { recursive: true });
+    const alias = join(home, 'alias'); await symlink(a, alias);
+    const roots = (await localSkillRoots(home, cwd, [a, home, alias, b])).roots;
+    expect(roots).toEqual([
+      { root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false },
+      ...[a, b].map(repoRoot => ({ root: join(repoRoot, '.claude', 'skills'), scope: 'project', repoRoot, registered: true, detected: false })),
+      { root: join(cwd, '.claude', 'skills'), scope: 'project', repoRoot: cwd, registered: false, detected: true },
+    ]);
+  });
+  it.each([false, true])('retains an absent registered skills root (checkout exists: %s)', async (exists) => {
+    const home = await temporaryDirectory(); const repo = join(home, 'checkout');
+    if (exists) await mkdir(repo);
+    const roots = (await localSkillRoots(home, undefined, [repo])).roots;
+    expect(roots).toHaveLength(2);
+    expect(await localSkills(roots[1]!.root, emptyConfig(), { scope: 'project', stateRoot: join(home, 'state') })).toMatchObject({ rootState: 'absent', entries: [] });
   });
 });

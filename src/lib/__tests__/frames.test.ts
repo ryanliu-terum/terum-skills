@@ -30,9 +30,10 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
   it('hello is the first frame and carries protocol, version, the public verbs and the feature map', () => {
     const s = shell();
     s.channel.hello('0.1.5');
+    expect(FRAME_FEATURES.checkouts).toBe(true);
     expect(s.frames).toEqual([{ t: 'hello', protocol: FRAME_PROTOCOL, version: '0.1.5', verbs: [...FRAME_VERBS], features: FRAME_FEATURES }]);
     expect(FRAME_FEATURES).toEqual({
-      memberRole: true, localIdentity: true,
+      memberRole: true, localIdentity: true, checkouts: true,
       favorites: false, follow: false, roles: false, lastSeen: false, installScope: false, inviteScoping: false,
       disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: false, perCase: false, progress: false,
     });

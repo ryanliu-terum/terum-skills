@@ -1,6 +1,6 @@
 ---
 name: terum-skills
-description: "Run a terum-skills CLI verb from inside the session (ls, ls --local, status, search, validate, update, sync, publish, install, uninstall-skill, invite, eval) and hand the verbs that ask a terminal question (connect, setup, team create/join/leave/remove, uninstall, sync --prune, login) to the user as a ready-to-run command, because the Bash tool has no TTY. Use when the user wants to see team or local skill state, check a skill's hygiene, sync, publish, install, invite, or evaluate a shared skill without leaving Claude Code."
+description: "Run a terum-skills CLI verb from inside the session (ls, ls --local, checkout add|remove|list, status, search, validate, update, sync, publish, install, uninstall-skill, invite, eval) and hand the verbs that ask a terminal question (connect, setup, team create/join/leave/remove, uninstall, sync --prune, login) to the user as a ready-to-run command, because the Bash tool has no TTY. Use when the user wants to see team or local skill state, check a skill's hygiene, sync, publish, install, invite, or evaluate a shared skill without leaving Claude Code."
 metadata:
   managed-by: terum-skills
 ---
@@ -48,6 +48,7 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 |---|---|---|
 | `status [--team <t>]` | nothing | show stdout; the `may be stale; run … sync` line is advice, offer `/terum-skills sync` |
 | `ls [--team <t>]`, `ls member <h>`, `ls project <n>` | nothing | show stdout |
+| `checkout add <abs-path>`, `checkout remove <abs-path>`, `checkout list` | `add`/`remove` write only `~/.terum/skills/config.json` (the registry); confirm with the user before `add` or `remove` | show stdout |
 | `ls --local` | nothing | show the **project** section in full; summarise the global section and the `Cannot be connected` list by count and reason unless the user asked for them (on a machine with many third-party skills that list runs to dozens of lines) |
 | `search <term> [--category] [--author] [--project]` | nothing | show stdout; `No skills found.` is a result |
 | `validate <abs-path or name> [--team <t>]` | nothing | exits 1 on error findings; a `warning HYG6` line with rc=0 is the size guideline, not a failure; show the lines verbatim. A local folder that has never been connected fails HYG1 on the missing `license` field, which `connect` injects; say so instead of calling the skill broken |
@@ -77,6 +78,7 @@ terminal; the CLI will ask you a question the session cannot answer.*
 
 | Verb | Free dry run first | Command to hand over |
 |---|---|---|
+| `checkout add` (no path) | none | `npx -y terum-skills@latest checkout add` — it asks "Which folder?" defaulting to the current repository |
 | `connect` (no path) | run it: the CLI lists every shareable folder under both roots and prints the exact command | `npx -y terum-skills@latest connect --team <team>` — run it from the project whose skills you mean |
 | `connect <abs-path>` | run it: it refreshes the clone, runs hygiene, prints the `Will add:` card, then fails at `Connect <name>?`; nothing is written. Show the findings and the card | `npx -y terum-skills@latest connect <abs-path>` |
 | `connect --forget <id>`, `--keep-source <id>`, `--keep-repo <id>` | none | the same command |
