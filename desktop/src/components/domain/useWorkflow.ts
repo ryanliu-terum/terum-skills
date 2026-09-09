@@ -43,6 +43,7 @@ export function useWorkflow() {
         setNotice(result.error);
         setSearch(params => { params.delete('dialog'); return params; }, { replace: true });
       } else setError(result.error);
+      return result;
     } catch (reason) { fail(reason); }
     finally {
       locked.current = false;
