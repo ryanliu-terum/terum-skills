@@ -21,7 +21,7 @@ export interface PrintFrame { t: 'print'; level: FrameLevel; line: string; }
 export interface AskFrame { t: 'ask'; id: string; kind: AskKind; question: string; default?: string; choices?: readonly string[]; }
 /** Reserved: no verb emits progress yet (the CLI has no progress events); the shape is fixed so a shell can render it when one does. */
 export interface ProgressFrame { t: 'progress'; step: string; current?: number; total?: number; }
-export interface ResultFrame { t: 'result'; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; value?: unknown; }
+export interface ResultFrame { t: 'result'; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; refused?: boolean; value?: unknown; }
 export type Frame = HelloFrame | PrintFrame | AskFrame | ProgressFrame | ResultFrame;
 
 export interface AnswerFrame { t: 'answer'; id: string; value: string | number | boolean; }
@@ -64,7 +64,7 @@ export interface FrameStreams {
   diagnostic?(line: string): void;
 }
 
-export interface ResultOutcome { verb: string; ok: boolean; error?: string; cancelled?: true; value?: unknown; exitCode: 0 | 1; }
+export interface ResultOutcome { verb: string; ok: boolean; error?: string; cancelled?: true; refused?: true; value?: unknown; exitCode: 0 | 1; }
 
 export interface FrameChannel {
   /** The Prompter a verb is handed: questions become `ask` frames, `print` becomes `print` frames. */
@@ -183,6 +183,7 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
       const frame: ResultFrame = { t: 'result', verb: outcome.verb, ok: outcome.ok, exitCode: outcome.exitCode };
       if (outcome.error !== undefined) frame.error = outcome.error;
       if (outcome.cancelled === true) frame.declined = true;
+      if (outcome.refused === true) frame.refused = true;
       if (outcome.value !== undefined) frame.value = outcome.value;
       writeFrame(output, frame);
       // The run is over: stop holding stdin open so the process can exit without the shell closing the

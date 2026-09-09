@@ -128,8 +128,8 @@ describe('team create (§6)', () => {
     const store = createConfigStore(pathJoin(root, 'local'));
     await store.update((config) => { config.teams.alpha = { remote: 'github.com/acme/alpha', handle: 'me' }; config.teams.beta = { remote: 'git.example/beta', handle: 'someone' }; });
     const io = () => new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']);
-    expect(await create({ name: 'alpha', remote: 'https://git.example/other.git', config: store, runner: mappedRunner('https://git.example/other.git', bare) }, io())).toMatchObject({ ok: false, error: expect.stringContaining('already configured for github.com/acme/alpha') });
-    expect(await create({ name: 'gamma', remote: 'https://git.example/beta.git', config: store, runner: mappedRunner('https://git.example/beta.git', bare) }, io())).toMatchObject({ ok: false, error: expect.stringContaining('already configured as team beta') });
+    expect(await create({ name: 'alpha', remote: 'https://git.example/other.git', config: store, runner: mappedRunner('https://git.example/other.git', bare) }, io())).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine') });
+    expect(await create({ name: 'gamma', remote: 'https://git.example/beta.git', config: store, runner: mappedRunner('https://git.example/beta.git', bare) }, io())).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine') });
     const after = await store.read();
     expect(after.teams.alpha).toEqual({ remote: 'github.com/acme/alpha', handle: 'me' });
     expect(Object.keys(after.teams).sort()).toEqual(['alpha', 'beta']);
@@ -195,7 +195,7 @@ describe('team create (§6)', () => {
     expect(runner.calls).toEqual([]);
     await rm(store.teamClone('dup'), { recursive: true });
     expect((await create({ name: 'dup', remote: publicRemote, config: store, runner: mappedRunner(publicRemote, bare) }, io())).ok).toBe(true);
-    expect(await create({ name: 'dup', remote: publicRemote, config: store, runner: mappedRunner(publicRemote, bare) }, io())).toMatchObject({ ok: false, error: expect.stringContaining('already configured') });
+    expect(await create({ name: 'dup', remote: publicRemote, config: store, runner: mappedRunner(publicRemote, bare) }, io())).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine') });
   });
 
   it('refuses an option-shaped or helper-shaped --remote before running any git command', async () => {
@@ -337,7 +337,7 @@ describe('team create (§6)', () => {
     expect(runner.calls).toEqual([]);
   });
 
-  it('re-checks under the config lock: a remote bound by another process while the scaffold pushed is not bound twice', async () => {
+  it.each([undefined, 'bare'] as const)('re-checks under the config lock: a remote bound by another process while the scaffold pushed is not bound twice (form=%s)', async (form) => {
     const { root, bare } = await emptyBare();
     const publicRemote = 'https://git.example/raced.git';
     const store = createConfigStore(pathJoin(root, 'local'));
@@ -346,8 +346,14 @@ describe('team create (§6)', () => {
       if (command === 'git' && args[0] === 'push') await store.update((config) => { config.teams.other = { remote: 'git.example/raced', handle: 'someone' }; });
       return result;
     });
-    const result = await create({ name: 'raced', remote: publicRemote, config: store, runner }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('already configured as team other') });
+    const result = await create({ name: 'raced', remote: publicRemote, config: store, runner, form }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
+    expect(result).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine') });
+    const prefix = form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest';
+    expect(result).toMatchObject({ error: expect.stringContaining(`run \`${prefix} team leave 'other'\` first, then re-run \`${prefix} team create 'raced'\`.`) });
+    if (!result.ok) {
+      expect(result.error).not.toContain('team join');
+      if (form === 'bare') expect(result.error).not.toContain('npx');
+    }
     expect(Object.keys((await store.read()).teams)).toEqual(['other']);
     expect((await git(['ls-remote', '--heads', bare])).trim()).toContain('refs/heads/main');
   });
@@ -400,5 +406,15 @@ it.each([undefined, 'bare'] as const)('routes remaining create recoveries (form=
     return value;
   });
   const result = await create({ name: 'raced', remote, config: store, runner: raced, form }, new ScriptedPrompter(['me', 'me', 'Me', 'me@example.com']));
-  expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`run \`${prefix} team join '${remote}' --as <other-name>\``) });
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`run \`${prefix} team leave 'raced'\` then \`${prefix} team join '${remote}'\``) });
+});
+
+it.each(['new', undefined])('refuses create %s on a configured machine before prompts or gh', async name => {
+  const store = createConfigStore(await temporaryDirectory());
+  await store.update(config => { config.teams.team = { remote: 'github.com/acme/team', handle: 'me' }; });
+  const runner = mappedRunner('https://github.com/acme/new.git', '/unused', fakeGh('me'));
+  const io = new ScriptedPrompter();
+  expect(await create({ name, config: store, runner }, io)).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine') });
+  expect(runner.calls).toEqual([]);
+  expect(io.asked).toEqual([]);
 });

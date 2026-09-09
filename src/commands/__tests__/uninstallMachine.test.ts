@@ -10,7 +10,7 @@ import { bareTeam, cloneWithIdentity, holdCloneLock, ScriptedPrompter, temporary
 import { fsForTests, run } from '../uninstallMachine.js';
 
 const complete = 'Machine cleanup complete. The package itself has not been removed; finish with the package manager that installed it.';
-const membership = 'Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.';
+const membership = 'Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.';
 const unrelated = { matcher: 'startup', hooks: [{ type: 'command', command: 'echo unrelated' }] };
 
 async function minimal() {
@@ -39,6 +39,7 @@ async function prepared(names = ['team']) {
 async function gone(path: string) { await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' }); }
 
 describe('machine uninstall', () => {
+  // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
   it('cleans two teams and the hook, preserves unrelated settings and recovery records, and prints the manual step', async () => {
     const { store, hook, wrapper, placements } = await prepared(['team', 'other']);
     await writeFile(hook.settingsFile, JSON.stringify({ hooks: { SessionStart: [unrelated] } })); await installHook(hook);

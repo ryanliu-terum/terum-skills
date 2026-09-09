@@ -4,7 +4,7 @@ import type { WithForm } from '../lib/invocation.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
-import { askHandle, askUntilValid, assertBindable, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, ghState, GhState, Identity, identityForJoiner, setIdentity, teamByRemote, Validation } from '../lib/auth.js';
+import { askHandle, askUntilValid, assertBindable, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, ghState, GhState, Identity, identityForJoiner, setIdentity, refuseSecondTeam, teamByRemote, Validation } from '../lib/auth.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists, mkdirPrivate } from '../lib/fs.js';
 import { defaultHookOptions, HookOptions, offerHook } from '../lib/hook.js';
@@ -211,12 +211,14 @@ export function repoNameQuestion(team: string, suggested: string): string {
 
 export async function create(args: CreateArgs, io: Prompter): Promise<Result<CreateResult>> {
   try {
-    const name = args.name !== undefined ? parseOrExplain(teamNameSchema, args.name, 'team name') : await askUntilValid(io, 'Team name', undefined, validateName);
+    const suppliedName = args.name === undefined ? undefined : parseOrExplain(teamNameSchema, args.name, 'team name');
     if (args.remote && (args.repo !== undefined || args.org !== undefined)) throw new Error('--repo and --org apply only when creating the repository on GitHub; drop them when using --remote.');
     if (args.org !== undefined) parseOrExplain(githubLoginSchema, args.org, 'GitHub organization');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
+    refuseSecondTeam(config, { create: true }, invocation(args.form, 'team create', ...(suppliedName === undefined ? [] : [suppliedName])), args.form);
+    const name = suppliedName ?? await askUntilValid(io, 'Team name', undefined, validateName);
     const clone = store.teamClone(name);
     if (Object.hasOwn(config.teams, name)) throw new Error(`Team ${name} is already configured for ${config.teams[name]!.remote}; run \`${invocation(args.form, 'team join')}\` for it or pick another name.`);
     if (await exists(clone)) throw new Error(`A clone already exists at ${clone}; run \`${invocation(args.form, 'team join')}\` for that team or pick another name.`);
@@ -283,10 +285,10 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       throw new Error(`${reason}\n${advice}`);
     }
     await store.update((fresh) => {
-      if (Object.hasOwn(fresh.teams, name)) throw new Error(`Team ${name} was configured by another process while this create ran; the repository ${remote} is scaffolded, run \`${invocation(args.form, 'team join', remote)} --as <other-name>\` to use it.`);
-      assertBindable(fresh, name, remote);
+      if (Object.hasOwn(fresh.teams, name)) throw new Error(`Team ${name} was configured by another process while this create ran; the repository ${remote} is scaffolded, run \`${invocation(args.form, 'team leave', name)}\` then \`${invocation(args.form, 'team join', remote)}\` to use it.`);
+      assertBindable(fresh, name, remote, { form: args.form, retry: invocation(args.form, 'team create', name) });
       setIdentity(fresh, identity);
-      bindTeam(fresh, name, { remote, handle: identity.handle });
+      bindTeam(fresh, name, { remote, handle: identity.handle }, { form: args.form, retry: invocation(args.form, 'team create', name) });
     });
     io.print(`Created team ${name} at ${remote}`);
     // The create is durable once the scaffold pushed and the binding was written; an unreadable
@@ -306,13 +308,14 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     const normalized = normalizeRemote(target.remote);
     if (hasEmbeddedCredentials(args.target)) io.print(credentialNotice(normalized));
     const configBefore = await store.read();
+    refuseSecondTeam(configBefore, { remote: normalized }, invocation(args.form, 'team join', args.target), args.form);
 
     // §6: a second join of an already-configured remote updates that entry; it never creates a duplicate team.
     const existing = teamByRemote(configBefore, normalized);
     if (existing && args.as && args.as !== existing[0]) io.print(`This remote is already configured as team ${existing[0]}; ignoring --as ${args.as}.`);
     const team = parseOrExplain(teamNameSchema, existing?.[0] ?? args.as ?? remoteName(target.remote), 'team name');
     if (!existing && Object.hasOwn(configBefore.teams, team)) {
-      throw new Error(`Team name ${team} is already used for ${configBefore.teams[team]!.remote}; pass --as <other-name>.`);
+      throw new Error(`Team name ${team} is already used for ${configBefore.teams[team]!.remote}.`);
     }
     // §5.4: the per-team handle is immutable once its people file exists — and only join/create bind it.
     const boundHandle = existing?.[1].handle;
@@ -344,10 +347,10 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     await store.update((fresh) => {
       // Re-check under the lock: another verb may have bound this remote or name while we prompted.
       // The roster write above is durable, so a refusal here says so and names the way forward.
-      try { assertBindable(fresh, team, normalized); }
+      try { assertBindable(fresh, team, normalized, { form: args.form, retry: invocation(args.form, 'team join', args.target) }); }
       catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)} Your roster entry people/${identity.handle}.json was already pushed to ${normalized}; run \`${invocation(args.form, 'team join', args.target)}\` again to continue under the existing entry, or ask an admin to \`team remove ${identity.handle}\` if you did not mean to join twice.`); }
       setIdentity(fresh, identity);
-      bindTeam(fresh, team, { remote: normalized, handle: identity.handle });
+      bindTeam(fresh, team, { remote: normalized, handle: identity.handle }, { form: args.form, retry: invocation(args.form, 'team join', args.target) });
     });
     io.print(`${rejoined ? 'Rejoined' : 'Joined'} ${team} as ${identity.handle}`);
     // The join is durable once safeWrite returned; a read-back problem must not turn it into a failure.
@@ -436,7 +439,7 @@ export async function ensureClone(clone: string, remote: string, normalized: str
   const described = await describeClone(clone, normalized, runner);
   if (described.state === 'absent') { await cloneTeam(remote, clone, runner); return; }
   if (described.state === 'incomplete') throw new Error(`${clone} exists but is not a complete clone of ${remote}; move it aside and retry.`);
-  if (described.state === 'foreign') throw new Error(`${clone} is a clone of ${described.origin}, not ${normalized}; pass --as <other-name> to keep both teams.`);
+  if (described.state === 'foreign') throw new Error(`${clone} is a clone of ${described.origin}, not ${normalized}; move it aside and retry.`);
   // Arming is idempotent, so it belongs on every join, not only on a fresh clone: a clone that exists
   // but was never armed — an interrupted create or join, an arming that failed after the clone landed
   // — is exactly the state whose printed advice is `team join <remote>`. After the origin checks, so

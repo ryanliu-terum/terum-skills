@@ -42,7 +42,7 @@ Guard table row (c), verbatim: `team.json` `global`/`projects[].skills` — perm
 export interface PublishArgs {
   ref: string;                 // <name> | <team>/<name> | <org>/<repo>/<name>; an 8+ char ID prefix is accepted in the name slot
   project?: string;            // endorse into team.json projects[<project>].skills instead of global
-  team?: string;               // explicit team when the ref is bare and several teams are configured
+  team?: string;               // explicit team when the ref is bare and several teams are configured (legacy machines only)
   config?: ConfigStore;
   runner?: Runner;
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;   // test clock, exactly as install/uninstall take it
@@ -89,7 +89,7 @@ Use the fixtures exactly as `uninstall.test.ts` and `remove.test.ts` do (`bareTe
 4. **`push` policy:** seed `team.json` with `policy.publish: 'push'`. With the confirm answered `false`: `ok: false`, error `Publish was cancelled.`, `origin/main` unchanged, no `publish/*` branch created. With `true`: `origin/main` moved by exactly one commit whose message is `<handle>: publish <name>`, `team.json global` lists the ID, and the printed card contains the skill name, the category, and the `allowed-tools` line.
 5. **`--project`:** with a project seeded in `team.json`, `--project product` appends to `projects.product.skills` and leaves `global` and `remotes` unchanged; `--project nope` fails with `Unknown project nope.` before any push (assert `runner.calls` has no `push`).
 6. **Already endorsed:** seed the ID into `global`; `ok: true`, `changed: false`, no push, no prompt asked (`io.asked` is empty), and the "already endorsed" line printed.
-7. **Ref handling:** an unknown name fails with `No skill …`; `name@<tree>` fails with the version message; `<team>/<name>` resolves; with two teams configured a bare ref fails with the existing ambiguity message from `teamForReference` and `--team` resolves it.
+7. **Ref handling:** an unknown name fails with `No skill …`; `name@<tree>` fails with the version message; `<team>/<name>` resolves; with two teams configured (legacy machines only) a bare ref fails with the existing ambiguity message from `teamForReference` and `--team` resolves it.
 8. **Mutation re-verification:** delete the skill from the remote (a seed commit that removes `skills/<name>/SKILL.md`) *after* the clone was pulled but before the write — use `wrapRunner` on safeWrite's `fetch` (the second one — the first is the preflight refresh) or on `push` as `join.test.ts` does for its race — and assert the failure names the skill and that nothing was pushed.
 9. **gh failure after the push:** `pr create` returns exit 1 → `ok: false`, the error contains the compare URL and gh's message, the branch exists on the remote, `origin/main` unchanged, and `pr create` was called exactly once.
 10. **Secrets:** with `binding.remote` set to a credential-bearing URL string in config (`https://me:tok@github.com/acme/team.git` stored verbatim), no printed line and no `Result.error` contains `tok`. (The remote is mapped by the runner; assert on `io.lines` and the error only.)
@@ -119,7 +119,7 @@ Everything `team leave` removes is machine-local and every path it deletes comes
 
 1. **Placements.** Every `config.placements` entry with `entry.team === name`, via the helper extracted in §3.2: lock the target root, `placer.remove(root, path, entry.fingerprint, <root>/quarantine)` (a hand-edited copy is quarantined, never deleted; a path already missing on disk is fine), print the quarantine line when there is one, delete the ledger entry under `store.update`, release the lock.
 2. **The clone.** `rm -rf store.teamClone(name)` if it exists. Also, if present: the version cache `<store.root>/cache/<name>`, the run stamp `<store.root>/run/<name>.stamp`, and the safeWrite lock directory `<store.root>/teams/.<name>.safewrite.lock`.
-3. **Config**, in one `store.update`: delete `teams[name]`; delete every `shared` entry whose `team === name` (the source folders themselves are the user's own files outside `~/.terum` and are never touched); drop every `pending` entry for the team; drop any `placements` entry for the team that step 1 did not already remove. `approvals` are left alone — they are consent for grant sets, not team membership.
+3. **Config**, in one `store.update`: delete `teams[name]`; delete every `shared` entry whose `team === name` (the source folders themselves are the user's own files outside `~/.terum` and are never touched); drop every `pending` entry for the team; drop any `placements` entry for the team that step 1 did not already remove. `approvals` are cleared when the last team leaves (Ryan 2026-09-08, F3); leaving one of several legacy teams leaves them alone.
 
 ### 2.3 Signature and behaviour
 
@@ -131,14 +131,14 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
 ```
 
 1. Validate `name` with `parseOrExplain(teamNameSchema, args.name, 'team name')`; `config.teams[name]` missing → `Team <name> is not configured.`
-2. Count what will go (placements for the team, whether the clone exists, shared entries, pending entries) and print one summary line per non-zero item, then `io.confirm('Leave <name>? This removes <n> placed skill(s) and the local clone; your membership in <remote> is unchanged.')` — the remote printed through `stripRemoteCredentials`. Declined → `failure('Leave was cancelled.')` with nothing changed. A non-interactive channel throws `PromptClosedError` from the Prompter before anything changes; let it surface as the failure it is.
+2. Count what will go (placements for the team, whether the clone exists, shared entries, pending entries) and print one summary line per non-zero item, then `io.confirm('Leave <name>? This removes <n> placed skill(s), the local clone and your skill consent records; your membership in <remote> is unchanged.')` — for the last team; when other teams remain, keep the old ask (`placed skill(s) and the local clone`, no consent-record mention). The remote is printed through `stripRemoteCredentials`. Declined → `failure('Leave was cancelled.')` with nothing changed. A non-interactive channel throws `PromptClosedError` from the Prompter before anything changes; let it surface as the failure it is.
 3. Steps 1–3 of §2.2, in that order (placements first, so a failure inside the Placer leaves config still pointing at a clone the user can inspect).
 4. Print `Left <name>. You are still an active member of <remote>; an admin archives membership with team remove <handle>.` and return `success`.
 5. Idempotence: a second `team leave <name>` after the first fails at step 1 (`not configured`). A partially completed first run (clone gone, config still bound) reruns cleanly: every removal in §2.2 tolerates an already-missing path.
 
 ### 2.4 Tests (`src/commands/__tests__/leave.test.ts`)
 
-1. **The full path:** a team with one global placement and one project placement (build them with `install` as `uninstall.test.ts` does, `home` and a project checkout under the fixture root), one `shared` entry, one `pending` entry, a cache directory and a run stamp created by hand. After `team leave team` with the confirm answered `true`: both placed folders are gone from disk, `placements` is `{}`, `pending` is `[]`, `shared` has no entry for the team, `teams` has no `team`, the clone directory, cache directory, and stamp are gone, `approvals` is unchanged, and **the bare repository's `main` SHA is byte-identical** (no repo trace) — assert `originSha` before and after, and that `people/seed.json` on `main` still lists the installed entries.
+1. **The full path:** a team with one global placement and one project placement (build them with `install` as `uninstall.test.ts` does, `home` and a project checkout under the fixture root), one `shared` entry, one `pending` entry, a cache directory and a run stamp created by hand. After `team leave team` with the confirm answered `true`: both placed folders are gone from disk, `placements` is `{}`, `pending` is `[]`, `shared` has no entry for the team, `teams` has no `team`, the clone directory, cache directory, and stamp are gone, `approvals` is empty, and **the bare repository's `main` SHA is byte-identical** (no repo trace) — assert `originSha` before and after, and that `people/seed.json` on `main` still lists the installed entries.
 3. **Declined:** confirm `false` → `Leave was cancelled.`, every path and every config entry still present.
 4. **A hand-edited placement** is moved to quarantine, not deleted: modify the placed `SKILL.md` first, then leave; assert a directory under `<store.root>/quarantine` contains the edited bytes and the notice line was printed.
 5. **Two teams:** leaving one leaves the other's placements, clone, and config entry untouched; `--`-free `team leave other` afterwards works too.
@@ -164,7 +164,7 @@ program
   .command('publish <ref>')
   .description('Endorse a shared skill for the team: opens a pull request under policy "pr", commits directly under policy "push"')
   .option('--project <project>', 'endorse into the project list instead of the global list')
-  .option('--team <team>', 'configured team (required when more than one exists and the ref is bare)')
+  .option('--team <team>', 'configured team (required when more than one exists and the ref is bare (legacy machines only))')
   .action(async (ref: string, options: { project?: string; team?: string }) => execute((io) => active.publish({ ref, ...options }, io)));
 ```
 

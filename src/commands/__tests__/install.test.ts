@@ -1,3 +1,5 @@
+import { createExecute } from '../../lib/execute.js';
+import type { ResultOutcome } from '../../lib/frames.js';
 import { getStartedLines } from '../../lib/invocation.js';
 import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -75,10 +77,10 @@ describe('install (§6 refs)', () => {
     expect(printed).not.toContain('Next, from any terminal');
     expect(printed).not.toContain('Feedback and requests');
     expect(printed).not.toContain('Repository:');
-    // A machine that already has a team keeps the message: a second team is `team join`'s explicit flow.
+    // A configured machine refuses a second binding before bootstrap.
     const second = createConfigStore(join(root, 'second-state'));
     await second.update((config) => { config.teams.other = { remote: 'github.com/other/repo', handle: 'bob' }; });
-    expect(await run({ ref: 'acme/team/sample', config: second, home: join(root, 'second-home'), runner }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining("npx -y terum-skills@latest team join 'acme/team'") });
+    expect(await run({ ref: 'acme/team/sample', config: second, home: join(root, 'second-home'), runner }, new ScriptedPrompter())).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine') });
   });
 
   it('an inherited object key is not a project', async () => {
@@ -374,6 +376,7 @@ describe('install (§6 refs)', () => {
     await cloneWithIdentity(second.bare, store.teamClone('team-b'));
     await store.update((config) => {
       config.teams['team-a'] = { remote: 'github.com/org/repo', handle: 'me' };
+      // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
       config.teams['team-b'] = { remote: second.bare, handle: 'seed' };
     });
     const mapped = mappedRunner('github.com/org/repo', first.bare);
@@ -389,7 +392,7 @@ describe('install (§6 refs)', () => {
     expect(await readFile(join(home, '.claude', 'skills', 'dup', 'SKILL.md'), 'utf8')).toContain('description: from first');
 
     const beforeUnjoined = JSON.stringify(await store.read());
-    expect(await run({ ref: 'other/repo/dup', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining("npx -y terum-skills@latest team join 'other/repo'") });
+    expect(await run({ ref: 'other/repo/dup', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, refused: true, error: expect.stringContaining("One team per machine") });
     expect(JSON.stringify(await store.read())).toBe(beforeUnjoined);
     expect((await run({ ref: `team-a/${dupId.slice(0, 8)}`, config: store, home, runner: mapped }, new ScriptedPrompter())).ok).toBe(true);
     expect(await run({ ref: 'team-a/deadbeef', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('ambiguous') });
@@ -425,4 +428,24 @@ it('skillAtSource carries the materialized source body rather than the clone bod
   const pinned = join(fixture.root, 'pinned'); await mkdir(pinned);
   await writeFile(join(pinned, 'SKILL.md'), source+'pinned prose');
   expect((await skillAtSource(pinned, record)).body).toBe('pinned prose');
+});
+
+it.each(['refused', 'cancelled'] as const)('zero-team install bootstrap preserves setup %s', async flag => {
+  const config = createConfigStore(await temporaryDirectory());
+  const spy = vi.spyOn(setup, 'run').mockResolvedValue({ ok: false, error: 'stopped', [flag]: true });
+  try {
+    expect(await run({ ref: 'acme/team/sample', config }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'stopped', [flag]: true });
+    expect(spy).toHaveBeenCalledTimes(1);
+  } finally { spy.mockRestore(); }
+});
+
+it('install refusal survives createExecute without bootstrap or runner calls', async () => {
+  const config = createConfigStore(await temporaryDirectory());
+  await config.update(fresh => { fresh.teams.team = { remote: 'github.com/one/team', handle: 'me' }; });
+  const frames: ResultOutcome[] = [];
+  const runner = mappedRunner('https://github.com/other/repo.git', '/unused', fakeGh('me'));
+  const execute = createExecute({ io: new ScriptedPrompter(), stderr: () => {}, setExitCode: () => {}, result: outcome => frames.push(outcome) });
+  await execute(io => run({ config, runner, ref: 'other/repo/skill' }, io), { verb: 'install', notices: false });
+  expect(frames).toEqual([expect.objectContaining({ ok: false, refused: true, exitCode: 1 })]);
+  expect(runner.calls).toEqual([]);
 });

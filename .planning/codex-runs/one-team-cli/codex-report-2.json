@@ -1,0 +1,82 @@
+{
+  "status": "complete",
+  "summary": "Applied both rulings and the create-target tidy across five files, preserving existing checks and assertions. All requested regressions pass; lint and typecheck pass, but both full test runs encountered the same unchanged runner timeout-test failure. Changes remain uncommitted.",
+  "filesChanged": [
+    {
+      "path": "src/lib/auth.ts",
+      "change": "modified",
+      "why": "Allow existing legacy bindings, forward invocation options through both binding checks, and use create: true."
+    },
+    {
+      "path": "src/commands/team.ts",
+      "change": "modified",
+      "why": "Thread create/join invocation form and retry through assertBindable and bindTeam; replace the empty-name sentinel."
+    },
+    {
+      "path": "src/lib/__tests__/auth.test.ts",
+      "change": "modified",
+      "why": "Cover legacy bindings and caller-specific retry text; update create-target inputs."
+    },
+    {
+      "path": "src/commands/__tests__/join.test.ts",
+      "change": "modified",
+      "why": "Add the legacy two-team rejoin regression."
+    },
+    {
+      "path": "src/commands/__tests__/create.test.ts",
+      "change": "modified",
+      "why": "Extend the locked-race test with bare-form coverage and retry assertions."
+    }
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "npm run lint: exit 0, no diagnostics.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "npm run typecheck: exit 0, no diagnostics.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": false,
+      "output": "Both full runs using --configLoader native --no-cache: 74 files passed, 1 failed; 1282 tests passed, 1 failed. Failure: src/lib/__tests__/runner.test.ts:73, sleeping child remained observable after cancellation. Isolated runner rerun: 6 passed. Pre-fix regression run: 86 passed, 4 failed, including the new legacy rejoin test.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [],
+  "deviations": [],
+  "invariantsTouched": [
+    {
+      "number": 2,
+      "howSatisfied": "Preserved the existing safeWrite roster mutation; changed only binding checks and refusal context."
+    },
+    {
+      "number": 3,
+      "howSatisfied": "Preserved guarded roster writes and both post-refusal remote/name checks."
+    }
+  ],
+  "testsModified": [
+    {
+      "path": "src/lib/__tests__/auth.test.ts",
+      "whatChanged": "Added assertions for legacy rejoin success, third-key RefusedError and LEGACY text, and bare-form caller retry. Replaced four name-based refusal inputs with create: true; existing expected outcomes remain unchanged.",
+      "justification": "Explicitly requested rulings and tidy."
+    },
+    {
+      "path": "src/commands/__tests__/join.test.ts",
+      "whatChanged": "Added a test asserting both joins succeed, exactly two team keys remain, and local and remote rosters contain only me.json and seed.json. Existing tests unchanged.",
+      "justification": "Reproduced the pre-fix legacy refusal and verified the correction."
+    },
+    {
+      "path": "src/commands/__tests__/create.test.ts",
+      "whatChanged": "Parameterized the existing race test for default and bare forms. Retained all existing assertions; added exact leave/create retry text and exclusions for team join and bare-form npx.",
+      "justification": "Verify invocation-aware refusal under the config lock."
+    }
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The runner failure appears sensitive to full-suite execution: it failed twice in full runs and passed in isolation, but its cause was not established."
+}

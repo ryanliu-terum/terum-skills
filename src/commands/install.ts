@@ -7,8 +7,9 @@ import type { HookOptions } from '../lib/hook.js';
 import type { WrapperOptions } from '../lib/wrapper.js';
 import { inspect, lockTarget, moveToQuarantine, place, quarantineDrift, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
+import { refuseSecondTeam, teamByRemote } from '../lib/auth.js';
 import { normalizeRemote } from '../lib/remote.js';
-import { fromError, CancelledError, Result, success } from '../lib/result.js';
+import { fromError, CancelledError, RefusedError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { Config, Team, describeRaw, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
@@ -64,13 +65,17 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
     const team = await teamForReference(config, reference.team ?? args.team, reference.remote, reference.name, args.form).catch(async (error: unknown) => {
       // §6: a three-part ref on a machine that has joined nothing performs the bootstrap first —
       // `setup <org>/<repo>` with its print-only steps suppressed — and then installs: one code
-      // path, not two. A machine that already has teams keeps the message: joining a second team
-      // is `team join`'s explicit, prompt-heavy flow. The import is deferred because setup is
+      // path, not two. The shared pre-flight refuses a configured machine before bootstrap.
+      // The import is deferred because setup is
       // built on team, which is built on this module.
       if (!(error instanceof NotJoinedError) || Object.keys(config.teams).length > 0) throw error;
       const { run: setup } = await import('./setup.js');
       const bootstrapped = await setup({ form: args.form, target: error.remote.replace(/^github\.com\//, ''), quiet: true, offerConnect: false, config: store, runner, home: args.home, hook: args.hook, wrapper: args.wrapper }, io);
-      if (!bootstrapped.ok) throw new Error(bootstrapped.error);
+      if (!bootstrapped.ok) {
+        if (bootstrapped.refused) throw new RefusedError(bootstrapped.error);
+        if (bootstrapped.cancelled) throw new CancelledError(bootstrapped.error);
+        throw new Error(bootstrapped.error);
+      }
       return bootstrapped.value.team;
     });
     return success([await installOne({ team, reference: reference.name, version: reference.version, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
@@ -205,7 +210,8 @@ export class NotJoinedError extends Error {
 }
 export async function teamForReference(config: Config, explicit: string | undefined, remote: string | undefined, name?: string, form?: InvocationForm): Promise<string> {
   if (remote) {
-    const found = Object.entries(config.teams).find(([, entry]) => normalizeRemote(entry.remote) === normalizeRemote(remote));
+    const found = teamByRemote(config, remote);
+    if (!found) refuseSecondTeam(config, { remote }, invocation(form, 'setup', remote.replace(/^github\.com\//, '')), form);
     if (!found) throw new NotJoinedError(remote, `This machine has not joined ${remote}; run \`${invocation(form, 'team join', remote.replace(/^github\.com\//, ''))}\` first.`);
     return found[0];
   }
