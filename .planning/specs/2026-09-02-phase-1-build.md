@@ -176,6 +176,8 @@ Remote matching: normalize (strip protocol/credentials/`.git`/trailing slash, lo
 
 ### 5.2 `people/<handle>.json`
 
+**S7b:** `role` (string, at most 32 characters) and `projects` (array of non-empty project names) are optional, owner-written profile fields, never refreshed by sync. Absence stays absent after parsing and unrelated writes; readers expose `role: null` and `projects: []`. These are job labels and registry membership, not permission roles. Reclaim/rejoin preserves both fields. `ls` roster, `ls member` and `status.members` carry both.
+
 ```jsonc
 {
   "handle": "ryan",
@@ -291,6 +293,11 @@ Section 5.4 clarification. `config.approvals[<skill id>]` stores the sha256 of t
 
 ## 6. Command behavior
 
+**`profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]... [--team <team>]` (S7b)** updates only self-describing fields of the caller's people file through safeWrite action `profile`. Explicit project flags replace the project list; each name must exist in the team.json pre-image registry read inside every mutation attempt. Email, GitHub login and handle are refused. `--name` also updates config.display_name via ConfigStore.update after the committed write. Prints changed fields and returns `{ handle, changed: string[] }`, naming the people-file keys. With no fields it reports no changes.
+
+**`decline <ref> [--team <team>]` (S7b)** resolves the skill ID and appends it to the caller's declined list through safeWrite action `decline`, idempotently. It refuses an ID already in the caller's installed list, with `uninstall-skill` guidance. The fresh people document is read inside each mutation attempt. Returns `{ handle, id, declined: true }`. This action never removes an existing decline.
+
+
 Refs come in three forms; names resolve to IDs via `skills/*/SKILL.md`, and an 8-char ID prefix is accepted anywhere a name is.
 
 | Form | Example | Resolves how |
@@ -330,7 +337,7 @@ The guard (`guard.ts`) runs inside the loop, on the staged diff, which may touch
 | # | Path | Permitted on |
 |---|---|---|
 | a | `skills/<name>/**` where that skill's `metadata.author` is you | `connect`, `sync` auto-update |
-| b | `people/<you>.json` | `join`, `install`, `uninstall-skill`, `sync` |
+| b | `people/<you>.json` | `join`, `install`, `uninstall-skill`, `sync`, `profile`, `decline` (same owner path; no team.json grant) |
 | c | `team.json` `global`/`projects[].skills` | `publish` only |
 | d | `team.json` `archived` — append your target's handle | `team remove` only |
 | e | `team.json` `archived` — remove **your own** handle | `team join` only (rejoin) |

@@ -1,4 +1,6 @@
 import { invocation, getStartedLines, type InvocationForm } from './lib/invocation.js';
+import { run as profile, type ProfileArgs } from './commands/profile.js';
+import { run as decline } from './commands/decline.js';
 import { run as runUpdate } from './commands/update.js';
 import { run as runApp } from './commands/app.js';
 import { packageVersion } from './lib/package.js';
@@ -31,10 +33,10 @@ import { failure, Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
-export interface CliVerbs { app?: typeof runApp; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; connect?: typeof connect; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; receiptCheck?: typeof runReceiptCheck; }
+export interface CliVerbs { profile?: typeof profile; decline?: typeof decline; app?: typeof runApp; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; connect?: typeof connect; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; receiptCheck?: typeof runReceiptCheck; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean } = {}): Command {
-  const active: Required<CliVerbs> = { app: verbs.app ?? runApp, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, connect: verbs.connect ?? connect, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, receiptCheck: verbs.receiptCheck ?? runReceiptCheck };
+  const active: Required<CliVerbs> = { profile: verbs.profile ?? profile, decline: verbs.decline ?? decline, app: verbs.app ?? runApp, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, connect: verbs.connect ?? connect, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, receiptCheck: verbs.receiptCheck ?? runReceiptCheck };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
@@ -138,5 +140,15 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .description("Show this copy's version, the latest advertised release, and the command that updates it (prints it, never runs it)")
     .action(async () => execute((io) => active.update(context, io), { verb: 'update', notices: false }));
 
+  program.command('profile').description('Update your own team profile')
+    .option('--name <display>').option('--bio <text>').option('--role <role>')
+    .option('--project <name>', 'project membership (repeat for each project)', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--team <team>')
+    .action(async (options: Omit<ProfileArgs, 'projects'> & { project?: string[] }) => {
+      const { project, ...rest } = options;
+      return execute(io => active.profile({ ...rest, ...(project?.length ? { projects: project } : {}), form: context.form }, io), { verb: 'profile', notices: true });
+    });
+  program.command('decline <ref>').description('Decline a skill you have not installed').option('--team <team>')
+    .action(async (ref: string, options: { team?: string }) => execute(io => active.decline({ ref, ...options, form: context.form }, io), { verb: 'decline', notices: true }));
   return program;
 }

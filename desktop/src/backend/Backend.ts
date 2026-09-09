@@ -17,6 +17,8 @@ export interface Backend {
   catalog(q?: { q?: string }, options?: ReadOptions): Promise<Result<Catalog>>;
   roster(q?: undefined, options?: ReadOptions): Promise<Result<Roster>>;
   search(args: SearchArgs, options?: ReadOptions): Promise<Result<SearchHit[]>>;
+  profile(args: { name?: string; bio?: string; role?: string; projects?: string[] }): Run<{ handle: string; changed: string[] }>;
+  decline(args: { ref: string }): Run<{ id: string }>;
   setIdentity(args: IdentityArgs): Run<IdentityWrite>;
   install(args: InstallArgs): Run<InstalledResult[]>;
   uninstallSkill(args: UninstallArgs): Run<UninstalledResult[]>;

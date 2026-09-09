@@ -59,3 +59,11 @@ it('uses only status-supplied sidebar counts on the empty scenario', async () =>
   expect(await screen.findByRole('link', { name: 'Global 71' })).toBeInTheDocument();
   expect(document.querySelectorAll('.nav-count')).toHaveLength(1);
 });
+
+it('keeps job labels separate from permission preferences and preserves removal without roles',async()=>{
+ const features=await backend.features();vi.spyOn(backend,'features').mockResolvedValue({...features,roles:false,memberRole:true});
+ backend.prefs.set('role:ryan','admin');open('#/share');const row=await screen.findByTestId('member-row-0');
+ expect(row).toHaveTextContent(design.ROSTER[0]!.role);expect(screen.queryByRole('button',{name:'Role for ryan'})).toBeNull();
+ expect(within(row).getByRole('button',{name:'Remove from team'})).toBeVisible();expect(backend.prefs.get('role:ryan','')).toBe('admin');
+ for(const project of design.MEMBER.ryan?.[1]??[])expect(within(row).getByText(project)).toBeVisible();
+});

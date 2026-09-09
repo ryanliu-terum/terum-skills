@@ -25,14 +25,15 @@ it.each([true, false])('renders all navigation with mock surfaces or while surfa
   expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
 });
 
-it('renders only Global navigation for the real adapter, retaining the settings gear', async () => {
+it('renders Global, Share and Marketplace navigation for the real adapter, retaining the settings gear', async () => {
   const backend = createTauriBackend(fakeBridge(() => undefined).bridge);
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><BackendContext value={backend}><HashRouter><Shell/></HashRouter></BackendContext></QueryClientProvider>);
   // The real adapter serves no project list here (status has no frames), so the Projects row never renders; wait for the surfaces read instead.
-  await waitFor(() => expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(1));
+  await waitFor(() => expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(3));
   expect(screen.queryByRole('link', { name: 'Projects' })).toBeNull();
   expect(screen.getByRole('link', { name: 'Global' })).toBeVisible();
-  expect(screen.queryByText('Team')).toBeNull();
+  expect(screen.getByRole('link', { name: 'Marketplace' })).toBeVisible();
+  expect(screen.getByRole('link', { name: 'Share' })).toBeVisible();
   expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
   expect(screen.getByRole('link', { name: 'Settings' })).toBeVisible();
 });

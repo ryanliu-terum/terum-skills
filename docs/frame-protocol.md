@@ -60,4 +60,6 @@ A `connect` that asks:
 
 ## Versioning
 
+`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, and `memberRole`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and remains false.
+
 `hello.protocol` is `1`. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.

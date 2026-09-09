@@ -21,7 +21,7 @@ export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?:
 export interface LsSkill { id: string; name: string; author: string; category: string; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; updated: string; unresolved: boolean; }
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
 export interface LocalSection extends LocalRoot { rows: { name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; problem?: string }[]; notOffered: { name: string; path: string; reason: string }[]; problems: { path: string; reason: string }[]; }
-export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { handle: string; declined: Person['declined'] }; }
+export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
 export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>> {
@@ -38,7 +38,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     const problems: { source: string; message: string }[] = [];
     const report = (source: string, message: string) => { problems.push({ source, message }); io.print(`${source}: ${message}`); };
     const people = (await Promise.all((await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).sort().map((file) => readPerson(clone, file.slice(0, -5)).catch((error: unknown) => { report(`people/${file}`, error instanceof Error ? error.message : String(error)); return undefined; })))).filter((person) => person !== undefined);
-    const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived) }));
+    const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived), role: person.role ?? null, projects: person.projects ?? [] }));
     const skills = await listSkills(team, people, clone, runner, io, teamName, problems);
     // `return await`: a returned promise leaves the try block before it settles, so a throw inside
     // showMember/showProject would reject run() instead of becoming the failure Result every verb returns.
@@ -92,7 +92,7 @@ async function showMember(handle: string | undefined, people: Awaited<ReturnType
   io.print(`Member ${member.handle}:`);
   io.print(`  Authored: ${authored.map((skill) => skill.name).join(', ') || '—'}`);
   io.print(`  Installed: ${member.installed.map((item) => namesById.get(item.id) ?? item.id).join(', ') || '—'}`);
-  return success({ roster, skills: authored, projects, problems, member: { handle: member.handle, declined: member.declined } });
+  return success({ roster, skills: authored, projects, problems, member: { handle: member.handle, declined: member.declined, role: member.role ?? null, projects: member.projects ?? [] } });
 }
 async function showProject(projectName: string | undefined, team: ReturnType<typeof teamSchema.parse>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems']): Promise<Result<LsResult>> {
   if (!projectName || !Object.hasOwn(team.projects, projectName)) throw new Error(`No project named ${projectName ?? ''}.`);

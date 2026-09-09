@@ -30,6 +30,8 @@ it('keeps errors without value when the failing value cannot be parsed', async (
 });
 
 const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = [
+  ['profile', b => b.profile({ name: 'A B', bio: '', role: 'Platform', projects: ['terum', 'second'] }).done, ['profile', '--name', 'A B', '--bio', '', '--role', 'Platform', '--project', 'terum', '--project', 'second']],
+  ['decline', b => b.decline({ ref: '-x' }).done, ['decline', '--', '-x']],
   ['leading-dash install', b => b.install({ ref: '-x', team: 'acme' }).done, ['install', '--team', 'acme', '--', '-x']],
   ['team create', b => b.team({ kind: 'create', name: '-x', remote: '/repo' }).done, ['team', 'create', '--remote', '/repo', '--', '-x']],
   ['team create without name', b => b.team({ kind: 'create', remote: '/repo' }).done, ['team', 'create', '--remote', '/repo']],
@@ -93,11 +95,11 @@ it.each([true, false])('maps every search field including its real description (
   expect(result).toEqual({ ok: true, value: [{ kind: 'skill', ref: metadata ? 'acme/a' : 'a', name: 'a', description: 'Real description', team: metadata ? 'acme' : null, author: hit.author, category: 'ops', installs: 0, latest: 'abc', unresolved: false, endorsed: metadata ? 'global' : null }] });
 });
 
-it('serves status, settings, library, skill and update while the other five surfaces stay typed gaps', async () => {
+it('serves status, settings, library, skill, update, roster and catalog while the other three surfaces stay typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: false, roster: false, update: true });
-  for (const result of await Promise.all([b.onboarding(), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox(), b.catalog(), b.roster()])) {
+  expect(await b.surfaces()).toEqual({ status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true });
+  for (const result of await Promise.all([b.onboarding(), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }
   expect(f.spawns).toHaveLength(0);
@@ -264,6 +266,69 @@ it('does not turn unreadable validation into a passing caption',async()=>{
   expect(await createTauriBackend(f.bridge).skill({ref:'a'})).toEqual({ok:false,error:'Validation failed'});
 });
 
+function peopleReplay(change?: (frame: Record<string, unknown>, name: string) => void) {
+  return fakeBridge((args, emit) => {
+    const name = args[0] === 'ls' ? args.includes('--local') ? 'ls-local' : args[1] === 'member' ? `ls-member-${args.at(-1)}` : 'ls' : args[0]!;
+    const lines = readFileSync(resolve('../.planning/codex-runs/m7-S7b/frames', `${name}.jsonl`), 'utf8').trim().split('\n');
+    for (const line of lines) {
+      const frame = JSON.parse(line) as Record<string, unknown>;
+      change?.(frame, name);
+      emit({ kind: 'stdout', line: JSON.stringify(frame) });
+    }
+  });
+}
+it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and installs', async () => {
+  const f = peopleReplay(), backend = createTauriBackend(f.bridge);
+  backend.prefs.set('role:mira', 'admin');
+  const roster = await backend.roster();
+  expect(roster.ok).toBe(true);
+  expect(roster.value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
+  expect(roster.value?.members[0]).toMatchObject({ name: 'Mira Chen', role: 'Platform', projects: ['terum'], joined: '—', lastSeen: '—', status: 'active' });
+  expect(backend.prefs.get('role:mira', '')).toBe('admin');
+  expect(await backend.features()).toMatchObject({ memberRole: true, roles: false, follow: false });
+  const catalog = await backend.catalog();
+  if (!catalog.ok) throw new Error(catalog.error);
+  expect(catalog.value.topRated).toEqual(['deploy-check', 'tdd', 'diagnose']);
+  expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject({ installed: true, installsN: 2 });
+  expect(catalog.value.skills.find(skill => skill.name === 'tdd')).toMatchObject({ installed: false, installsN: 1 });
+  expect(catalog.value.people[0]).toMatchObject({ handle: 'mira', role: 'Platform', projects: ['terum'], skills: ['deploy-check'], declined: [], onDisk: [1, 1], adoption: 2 });
+  expect(catalog.value.people.map(person => person.handle)).toEqual(['mira', 'ravi', 'seed']);
+  expect(catalog.value.people.find(person => person.handle === 'seed')?.declined).toEqual(['33333333-3333-4333-8333-333333333333']);
+  expect(catalog.value.categories).toEqual([['ops', 'tag', 1], ['debugging', 'tag', 1], ['engineering', 'tag', 1]]);
+  expect(catalog.value.projects[0]).toMatchObject({ name: 'terum', skillsIn: ['tdd'], memberHandles: ['mira'], evaluated: null });
+  expect(catalog.value.bulkInstall).toEqual({});
+  expect(catalog.value.verdictCounts).toEqual({ PASS: null, NEUTRAL: null, FAIL: null, 'Not evaluated': null });
+  expect(JSON.stringify(catalog)).not.toMatch(/Teddy|SSM|MRF|founder/);
+  expect(f.spawns.some(spawn => JSON.stringify(spawn.args) === JSON.stringify(['ls', 'member', '--team', 'acme', '--', 'ravi']))).toBe(true);
+});
+it('S7b maps both recorded write results and emits clone invalidation only', async () => {
+  const backend = createTauriBackend(peopleReplay().bridge), changed: string[] = [];
+  backend.subscribe(source => changed.push(source));
+  expect(await backend.profile({ role: 'Platform' }).done).toEqual({ ok: true, value: { handle: 'seed', changed: ['role'] } });
+  expect(await backend.decline({ ref: '33333333-3333-4333-8333-333333333333' }).done).toEqual({ ok: true, value: { id: '33333333-3333-4333-8333-333333333333' } });
+  expect(changed).toEqual(['clone', 'clone']);
+});
+it('S7b tolerates absent metadata but rejects malformed values and failed member reads', async () => {
+  const backend = createTauriBackend(peopleReplay((frame, name) => {
+    if (frame.t !== 'result') return;
+    if (name === 'status') {
+      const value = frame.value as { teams: { members: Record<string, unknown>[] }[] };
+      for (const member of value.teams[0]!.members) { delete member.role; delete member.projects; }
+    }
+  }).bridge);
+  expect((await backend.roster()).value?.members[0]).toMatchObject({ role: '', projects: [] });
+  const failed = createTauriBackend(peopleReplay((frame, name) => {
+    if (frame.t === 'result' && name === 'ls-member-ravi') Object.assign(frame, { ok: false, exitCode: 1, error: 'Unreadable member.' });
+  }).bridge);
+  expect(await failed.catalog()).toMatchObject({ ok: false, error: expect.stringContaining('Unreadable member.') });
+  const malformed = createTauriBackend(peopleReplay((frame, name) => {
+    if (frame.t === 'result' && name === 'status') {
+      const value = frame.value as { teams: { members: Record<string, unknown>[] }[] };
+      value.teams[0]!.members[0]!.role = 5;
+    }
+  }).bridge);
+  expect((await malformed.roster()).ok).toBe(false);
+});
 
 it('sets identity with exact pairs, no team option, and config-only invalidation', async () => {
   const value = { updated: [{key:'name',value:'Ryan Liu'},{key:'email',value:'ryan@example.com'},{key:'default-handle',value:'ryan'}], notice: 'Author line notice.' };

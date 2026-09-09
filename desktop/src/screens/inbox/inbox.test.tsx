@@ -4,6 +4,7 @@ import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
 import { pickBackend } from '../../backend';
+import { createRun } from '../../backend/mock/run';
 import { design } from '../../backend/mock/data';
 function open(route: string) { location.hash = route; return render(<Providers><App/></Providers>); }
 beforeEach(() => { localStorage.clear(); useUiStore.setState({ railOpen: true, overviewHidden: false, theme: 'dark' }); });
@@ -51,14 +52,18 @@ it('keeps secondary decline pixels unchanged', async () => { open('#/inbox'); co
 it('retains the installed score when an update has no new receipt', async () => { open('#/inbox/update-adr-writer'); expect(await screen.findByText(/No receipt for c41d0e9f8a27 yet\./)).toHaveTextContent('The installed version b7a2c15d4e9f scored +78% PASS on its last run.'); });
 
 it.each([
- ['#/inbox', 'Decline', 'declined:secret-scan', true],
  ['#/inbox/update-pr-review', 'Later', 'inbox-later:update-pr-review', true],
  ['#/inbox/alert-offtarget-deploy-check', 'Disable', 'enabled:deploy-check', false],
 ] as const)('persists %s secondary %s without changing the report', async (route, label, key, value) => {
  open(route); const pane = await screen.findByRole('region', { name: 'Inbox report' }); const before = pane.textContent;
  fireEvent.click(within(pane).getByRole('button', { name: label })); expect(pickBackend().prefs.get(key, !value)).toBe(value); expect(pane.textContent).toBe(before);
 });
-it('surfaces secondary preference failures explicitly', async () => { open('#/inbox'); await screen.findByRole('button', { name: 'Decline' }); vi.spyOn(pickBackend().prefs, 'set').mockImplementation(() => { throw new Error('Preference write failed.'); }); fireEvent.click(screen.getByRole('button', { name: 'Decline' })); expect(await screen.findByRole('alert')).toHaveTextContent('Preference write failed.'); });
+it('records a decline through the backend without creating a preference', async () => {
+ const decline=vi.spyOn(pickBackend(),'decline');open('#/inbox');fireEvent.click(await screen.findByRole('button',{name:'Decline'}));
+ await waitFor(()=>expect(decline).toHaveBeenCalledWith({ref:'terum/team-skills/secret-scan'}));
+ expect(pickBackend().prefs.get('declined:secret-scan',false)).toBe(false);
+});
+it('surfaces failed decline results explicitly', async () => { open('#/inbox'); await screen.findByRole('button', { name: 'Decline' }); vi.spyOn(pickBackend(), 'decline').mockImplementation(() => createRun(async()=>({ok:false,error:'Decline write failed.'}))); fireEvent.click(screen.getByRole('button', { name: 'Decline' })); expect(await screen.findByRole('alert')).toHaveTextContent('Decline write failed.'); });
 
 it('uses only status-supplied sidebar counts on the empty scenario', async () => {
   const source = pickBackend();
