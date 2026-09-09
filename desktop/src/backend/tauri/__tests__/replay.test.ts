@@ -6,10 +6,14 @@ import { createTauriBackend, read } from '../index';
 import { cliRun } from '../run';
 import { fakeBridge, STATE } from './fake-bridge';
 
-const directory = resolve('../.planning/codex-runs/m7-S7f/frames');
+const directory = resolve('../.planning/codex-runs/m7-S7g/frames');
 const s7dDirectory = resolve('../.planning/codex-runs/m7-S7d/frames');
 function recorded(name: string) {
   return readFileSync(resolve(name === 'usage-error' || name === 'decline' ? s7dDirectory : directory, name + '.jsonl'), 'utf8').trim().split('\n');
+}
+// S7f's recording predates the S7k status payload (no ledger, identity or tools): the older schema the served surface must refuse.
+function olderStatus() {
+  return readFileSync(resolve('../.planning/codex-runs/m7-S7f/frames/status.jsonl'), 'utf8').trim().split('\n');
 }
 function replay(lines: string[]) {
   return fakeBridge((_args, emit) => {
@@ -19,7 +23,7 @@ function replay(lines: string[]) {
 const status = z.object({ version: z.string(), teams: z.array(z.object({ team: z.string() }).passthrough()) }).passthrough();
 
 it('replays older status through the generic read driver but rejects it as an incomplete served schema', async () => {
-  const f = replay(recorded('status'));
+  const f = replay(olderStatus());
   const result = await read(cliRun(f.bridge, Promise.resolve(STATE), ['status'], { map: value => status.parse(value) }));
   expect(result.ok).toBe(true);
   expect(result.value?.teams.map(team => team.team)).toEqual(['acme']);
@@ -78,6 +82,14 @@ it('replays the rebuilt fixture through Library, project and installed scopes an
   expect(member?.value).toMatchObject({member:{handle:'mira',declined:[]},projects:[{name:'terum'}]});
 });
 
+it('replays S7g local frames through settings: the real placement path, name, 12-character version and drawn state',async()=>{
+  const result=await createTauriBackend(inventoryReplay().bridge).settings();
+  const frame=recorded('ls-local').map(line=>JSON.parse(line) as {t:string;value?:{local:{rows:{name:string;path:string;health:string;placement:{id:string;team:string;version:string}}[]}[]}}).find(frame=>frame.t==='result');
+  const row=frame?.value?.local.flatMap(section=>section.rows).find(row=>row.name==='deploy-check');
+  expect(row?.health).toBe('up-to-date');expect(row?.placement.team).toBe('acme');
+  expect(result).toMatchObject({ok:true,value:{PLACEMENTS:[[row?.path,'deploy-check','Global',row?.placement.version.slice(0,12),'—','up to date']],PLACEMENTS_N:1,PINNED_N:1}});
+  expect(result.value?.SHARED).toEqual([['22222222-2222-4222-8222-222222222222',expect.stringContaining('/skills/tdd'),'acme','—']]);
+});
 it.each([
   ['usage-error', false, "error: unknown option '-x'"],
   ['decline', true, 'Connect was declined.'],

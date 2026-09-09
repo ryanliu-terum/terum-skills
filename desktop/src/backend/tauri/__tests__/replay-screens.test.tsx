@@ -15,7 +15,7 @@ function open(route: string) {
   useUiStore.setState({ railOpen: true, overviewHidden: false });
   const f = fakeBridge((args, emit) => {
     const name = args[0] === 'ls' ? args.includes('--local') ? 'ls-local' : args[1] === 'project' ? 'ls-project-terum' : 'ls' : args[0] === 'validate' ? 'validate-deploy-check' : args[0]!;
-    const lines = readFileSync(resolve('../.planning/codex-runs/m7-S7f/frames', name + '.jsonl'), 'utf8').trim().split('\n');
+    const lines = readFileSync(resolve('../.planning/codex-runs/m7-S7g/frames', name + '.jsonl'), 'utf8').trim().split('\n');
     for (const line of lines) emit({ kind: 'stdout', line });
   });
   location.hash = route;
@@ -49,4 +49,13 @@ it('preserves the project route key when the displayed title is capitalized', as
   expect(await screen.findByText('1 of 3 skills')).toBeVisible();
   expect(screen.getByTestId('skill-card-tdd')).toBeVisible();
   expect(f.spawns.find(spawn => spawn.args[1] === 'project')?.args).toEqual(['ls', 'project', 'terum', '--team', 'acme']);
+});
+
+it('renders the real machine placement table from typed provenance, in the board\'s vocabulary',async()=>{
+  open('#/settings/machine');
+  const row=await screen.findByTestId('placement-row-0');
+  expect(row).toHaveTextContent('deploy-check');expect(row).toHaveTextContent('up to date');
+  expect(row).not.toHaveTextContent('tracking');expect(row).not.toHaveTextContent('In sync');
+  expect(screen.getByText(/1 placed · 1 global · 1 pinned/)).toBeVisible();
+  expect(screen.queryByRole('alert')).toBeNull();
 });
