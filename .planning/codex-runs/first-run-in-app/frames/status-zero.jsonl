@@ -1,0 +1,6 @@
+{"t":"hello","protocol":1,"version":"0.1.7","verbs":["login","setup","team create","team join","team remove","team leave","team workflow-update","invite","ls","status","publish","validate","eval","connect","install","uninstall-skill","uninstall","sync","search","update","app","profile","decline"],"features":{"memberRole":true,"favorites":false,"follow":false,"roles":false,"lastSeen":false,"installScope":false,"inviteScoping":false,"disablePerMachine":false,"projectMembers":false,"liftOnCards":false,"runEvalInApp":false,"perCase":false,"progress":false}}
+{"t":"print","level":"info","line":"terum-skills 0.1.7"}
+{"t":"print","level":"info","line":"No team is configured on this machine."}
+{"t":"print","level":"info","line":"  Create a team: npx -y terum-skills@latest setup"}
+{"t":"print","level":"info","line":"  Join a team:   npx -y terum-skills@latest setup <org>/<repo>"}
+{"t":"result","verb":"status","ok":true,"exitCode":0,"value":{"version":"0.1.7","teams":[],"ledger":{"placements":[],"approvals":[],"shared":[]},"identity":null,"tools":{"git":true,"gh":true}}}

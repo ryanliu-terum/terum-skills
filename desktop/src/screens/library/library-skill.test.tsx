@@ -36,3 +36,10 @@ it.each([
 ])('reaches the real board content at %s',async(route,text)=>{open(route);expect(await screen.findByText(text)).toBeInTheDocument();expect(screen.queryByText(/S1b builds this/)).toBeNull();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));});
 it('can reopen persisted collapsed overview and rail',async()=>{useUiStore.setState({overviewHidden:true});open('#/library/global');await screen.findByText('15 of 30 skills');fireEvent.click(screen.getByRole('button',{name:'Show overview'}));expect(await screen.findByText('Team installs')).toBeInTheDocument();cleanup();useUiStore.setState({railOpen:false});open('#/skill/deploy-check');await screen.findByRole('heading',{name:'deploy-check'});fireEvent.click(screen.getByRole('button',{name:'Open details rail'}));expect(await screen.findByText('Status')).toBeInTheDocument();});
 it('binds the inbox placeholder to the share selection and clears unknown ids',async()=>{const view=open('#/inbox');await waitFor(()=>expect(view.container.querySelector('[data-selected-id="share-secret-scan"]')).not.toBeNull());cleanup();const unknown=open('#/inbox/unknown');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(unknown.container.querySelector('[data-selected-id]')).toBeNull();});
+
+it('offers app setup on the additive no-team board',async()=>{
+ open('#/library/global?__mock=no-team');
+ expect(await screen.findByText('No team on this machine')).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Start setup'})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Copy terminal command'})).toBeInTheDocument();
+});

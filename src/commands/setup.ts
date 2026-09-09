@@ -78,8 +78,8 @@ function joinHandoff(): string[] {
   ];
 }
 
-function failed(error: unknown, role: SetupResult['role'], teamName: string, remote: string, steps: SetupResult['steps']): Result<SetupResult> {
-  return failure(error instanceof Error ? error.message : String(error), { role, team: teamName, remote, steps });
+function failed(error: unknown, role: SetupResult['role'], teamName: string, remote: string, steps: SetupResult['steps'], cancelled?: true): Result<SetupResult> {
+  return { ...failure(error instanceof Error ? error.message : String(error), { role, team: teamName, remote, steps }), ...(cancelled ? { cancelled } : {}) };
 }
 
 function resolvedHook(store: ConfigStore, home: string | undefined, partial: HookOptions | undefined): Required<HookOptions> {
@@ -108,7 +108,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       steps.app = 'skipped';
     } else {
       const wanted = args.app === true || (await store.read()).app?.choice === 'opted-in';
-      const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, target: args.target, offer: !wanted }, io);
+      const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, target: args.target, intent: 'setup', offer: !wanted }, io);
       if (opened.ok && (opened.value.action === 'launched' || opened.value.action === 'installed-and-launched')) {
         io.print(args.target === undefined ? 'Continuing in the app.' : `Continuing in the app. Join ${args.target} there.`);
         steps.app = 'done';
@@ -155,7 +155,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         steps.team = 'skipped';
       } else {
         const result = await verbs.team({ form: args.form, kind: 'create', offerHook: false, config: store, runner }, io);
-        if (!result.ok) return failed(result.error, role, teamName, remote, steps);
+        if (!result.ok) return failed(result.error, role, teamName, remote, steps, result.cancelled);
         teamName = result.value.team;
         remote = 'remote' in result.value ? result.value.remote : (await store.read()).teams[teamName]!.remote;
         steps.team = 'done';
@@ -169,7 +169,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         steps.team = 'skipped';
       } else {
         const result = await verbs.team({ form: args.form, kind: 'join', target: args.target!, offerHook: false, config: store, runner }, io);
-        if (!result.ok) return failed(result.error, role, teamName, remote, steps);
+        if (!result.ok) return failed(result.error, role, teamName, remote, steps, result.cancelled);
         teamName = result.value.team;
         remote = (await store.read()).teams[teamName]!.remote;
         steps.team = 'done';

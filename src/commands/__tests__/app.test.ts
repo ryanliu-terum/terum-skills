@@ -95,6 +95,7 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     const state = JSON.parse(await readFile(join(root, 'run', 'app.json'), 'utf8'));
     expect(state).toMatchObject({ schema: 1, node: '/opt/node/bin/node', entry: '/opt/lib/node_modules/terum-skills/dist/index.js', path: process.env.PATH ?? null, version: V });
     expect(state).not.toHaveProperty('target');
+    expect(state).not.toHaveProperty('intent');
     expect((await store.read()).app).toMatchObject({ choice: 'opted-in' });
     expect(await readdir(join(root, 'app'))).toEqual([V]);  // no staging directory left behind
     expect(io.lines.at(-1)).toBe(`Installed and opened Terum Skills ${V}.`);
@@ -107,11 +108,12 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     const root = await temporaryDirectory();
     const args = { config: createConfigStore(root), runner: fakeGhRelease(), exec: fakeExec().exec, version: V, evidence: mac, open: false };
     const path = 'C:\\Program Files\\node;C:\\git\\bin';
-    expect((await run({ ...args, target: 'acme/team', path }, new ScriptedPrompter())).ok).toBe(true);
-    expect(await readAppState(root)).toMatchObject({ target: 'acme/team', path });
+    expect((await run({ ...args, target: 'acme/team', intent: 'setup', path }, new ScriptedPrompter())).ok).toBe(true);
+    expect(await readAppState(root)).toMatchObject({ target: 'acme/team', intent: 'setup', path });
     expect((await run(args, new ScriptedPrompter())).ok).toBe(true);
     const plain = await readAppState(root);
     expect(plain).not.toHaveProperty('target');
+    expect(plain).not.toHaveProperty('intent');
     expect(plain?.path).toBe(process.env.PATH ?? null);
     expect((await run({ ...args, path: null }, new ScriptedPrompter())).ok).toBe(true);
     expect((await readAppState(root))?.path).toBeNull();

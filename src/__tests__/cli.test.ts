@@ -58,6 +58,12 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     ]);
   });
 
+  it.each([[['--app'],true],[['--no-app'],false],[[],undefined]] as const)('forwards setup desktop choice %j as %s',async(flags,app)=>{
+    const {program,calls}=harness();
+    await program.parseAsync(['setup',...flags],{from:'user'});
+    expect(calls).toStrictEqual([{verb:'setup',form:undefined,target:undefined,cwd:process.cwd(),app}]);
+  });
+
   it('passes an optional setup target through unchanged', async () => {
     const { program, calls } = harness();
     await program.parseAsync(['setup'], { from: 'user' });

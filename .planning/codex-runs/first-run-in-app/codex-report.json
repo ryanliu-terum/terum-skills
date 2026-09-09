@@ -1,0 +1,124 @@
+{
+  "status": "complete",
+  "summary": "Implemented §§1.1–1.4, 1.6, 2.1, 3.1–3.7, 4.1–4.3, 5.1–5.3, 6, 7, 8.1–8.2, 9, 10, 11 and 12: launch-context routing, queued requests, setup outcomes/retry/stop, Library fallback, adapter updates, amendments and replay tests. Root and desktop lint/typecheck and root build passed; both Vitest commands were blocked by sandbox permissions before executing tests.",
+  "filesChanged": [
+    {"path":"src/commands/app.ts","change":"modified","why":"§1.1: persist optional setup intent and clear it on plain launches."},
+    {"path":"src/commands/setup.ts","change":"modified","why":"§§1.2–1.3: forward setup intent and preserve delegated team cancellations."},
+    {"path":"src/cli.ts","change":"modified","why":"§1.4: register and forward --app/--no-app."},
+    {"path":"desktop/src-tauri/src/lib.rs","change":"modified","why":"§2.1: emit launch:reopen while retaining five commands."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"§§3, 5, 8: launch context, failure reasons, cancellation class and authentication state."},
+    {"path":"desktop/src/backend/Backend.ts","change":"modified","why":"§3.2: replace launchTarget with the launch-context seam."},
+    {"path":"desktop/src/backend/index.ts","change":"modified","why":"§§3.6–3.7: launch-context query and shared session exports."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"§§3.2, 7, 8.2: mock launch seam, no-team scenario and authentication state."},
+    {"path":"desktop/src/backend/mock/scenario.ts","change":"modified","why":"§7: recognize __mock=no-team."},
+    {"path":"desktop/src/backend/tauri/bridge.ts","change":"modified","why":"§3.1: declare intent and subscribe to launch:reopen."},
+    {"path":"desktop/src/backend/tauri/__tests__/fake-bridge.ts","change":"modified","why":"§3.1: provide launch-event subscription and firing support."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"§§3.3–3.5, 8: refresh launch state safely, classify inventory failures, invalidate settled writes and map identity/authentication."},
+    {"path":"desktop/src/backend/drive.ts","change":"modified","why":"§5.3: preserve typed prompt cancellation."},
+    {"path":"desktop/src/app/providers.tsx","change":"modified","why":"§§5.1–5.2: require explicit select choices and distinguish user cancellation."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"§8.2: show signed-in text only when authentication is known."},
+    {"path":"desktop/src/backend/setup-session.ts","change":"modified","why":"§3.7: request-keyed attempts, retry, stop, outcomes and consumption."},
+    {"path":"desktop/src/app/launch-decision.ts","change":"added","why":"§4.1: share one launch-routing decision."},
+    {"path":"desktop/src/app/LaunchCoordinator.tsx","change":"added","why":"§§4.2–4.3: coordinate startup, reopen/focus refreshes, deduplication and queued requests."},
+    {"path":"desktop/src/app/App.tsx","change":"modified","why":"§4: mount the coordinator across routes."},
+    {"path":"desktop/src/app/routes.tsx","change":"modified","why":"§4.1: use the shared decision and conditional status readiness."},
+    {"path":"desktop/src/screens/onboarding/OnboardingScreen.tsx","change":"modified","why":"§§4, 7, 9: shared Boot eligibility, keyed sessions and explicit manual starts."},
+    {"path":"desktop/src/screens/onboarding/SetupBoot.tsx","change":"modified","why":"§6: outcome-specific content/actions and five-line join handoff."},
+    {"path":"desktop/src/screens/library/LibraryScreen.tsx","change":"modified","why":"§7: no-team board with app setup and terminal-copy actions."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"§11: re-anchor the null launch assertion to launchContext."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"§11: cover legacy contexts, refreshed environments, concurrent reads and launch events."},
+    {"path":"desktop/src/screens/onboarding/setup-driver.test.tsx","change":"modified","why":"§11: cover routing, explicit selection, handoff, cancellation, retry, stop and manual starts."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"§11: cover inventory reasons, footer fallback and failed setup/team invalidation."},
+    {"path":"src/commands/__tests__/app.test.ts","change":"modified","why":"§11: assert setup-intent round-trip and plain-launch clearing."},
+    {"path":"src/commands/__tests__/setup.test.ts","change":"modified","why":"§11: assert handoff intent and delegated cancellation preservation."},
+    {"path":"src/__tests__/cli.test.ts","change":"modified","why":"§11: assert true/false/undefined desktop-choice forwarding."},
+    {"path":"desktop/src/screens/library/library-skill.test.tsx","change":"modified","why":"§11: add no-team coverage while preserving existing error-board tests."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","change":"modified","why":"§11: assert unknown authentication omits signed-in text."},
+    {"path":"desktop/src/app/launch-coordinator.test.tsx","change":"added","why":"§11: cover reopen delivery, duplicates, consumption and queued handover."},
+    {"path":"desktop/src/backend/tauri/__tests__/setup-replay.test.tsx","change":"modified","why":"§12: append create-failure, join-handoff and resume recordings without changing existing replays."},
+    {"path":".planning/specs/m7-S7r.md","change":"modified","why":"§10: replace CP-21 with the amended first-run contract."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"§§1.6, 10: amend desktop launch-state fields and lifecycle."},
+    {"path":".planning/specs/m7-S7ad.md","change":"modified","why":"§10: amend AD-19 launch-context and memoization contract."},
+    {"path":".planning/decisions/2026-09-08-m7-takeover-decision-walk.md","change":"modified","why":"§10: record Ryan’s first-run rulings and D-BM-3 rider."}
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop lint exited 0; no reported errors or warnings.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop typecheck exited 0 with no diagnostics. Root npm run build also exited 0.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": false,
+      "output": "0 tests executed; both Vitest commands failed during configuration loading. Root sandbox failure: Error: EPERM: operation not permitted, open '/Users/ryanliu/Documents/Terum/skill-management-software-wt-first-run/node_modules/.vite-temp/vitest.config.ts.timestamp-1788928548132-a78745d6cf959.mjs'. Desktop sandbox failure: Error: EPERM: operation not permitted, open '/Users/ryanliu/Documents/Terum/skill-management-software-wt-first-run/desktop/node_modules/.vite-temp/vitest.config.ts.timestamp-1788928282064-95d9ba9f1cc078.mjs'.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [
+    {
+      "question": "The §3.6 query example inherits refetchOnMount:'always', allowing automatic reads to bypass queued launch delivery.",
+      "specSection": "§§3.6, 4.3",
+      "conservativeChoice": "Disabled automatic mount/focus refetch for launch context; the coordinator owns subsequent refresh publication."
+    },
+    {
+      "question": "How should multiple distinct requests arriving during one wizard be queued?",
+      "specSection": "§4.3",
+      "conservativeChoice": "Preserved observed requests in arrival order, without comparing timestamps or replacing the active wizard."
+    },
+    {
+      "question": "What should happen when a reopen/focus refresh cannot read app.json?",
+      "specSection": "§4.2",
+      "conservativeChoice": "Retained the last usable routing context and allowed a later launch/focus event to retry, without polling."
+    },
+    {
+      "question": "How should the create-fork replay advance its recorded stdin-ended tail while the Team name dialog is awaiting input?",
+      "specSection": "§12(a)",
+      "conservativeChoice": "Blank Continue advances the next recorded segment; assertions require the recorded ordinary failure, Retry and no consumption, rather than typed UI cancellation."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "Windows second-launch delivery remains a separate requirement.",
+      "why": "§2.3 explicitly defers it; Library Start setup provides the fallback."
+    },
+    {
+      "what": "Neither Vitest suite could execute.",
+      "why": "Sandbox EPERM on symlinked node_modules/.vite-temp; no configuration or dependency workaround was attempted."
+    },
+    {
+      "what": "§1.5, cargo check, Playwright fidelity/routes and the running-app Reopen check were not performed.",
+      "why": "Explicitly excluded from this implementation run and assigned to the orchestrator or Ryan."
+    }
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Native imports remain behind the backend seam; Reopen is an event and lib.rs retains exactly five commands."},
+    {"number":2,"howSatisfied":"Real onboarding remains unserved; mock authentication preserves existing text and unknown real authentication makes no signed-in claim."},
+    {"number":3,"howSatisfied":"Generated fixtures and tokens were not edited."},
+    {"number":4,"howSatisfied":"No e2e files, fidelity tolerances, snapshots or oracle files were edited."},
+    {"number":5,"howSatisfied":"Reused existing UI primitives and preserved mock settings copy; no stylesheet changes."},
+    {"number":7,"howSatisfied":"Added regression/replay coverage and explicitly re-anchored obsolete launch assertions; existing target replays and Library error tests remain."},
+    {"number":8,"howSatisfied":"Ran all requested sandbox gates, reported failures honestly, read back edits and used no git, network or installs."}
+  ],
+  "testsModified": [
+    {"path":"desktop/src/backend/tauri/__tests__/fake-bridge.ts","whatChanged":"Added launch-event subscription and firing support.","justification":"§§3.1, 11 require the expanded fake seam."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","whatChanged":"Renamed the launch API assertion.","justification":"§11 requires launchTarget → launchContext re-anchoring."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","whatChanged":"Re-anchored launch assertions, corrected legacy-context expectation and added refresh/event tests.","justification":"§11 explicitly changes the legacy-state contract."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Updated the Bridge helper, added ambiguity reason and new adapter assertions.","justification":"§11 requires structured reasons, identity mapping and settlement invalidation."},
+    {"path":"desktop/src/screens/onboarding/setup-driver.test.tsx","whatChanged":"Re-anchored launch mocks, replaced obsolete zero-team behavior while retaining failed-status coverage, and added setup lifecycle tests.","justification":"§11 explicitly requires the routing change and outcome coverage."},
+    {"path":"desktop/src/backend/tauri/__tests__/setup-replay.test.tsx","whatChanged":"Appended three first-run replay tests and their helper; existing tests unchanged.","justification":"§12 requires replaying the supplied recordings."},
+    {"path":"desktop/src/screens/library/library-skill.test.tsx","whatChanged":"Appended no-team board coverage.","justification":"§11; existing error-board assertions unchanged."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","whatChanged":"Appended unknown-authentication coverage.","justification":"§11 requires omission of signed-in text."},
+    {"path":"src/commands/__tests__/app.test.ts","whatChanged":"Added intent round-trip and clearing assertions.","justification":"§11 requires the new launch-state field contract."},
+    {"path":"src/commands/__tests__/setup.test.ts","whatChanged":"Added handoff-intent assertions and delegated-cancellation cases.","justification":"§11 requires §§1.2–1.3 coverage."},
+    {"path":"src/__tests__/cli.test.ts","whatChanged":"Added --app, --no-app and absent-option forwarding cases.","justification":"§11 requires Commander option coverage."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The new runtime queueing and replay tests will pass outside the sandbox; both Vitest suites were blocked before execution."
+}

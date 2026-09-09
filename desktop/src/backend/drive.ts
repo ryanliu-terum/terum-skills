@@ -1,4 +1,5 @@
 import type { Frame, PromptQuestion, Result, Run } from './types';
+import { PromptCancelledError } from './types';
 import { scriptedPrompter } from './prompter';
 /** Consume replayable frames and answer every prompt before waiting for completion. */
 export async function driveRun<T>(run:Run<T>,answers:Record<string,string|boolean>,onUnexpected:(question:PromptQuestion)=>Promise<string|boolean>,onPrint?:(line:string)=>void,onProgress?:(frame:Extract<Frame,{t:'progress'}>)=>void):Promise<Result<T>>{
@@ -13,5 +14,5 @@ export async function driveRun<T>(run:Run<T>,answers:Record<string,string|boolea
    }
   }
   return await run.done;
- }catch(error){await run.cancel();return {ok:false,error:error instanceof Error?error.message:'Operation failed.'};}
+ }catch(error){await run.cancel();return error instanceof PromptCancelledError ? {ok:false,error:'Setup was cancelled.',cancelled:true} : {ok:false,error:error instanceof Error?error.message:'Operation failed.'};}
 }

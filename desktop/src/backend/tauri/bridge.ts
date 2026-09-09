@@ -12,7 +12,7 @@ export type LineEvent =
   | { kind: 'error'; message: string };
 
 /** `~/.terum/skills/run/app.json`, written by `terum-skills app` on every launch (decision walk D1). */
-export const appStateSchema = z.object({ schema: z.literal(1), node: z.string().min(1), entry: z.string().min(1), path: z.string().nullable().optional(), version: z.string().min(1), writtenAt: z.string(), target: z.string().optional() });
+export const appStateSchema = z.object({ schema: z.literal(1), node: z.string().min(1), entry: z.string().min(1), path: z.string().nullable().optional(), version: z.string().min(1), writtenAt: z.string(), target: z.string().optional(), intent: z.literal('setup').optional() });
 export type AppState = z.infer<typeof appStateSchema>;
 
 /** Everything the adapter needs from the shell, behind an interface so the adapter is testable without Tauri. */
@@ -20,6 +20,7 @@ export interface Bridge {
   spawn(id: string, state: AppState, args: readonly string[], cwd: string | undefined, onEvent: (event: LineEvent) => void): Promise<() => void>;
   write(id: string, line: string): Promise<void>;
   kill(id: string): Promise<void>;
+  onLaunchRequest(listener: () => void): Promise<() => void>;
   readAppState(): Promise<AppState | null>;
   hostPlatform(): Promise<string>;
   homeDirectory(): Promise<string>;
@@ -42,6 +43,7 @@ export function tauriBridge(): Bridge {
     },
     write: (id, line) => invoke('cli_write', { id, line }),
     kill: (id) => invoke('cli_kill', { id }),
+    onLaunchRequest: listener => listen('launch:reopen', listener),
     async readAppState() {
       const text = await invoke<string | null>('read_app_state');
       if (text === null) return null;

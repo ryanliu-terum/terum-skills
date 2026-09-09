@@ -57,7 +57,7 @@ it('returns isolated Settings DTO additions while preserving drawn fixture const
  const b=createMockBackend();const settings=await b.settings();const onboarding=await b.onboarding();
  expect(settings.ok).toBe(true);expect(onboarding.ok).toBe(true);
  if(!settings.ok||!onboarding.ok)throw new Error('Expected fixture reads');
- const additions={MACHINE:expectedMachine,ME:expectedMe,TEAMS:expectedTeams,TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null};
+ const additions={AGENT_CLI_AUTH:'signed-in',MACHINE:expectedMachine,ME:expectedMe,TEAMS:expectedTeams,TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null};
  for(const [key,value] of Object.entries(settings.value))expect(value).toEqual(Object.hasOwn(additions,key)?Reflect.get(additions,key):Reflect.get(design,key));
  for(const key of ['ONBOARD_STEPS','ONBOARD_BASICS','GLOBAL_SET','BOOT_STEPS','ONBOARD_LATER','ONBOARD_COMMUNITY','ONBOARD_FETCH_ERROR','WELCOME_LINES','BASICS_COPY','BASICS_HINT','THEME_OPTIONS','LIBRARY_OVERVIEW','INVITEE','TEAM_REPO','INVITE_TIP','JOIN_BLOCK_NOTE'])expect(Reflect.get(onboarding.value,key)).toEqual(Reflect.get(design,key));
  expect(onboarding.value.skill.name).toBe(design.SKILLS[0]?.name);expect(onboarding.value.summary?.lift).toBe(44);expect(onboarding.value.arm).toEqual(design.DETAIL.receipt?.arm);expect(onboarding.value.rosterInitials).toEqual(design.ROSTER.map(q=>q.initials));expect(onboarding.value.bootRows).toHaveLength(5);expect(onboarding.value.failedBootRows[1]?.[0]).toBe('failed');
@@ -112,4 +112,4 @@ it('marks a mock connect decline on both the result and the terminal frame',asyn
  const frames=[];for await(const frame of run.frames)frames.push(frame);
  expect(frames.at(-1)).toEqual({t:'result',ok:false,error:'Connect was declined.',declined:true});
 });
-it('has no launch target in the mock',async()=>{expect(await createMockBackend().launchTarget()).toBeNull();});
+it('has no launch target in the mock',async()=>{expect(await createMockBackend().launchContext()).toBeNull();});
