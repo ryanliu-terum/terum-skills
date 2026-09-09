@@ -6,11 +6,11 @@ import { describe, expect, it } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
 import { packageVersion } from '../package.js';
-import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText } from '../teamRepo.js';
+import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText, withCloneLock } from '../teamRepo.js';
 import { createConfigStore } from '../config.js';
 import { run as connect } from '../../commands/connect.js';
 import { ScriptedPrompter } from './fixtures.js';
-import { bareTeam, cloneWithIdentity, mappedRunner, git, originSha, person, pushFromSeed, temporaryDirectory, wrapRunner } from './fixtures.js';
+import { bareTeam, cloneWithIdentity, holdCloneLock, mappedRunner, git, originSha, person, pushFromSeed, temporaryDirectory, wrapRunner } from './fixtures.js';
 
 const exists = (path: string) => access(path).then(() => true, () => false);
 const personJson = (handle: string) => `${JSON.stringify(person(handle))}\n`;
@@ -392,6 +392,24 @@ describe('safeWrite (§6.0)', () => {
     expect(await originSha(fixture.bare)).toBe(before);
     expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe((await git(['rev-parse', 'origin/main'], clone)).trim());
     // The next write resets the clone itself and lands.
+    expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' })).toEqual({ changed: true, pushedTo: 'main' });
+  });
+
+  it('contention at acquisition is classified into CloneBusy for safeWrite and withCloneLock alike, never proper-lockfile\'s raw ELOCKED', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const release = await holdCloneLock(clone);
+    try {
+      // Both contenders pay the full retry backoff; started together so the waits overlap.
+      const write = openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' }).then(() => 'landed', (error: unknown) => error);
+      const held = withCloneLock(clone, async () => 'ran', { label: 'team' }).then((value) => value, (error: unknown) => error);
+      const [writeError, heldError] = await Promise.all([write, held]);
+      expect(writeError).toBeInstanceOf(CloneBusy);
+      expect((writeError as Error).message).toBe(`Another terum-skills operation holds the write lock on ${clone}; retry when it finishes.`);
+      expect(heldError).toBeInstanceOf(CloneBusy);
+      expect((heldError as Error).message).toBe('Another terum-skills operation holds the write lock on team; retry when it finishes.');
+    } finally { await release(); }
+    // Once the lock is free the same write lands.
     expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' })).toEqual({ changed: true, pushedTo: 'main' });
   });
 
