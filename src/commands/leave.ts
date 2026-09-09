@@ -81,7 +81,8 @@ export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Pr
       if (shared === undefined) { remaining.push([path, entry]); continue; }
       await store.update((fresh) => { delete fresh.placements[path]; });
       io.print(`${path} is also the authoring source of ${basename(shared)}; left in place.`);
-      kept.push(path); removedPaths.push(path);
+      // Dropped from the ledger above, but the folder stays: it is kept, never counted as removed.
+      kept.push(path);
     }
     removedPaths.push(...await removePlacements(store, remaining, io));
     const clone = store.teamClone(name);

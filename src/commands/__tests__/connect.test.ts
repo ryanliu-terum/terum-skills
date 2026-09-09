@@ -24,6 +24,22 @@ describe('connect (§5.3)', () => {
     expect(Object.keys((await store.read()).shared)).toHaveLength(1);
   });
 
+  it('direct-path connect keeps the pushed-but-untracked recovery advice when the ledger write fails', async () => {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const source = join(fixture.root, 'sample'); await mkdir(source);
+    await writeFile(join(source, 'SKILL.md'), '---\nname: sample\ndescription: x\nmetadata:\n  terum-category: testing\n---\n');
+    // The only update through this wrapped store is connect's own ledger write, after the push landed.
+    const config = { ...store, update: async () => { throw new Error('ledger unavailable'); } };
+    const result = await run({ path: source, team: 'team', config }, new ScriptedPrompter([], [true]));
+    const bytes = await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare);
+    const id = /id: ([0-9a-f-]{36})/.exec(bytes)![1]!;
+    expect(result).toMatchObject({ ok: false, error: `Stopped: ledger unavailable. sample was pushed to team team as ${id} but is not tracked on this machine; run \`npx -y terum-skills@latest sync\` and, if it is still not listed by \`ls --local\`, report this — the local ledger entry is missing.` });
+    expect((await store.read()).shared).toEqual({});
+  });
+
   it('shares an off-the-shelf SKILL.md with no metadata block: the tool generates all four fields, shows the category default before the y/N, and the repository copy parses', async () => {
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
@@ -249,6 +265,15 @@ describe('connect (§5.3)', () => {
     expect((await run({ keepSource: id, config: store }, new ScriptedPrompter())).ok).toBe(true);
     expect(await sync({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { deferred: [] } });
     await expect(access(join(store.root, 'run', 'team.stamp'))).resolves.toBeUndefined();
+  });
+
+  it('refuses --keep-source/--keep-repo under a --team the skill is not tracked in, and honors the matching team', async () => {
+    const { store } = await sharedFixture();
+    const id = Object.keys((await store.read()).shared)[0]!;
+    expect(await run({ keepRepo: id, team: 'other', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `Connected skill ${id} is tracked in team team, not other; rerun with --team team or without --team.` });
+    expect(await run({ keepSource: id, team: 'other', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('is tracked in team team, not other') });
+    // The matching override behaves exactly like no override.
+    expect((await run({ keepSource: id, team: 'team', config: store }, new ScriptedPrompter())).ok).toBe(true);
   });
 
   it('treats a missing baseline as divergence without changing either copy or restoring the baseline', async () => {

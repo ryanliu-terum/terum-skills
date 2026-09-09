@@ -68,6 +68,9 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
     const person = await readPerson(store.teamClone(team), handle);
     const installed = person.installed.filter((entry) => entry.id === record.id);
     const targets = (await ledgerScopes(store, team, record.id, installed.map((entry) => entry.scope))).map((scope) => ({ id: record.id, scope }));
+    // A real team skill that was never installed here resolves to no targets; confirmAndRemove
+    // would return an empty success without asking, so say it here instead of exiting 0 in silence.
+    if (!targets.length) { io.print(`${record.id.slice(0, 8)} is not placed on this machine.`); return success([]); }
     return await confirmAndRemove({ team, targets, from: args.from, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io, (preview) => ({ question: `Remove ${record.name}?`, detail: preview.lines }));
   } catch (error) {
     if (error instanceof UninstallInterruptedError) return failure(error.message, error.results);

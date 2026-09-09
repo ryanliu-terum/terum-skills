@@ -43,6 +43,12 @@ describe('execute — the bin contract (§3)', () => {
     expect(quiet.lines).toEqual([]);
   });
 
+  it('counts a skill deferred twice in one run (pending replay, then the placement loop) once', async () => {
+    const dup = sink();
+    await dup.execute(async () => success({ placed: 0, deferred: ['sample', 'sample'], notices: [], changed: false, hook: true }));
+    expect(dup.lines).toEqual(['1 skills need review — run `npx -y terum-skills@latest sync`']);
+  });
+
   it('keeps an unreachable sync failure after hook notices and before the release tail', async () => {
     const lines: string[] = []; const codes: number[] = [];
     const execute = createExecute({ io: new ScriptedPrompter(), stderr: (line) => lines.push(line), setExitCode: (code) => codes.push(code), afterVerb: async () => { lines.push('notice'); } });

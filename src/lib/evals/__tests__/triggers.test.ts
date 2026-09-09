@@ -59,4 +59,19 @@ describe('trigger scoring (§7.2, port of triggers.py)', () => {
     const agent = fakeAgent({ 'x': new TypeError('bug') });
     await expect(runTriggerEvals(agent, { skillName: 's', catalog: '', spec: { shouldTrigger: ['x'], shouldNotTrigger: [] } })).rejects.toThrow(TypeError);
   });
+
+  it("a catalog or prompt containing $' and $& lands verbatim in the selection prompt", async () => {
+    const catalog = "- s: wraps bash -c $'echo hi' and matches $& literally";
+    const userPrompt = 'run $` with $$ please';
+    const prompts: string[] = [];
+    const agent: AgentApi = {
+      runAgent: () => { throw new Error('not used'); },
+      askJson: (prompt) => { prompts.push(prompt); return Promise.resolve({ selected: [] }); },
+    };
+    await runTriggerEvals(agent, { skillName: 's', catalog, spec: { shouldTrigger: [userPrompt], shouldNotTrigger: [] } });
+    expect(prompts[0]).toContain(catalog); // string-form replace would splice the template at `$'`
+    expect(prompts[0]).toContain(userPrompt); // and leave `{prompt}` unfilled inside the spliced copy
+    expect(prompts[0]).not.toContain('{catalog}');
+    expect(prompts[0]).not.toContain('{prompt}');
+  });
 });

@@ -265,6 +265,19 @@ describe('uninstall (§6 pending)', () => {
     expect(JSON.parse(await readFile(join(cloneA, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
   });
 
+  it('says a never-installed team skill is not placed on this machine instead of exiting silently', async () => {
+    const fixture = await bareTeam();
+    const id = 'efefefef-efef-4fef-8fef-efefefefefef';
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    const home = join(fixture.root, 'home');
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'team/sample', config: store, home }, io)).toMatchObject({ ok: true, value: [] });
+    expect(io.lines).toContain(`${id.slice(0, 8)} is not placed on this machine.`);
+  });
+
   it('does not turn an incidental team.json description mention into a durable decline', async () => {
     const fixture = await bareTeam(); const id = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: ${id}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
