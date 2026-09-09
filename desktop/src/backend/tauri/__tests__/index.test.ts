@@ -5,6 +5,7 @@ import type { Bridge } from '../bridge';
 import type { Backend } from '../../Backend';
 import { createTauriBackend } from '../index';
 import { fakeBridge } from './fake-bridge';
+import { installedReplay } from './installed-fixture';
 
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
 
@@ -98,7 +99,7 @@ it.each([true, false])('maps every search field including its real description (
 it('serves status, settings, library, skill, update, roster and catalog while the other three surfaces stay typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true });
+  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true });
   for (const result of await Promise.all([b.onboarding(), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }
@@ -145,6 +146,7 @@ describe('read-only calls preserve spawn rejection', () => {
     const spawn = vi.fn<Bridge['spawn']>().mockRejectedValue(error);
     const bridge: Bridge = {
       spawn,
+      onLaunchRequest: async () => () => {},
       write: vi.fn<Bridge['write']>(),
       kill: vi.fn<Bridge['kill']>(),
       readAppState: async () => ({ schema: 1, node: '/usr/local/bin/node', entry: '/cli/index.js', version: '0.1.6', writtenAt: '2026-09-08T00:00:00Z' }),
@@ -237,7 +239,7 @@ function inventoryBridge(overrides: { row?: Partial<typeof lsRow>; validation?: 
 }
 it.each(['Global','ops','installed'])('maps the %s library from real counts and registry, with scoped argv',async scope=>{
   const f=inventoryBridge();const result=await createTauriBackend(f.bridge).library({scope,team:'acme'});
-  expect(result).toMatchObject({ok:true,value:{title:'1 of 3 skills',projects:lsValue.projects,skills:[{name:'a',desc:'Live description',project:'Global',installs:'1 installs',installsN:1,installed:true,updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}],overview:{skills:'1',installs:'1',evaluated:'—',attention:'—',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:'1 endorsed to Global',installs_note:'across every readable people file · 1 active teammate'},provenance:null}});
+  expect(result).toMatchObject({ok:true,value:{title:'1 skills · 1 in ~/.claude/skills',projects:lsValue.projects,skills:[{name:'a',desc:'Live description',project:'Global',installs:'1 installs',installsN:1,installed:true,updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}],overview:{skills:'1',installs:'1',evaluated:'—',attention:'—',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:scope==='ops'?'1 also on Global':'1 endorsed to Global',installs_note:'across every readable people file · 1 active teammate'},provenance:null}});
   expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls',...(scope==='ops'?['project','ops']:[]),'--team','acme'],['ls','--local']]);
 });
 it('maps the detail body, grants and all install records without fabricating missing values',async()=>{
@@ -252,12 +254,12 @@ it('retains null grants/body/date and marks unresolved skills broken, with a fai
 it('does not infer installation from an untracked or other-team same-name folder',async()=>{
   for(const state of ['untracked locally','placement recorded from other @abc','connected source for acme; endorsed (global)']){
     const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state,tracked:state!=='untracked locally',shared:state.startsWith('connected')?[{id:'id-a',team:'acme'}]:[],placement:state.includes('other')?{id:'id-a',team:'other',version:null}:null,health:'unknown'}],notOffered:[],problems:[]}]}});
-    expect(await createTauriBackend(f.bridge).library({scope:'installed',team:'acme'})).toMatchObject({ok:true,value:{skills:[],title:'0 of 3 skills'}});
+    expect(await createTauriBackend(f.bridge).library({scope:'installed',team:'acme'})).toMatchObject({ok:true,value:{skills:[],title:'0 skills · 0 in ~/.claude/skills'}});
   }
 });
 it('refuses multi-team ambiguity before ls and discovers a single configured team without a prompt',async()=>{
   const f=inventoryBridge({teams:['one','two']});
-  expect(await createTauriBackend(f.bridge).library({scope:'Global'})).toEqual({ok:false,error:'Select a team explicitly to read its skills.'});
+  expect(await createTauriBackend(f.bridge).library({scope:'Global'})).toEqual({ok:false,error:'This machine is configured for teams one, two; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.',reason:'ambiguous-team'});
   expect(f.spawns.map(s=>s.args)).toEqual([['status']]);
   expect((await createTauriBackend(inventoryBridge().bridge).skill({ref:'a'})).ok).toBe(true);
 });
@@ -290,7 +292,7 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   expect(catalog.value.topRated).toEqual(['deploy-check', 'tdd', 'diagnose']);
   expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject({ installed: true, installsN: 2 });
   expect(catalog.value.skills.find(skill => skill.name === 'tdd')).toMatchObject({ installed: false, installsN: 1 });
-  expect(catalog.value.people[0]).toMatchObject({ handle: 'mira', role: 'Platform', projects: ['terum'], skills: ['deploy-check'], declined: [], onDisk: [1, 1], adoption: 2 });
+  expect(catalog.value.people[0]).toMatchObject({ handle: 'mira', role: 'Platform', projects: ['terum'], skills: ['deploy-check'], declined: [], installable: [], onDisk: [0, 0], adoption: 2 });
   expect(catalog.value.people.map(person => person.handle)).toEqual(['mira', 'ravi', 'seed']);
   expect(catalog.value.people.find(person => person.handle === 'seed')?.declined).toEqual(['33333333-3333-4333-8333-333333333333']);
   expect(catalog.value.categories).toEqual([['ops', 'tag', 1], ['debugging', 'tag', 1], ['engineering', 'tag', 1]]);
@@ -379,4 +381,148 @@ it('rejects undeclared local row keys and missing typed provenance',async()=>{
     const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'x',tracked:true,shared:[],placement:null,health:'unknown',...extra}],notOffered:[],problems:[]}]};
     expect((await createTauriBackend(inventoryBridge({local}).bridge).library({scope:'installed',team:'acme'})).ok).toBe(false);
   }
+});
+
+it('classifies successful zero-team inventory without spawning ls',async()=>{
+ const f=inventoryBridge({teams:[]});
+ expect(await createTauriBackend(f.bridge).library({scope:'Global'})).toEqual({ok:false,reason:'no-team',error:'No team is configured on this machine.'});
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status']]);
+});
+it.each(['octo',''])('uses GitHub login for the footer, falling back to the team handle (%s)',async github=>{
+ const f=statusReplay(false,(frame,verb)=>{
+  if(verb!=='status')return;
+  const value=frame.value as {identity:{github:string};teams:{handle:string}[]};
+  value.identity.github=github;value.teams[0]!.handle='mira';
+ });
+ const status=await createTauriBackend(f.bridge).status();
+ expect(status.value?.me).toMatchObject({handle:'mira',footerLabel:github||'mira'});
+});
+it.each(['setup','team'] as const)('invalidates every affected read model when %s fails',async verb=>{
+ const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:JSON.stringify({t:'result',verb,ok:false,exitCode:1,error:'Stopped after a partial write.'})}));
+ const b=createTauriBackend(f.bridge),notify=vi.fn();b.subscribe(notify);
+ await (verb==='setup'?b.setup({offerConnect:true}):b.team({kind:'create',name:'acme'})).done;
+ expect(notify.mock.calls).toEqual([['config'],['clone'],['placed']]);
+});
+
+// Installed-state replay fixtures deliberately cover presence separately from provenance.
+it.each(['on-disk-only','placed','placed-problem','project'])('derives installed identity from the %s replay', async mode => {
+ const backend=createTauriBackend(installedReplay(mode).bridge);
+ const result=await backend.library({scope:'installed'});
+ expect(result.ok).toBe(true);
+ const skill=result.value?.skills[0];
+ expect(skill).toMatchObject({name:'deploy-check',installed:true,placed:mode.startsWith('placed'),onDiskOnly:!mode.startsWith('placed')});
+ expect(skill?.paths[0]?.[1]).toBe(mode==='project'?'project':'global');
+ if(mode==='placed-problem')expect(skill).toMatchObject({flags:['broken'],flagText:{broken:'SKILL.md missing'}});
+ const detail=await backend.skill({ref:'deploy-check'});
+ expect(detail.value?.path).toBe(mode==='project'?'/work/project/.claude/skills/deploy-check':'/Users/teddy/.claude/skills/deploy-check');
+ expect(detail.value?.pathLabel).toBe(skill?.paths[0]?.[0]);
+});
+it('keeps local rows closed while accepting the three declared additive keys',async()=>{
+ expect((await createTauriBackend(installedReplay().bridge).library({scope:'installed'})).value?.skills[0]).toMatchObject({onDiskOnly:true});
+ const f=installedReplay('on-disk-only','none',frame=>{
+  if(frame.t==='result') (frame.value as {local:{rows:Record<string,unknown>[]}[]}).local[0]!.rows[0]!.surprise=true;
+ });
+ expect((await createTauriBackend(f.bridge).library({scope:'Global'})).ok).toBe(false);
+});
+it.each(['missing-id','old-cli'])('does not infer presence by name with %s',async mode=>{
+ const present=await createTauriBackend(installedReplay().bridge).library({scope:'installed'});
+ expect(present.value?.skills[0]).toMatchObject({onDiskOnly:true});
+ const f=installedReplay('on-disk-only','none',frame=>{
+  if(frame.t==='hello'&&mode==='old-cli')delete (frame.features as Record<string,unknown>).localIdentity;
+  if(frame.t==='result'&&mode==='missing-id')delete (frame.value as {local:{rows:Record<string,unknown>[]}[]}).local[0]!.rows[0]!.skillId;
+ });
+ expect((await createTauriBackend(f.bridge).library({scope:'installed'})).value?.skills).toEqual([]);
+});
+it('copies recorded member installs rather than authored skills',async()=>{
+ const none=await createTauriBackend(installedReplay('on-disk-only','none').bridge).catalog();
+ expect(none.value?.people[0]).toMatchObject({skills:['deploy-check'],installable:[],onDisk:[0,0]});
+ const installed=await createTauriBackend(installedReplay('on-disk-only','installed').bridge).catalog();
+ expect(installed.value?.people[0]).toMatchObject({skills:['deploy-check'],installable:['deploy-check','tdd'],onDisk:[1,2]});
+});
+it('retains every id occurrence while preferring a placed path and version over a connected source',async()=>{
+ const f=installedReplay('project','none',frame=>{
+  if(frame.t!=='result')return;
+  const local=(frame.value as {local:{rows:Record<string,unknown>[]}[]}).local;
+  const present=local[1]!.rows[0]!;
+  present.shared=[{id:present.skillId,team:'acme'}];present.connected=true;
+  local[0]!.rows=[{...present,path:'/Users/teddy/.claude/skills/relocated',name:'relocated',placed:true,tracked:true,shared:[],connected:false,placement:{id:present.skillId,team:'acme',version:'b'.repeat(40)},health:'up-to-date'}];
+ });
+ const detail=await createTauriBackend(f.bridge).skill({ref:'deploy-check'});
+ expect(detail.value).toMatchObject({installed:true,placed:true,onDiskOnly:false,path:'/Users/teddy/.claude/skills/relocated',version:'bbbbbbbbbbbb',connectedSources:['/work/project/.claude/skills/deploy-check'],pathLabel:'~/.claude/skills/relocated',paths:[['~/.claude/skills/relocated','global'],['/work/project/.claude/skills/deploy-check','project']]});
+});
+
+// Sidebar counts describe scanned rows, independently of the placement ledger.
+it.each(['identity','old-cli','missing-id','placed','placement'])('counts global scan rows with %s evidence and an empty ledger',async mode=>{
+ const f=installedReplay('on-disk-only','none',frame=>{
+  if(frame.t==='hello'&&mode==='old-cli')delete (frame.features as Record<string,unknown>).localIdentity;
+  if(frame.t==='result'){
+   const row=(frame.value as {local:{rows:Record<string,unknown>[]}[]}).local[0]!.rows[0]!;
+   if(mode!=='identity')delete row.skillId;
+   if(mode==='placed')row.placed=true;
+   if(mode==='placement')row.placement={id:'11111111-1111-4111-8111-111111111111',team:'acme',version:null};
+  }
+ },frame=>{
+  if(frame.t==='result')(frame.value as {ledger:{placements:unknown[]}}).ledger.placements=[];
+ });
+ const status=await createTauriBackend(f.bridge).status();
+ expect(status.ok).toBe(true);
+ expect(status.value?.ledger?.placements).toEqual([]);
+ expect(status.value?.counts).toEqual({Global:['identity','placed','placement'].includes(mode)?'1':'0'});
+});
+it.each(['failed','failed-with-value','unreadable'])('omits Global when the local scan is %s',async mode=>{
+ const f=installedReplay('on-disk-only','none',frame=>{
+  if(frame.t!=='result')return;
+  if(mode==='failed')Object.assign(frame,{ok:false,exitCode:1,error:'Scan failed.',value:undefined});
+  else if(mode==='failed-with-value')Object.assign(frame,{ok:false,exitCode:1,error:'Scan incomplete.'});
+  else frame.value={local:'unreadable'};
+ });
+ const status=await createTauriBackend(f.bridge).status();
+ expect(status.ok).toBe(false);
+ expect(status.value).toBeDefined();
+ expect(status.value?.counts).toEqual({});
+ expect(status.value?.counts).not.toHaveProperty('Global');
+});
+it('does not derive per-project sidebar counts from placements or project scan rows',async()=>{
+ const status=await createTauriBackend(installedReplay('project').bridge).status();
+ expect(status.ok).toBe(true);
+ expect(status.value?.counts).toEqual({Global:'0'});
+});
+it.each(['on-disk-only','project'])('includes only scanned roots and this library’s occurrence totals in the %s subtitle',async mode=>{
+ const f=installedReplay(mode,'none',frame=>{
+  if(frame.t!=='result'||mode!=='project')return;
+  const sections=(frame.value as {local:{rows:Record<string,unknown>[]}[]}).local;
+  const projectRow=sections[1]!.rows[0]!;
+  // Two occurrences of one library skill count once; unrelated IDs do not count.
+  sections[0]!.rows=[{...projectRow,path:'/Users/teddy/.claude/skills/deploy-check'},{...projectRow,path:'/Users/teddy/.claude/skills/duplicate'},{...projectRow,skillId:'99999999-9999-4999-8999-999999999999',path:'/Users/teddy/.claude/skills/other'}];
+ });
+ const library=await createTauriBackend(f.bridge).library({scope:'installed'});
+ expect(library.ok).toBe(true);
+ expect(library.value?.title).toBe('1 skills · 1 in ~/.claude/skills'+(mode==='project'?' · 1 in project':''));
+ expect(library.value?.scanned).toEqual(mode==='project'?['~/.claude/skills','/work/project']:['~/.claude/skills']);
+});
+it('abbreviates catalog card display paths',async()=>{
+ const catalog=await createTauriBackend(installedReplay().bridge).catalog();
+ expect(catalog.ok).toBe(true);
+ expect(catalog.value?.skills[0]?.paths).toEqual([['~/.claude/skills/deploy-check','global']]);
+});
+it.each([[[]],[['one','two']]])('refuses people inventory before ls for teams %j',async teams=>{
+ const f=peopleReplay((frame,name)=>{
+  if(name==='status'&&frame.t==='result'){
+   const value=frame.value as {teams:{team:string}[]};
+   value.teams=teams.map(team=>({...value.teams[0]!,team}));
+  }
+ });
+ expect(await createTauriBackend(f.bridge).roster()).toEqual(teams.length?{ok:false,error:'This machine is configured for teams one, two; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.',reason:'ambiguous-team'}:{ok:false,error:'No team is configured on this machine.',reason:'no-team'});
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status']]);
+});
+it('syncs with the bare CLI verb and leaves by the supplied team key',async()=>{
+ const f=replay(undefined,false),backend=createTauriBackend(f.bridge);
+ await backend.sync({}).done;await backend.team({kind:'leave',name:'acme-key'}).done;
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['sync'],['team','leave','--','acme-key']]);
+});
+it('streams diagnostics as a status run without a read-model projection',async()=>{
+ const f=replay(undefined,true,['CLI version','Team state']),run=createTauriBackend(f.bridge).diagnostics(),lines:string[]=[];
+ for await(const frame of run.frames)if(frame.t==='print')lines.push(frame.line);
+ expect(lines).toEqual(['CLI version','Team state']);expect(await run.done).toEqual({ok:true,value:undefined});
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status']]);
 });

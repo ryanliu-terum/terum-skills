@@ -5,7 +5,7 @@ import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { candidatesOf, localSkillRoots, localSkills } from '../lib/local-skills.js';
-import { assertNotInsideStateRoot, assertSkillDirectory, printable, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
+import { assertNotInsideStateRoot, assertSkillDirectory, inspectSkillSource, printable, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
@@ -14,7 +14,7 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
 import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
 import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedFields, skillRecords } from '../lib/skills.js';
-import { MutableTree, openTeamRepo, shellQuote, treeText } from '../lib/teamRepo.js';
+import { MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 import { assessHygiene, type HygieneAssessment, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 
 export interface ConnectArgs extends WithForm {
@@ -30,7 +30,7 @@ export interface ConnectArgs extends WithForm {
   config?: ConfigStore;
   runner?: Runner;
 }
-export interface ConnectResult { id: string; name: string; reconciled?: boolean; }
+export interface ConnectResult { id: string; name: string; reconciled?: boolean; adopted?: boolean; }
 export interface ReconcileOutcome { id: string; team: string; name: string; kind: 'pushed' | 'pulled' | 'renamed' | 'repaired' | 'unchanged' | 'deferred'; }
 
 export interface ConnectBatch { kind: 'batch'; shared: ConnectResult[]; declined: string[]; refused: { name: string; reason: string }[]; }
@@ -110,7 +110,7 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
               io.print(`Local candidates under ${printable(inventory.root)}:`);
               for (const candidate of candidatesOf(inventory, args.allowPrivileged)) io.print(`  ${printable(candidate.path)}`);
             }
-            throw new Error(`No skill selected. In an interactive terminal, run \`${printable(invocation(args.form, 'connect'))} --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
+            throw new Error(`No skill selected. In an interactive terminal, run \`${printable(invocation(args.form, 'connect'))}\`, or pass an explicit skill folder path.`);
           }
           qualify = new Set(candidates.filter((candidate) => candidates.some((other) => other.name === candidate.name && other.scope !== candidate.scope)).map((candidate) => candidate.name));
         }
@@ -184,6 +184,19 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
     await repo.safeWrite(() => undefined, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}` });
     const records = await skillRecords(clone, team);
     phase = 'validate'; recoverable = true;
+    const inspection = inspectSkillSource(raw);
+    const existing = inspection.ok && inspection.id ? records.find(record => record.id === inspection.id) : undefined;
+    if (existing) {
+      if (existing.name !== name || !inspectSkillSource(raw, name).ok) throw new Error(`This folder's id belongs to ${existing.name} in team ${team}; its name must match before connecting.`);
+      phase = 'consent'; recoverable = false;
+      if (!(await io.confirm(`This folder already carries the id of ${name} in team ${team}. Record it as your connected source on this machine? (y/N)`))) {
+        recoverable = true;
+        throw new CancelledError('Connect was declined.');
+      }
+      const baseline = await canonicalDigest(source);
+      await store.update(current => { current.shared[existing.id] = { source, team, baseline }; });
+      return { id: existing.id, name, reconciled: false, adopted: true };
+    }
     if (records.some((record) => record.name === name)) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
     recoverable = false;
     id = randomUUID(); // minted before safeWrite, never inside its re-applied mutation

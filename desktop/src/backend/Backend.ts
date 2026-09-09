@@ -1,4 +1,4 @@
-import type { IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, Scope, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, Scope, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   features(): Promise<Features>;
@@ -7,7 +7,9 @@ export interface Backend {
   revealPath(path: string): Promise<Result<void>>;
   capabilities(): Promise<Capabilities>;
   surfaces(): Promise<Surfaces>;
-  launchTarget(): Promise<{ target: string; writtenAt: string } | null>;
+  launchContext(): Promise<LaunchContext | null>;
+  refreshLaunch(): Promise<LaunchContext | null>;
+  onLaunchRequest(listener: () => void): Subscription;
   status(q?: undefined, options?: ReadOptions): Promise<Result<StatusResult>>;
   settings(q?: undefined, options?: ReadOptions): Promise<Result<Settings>>;
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;
@@ -33,6 +35,7 @@ export interface Backend {
   eval(args: EvalArgs): Run<EvalResult>;
   validate(args: ValidateArgs, options?: ReadOptions): Promise<Result<ValidateResult>>;
   update(q?: undefined, options?: ReadOptions): Promise<Result<UpdateAdvice>>;
+  diagnostics(): Run<void>;
   openInEditor(path: string): Promise<Result<void>>;
   copyToClipboard(text: string): Promise<Result<void>>;
   copyImage(png: Blob): Promise<Result<void>>;

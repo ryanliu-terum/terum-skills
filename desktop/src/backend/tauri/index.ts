@@ -29,7 +29,7 @@ const cliLogin = z.object({ updated: z.array(z.object({ key: z.string(), value: 
 const cliInstalled = z.array(z.object({ id: z.string(), team: z.string() }).passthrough());
 const cliUninstalled = z.array(z.object({ id: z.string(), team: z.string(), removed: z.number() }).passthrough());
 const cliMachine = z.object({ teams: z.array(z.string()) }).passthrough();
-const cliConnectResult = z.object({ id: z.string(), name: z.string(), reconciled: z.boolean().optional() }).passthrough();
+const cliConnectResult = z.object({ id: z.string(), name: z.string(), reconciled: z.boolean().optional(), adopted: z.boolean().optional() }).passthrough();
 const cliConnect = z.union([z.object({ kind: z.literal('batch'), shared: z.array(cliConnectResult), declined: z.array(z.string()), refused: z.array(z.object({ name: z.string(), reason: z.string() })) }).passthrough(), cliConnectResult]).optional();
 const cliPublish = z.object({ name: z.string(), branch: z.string().nullable(), prUrl: z.string().nullable(), changed: z.boolean().optional() }).passthrough();
 const cliSync = z.object({ placed: z.number(), deferred: z.array(z.string()) }).passthrough();
@@ -45,10 +45,10 @@ const cliLsSkill = z.object({ id: z.string(), name: z.string(), author: z.string
 const cliProject = z.object({ name: z.string(), skills: z.array(z.string()), remotes: z.array(z.string()), description: z.string().optional() }).catchall(z.unknown());
 // S7g: every `ls --local` row carries typed provenance and a read-only health; the prose `state` is never parsed.
 const cliLocalHealth = z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']);
-const cliLocalRow = z.object({ name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), shared: z.array(z.strictObject({ id: z.string(), team: z.string() })), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().length(40).nullable() }).nullable(), health: cliLocalHealth, problem: z.string().optional() }).strict();
+const cliLocalRow = z.object({ name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), shared: z.array(z.strictObject({ id: z.string(), team: z.string() })), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().length(40).nullable() }).nullable(), health: cliLocalHealth, problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional(), connected: z.boolean().optional() }).strict();
 const cliLs = z.object({
-  roster: z.array(z.object({ handle: z.string(), active: z.boolean(), ...memberMetadata })), skills: z.array(cliLsSkill), problems: z.array(z.object({ source: z.string(), message: z.string() })), projects: z.array(cliProject).optional(), member: z.object({ handle: z.string(), declined: z.array(z.string()), ...memberMetadata }).optional(),
-  local: z.array(z.object({ root: z.string(), scope: z.enum(['global', 'project']), repoRoot: z.string().optional(), rows: z.array(cliLocalRow), notOffered: z.array(z.object({ name: z.string(), path: z.string(), reason: z.string() })), problems: z.array(z.object({ path: z.string(), reason: z.string() })) })).optional(),
+  roster: z.array(z.object({ handle: z.string(), active: z.boolean(), ...memberMetadata })), skills: z.array(cliLsSkill), problems: z.array(z.object({ source: z.string(), message: z.string() })), projects: z.array(cliProject).optional(), member: z.object({ installed: z.array(z.object({ id: z.string(), scope: cliScope, since: z.string() })).optional(), handle: z.string(), declined: z.array(z.string()), ...memberMetadata }).optional(),
+  local: z.array(z.object({ root: z.string(), scope: z.enum(['global', 'project']), repoRoot: z.string().optional(), rows: z.array(cliLocalRow), notOffered: z.array(z.object({ skillId: z.string().nullable().optional(), name: z.string(), path: z.string(), reason: z.string() })), problems: z.array(z.object({ path: z.string(), reason: z.string() })) })).optional(),
 });
 const cliStatusTeams = z.object({ version: z.string().nullable(), teams: z.array(z.object({ team: z.string(), handle: z.string(), repository: z.string().nullable(), readable: z.boolean(), sharedSkills: z.number().nullable(), memberCount: z.number().nullable() })) });
 type Inventory = z.infer<typeof cliLs>;
@@ -56,20 +56,25 @@ type InventorySkill = z.infer<typeof cliLsSkill>;
 type InventoryTeam = z.infer<typeof cliStatusTeams>['teams'][number];
 
 // Join provenance by team and ID, including relocated or conflicting tracked folders.
-function placement(local: Inventory, team: string, id: string) {
-  return local.local?.flatMap(section => section.rows.map(row => ({ ...row, scope: section.scope }))).find(row => row.placement?.id === id && row.placement.team === team);
+function onDisk(local: Inventory, team: string, id: string, features: Pick<Features, 'localIdentity'>) {
+  return local.local?.flatMap(section => section.rows.map(row => ({ ...row, scope: section.scope, root: section.root, repoRoot: section.repoRoot }))).filter(row => (row.placement?.id === id && row.placement.team === team) || (features.localIdentity && row.skillId === id)) ?? [];
 }
-function inventoryCard(row: InventorySkill, local: Inventory, team: string): SkillCard {
-  return { name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} installs`, installsN: row.installs, installed: placement(local, team, row.id) !== undefined, desc: row.description, grants: row.grants?.split('\n') ?? null, normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, size: '—', tokensK: 0, wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: row.unresolved ? ['broken'] : [], flagText: {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };
+function inventoryCard(row: InventorySkill, local: Inventory, team: string, features: Pick<Features, 'localIdentity'>, home: string): SkillCard {
+  const rows = onDisk(local, team, row.id, features);
+  const placements = rows.filter(r => r.placement?.id === row.id && r.placement.team === team);
+  const placed = placements.length > 0, installed = rows.length > 0;
+  const problem = placements.find(r => r.problem !== undefined || r.health === 'unknown' || r.health === 'gone-from-repo');
+  return { name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} installs`, installsN: row.installs, installed, placed, onDiskOnly: installed && !placed, paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [r.repoRoot] : []), connectedSources: rows.filter(r => r.shared.length > 0).map(r => r.path), desc: row.description, grants: row.grants?.split('\n') ?? null, normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, size: '—', tokensK: 0, wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: problem || row.unresolved ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };
 }
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
-function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryTeam, validation: Result<ValidateResult>, inventory: Inventory): SkillDetail {
-  const card = inventoryCard(row, local, team.team), placed = placement(local, team.team, row.id);
+function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryTeam, validation: Result<ValidateResult>, inventory: Inventory, features: Pick<Features, 'localIdentity'>, home: string): SkillDetail {
+  const card = inventoryCard(row, local, team.team, features, home), rows = onDisk(local, team.team, row.id, features), placed = rows.find(r => r.placement?.id === row.id && r.placement.team === team.team);
+  const path = placed?.path ?? rows[0]?.path ?? `skills/${row.name}`;
   const name = row.author.replace(/\s*<[^>]*>$/, '');
   const installers = row.installedBy;
   return { ...card, team: team.team, installScopes: [], projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: null, skillRef: `${team.team}/${row.name}`, root: 'Global', desc_long: row.description, files: ['SKILL.md'], size_bytes: '—', version: placed?.placement?.version?.slice(0, 12) ?? '—', version_full: placed?.placement?.version ?? null, scope: placed?.scope === 'global' ? 'Global' : placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
     used_by: [...new Map(installers.map(person => [person.handle, initials(person.displayName)])).values()], users: installers.map(person => [person.handle, initials(person.displayName), `${person.scope.kind === 'global' ? 'Global' : person.scope.project} · since ${person.since}`]),
-    author: { name, handle: '', role: '', initials: initials(name) }, repo: team.repository ?? null, path: placed?.path ?? `skills/${row.name}`, grants_approved: '', receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: validation.value === undefined ? null : `Hygiene checks · ${validation.ok && validation.value.findings === 0 ? 'pass' : 'fail'} on connect`,
+    author: { name, handle: '', role: '', initials: initials(name) }, repo: team.repository ?? null, path, pathLabel: abbreviateHome(path, home), grants_approved: '', receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: validation.value === undefined ? null : `Hygiene checks · ${validation.ok && validation.value.findings === 0 ? 'pass' : 'fail'} on connect`,
     skillMd: { frontmatter: '', body: [], markdown: row.body ?? null }, evalEstimate: null, evalEstimateText: '', evalEstimateTip: '', evalCommand: `npx -y terum-skills@latest eval ${row.name}`, shareCommand: `npx -y terum-skills@latest install ${team.team}/${row.name}`, incumbentLift: null, reportNumbers: null, scoreFractions: { routesExpected: null, roi: null, quality: null }, method: '',
   };
 }
@@ -98,39 +103,34 @@ const cliStatus = z.object({
  identity:z.object({default_handle:z.string().nullable(),email:z.string().nullable(),display_name:z.string().nullable(),github:z.string().nullable()}).nullable(),
  tools:z.object({git:z.boolean(),gh:z.boolean()}),
 });
-const cliLocal=z.object({local:z.array(z.object({root:z.string(),scope:z.enum(['global','project']),rows:z.array(cliLocalRow),problems:z.array(z.object({path:z.string(),reason:z.string()}))})),skills:z.array(z.object({id:z.string(),name:z.string(),grantsHash:z.string().nullish().transform(v=>v??null),grants:z.string().nullish().transform(v=>v??null)}))});
+const cliLocal=z.object({local:z.array(z.object({root:z.string(),scope:z.enum(['global','project']),repoRoot:z.string().optional(),rows:z.array(cliLocalRow),problems:z.array(z.object({path:z.string(),reason:z.string()}))})),skills:z.array(z.object({id:z.string(),name:z.string(),grantsHash:z.string().nullish().transform(v=>v??null),grants:z.string().nullish().transform(v=>v??null)}))});
 type CliStatus=z.infer<typeof cliStatus>;
 type CliLocal=z.infer<typeof cliLocal>;
 
-function placementCounts(placements:CliStatus['ledger']['placements']):Record<string,string> {
- const counts:Record<string,number>={Global:0};
- for(const p of placements){const scope=p.scope.kind==='global'?'Global':p.scope.project;counts[scope]=(counts[scope]??0)+1;}
- return Object.fromEntries(Object.entries(counts).map(([scope,count])=>[scope,String(count)]));
-}
-function statusModel(value:CliStatus, _local:CliLocal|null, platform:string):StatusResult {
+function statusModel(value:CliStatus, local:CliLocal|null, platform:string, features:Pick<Features, 'localIdentity'>):StatusResult {
  const name=value.identity?.display_name??'';
- const handle=value.teams[0]?.handle??'';
+ const handle=value.teams[0]?.handle??''; // one team per machine — legacy 2+ shows a hint, not a projection
  return {
   ledger:value.ledger??null,
   machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
-  me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:handle||value.identity?.default_handle||''},
+  me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:[value.identity?.github,handle,value.identity?.default_handle].find(v=>v)??''},
   teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath??null,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{publish:team.policy.publish==='pr'?'Pull request':'Push',license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
-  counts:placementCounts(value.ledger.placements),tools:value.tools,projects:null,
+  counts:local===null?{}:{Global:String(local.local.filter(section=>section.scope==='global').flatMap(section=>section.rows).filter(row=>row.placed===true||row.placement!==null||(features.localIdentity&&row.skillId!=null)).length)},tools:value.tools,projects:null,
  };
 }
 // AD-23: the drawn placement states (design fixture PLACEMENTS: 'up to date', 'update available', 'edited locally', 'pinned'); a health the board has no word for is '—'.
 const PLACEMENT_STATE:Record<z.infer<typeof cliLocalHealth>,string>={'up-to-date':'up to date','update-available':'update available','local-changed':'edited locally',both:'edited locally · update available','gone-from-repo':'removed from the team',unknown:'—',untracked:'—'};
 function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult):Settings {
  const rows=local?.local.flatMap(root=>root.rows)??[];
- const policy=status.teams[0]?.policy??null;
+ const policy=status.teams.length===1?status.teams[0]?.policy??null:null; // one team per machine — legacy 2+ shows a hint, not a projection
  return {
-  MACHINE:status.machine,ME:status.me,TEAMS:status.teams,tools:status.tools,
-  TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams[0]?.categories??null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'},
+  K:null,MACHINE:status.machine,ME:status.me,TEAMS:status.teams,tools:status.tools,
+  TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams.length===1?status.teams[0]?.categories??null:null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'}, // one team per machine — legacy 2+ shows a hint, not a projection
   PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [p.path,row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,p.version?.slice(0,12)??null,p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
   SHARED:value.ledger.shared.map(item=>[item.id,item.source,item.team,'—']),
   QUARANTINE:[],LOCAL_UNSHARED:[],HOOK:{installed:false,file:'',timeout:0},
-  APP_VERSION:appPackage.version,AGENT_CLI:'—',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
+  APP_VERSION:appPackage.version,AGENT_CLI:'—',AGENT_CLI_AUTH:'unknown',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
   STORAGE:{cache:'—',cache_n:0,evals:'—',evals_n:0,quarantine:'—'},PINNED_N:value.ledger.placements.filter(p=>p.version!==null).length,
   CLI_VERSION:value.version??'—',CLI_LATEST:'—',FOLLOWING:[],SHARED_SPECIMEN:null,
   SETTINGS_NAV:[],SHORTCUTS:[],INBOX_KIND_TEXT:{share:'Shared with you',update:'Update',alert:'Alert',eval:'Eval finished',review:'Review request',author:'Your skill',team:'Team'},THEME_OPTIONS:['System','Light','Dark'],
@@ -142,16 +142,16 @@ function rosterModel(team: CliStatus['teams'][number], inventory: Inventory): Ro
   const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? '', projects: member.projects ?? [], followers: null, joined: '—', last_publish: '—', lastPublish: '—', lastSeen: '—', status: inventory.roster.find(row => row.handle === member.handle)?.active ? 'active' : 'inactive' }));
   return { members, invited: [], member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] };
 }
-function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, people: Person[], query?: string): Catalog {
-  const skills = inventory.skills.map(row => inventoryCard(row, local, team.team));
+function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, people: Person[], features: Pick<Features, 'localIdentity'>, home: string, query?: string): Catalog {
+  const skills = inventory.skills.map(row => inventoryCard(row, local, team.team, features, home));
   const categorySkills: Record<string, string[]> = {};
   for (const skill of skills) (categorySkills[skill.category] ??= []).push(skill.name);
   const projects = (inventory.projects ?? []).map(project => {
     const rows = inventory.skills.filter(skill => project.skills.includes(skill.id));
     const members = people.filter(person => person.projects.includes(project.name));
-    return { name: project.name, key: project.name, ico: 'folder', desc: project.description ?? '', skills: project.skills.length, members: members.length, remote: project.remotes[0] ?? '—', installed: project.skills.length > 0 && rows.length === project.skills.length && rows.every(row => placement(local, team.team, row.id)), favorites: null, updated: '—', path: null, admin: { handle: '', name: '—', role: '', initials: '' }, evaluated: null, memberHandles: members.map(member => member.handle), memberInitials: members.map(member => member.initials), skillsIn: rows.map(row => row.name) };
+    return { name: project.name, key: project.name, ico: 'folder', desc: project.description ?? '', skills: project.skills.length, members: members.length, remote: project.remotes[0] ?? '—', installed: project.skills.length > 0 && rows.length === project.skills.length && rows.every(row => inventoryCard(row, local, team.team, features, home).placed), favorites: null, updated: '—', path: null, admin: { handle: '', name: '—', role: '', initials: '' }, evaluated: null, memberHandles: members.map(member => member.handle), memberInitials: members.map(member => member.initials), skillsIn: rows.map(row => row.name) };
   });
-  return { repository: team.repository ?? null, skills: skills.filter(skill => !query || `${skill.name} ${skill.desc}`.toLowerCase().includes(query.toLowerCase())), extras: [], people, projects, categories: Object.entries(categorySkills).map(([name, rows]) => [name, 'tag', rows.length]), categoryRemaining: {}, topRated: [...skills].sort((a, b) => b.installsN - a.installsN).map(skill => skill.name), peopleByAdoption: [...people].sort((a, b) => b.adoption - a.adoption).map(person => person.handle), projectsByMembers: [...projects].sort((a, b) => b.members - a.members).map(project => project.name), categorySkills, filterDefault: { verdicts: [], lift_min: 0, tokens_max: 0, installs_min: 0 }, filterCount: skills.length, verdictCounts: { PASS: null, NEUTRAL: null, FAIL: null, 'Not evaluated': null }, catalogN: skills.length, teamN: people.length, bulkInstall: {} };
+  return { scanned: (local.local ?? []).map(section => section.scope === 'global' ? '~/.claude/skills' : section.repoRoot ?? section.root), repository: team.repository ?? null, skills: skills.filter(skill => !query || `${skill.name} ${skill.desc}`.toLowerCase().includes(query.toLowerCase())), extras: [], people, projects, categories: Object.entries(categorySkills).map(([name, rows]) => [name, 'tag', rows.length]), categoryRemaining: {}, topRated: [...skills].sort((a, b) => b.installsN - a.installsN).map(skill => skill.name), peopleByAdoption: [...people].sort((a, b) => b.adoption - a.adoption).map(person => person.handle), projectsByMembers: [...projects].sort((a, b) => b.members - a.members).map(project => project.name), categorySkills, filterDefault: { verdicts: [], lift_min: 0, tokens_max: 0, installs_min: 0 }, filterCount: skills.length, verdictCounts: { PASS: null, NEUTRAL: null, FAIL: null, 'Not evaluated': null }, catalogN: skills.length, teamN: people.length, bulkInstall: {} };
 }
 
 export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
@@ -160,13 +160,35 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   let featuresOnce: Promise<void> | undefined;
   const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { hello = frame; };
   let stateOnce: Promise<AppState | null> | undefined;
-  const state = () => (stateOnce ??= bridge.readAppState().then((value) => {
-    if (value === null) stateOnce = undefined;
-    return value;
-  }, (error: unknown) => {
-    stateOnce = undefined;
-    throw error;
-  }));
+  let inFlight: Promise<AppState | null> | undefined;
+  let generation = 0;
+  let launchListenerReady: Promise<unknown> = Promise.resolve();
+  const state = (): Promise<AppState | null> => {
+    if (stateOnce) return stateOnce;
+    if (inFlight) return stateOnce = inFlight;
+    const request = (async () => {
+      for (;;) {
+        const readingGeneration = generation;
+        try {
+          const value = await bridge.readAppState();
+          if (readingGeneration !== generation) continue;
+          return value;
+        } catch (error) {
+          if (readingGeneration !== generation) continue;
+          throw error;
+        }
+      }
+    })();
+    inFlight = stateOnce = request;
+    void request.then(value => {
+      if (inFlight === request) inFlight = undefined;
+      if (value === null && stateOnce === request) stateOnce = undefined;
+    }, () => {
+      if (inFlight === request) inFlight = undefined;
+      if (stateOnce === request) stateOnce = undefined;
+    });
+    return request;
+  };
   let homeOnce: Promise<string> | undefined;
   const home = () => (homeOnce ??= bridge.homeDirectory().catch(() => ''));
   async function localPath(path:string):Promise<string> {
@@ -185,7 +207,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const cwd = () => backend.prefs.get<string>('workspace', '') || undefined;
 
   function run<TIn, TOut>(argv: readonly string[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut, touches: ChangeSource[] = ['config', 'placed']): Run<TOut> {
-    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), onHello, map: (value) => map(schema.parse(value)), onSettled: (result) => { if (result.ok) notify(...touches); } });
+    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), onHello, map: (value) => map(schema.parse(value)), onSettled: (result) => { if (argv[0] === 'setup' || argv[0] === 'team') notify('config', 'clone', 'placed'); else if (result.ok) notify(...touches); } });
     return {
       done: job.done.then(result),
       answer: (id, value) => job.answer(id, value),
@@ -210,23 +232,30 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       bridge.hostPlatform().then(value=>({ok:true as const,value})).catch((error:unknown)=>({ok:false as const,error:error instanceof Error?error.message:String(error),value:''})),
     ]);
     if (status.value===undefined) return result({ok:false,error:status.ok?'Status returned no data.':status.error});
-    const value=map(status.value,local.value??null,platform.value);
+    const value=map(status.value,local.ok?local.value:null,platform.value);
     const errors=[status,local,platform].flatMap(outcome=>outcome.ok?[]:[outcome.error]);
     return result(errors.length?{ok:false,error:errors.join('\n'),value}:{ok:true,value});
+  }
+
+  function teamSelectionFailure(teams:readonly {team:string}[]):Result<never> {
+    return teams.length===0
+      ? {ok:false,error:'No team is configured on this machine.',reason:'no-team'}
+      : {ok:false,error:`This machine is configured for teams ${teams.map(team=>team.team).join(', ')}; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.`,reason:'ambiguous-team'};
   }
 
   async function inventoryTeam(team: string | undefined, options?: ReadOptions): Promise<Result<InventoryTeam>> {
     const status = await read(run(['status', ...(team ? ['--team', team] : [])], cliStatusTeams, value => value, []), options);
     if (!status.ok) return { ok: false, error: status.error };
+    if (!team && status.value.teams.length !== 1) return teamSelectionFailure(status.value.teams);
     const selected = team ? status.value.teams.find(value => value.team === team) : status.value.teams.length === 1 ? status.value.teams[0] : undefined;
-    if (!selected) return fail('Select a team explicitly to read its skills.');
+    if (!selected) return { ok: false, error: 'Select a team explicitly to read its skills.', reason: 'ambiguous-team' };
     if (!selected.readable) return fail(`Team ${selected.team} could not be read.`);
     return { ok: true, value: selected };
   }
   async function peopleInventory(options?: ReadOptions) {
     const status = await read(run(['status'], cliStatus, value => value, []), options);
     if (!status.ok) return status;
-    if (status.value.teams.length !== 1) return { ok: false as const, error: 'Select a single configured team to read people.' };
+    if (status.value.teams.length !== 1) return teamSelectionFailure(status.value.teams);
     const team = status.value.teams[0]!;
     if (!team.readable) return { ok: false as const, error: `Team ${team.team} could not be read.` };
     const inventory = await read(run(['ls', '--team', team.team], cliLs, value => value, []), options);
@@ -234,10 +263,23 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   }
   const backend: Backend = {
     async setWindowBackground(color) { try { await getCurrentWindow().setBackgroundColor(color); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
-    async launchTarget() {
+    async launchContext() {
       const launch = await state();
-      const target = launch?.target ?? null;
-      return launch && target !== null ? { target, writtenAt: launch.writtenAt } : null;
+      return launch ? { writtenAt: launch.writtenAt, ...(launch.target ? { target: launch.target } : {}), ...(launch.intent ? { intent: launch.intent } : {}) } : null;
+    },
+    async refreshLaunch() {
+      await launchListenerReady;
+      stateOnce = undefined;
+      generation++;
+      return backend.launchContext();
+    },
+    onLaunchRequest(listener) {
+      let disposed = false;
+      let unlisten: (() => void) | undefined;
+      launchListenerReady = bridge.onLaunchRequest(listener).then(stop => {
+        if (disposed) stop(); else unlisten = stop;
+      });
+      return () => { disposed = true; unlisten?.(); };
     },
     async features(): Promise<Features> {
       if (!hello) await (featuresOnce ??= read(run(['status'], z.unknown(), value => value, [])).then(() => undefined));
@@ -248,24 +290,29 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
-      return { status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true };
+      return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true };
     },
     // Status and Settings are offline reads; the remaining surfaces retain their explicit gaps.
-    status: (_, options) => readModels(options, (value, local, platform) => statusModel(value, local, platform)),
-    settings: (_, options) => readModels(options, (value, local, platform) => settingsModel(value, local, statusModel(value, local, platform))),
+    status: (_, options) => readModels(options, (value, local, platform) => statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false })),
+    settings: (_, options) => readModels(options, (value, local, platform) => settingsModel(value, local, statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }))),
     onboarding: async () => gap('Onboarding data'),
     async library({ scope, team }, options) {
       const selected = await inventoryTeam(team, options);
-      if (!selected.ok) return fail(selected.error);
+      if (!selected.ok) return { ok: false, error: selected.error, ...(selected.reason ? { reason: selected.reason } : {}) };
       const args = scope.toLowerCase() === 'global' || scope.toLowerCase() === 'installed' ? [] : ['project', scope];
       const inventory = await read(run(['ls', ...args, '--team', selected.value.team], cliLs, value => value, []), options);
       if (!inventory.ok) return fail(inventory.error);
       const local = await read(run(['ls', '--local'], cliLs, value => value, []), options);
       if (!local.ok) return fail(local.error);
-      const skills = inventory.value.skills.map(row => inventoryCard(row, local.value, selected.value.team)).filter(row => scope.toLowerCase() !== 'installed' || row.installed);
+      const directory = await home();
+      const skills = inventory.value.skills.map(row => inventoryCard(row, local.value, selected.value.team, { localIdentity: hello?.features.localIdentity ?? false }, directory)).filter(row => scope.toLowerCase() !== 'installed' || row.installed);
       const installs = skills.reduce((sum, row) => sum + row.installsN, 0);
-      const value: Library = { skills, title: `${skills.length} of ${selected.value.sharedSkills ?? inventory.value.skills.length} skills`, projects: inventory.value.projects ?? [], problems: inventory.value.problems, provenance: null,
-        overview: { skills: String(skills.length), skills_note: `${inventory.value.skills.filter(row => row.endorsement === 'global').length} endorsed to Global`, evaluated: '—', meter: { pass_: 0, neutral: 0, fail: 0, total: 0 }, meter_text: '', installs: String(installs), installs_note: `across every readable people file · ${inventory.value.roster.filter(person => person.active).length} active teammate${inventory.value.roster.filter(person => person.active).length === 1 ? '' : 's'}`, attention: '—', attention_lines: [], attention_link: '', zero: { skills: '', evaluated: '', installs: '', attention: '' } },
+      const globalCount = skills.filter(skill => skill.paths.some(([, scope]) => scope === 'global')).length;
+      const projectSection = local.value.local?.find(section => section.scope === 'project');
+      const projectCount = skills.filter(skill => skill.paths.some(([, scope]) => scope === 'project')).length;
+      const projectName = projectSection ? (projectSection.repoRoot ?? projectSection.root).split(/[\\/]/).filter(Boolean).at(-1) ?? '' : '';
+      const value: Library = { scanned: (local.value.local ?? []).map(section => section.scope === 'global' ? '~/.claude/skills' : section.repoRoot ?? section.root), skills, title: `${skills.length} skills · ${globalCount} in ~/.claude/skills${projectSection ? ` · ${projectCount} in ${projectName}` : ''}`, projects: inventory.value.projects ?? [], problems: inventory.value.problems, provenance: null,
+        overview: { skills: String(skills.length), skills_note: `${inventory.value.skills.filter(row => row.endorsement === 'global').length} ${args.length===0?'endorsed to Global':'also on Global'}`, evaluated: '—', meter: { pass_: 0, neutral: 0, fail: 0, total: 0 }, meter_text: '', installs: String(installs), installs_note: `across every readable people file · ${inventory.value.roster.filter(person => person.active).length} active teammate${inventory.value.roster.filter(person => person.active).length === 1 ? '' : 's'}`, attention: '—', attention_lines: [], attention_link: '', zero: { skills: '', evaluated: '', installs: '', attention: '' } },
       };
       return { ok: true, value };
     },
@@ -274,7 +321,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const explicitTeam = team ?? (parts.length === 2 ? parts[0] : undefined);
       const name = parts.length === 2 ? parts[1]! : ref;
       const selected = await inventoryTeam(explicitTeam, options);
-      if (!selected.ok) return fail(selected.error);
+      if (!selected.ok) return { ok: false, error: selected.error, ...(selected.reason ? { reason: selected.reason } : {}) };
       const inventory = await read(run(['ls', '--team', selected.value.team], cliLs, value => value, []), options);
       if (!inventory.ok) return fail(inventory.error);
       const matches = inventory.value.skills.filter(row => row.name === name || row.id.startsWith(name));
@@ -285,19 +332,19 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const validation = await backend.validate({ ref: row.name, team: selected.value.team }, options);
       // A hygiene failure has a parsed value; an unreadable/cancelled validation is a read failure.
       if (!validation.ok && validation.value === undefined) return fail(validation.error);
-      return { ok: true, value: inventoryDetail(row, local.value, selected.value, validation, inventory.value) };
+      return { ok: true, value: inventoryDetail(row, local.value, selected.value, validation, inventory.value, { localIdentity: hello?.features.localIdentity ?? false }, await home()) };
     },
     receipts: async () => gap('Eval receipts'),
     inbox: async () => gap('The Inbox'),
     async roster(_, options) {
       const data = await peopleInventory(options);
-      if (!data.ok) return fail(data.error);
+      if (!data.ok) return {ok:false,error:data.error,...(data.reason?{reason:data.reason}:{})};
       const { team, inventory } = data.value;
       return { ok: true, value: rosterModel(team, inventory) };
     },
     async catalog(query, options) {
       const data = await peopleInventory(options);
-      if (!data.ok) return fail(data.error);
+      if (!data.ok) return {ok:false,error:data.error,...(data.reason?{reason:data.reason}:{})};
       const { team, inventory } = data.value;
       const local = await read(run(['ls', '--local'], cliLs, value => value, []), options);
       if (!local.ok) return fail(local.error);
@@ -308,9 +355,11 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         if (!detail.value.member) return fail(`No member data for ${member.handle}.`);
         const authored = detail.value.skills;
         const names = authored.map(skill => skill.name);
-        people.push({ ...member, organization: team.team, declined: detail.value.member.declined, skills: names, adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: '—', teamsLine: member.projects.join(' · '), buckets: names.length ? [['Authored', names]] : [], placeNote: '—', onDisk: [authored.filter(skill => placement(local.value, team.team, skill.id)).length, names.length] });
+        const installedIds = new Set((detail.value.member.installed ?? []).map(item => item.id));
+        const installable = inventory.skills.filter(skill => installedIds.has(skill.id));
+        people.push({ ...member, organization: team.team, declined: detail.value.member.declined, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: '—', teamsLine: member.projects.join(' · '), buckets: names.length ? [['Authored', names]] : [], placeNote: '—', onDisk: [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length] });
       }
-      return { ok: true, value: catalogModel(team, inventory, local.value, people, query?.q) };
+      return { ok: true, value: catalogModel(team, inventory, local.value, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
     },
     search: (args: SearchArgs, options?: ReadOptions) => read(run(['search', '--', args.q], cliSearch, (hits): SearchHit[] => hits.map((hit) => ({ kind: 'skill', ref: hit.team === undefined ? hit.name : `${hit.team}/${hit.name}`, name: hit.name, description: hit.description, team: hit.team ?? null, category: hit.category ?? null, author: hit.author ?? null, installs: hit.installs ?? null, latest: hit.latest ?? null, endorsed: hit.endorsed ?? null, unresolved: hit.unresolved ?? null })), []), options).then(result),
     // Long verbs: one process each, questions become dialogs, the CLI's own decline messages come back as `ok:false`.
@@ -333,6 +382,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     eval: (args: EvalArgs) => run(['eval', ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name: value.name, receipt: null }), ['clone']),
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
     update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
+    diagnostics: () => run(['status'], z.unknown(), () => undefined, []),
     async windowAction(action) { try { const window = getCurrentWindow(); if (action === 'toggle-maximize') await window.toggleMaximize(); else await window.startDragging(); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async openUrl(url) { try { await openUrl(url); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async revealPath(path) { try { await revealItemInDir(await localPath(path)); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
@@ -357,11 +407,11 @@ function teamArgv(args: TeamArgs): string[] {
 
 /** Drive a read-only run without answering questions, retaining diagnostics and partial values. */
 export async function read<T>(job: Run<T>, options?: ReadOptions): Promise<Result<T>> {
+  const lines: string[] = [];
   const signal = options?.signal;
   const cancel = () => { void job.cancel(); };
   signal?.addEventListener('abort', cancel, { once: true });
   if (signal?.aborted) cancel();
-  const lines: string[] = [];
   try {
     for await (const frame of job.frames) {
       if (frame.t === 'print') lines.push(frame.line);

@@ -1,0 +1,28 @@
+{"t":"hello","protocol":1,"version":"0.1.7","verbs":["login","setup","team create","team join","team remove","team leave","team workflow-update","invite","ls","status","publish","validate","eval","connect","install","uninstall-skill","uninstall","sync","search","update","app","profile","decline"],"features":{"memberRole":true,"favorites":false,"follow":false,"roles":false,"lastSeen":false,"installScope":false,"inviteScoping":false,"disablePerMachine":false,"projectMembers":false,"liftOnCards":false,"runEvalInApp":false,"perCase":false,"progress":false}}
+{"t":"print","level":"info","line":"Welcome to terum-skills."}
+{"t":"print","level":"info","line":"Your team's skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have."}
+{"t":"print","level":"info","line":"This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it."}
+{"t":"print","level":"info","line":"Resuming setup for team acme. To join another team, run the setup command its owner sent you."}
+{"t":"print","level":"info","line":"GitHub: gh is logged in."}
+{"t":"ask","id":"q1","kind":"text","question":"Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)"}
+{"t":"print","level":"info","line":"No local candidates to connect under /private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/cc2cc192-c671-45fe-a857-c4d3f1c03eff/scratchpad/impl-first-run/fx/home/.claude/skills. Skills elsewhere can be connected by passing their folder path."}
+{"t":"print","level":"info","line":"Next, from any terminal:"}
+{"t":"print","level":"info","line":"  npx -y terum-skills@latest install acme/<skill>   — install a shared skill (add @<version> to pin it)"}
+{"t":"print","level":"info","line":"  npx -y terum-skills@latest ls [--local]             — list members and shared skills; --local lists your own"}
+{"t":"print","level":"info","line":"  npx -y terum-skills@latest search <term>            — find a skill by name, description, or category"}
+{"t":"print","level":"info","line":"  npx -y terum-skills@latest sync                     — pull updates and finish pending work"}
+{"t":"print","level":"info","line":"  npx -y terum-skills@latest publish <skill> — endorse a skill already connected to the team"}
+{"t":"print","level":"info","line":"  npx -y terum-skills@latest eval <skill>             — evaluate a shared skill locally before publishing"}
+{"t":"print","level":"info","line":"  npx -y terum-skills@latest connect      — connect your local skills to the team (asks which)"}
+{"t":"print","level":"info","line":"Feedback and requests: https://discord.gg/8tnRrxRM3Z"}
+{"t":"ask","id":"q2","kind":"confirm","question":"Install the Claude Code session-start hook so team skills sync automatically? (edits /private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/cc2cc192-c671-45fe-a857-c4d3f1c03eff/scratchpad/impl-first-run/fx/home/.claude/settings.json)"}
+{"t":"print","level":"info","line":"Skipped the session hook; re-run setup to install it later."}
+{"t":"ask","id":"q3","kind":"confirm","question":"Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes /private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/cc2cc192-c671-45fe-a857-c4d3f1c03eff/scratchpad/impl-first-run/fx/home/.claude/skills/terum-skills)"}
+{"t":"print","level":"info","line":"Skipped the /terum-skills skill; re-run setup to install it later."}
+{"t":"print","level":"info","line":"Members:"}
+{"t":"print","level":"info","line":"  @mira — Mira Chen"}
+{"t":"print","level":"info","line":"  @ravi — Ravi Patel"}
+{"t":"print","level":"info","line":"  @seed — Seed"}
+{"t":"print","level":"info","line":"Repository: https://github.com/acme/team"}
+{"t":"print","level":"info","line":"README: https://github.com/acme/team/blob/main/README.md"}
+{"t":"result","verb":"setup","ok":true,"exitCode":0,"value":{"role":"creator","team":"acme","remote":"github.com/acme/team","steps":{"welcome":"printed","app":"skipped","github":"done","team":"skipped","invite":"skipped","actions":"skipped","community":"printed","hook":"skipped","wrapper":"skipped","done":"printed"}}}

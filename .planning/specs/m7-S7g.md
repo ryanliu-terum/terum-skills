@@ -6,6 +6,8 @@
 
 ## 0. What this batch is
 
+Superseded in part by the §6 installed-state amendment: installed = present-or-placed by id join over ls --local rows; version and every action remain placement-based; the app's cliLocalRow stays closed but declares the three keys optional.
+
 `ls --local` describes each placed or connected folder in an English sentence the app would have to regex. It gains typed fields: `tracked`, the ledger references it already resolved (`placement {id, team, version}`, `shared {id, team}[]`), and a read-only `health` computed from three fingerprints without running the sync that would change it. The app's Settings ▸ This machine placements table renders those fields, and the Library/Skill `installed`/`version` mapping (S7f's AD-21/22) switches from prose to the typed references. No write, no lock, nothing moves.
 
 ## 1. CLI half (`src/commands/ls.ts`, `src/lib/local-skills.ts` read-only helpers)
@@ -18,6 +20,8 @@
 - Tests (`src/commands/__tests__/ls.test.ts`): `up-to-date` when ledger, placed copy and clone agree; `update-available` when only the clone moved; `local-changed` when only the placed copy moved; `both`; `gone-from-repo`; `unknown` for an unreadable clone and for a rejected inspection; `tracked` false for a folder with neither ref, true for a connected source; `shared`/`placement` carry team and version; a missing placement folder names a `problems` entry; the printed sentence is byte-identical to today.
 
 ## 2. App half (`desktop/src/backend/tauri/index.ts`, `types.ts`, `mock/`, Settings ▸ This machine)
+
+Superseded in part by the §6 installed-state amendment: installed = present-or-placed by id join over ls --local rows; version and every action remain placement-based; the app's cliLocalRow stays closed but declares the three keys optional.
 
 - Schema: `cliLs`'s `local[].rows[]` declares the new keys (closed object).
 - **AD-23:** `settings().PLACEMENTS` rows map from `ls --local` rows with a `placement`: `name`, `path`, `team`, `version` (12 chars of the 40-char value; `—` for `null`), `state` from `health` (the drawn vocabulary: `up-to-date` → the board's "In sync", `update-available` → "Update available", `local-changed` → "Edited here", `both` → "Edited here · update available", `gone-from-repo` → "Removed from the team", `unknown` → "—"), `placed` `—` until a date field exists. `installed`/`version` for the Library and Skill mappings (S7f's AD-21/22) come from `placement`, never from the prose `state`. `SHARED` rows from `shared` refs (`name`, `path`, `team`, state `—` until `sharedState` ships). Mock unchanged in output (its PLACEMENTS come from the fixture). Pixel-neutral.

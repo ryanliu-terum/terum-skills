@@ -39,6 +39,7 @@ describe('candidateSummary', () => {
     expect(await candidateSummary(root, emptyConfig())).toEqual({ names: ['alpha', 'zebra'], omitted: [], unreadable: 0 });
   });
 
+  // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
   it('excludes a shared source even when it belongs to another team', async () => {
     const root = await temporaryDirectory();
     const path = await candidate(root, 'mine');
@@ -140,7 +141,7 @@ describe('issue 9 local inventory', () => {
     config.shared.first = { team: 'one', source: path };
     config.shared.second = { team: 'two', source: join(path, '..', 'missing') };
     config.placements[path] = { id: '33333333-3333-4333-8333-333333333333', team: 'three', version: null, scope: { kind: 'global' }, placed_at: '', fingerprint: '' };
-    expect((await localSkills(root, config, { scope: 'global', stateRoot: join(root, '.state') })).entries).toEqual([{ name: 'missing', path, shared: [{ id: 'first', team: 'one' }, { id: 'second', team: 'two' }], placement: { id: config.placements[path]!.id, team: 'three', version: null }, placementFingerprint: '', inspection: { kind: 'rejected', reason: 'skill-md-missing', detail: 'SKILL.md missing' } }]);
+    expect((await localSkills(root, config, { scope: 'global', stateRoot: join(root, '.state') })).entries).toEqual([{ skillId: null, name: 'missing', path, shared: [{ id: 'first', team: 'one' }, { id: 'second', team: 'two' }], placement: { id: config.placements[path]!.id, team: 'three', version: null }, placementFingerprint: '', inspection: { kind: 'rejected', reason: 'skill-md-missing', detail: 'SKILL.md missing' } }]);
   });
 
   it('distinguishes an absent root from a scanned empty root', async () => {

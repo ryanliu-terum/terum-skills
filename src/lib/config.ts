@@ -1,4 +1,4 @@
-import { getStartedLines, type InvocationForm } from './invocation.js';
+import { invocation, getStartedLines, type InvocationForm } from './invocation.js';
 import { access, open, readFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -26,7 +26,7 @@ export function selectTeam<T extends { remote: string }>(teams: Record<string, T
   const entries = Object.entries(teams);
   if (entries.length === 1) return entries[0]!;
   if (entries.length === 0) throw new Error(getStartedLines(form).join('\n'));
-  throw new Error(`More than one team is configured; pass --team <name> (${entries.map(([name]) => name).join(', ')}).`);
+  throw new Error(`This machine is configured for teams ${entries.map(([name]) => name).join(', ')}; Terum Skills keeps one team per machine. Run \`${invocation(form, 'team leave', { raw: '<name>' })}\` for each you no longer want; until then name one with --team.`);
 }
 
 export interface ConfigStoreOptions {

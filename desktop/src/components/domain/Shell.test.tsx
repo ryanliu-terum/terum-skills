@@ -21,12 +21,12 @@ it('retains footer identity while Library error counts are hidden',async()=>{
  expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
 });
 it.each([
- ['/library/global','loading',null],['/library/global','error',null],['/library/global','empty',['0','22','15','32','3','3','8']],
- ['/skill/deploy-check','loading',null],['/skill/deploy-check','error',['30','22','15','32','3','3','8']],
- ['/inbox','loading',null],['/inbox','error',null],['/inbox','empty',['30','22','15','32']],
- ['/marketplace','loading',null],['/marketplace','error',['30','22','15','32','3','3','8']],
- ['/marketplace?q=missing','default',['30','22','15','32','3','3','8']],
- ['/share','loading',null],['/share','error',null],['/share','empty',['30','22','15','32','3','3','8']],
+ ['/library/global','loading',null],['/library/global','error',null],['/library/global','empty',['0','8','3','2','3','3','8']],
+ ['/skill/deploy-check','loading',null],['/skill/deploy-check','error',['15','8','3','2','3','3','8']],
+ ['/inbox','loading',null],['/inbox','error',null],['/inbox','empty',['15','8','3','2']],
+ ['/marketplace','loading',null],['/marketplace','error',['15','8','3','2','3','3','8']],
+ ['/marketplace?q=missing','default',['15','8','3','2','3','3','8']],
+ ['/share','loading',null],['/share','error',null],['/share','empty',['15','8','3','2','3','3','8']],
  ['/settings/account','loading',null],['/settings/account','error',null],
 ] as const)('uses board counts for %s %s',async(route,scenario,counts)=>{
  location.hash='#'+route+(route.includes('?')?'&':'?')+'__mock='+scenario;
@@ -40,7 +40,7 @@ it.each(['loading','error','empty','default'])('onboarding %s has a main landmar
 });
 it.each([undefined,null,{Global:'99'}])('treats explicit Shell counts as authoritative: %j',async counts=>{
  location.hash='#/frame?__mock=error';render(<Providers><HashRouter><Shell counts={counts}><ScreenFrame/></Shell></HashRouter></Providers>);
- await screen.findByText('teniroo');expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(counts===undefined?['30','22','15','32','3','3','8']:counts===null?[]:['99']);
+ await screen.findByText('teniroo');expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(counts===undefined?['15','8','3','2','3','3','8']:counts===null?[]:['99']);
 });
 it('marks a light frame ready only after the URL theme is applied and status resolves',async()=>{
  useUiStore.getState().setTheme('dark');location.hash='#/frame?theme=light';

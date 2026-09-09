@@ -1,0 +1,57 @@
+{
+  "status": "partial",
+  "summary": "Added AGENT_CLI_AUTH:'signed-in' to the mock Settings test’s additions map for §8.2, with no other test changes. Root and desktop lint/typecheck and root build passed. Both test suites were attempted but blocked before collection by sandbox EPERM errors.",
+  "filesChanged": [
+    {
+      "path": "desktop/src/backend/__tests__/mock.test.ts",
+      "change": "modified",
+      "why": "Explicitly expect the §8.2 Settings seam addition."
+    }
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop lint exited 0.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop typecheck exited 0. Root build also exited 0.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": false,
+      "output": "Both requested commands exited 1; 0 tests collected. Error: EPERM: operation not permitted, open '<worktree>/desktop/node_modules/.vite-temp/vitest.config.ts.timestamp-1788929811213-aaf2ed8cabefb.mjs'; root had the same error at '<worktree>/node_modules/.vite-temp/vitest.config.ts.timestamp-1788929812007-1c855ae1afc528.mjs'. Both .vite-temp entries remain symlinks into skill-management-software-wt-m7 outside the writable sandbox.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [],
+  "deviations": [
+    {
+      "what": "Could not establish fully green desktop and root test suites.",
+      "why": "Vite cannot write through the .vite-temp symlinks. Standing constraints prohibit modifying node_modules or configs to work around this."
+    }
+  ],
+  "invariantsTouched": [
+    {
+      "number": 7,
+      "howSatisfied": "Preserved every assertion; added only the explicitly requested expected value."
+    },
+    {
+      "number": 8,
+      "howSatisfied": "Ran required gates and reported actual results; used no git or dependency installation."
+    }
+  ],
+  "testsModified": [
+    {
+      "path": "desktop/src/backend/__tests__/mock.test.ts",
+      "whatChanged": "Added AGENT_CLI_AUTH:'signed-in' to additions.",
+      "justification": "Spec §8.2 and the user's explicit correction require this seam value; fixture comparisons and isolation assertions remain intact."
+    }
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The correction resolves the reported assertion failure; the code matches the requested fix, but sandbox startup errors prevented runtime confirmation."
+}

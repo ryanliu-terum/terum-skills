@@ -310,7 +310,7 @@ it('returns sorted passthrough projects including empty projects, member decline
   for(const args of [{},{kind:'member' as const,value:'seed'},{kind:'project' as const,value:'A'}]) {
     const result=await run({config:store,...args},new ScriptedPrompter());if(!result.ok)throw new Error(result.error);
     expect(result.value.projects).toEqual([{name:'A',skills:[ID],remotes:['github.com/acme/a'],description:'Hand maintained'},{name:'z',skills:[],remotes:[]}]);
-    if(args.kind==='member')expect(result.value.member).toEqual({handle:'seed',declined:[ID],role:null,projects:[]});else expect(result.value).not.toHaveProperty('member');
+    if(args.kind==='member')expect(result.value.member).toEqual({handle:'seed',declined:[ID],role:null,projects:[],installed:[]});else expect(result.value).not.toHaveProperty('member');
   }
   const local=await run({config:store,local:true,home:root},new ScriptedPrompter());expect(local).toMatchObject({ok:true,value:{problems:[]}});expect(local.value).not.toHaveProperty('projects');
 });
@@ -375,4 +375,38 @@ describe('S7g local health and provenance', () => {
     await store.update(config=>{config.placements[path]={id:ID,team:'team',version:null,fingerprint:'',scope:{kind:'global'},placed_at:''};});
     expect(await run({local:true,home,config:store},new ScriptedPrompter())).toMatchObject({ok:true,value:{local:[{rows:[],problems:[{path,reason:'placement recorded in the ledger but the folder is missing'}]}]}});
   });
+});
+
+
+describe('local identity', () => {
+  it.each(['present', 'placed', 'connected-and-placed', 'rejected', 'non-uuid'])('reports %s without changing printed state', async mode => {
+    const home = await temporaryDirectory(), store = createConfigStore(join(home, 'state'));
+    const raw = mode === 'rejected' ? 'not frontmatter' : inventorySource('good').replace(ID, mode === 'non-uuid' ? 'not-an-id' : ID);
+    const path = await localSource(home, 'good', raw);
+    const placed = mode === 'placed' || mode === 'connected-and-placed';
+    const connected = mode === 'connected-and-placed';
+    if (placed) await store.update(config => {
+      config.placements[path] = { id: ID, team: 'team', version: null, fingerprint: '', scope: {kind:'global'}, placed_at: '' };
+      if (connected) config.shared[ID] = { source: path, team: 'team' };
+    });
+    const io = new ScriptedPrompter(), result = await run({ local: true, home, config: store }, io);
+    expect(result.ok).toBe(true);
+    if (mode === 'rejected') expect(result.value?.local?.[0]?.notOffered[0]).toMatchObject({skillId:null});
+    else {
+      expect(result.value?.local?.[0]?.rows[0]).toMatchObject({skillId:mode === 'non-uuid' ? null : ID, placed, connected});
+      const state = connected ? 'conflicting tracking: connected source for team; repository status unknown; placement recorded from team' : placed ? 'placement recorded from team' : 'untracked locally';
+      expect(io.lines).toContain(`  good — ${state}; path: ${path}`);
+    }
+  });
+});
+
+it('returns recorded member install ids even when no skills were authored',async()=>{
+ const root=await temporaryDirectory(),store=createConfigStore(join(root,'state')),clone=store.teamClone('team');
+ await mkdir(join(clone,'skills'),{recursive:true});await mkdir(join(clone,'people'));
+ await writeFile(join(clone,'team.json'),JSON.stringify(TEAM_JSON));
+ await writeFile(join(clone,'people','seed.json'),JSON.stringify(person('seed',{installed:[{id:ID,version:null,scope:{kind:'global'},since:'2026-09-01'}]})));
+ await store.update(config=>{config.teams.team={remote:'https://github.com/acme/team',handle:'seed'};});
+ const runner={run:async()=>({code:0,stdout:'',stderr:''})},io=new ScriptedPrompter();
+ expect(await run({kind:'member',value:'seed',config:store,runner},io)).toMatchObject({ok:true,value:{skills:[],member:{installed:[{id:ID,scope:{kind:'global'},since:'2026-09-01'}]}}});
+ expect(io.lines).toContain(`  Installed: ${ID}`);
 });

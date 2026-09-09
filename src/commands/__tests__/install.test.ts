@@ -1,3 +1,5 @@
+import { createExecute } from '../../lib/execute.js';
+import type { ResultOutcome } from '../../lib/frames.js';
 import { getStartedLines } from '../../lib/invocation.js';
 import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join, posix, win32 } from 'node:path';
@@ -75,10 +77,10 @@ describe('install (§6 refs)', () => {
     expect(printed).not.toContain('Next, from any terminal');
     expect(printed).not.toContain('Feedback and requests');
     expect(printed).not.toContain('Repository:');
-    // A machine that already has a team keeps the message: a second team is `team join`'s explicit flow.
+    // A configured machine refuses a second binding before bootstrap.
     const second = createConfigStore(join(root, 'second-state'));
     await second.update((config) => { config.teams.other = { remote: 'github.com/other/repo', handle: 'bob' }; });
-    expect(await run({ ref: 'acme/team/sample', config: second, home: join(root, 'second-home'), runner }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining("npx -y terum-skills@latest team join 'acme/team'") });
+    expect(await run({ ref: 'acme/team/sample', config: second, home: join(root, 'second-home'), runner }, new ScriptedPrompter())).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine') });
   });
 
   it('an inherited object key is not a project', async () => {
@@ -116,6 +118,8 @@ describe('install (§6 refs)', () => {
     const io = new ScriptedPrompter([], [true]);
     expect(await run({ ref: `helper@${pinned}`, config: store, home: join(fixture.root, 'home') }, io)).toMatchObject({ ok: true });
     expect(io.askedAbout('Approve these tools')).toBe(true);
+    expect(io.lines.join('\n')).not.toContain('helper requests allowed-tools:');
+    expect(io.details['Approve these tools for helper?']).toEqual(['helper requests allowed-tools:', 'Bash(*)']);
     const grants = allowedTools('Bash(*)'); if (!grants.ok) throw new Error('test grant must normalize');
     expect((await store.read()).approvals[id]?.grants).toBe(grants.hash);
   });
@@ -163,7 +167,9 @@ describe('install (§6 refs)', () => {
     const io = new ScriptedPrompter([], [false]);
     const result = await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, io);
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('malformed allowed-tools') });
-    expect(io.lines.join('\n')).toContain('{"Bash":"*"}');
+    expect(io.lines.join('\n')).not.toContain('{"Bash":"*"}');
+    expect(io.details['Install sample despite malformed allowed-tools?']).toEqual([expect.stringMatching(/^allowed-tools for sample could not be parsed: /)]);
+    expect(io.details['Install sample despite malformed allowed-tools?']![0]).toContain('{"Bash":"*"}');
     expect(io.askedAbout('despite malformed')).toBe(true);
     expect((await store.read()).approvals).toEqual({});
     expect((await store.read()).pending).toEqual([]);
@@ -180,7 +186,8 @@ describe('install (§6 refs)', () => {
     const io = new ScriptedPrompter([], [false]);
     expect(await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, io)).toMatchObject({ ok: false, error: expect.stringContaining('malformed allowed-tools') });
     expect(io.askedAbout('despite malformed')).toBe(true);
-    expect(io.lines.join('\n')).toContain('allowed-tools for sample could not be parsed: ');
+    expect(io.lines.join('\n')).not.toContain('allowed-tools for sample could not be parsed: ');
+    expect(io.details['Install sample despite malformed allowed-tools?']).toEqual([expect.stringMatching(/^allowed-tools for sample could not be parsed: /)]);
   });
 
   it('keeps an earlier matching pending install when this attempt declines consent', async () => {
@@ -374,6 +381,7 @@ describe('install (§6 refs)', () => {
     await cloneWithIdentity(second.bare, store.teamClone('team-b'));
     await store.update((config) => {
       config.teams['team-a'] = { remote: 'github.com/org/repo', handle: 'me' };
+      // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
       config.teams['team-b'] = { remote: second.bare, handle: 'seed' };
     });
     const mapped = mappedRunner('github.com/org/repo', first.bare);
@@ -389,7 +397,7 @@ describe('install (§6 refs)', () => {
     expect(await readFile(join(home, '.claude', 'skills', 'dup', 'SKILL.md'), 'utf8')).toContain('description: from first');
 
     const beforeUnjoined = JSON.stringify(await store.read());
-    expect(await run({ ref: 'other/repo/dup', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining("npx -y terum-skills@latest team join 'other/repo'") });
+    expect(await run({ ref: 'other/repo/dup', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, refused: true, error: expect.stringContaining("One team per machine") });
     expect(JSON.stringify(await store.read())).toBe(beforeUnjoined);
     expect((await run({ ref: `team-a/${dupId.slice(0, 8)}`, config: store, home, runner: mapped }, new ScriptedPrompter())).ok).toBe(true);
     expect(await run({ ref: 'team-a/deadbeef', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('ambiguous') });
@@ -436,4 +444,24 @@ it('placementHome finds HOME two segments above the default store root on either
   expect(placementHome({ root: '/tmp/terum-test/state' }, posix)).toBe('/tmp/terum-test/state');
   // A test store root that merely LOOKS like the default shape keeps the two-levels-up intent.
   expect(placementHome({ root: posix.join('/tmp/fixture', '.terum', 'skills') }, posix)).toBe('/tmp/fixture');
+});
+
+it.each(['refused', 'cancelled'] as const)('zero-team install bootstrap preserves setup %s', async flag => {
+  const config = createConfigStore(await temporaryDirectory());
+  const spy = vi.spyOn(setup, 'run').mockResolvedValue({ ok: false, error: 'stopped', [flag]: true });
+  try {
+    expect(await run({ ref: 'acme/team/sample', config }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'stopped', [flag]: true });
+    expect(spy).toHaveBeenCalledTimes(1);
+  } finally { spy.mockRestore(); }
+});
+
+it('install refusal survives createExecute without bootstrap or runner calls', async () => {
+  const config = createConfigStore(await temporaryDirectory());
+  await config.update(fresh => { fresh.teams.team = { remote: 'github.com/one/team', handle: 'me' }; });
+  const frames: ResultOutcome[] = [];
+  const runner = mappedRunner('https://github.com/other/repo.git', '/unused', fakeGh('me'));
+  const execute = createExecute({ io: new ScriptedPrompter(), stderr: () => {}, setExitCode: () => {}, result: outcome => frames.push(outcome) });
+  await execute(io => run({ config, runner, ref: 'other/repo/skill' }, io), { verb: 'install', notices: false });
+  expect(frames).toEqual([expect.objectContaining({ ok: false, refused: true, exitCode: 1 })]);
+  expect(runner.calls).toEqual([]);
 });

@@ -40,7 +40,7 @@ export interface AppArgs extends WithForm {
   entry?: string;
   /** Launch PATH and setup join target; PATH defaults to this process. */
   path?: string | null;
-  target?: string;
+  target?: string; intent?: 'setup';
   /** Ask first (setup's opt-in, default no). A no is recorded and returns `action: 'declined'` without touching the network. */
   offer?: boolean;
   /** Test knob: skip opening the app (everything else runs). */
@@ -58,7 +58,7 @@ export interface AppResult {
 }
 
 /** `~/.terum/skills/run/app.json`: what desktop/src/backend/tauri/bridge.ts reads (schema 1). */
-export interface AppState { schema: 1; node: string; entry: string; path: string | null; version: string; writtenAt: string; target?: string; }
+export interface AppState { schema: 1; node: string; entry: string; path: string | null; version: string; writtenAt: string; target?: string; intent?: 'setup'; }
 
 const tail = (form: WithForm['form']) => `Everything works from the terminal. Run \`${invocation(form, 'app')}\` later to try again.`;
 
@@ -134,7 +134,7 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
 
     // D1: the app finds Node and this CLI through this file, on every launch, so a relaunch from the Dock a week later still works.
     const statePath = join(root, 'run', 'app.json');
-    await writeState(statePath, { schema: 1, node: args.node ?? process.execPath, entry: args.entry ?? (args.launch?.path ?? process.argv[1] ?? ''), path: args.path === undefined ? process.env.PATH ?? null : args.path, version, writtenAt: new Date().toISOString(), ...(args.target === undefined ? {} : { target: args.target }) });
+    await writeState(statePath, { schema: 1, node: args.node ?? process.execPath, entry: args.entry ?? (args.launch?.path ?? process.argv[1] ?? ''), path: args.path === undefined ? process.env.PATH ?? null : args.path, version, writtenAt: new Date().toISOString(), ...(args.target === undefined ? {} : { target: args.target }), ...(args.intent === undefined ? {} : { intent: args.intent }) });
     // D4: running `app` explicitly is opting in; setup will not ask again.
     await store.update((config) => { config.app = { choice: 'opted-in', at: new Date().toISOString() }; });
 

@@ -1,0 +1,26 @@
+{
+  "status": "complete",
+  "summary": "Extended the existing non-full override to all five specified panes, allowing their content height to flow into .detail-main. Read back the write; all other declarations, .full rules, and scroll assertions remain untouched.",
+  "filesChanged": [
+    {
+      "path": "desktop/src/screens/skill/skill.css",
+      "change": "modified",
+      "why": "Prevents nested panes from shrinking and clipping content by applying overflow:visible and min-height:auto outside .full."
+    }
+  ],
+  "gates": {
+    "lint": {"ran": true, "passed": true, "output": "eslint . --max-warnings 0 exited 0; no diagnostics.", "preExistingFailures": ""},
+    "typecheck": {"ran": true, "passed": true, "output": "tsc --noEmit exited 0; no diagnostics.", "preExistingFailures": ""},
+    "test": {"ran": true, "passed": true, "output": "npm test: 67 files passed; 926 tests passed, 88 skipped (1014 total).", "preExistingFailures": ""}
+  },
+  "openQuestions": [],
+  "deviations": [],
+  "invariantsTouched": [
+    {"number": 5, "howSatisfied": "Preserved spacing and geometry declarations; pixel fidelity awaits the orchestrator's browser gate."},
+    {"number": 7, "howSatisfied": "No tests or assertions changed."},
+    {"number": 8, "howSatisfied": "Ran the required command chain successfully, read back the write, and used no git commands. Playwright and fidelity were not run, as instructed."}
+  ],
+  "testsModified": [],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Above-the-fold pixels remain identical: geometry declarations are unchanged, but browser fidelity cannot be verified in this sandbox."
+}

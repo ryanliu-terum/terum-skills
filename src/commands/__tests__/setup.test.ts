@@ -1,3 +1,5 @@
+import { createExecute } from '../../lib/execute.js';
+import type { ResultOutcome } from '../../lib/frames.js';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -247,7 +249,7 @@ describe('setup (§6.1)', () => {
     expect(io.lines.join('\n')).not.toMatch(/\bui\b/i);
     expect(io.lines).toContain('  npx -y terum-skills@latest eval <skill>             — evaluate a shared skill locally before publishing');
     expect(io.lines.join('\n')).not.toContain('Feedback and requests:');
-    expect(io.lines).toContain('Resuming setup for team team. To join another team, run the setup command its owner sent you.');
+    expect(io.lines).toContain('Resuming setup for team team. Terum Skills keeps one team per machine; to move this machine to another team run `npx -y terum-skills@latest team leave \'team\'` first.');
     expect(io.askedAbout('Create a team or join one?')).toBe(false);
   });
 
@@ -427,7 +429,7 @@ describe('setup (§6.1)', () => {
     const resumed = await run({ app: false, config: store, home, runner, hook: hookFor(root) }, second);
     if (!resumed.ok) throw new Error(resumed.error);
     expect(second.askedAbout('Create a team or join one?')).toBe(false);
-    expect(second.lines).toContain('Resuming setup for team resume. To join another team, run the setup command its owner sent you.');
+    expect(second.lines).toContain('Resuming setup for team resume. Terum Skills keeps one team per machine; to move this machine to another team run `npx -y terum-skills@latest team leave \'resume\'` first.');
     expect(resumed.value.steps).toMatchObject({ team: 'skipped', actions: 'done', invite: 'done', community: 'printed', hook: 'done', done: 'printed' });
     expect(runner.calls.filter((call) => call.command === 'gh' && call.args.join(' ') === 'repo create resume-repo --private')).toHaveLength(1);
     expect((await git(['ls-tree', '--name-only', 'main:people'], bare)).split('\n').filter(Boolean)).toEqual(['alice.json']);
@@ -694,11 +696,11 @@ describe('the desktop app question (decision walk D4/D5, 2026-09-08)', () => {
     expect(result.ok && result.value.steps.role).toBeUndefined();
     expect(io.lines.at(-1)).toBe('Continuing in the app.');
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ form: 'bare', evidence: mac, offer: true });
+    expect(calls[0]).toMatchObject({ form: 'bare', evidence: mac, offer: true, intent: 'setup' });
     const joiner = new SP([], [true]);
     await run({ target: 'alice/team', config: store, evidence: mac, verbs: { app: appOk(calls) } }, joiner);
     expect(joiner.lines.at(-1)).toBe('Continuing in the app. Join alice/team there.');
-    expect(calls[1]).toMatchObject({ target: 'alice/team' });
+    expect(calls[1]).toMatchObject({ target: 'alice/team', intent: 'setup' });
   });
 
   it('a remembered yes is not asked again and hands off; --app hands off without asking; --no-app never asks', async () => {
@@ -739,4 +741,61 @@ describe('the desktop app question (decision walk D4/D5, 2026-09-08)', () => {
     expect(io.lines.some((line) => line.startsWith('Could not reach GitHub'))).toBe(true);
     expect(io.asked).toEqual([APP_QUESTION, ROLE_QUESTION]);
   });
+});
+
+it.each([undefined,'alice/team'])('preserves a delegated team cancellation (target=%s)',async target=>{
+ const store=createConfigStore(join(await temporaryDirectory(),'state'));
+ const io=new ScriptedPrompter(target?[]:['Create a new team']);
+ const result=await run({app:false,config:store,runner:mappedRunner('/unused/remote','/unused/bare',fakeGh('alice')),...(target?{target}:{}),verbs:{team:async()=>({...failure('Team was declined.'),cancelled:true})}},io);
+ expect(result).toMatchObject({ok:false,error:'Team was declined.',cancelled:true,value:{role:target?'joiner':'creator',team:''}});
+});
+
+it('refuses another setup target before app, prompts, gh or clone and preserves config bytes', async () => {
+  const fixture = await configuredCreator({});
+  const store = fixture.args.config;
+  const before = await readFile(join(store.root, 'config.json'), 'utf8');
+  let appCalls = 0;
+  const io = new AnsweringPrompter({}, {});
+  const result = await run({ ...fixture.args, app: undefined, target: 'other/repo', verbs: { ...fixture.args.verbs, app: async () => { appCalls++; return failure('unexpected app'); } } }, io);
+  expect(result).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine'), value: { role: 'joiner', steps: { welcome: 'printed' } } });
+  expect(appCalls).toBe(0);
+  expect(fixture.runner.calls).toEqual([]);
+  expect(io.events.some(event => event.startsWith('ask:'))).toBe(false);
+  expect(await exists(store.teamClone('repo'))).toBe(false);
+  expect(await readFile(join(store.root, 'config.json'), 'utf8')).toBe(before);
+});
+
+it('resumes setup for a raw-stored spelling of the same remote', async () => {
+  const fixture = await configuredCreator({});
+  const io = new ScriptedPrompter();
+  const result = await run({ ...fixture.args, target: 'alice/team', offerConnect: false, verbs: { ...fixture.args.verbs, offerWrapper: async () => 'present' } }, io);
+  expect(result.ok).toBe(true);
+  expect(io.lines).toContain('Team team is already configured on this machine.');
+});
+
+it('bare setup refuses legacy teams before app, gh and prompts', async () => {
+  const fixture = await configuredCreator({});
+  await fixture.args.config.update(config => { config.teams.other = { remote: 'github.com/other/repo', handle: 'alice' }; });
+  const io = new ScriptedPrompter();
+  expect(await run(fixture.args, io)).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('configured for teams team, other') });
+  expect(fixture.runner.calls).toEqual([]);
+  expect(io.asked).toEqual([]);
+});
+
+it.each(['refused', 'cancelled'] as const)('setup preserves a child %s with its progress payload', async flag => {
+  const fixture = await configuredCreator({});
+  const io = new ScriptedPrompter();
+  const result = await run({ ...fixture.args, target: 'alice/team', verbs: { ...fixture.args.verbs, connect: async () => ({ ok: false, error: 'stopped', [flag]: true }) } }, io);
+  expect(result).toMatchObject({ ok: false, [flag]: true, value: { role: 'joiner', team: 'team' } });
+});
+
+it('setup refusal survives createExecute with exit 1 and its partial value', async () => {
+  const fixture = await configuredCreator({});
+  const frames: ResultOutcome[] = [];
+  const codes: number[] = [];
+  const execute = createExecute({ io: new ScriptedPrompter(), stderr: () => {}, setExitCode: code => codes.push(code), result: outcome => frames.push(outcome) });
+  await execute(io => run({ ...fixture.args, target: 'other/repo' }, io), { verb: 'setup', notices: false });
+  expect(codes).toEqual([1]);
+  expect(frames).toEqual([expect.objectContaining({ ok: false, refused: true, exitCode: 1, value: expect.objectContaining({ role: 'joiner' }) })]);
+  expect(frames[0]).not.toHaveProperty('cancelled');
 });

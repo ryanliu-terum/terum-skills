@@ -1,0 +1,86 @@
+# verify.log — orchestrator gates, run outside the Codex sandbox on 2026-09-08 21:56 PDT
+
+## baseline (origin/main 279830d, untouched)
+> terum-skills-desktop@0.1.0 typecheck
+> tsc --noEmit
+
+typecheck rc=
+> terum-skills-desktop@0.1.0 lint
+> eslint . --max-warnings 0
+
+lint rc=
+ RUN  v4.1.11 /Users/ryanliu/Documents/Terum/skill-management-software-wt-card/desktop
+
+
+ Test Files  67 passed (67)
+      Tests  922 passed | 88 skipped (1010)
+   Start at  21:33:45
+   Duration  24.89s (transform 4.04s, setup 5.74s, import 26.84s, tests 84.74s, environment 39.14s)
+
+
+## round 1 (Codex)
+> tsc --noEmit
+
+typecheck rc=
+> eslint . --max-warnings 0
+
+lint rc=
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 66 passed (67)
+      Tests  1 failed | 925 passed | 88 skipped (1014)
+   Start at  21:41:39
+   Duration  39.07s (transform 5.76s, setup 12.69s, import 40.25s, tests 83.85s, environment 94.91s)
+
+test rc=
+
+## round 2 (Codex, after dropping the Switch tagName assertion)
+
+typecheck rc=
+
+lint rc=
+
+ Test Files  67 passed (67)
+      Tests  926 passed | 88 skipped (1014)
+   Start at  21:44:18
+   Duration  30.54s (transform 7.29s, setup 6.92s, import 38.55s, tests 96.15s, environment 53.51s)
+
+test rc=
+
+## Playwright e2e/routes + card-click.spec.ts on the fix (pass-after)
+> playwright test e2e/routes e2e/routes/card-click.spec.ts
+[1/101] [chromium] › e2e/routes/card-click.spec.ts:33:1 › switch click toggles without navigating
+[2/101] [chromium] › e2e/routes/card-click.spec.ts:26:1 › skill body click opens the skill
+[3/101] [chromium] › e2e/routes/card-click.spec.ts:43:1 › favorite click toggles without navigating
+[4/101] [chromium] › e2e/routes/card-click.spec.ts:53:1 › flag hover still shows the update tooltip
+[5/101] [chromium] › e2e/routes/card-click.spec.ts:62:1 › marketplace install button opens the install dialog
+[6/101] [chromium] › e2e/routes/card-click.spec.ts:72:1 › More actions opens Remove
+[7/101] [chromium] › e2e/routes/card-click.spec.ts:82:1 › keyboard focus puts the focus ring on the card
+[8/101] [chromium] › e2e/routes/card-click.spec.ts:102:1 › marketplace-origin skill body click keeps the root
+[9/101] [chromium] › e2e/routes/card-click.spec.ts:110:1 › person body click opens the person
+[10/101] [chromium] › e2e/routes/card-click.spec.ts:117:1 › person Follow toggles without navigating
+  101 passed (47.7s)
+
+## Playwright card-click.spec.ts on origin/main 279830d with only the spec copied in (fail-before)
+  1) [chromium] › ../skill-management-software-wt-card-base/desktop/e2e/routes/card-click.spec.ts:82:1 › keyboard focus puts the focus ring on the card 
+    Expected: not "none"
+  2) [chromium] › ../skill-management-software-wt-card-base/desktop/e2e/routes/card-click.spec.ts:102:1 › marketplace-origin skill body click keeps the root 
+    Error: expect(page).toHaveURL(expected) failed
+    Expected pattern: /root=marketplace/
+    Received string:  "http://localhost:1420/#/marketplace/people/ryan"
+  3) [chromium] › ../skill-management-software-wt-card-base/desktop/e2e/routes/card-click.spec.ts:26:1 › skill body click opens the skill 
+    Error: expect(page).toHaveURL(expected) failed
+    Expected pattern: /#\/skill\/deploy-check$/
+    Received string:  "http://localhost:1420/#/library/global"
+  4) [chromium] › ../skill-management-software-wt-card-base/desktop/e2e/routes/card-click.spec.ts:110:1 › person body click opens the person 
+    Error: expect(page).toHaveURL(expected) failed
+    Expected pattern: /#\/marketplace\/people\/ryan$/
+    Received string:  "http://localhost:1420/#/marketplace/people"
+  4 failed
+  6 passed (1.4m)
+
+## e2e:fidelity, TERUM_DESIGN_DIR=/Users/ryanliu/Documents/Terum/design-canvas-terum-skills (macOS oracle re-rendered 2026-09-08)
+  88 passed (38.8s)
+
+## (discarded) e2e:fidelity against ~/Downloads/terum-teammate-bundle/design-canvas-terum-skills/.shots — byte-identical to .shots-linux-teddy-2026-09-08; 86 failed / 2 passed, Main 3702 px: the Linux-raster signature, not the fix

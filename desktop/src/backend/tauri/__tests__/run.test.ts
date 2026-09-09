@@ -192,16 +192,15 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     const f = fakeBridge(ok('sync', { placed: 0, deferred: [] }), { ...STATE, target: 'acme/team' });
     const read = vi.spyOn(f.bridge, 'readAppState');
     const backend = createTauriBackend(f.bridge);
-    const [first, second, run] = await Promise.all([backend.launchTarget(), backend.launchTarget(), backend.sync({}).done]);
+    const [first, second, run] = await Promise.all([backend.launchContext(), backend.launchContext(), backend.sync({}).done]);
     expect(first).toEqual({ target: 'acme/team', writtenAt: STATE.writtenAt });
     expect(second).toEqual(first);
     expect(run.ok).toBe(true);
     expect(read).toHaveBeenCalledTimes(1);
   });
-  it('has no launch target for missing or legacy state', async () => {
-    for (const state of [null, STATE]) {
-      expect(await createTauriBackend(fakeBridge(() => undefined, state).bridge).launchTarget()).toBeNull();
-    }
+  it('retains a legacy context without a target and distinguishes a missing file', async () => {
+    expect(await createTauriBackend(fakeBridge(() => undefined, STATE).bridge).launchContext()).toEqual({writtenAt:STATE.writtenAt});
+    expect(await createTauriBackend(fakeBridge(() => undefined, null).bridge).launchContext()).toBeNull();
   });
   it('install builds the three argv shapes and maps the CLI rows to the seam', async () => {
     const f = fakeBridge(ok('install', [{ id: 'deploy-check', team: 'terum', path: '/p', version: 'abc' }]));
@@ -308,4 +307,62 @@ it.each([true, false, undefined])('maps only a typed wire decline into both seam
   const run = cliRun(f.bridge, Promise.resolve(STATE), ['publish'], { map: value => value });
   expect(await run.done).toEqual({ ok: false, error, value: 3, ...(declined === true ? { cancelled: true } : {}) });
   expect(await collect(run.frames)).toEqual([{ t: 'result', ok: false, error, ...(declined === true ? { declined: true } : {}) }]);
+});
+
+it('refreshes A to B, including the environment used by subsequent CLI runs', async () => {
+ const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{placed:0,deferred:[]}})}));
+ const b=createTauriBackend(f.bridge), spawn=vi.spyOn(f.bridge,'spawn');
+ expect(await b.launchContext()).toEqual({writtenAt:STATE.writtenAt});
+ const next={...STATE,writtenAt:'B',target:'org/team',intent:'setup' as const,node:'/new/node',entry:'/new/cli',path:'/new/path'};
+ vi.spyOn(f.bridge,'readAppState').mockResolvedValue(next);
+ expect(await b.refreshLaunch()).toEqual({writtenAt:'B',target:'org/team',intent:'setup'});
+ await b.sync({}).done;
+ expect(spawn.mock.calls[0]?.[1]).toEqual(next);
+});
+it('re-reads after a request arrives during an in-flight state read, without publishing A', async () => {
+ const f=fakeBridge(()=>undefined);
+ let finish!: (state:typeof STATE)=>void;
+ const read=vi.spyOn(f.bridge,'readAppState').mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;})).mockResolvedValue({...STATE,writtenAt:'B'});
+ const b=createTauriBackend(f.bridge),first=b.launchContext(),next=b.refreshLaunch();
+ await Promise.resolve();
+ finish(STATE);
+ expect(await first).toEqual({writtenAt:'B'});
+ expect(await next).toEqual({writtenAt:'B'});
+ expect(await b.launchContext()).toEqual({writtenAt:'B'});
+ expect(read).toHaveBeenCalledTimes(2);
+});
+it('delivers reopen events and unsubscribes through the backend seam', async () => {
+ const f=fakeBridge(()=>undefined),b=createTauriBackend(f.bridge),listener=vi.fn();
+ const unsubscribe=b.onLaunchRequest(listener);
+ await b.refreshLaunch();f.reopen();expect(listener).toHaveBeenCalledTimes(1);
+ unsubscribe();f.reopen();expect(listener).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+ [['a',1,'b'],{detail:['a','b']}], [[],{}], [[1],{}],
+])('keeps only nonempty string detail in parsed asks: %j',(detail,expected)=>{
+ const ask={t:'ask',id:'q1',kind:'confirm',question:'Use this identity?'};
+ expect(parseCliFrame(line({...ask,detail}))).toEqual({...ask,...expected});
+});
+it('carries decision context through cliRun to the seam ask',async()=>{
+ const ask={t:'ask',id:'q1',kind:'confirm',question:'Use this identity?',detail:['Identity: @me']};
+ const f=fakeBridge((_args,emit)=>{
+  emit({kind:'stdout',line:line(ask)});
+  emit({kind:'stdout',line:line({t:'result',verb:'setup',ok:true,exitCode:0,value:3})});
+ });
+ const run=cliRun(f.bridge,Promise.resolve(STATE),['setup'],{map:value=>value});
+ expect(await collect(run.frames)).toEqual([ask,{t:'result',ok:true}]);
+});
+it('maps a typed refusal into the settled result and seam result frame',async()=>{
+ const error='Leave the existing team first.';
+ const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:line({t:'result',verb:'setup',ok:false,exitCode:1,error,refused:true})}));
+ const run=cliRun(f.bridge,Promise.resolve(STATE),['setup'],{map:value=>value});
+ expect(await run.done).toEqual({ok:false,error,refused:true});
+ expect(await collect(run.frames)).toEqual([{t:'result',ok:false,error,refused:true}]);
+});
+it('forwards a refused result on both the promise and seam frame',async()=>{
+ const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:line({t:'result',verb:'setup',ok:false,exitCode:1,error:'Leave first.',refused:true})}));
+ const run=cliRun(f.bridge,Promise.resolve(STATE),['setup'],{map:value=>value});
+ expect(await run.done).toEqual({ok:false,error:'Leave first.',refused:true});
+ expect(await collect(run.frames)).toEqual([{t:'result',ok:false,error:'Leave first.',refused:true}]);
 });

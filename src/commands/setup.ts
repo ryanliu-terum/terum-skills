@@ -1,6 +1,6 @@
 import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
-import { creatorAuthenticationError, detectOrOfferGh, teamByRemote } from '../lib/auth.js';
+import { creatorAuthenticationError, detectOrOfferGh, refuseSecondTeam, teamByRemote } from '../lib/auth.js';
 import { COMMUNITY_URL } from '../lib/community.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
@@ -8,7 +8,7 @@ import { defaultWrapperOptions, offerWrapper as defaultOfferWrapper, WrapperOpti
 import { Prompter } from '../lib/prompt.js';
 import { readRoster } from '../lib/skills.js';
 import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { describeClone } from '../lib/teamRepo.js';
 import { readFile } from 'node:fs/promises';
@@ -79,7 +79,9 @@ function joinHandoff(): string[] {
 }
 
 function failed(error: unknown, role: SetupResult['role'], teamName: string, remote: string, steps: SetupResult['steps']): Result<SetupResult> {
-  return failure(error instanceof Error ? error.message : String(error), { role, team: teamName, remote, steps });
+  const outcome = error && typeof error === 'object' && 'ok' in error && error.ok === false && 'error' in error
+    ? error as Extract<Result<unknown>, { ok: false }> : fromError(error);
+  return { ...outcome, ok: false, error: outcome.ok ? '' : outcome.error, value: { role, team: teamName, remote, steps } };
 }
 
 function resolvedHook(store: ConfigStore, home: string | undefined, partial: HookOptions | undefined): Required<HookOptions> {
@@ -99,6 +101,9 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   try {
     for (const line of WELCOME) say(line);
     steps.welcome = args.quiet ? 'skipped' : 'printed';
+    const before = await store.read();
+    const target = args.target === undefined ? undefined : parseJoinTarget(args.target);
+    refuseSecondTeam(before, target ? { remote: target.remote } : {}, invocation(args.form, 'setup', ...(args.target === undefined ? [] : [args.target])), args.form);
 
     // The desktop app, first and opt-in (D4/D5, 2026-09-08). Asked only where an app exists for this machine, only to a
     // person at an interactive terminal (never over a pipe, never over frames, never in install's quiet bootstrap). The question itself belongs to the
@@ -108,7 +113,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       steps.app = 'skipped';
     } else {
       const wanted = args.app === true || (await store.read()).app?.choice === 'opted-in';
-      const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, target: args.target, offer: !wanted }, io);
+      const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, target: args.target, intent: 'setup', offer: !wanted }, io);
       if (opened.ok && (opened.value.action === 'launched' || opened.value.action === 'installed-and-launched')) {
         io.print(args.target === undefined ? 'Continuing in the app.' : `Continuing in the app. Join ${args.target} there.`);
         steps.app = 'done';
@@ -119,14 +124,13 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     }
 
     // The fork the argument used to decide silently. A target names a team to join; a configured
-    // machine resumes its first team and is told how to reach another; only a fresh machine with no
+    // machine resumes its configured team; only a fresh machine with no
     // target is asked — before gh is probed, so a joiner is never offered `gh auth login`. The
     // selection has no default on purpose (the one exception to "a question with a default"): a wrong
     // "create" is a private GitHub repository, a wrong "join" is a re-run. "Join" is a success exit
     // that writes nothing; the owner's command creates every piece of local state itself.
-    const before = await store.read();
     const configured = args.target === undefined ? Object.entries(before.teams)[0] : undefined;
-    if (configured) say(`Resuming setup for team ${configured[0]}. To join another team, run the setup command its owner sent you.`);
+    if (configured) say(`Resuming setup for team ${configured[0]}. Terum Skills keeps one team per machine; to move this machine to another team run \`${invocation(args.form, 'team leave', configured[0])}\` first.`);
     else if (args.target === undefined) {
       io.print('Creating a new team creates a private GitHub repository under your account.');
       const choice = await io.select(ROLE_QUESTION, [CREATE_CHOICE, JOIN_CHOICE]);
@@ -155,7 +159,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         steps.team = 'skipped';
       } else {
         const result = await verbs.team({ form: args.form, kind: 'create', offerHook: false, config: store, runner }, io);
-        if (!result.ok) return failed(result.error, role, teamName, remote, steps);
+        if (!result.ok) return failed(result, role, teamName, remote, steps);
         teamName = result.value.team;
         remote = 'remote' in result.value ? result.value.remote : (await store.read()).teams[teamName]!.remote;
         steps.team = 'done';
@@ -169,7 +173,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         steps.team = 'skipped';
       } else {
         const result = await verbs.team({ form: args.form, kind: 'join', target: args.target!, offerHook: false, config: store, runner }, io);
-        if (!result.ok) return failed(result.error, role, teamName, remote, steps);
+        if (!result.ok) return failed(result, role, teamName, remote, steps);
         teamName = result.value.team;
         remote = (await store.read()).teams[teamName]!.remote;
         steps.team = 'done';
@@ -211,7 +215,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       if (logins.length === 0) steps.invite = 'skipped';
       else {
         const result = await verbs.invite({ form: args.form, logins, team: teamName, config: store, runner }, io);
-        if (!result.ok) return failed(result.error, role, teamName, remote, steps);
+        if (!result.ok) return failed(result, role, teamName, remote, steps);
         steps.invite = 'done';
       }
     } else {
@@ -222,7 +226,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
 
     if (args.offerConnect !== false) {
       const result = await verbs.connect({ form: args.form, team: teamName, home: args.home, cwd: args.cwd, config: store, runner }, io);
-      if (!result.ok) return failed(result.error, role, teamName, remote, steps);
+      if (!result.ok) return failed(result, role, teamName, remote, steps);
       steps.actions = result.value !== undefined && (!('kind' in result.value) || result.value.shared.length > 0) ? 'done' : 'skipped';
     } else steps.actions = 'skipped';
     say('Next, from any terminal:');

@@ -12,7 +12,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/cli.ts",
     "line": 127,
     "policy": "prose",
-    "pattern": "program.command('uninstall').description('Remove terum-skills from this machine: every team you joined (placed skills, local clones, cache), the session-start hook and the /terum-skills Claude Code skill if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \\`${invocation(context.form, 'uninstall-skill <ref>')}\\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));"
+    "pattern": "program.command('uninstall').description('Remove terum-skills from this machine: your team (placed skills, local clone, cache), the session-start hook and the /terum-skills Claude Code skill if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \\`${invocation(context.form, 'uninstall-skill <ref>')}\\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));"
   },
   {
     "file": "src/commands/eval.ts",
@@ -252,7 +252,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/uninstallMachine.ts",
     "line": 65,
     "policy": "fixed",
-    "pattern": "io.print('Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');"
+    "pattern": "io.print('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');"
   },
   {
     "file": "src/commands/uninstallMachine.ts",

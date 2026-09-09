@@ -11,7 +11,7 @@ export type Inspection =
   | { kind: 'candidate'; description: string; privileged: boolean }
   | { kind: 'rejected'; reason: SourceProblem; detail: string }
   | { kind: 'failed'; reason: string };
-export interface LocalEntry { name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; placementFingerprint?: string; inspection: Inspection; }
+export interface LocalEntry { skillId: string | null; name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; placementFingerprint?: string; inspection: Inspection; }
 export interface LocalInventory {
   root: string;
   scope: 'global' | 'project';
@@ -93,7 +93,7 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
     const shared = sharedPaths.filter(({ ref, canonical: reference }) => resolve(ref.source) === path || (canonical !== undefined && reference === canonical)).map(({ id, ref }) => ({ id, team: ref.team }));
     const placement = placementPaths.find(({ target, canonical: reference }) => resolve(target) === path || (canonical !== undefined && reference === canonical))?.ref;
     const tracked = shared.length > 0 || placement !== undefined;
-    const entry: LocalEntry = { name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
+    const entry: LocalEntry = { skillId: null, name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
     const reject = (reason: SourceProblem, detail: string): void => { entry.inspection = { kind: 'rejected', reason, detail }; };
     try {
       const details = await lstat(path);
@@ -125,7 +125,7 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
           else {
             const scan = await scanSkillFolder(path);
             if (scan.symlink) reject('nested-symlink', `contains symlink ${scan.symlink}`);
-            else entry.inspection = { kind: 'candidate', description: inspection.description, privileged: scan.privileged };
+            else { entry.skillId = inspection.id; entry.inspection = { kind: 'candidate', description: inspection.description, privileged: scan.privileged }; }
           }
         }
       }

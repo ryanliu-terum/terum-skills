@@ -74,13 +74,13 @@ export function verdict_counts():Record<'PASS'|'NEUTRAL'|'FAIL'|'Not evaluated',
 export function bulk_install(q:Project){return {total:q.skills,asking:skills_in(q).filter(s=>s.grants?.length).length};}
 export function person_on_disk(handle:string):[number,number]{const mine=skills_by(handle);return [mine.filter(s=>s.installed!==false).length,mine.length];}
 export function category_remaining(key:string,n:number):number{return n-category_skills(key).length;}
-export function library_title(scope:string):string{const counts:Record<string,string>=d.COUNTS;return (counts[scope]??'0')+' skills';}
+export function library_title(scope:string):string{const titles:Record<string,string>=d.DERIVED.libraryTitles;return Object.hasOwn(titles,scope)?titles[scope]!:'0 skills';}
 export function score_fractions(rc:Receipt|null):{roi:[number,number]|null;quality:[number,number]|null}{if(!rc)return {roi:null,quality:null};const c=Number.parseFloat(rc.eff.candidate[2]!.replace('$','')),b=Number.parseFloat(rc.eff.baseline[2]!.replace('$','')),max=Math.max(c,b);return {roi:[c/max,b/max],quality:[rc.arm.candidate,rc.arm.baseline]};}
 
-/** The same three buckets feed the overview and sidebar; Updates is already part of Alerts. */
+/** Library attention counts only the Global library; Inbox badges are separate fixture counts. */
 export function attentionCounts() {
  const failingEvals=d.LIBRARY_OVERVIEW.meter.fail;
- const updatesAvailable=Number(d.COUNTS.Updates);
+ const updatesAvailable=d.SKILLS.filter(skill=>skill.flags?.includes('update')).length;
  const notEvaluated=d.LIBRARY_OVERVIEW.meter.total-d.LIBRARY_OVERVIEW.meter.pass_-d.LIBRARY_OVERVIEW.meter.neutral-failingEvals;
  return {failingEvals,updatesAvailable,notEvaluated,attention:failingEvals+updatesAvailable+notEvaluated};
 }
@@ -92,4 +92,9 @@ export function cloneStateCopy(state:CloneState,clone:string,remote:string,reada
   case 'incomplete':return state.reason==='unverifiable'?`Clone: ${clone} could not be verified (${state.error??'unknown error'}); check that git is installed before repairing anything.`:`Clone: ${clone} exists but is not a complete clone.`;
   case 'ok':return readable?'From the local clone; GitHub access is not checked.':'Local team details could not be read.';
  }
+}
+
+/** Human diagnostics use the same fixture facts as the Settings read model. */
+export function statusLines(data:Pick<typeof d,'CLI_VERSION'|'TEAMS'>):string[] {
+ return [`terum-skills ${data.CLI_VERSION}`,...data.TEAMS.map(team=>`${team.name} · ${team.remote} · handle ${team.handle} · ${team.members} members · ${team.skills} skills · last sync ${team.last_sync}`)];
 }

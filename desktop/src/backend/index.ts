@@ -32,5 +32,5 @@ export function usePreference<T>(key:string,fallback:T):T {
  return JSON.parse(json) as T;
 }
 
-export { setupSession, existingSetupSession, SETUP_STEP_TO_BOARD } from './setup-session';
-export function useLaunchTarget(){const backend=useBackend();return useQuery({queryKey:['launch-target'],queryFn:async()=>{await backend.prefs.ready;return backend.launchTarget();},staleTime:Infinity});}
+export { setupSession, existingSetupSession, activeSetupSession, SETUP_STEP_TO_BOARD } from './setup-session';
+export function useLaunchContext(){const backend=useBackend();return useQuery({queryKey:['launch-context'],queryFn:async()=>{await backend.prefs.ready;return backend.launchContext();},staleTime:Infinity,refetchOnMount:false,refetchOnWindowFocus:false});}
