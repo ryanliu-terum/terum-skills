@@ -109,7 +109,7 @@ function placementCounts(placements:CliStatus['ledger']['placements']):Record<st
 }
 function statusModel(value:CliStatus, _local:CliLocal|null, platform:string):StatusResult {
  const name=value.identity?.display_name??'';
- const handle=value.teams[0]?.handle??'';
+ const handle=value.teams[0]?.handle??''; // one team per machine — legacy 2+ shows a hint, not a projection
  return {
   ledger:value.ledger??null,
   machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
@@ -122,10 +122,10 @@ function statusModel(value:CliStatus, _local:CliLocal|null, platform:string):Sta
 const PLACEMENT_STATE:Record<z.infer<typeof cliLocalHealth>,string>={'up-to-date':'up to date','update-available':'update available','local-changed':'edited locally',both:'edited locally · update available','gone-from-repo':'removed from the team',unknown:'—',untracked:'—'};
 function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult):Settings {
  const rows=local?.local.flatMap(root=>root.rows)??[];
- const policy=status.teams[0]?.policy??null;
+ const policy=status.teams.length===1?status.teams[0]?.policy??null:null; // one team per machine — legacy 2+ shows a hint, not a projection
  return {
   MACHINE:status.machine,ME:status.me,TEAMS:status.teams,tools:status.tools,
-  TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams[0]?.categories??null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'},
+  TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams.length===1?status.teams[0]?.categories??null:null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'}, // one team per machine — legacy 2+ shows a hint, not a projection
   PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [p.path,row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,p.version?.slice(0,12)??null,p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
   SHARED:value.ledger.shared.map(item=>[item.id,item.source,item.team,'—']),
@@ -237,10 +237,16 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     return result(errors.length?{ok:false,error:errors.join('\n'),value}:{ok:true,value});
   }
 
+  function teamSelectionFailure(teams:readonly {team:string}[]):Result<never> {
+    return teams.length===0
+      ? {ok:false,error:'No team is configured on this machine.',reason:'no-team'}
+      : {ok:false,error:`This machine is configured for teams ${teams.map(team=>team.team).join(', ')}; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.`,reason:'ambiguous-team'};
+  }
+
   async function inventoryTeam(team: string | undefined, options?: ReadOptions): Promise<Result<InventoryTeam>> {
     const status = await read(run(['status', ...(team ? ['--team', team] : [])], cliStatusTeams, value => value, []), options);
     if (!status.ok) return { ok: false, error: status.error };
-    if (status.value.teams.length === 0) return { ok: false, error: 'No team is configured on this machine.', reason: 'no-team' };
+    if (!team && status.value.teams.length !== 1) return teamSelectionFailure(status.value.teams);
     const selected = team ? status.value.teams.find(value => value.team === team) : status.value.teams.length === 1 ? status.value.teams[0] : undefined;
     if (!selected) return { ok: false, error: 'Select a team explicitly to read its skills.', reason: 'ambiguous-team' };
     if (!selected.readable) return fail(`Team ${selected.team} could not be read.`);
@@ -249,7 +255,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   async function peopleInventory(options?: ReadOptions) {
     const status = await read(run(['status'], cliStatus, value => value, []), options);
     if (!status.ok) return status;
-    if (status.value.teams.length !== 1) return { ok: false as const, error: 'Select a single configured team to read people.' };
+    if (status.value.teams.length !== 1) return teamSelectionFailure(status.value.teams);
     const team = status.value.teams[0]!;
     if (!team.readable) return { ok: false as const, error: `Team ${team.team} could not be read.` };
     const inventory = await read(run(['ls', '--team', team.team], cliLs, value => value, []), options);
@@ -284,7 +290,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
-      return { status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true };
+      return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true };
     },
     // Status and Settings are offline reads; the remaining surfaces retain their explicit gaps.
     status: (_, options) => readModels(options, (value, local, platform) => statusModel(value, local, platform)),
@@ -327,13 +333,13 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     inbox: async () => gap('The Inbox'),
     async roster(_, options) {
       const data = await peopleInventory(options);
-      if (!data.ok) return fail(data.error);
+      if (!data.ok) return {ok:false,error:data.error,...(data.reason?{reason:data.reason}:{})};
       const { team, inventory } = data.value;
       return { ok: true, value: rosterModel(team, inventory) };
     },
     async catalog(query, options) {
       const data = await peopleInventory(options);
-      if (!data.ok) return fail(data.error);
+      if (!data.ok) return {ok:false,error:data.error,...(data.reason?{reason:data.reason}:{})};
       const { team, inventory } = data.value;
       const local = await read(run(['ls', '--local'], cliLs, value => value, []), options);
       if (!local.ok) return fail(local.error);
@@ -369,6 +375,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     eval: (args: EvalArgs) => run(['eval', ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name: value.name, receipt: null }), ['clone']),
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
     update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
+    diagnostics: () => run(['status'], z.unknown(), () => undefined, []),
     async windowAction(action) { try { const window = getCurrentWindow(); if (action === 'toggle-maximize') await window.toggleMaximize(); else await window.startDragging(); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async openUrl(url) { try { await openUrl(url); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async revealPath(path) { try { await revealItemInDir(await localPath(path)); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },

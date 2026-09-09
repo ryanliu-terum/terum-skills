@@ -98,7 +98,7 @@ it.each([true, false])('maps every search field including its real description (
 it('serves status, settings, library, skill, update, roster and catalog while the other three surfaces stay typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true });
+  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: true, roster: true, update: true });
   for (const result of await Promise.all([b.onboarding(), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }
@@ -258,7 +258,7 @@ it('does not infer installation from an untracked or other-team same-name folder
 });
 it('refuses multi-team ambiguity before ls and discovers a single configured team without a prompt',async()=>{
   const f=inventoryBridge({teams:['one','two']});
-  expect(await createTauriBackend(f.bridge).library({scope:'Global'})).toEqual({ok:false,error:'Select a team explicitly to read its skills.',reason:'ambiguous-team'});
+  expect(await createTauriBackend(f.bridge).library({scope:'Global'})).toEqual({ok:false,error:'This machine is configured for teams one, two; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.',reason:'ambiguous-team'});
   expect(f.spawns.map(s=>s.args)).toEqual([['status']]);
   expect((await createTauriBackend(inventoryBridge().bridge).skill({ref:'a'})).ok).toBe(true);
 });
@@ -401,4 +401,25 @@ it.each(['setup','team'] as const)('invalidates every affected read model when %
  const b=createTauriBackend(f.bridge),notify=vi.fn();b.subscribe(notify);
  await (verb==='setup'?b.setup({offerConnect:true}):b.team({kind:'create',name:'acme'})).done;
  expect(notify.mock.calls).toEqual([['config'],['clone'],['placed']]);
+});
+it.each([[[]],[['one','two']]])('refuses people inventory before ls for teams %j',async teams=>{
+ const f=peopleReplay((frame,name)=>{
+  if(name==='status'&&frame.t==='result'){
+   const value=frame.value as {teams:{team:string}[]};
+   value.teams=teams.map(team=>({...value.teams[0]!,team}));
+  }
+ });
+ expect(await createTauriBackend(f.bridge).roster()).toEqual(teams.length?{ok:false,error:'This machine is configured for teams one, two; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.',reason:'ambiguous-team'}:{ok:false,error:'No team is configured on this machine.',reason:'no-team'});
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status']]);
+});
+it('syncs with the bare CLI verb and leaves by the supplied team key',async()=>{
+ const f=replay(undefined,false),backend=createTauriBackend(f.bridge);
+ await backend.sync({}).done;await backend.team({kind:'leave',name:'acme-key'}).done;
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['sync'],['team','leave','--','acme-key']]);
+});
+it('streams diagnostics as a status run without a read-model projection',async()=>{
+ const f=replay(undefined,true,['CLI version','Team state']),run=createTauriBackend(f.bridge).diagnostics(),lines:string[]=[];
+ for await(const frame of run.frames)if(frame.t==='print')lines.push(frame.line);
+ expect(lines).toEqual(['CLI version','Team state']);expect(await run.done).toEqual({ok:true,value:undefined});
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status']]);
 });

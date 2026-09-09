@@ -18,7 +18,7 @@ it.each(['#/marketplace?__mock=error','#/share?__mock=error','#/settings/sync'])
  const backend=createMockBackend(),sync=vi.spyOn(backend,'sync');location.hash=route;render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
  const button=await screen.findByRole('button',{name:'Sync now'});fireEvent(window,new Event('focus'));expect(sync).not.toHaveBeenCalled();
  fireEvent.click(button);expect(await screen.findByRole('dialog')).toHaveTextContent('Sync now');
- await waitFor(()=>expect(sync).toHaveBeenCalledTimes(1));expect(sync).toHaveBeenCalledWith({team:'terum'});
+ await waitFor(()=>expect(sync).toHaveBeenCalledTimes(1));expect(sync).toHaveBeenCalledWith({});
 });
 it('uses only the drawn shortcuts and never syncs from focus',async()=>{
  const backend=createMockBackend(),sync=vi.spyOn(backend,'sync');location.hash='#/library/global';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);

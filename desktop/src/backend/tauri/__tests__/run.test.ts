@@ -337,3 +337,9 @@ it('delivers reopen events and unsubscribes through the backend seam', async () 
  await b.refreshLaunch();f.reopen();expect(listener).toHaveBeenCalledTimes(1);
  unsubscribe();f.reopen();expect(listener).toHaveBeenCalledTimes(1);
 });
+it('forwards a refused result on both the promise and seam frame',async()=>{
+ const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:line({t:'result',verb:'setup',ok:false,exitCode:1,error:'Leave first.',refused:true})}));
+ const run=cliRun(f.bridge,Promise.resolve(STATE),['setup'],{map:value=>value});
+ expect(await run.done).toEqual({ok:false,error:'Leave first.',refused:true});
+ expect(await collect(run.frames)).toEqual([{t:'result',ok:false,error:'Leave first.',refused:true}]);
+});

@@ -93,3 +93,8 @@ export function cloneStateCopy(state:CloneState,clone:string,remote:string,reada
   case 'ok':return readable?'From the local clone; GitHub access is not checked.':'Local team details could not be read.';
  }
 }
+
+/** Human diagnostics use the same fixture facts as the Settings read model. */
+export function statusLines(data:Pick<typeof d,'CLI_VERSION'|'TEAMS'>):string[] {
+ return [`terum-skills ${data.CLI_VERSION}`,...data.TEAMS.map(team=>`${team.name} · ${team.remote} · handle ${team.handle} · ${team.members} members · ${team.skills} skills · last sync ${team.last_sync}`)];
+}
