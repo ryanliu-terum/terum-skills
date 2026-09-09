@@ -92,3 +92,4 @@ it('marks a mock connect decline on both the result and the terminal frame',asyn
  const frames=[];for await(const frame of run.frames)frames.push(frame);
  expect(frames.at(-1)).toEqual({t:'result',ok:false,error:'Connect was declined.',declined:true});
 });
+it('has no launch target in the mock',async()=>{expect(await createMockBackend().launchTarget()).toBeNull();});

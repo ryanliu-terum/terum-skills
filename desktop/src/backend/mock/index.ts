@@ -48,6 +48,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   }
  }
  const backend:Backend = {
+  async launchTarget(){return null;},
   async features(){return Object.fromEntries(FEATURE_KEYS.map(key=>[key,true])) as Features;},
   async windowAction(){return ok(undefined);},
   async openUrl(url){try{window.open(url,'_blank','noopener');return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:String(error));}},
