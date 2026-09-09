@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { AgentRunError, type AgentApi } from '../agent.js';
 import { judgePair, makeRng } from '../judge.js';
 
-const agentReturning = (verdicts: Array<Record<string, unknown> | Error>): { agent: AgentApi; calls: Array<{ model?: string }> } => {
-  const calls: Array<{ model?: string }> = [];
+const agentReturning = (verdicts: Array<Record<string, unknown> | Error>): { agent: AgentApi; calls: Array<{ model?: string; prompt: string }> } => {
+  const calls: Array<{ model?: string; prompt: string }> = [];
   return {
     calls,
     agent: {
       runAgent: () => { throw new Error('not used'); },
-      askJson: (_prompt, options) => {
-        calls.push({ model: options?.model });
+      askJson: (prompt, options) => {
+        calls.push({ model: options?.model, prompt });
         const next = verdicts[Math.min(calls.length - 1, verdicts.length - 1)]!;
         return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
       },
@@ -102,5 +102,21 @@ describe('escalation chain (§7.5)', () => {
   it('non-agent errors propagate', async () => {
     const { agent } = agentReturning([new TypeError('bug')]);
     await expect(judgePair(agent, { ...base, rng: () => 0.9 })).rejects.toThrow(TypeError);
+  });
+});
+
+describe('prompt assembly', () => {
+  it("transcripts containing $' and $& land verbatim; later placeholders still fill", async () => {
+    const left = "left ran: bash -c $'echo hi' && grep foo $& done";
+    const right = 'right used $` and $$ and ${HOME} here';
+    const { agent, calls } = agentReturning([{ winner: 'tie', reason: 'even' }]);
+    await judgePair(agent, { ...base, leftText: left, rightText: right, rng: () => 0.9 });
+    const prompt = calls[0]!.prompt;
+    expect(prompt).toContain(left); // string-form replace would splice the rest of the template here
+    expect(prompt).toContain(right); // and `{b}` would survive unfilled inside the spliced copy
+    expect(prompt).not.toContain('{a}');
+    expect(prompt).not.toContain('{b}');
+    expect(prompt).not.toContain('{task}');
+    expect(prompt).not.toContain('{rubric}');
   });
 });

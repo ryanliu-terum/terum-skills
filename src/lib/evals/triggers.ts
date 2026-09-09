@@ -73,7 +73,8 @@ export async function runTriggerEvals(agent: AgentApi, options: TriggerOptions):
   ];
   const rows: TriggerRow[] = [];
   for (const [prompt, expected] of prompts) {
-    const selection = SELECTION_PROMPT.replace('{catalog}', options.catalog).replace('{prompt}', prompt);
+    // function form: `$&`/`$'` in catalog/prompt text must not be interpreted
+    const selection = SELECTION_PROMPT.replace('{catalog}', () => options.catalog).replace('{prompt}', () => prompt);
     try {
       const verdict = await agent.askJson(selection, { model: options.model ?? DEFAULT_MODEL });
       const selected = Array.isArray(verdict['selected']) ? verdict['selected'].map(String) : [];

@@ -75,11 +75,12 @@ async function askOnce(agent: AgentApi, options: JudgeOptions, swap: boolean): P
   const model = options.model ?? DEFAULT_MODEL;
   const sleep = options.sleep ?? defaultSleep;
   const [a, b] = swap ? [options.rightText, options.leftText] : [options.leftText, options.rightText];
+  // function form: `$&`/`$'` in task/rubric/transcript text must not be interpreted
   const prompt = PROMPT
-    .replace('{task}', options.task)
-    .replace('{rubric}', options.rubric)
-    .replace('{a}', a.slice(-TRANSCRIPT_TAIL))
-    .replace('{b}', b.slice(-TRANSCRIPT_TAIL));
+    .replace('{task}', () => options.task)
+    .replace('{rubric}', () => options.rubric)
+    .replace('{a}', () => a.slice(-TRANSCRIPT_TAIL))
+    .replace('{b}', () => b.slice(-TRANSCRIPT_TAIL));
 
   const chain = [model, model, options.escalationModel ?? DEFAULT_ESCALATION_MODEL];
   let lastError = '';
