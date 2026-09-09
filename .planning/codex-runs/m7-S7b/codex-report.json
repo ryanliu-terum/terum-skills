@@ -1,0 +1,125 @@
+{
+  "status": "complete",
+  "summary": "Implemented owner-written profile metadata, profile/decline verbs, guard coverage, and the hello inventory gate. Share and Marketplace now use real CLI read models, with rebuilt frame replays and regression tests. Permission-role preferences remain separate and intact; all required gates pass.",
+  "filesChanged": [
+    {"path":"src/cli.ts","change":"modified","why":"Register profile and decline."},
+    {"path":"src/commands/profile.ts","change":"added","why":"Implement guarded profile writes and config name updates."},
+    {"path":"src/commands/decline.ts","change":"added","why":"Implement idempotent, ID-keyed declines."},
+    {"path":"src/commands/team.ts","change":"modified","why":"Preserve role and projects during reclaim."},
+    {"path":"src/commands/ls.ts","change":"modified","why":"Expose role and projects in roster and member payloads."},
+    {"path":"src/lib/schema.ts","change":"modified","why":"Declare optional people metadata without defaults."},
+    {"path":"src/lib/guard.ts","change":"modified","why":"Authorize both verbs on the caller’s people path."},
+    {"path":"src/lib/skills.ts","change":"modified","why":"Expose metadata through the status roster."},
+    {"path":"src/lib/frames.ts","change":"modified","why":"Advertise verbs and memberRole."},
+    {"path":"src/__tests__/frames-cli.test.ts","change":"modified","why":"Exercise all advertised verbs through Commander."},
+    {"path":"src/commands/__tests__/profile.test.ts","change":"added","why":"Test fields, identity refusal, registry validation, config updates, and concurrent writers."},
+    {"path":"src/commands/__tests__/decline.test.ts","change":"added","why":"Test append, idempotency, and installed-ID refusal."},
+    {"path":"src/commands/__tests__/join.test.ts","change":"modified","why":"Test reclaim preservation."},
+    {"path":"src/commands/__tests__/sync.test.ts","change":"modified","why":"Test metadata preservation through install and orphan handling."},
+    {"path":"src/commands/__tests__/ls.test.ts","change":"modified","why":"Assert additive member fields."},
+    {"path":"src/lib/__tests__/schema.test.ts","change":"modified","why":"Test optional-field round trips and validation."},
+    {"path":"src/lib/__tests__/guard.test.ts","change":"modified","why":"Test owner-path authorization and refusals."},
+    {"path":"src/lib/__tests__/skills.test.ts","change":"modified","why":"Assert additive roster fields."},
+    {"path":"src/lib/__tests__/frames.test.ts","change":"modified","why":"Add CP-19 gates and update the feature snapshot."},
+    {"path":"docs/frame-protocol.md","change":"modified","why":"Document the feature inventory and memberRole distinction."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"Document people fields, verbs, and permitted writes."},
+    {"path":"desktop/src/backend/Backend.ts","change":"modified","why":"Add profile and decline seam methods."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Represent people metadata and unavailable catalog values."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Implement mock profile and decline behavior."},
+    {"path":"desktop/src/backend/mock/data.ts","change":"modified","why":"Supply projects and complete people ordering from fixtures."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Serve roster/catalog and map both write verbs."},
+    {"path":"desktop/src/screens/share/ShareScreen.tsx","change":"modified","why":"Gate job labels and Teams independently of permissions; retain removal."},
+    {"path":"desktop/src/screens/marketplace/MarketplaceScreen.tsx","change":"modified","why":"Use real person metadata and explicit install operands; handle absent bulk previews."},
+    {"path":"desktop/src/screens/marketplace/market-components.tsx","change":"modified","why":"Render metadata and unavailable values without sample data."},
+    {"path":"desktop/src/screens/marketplace/market-filters.tsx","change":"modified","why":"Render unavailable verdict counts as dashes."},
+    {"path":"desktop/src/screens/inbox/InboxScreen.tsx","change":"modified","why":"Route Decline through the backend verb."},
+    {"path":"desktop/src/backend/__tests__/s7b-mock.test.ts","change":"added","why":"Verify mock metadata and decline behavior."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Test argv, read models, recorded results, and invalidation."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"Keep gap coverage on an unserved surface."},
+    {"path":"desktop/src/backend/tauri/__tests__/s7b-screens.test.tsx","change":"added","why":"Prove real Share, Marketplace, and project-dialog rendering."},
+    {"path":"desktop/src/components/domain/Sidebar.test.tsx","change":"modified","why":"Assert newly served navigation."},
+    {"path":"desktop/src/components/domain/s7q-surfaces.test.tsx","change":"modified","why":"Assert Teams uses memberRole."},
+    {"path":"desktop/src/screens/share/share.test.tsx","change":"modified","why":"Verify job-label separation and removal without permission chips."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","change":"modified","why":"Assert explicit project/member install operands."},
+    {"path":"desktop/src/screens/inbox/inbox.test.tsx","change":"modified","why":"Verify backend declines and failure handling."},
+    {"path":".planning/codex-runs/m7-S7b/fixture.sh","change":"modified","why":"Rebuild an offline fixture with people metadata."},
+    {"path":".planning/codex-runs/m7-S7b/frames/status.jsonl","change":"modified","why":"Record rebuilt status metadata."},
+    {"path":".planning/codex-runs/m7-S7b/frames/ls.jsonl","change":"modified","why":"Record rebuilt inventory metadata."},
+    {"path":".planning/codex-runs/m7-S7b/frames/ls-local.jsonl","change":"modified","why":"Record actual local installations."},
+    {"path":".planning/codex-runs/m7-S7b/frames/ls-member-mira.jsonl","change":"modified","why":"Record real role and projects."},
+    {"path":".planning/codex-runs/m7-S7b/frames/ls-member-seed.jsonl","change":"added","why":"Record authored skills and persisted decline."},
+    {"path":".planning/codex-runs/m7-S7b/frames/ls-member-ravi.jsonl","change":"added","why":"Record the third member’s data."},
+    {"path":".planning/codex-runs/m7-S7b/frames/profile.jsonl","change":"added","why":"Record a successful profile write."},
+    {"path":".planning/codex-runs/m7-S7b/frames/decline.jsonl","change":"added","why":"Record a successful decline write."}
+  ],
+  "gates": {
+    "lint": {"ran":true,"passed":true,"output":"Root and desktop lint passed with no errors.","preExistingFailures":""},
+    "typecheck": {"ran":true,"passed":true,"output":"Root and desktop typechecks passed. Root build also passed.","preExistingFailures":""},
+    "test": {"ran":true,"passed":true,"output":"Root: 75 files, 1227 passed. Desktop: 55 files, 674 passed, 88 skipped. Playwright was not run, as instructed.","preExistingFailures":""}
+  },
+  "openQuestions": [
+    {
+      "question":"How should an empty project list be expressed through CLI flags?",
+      "specSection":"§1 profile; §2 seam",
+      "conservativeChoice":"Explicit non-empty lists replace membership; omitted flags leave it unchanged. The adapter’s empty array emits no project flags; no clearing flag or UI was invented."
+    },
+    {
+      "question":"Which team should roster/catalog select when multiple teams are configured?",
+      "specSection":"§2 AD-25/AD-26",
+      "conservativeChoice":"Return an explicit ambiguity failure because these seam methods have no team selector."
+    },
+    {
+      "question":"How should the project install dialog handle the specified empty bulkInstall map?",
+      "specSection":"§2 AD-26",
+      "conservativeChoice":"Omit the unavailable grant preview and retain installation through the CLI."
+    },
+    {
+      "question":"Should changed contain flag names or committed field names?",
+      "specSection":"§1 profile result",
+      "conservativeChoice":"Return committed field names, including display_name."
+    }
+  ],
+  "deviations": [
+    {
+      "what":"Added the existing public app command to FRAME_VERBS.",
+      "why":"The required bidirectional inventory gate exposed its omission."
+    },
+    {
+      "what":"Recorded the fixture against a local bare remote.",
+      "why":"This permits offline write replays without making the existing clone guard see a rewritten foreign remote."
+    },
+    {
+      "what":"Left the adapter README’s old gap description unchanged.",
+      "why":"Maintainer-owned documentation constraints prohibit editing it; roster and catalog are now served."
+    }
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Native capabilities remain behind the backend seam; screens use backend methods."},
+    {"number":2,"howSatisfied":"memberRole comes from hello; roles remains false; permission preferences remain separate."},
+    {"number":3,"howSatisfied":"Generated fixtures and tokens were not edited."},
+    {"number":4,"howSatisfied":"No oracle, tolerance, or snapshot changes; no Playwright execution."},
+    {"number":5,"howSatisfied":"Retained mock geometry and board content while mapping real metadata."},
+    {"number":6,"howSatisfied":"Rankings use install counts; unavailable receipt statistics render as dashes."},
+    {"number":7,"howSatisfied":"Added behavioral regression coverage and updated existing assertions only for changed contracts."},
+    {"number":8,"howSatisfied":"Ran required gates, verified writes by reading them back, and made no repository git operations, installs, commits, or pushes."}
+  ],
+  "testsModified": [
+    {"path":"src/__tests__/frames-cli.test.ts","whatChanged":"Added app/profile/decline invocations and stubs.","justification":"Cover the expanded public inventory."},
+    {"path":"src/commands/__tests__/ls.test.ts","whatChanged":"Expected role:null and projects:[].","justification":"Required additive wire fields."},
+    {"path":"src/commands/__tests__/join.test.ts","whatChanged":"Added reclaim preservation test.","justification":"Required regression coverage."},
+    {"path":"src/commands/__tests__/sync.test.ts","whatChanged":"Added install/adopt/decline propagation tests.","justification":"Required regression coverage."},
+    {"path":"src/lib/__tests__/schema.test.ts","whatChanged":"Added optional metadata validation and round-trip test.","justification":"Protect absence-preserving parsing."},
+    {"path":"src/lib/__tests__/skills.test.ts","whatChanged":"Expected additive roster metadata.","justification":"Required reader contract."},
+    {"path":"src/lib/__tests__/guard.test.ts","whatChanged":"Added owner-path and refusal tests.","justification":"Protect authorization boundaries."},
+    {"path":"src/lib/__tests__/frames.test.ts","whatChanged":"Updated feature snapshot and added inventory/documentation gates.","justification":"Required CP-19 coverage."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Updated served surfaces; added argv and real-frame tests.","justification":"Verify the new adapter contracts."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","whatChanged":"Moved gap assertion from catalog to onboarding.","justification":"Catalog is now served; gap behavior remains covered."},
+    {"path":"desktop/src/components/domain/Sidebar.test.tsx","whatChanged":"Expected Share and Marketplace navigation.","justification":"Both surfaces are now served."},
+    {"path":"desktop/src/components/domain/s7q-surfaces.test.tsx","whatChanged":"Teams gate now tests memberRole.","justification":"Required separation from projectMembers."},
+    {"path":"desktop/src/screens/share/share.test.tsx","whatChanged":"Added permission/job-label separation test.","justification":"Protect role preferences and removal access."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","whatChanged":"Expected explicit project/member operands.","justification":"Ensure actions invoke the intended CLI install mode."},
+    {"path":"desktop/src/screens/inbox/inbox.test.tsx","whatChanged":"Replaced decline preference assertions with backend-call and failed-result assertions.","justification":"Declines now persist through the CLI."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Mock pixel neutrality: DOM tests pass, but pixel fidelity was not checked because Playwright was prohibited."
+}
