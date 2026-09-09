@@ -337,3 +337,26 @@ it('delivers reopen events and unsubscribes through the backend seam', async () 
  await b.refreshLaunch();f.reopen();expect(listener).toHaveBeenCalledTimes(1);
  unsubscribe();f.reopen();expect(listener).toHaveBeenCalledTimes(1);
 });
+
+it.each([
+ [['a',1,'b'],{detail:['a','b']}], [[],{}], [[1],{}],
+])('keeps only nonempty string detail in parsed asks: %j',(detail,expected)=>{
+ const ask={t:'ask',id:'q1',kind:'confirm',question:'Use this identity?'};
+ expect(parseCliFrame(line({...ask,detail}))).toEqual({...ask,...expected});
+});
+it('carries decision context through cliRun to the seam ask',async()=>{
+ const ask={t:'ask',id:'q1',kind:'confirm',question:'Use this identity?',detail:['Identity: @me']};
+ const f=fakeBridge((_args,emit)=>{
+  emit({kind:'stdout',line:line(ask)});
+  emit({kind:'stdout',line:line({t:'result',verb:'setup',ok:true,exitCode:0,value:3})});
+ });
+ const run=cliRun(f.bridge,Promise.resolve(STATE),['setup'],{map:value=>value});
+ expect(await collect(run.frames)).toEqual([ask,{t:'result',ok:true}]);
+});
+it('maps a typed refusal into the settled result and seam result frame',async()=>{
+ const error='Leave the existing team first.';
+ const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:line({t:'result',verb:'setup',ok:false,exitCode:1,error,refused:true})}));
+ const run=cliRun(f.bridge,Promise.resolve(STATE),['setup'],{map:value=>value});
+ expect(await run.done).toEqual({ok:false,error,refused:true});
+ expect(await collect(run.frames)).toEqual([{t:'result',ok:false,error,refused:true}]);
+});

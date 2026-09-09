@@ -1,0 +1,63 @@
+{
+  "status": "complete",
+  "summary": "Re-anchored the malformed-tools assertion to confirm detail (Part A.C) and restored unconditional persistence-error alerts (Part B.5 clarification). Updated the refusal test that explicitly simulates a failed flush; no other stale assertions were found. Changes remain unstaged; no git commands, installs, or recording edits were made.",
+  "filesChanged": [
+    {
+      "path": "src/commands/__tests__/install.test.ts",
+      "change": "modified",
+      "why": "Verify raw malformed tools are absent from logs and present in exactly one detail line with the required prefix."
+    },
+    {
+      "path": "desktop/src/screens/onboarding/SetupBoot.tsx",
+      "change": "modified",
+      "why": "Always render persistence errors with role=\"alert\"."
+    },
+    {
+      "path": "desktop/src/screens/onboarding/setup-driver.test.tsx",
+      "change": "modified",
+      "why": "Require a persistence-error alert when the refused fixture's preference flush fails."
+    }
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop npm run lint exited 0.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop npm run typecheck exited 0.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": false,
+      "output": "Desktop setup-driver: 21 passed, 0 failed. Root Vitest not rerun: known sandbox EPERM on node_modules/.vite-temp, as reported in the supplied context.",
+      "preExistingFailures": "Orchestrator reported root: 1272 passed / 1 failed; desktop: 970 passed / 2 expected S7r replay failures awaiting re-recording."
+    }
+  },
+  "openQuestions": [],
+  "deviations": [],
+  "invariantsTouched": [
+    {
+      "number": 4,
+      "howSatisfied": "Preserved all consent and durable-intent assertions while checking malformed grant context on the confirm detail."
+    }
+  ],
+  "testsModified": [
+    {
+      "path": "src/commands/__tests__/install.test.ts",
+      "whatChanged": "Re-anchored the malformed allowed-tools test from log output to a one-element confirm detail with the required prefix and raw value; preserved every other assertion.",
+      "justification": "Part A.C and follow-up requirement 1."
+    },
+    {
+      "path": "desktop/src/screens/onboarding/setup-driver.test.tsx",
+      "whatChanged": "The parameterized refusal test now expects an alert for failed preference flushes and no alert for successful flushes.",
+      "justification": "Part B.5 clarification and follow-up requirement 2 explicitly permit adjustment when the fixture depends on a persistence error."
+    }
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The corrected root test passes at runtime: root Vitest remains unverified here because of the reported sandbox EPERM."
+}

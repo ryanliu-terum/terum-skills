@@ -80,7 +80,7 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
     switch (frame.t) {
       case 'hello': options.onHello?.(frame); return;
       case 'print': push({ t: 'print', line: frame.level === 'info' ? frame.line : `${frame.level}: ${frame.line}` }); return;
-      case 'ask': push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }) }); return;
+      case 'ask': push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }), ...(frame.detail === undefined ? {} : { detail: frame.detail }) }); return;
       case 'progress': { const current = frame.current ?? 0; push({ t: 'progress', done: current, total: Math.max(frame.total ?? current, current, 1), label: frame.step }); return; }
       case 'result': {
         if (cancelled) { finish({ ok: false, error: 'Cancelled.' }); return; }
@@ -94,7 +94,7 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
           if (frame.value !== undefined) {
             try { value = options.map(frame.value as TIn); } catch { value = undefined; }
           }
-          finish({ ok: false, error, ...(frame.declined === true ? { cancelled: true } : {}), ...(value === undefined ? {} : { value }) }, { t: 'result', ok: false, error, ...(frame.declined === true ? { declined: true } : {}) });
+          finish({ ok: false, error, ...(frame.declined === true ? { cancelled: true } : {}), ...(frame.refused === true ? { refused: true } : {}), ...(value === undefined ? {} : { value }) }, { t: 'result', ok: false, error, ...(frame.declined === true ? { declined: true } : {}), ...(frame.refused === true ? { refused: true } : {}) });
         }
         return;
       }
