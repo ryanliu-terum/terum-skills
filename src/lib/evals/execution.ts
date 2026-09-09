@@ -115,7 +115,12 @@ export async function seedSandbox(evalCase: EvalCase, options: SeedOptions): Pro
     await cp(source, sandbox, { recursive: true });
   }
   for (const [rel, content] of Object.entries(evalCase.files)) {
-    if (isAbsolute(rel) || rel.split(/[\\/]/).includes('..')) throw new Error(`case '${evalCase.name}': unsafe file path in case: ${rel}`);
+    const segments = rel.split(/[\\/]/);
+    if (isAbsolute(rel) || segments.includes('..')) throw new Error(`case '${evalCase.name}': unsafe file path in case: ${rel}`);
+    // A generated case must not seed project settings/hooks into the arm being scored:
+    // `--setting-sources project` would load sandbox-root `.claude/` and run model-authored
+    // hooks on the host. Only the skill-staging step below may write there.
+    if (segments.find((segment) => segment !== '' && segment !== '.') === '.claude') throw new Error(`case '${evalCase.name}': unsafe file path in case (seeds .claude): ${rel}`);
     const target = join(sandbox, rel);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, content, 'utf8');
