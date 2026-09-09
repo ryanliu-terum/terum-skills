@@ -7,7 +7,7 @@ import { BackendContext, existingSetupSession, SETUP_STEP_TO_BOARD } from '../..
 import { SETUP_STEP_KEYS } from '../../backend/types';
 import { createMockBackend } from '../../backend/mock';
 import { createRun } from '../../backend/mock/run';
-const launch={target:'/fixture/team.git',writtenAt:'2026-09-08T12:00:00Z'};
+const launch={target:'https://github.com/terum/team-skills.git',writtenAt:'2026-09-08T12:00:00Z'};
 afterEach(()=>{cleanup();localStorage.clear();location.hash='';vi.restoreAllMocks();});
 function backend(){const b=createMockBackend();vi.spyOn(b,'launchContext').mockResolvedValue(launch);vi.spyOn(b,'refreshLaunch').mockResolvedValue(launch);return b;}
 function open(b:ReturnType<typeof backend>,route='#/'){location.hash=route;return render(<StrictMode><Providers><BackendContext value={b}><App/></BackendContext></Providers></StrictMode>);}
@@ -27,15 +27,15 @@ it('routes a fresh target to Boot, waits for the human, renders prints/progress,
  expect(answered).not.toHaveBeenCalled();expect(b.prefs.get('launch:consumedWrittenAt','')).toBe('');
  expect(screen.getByLabelText('Setup output')).toHaveTextContent('GitHub CLI is installed but logged out.');
  expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow','2');expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuemax','4');
- fireEvent.click(within(dialog).getByRole('button',{name:'Cancel'}));
- await waitFor(()=>expect(answered).toHaveBeenCalledWith(false));await screen.findByText('Join was declined.');
- expect(screen.queryByRole('alert')).toBeNull();expect(screen.getByRole('progressbar')).not.toHaveAttribute('data-failed');
+ fireEvent.click(within(dialog).getByRole('button',{name:'No'}));
+ await waitFor(()=>expect(answered).toHaveBeenCalledWith(false));await waitFor(()=>expect(location.hash).toBe('#/library/global'));
+ expect(existingSetupSession(b,launch)?.snapshot()).toMatchObject({outcome:'cancelled',result:{ok:false,error:'Join was declined.',cancelled:true}});
  expect(set.mock.calls.filter(([key])=>key==='launch:consumedWrittenAt')).toEqual([['launch:consumedWrittenAt',launch.writtenAt]]);
  view.unmount();open(b);await waitFor(()=>expect(location.hash).toBe('#/library/global'));expect(setup).toHaveBeenCalledTimes(1);
 });
 it('uses four result-driven rows without inventing a progress counter',async()=>{
  const b=backend();vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{
-  ctx.print('Repository: /fixture/team.git');return {ok:true,value:{team:'team',role:'joiner',steps:{github:'done',team:'done',actions:'skipped',hook:'skipped',wrapper:'skipped',done:'printed'}}};
+  ctx.print('Repository: https://github.com/terum/team-skills.git');return {ok:true,value:{team:'team',role:'joiner',steps:{github:'done',team:'done',actions:'skipped',hook:'skipped',wrapper:'skipped',done:'printed'}}};
  }));
  const view=open(b);await screen.findByRole('heading',{name:'Setup finished'});expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(4);
  expect(screen.queryByLabelText('Onboarding progress')).toBeNull();expect(screen.getByRole('progressbar',{name:'Setup progress'})).not.toHaveAttribute('aria-valuenow');expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuemax');
@@ -86,15 +86,13 @@ it('requires an explicit select choice and renders a consumed join hand-off',asy
  expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
  expect(screen.getByRole('button',{name:'Back to the Library'})).toBeInTheDocument();
 });
-it('select Cancel is a typed cancellation with Retry and no failure styling',async()=>{
+it('select Cancel is a typed cancellation consumed before navigation',async()=>{
  const b=backend();vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{
   await ctx.ask('select','Create a team or join one?',{choices:['Create','Join']});return {ok:true,value:{role:'creator',team:'team',steps:{}}};
  }));
  open(b);fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Cancel'}));
- await screen.findByRole('heading',{name:'Setup cancelled'});
- expect(existingSetupSession(b,launch)?.snapshot().result).toMatchObject({ok:false,cancelled:true});
- expect(screen.queryByRole('alert')).toBeNull();expect(screen.getByRole('progressbar')).not.toHaveAttribute('data-failed');
- expect(screen.getByRole('button',{name:'Retry'})).toBeInTheDocument();
+ await waitFor(()=>expect(location.hash).toBe('#/library/global'));
+ expect(existingSetupSession(b,launch)?.snapshot()).toMatchObject({outcome:'cancelled',result:{ok:false,cancelled:true}});
  expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
 });
 it('Retry starts a second attempt after a failure',async()=>{
@@ -106,8 +104,9 @@ it('Retry starts a second attempt after a failure',async()=>{
 it('Stop cancels the run and settles as cancelled',async()=>{
  const b=backend(),run=createRun<import('../../backend/types').SetupResult>(async()=>new Promise(()=>{})),cancel=vi.spyOn(run,'cancel');
  vi.spyOn(b,'setup').mockReturnValue(run);open(b);
- fireEvent.click(await screen.findByRole('button',{name:'Stop'}));await screen.findByRole('heading',{name:'Setup cancelled'});
- expect(cancel).toHaveBeenCalled();expect(screen.queryByRole('alert')).toBeNull();
+ await waitFor(()=>expect(b.setup).toHaveBeenCalledTimes(1));
+ fireEvent.click(await screen.findByRole('button',{name:'Stop'}));await waitFor(()=>expect(location.hash).toBe('#/library/global'));
+ expect(cancel).toHaveBeenCalled();expect(existingSetupSession(b,launch)?.snapshot()).toMatchObject({outcome:'cancelled',result:{ok:false,cancelled:true}});
  expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
 });
 
@@ -125,4 +124,56 @@ it('Back leaves an unconsumed failure on Library until an explicit retry or new 
  open(b);await screen.findByRole('heading',{name:"Couldn't finish setup"});
  fireEvent.click(screen.getByRole('button',{name:'Back'}));await screen.findByText('15 skills');
  expect(location.hash).toBe('#/library/global');expect(setup).toHaveBeenCalledTimes(1);
+});
+
+it.each([false,true])('refuses a foreign target before setup and offers Team settings (flush fails=%s)',async flushFails=>{
+ const b=backend(),ctx={...launch,target:'github.com/other/repo'},base=await b.status();
+ if(!base.ok||!base.value.teams[0])throw new Error('Expected mock team');
+ const name=base.value.teams[0].name;
+ vi.mocked(b.launchContext).mockResolvedValue(ctx);vi.mocked(b.refreshLaunch).mockResolvedValue(ctx);
+ if(flushFails)b.prefs.flush=async()=>{throw new Error('Preferences could not be saved.');};
+ const setup=vi.spyOn(b,'setup');open(b);
+ await screen.findByRole('heading',{name:'Setup not started'});
+ if(flushFails)expect(screen.getByText('Preferences could not be saved.')).toBeInTheDocument();
+ expect(screen.getByRole('status')).toHaveTextContent(`This machine is on team ${name}. To join github.com/other/repo, leave ${name} first (Settings ▸ Team).`);
+ if(flushFails)expect(screen.getByRole('alert')).toHaveTextContent('Preferences could not be saved.');
+ else expect(screen.queryByRole('alert')).toBeNull();
+ expect(screen.getByRole('progressbar')).not.toHaveAttribute('data-failed');
+ expect(setup).not.toHaveBeenCalled();expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(ctx.writtenAt);
+ expect(existingSetupSession(b,ctx)?.snapshot().outcome).toBe('refused');
+ expect(screen.queryByRole('button',{name:'Back'})).toBeNull();expect(location.hash).toBe('#/onboarding/boot');
+ fireEvent.click(screen.getByRole('button',{name:'Open Settings ▸ Team'}));await waitFor(()=>expect(location.hash).toBe('#/settings/teams'));
+});
+it('lets the CLI decide when target pre-flight status fails',async()=>{
+ const b=backend();vi.spyOn(b,'status').mockResolvedValue({ok:false,error:'Status unavailable.'});
+ const setup=vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:true,value:{role:'joiner',team:'team',steps:{}}})));
+ open(b);await screen.findByRole('heading',{name:'Setup finished'});
+ expect(setup).toHaveBeenCalledExactlyOnceWith({target:launch.target,offerConnect:true});
+});
+it('consumes a CLI refusal and keeps its outcome distinct from failure',async()=>{
+ const b=backend();vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:false,error:'CLI refused this setup.',refused:true})));
+ open(b);await screen.findByRole('heading',{name:'Setup not started'});
+ expect(screen.getByRole('status')).toHaveTextContent('CLI refused this setup.');expect(screen.queryByRole('alert')).toBeNull();
+ expect(existingSetupSession(b,launch)?.snapshot().outcome).toBe('refused');expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
+});
+it('waits for cancellation consumption to flush before navigating',async()=>{
+ const b=backend();let flush!:()=>void;
+ b.prefs.flush=vi.fn(()=>new Promise<void>(resolve=>{flush=resolve;}));
+ vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:false,error:'Declined.',cancelled:true})));
+ open(b);await waitFor(()=>expect(b.prefs.flush).toHaveBeenCalledTimes(1));
+ expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);expect(location.hash).toBe('#/onboarding/boot');
+ flush();await waitFor(()=>expect(location.hash).toBe('#/library/global'));
+ expect(existingSetupSession(b,launch)?.snapshot().outcome).toBe('cancelled');
+});
+
+it('uses identity ask detail for the dialog and the active team cue without transcript output',async()=>{
+ const b=backend(),detail=['Identity: @seed — Seed <seed@example.com> (GitHub: seed)'];
+ vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{
+  await ctx.ask('confirm','Use this identity?',{detail});return {ok:true,value:{role:'joiner',team:'team',steps:{team:'done'}}};
+ }));
+ open(b);const dialog=await screen.findByRole('dialog');
+ expect(dialog).toHaveTextContent(detail[0]!);
+ expect(screen.getByText('Configuring the team').parentElement).toHaveAttribute('data-state','current');
+ expect(screen.getByLabelText('Setup output')).not.toHaveTextContent('Identity:');
+ fireEvent.click(within(dialog).getByRole('button',{name:'Yes'}));await screen.findByRole('heading',{name:'Setup finished'});
 });

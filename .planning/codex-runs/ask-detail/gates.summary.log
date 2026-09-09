@@ -1,0 +1,117 @@
+# root gates Tue Sep  8 22:52:52 PDT 2026
+root lint: rc=0
+root typecheck: rc=0
+root build: rc=0
+root test:  Test Files  75 passed (75)
+root test:       Tests  1273 passed (1273)
+# desktop gates Tue Sep  8 22:55:19 PDT 2026
+desktop typecheck: rc=0
+desktop lint (--max-warnings 0): rc=0
+desktop test:  Test Files  68 passed (68)
+desktop test:       Tests  972 passed | 88 skipped (1060)
+
+# root fail-before on pristine origin/fix/first-run-in-app (6026060); the 5 changed test files + fixtures.ts copied over
+     × shows the known identity on one line and asks one y/N instead of four questions 8ms
+     × a bound per-team handle is shown, confirmed, and still never asked on n 1ms
+     × a recorded "no GitHub login" is a known answer, not a missing one 0ms
+     × carries decision detail on the ask and omits an empty detail list 17ms
+     × text and every select attempt carry the whole decision context 4ms
+     × prints identity detail once immediately before its confirm question 20ms
+     × prints text and select detail once, including across select retries 22ms
+     × asks consent for allowed-tools in the pinned tree, rather than HEAD 5094ms
+     × shows malformed allowed-tools verbatim, requires consent, and leaves no durable intent when declined 945ms
+     × keeps the malformed-allowed-tools consent prompt when the YAML value cannot be serialized (a self-referencing anchor) 907ms
+     × reviews an added tool interactively and defers it unchanged in hook mode 2033ms
+   × forwards allowed-tools decision detail through the endorsed batch child prompter 1750ms
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/commands/__tests__/install.test.ts > install (§6 refs) > asks consent for allowed-tools in the pinned tree, rather than HEAD
+ FAIL  src/commands/__tests__/install.test.ts > install (§6 refs) > shows malformed allowed-tools verbatim, requires consent, and leaves no durable intent when declined
+ FAIL  src/commands/__tests__/install.test.ts > install (§6 refs) > keeps the malformed-allowed-tools consent prompt when the YAML value cannot be serialized (a self-referencing anchor)
+ FAIL  src/commands/__tests__/sync.test.ts > sync --hook (§3, §6) > reviews an added tool interactively and defers it unchanged in hook mode
+ FAIL  src/commands/__tests__/sync.test.ts > forwards allowed-tools decision detail through the endorsed batch child prompter
+ FAIL  src/lib/__tests__/auth.test.ts > one-line identity confirmation (acceptance A2, 2026-09-06) > shows the known identity on one line and asks one y/N instead of four questions
+ FAIL  src/lib/__tests__/auth.test.ts > one-line identity confirmation (acceptance A2, 2026-09-06) > a bound per-team handle is shown, confirmed, and still never asked on n
+ FAIL  src/lib/__tests__/auth.test.ts > one-line identity confirmation (acceptance A2, 2026-09-06) > a recorded "no GitHub login" is a known answer, not a missing one
+ FAIL  src/lib/__tests__/frames.test.ts > frame mode — the Prompter serialised (docs/frame-protocol.md) > carries decision detail on the ask and omits an empty detail list
+ FAIL  src/lib/__tests__/frames.test.ts > frame mode — the Prompter serialised (docs/frame-protocol.md) > text and every select attempt carry the whole decision context
+ FAIL  src/lib/__tests__/prompt.test.ts > terminalPrompter behaviour > prints identity detail once immediately before its confirm question
+ FAIL  src/lib/__tests__/prompt.test.ts > terminalPrompter behaviour > prints text and select detail once, including across select retries
+ Test Files  5 failed (5)
+      Tests  12 failed | 159 passed (171)
+
+# desktop fail-before on pristine origin/fix/first-run-in-app (6026060); the 12 changed test files copied over (base keeps its old recordings)
+   × opens a new dialog for an unexpected confirmation and resolves its answer 1182ms
+   × shows each decision line as description and keeps confirms open on Escape and backdrop 45ms
+   × keeps only nonempty string detail in parsed asks: ["a",1,"b"] 15ms
+   × carries decision context through cliRun to the seam ask 2ms
+   × maps a typed refusal into the settled result and seam result frame 0ms
+   × replays the real setup recording through launch routing, the ask dialog, and the partial result 1068ms
+   × replays the real offline setup join: the human answers each ask, the card settles finished, the target is consumed once 268ms
+   × replays configured-machine resume because setup intent wins over the existing team 923ms
+   × refuses a foreign target against the recorded status without spawning setup 1011ms
+   × forwards confirm detail and observes the full ask before answering 5ms
+   × forwards text detail and observes the full ask before answering 17ms
+   × forwards select detail and observes the full ask before answering 3ms
+   × forwards detail on every unexpected question and omits empty detail 81ms
+   × maps the identity ask to team without treating unrelated asks as setup steps 3ms
+   × normalizes repository identity: https://github.com/Acme/Team.git 6ms
+   × normalizes repository identity: git@github.com:acme/team.git 2ms
+   × normalizes repository identity: github.com/acme/team/ 1ms
+   × normalizes repository identity: acme/team 25ms
+   × normalizes repository identity:  ssh://git@github.com/Acme/Team.git/  15ms
+   × normalizes repository identity: /srv/x/team.git 0ms
+   × normalizes repository identity: file:///srv/x/team.git 3ms
+   × routes a fresh target to Boot, waits for the human, renders prints/progress, and consumes a typed decline once 1469ms
+   × select Cancel is a typed cancellation consumed before navigation 1413ms
+   × Stop cancels the run and settles as cancelled 1072ms
+   × refuses a foreign target before setup and offers Team settings (flush fails=false) 1011ms
+   × refuses a foreign target before setup and offers Team settings (flush fails=true) 1012ms
+   × consumes a CLI refusal and keeps its outcome distinct from failure 1018ms
+   × waits for cancellation consumption to flush before navigating 1037ms
+   × uses identity ask detail for the dialog and the active team cue without transcript output 27ms
+   × opens a dialog for an unexpected run prompt 502ms
+   × renders all four install scope rows and keeps the Marketplace root after install 1140ms
+   × opens a prompt dialog for an unexpected invite question 2429ms
+⎯⎯⎯⎯⎯⎯ Failed Tests 32 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/app/providers.test.tsx > opens a new dialog for an unexpected confirmation and resolves its answer
+ FAIL  src/app/providers.test.tsx > shows each decision line as description and keeps confirms open on Escape and backdrop
+ FAIL  src/backend/__tests__/drive.test.ts > forwards confirm detail and observes the full ask before answering
+ FAIL  src/backend/__tests__/drive.test.ts > forwards text detail and observes the full ask before answering
+ FAIL  src/backend/__tests__/drive.test.ts > forwards select detail and observes the full ask before answering
+ FAIL  src/backend/__tests__/paths.test.ts > normalizes repository identity: https://github.com/Acme/Team.git
+ FAIL  src/backend/__tests__/paths.test.ts > normalizes repository identity: git@github.com:acme/team.git
+ FAIL  src/backend/__tests__/paths.test.ts > normalizes repository identity: github.com/acme/team/
+ FAIL  src/backend/__tests__/paths.test.ts > normalizes repository identity: acme/team
+ FAIL  src/backend/__tests__/paths.test.ts > normalizes repository identity:  ssh://git@github.com/Acme/Team.git/ 
+ FAIL  src/backend/__tests__/paths.test.ts > normalizes repository identity: /srv/x/team.git
+ FAIL  src/backend/__tests__/paths.test.ts > normalizes repository identity: file:///srv/x/team.git
+ FAIL  src/backend/__tests__/prompter.test.ts > forwards detail on every unexpected question and omits empty detail
+ FAIL  src/backend/__tests__/setup-steps.test.ts > maps the identity ask to team without treating unrelated asks as setup steps
+ FAIL  src/screens/inbox/inbox.test.tsx > opens a dialog for an unexpected run prompt
+ FAIL  src/screens/library/library-skill.test.tsx > renders all four install scope rows and keeps the Marketplace root after install
+ FAIL  src/screens/onboarding/setup-driver.test.tsx > routes a fresh target to Boot, waits for the human, renders prints/progress, and consumes a typed decline once
+ FAIL  src/screens/onboarding/setup-driver.test.tsx > select Cancel is a typed cancellation consumed before navigation
+ FAIL  src/screens/onboarding/setup-driver.test.tsx > Stop cancels the run and settles as cancelled
+ FAIL  src/screens/onboarding/setup-driver.test.tsx > refuses a foreign target before setup and offers Team settings (flush fails=false)
+ FAIL  src/screens/onboarding/setup-driver.test.tsx > refuses a foreign target before setup and offers Team settings (flush fails=true)
+ FAIL  src/screens/onboarding/setup-driver.test.tsx > consumes a CLI refusal and keeps its outcome distinct from failure
+ FAIL  src/screens/onboarding/setup-driver.test.tsx > waits for cancellation consumption to flush before navigating
+ FAIL  src/screens/onboarding/setup-driver.test.tsx > uses identity ask detail for the dialog and the active team cue without transcript output
+ FAIL  src/screens/share/share.test.tsx > opens a prompt dialog for an unexpected invite question
+ FAIL  src/backend/tauri/__tests__/run.test.ts > keeps only nonempty string detail in parsed asks: ["a",1,"b"]
+ FAIL  src/backend/tauri/__tests__/run.test.ts > carries decision context through cliRun to the seam ask
+ FAIL  src/backend/tauri/__tests__/run.test.ts > maps a typed refusal into the settled result and seam result frame
+ FAIL  src/backend/tauri/__tests__/setup-replay.test.tsx > replays the real setup recording through launch routing, the ask dialog, and the partial result
+ FAIL  src/backend/tauri/__tests__/setup-replay.test.tsx > replays the real offline setup join: the human answers each ask, the card settles finished, the target is consumed once
+ FAIL  src/backend/tauri/__tests__/setup-replay.test.tsx > replays configured-machine resume because setup intent wins over the existing team
+ FAIL  src/backend/tauri/__tests__/setup-replay.test.tsx > refuses a foreign target against the recorded status without spawning setup
+ Test Files  11 failed | 1 passed (12)
+      Tests  32 failed | 167 passed (199)
+
+# design gates (TERUM_DESIGN_DIR=/Users/ryanliu/Documents/Terum/design-canvas-terum-skills, macOS raster oracle, workers=2)
+export:check rc=
+  88 passed (2.3m)
+
+# frames smoke: dist/index.js --frames setup -- <fx>/repo/team.git (HOME=<fx>/home, cwd=<fx>/repo/seed, gh logged out under the scratch HOME)
+setup.jsonl: q1 = {"t":"ask","id":"q1","kind":"confirm","question":"Use this identity?","detail":["Identity: @seed — Seed <seed@example.com> (GitHub: seed)"]}
+Identity print frames in the two re-recorded files: /private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/cc2cc192-c671-45fe-a857-c4d3f1c03eff/scratchpad/impl-detail/setup.jsonl:0 /private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/cc2cc192-c671-45fe-a857-c4d3f1c03eff/scratchpad/impl-detail/setup-join.jsonl:0 

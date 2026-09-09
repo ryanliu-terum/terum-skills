@@ -105,9 +105,9 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
     const childIo: Prompter = {
       interactive: 'confirm' in io ? io.interactive : false,
       print: notice,
-      confirm: (question) => ('confirm' in io ? io.confirm(question) : Promise.resolve(false)),
-      text: (question, defaultValue) => ('text' in io ? io.text(question, defaultValue) : Promise.reject(new Error('sync --hook cannot prompt'))),
-      select: (question, choices) => ('select' in io ? io.select(question, choices) : Promise.reject(new Error('sync --hook cannot prompt'))),
+      confirm: (question, options) => ('confirm' in io ? io.confirm(question, options) : Promise.resolve(false)),
+      text: (question, defaultValue, options) => ('text' in io ? io.text(question, defaultValue, options) : Promise.reject(new Error('sync --hook cannot prompt'))),
+      select: (question, choices, options) => ('select' in io ? io.select(question, choices, options) : Promise.reject(new Error('sync --hook cannot prompt'))),
     };
     if (args.prune) {
       if (!interactive) throw new Error('sync prune needs an interactive terminal.');
@@ -228,8 +228,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
         if (!approved((await store.read()), skill.id, grants)) {
           if (!grants.ok) { blocked(entry.team, skill.name, `Blocked ${skill.name}: allowed-tools is malformed.`); continue; }
           if (!interactive) { defer(entry.team, skill.name); continue; }
-          (io as Prompter).print(`allowed-tools changed for ${skill.name}:\n${grants.normalized}`);
-          if (!(await (io as Prompter).confirm(`Approve updated tools for ${skill.name}?`))) { defer(entry.team, skill.name); continue; }
+          if (!(await (io as Prompter).confirm(`Approve updated tools for ${skill.name}?`, { detail: [`allowed-tools changed for ${skill.name}:`, ...grants.normalized.split('\n')] }))) { defer(entry.team, skill.name); continue; }
           await store.update((fresh) => { fresh.approvals[skill.id] = { grants: grants.hash, approved_at: new Date().toISOString().slice(0, 10) }; });
         }
         // The ledger is provenance for the exact placement, including a particular project checkout.
