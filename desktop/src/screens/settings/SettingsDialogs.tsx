@@ -1,10 +1,10 @@
 import { useSearchParams } from 'react-router';
 import { useBackend } from '../../backend';
-import type { Settings, StatusResult } from '../../backend/types';
+import type { FullSettings, StatusResult } from '../../backend/types';
 import { WorkflowDialog } from '../../components/domain/WorkflowControls';
 import { useWorkflow } from '../../components/domain/useWorkflow';
 import { settingsRows } from './settings-data';
-export function SettingsDialogs({section,data:d,status}:{section:string;data:Settings;status:StatusResult}){
+export function SettingsDialogs({section,data:d,status}:{section:string;data:FullSettings;status:StatusResult}){
   const backend=useBackend(),action=useWorkflow(),[search,setSearch]=useSearchParams(),team=status.teams[0];
   const rows=settingsRows.parse(d);
   const name=search.get('dialog');

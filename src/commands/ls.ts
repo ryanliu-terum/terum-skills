@@ -4,6 +4,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
+import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { printable } from '../lib/skill-source.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
@@ -18,7 +19,8 @@ import { skillVersions } from '../lib/teamRepo.js';
 
 export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
 export interface LsSkill { id: string; name: string; author: string; category: string; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; updated: string; unresolved: boolean; }
-export interface LocalSection extends LocalRoot { rows: { name: string; path: string; state: string; problem?: string }[]; notOffered: { name: string; path: string; reason: string }[]; problems: { path: string; reason: string }[]; }
+export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
+export interface LocalSection extends LocalRoot { rows: { name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; problem?: string }[]; notOffered: { name: string; path: string; reason: string }[]; problems: { path: string; reason: string }[]; }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { handle: string; declined: Person['declined'] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
@@ -110,7 +112,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
   const config = await store.read();
   const inventories = await Promise.all(discovery.roots.map(async (root) => ({ ...root, inventory: await localSkills(root.root, config, { scope: root.scope, stateRoot: store.root }) })));
   const sections: LocalSection[] = [];
-  const snapshots = new Map<string, { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; complete: boolean }>();
+  const snapshots = new Map<string, { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; fingerprints?: Map<string, string>; complete: boolean }>();
   const stateOf = (entry: LocalEntry): string => {
     const states = entry.shared.map((ref) => {
       const snapshot = snapshots.get(ref.team)!;
@@ -128,6 +130,21 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
     if (entry.placement) states.push(`placement recorded from ${entry.placement.team}${entry.placement.version === null ? '' : ` @${entry.placement.version.slice(0, 8)}`}`);
     return states.length > 1 ? `conflicting tracking: ${states.join('; ')}` : states[0] ?? 'untracked locally';
   };
+  const healthOf = async (entry: LocalEntry): Promise<LocalHealth> => {
+    if (entry.inspection.kind === 'rejected') return 'unknown';
+    if (!entry.placement) return entry.shared.length ? 'unknown' : 'untracked';
+    const snapshot = snapshots.get(entry.placement.team);
+    if (!snapshot?.complete || !snapshot.ids) return 'unknown';
+    if (!snapshot.ids.has(entry.placement.id)) return 'gone-from-repo';
+    const current = snapshot.fingerprints?.get(entry.placement.id);
+    if (current === undefined || entry.placementFingerprint === undefined) return 'unknown';
+    try {
+      const placed = (await snapshotSkillDirectory(entry.path)).fingerprint;
+      const localChanged = placed !== entry.placementFingerprint;
+      const repoChanged = current !== entry.placementFingerprint;
+      return localChanged ? repoChanged ? 'both' : 'local-changed' : repoChanged ? 'update-available' : 'up-to-date';
+    } catch { return 'unknown'; }
+  };
   for (const { inventory, repoRoot } of inventories) {
     const local: LocalSection = { root: inventory.root, scope: inventory.scope, ...(repoRoot === undefined ? {} : { repoRoot }), rows: [], notOffered: [], problems: [...inventory.problems] };
     sections.push(local);
@@ -135,7 +152,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
     for (const entry of inventory.entries) {
       for (const ref of [...entry.shared, ...(entry.placement ? [entry.placement] : [])]) {
         if (snapshots.has(ref.team)) continue;
-        const snapshot: { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; complete: boolean } = { complete: false };
+        const snapshot: { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; fingerprints?: Map<string, string>; complete: boolean } = { complete: false };
         snapshots.set(ref.team, snapshot);
         try {
           const clone = store.teamClone(ref.team);
@@ -144,6 +161,11 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
           const records = await skillRecords(clone, ref.team, { onProblem: () => { complete = false; } });
           snapshot.ids = new Set(records.map((record) => record.id));
           snapshot.complete = complete;
+          snapshot.fingerprints = new Map();
+          for (const record of records) {
+            try { snapshot.fingerprints.set(record.id, (await snapshotSkillDirectory(record.directory)).fingerprint); }
+            catch { /* An unreadable tree has no usable fingerprint. */ }
+          }
         } catch { /* A ledger fact survives an unavailable clone. */ }
       }
     }
@@ -152,7 +174,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
       const inspection = entry.inspection;
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (connect needs --allow-privileged)' : undefined;
-        local.rows.push({ name: entry.name, path: entry.path, state: stateOf(entry), ...(problem === undefined ? {} : { problem }) });
+        local.rows.push({ name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: await healthOf(entry), ...(problem === undefined ? {} : { problem }) });
       } else if (inspection.kind === 'rejected') local.notOffered.push({ name: entry.name, path: entry.path, reason: inspection.detail });
       if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
     }

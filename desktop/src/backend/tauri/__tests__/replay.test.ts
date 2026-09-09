@@ -6,7 +6,7 @@ import { createTauriBackend, read } from '../index';
 import { cliRun } from '../run';
 import { fakeBridge, STATE } from './fake-bridge';
 
-const directory = resolve('../.planning/codex-runs/m7-S7f/frames');
+const directory = resolve('../.planning/codex-runs/m7-S7g/frames');
 function recorded(name: string) {
   return readFileSync(resolve(directory, name + '.jsonl'), 'utf8').trim().split('\n');
 }
@@ -72,4 +72,12 @@ it('replays the rebuilt fixture through Library, project and installed scopes an
   expect(await backend.library({scope:'installed',team:'acme'})).toMatchObject({ok:true,value:{skills:[{name:'deploy-check'}]}});
   const member=recorded('ls-member-mira').map(line=>JSON.parse(line) as {t:string;value?:unknown}).find(frame=>frame.t==='result');
   expect(member?.value).toMatchObject({member:{handle:'mira',declined:[]},projects:[{name:'terum'}]});
+});
+
+it('replays S7g local frames through settings with the real placement team, id, version and health',async()=>{
+  const result=await createTauriBackend(inventoryReplay().bridge).settings();
+  const frame=recorded('ls-local').map(line=>JSON.parse(line) as {t:string;value?:{local:{rows:{name:string;path:string;health:string;placement:{id:string;team:string;version:string}}[]}[]}}).find(frame=>frame.t==='result');
+  const row=frame?.value?.local.flatMap(section=>section.rows).find(row=>row.name==='deploy-check');
+  expect(row?.health).toBe('up-to-date');expect(row?.placement.team).toBe('acme');
+  expect(result).toMatchObject({ok:true,value:{kind:'local',PLACEMENTS:[{id:row?.placement.id,name:'deploy-check',path:row?.path,team:row?.placement.team,version:row?.placement.version.slice(0,12),state:'In sync',placed:'—'}],SHARED:[]}});
 });

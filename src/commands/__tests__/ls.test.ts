@@ -7,6 +7,7 @@ import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompte
 import { run, format } from '../ls.js';
 import { systemRunner } from '../../lib/runner.js';
 import { allowedTools } from '../../lib/schema.js';
+import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { candidatesOf, localSkills } from '../../lib/local-skills.js';
 import { ghOnlyRunner } from '../../lib/__tests__/fixtures.js';
 
@@ -320,4 +321,58 @@ it('uses one version child and at most eight simultaneous date children for a la
   let active=0,peak=0;const calls:string[][]=[];
   const runner={run:async(command:Parameters<typeof systemRunner.run>[0],args:readonly string[],options?:Parameters<typeof systemRunner.run>[2])=>{active++;peak=Math.max(peak,active);calls.push([...args]);try{return await systemRunner.run(command,args,options);}finally{active--;}}};
   const result=await run({config:store,runner},new ScriptedPrompter());expect(result.ok).toBe(true);expect(peak).toBeLessThanOrEqual(9);expect(peak).toBeGreaterThan(1);expect(calls.filter(c=>c[0]==='ls-tree')).toEqual([['ls-tree','HEAD:skills']]);expect(calls.filter(c=>c[0]==='log')).toHaveLength(19);
+});
+
+
+describe('S7g local health and provenance', () => {
+  it.each(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'unreadable', 'incomplete', 'rejected', 'failed-snapshot'] as const)('reports %s from the ledger and current filesystem without changing the row sentence', async mode => {
+    const home = await temporaryDirectory(), store = createConfigStore(join(home, 'state'));
+    const placed = await localSource(home, 'good', inventorySource('good'));
+    const clone = store.teamClone('team'), source = join(clone, 'skills', 'good');
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, 'SKILL.md'), inventorySource('good'));
+    await writeFile(join(clone, 'team.json'), JSON.stringify(TEAM_JSON));
+    const baseline = (await snapshotSkillDirectory(placed)).fingerprint;
+    await store.update(config => { config.placements[placed] = { id: ID, team: 'team', version: 'a'.repeat(40), fingerprint: baseline, scope: {kind:'global'}, placed_at: '' }; });
+    if (mode === 'update-available' || mode === 'both') await writeFile(join(source, 'extra.txt'), 'clone changed');
+    if (mode === 'local-changed' || mode === 'both') await writeFile(join(placed, 'extra.txt'), 'placed changed');
+    if (mode === 'gone-from-repo') await rm(source, {recursive:true});
+    if (mode === 'unreadable') await rm(clone, {recursive:true});
+    if (mode === 'incomplete') { await mkdir(join(clone,'skills','broken')); await writeFile(join(clone,'skills','broken','SKILL.md'), 'bad'); }
+    if (mode === 'rejected') { await rm(placed,{recursive:true}); await fs.symlink(source,placed,'dir'); }
+    const original = fs.readdir;
+    const spy = vi.spyOn(fs, 'readdir').mockImplementation((...args) => {
+      if (args[0] === placed && (mode === 'rejected' || mode === 'failed-snapshot')) return Promise.reject(new Error('must not read rejected target'));
+      return original(...args);
+    });
+    const before = await readFile(join(store.root,'config.json'),'utf8');
+    try {
+      const io = new ScriptedPrompter(), result = await run({local:true,home,config:store},io);
+      const health = ['unreadable','incomplete','rejected','failed-snapshot'].includes(mode) ? 'unknown' : mode;
+      expect(result).toMatchObject({ok:true,value:{local:[{rows:[{name:'good',path:placed,tracked:true,shared:[],placement:{id:ID,team:'team',version:'a'.repeat(40)},health}]}]}});
+      if (mode === 'rejected') {
+        expect(spy.mock.calls.some(([path])=>path===placed)).toBe(false);
+        expect(result.value?.local?.[0]?.rows[0]?.problem).toBe('symbolic link');
+      } else if (mode !== 'failed-snapshot') expect(io.lines).toContain(`  good — placement recorded from team @aaaaaaaa; path: ${placed}`);
+      expect(await readFile(join(store.root,'config.json'),'utf8')).toBe(before);
+    } finally { spy.mockRestore(); }
+  });
+
+  it('carries shared refs, null tracking versions and untracked rows independently of prose',async()=>{
+    const home=await temporaryDirectory(),store=createConfigStore(join(home,'state'));
+    const connected=await localSource(home,'connected'),placed=await localSource(home,'placed');await localSource(home,'untracked');
+    await store.update(config=>{config.shared[ID]={source:connected,team:'one'};config.placements[placed]={id:ID,team:'two',version:null,fingerprint:'',scope:{kind:'global'},placed_at:''};});
+    expect(await run({local:true,home,config:store},new ScriptedPrompter())).toMatchObject({ok:true,value:{local:[{rows:[
+      {name:'connected',tracked:true,shared:[{id:ID,team:'one'}],placement:null,health:'unknown'},
+      {name:'placed',tracked:true,shared:[],placement:{id:ID,team:'two',version:null},health:'unknown'},
+      {name:'untracked',tracked:false,shared:[],placement:null,health:'untracked'},
+    ]}]}});
+  });
+
+  it.each([false,true])('names a missing placement without inventing a row (absent root=%s)',async absent=>{
+    const home=await temporaryDirectory(),store=createConfigStore(join(home,'state')),root=join(home,'.claude','skills'),path=join(root,'missing');
+    if(!absent)await mkdir(root,{recursive:true});
+    await store.update(config=>{config.placements[path]={id:ID,team:'team',version:null,fingerprint:'',scope:{kind:'global'},placed_at:''};});
+    expect(await run({local:true,home,config:store},new ScriptedPrompter())).toMatchObject({ok:true,value:{local:[{rows:[],problems:[{path,reason:'placement recorded in the ledger but the folder is missing'}]}]}});
+  });
 });

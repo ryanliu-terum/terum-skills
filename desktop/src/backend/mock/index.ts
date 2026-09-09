@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FEATURE_KEYS } from '../types';
-import type { Features } from '../types';
+import type { Features, FullSettings, ReadOptions } from '../types';
 import { decodeText } from '../../lib/fixture-text';
 import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
@@ -16,7 +16,8 @@ const fatal=decodeText(design.ONBOARD_FETCH_ERROR);
 const errors={library:"EACCES: permission denied, scandir '~/.terum/skills'",settings:"Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)",inbox:fatal,marketplace:"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com",share:"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'",skill:(ref:string)=>`ENOENT: no such file or directory, open '~/.claude/skills/${ref}/SKILL.md'`,onboarding:design.ONBOARD_FETCH_ERROR.replaceAll("&#39;", "'")};
 const ok=<T>(value:T):Result<T>=>({ok:true,value});
 const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeText(error),'')});
-export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
+type MockBackend = Omit<Backend, 'settings'> & { settings(q?: undefined, options?: ReadOptions): Promise<Result<FullSettings>> };
+export function createMockBackend(opts:{latencyMs?:number}={}):MockBackend {
  const latency=opts.latencyMs??0;
  if(!Number.isFinite(latency)||latency<0)throw new Error('latencyMs must be a finite nonnegative number.');
  async function read<T>(family:keyof typeof errors,get:(scenario:ReturnType<typeof readScenario>)=>Result<T>,ref=''):Promise<Result<T>>{
@@ -46,7 +47,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
    if(await ctx.ask('confirm',`Connect ${name}?`)){batch.shared.push({id:name,name});ctx.print(`Connected ${name}.`);}else batch.declined.push(name);
   }
  }
- const backend:Backend = {
+ const backend:MockBackend = {
   async features(){return Object.fromEntries(FEATURE_KEYS.map(key=>[key,true])) as Features;},
   async windowAction(){return ok(undefined);},
   async openUrl(url){try{window.open(url,'_blank','noopener');return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:String(error));}},

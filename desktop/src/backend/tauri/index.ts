@@ -39,26 +39,26 @@ const cliLsSkill = z.object({ id: z.string(), name: z.string(), author: z.string
 const cliProject = z.object({ name: z.string(), skills: z.array(z.string()), remotes: z.array(z.string()), description: z.string().optional() }).catchall(z.unknown());
 const cliLs = z.object({
   roster: z.array(z.object({ handle: z.string(), active: z.boolean() })), skills: z.array(cliLsSkill), problems: z.array(z.object({ source: z.string(), message: z.string() })), projects: z.array(cliProject).optional(), member: z.object({ handle: z.string(), declined: z.array(z.string()) }).optional(),
-  local: z.array(z.object({ root: z.string(), scope: z.enum(['global', 'project']), repoRoot: z.string().optional(), rows: z.array(z.object({ name: z.string(), path: z.string(), state: z.string(), problem: z.string().optional() })), notOffered: z.array(z.object({ name: z.string(), path: z.string(), reason: z.string() })), problems: z.array(z.object({ path: z.string(), reason: z.string() })) })).optional(),
+  local: z.array(z.object({ root: z.string(), scope: z.enum(['global', 'project']), repoRoot: z.string().optional(), rows: z.array(z.object({ name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), shared: z.array(z.strictObject({ id: z.string(), team: z.string() })), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().length(40).nullable() }).nullable(), health: z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']), problem: z.string().optional() }).strict()), notOffered: z.array(z.object({ name: z.string(), path: z.string(), reason: z.string() })), problems: z.array(z.object({ path: z.string(), reason: z.string() })) })).optional(),
 });
 const cliStatus = z.object({ version: z.string().nullable(), teams: z.array(z.object({ team: z.string(), handle: z.string(), repository: z.string().nullable(), readable: z.boolean(), sharedSkills: z.number().nullable(), memberCount: z.number().nullable() })) });
 type Inventory = z.infer<typeof cliLs>;
 type InventorySkill = z.infer<typeof cliLsSkill>;
 type InventoryTeam = z.infer<typeof cliStatus>['teams'][number];
 
-// Until S7g supplies structured placement provenance, accept only the CLI's explicit ledger sentence.
-function placement(local: Inventory, team: string, name: string) {
-  return local.local?.flatMap(section => section.rows.map(row => ({ ...row, scope: section.scope }))).find(row => row.name === name && (row.state === `placement recorded from ${team}` || row.state.startsWith(`placement recorded from ${team} @`)));
+// Join provenance by team and ID, including relocated or conflicting tracked folders.
+function placement(local: Inventory, team: string, id: string) {
+  return local.local?.flatMap(section => section.rows.map(row => ({ ...row, scope: section.scope }))).find(row => row.placement?.id === id && row.placement.team === team);
 }
 function inventoryCard(row: InventorySkill, local: Inventory, team: string): SkillCard {
-  return { name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} installs`, installsN: row.installs, installed: placement(local, team, row.name) !== undefined, desc: row.description, grants: row.grants?.split('\n') ?? null, normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, size: '—', tokensK: 0, wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: row.unresolved ? ['broken'] : [], flagText: {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };
+  return { name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} installs`, installsN: row.installs, installed: placement(local, team, row.id) !== undefined, desc: row.description, grants: row.grants?.split('\n') ?? null, normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, size: '—', tokensK: 0, wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: row.unresolved ? ['broken'] : [], flagText: {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };
 }
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
 function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryTeam, validation: Result<ValidateResult>, inventory: Inventory): SkillDetail {
-  const card = inventoryCard(row, local, team.team), placed = placement(local, team.team, row.name);
+  const card = inventoryCard(row, local, team.team), placed = placement(local, team.team, row.id);
   const name = row.author.replace(/\s*<[^>]*>$/, '');
   const installers = row.installedBy;
-  return { ...card, team: team.team, installScopes: [], projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: null, skillRef: `${team.team}/${row.name}`, root: 'Global', desc_long: row.description, files: ['SKILL.md'], size_bytes: '—', version: row.latest, version_full: null, scope: placed?.scope === 'global' ? 'Global' : placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
+  return { ...card, team: team.team, installScopes: [], projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: null, skillRef: `${team.team}/${row.name}`, root: 'Global', desc_long: row.description, files: ['SKILL.md'], size_bytes: '—', version: placed?.placement?.version?.slice(0, 12) ?? '—', version_full: placed?.placement?.version ?? null, scope: placed?.scope === 'global' ? 'Global' : placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
     used_by: [...new Map(installers.map(person => [person.handle, initials(person.displayName)])).values()], users: installers.map(person => [person.handle, initials(person.displayName), `${person.scope.kind === 'global' ? 'Global' : person.scope.project} · since ${person.since}`]),
     author: { name, handle: '', role: '', initials: initials(name) }, repo: team.repository ?? null, path: placed?.path ?? `skills/${row.name}`, grants_approved: '', receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: validation.value === undefined ? null : `Hygiene checks · ${validation.ok && validation.value.findings === 0 ? 'pass' : 'fail'} on connect`,
     skillMd: { frontmatter: '', body: [], markdown: row.body ?? null }, evalEstimate: null, evalEstimateText: '', evalEstimateTip: '', evalCommand: `npx -y terum-skills@latest eval ${row.name}`, shareCommand: `npx -y terum-skills@latest install ${team.team}/${row.name}`, incumbentLift: null, reportNumbers: null, scoreFractions: { routesExpected: null, roi: null, quality: null }, method: '',
@@ -128,11 +128,24 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return { windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
-      return { status: false, settings: false, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: false, roster: false, update: false };
+      return { status: false, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: false, roster: false, update: false };
     },
     // Read models the CLI cannot produce yet (GAPS.md): the drawn error boards render, nothing is invented.
     status: async () => gap('Team status in the design’s shape (machine, me, teams, counts)'),
-    settings: async () => gap('Settings'),
+    async settings(_query, options) {
+      const status = await read(run(['status'], cliStatus, value => value, []), options);
+      if (!status.ok) return fail(status.error);
+      const local = await read(run(['ls', '--local'], cliLs, value => value, []), options);
+      if (!local.ok) return fail(local.error);
+      if (!local.value.local) return fail('ls --local returned no local sections.');
+      const states = { 'up-to-date': 'In sync', 'update-available': 'Update available', 'local-changed': 'Edited here', both: 'Edited here · update available', 'gone-from-repo': 'Removed from the team', unknown: '—', untracked: '—' };
+      return { ok: true, value: {
+        kind: 'local', CLI_VERSION: status.value.version ?? null,
+        PLACEMENTS: local.value.local.flatMap(section => section.rows.flatMap(row => row.placement ? [{ id: row.placement.id ?? null, name: row.name, path: row.path, team: row.placement.team ?? null, scope: section.scope === 'global' ? 'Global' : 'project', version: row.placement.version?.slice(0, 12) ?? '—', state: states[row.health], placed: '—' }] : [])),
+        SHARED: local.value.local.flatMap(section => section.rows.flatMap(row => row.shared.map(ref => ({ id: ref.id, name: row.name, path: row.path, team: ref.team, state: '—' })))),
+        problems: local.value.local.flatMap(section => [...section.problems, ...section.rows.flatMap(row => row.problem ? [{ path: row.path, reason: row.problem }] : [])]),
+      } };
+    },
     onboarding: async () => gap('Onboarding data'),
     async library({ scope, team }, options) {
       const selected = await inventoryTeam(team, options);

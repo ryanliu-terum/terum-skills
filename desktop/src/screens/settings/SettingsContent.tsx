@@ -1,8 +1,9 @@
+import { PlacementTable } from './PlacementTable';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { useBackend, useCapabilities, cloneStateCopy } from '../../backend';
-import type { Catalog, Settings, StatusResult, Theme } from '../../backend/types';
+import type { Catalog, FullSettings, StatusResult, Theme } from '../../backend/types';
 import { useUiStore } from '../../app/store';
 import { RichText, TerminalHint } from '../../components/domain/Primitives';
 import { InlineChoice, WorkflowDialog, WorkflowField } from '../../components/domain/WorkflowControls';
@@ -15,7 +16,7 @@ import { SettingsHead as Head, SettingRow as Row, SettingCard as Card, SettingsG
 import { SettingsDialogs } from './SettingsDialogs';
 import { inboxLabels, settingsRows } from './settings-data';
 
-type Props={section:string;data:Settings;status:StatusResult;catalog?:Catalog|undefined};
+type Props={section:string;data:FullSettings;status:StatusResult;catalog?:Catalog|undefined};
 export function SettingsContent({section,data:d,status,catalog}:Props){
   const backend=useBackend(),capabilities=useCapabilities(),action=useWorkflow(),[search,setSearch]=useSearchParams(),navigate=useNavigate();
   const [signIn,setSignIn]=useState(false);
@@ -48,7 +49,7 @@ export function SettingsContent({section,data:d,status,catalog}:Props){
       </Card></Group></>;break;
     case 'machine': content=<><Head title="This machine" sub="What Terum put on this laptop, and what it will ask you again for on the next one."/>
       <Group label="Identity"><Card><Row title={machine.name} desc={`${machine.os} · the name in the footer. Terum keeps no list of your machines and nothing here is committed.`}><Value quiet>This machine</Value></Row>{capabilities?.machineRegistry?<Row title="Other machines" desc="Nothing to list. Your installs are recorded in your people file and placed by sync on whichever machine runs it; tool approvals are asked again there."><Value quiet>—</Value></Row>:null}</Card></Group>
-      <Group label="Placed here" note={<Note>The provenance ledger: the only paths Terum may ever touch. Tracked copies follow the team at sync; a pinned one stays until you install again.</Note>}><div className="placement-table" role="table" aria-label="Placed here"><div className="placement-head" role="row">{['Path','Scope','Version','Placed','State'].map(text=><span role="columnheader" key={text}>{text}</span>)}</div>{rows.PLACEMENTS.map(([path,skill,scope,version,placed,state],index)=><div role="row" className="placement-row" data-testid={'placement-row-'+index} key={path}><span role="cell" title={skill}>{path}</span><span role="cell">{scope}</span><span role="cell" className="board-mono" style={{color:version?'var(--tk-text1)':'var(--tk-text3)'}}>{version??'tracking'}</span><span role="cell">{placed}</span><span role="cell">{state}</span></div>)}<div className="placement-footer">{d.PLACEMENTS_N} placed · {status.counts.Global??'—'} global · {d.PINNED_N} pinned</div></div></Group>
+      <Group label="Placed here" note={<Note>The provenance ledger: the only paths Terum may ever touch. Tracked copies follow the team at sync; a pinned one stays until you install again.</Note>}><PlacementTable rows={rows.PLACEMENTS.map(([path,name,scope,version,placed,state])=>({path,name,scope,version,placed,state,id:null,team:null}))} footer={<>{d.PLACEMENTS_N} placed · {status.counts.Global??'—'} global · {d.PINNED_N} pinned</>}/></Group>
       <Group label="Tool approvals on this machine" note={<Note>An approval covers exactly these tools. A changed or widened set asks again; there is no way to revoke one yet.</Note>}><Card>{rows.APPROVALS.map(([skill,grants,approved])=><Row key={skill} title={skill} desc={`Approved ${approved}`}><div className="settings-chips" style={{maxWidth:320}}>{grants.map(grant=><Chip key={grant}>{grant}</Chip>)}</div></Row>)}<Row title="Other skills" desc="Declare no tools and place without asking."><Value quiet>No approval needed</Value></Row></Card></Group>
       <Group label="Quarantine" trailing={<Button icon="trash" onClick={prune} state={search.get('dialog')==='prune'?'pressed':'default'}>Prune…</Button>} note={<TerminalHint command="npx -y terum-skills@latest sync --prune" prefix="Prune stands for"/>}><Card>{rows.QUARANTINE.map(([when,name,why,size])=><Row key={when+name} title={name} desc={`${why} · ${when}`}><Value quiet>{size}</Value></Row>)}</Card></Group></>;break;
     case 'sync': {const hook=backend.prefs.get('sync:hook',d.HOOK.installed);content=<><Head title="Sync" sub="How this machine follows the team, and what it will never do without you."/>

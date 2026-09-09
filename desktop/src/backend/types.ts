@@ -64,5 +64,16 @@ export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value
 export type Subscription=()=>void;
 export type ChangeSource='config'|'clone'|'placed'|'stamp';
 
-export type Settings = Pick<Design, 'MACHINE'|'ME'|'TEAMS'|'TEAM_POLICY'|'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'QUARANTINE'|'SHARED'|'LOCAL_UNSHARED'|'HOOK'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'STORAGE'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'CLI_LATEST'|'FOLLOWING'|'SHARED_SPECIMEN'>;
+export type FullSettings = Pick<Design, 'MACHINE'|'ME'|'TEAMS'|'TEAM_POLICY'|'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'QUARANTINE'|'SHARED'|'LOCAL_UNSHARED'|'HOOK'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'STORAGE'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'CLI_LATEST'|'FOLLOWING'|'SHARED_SPECIMEN'>;
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};
+
+/** The local inventory is independently served; other settings await their CLI read models. */
+export interface PlacementRow { id: string | null; name: string; path: string; team: string | null; scope: string; version: string | null; state: string; placed: string; }
+export interface LocalSettings {
+  kind: 'local';
+  PLACEMENTS: PlacementRow[];
+  SHARED: { id: string; name: string; path: string; team: string; state: string }[];
+  CLI_VERSION: string | null;
+  problems: { path: string; reason: string }[];
+}
+export type Settings = FullSettings | LocalSettings;
