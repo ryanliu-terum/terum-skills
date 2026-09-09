@@ -370,40 +370,50 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
     // mid-write, so its roster is not evidence of an orphan and a decline written against it would
     // be wrong; and a §8 rate-limited hook run defers nothing, so it stays a silent no-op.
     if (skipTeams.has(placement.team)) continue;
-    if (config.pending.some((entry) => entry.id === placement.id && entry.team === placement.team && sameScope(entry.scope, placement.scope))) continue;
-    const binding = config.teams[placement.team];
-    if (!binding?.handle) continue;
-    const person = await actorPerson(store, placement.team, binding.handle);
-    if (!person) continue;
-    if (person.declined.includes(placement.id)) continue;
-    if (person.installed.some((entry) => entry.id === placement.id && sameScope(entry.scope, placement.scope))) continue;
-    if (!io) { defer(placement.team, basename(path)); continue; }
-    const adopt = await io.confirm(`Adopt orphaned placement at ${path}?`);
-    const repo = openTeamRepo(store.teamClone(placement.team), binding.remote, runner);
-    if (adopt) {
-      await repo.safeWrite((tree) => {
-        const personPath = `people/${binding.handle}.json`;
-        const raw = tree.before(personPath);
-        if (!raw) throw new Error(`Missing ${personPath}.`);
-        const fresh = parseJson(personSchema, treeText(raw), personPath);
-        if (!fresh.installed.some((entry) => entry.id === placement.id && sameScope(entry.scope, placement.scope))) {
-          fresh.installed.push({ id: placement.id, version: placement.version, scope: placement.scope, since: new Date().toISOString().slice(0, 10) });
+    // One failed adoption or decline (a refused push, a busy clone lock, a dropped network) costs
+    // only itself, reported — the shape every other sync loop already has. The entry is deferred, so
+    // its team stays unstamped (§8: a stamp means a fully completed sync) while other entries and
+    // every other team's outcome and stamp still land.
+    try {
+      if (config.pending.some((entry) => entry.id === placement.id && entry.team === placement.team && sameScope(entry.scope, placement.scope))) continue;
+      const binding = config.teams[placement.team];
+      if (!binding?.handle) continue;
+      const person = await actorPerson(store, placement.team, binding.handle);
+      if (!person) continue;
+      if (person.declined.includes(placement.id)) continue;
+      if (person.installed.some((entry) => entry.id === placement.id && sameScope(entry.scope, placement.scope))) continue;
+      if (!io) { defer(placement.team, basename(path)); continue; }
+      const adopt = await io.confirm(`Adopt orphaned placement at ${path}?`);
+      const repo = openTeamRepo(store.teamClone(placement.team), binding.remote, runner);
+      if (adopt) {
+        await repo.safeWrite((tree) => {
+          const personPath = `people/${binding.handle}.json`;
+          const raw = tree.before(personPath);
+          if (!raw) throw new Error(`Missing ${personPath}.`);
+          const fresh = parseJson(personSchema, treeText(raw), personPath);
+          if (!fresh.installed.some((entry) => entry.id === placement.id && sameScope(entry.scope, placement.scope))) {
+            fresh.installed.push({ id: placement.id, version: placement.version, scope: placement.scope, since: new Date().toISOString().slice(0, 10) });
+            tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
+          }
+        }, { action: 'install', handle: binding.handle, message: `${binding.handle}: adopt ${placement.id.slice(0, 8)}` });
+        notice(`Adopted orphaned placement at ${path}.`);
+        record(placement.team, path, 'adopted');
+      } else {
+        await repo.safeWrite((tree) => {
+          const personPath = `people/${binding.handle}.json`;
+          const raw = tree.before(personPath);
+          if (!raw) throw new Error(`Missing ${personPath}.`);
+          const fresh = parseJson(personSchema, treeText(raw), personPath);
+          if (!fresh.declined.includes(placement.id)) fresh.declined.push(placement.id);
           tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
-        }
-      }, { action: 'install', handle: binding.handle, message: `${binding.handle}: adopt ${placement.id.slice(0, 8)}` });
-      notice(`Adopted orphaned placement at ${path}.`);
-      record(placement.team, path, 'adopted');
-    } else {
-      await repo.safeWrite((tree) => {
-        const personPath = `people/${binding.handle}.json`;
-        const raw = tree.before(personPath);
-        if (!raw) throw new Error(`Missing ${personPath}.`);
-        const fresh = parseJson(personSchema, treeText(raw), personPath);
-        if (!fresh.declined.includes(placement.id)) fresh.declined.push(placement.id);
-        tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
-      }, { action: 'uninstall', handle: binding.handle, message: `${binding.handle}: decline ${placement.id.slice(0, 8)}` });
-      notice(`Declined orphaned placement at ${path}.`);
-      record(placement.team, path, 'declined');
+        }, { action: 'uninstall', handle: binding.handle, message: `${binding.handle}: decline ${placement.id.slice(0, 8)}` });
+        notice(`Declined orphaned placement at ${path}.`);
+        record(placement.team, path, 'declined');
+      }
+    } catch (error) {
+      if (error instanceof PromptClosedError) throw error; // the channel is gone, not this entry
+      defer(placement.team, basename(path));
+      notice(`Deferred orphaned placement at ${path}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

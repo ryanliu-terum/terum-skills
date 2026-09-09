@@ -951,6 +951,29 @@ describe('sync --hook (§3, §6)', () => {
     const declined = await orphanedPlacement();
     expect(await run({ config: declined.store }, new ScriptedPrompter([], [false], true))).toMatchObject({ ok: true, value: { changed: true, teams: [{ state: 'complete', counts: { declined: 1 } }] } });
   });
+
+  it('one failed orphan write costs only that entry: it is deferred, its team left unstamped (§8: a stamp means a fully completed sync), and the other team still completes and stamps', async () => {
+    const orphan = await orphanedPlacement();
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, orphan.store.teamClone('other'));
+    await orphan.store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    // The adoption's people-file push is refused (permissions, a dropped network); every other pass already ran.
+    const refusing = wrapRunner(systemRunner, async (command, args, options, next) => command === 'git' && args[0] === 'push' && options?.cwd === orphan.store.teamClone('team')
+      ? { code: 1, stdout: '', stderr: 'remote: Permission denied' }
+      : next());
+    const io = new ScriptedPrompter([], [true], true);
+    const result = await run({ config: orphan.store, runner: refusing }, io);
+    expect(result).toMatchObject({ ok: true, value: { deferred: ['sample'], teams: [
+      { team: 'team', state: 'incomplete', review: ['sample'] },
+      { team: 'other', state: 'complete' },
+    ] } });
+    expect(io.lines.filter((line) => line.startsWith(`Deferred orphaned placement at ${orphan.path}: `))).toHaveLength(1);
+    await expect(access(stampPath(orphan.store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(stampPath(orphan.store.root, 'other'))).resolves.toBeUndefined();
+    // Nothing was recorded as adopted: the placement stays an orphan for the next run to retry.
+    expect(JSON.parse(await readFile(join(orphan.clone, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
+    expect((await orphan.store.read()).placements[orphan.path]).toBeDefined();
+  });
 });
 
 async function orphanedPlacement(installed = false) {
