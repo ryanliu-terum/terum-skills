@@ -31,5 +31,5 @@ it('keeps OS decorations and the locked minimum dimensions, with macOS overlay s
  expect(config.app.windows[0]).toMatchObject({decorations:true,minWidth:960,minHeight:600,titleBarStyle:'Overlay',hiddenTitle:true,trafficLightPosition:{x:16,y:14}});
  const permissions=JSON.parse(readFileSync('src-tauri/capabilities/default.json','utf8')).permissions;
  expect(permissions).toContain('core:window:allow-toggle-maximize');expect(permissions).toContain('core:window:allow-internal-toggle-maximize');
- expect(permissions).not.toContain('opener:default');expect(permissions).toContainEqual({identifier:'opener:allow-open-url',allow:[{url:'https://github.com/*'}]});
+ expect(permissions).not.toContain('opener:default');expect(permissions).toContainEqual({identifier:'opener:allow-open-url',allow:[{url:'https://github.com/*'},{url:'https://discord.gg/*'}]});
 });

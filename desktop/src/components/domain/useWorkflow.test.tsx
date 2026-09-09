@@ -28,3 +28,12 @@ it('keeps an actual failure in the popup error state even when its message says 
   expect(result.current.action.error).toBe('Unknown option --declined');
   expect(result.current.action.notice).toBeNull();
 });
+
+it('closes a refused workflow quietly and retains the CLI notice',async()=>{
+ const success=vi.fn();
+ const {result}=renderHook(()=>({action:useWorkflow(),location:useLocation()}),{wrapper});
+ await act(()=>result.current.action.run(()=>createRun(async()=>({ok:false,error:'Leave first.',refused:true})),{},success));
+ await waitFor(()=>expect(result.current.location.search).toBe('?tab=teams'));
+ expect(result.current.action.notice).toBe('Leave first.');expect(result.current.action.error).toBeNull();
+ expect(result.current.action.busy).toBe(false);expect(success).not.toHaveBeenCalled();
+});

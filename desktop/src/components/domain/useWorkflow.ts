@@ -39,7 +39,7 @@ export function useWorkflow() {
       const result = await start();
       if (!mounted.current) return;
       if (result.ok) success?.(result.value);
-      else if (result.cancelled) {
+      else if (result.cancelled || result.refused) {
         setNotice(result.error);
         setSearch(params => { params.delete('dialog'); return params; }, { replace: true });
       } else setError(result.error);
@@ -61,5 +61,5 @@ export function useWorkflow() {
     try { backend.prefs.set(key, value); void backend.prefs.flush?.().catch(fail); setError(null); refreshPrefs(n => n + 1); return true; }
     catch (reason) { fail(reason); return false; }
   }
-  return { error, notice, lines, busy, run, perform, pref, fail, open: (path: string) => perform(() => backend.openInEditor(path)) };
+  return { error, notice, lines, busy, run, perform, pref, fail };
 }

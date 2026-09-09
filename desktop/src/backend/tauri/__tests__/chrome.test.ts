@@ -15,3 +15,14 @@ it('pins initial background to dark chrome, preserves minimum geometry and grant
  expect(readFileSync('src-tauri/capabilities/default.json','utf8')).toContain('core:window:allow-set-background-color');
  expect(readFileSync('src-tauri/src/lib.rs','utf8')).toContain('tauri_plugin_window_state');
 });
+
+it('allows home paths including dot directories and GitHub and Discord URLs',()=>{
+ const capability=JSON.parse(readFileSync('src-tauri/capabilities/default.json','utf8')) as {permissions:(string|{identifier:string;allow:unknown[]})[]};
+ const path=capability.permissions.find(entry=>typeof entry!=='string'&&entry.identifier==='opener:allow-open-path');
+ expect(path).toMatchObject({identifier:'opener:allow-open-path',allow:[{path:'$HOME/**'}]});
+ expect(capability.permissions).not.toContain('opener:allow-open-path');
+ const url=capability.permissions.find(entry=>typeof entry!=='string'&&entry.identifier==='opener:allow-open-url');
+ expect(url).toEqual({identifier:'opener:allow-open-url',allow:[{url:'https://github.com/*'},{url:'https://discord.gg/*'}]});
+ const config=JSON.parse(readFileSync('src-tauri/tauri.conf.json','utf8')) as {plugins:{opener:{requireLiteralLeadingDot:boolean}}};
+ expect(config.plugins.opener.requireLiteralLeadingDot).toBe(false);
+});
