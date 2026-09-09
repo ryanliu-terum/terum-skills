@@ -91,7 +91,10 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
     // Validate the login from the raw document (a legacy repository can carry a value written before
     // the schema existed) and only where it becomes a gh API path segment; archiving a member who
     // has no GitHub login must still work.
-    const targetRaw = JSON.parse(shown.stdout) as { github?: unknown };
+    let targetRaw: { github?: unknown };
+    // Same labeled failure parseJson gives below: a syntax error must name the people file, not surface bare.
+    try { targetRaw = JSON.parse(shown.stdout) as { github?: unknown }; }
+    catch (error) { throw new Error(`Invalid people/${targetHandle}.json: ${error instanceof Error ? error.message : String(error)}`); }
     let login = '';
     if (revoking) {
       if (typeof targetRaw.github !== 'string' || targetRaw.github.trim() === '') throw new Error(`${targetHandle} has no GitHub login on the roster, so there is no host access to revoke; run \`team remove ${targetHandle} --archive-only\` to archive the membership.`);

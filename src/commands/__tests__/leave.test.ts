@@ -195,7 +195,8 @@ it('a placement that is also a shared source is dropped from the ledger and left
   await store.update((c) => { c.shared.sample!.source = placed.path; });
   const io = new ScriptedPrompter([], [true]);
   const result = await run({ name: 'team', config: store, hook: { settingsFile: join(fixture.root, 'settings.json'), backupDir: join(store.root, 'backups') } }, io);
-  expect(result).toMatchObject({ ok: true, value: { removed: 1, kept: [placed.path] } });
+  // Kept placements are not removed: the two lists are disjoint.
+  expect(result).toMatchObject({ ok: true, value: { removed: 0, kept: [placed.path] } });
   await expect(access(join(placed.path, 'SKILL.md'))).resolves.toBeUndefined();
   expect((await store.read()).placements).toEqual({});
   expect(io.lines).toContain(`${placed.path} is also the authoring source of sample; left in place.`);
@@ -214,4 +215,18 @@ it('last-team cleanup runs after the config update while the team mutex is still
   const released = await acquireTeamLock(store.root, 'team');
   expect(released).not.toBeNull();
   await released?.();
+});
+
+it('counts removed and kept placements disjointly when one placement is kept and another is removed', async () => {
+  const { fixture, store, placed } = await prepared();
+  await store.update((c) => { c.shared.sample!.source = placed.path; });
+  const otherSource = join(fixture.root, 'other-source'); await mkdir(otherSource);
+  await writeFile(join(otherSource, 'SKILL.md'), '---\nname: other\ndescription: x\n---\n');
+  const other = await place(otherSource, join(fixture.root, 'home', '.claude', 'skills'), 'other');
+  await store.update((c) => { c.placements[other.path] = { id: '33333333-3333-4333-8333-333333333333', team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-01-01', fingerprint: other.snapshot.fingerprint }; });
+  const result = await run({ name: 'team', config: store, hook: { settingsFile: join(fixture.root, 'settings.json'), backupDir: join(store.root, 'backups') } }, new ScriptedPrompter([], [true]));
+  expect(result).toMatchObject({ ok: true, value: { removed: 1, kept: [placed.path] } });
+  await expect(access(join(placed.path, 'SKILL.md'))).resolves.toBeUndefined();
+  await expect(access(other.path)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect((await store.read()).placements).toEqual({});
 });

@@ -37,6 +37,14 @@ describe('team remove (§6)', () => {
     expect(runner.calls.some((call) => call.args.includes('--paginate'))).toBe(true);
   });
 
+  it('names the people file when its JSON is invalid, before any gh call', async () => {
+    const { fixture, store } = await prepared();
+    await pushFromSeed(fixture.seed, 'people/broken.json', '{not json}\n');
+    const runner = mappedRunner(REMOTE, fixture.bare, () => ({ code: 1, stdout: '', stderr: 'unexpected gh' }));
+    await expect(run({ kind: 'remove', handle: 'broken', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/^Invalid people\/broken\.json: /) });
+    expect(runner.calls.some((call) => call.command === 'gh')).toBe(false);
+  });
+
   it('refuses self and the last remaining admin before access changes', async () => {
     const { fixture, store } = await prepared();
     const runner = mappedRunner(REMOTE, fixture.bare, (args) => {
