@@ -11,36 +11,16 @@ const backend=createMockBackend();
 function open(route:string){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}
 beforeEach(()=>{localStorage.clear();useUiStore.getState().setTheme('dark');});
 afterEach(()=>{cleanup();location.hash='';vi.restoreAllMocks();});
-it.each([['account','Account'],['teams','Teams'],['machine','This machine'],['sync','Sync'],['updates','Updates'],['inbox','Inbox'],['evals','Evals'],['sharing','Sharing'],['appearance','Appearance'],['advanced','Advanced'],['about','About']])('renders the %s settings head and nav',async(section,title)=>{open('#/settings/'+section);expect(await screen.findByRole('heading',{name:title})).toBeInTheDocument();expect(within(screen.getByRole('navigation',{name:'Settings sections'})).getAllByRole('link')).toHaveLength(11);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(screen.queryByText(/S1b builds this/)).toBeNull();});
+it.each([['account','Account'],['teams','Team'],['machine','This machine'],['sync','Sync'],['updates','Updates'],['inbox','Inbox'],['evals','Evals'],['sharing','Sharing'],['appearance','Appearance'],['advanced','Advanced'],['about','About']])('renders the %s settings head and nav',async(section,title)=>{open('#/settings/'+section);expect(await screen.findByRole('heading',{name:title})).toBeInTheDocument();expect(within(screen.getByRole('navigation',{name:'Settings sections'})).getAllByRole('link')).toHaveLength(11);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(screen.queryByText(/S1b builds this/)).toBeNull();});
 it('defaults unknown sections to Account',async()=>{open('#/settings/no-such-section');expect(await screen.findByRole('heading',{name:'Account'})).toBeInTheDocument();});
-it('renders Leave and preanswers its exact confirmation',async()=>{const leave=vi.spyOn(backend,'team');open('#/settings/teams?dialog=leave');const dialog=await screen.findByRole('dialog');expect(within(dialog).getByRole('heading')).toHaveTextContent('Leave Terum on this machine?');expect([...dialog.querySelectorAll('.settings-leave-bullet>span:last-child')].map(node=>node.textContent)).toEqual([
- "Its placed skills leave ~/.claude/skills and the project checkouts on this machine (15 global, 13 in checkouts) — a copy you edited by hand is moved to quarantine instead of deleted, and a folder that is also a skill's authoring source is left where it is",
+it('renders Leave and asks the CLI confirmation',async()=>{const leave=vi.spyOn(backend,'team');open('#/settings/teams?dialog=leave');const dialog=await screen.findByRole('dialog');expect(within(dialog).getByRole('heading')).toHaveTextContent('Leave Terum on this machine?');expect([...dialog.querySelectorAll('.settings-leave-bullet>span:last-child')].map(node=>node.textContent)).toEqual([
+ "Its placed skills on this machine leave ~/.claude/skills and the project checkouts — a copy you edited by hand is moved to quarantine instead of deleted, and a folder that is also a skill's authoring source is left where it is",
  `The clone at ${design.TEAMS[0]?.clone} and this team's entry in config.json — a clone holding uncommitted or unpushed work is moved to quarantine instead`,
  'Its connected skill records and any pending operations on this machine',
  'This is your last team here, so the session-start hook is removed from ~/.claude/settings.json; if that file cannot be written the leave still finishes and says so',
+ "Consent you gave for skills' tool permissions may need to be given again for a new team",
  `Your people file in the team repo stays: you remain a member (an admin archives that with team remove ${design.ME.handle}), and setup brings this machine back`,
-]);fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledWith({kind:'leave'});expect(location.hash).toBe('#/settings/teams');});
-it.each([
-  ['0','0 global, 28 in checkouts'],
-  ['28','28 global, 0 in checkouts'],
-  ['29','— global, — in checkouts'],
-  ['99','— global, — in checkouts'],
-  [undefined,'— global, — in checkouts'],
-  ['','— global, — in checkouts'],
-  ['many','— global, — in checkouts'],
-  ['-1','— global, — in checkouts'],
-  ['30.5','— global, — in checkouts'],
-  ['100','— global, — in checkouts'],
-  ['9007199254740992','— global, — in checkouts'],
-])('renders Leave placement counts safely for Global=%s',async(globalCount,expected)=>{
-  const status=await backend.status();
-  if(!status.ok)throw new Error(status.error);
-  if(globalCount===undefined)delete status.value.counts.Global;
-  else status.value.counts.Global=globalCount;
-  vi.spyOn(backend,'status').mockResolvedValue(status);
-  open('#/settings/teams?dialog=leave');
-  expect(await screen.findByRole('dialog')).toHaveTextContent(`(${expected})`);
-});
+]);fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));const prompt=await screen.findByRole('dialog',{name:`Leave terum? This removes ${design.PLACEMENTS_N} placed skill(s) from this machine.`});fireEvent.click(within(prompt).getByRole('button',{name:'Confirm'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledWith({kind:'leave',name:'terum'});expect(location.hash).toBe('#/settings/teams');});
 it('renders every prune path and preanswers Delete N quarantined items',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/machine?dialog=prune');const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Delete 2 quarantined folders?');for(const [when,name] of design.QUARANTINE)expect(dialog).toHaveTextContent(`quarantine/${when}/${name}`);fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(sync).toHaveBeenCalledWith({prune:true});expect(location.hash).toBe('#/settings/machine');});
 it('keeps failed prune open',async()=>{vi.spyOn(backend,'sync').mockImplementation(()=>createRun(async()=>({ok:false,error:'Prune failed.'})));open('#/settings/machine?dialog=prune');fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('alert')).toHaveTextContent('Prune failed.');expect(screen.getByRole('dialog')).toBeInTheDocument();});
 it('renders the CLI config error line with hidden counts',async()=>{open('#/settings/account?__mock=error');expect(await screen.findByRole('alert')).toHaveTextContent("Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)");expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
@@ -49,7 +29,7 @@ it('changes data-theme from Appearance and updates an existing URL theme',async(
 it('persists the hook toggle and updates its explanation',async()=>{open('#/settings/sync');fireEvent.click(await screen.findByRole('switch',{name:'Sync at session start'}));expect(backend.prefs.get('sync:hook',true)).toBe(false);expect(screen.getByText(/Not installed. Run sync yourself/)).toBeInTheDocument();});
 it('persists each inbox kind independently',async()=>{open('#/settings/inbox');const controls=await screen.findAllByRole('checkbox');expect(controls).toHaveLength(7);fireEvent.click(screen.getByRole('checkbox',{name:'Alert'}));expect(backend.prefs.get('inbox:kind:alert',true)).toBe(false);expect(backend.prefs.get('inbox:kind:share',true)).toBe(true);});
 it('writes k without deriving a new statistic',async()=>{open('#/settings/evals');fireEvent.click(await screen.findByRole('combobox',{name:'Repetitions per case'}));const option=await screen.findByRole('option',{name:'10'});fireEvent.pointerDown(option,{pointerType:'mouse'});fireEvent.click(option);expect(backend.prefs.get('eval:k','')).toBe('10');});
-it('runs Sync now for the selected team through the workflow popup from a user action',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));expect(await screen.findByRole('dialog')).toHaveTextContent('Sync now');await waitFor(()=>expect(sync).toHaveBeenCalledWith({team:'terum'}));});
+it('runs Sync now without a team selector through the workflow popup from a user action',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));expect(await screen.findByRole('dialog')).toHaveTextContent('Sync now');await waitFor(()=>expect(sync).toHaveBeenCalledWith({}));});
 it('renders update advice verbatim from the DTO without opening a command in an editor',async()=>{
  const report=await backend.update();if(!report.ok)throw new Error(report.error);
  report.value.advice=['Running from a source checkout.','  custom build <command> & preserve spacing'];
@@ -158,4 +138,125 @@ it('does not claim agent authentication when the adapter reports unknown',async(
  open('#/settings/evals');await screen.findByRole('heading',{name:'Evals'});
  expect(screen.getByText(result.value.AGENT_CLI)).toBeInTheDocument();
  expect(screen.queryByText(/· signed in/)).toBeNull();
+});
+async function teamFixture(count:number){
+ const status=await backend.status(),settings=await backend.settings();
+ if(!status.ok||!settings.ok)throw new Error('Expected fixture');
+ const team=status.value.teams[0]!;
+ status.value.teams=Array.from({length:count},(_,index)=>({...team,name:index?'Other Team':'Acme Team',key:index?'other-key':'acme-key',clone:`~/.terum/skills/teams/${index?'other-key':'acme-key'}`}));
+ settings.value.TEAMS=status.value.teams;
+ const statusSpy=vi.spyOn(backend,'status').mockResolvedValue(status);
+ const settingsSpy=vi.spyOn(backend,'settings').mockResolvedValue(settings);
+ return {statusSpy,settingsSpy};
+}
+it('joins only from a zero-team machine, validates input, streams invitations and refreshes reads',async()=>{
+ const {statusSpy,settingsSpy}=await teamFixture(0),editor=vi.spyOn(backend,'openInEditor');
+ const invitation='Accept the invitation at https://github.com/acme/skills/invitations before continuing.';
+ const setup=vi.spyOn(backend,'setup').mockImplementation(()=>createRun(async ctx=>{
+  ctx.print(invitation);await ctx.ask('confirm','Invitation accepted?');return {ok:true,value:{team:'acme',role:'joiner'}};
+ }));
+ open('#/settings/teams');fireEvent.click(await screen.findByRole('button',{name:'Join'}));
+ const dialog=await screen.findByRole('dialog',{name:'Join a team'});
+ fireEvent.change(within(dialog).getByRole('textbox',{name:'Team repository'}),{target:{value:'  '}});
+ fireEvent.click(within(dialog).getByRole('button',{name:'Join'}));
+ expect(within(dialog).getByRole('alert')).toHaveTextContent('Enter the team as <org>/<repo> or a remote URL.');expect(setup).not.toHaveBeenCalled();
+ fireEvent.change(within(dialog).getByRole('textbox',{name:'Team repository'}),{target:{value:'  acme/skills  '}});
+ const statusCalls=statusSpy.mock.calls.length,settingsCalls=settingsSpy.mock.calls.length;
+ fireEvent.click(within(dialog).getByRole('button',{name:'Join'}));
+ expect(await within(dialog).findByText(invitation)).toBeInTheDocument();
+ expect(setup).toHaveBeenCalledExactlyOnceWith({target:'acme/skills'});
+ const prompt=await screen.findByRole('dialog',{name:'Invitation accepted?'});fireEvent.click(within(prompt).getByRole('button',{name:'Confirm'}));
+ expect(await within(dialog).findByRole('status')).toHaveTextContent('Joined acme');
+ await waitFor(()=>{expect(statusSpy.mock.calls.length).toBeGreaterThan(statusCalls);expect(settingsSpy.mock.calls.length).toBeGreaterThan(settingsCalls);});
+ expect(within(dialog).getByRole('button',{name:'Close'})).toBeEnabled();expect(editor).not.toHaveBeenCalled();
+});
+it('keeps Join mounted after the status refetch adds the joined team until Close',async()=>{
+ const joinedStatus=await backend.status();if(!joinedStatus.ok)throw new Error(joinedStatus.error);
+ joinedStatus.value.teams[0]!.name='Acme Team';
+ const {statusSpy,settingsSpy}=await teamFixture(0);
+ const line='Joined repository acme/skills.';
+ vi.spyOn(backend,'setup').mockImplementation(()=>createRun(async ctx=>{
+  ctx.print(line);return {ok:true,value:{team:'acme/skills',role:'joiner'}};
+ }));
+ open('#/settings/teams');fireEvent.click(await screen.findByRole('button',{name:'Join'}));
+ const dialog=await screen.findByRole('dialog',{name:'Join a team'});
+ fireEvent.change(within(dialog).getByRole('textbox',{name:'Team repository'}),{target:{value:'acme/skills'}});
+ const statusCalls=statusSpy.mock.calls.length,settingsCalls=settingsSpy.mock.calls.length;
+ statusSpy.mockResolvedValue(joinedStatus);
+ fireEvent.click(within(dialog).getByRole('button',{name:'Join'}));
+ await screen.findByText('Acme Team');
+ await waitFor(()=>{expect(statusSpy.mock.calls.length).toBeGreaterThan(statusCalls);expect(settingsSpy.mock.calls.length).toBeGreaterThan(settingsCalls);});
+ expect(screen.getByRole('dialog',{name:'Join a team'})).toBe(dialog);
+ expect(within(dialog).getByText(line)).toBeInTheDocument();
+ expect(within(dialog).getByRole('status')).toHaveTextContent('Joined acme/skills');
+ expect(within(dialog).getByRole('button',{name:'Close'})).toBeEnabled();
+ fireEvent.click(within(dialog).getByRole('button',{name:'Close'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ expect(screen.getByText('Acme Team').closest('.setting-card')).toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Join'})).toBeNull();
+});
+it('rejects a direct Join dialog URL with the default configured team',async()=>{
+ open('#/settings/teams?dialog=join');await screen.findByRole('heading',{name:'Team'});
+ expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('requires leaving the configured team first and never starts setup',async()=>{
+ await teamFixture(1);const setup=vi.spyOn(backend,'setup');open('#/settings/teams');
+ fireEvent.click(await screen.findByRole('button',{name:'Leave Acme Team first'}));
+ expect(await screen.findByRole('dialog',{name:'Leave Acme Team on this machine?'})).toBeInTheDocument();
+ expect(location.hash).toContain('dialog=leave&team=acme-key');expect(setup).not.toHaveBeenCalled();
+});
+it('renders two legacy team cards with keyed Leave actions and no Join button',async()=>{
+ await teamFixture(2);open('#/settings/teams');await screen.findByRole('heading',{name:'Team'});
+ expect(screen.getByRole('link',{name:'Team'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'Join'})).toBeNull();
+ for(const [name,key] of [['Acme Team','acme-key'],['Other Team','other-key']]){
+  const card=screen.getByText(name!).closest('.setting-card');if(!card)throw new Error('Expected card');
+  fireEvent.click(within(card as HTMLElement).getByRole('button',{name:'Leave'}));
+  const dialog=await screen.findByRole('dialog',{name:`Leave ${name} on this machine?`});
+  expect(location.hash).toContain(`dialog=leave&team=${key}`);expect(dialog).toHaveTextContent(`~/.terum/skills/teams/${key}`);expect(dialog).not.toHaveTextContent('This is your last team here');
+  fireEvent.click(within(dialog).getByRole('button',{name:'Cancel'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ }
+});
+it.each([1,2])('rejects a direct Join dialog URL with %i teams',async count=>{
+ await teamFixture(count);open('#/settings/teams?dialog=join');await screen.findByRole('heading',{name:'Team'});expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('does not infer a Leave target on a legacy multi-team machine',async()=>{
+ await teamFixture(2);open('#/settings/teams?dialog=leave');await screen.findByRole('heading',{name:'Team'});expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('removes the second-team handle suggestion from Account',async()=>{
+ open('#/settings/account');await screen.findByRole('heading',{name:'Account'});expect(screen.queryByText(/A second team can use a different one/)).toBeNull();
+});
+it('runs diagnostics once in a Status dialog and never opens a command path',async()=>{
+ const lines=['terum-skills test-version','Acme · remote · handle · counts · last sync'];
+ const diagnostics=vi.spyOn(backend,'diagnostics').mockImplementation(()=>createRun(async ctx=>{for(const line of lines)ctx.print(line);return {ok:true,value:undefined};}));
+ const editor=vi.spyOn(backend,'openInEditor');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Run'}));
+ const dialog=await screen.findByRole('dialog',{name:'Status'});await waitFor(()=>expect(within(dialog).getByRole('status')).toHaveTextContent('Done.'));
+ for(const line of lines)expect(within(dialog).getByText(line)).toBeInTheDocument();expect(diagnostics).toHaveBeenCalledTimes(1);expect(editor).not.toHaveBeenCalled();
+ fireEvent.click(within(dialog).getByRole('button',{name:'Close'}));await waitFor(()=>expect(location.hash).not.toContain('dialog='));
+});
+it('routes About Check to the Updates dialog with verbatim advice and preserves mock mode',async()=>{
+ const report=await backend.update();if(!report.ok)throw new Error(report.error);
+ vi.spyOn(backend,'update').mockResolvedValue(report);open('#/settings/about?__mock=empty');fireEvent.click(await screen.findByRole('button',{name:'Check'}));
+ const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('pre')?.textContent).toBe(report.value.advice.join('\n')));
+ expect(location.hash).toContain('/settings/updates?dialog=update&__mock=empty');
+});
+it('copies the sign-out command from its terminal instructions',async()=>{
+ const copy=vi.spyOn(backend,'copyToClipboard').mockResolvedValue({ok:true,value:undefined}),editor=vi.spyOn(backend,'openInEditor');
+ open('#/settings/account');fireEvent.click(await screen.findByRole('button',{name:'Sign out'}));
+ const dialog=await screen.findByRole('dialog',{name:'Sign out from a terminal'});fireEvent.click(within(dialog).getByRole('button',{name:'Copy command'}));
+ await waitFor(()=>expect(copy).toHaveBeenCalledWith('gh auth logout'));expect(editor).not.toHaveBeenCalled();
+});
+it('syncs without a team selector even on a legacy two-team machine',async()=>{
+ await teamFixture(2);const sync=vi.spyOn(backend,'sync');open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));
+ await screen.findByRole('dialog');await waitFor(()=>expect(sync).toHaveBeenCalledWith({}));expect(screen.queryByRole('combobox',{name:'Team to sync'})).toBeNull();
+});
+it('leaves the keyed team, renders inventory and delegates confirmation to the real prompt',async()=>{
+ await teamFixture(2);const completed=vi.fn();
+ const leave=vi.spyOn(backend,'team').mockImplementation(()=>createRun(async ctx=>{
+  ctx.print('Inventory: acme-key has placed skills.');const confirmed=await ctx.ask('confirm','Really leave acme-key on this machine?');completed(confirmed);return {ok:true,value:{name:'acme-key',kind:'leave'}};
+ }));
+ open('#/settings/teams?dialog=leave&team=acme-key');const dialog=await screen.findByRole('dialog',{name:'Leave Acme Team on this machine?'});
+ fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));
+ expect(await within(dialog).findByText('Inventory: acme-key has placed skills.')).toBeInTheDocument();
+ const prompt=await screen.findByRole('dialog',{name:'Really leave acme-key on this machine?'});expect(completed).not.toHaveBeenCalled();fireEvent.click(within(prompt).getByRole('button',{name:'Confirm'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledExactlyOnceWith({kind:'leave',name:'acme-key'});expect(completed).toHaveBeenCalledWith(true);expect(location.hash).not.toContain('dialog=');
 });

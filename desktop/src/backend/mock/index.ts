@@ -7,7 +7,7 @@ import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
 import type { ConnectBatch, ConnectOutcome, Result, Roster, Run, SearchHit } from '../types';
 import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData } from './data';
-import { library_title, roster_by_adoption } from './derive';
+import { library_title, roster_by_adoption, statusLines } from './derive';
 import { onboardingData } from './onboarding';
 import { readScenario } from './scenario';
 import { statusCounts } from './status-counts';
@@ -16,7 +16,7 @@ import type { RunContext } from './run';
 const updateAdvice=['Cache request recorded as: terum-skills@latest',"To request the registry's latest release, run:",'  npx -y terum-skills@latest <command>','This does not update other local or global installations.'];
 const cancelled=(error:string):Result<never>=>({ok:false,error,cancelled:true});
 const fatal=decodeText(design.ONBOARD_FETCH_ERROR);
-const errors={library:"EACCES: permission denied, scandir '~/.terum/skills'",settings:"Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)",inbox:fatal,marketplace:"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com",share:"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'",skill:(ref:string)=>`ENOENT: no such file or directory, open '~/.claude/skills/${ref}/SKILL.md'`,onboarding:design.ONBOARD_FETCH_ERROR.replaceAll("&#39;", "'")};
+const errors={status:"Could not read ~/.terum/skills/config.json.",library:"EACCES: permission denied, scandir '~/.terum/skills'",settings:"Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)",inbox:fatal,marketplace:"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com",share:"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'",skill:(ref:string)=>`ENOENT: no such file or directory, open '~/.claude/skills/${ref}/SKILL.md'`,onboarding:design.ONBOARD_FETCH_ERROR.replaceAll("&#39;", "'")};
 const ok=<T>(value:T):Result<T>=>({ok:true,value});
 const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeText(error),'')});
 const zeroCopy=design.LIBRARY_OVERVIEW.zero;
@@ -65,7 +65,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   async openUrl(url){try{window.open(url,'_blank','noopener');return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:String(error));}},
   async revealPath(){return ok(undefined);},
   async capabilities(){return {appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
-  async surfaces(){return {status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true};},
+  async surfaces(){return {divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true};},
   async status(){return structuredClone(ok({machine:{...design.MACHINE,hostname:design.MACHINE.name},me:identity,teams:readScenario()==='no-team'?[]:mockTeams(),tools:{git:true,gh:true},projects:sidebarProjects(),counts:statusCounts(location.hash,readScenario())}));},
   settings:()=>read('settings',()=>ok({K:design.K,MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:identity,TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,SHARED:design.SHARED,LOCAL_UNSHARED:design.LOCAL_UNSHARED,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,AGENT_CLI_AUTH:'signed-in',COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN})),
   onboarding:async()=>{const result=await read('onboarding',()=>ok(onboardingData()));return result.ok?result:{...result,value:onboardingData()};},
@@ -105,7 +105,8 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   eval:args=>long('library',async ctx=>{const detail=skillByRef(args.ref);if(!detail.ok)return fail(detail.error);ctx.print(`Evaluating ${args.ref}…`);ctx.progress(1,1,'Complete');return ok({name:args.ref,receipt:detail.value.receipt??null});}),
   validate:args=>read('library',()=>{const name=args.ref??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0}):fail(detail.error);}),
   update:()=>read('settings',()=>ok({running:design.CLI_VERSION,latest:design.CLI_LATEST,observation:'newer',launch:'npx',description:`${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`,advice:updateAdvice,lines:[`terum-skills ${design.CLI_VERSION}`,`Latest advertised release: ${design.CLI_LATEST}`,...updateAdvice]})),
-  async openInEditor(path){return path.trim()?ok(undefined):fail('An editor path is required.');},
+  diagnostics:()=>long('status',async ctx=>{for(const line of statusLines(design))ctx.print(line);return ok(undefined);}),
+  async openInEditor(path){return (path==='~'||path.startsWith('~/')||path.startsWith('/'))?ok(undefined):fail('An editor path is required.');},
   async copyToClipboard(text){try{if(!navigator.clipboard?.writeText)return fail('Clipboard unavailable.');await navigator.clipboard.writeText(text);return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:'Clipboard unavailable.');}},
   async copyImage(png){try{if(png.type!=='image/png')return fail('Expected a PNG image.');if(!navigator.clipboard?.write||typeof ClipboardItem==='undefined')return fail('Clipboard unavailable.');await navigator.clipboard.write([new ClipboardItem({'image/png':png})]);return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:'Clipboard unavailable.');}},
   prefs:browserPrefs(),
