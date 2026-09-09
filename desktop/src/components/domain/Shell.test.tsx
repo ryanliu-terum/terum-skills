@@ -40,7 +40,7 @@ it.each(['loading','error','empty','default'])('onboarding %s has a main landmar
 });
 it.each([undefined,null,{Global:'99'}])('treats explicit Shell counts as authoritative: %j',async counts=>{
  location.hash='#/frame?__mock=error';render(<Providers><HashRouter><Shell counts={counts}><ScreenFrame/></Shell></HashRouter></Providers>);
- await screen.findByText('teniroo');expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(counts===undefined?['15','8','3','2','3','3','8']:counts===null?[]:['99']);
+ await screen.findByText('teniroo');expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(counts===undefined?['15','8','3','2','3','3','8']:counts===null?[]:['99','8','3','2']);
 });
 it('marks a light frame ready only after the URL theme is applied and status resolves',async()=>{
  useUiStore.getState().setTheme('dark');location.hash='#/frame?theme=light';

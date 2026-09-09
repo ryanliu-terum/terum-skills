@@ -8,7 +8,7 @@ import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
-import type { IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
+import type { Root, LibraryTeam, IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { cliEvalReport, mapEvalReport } from './eval-report';
@@ -46,14 +46,43 @@ const cliProject = z.object({ name: z.string(), skills: z.array(z.string()), rem
 // S7g: every `ls --local` row carries typed provenance and a read-only health; the prose `state` is never parsed.
 const cliLocalHealth = z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']);
 const cliLocalRow = z.object({ name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), shared: z.array(z.strictObject({ id: z.string(), team: z.string() })), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().length(40).nullable() }).nullable(), health: cliLocalHealth, problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional(), connected: z.boolean().optional() }).strict();
+const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), registered:z.boolean().optional(), detected:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional()})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
+const cliCheckoutAdded = z.object({path:z.string(),registered:z.boolean()});
+const cliCheckoutRemoved = z.object({path:z.string(),placementsRemaining:z.number()});
 const cliLs = z.object({
   roster: z.array(z.object({ handle: z.string(), active: z.boolean(), ...memberMetadata })), skills: z.array(cliLsSkill), problems: z.array(z.object({ source: z.string(), message: z.string() })), projects: z.array(cliProject).optional(), member: z.object({ installed: z.array(z.object({ id: z.string(), scope: cliScope, since: z.string() })).optional(), handle: z.string(), declined: z.array(z.string()), ...memberMetadata }).optional(),
-  local: z.array(z.object({ root: z.string(), scope: z.enum(['global', 'project']), repoRoot: z.string().optional(), rows: z.array(cliLocalRow), notOffered: z.array(z.object({ skillId: z.string().nullable().optional(), name: z.string(), path: z.string(), reason: z.string() })), problems: z.array(z.object({ path: z.string(), reason: z.string() })) })).optional(),
+  local: z.array(cliLocalSection).optional(),
 });
 const cliStatusTeams = z.object({ version: z.string().nullable(), teams: z.array(z.object({ team: z.string(), handle: z.string(), repository: z.string().nullable(), readable: z.boolean(), sharedSkills: z.number().nullable(), memberCount: z.number().nullable() })) });
 type Inventory = z.infer<typeof cliLs>;
 type InventorySkill = z.infer<typeof cliLsSkill>;
 type InventoryTeam = z.infer<typeof cliStatusTeams>['teams'][number];
+
+type LocalSection=z.infer<typeof cliLocalSection>;
+type LocalRow=z.infer<typeof cliLocalRow>;
+type NotOffered=NonNullable<LocalSection['notOffered']>[number];
+function normalizePath(path:string):string{return path.replace(/[\\/]+$/,'');}
+function basename(path:string):string{return normalizePath(path).split(/[\\/]/).at(-1)??'';}
+function rootOf(section:LocalSection,home=''):Root {
+  const global=section.scope==='global',repoRoot=section.repoRoot??section.root;
+  return {id:global?'global':repoRoot,kind:global?'global':'checkout',label:section.label??(global?'Global':basename(repoRoot)),root:global?(home?abbreviateHome(section.root,home):'~/.claude/skills'):repoRoot,rootState:section.rootState,registered:section.registered??false,detected:section.detected??false,count:section.counts?String(section.counts.skillFolders):undefined};
+}
+// D2: only these frontmatter failures still describe folders holding SKILL.md.
+function countable(entry:NotOffered):boolean{return ['no-frontmatter','invalid-yaml','illegal-name','name-mismatch','description-missing','unsupported-field','malformed-allowed-tools','managed-wrapper'].includes(entry.reason);}
+function joinedSkill(row:LocalRow,inventory:Inventory,team:string,features:Pick<Features,'localIdentity'>):InventorySkill|undefined {
+  return inventory.skills.find(skill=>features.localIdentity&&row.skillId!=null?row.skillId===skill.id:row.placement?.id===skill.id&&row.placement.team===team);
+}
+function localCard(row:LocalRow,section:LocalSection,home:string):SkillCard {
+  const placed=row.placed??row.placement!==null,local=!row.connected&&!row.shared.length&&!placed;
+  return {path:row.path,name:row.name,desc:'',project:'local',category:'—',installs:'—',installsN:0,installed:true,placed,onDiskOnly:!placed,paths:[[abbreviateHome(row.path,home),section.scope]],connectedSources:row.connected||row.shared.length?[row.path]:[],flags:row.problem!==undefined?['broken']:local?['local']:[],flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local · not shared with a team'}:{},grants:null,normalizedGrants:null,grantsHash:null,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,updated:null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};
+}
+function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):SkillCard {
+  return localCard({name:entry.name,path:entry.path,state:'',tracked:false,shared:[],placement:null,health:'unknown',problem:'Not connectable · '+(entry.detail??entry.reason)},section,home);
+}
+function localDetail(card:SkillCard,section:LocalSection,path:string,home:string):SkillDetail {
+  const pathLabel=abbreviateHome(path,home);
+  return {...card,team:null,skillRef:'local:'+path,root:'Global',installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,path,pathLabel,repo:null,version:'—',version_full:null,scope:section.scope==='global'?'Global':section.label??basename(section.repoRoot??section.root),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:['SKILL.md'],size_bytes:'—',desc_long:'',grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:'',body:[],markdown:null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest connect '+pathLabel,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},method:'',versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[]};
+}
 
 // Join provenance by team and ID, including relocated or conflicting tracked folders.
 function onDisk(local: Inventory, team: string, id: string, features: Pick<Features, 'localIdentity'>) {
@@ -64,7 +93,7 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
   const placements = rows.filter(r => r.placement?.id === row.id && r.placement.team === team);
   const placed = placements.length > 0, installed = rows.length > 0;
   const problem = placements.find(r => r.problem !== undefined || r.health === 'unknown' || r.health === 'gone-from-repo');
-  return { name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: installed && !placed, paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [r.repoRoot] : []), connectedSources: rows.filter(r => r.shared.length > 0).map(r => r.path), desc: row.description, grants: row.grants?.split('\n') ?? null, normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, size: '—', tokensK: 0, wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: problem || row.unresolved ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };
+  return { path:null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: installed && !placed, paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [r.repoRoot] : []), connectedSources: rows.filter(r => r.shared.length > 0).map(r => r.path), desc: row.description, grants: row.grants?.split('\n') ?? null, normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, size: '—', tokensK: 0, wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: problem || row.unresolved ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };
 }
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
 function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryTeam, validation: Result<ValidateResult>, inventory: Inventory, features: Pick<Features, 'localIdentity'>, home: string): SkillDetail {
@@ -103,11 +132,11 @@ const cliStatus = z.object({
  identity:z.object({default_handle:z.string().nullable(),email:z.string().nullable(),display_name:z.string().nullable(),github:z.string().nullable()}).nullable(),
  tools:z.object({git:z.boolean(),gh:z.boolean()}),
 });
-const cliLocal=z.object({local:z.array(z.object({root:z.string(),scope:z.enum(['global','project']),repoRoot:z.string().optional(),rows:z.array(cliLocalRow),problems:z.array(z.object({path:z.string(),reason:z.string()}))})),skills:z.array(z.object({id:z.string(),name:z.string(),grantsHash:z.string().nullish().transform(v=>v??null),grants:z.string().nullish().transform(v=>v??null)}))});
+const cliLocal=z.object({local:z.array(cliLocalSection),skills:z.array(z.object({id:z.string(),name:z.string(),grantsHash:z.string().nullish().transform(v=>v??null),grants:z.string().nullish().transform(v=>v??null)}))});
 type CliStatus=z.infer<typeof cliStatus>;
 type CliLocal=z.infer<typeof cliLocal>;
 
-function statusModel(value:CliStatus, local:CliLocal|null, platform:string, features:Pick<Features, 'localIdentity'>):StatusResult {
+function statusModel(value:CliStatus, local:CliLocal|null, platform:string):StatusResult {
  const name=value.identity?.display_name??'';
  const handle=value.teams[0]?.handle??''; // one team per machine — legacy 2+ shows a hint, not a projection
  return {
@@ -115,7 +144,7 @@ function statusModel(value:CliStatus, local:CliLocal|null, platform:string, feat
   machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
   me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:[value.identity?.github,handle,value.identity?.default_handle].find(v=>v)??''},
   teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath??null,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{publish:team.policy.publish==='pr'?'Pull request':'Push',license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
-  counts:local===null?{}:{Global:String(local.local.filter(section=>section.scope==='global').flatMap(section=>section.rows).filter(row=>row.placed===true||row.placement!==null||(features.localIdentity&&row.skillId!=null)).length)},tools:value.tools,projects:null,
+  counts:local?.local.find(section=>section.scope==='global')?.counts ? {Global:String(local.local.find(section=>section.scope==='global')!.counts!.skillFolders)} : {},tools:value.tools,roots:local===null?[]:local.local.map(section=>rootOf(section)),
  };
 }
 // AD-23: the drawn placement states (design fixture PLACEMENTS: 'up to date', 'update available', 'edited locally', 'pinned'); a health the board has no word for is '—'.
@@ -254,6 +283,13 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     if (!selected.readable) return fail(`Team ${selected.team} could not be read.`);
     return { ok: true, value: selected };
   }
+  async function libraryTeam(team:string|undefined,options?:ReadOptions):Promise<{team:LibraryTeam;inventory?:Inventory;selected?:InventoryTeam}> {
+    const selected=await inventoryTeam(team,options);
+    if(!selected.ok)return {team:selected.reason==='no-team'?{kind:'none'}:{kind:'unreadable',message:selected.error}};
+    const inventory=await read(run(['ls','--team',selected.value.team],cliLs,value=>value,[]),options);
+    if(!inventory.ok)return {team:{kind:'unreadable',message:inventory.error}};
+    return {team:{kind:'ok',team:selected.value.team},selected:selected.value,inventory:inventory.value};
+  }
   async function peopleInventory(options?: ReadOptions) {
     const status = await read(run(['status'], cliStatus, value => value, []), options);
     if (!status.ok) return status;
@@ -297,32 +333,61 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, evalCommitChoice: features.runEvalInApp, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
-      return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true };
+      return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, checkouts:true };
     },
     // Status and Settings are offline reads; the remaining surfaces retain their explicit gaps.
-    status: (_, options) => readModels(options, (value, local, platform) => statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false })),
-    settings: (_, options) => readModels(options, (value, local, platform) => settingsModel(value, local, statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }))),
+    status: (_, options) => readModels(options, (value, local, platform) => statusModel(value, local, platform)),
+    settings: (_, options) => readModels(options, (value, local, platform) => settingsModel(value, local, statusModel(value, local, platform))),
     onboarding: async () => gap('Onboarding data'),
     async library({ scope, team }, options) {
-      const selected = await inventoryTeam(team, options);
-      if (!selected.ok) return { ok: false, error: selected.error, ...(selected.reason ? { reason: selected.reason } : {}) };
-      const args = scope.toLowerCase() === 'global' || scope.toLowerCase() === 'installed' ? [] : ['project', scope];
-      const inventory = await read(run(['ls', ...args, '--team', selected.value.team], cliLs, value => value, []), options);
-      if (!inventory.ok) return fail(inventory.error);
       const local = await read(run(['ls', '--local'], cliLs, value => value, []), options);
       if (!local.ok) return fail(local.error);
-      const directory = await home();
-      const skills = inventory.value.skills.map(row => inventoryCard(row, local.value, selected.value.team, { localIdentity: hello?.features.localIdentity ?? false }, directory)).filter(row => scope.toLowerCase() !== 'installed' || row.installed);
-      const installs = skills.reduce((sum, row) => sum + row.installsN, 0);
-      const globalCount = skills.filter(skill => skill.paths.some(([, scope]) => scope === 'global')).length;
-      const projectSection = local.value.local?.find(section => section.scope === 'project');
-      const projectCount = skills.filter(skill => skill.paths.some(([, scope]) => scope === 'project')).length;
-      const projectName = projectSection ? (projectSection.repoRoot ?? projectSection.root).split(/[\\/]/).filter(Boolean).at(-1) ?? '' : '';
-      const value: Library = { scanned: (local.value.local ?? []).map(section => section.scope === 'global' ? '~/.claude/skills' : section.repoRoot ?? section.root), skills, title: `${skills.length} skills · ${globalCount} in ~/.claude/skills${projectSection ? ` · ${projectCount} in ${projectName}` : ''}`, projects: inventory.value.projects ?? [], problems: inventory.value.problems, provenance: null,
-        overview: { skills: String(skills.length), skills_note: `${inventory.value.skills.filter(row => row.endorsement === 'global').length} ${args.length===0?'endorsed to Global':'also on Global'}`, evaluated: '—', meter: { pass_: 0, neutral: 0, fail: 0, total: 0 }, meter_text: '', installs: String(installs), installs_note: `across every readable people file · ${inventory.value.roster.filter(person => person.active).length} active teammate${inventory.value.roster.filter(person => person.active).length === 1 ? '' : 's'}`, attention: '—', attention_lines: [], attention_link: '', zero: { skills: '', evaluated: '', installs: '', attention: '' } },
-      };
-      return { ok: true, value };
+      const section = local.value.local?.find(section => scope.kind==='global' ? section.scope==='global' : section.scope==='project' && normalizePath(section.repoRoot??section.root)===normalizePath(scope.root));
+      if (!section) return fail('No such checkout: '+(scope.kind==='checkout'?scope.root:'global')+' · Register it under Settings ▸ This machine ▸ Checkouts.');
+      const features = {localIdentity:hello?.features.localIdentity??false};
+      const enrichment = await libraryTeam(team, options);
+      const directory = await home(), root = rootOf(section, directory);
+      const skills:SkillCard[] = [], seen=new Set<string>();let joined=0;
+      for (const row of section.rows) {
+        if(seen.has(row.path))continue;seen.add(row.path);
+        const skill = enrichment.team.kind==='ok' ? joinedSkill(row,enrichment.inventory!,enrichment.team.team,features) : undefined;
+        if(skill && enrichment.team.kind==='ok') {joined++;skills.push({...inventoryCard(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.team.team,features,directory),path:row.path});}
+        else skills.push(localCard(row,section,directory));
+      }
+      for(const entry of section.notOffered??[]) {
+        if(!countable(entry)||seen.has(entry.path))continue;seen.add(entry.path);
+        skills.push(notOfferedCard(entry,section,directory));
+      }
+      const n=skills.length;
+      const value:Library={root,team:enrichment.team,scanned:(local.value.local??[]).map(section=>section.scope==='global'?'~/.claude/skills':section.repoRoot??section.root),skills,problems:enrichment.inventory?.problems??[],provenance:null,
+        title:`${n} skill folder${n===1?'':'s'} in ${root.label}`+(enrichment.team.kind==='ok'&&joined>0?` · ${joined} shared with ${enrichment.team.team}`:''),
+        overview:{skills:String(n),skills_note:'—',evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:'',installs:String(skills.reduce((sum,row)=>sum+row.installsN,0)),installs_note:'—',attention:'—',attention_lines:[],attention_link:'',zero:{skills:'',evaluated:'',installs:'',attention:''}}};
+      return {ok:true,value};
     },
+    async localSkill({path},options) {
+      const local=await read(run(['ls','--local'],cliLs,value=>value,[]),options);
+      if(!local.ok)return fail(local.error);
+      const directory=await home(),features={localIdentity:hello?.features.localIdentity??false};
+      for(const section of local.value.local??[]) {
+        const row=section.rows.find(row=>normalizePath(row.path)===normalizePath(path));
+        const entry=row?undefined:section.notOffered?.find(entry=>countable(entry)&&normalizePath(entry.path)===normalizePath(path));
+        if(!row&&!entry)continue;
+        const enrichment=await libraryTeam(undefined,options);
+        const skill=row&&enrichment.team.kind==='ok'?joinedSkill(row,enrichment.inventory!,enrichment.team.team,features):undefined;
+        if(row&&skill&&enrichment.selected&&enrichment.inventory) {
+          const team=enrichment.selected.team;
+          const validation=await backend.validate({ref:skill.name,team},options);
+          if(!validation.ok&&validation.value===undefined)return fail(validation.error);
+          const detail=inventoryDetail(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.selected,validation,enrichment.inventory,features,directory);
+          const report=await backend.evalReport({ref:skill.name,team},options);
+          return {ok:true,value:report.ok?{...detail,...report.value}:{...detail,evalReportError:report.error}};
+        }
+        const card=row?localCard(row,section,directory):notOfferedCard(entry!,section,directory);
+        return {ok:true,value:localDetail(card,section,row?.path??entry!.path,directory)};
+      }
+      return {ok:false,error:abbreviateHome(path,directory)+' is not in any Library root (Global or a registered checkout), or no longer holds a SKILL.md.',reason:'not-in-library'};
+    },
+    checkouts:{add:path=>run(['checkout','add','--',path],cliCheckoutAdded,v=>v,['config']),remove:path=>run(['checkout','remove','--',path],cliCheckoutRemoved,v=>v,['config'])},
     async skill({ ref, team }, options) {
       const parts = ref.split('/');
       const explicitTeam = team ?? (parts.length === 2 ? parts[0] : undefined);

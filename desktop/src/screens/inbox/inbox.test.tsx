@@ -65,12 +65,12 @@ it('records a decline through the backend without creating a preference', async 
 });
 it('surfaces failed decline results explicitly', async () => { open('#/inbox'); await screen.findByRole('button', { name: 'Decline' }); vi.spyOn(pickBackend(), 'decline').mockImplementation(() => createRun(async()=>({ok:false,error:'Decline write failed.'}))); fireEvent.click(screen.getByRole('button', { name: 'Decline' })); expect(await screen.findByRole('alert')).toHaveTextContent('Decline write failed.'); });
 
-it('uses only status-supplied sidebar counts on the empty scenario', async () => {
+it('uses status Global and checkout root counts on the empty scenario', async () => {
   const source = pickBackend();
   const status = await source.status();
   if (!status.ok) throw new Error(status.error);
   vi.spyOn(source, 'status').mockResolvedValue({ ...status, value: { ...status.value, counts: { Global: '71' } } });
   open('#/inbox?__mock=empty');
   expect(await screen.findByRole('link', { name: 'Global 71' })).toBeInTheDocument();
-  expect(document.querySelectorAll('.nav-count')).toHaveLength(1);
+  expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(['71','8','3','2']);
 });

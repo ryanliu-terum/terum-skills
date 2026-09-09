@@ -18,7 +18,7 @@ import { Shell } from '../components/domain/Shell';
 import { ScreenFrame } from '../components/domain/ScreenFrame';
 function NotFoundScreen(){return <Shell><ScreenFrame><div className="not-found">No such page<a href="#/library/global">Library</a></div></ScreenFrame></Shell>;}
 // Navigation contract (AC-10): native hash history owns Back/Forward; links push and launch redirects replace.
-// Sidebar selection follows the route family, with Global and each /library/project/:name explicit scopes.
+// Sidebar selection follows the route family, with Global and each /library/checkout?root= explicit scopes.
 // Settings defaults to Account. Marketplace skill links carry ?root=marketplace, including copied deep links.
 // The tour order is boot → welcome → style → basics → team → feedback → done; only Boot has a real setup read model.
 function LaunchRoute(){
@@ -37,7 +37,7 @@ export const routes:RouteObject[]=[
 {path:"/",element:<LaunchRoute/>},
 {path:"/frame",element:<FrameScreen/>},
 {path:"/library/global",element:<LibraryScreen/>},
-{path:"/library/project/:name",element:<LibraryScreen/>},
+{path:"/library/checkout",element:<LibraryScreen/>},
 {path:"/skill/:ref",element:<SkillScreen/>},
 {path:"/inbox",element:<InboxRoute><InboxScreen/></InboxRoute>},
 {path:"/inbox/:id",element:<InboxRoute><InboxScreen/></InboxRoute>},

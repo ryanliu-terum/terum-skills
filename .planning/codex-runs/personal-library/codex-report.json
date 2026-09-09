@@ -1,0 +1,138 @@
+{
+  "status": "partial",
+  "summary": "Implemented the Personal Library roots model, local-folder details, checkout registration controls, and regression coverage. Typecheck and lint pass; the final full test run reported 1,121 passed, 1 timeout, and 91 skipped, with the timed-out file passing in isolation. Exact origin/main fail-before verification remains unverified under the no-git constraint.",
+  "filesChanged": [
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"§1.1: roots, LibraryScope, local paths, checkout results, and typed local failure."},
+    {"path":"desktop/src/backend/Backend.ts","change":"modified","why":"§1.2: object Library scopes, localSkill, and checkout operations."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"§1.3: shared section schema, local-first inventory, optional team enrichment, local details, and registry commands."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"§1.5: mock roots, path-based reads, checkout operations, and hidden Checkouts settings surface."},
+    {"path":"desktop/src/backend/mock/scenario.ts","change":"modified","why":"§1.5: detected-root and missing-root URL scenarios."},
+    {"path":"desktop/src/backend/mock/data.ts","change":"modified","why":"§1.5: card and detail path fields."},
+    {"path":"desktop/src/app/invalidation.ts","change":"modified","why":"§1.4: config changes invalidate Library, skill, and catalog reads."},
+    {"path":"desktop/src/app/routes.tsx","change":"modified","why":"§1.8: checkout route replaces the project-name route."},
+    {"path":"desktop/src/components/domain/Sidebar.tsx","change":"modified","why":"§1.6: canonical-root selection, root counts, and detected-folder Add."},
+    {"path":"desktop/src/components/domain/Sidebar.css","change":"added","why":"§3: detected-row Add styling."},
+    {"path":"desktop/src/components/domain/Shell.tsx","change":"modified","why":"§1.7: passes roots from status."},
+    {"path":"desktop/src/components/domain/SkillCard.tsx","change":"modified","why":"§1.10: local title and Open menu navigate by path."},
+    {"path":"desktop/src/screens/library/LibraryScreen.tsx","change":"modified","why":"§1.9: explicit root scopes, missing-root handling, and best-effort team boards."},
+    {"path":"desktop/src/screens/skill/SkillScreen.tsx","change":"modified","why":"§1.11: local reads, checkout selection, honest errors, and path-specific state."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"§1.12: gated checkout management and registration-is-not-sharing copy."},
+    {"path":"desktop/src/screens/onboarding/OnboardingScreen.tsx","change":"modified","why":"Migrates its existing Library call to the required object scope."},
+    {"path":"desktop/src/app/invalidation.test.ts","change":"modified","why":"Asserts the expanded config invalidation set."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"Asserts mock roots, scope objects, and checkouts surface."},
+    {"path":"desktop/src/backend/mock/__tests__/scoped-library.test.ts","change":"modified","why":"Asserts canonical roots, preserved board overviews, and unknown-root failures."},
+    {"path":"desktop/src/backend/mock/__tests__/status-counts.test.ts","change":"modified","why":"Uses checkout URLs while preserving derived-count assertions."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Asserts local-first argv, folder identity, counts, enrichment, and local detail."},
+    {"path":"desktop/src/backend/tauri/__tests__/library-replay.test.ts","change":"added","why":"Replays all five supplied recordings and tests typed local failures."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","change":"modified","why":"Migrates S7g assertions to Global and canonical checkout roots."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay-screens.test.tsx","change":"modified","why":"Asserts recorded checkout links, folder titles, and absence of project-list spawns."},
+    {"path":"desktop/src/backend/tauri/__tests__/path-true-screens.test.tsx","change":"modified","why":"Asserts honest errors for unregistered checkout roots."},
+    {"path":"desktop/src/backend/tauri/__tests__/setup-replay.test.tsx","change":"modified","why":"Asserts omitted counts when recorded sections lack counts."},
+    {"path":"desktop/src/components/domain/Shell.test.tsx","change":"modified","why":"Asserts explicit Global counts alongside root-owned checkout counts."},
+    {"path":"desktop/src/components/domain/Sidebar.test.tsx","change":"modified","why":"Covers duplicate labels, detected Add, feature gating, missing roots, and hidden counts."},
+    {"path":"desktop/src/components/domain/collapse.test.tsx","change":"modified","why":"Migrates checkout navigation while preserving collapse assertions."},
+    {"path":"desktop/src/components/domain/s7q-surfaces.test.tsx","change":"modified","why":"Migrates the Library scope used by feature-gating tests."},
+    {"path":"desktop/src/screens/library/library-skill.test.tsx","change":"modified","why":"Covers root URL preservation, local navigation, error safety, selection, and actions."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","change":"modified","why":"Covers checkout visibility, Add/Remove, field clearing, and action errors."},
+    {"path":"desktop/src/screens/inbox/inbox.test.tsx","change":"modified","why":"Asserts root-owned sidebar counts alongside explicit Global counts."},
+    {"path":"desktop/src/screens/share/share.test.tsx","change":"modified","why":"Asserts root-owned sidebar counts alongside explicit Global counts."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","change":"modified","why":"Asserts root-owned sidebar counts alongside explicit Global counts."},
+    {"path":"desktop/e2e/routes/scroll.spec.ts","change":"modified","why":"§4: checkout URL migration; existing geometry assertions retained."},
+    {"path":"desktop/e2e/routes/collapse.spec.ts","change":"modified","why":"§4: checkout URL migration; existing overview assertions retained."}
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Final npm run lint exited 0: 0 errors, 0 warnings.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Final npm run typecheck exited 0: 0 TypeScript diagnostics.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": false,
+      "output": "Final npm test -- --maxWorkers=2: 1121 passed, 1 failed, 91 skipped across 79 files. Marketplace sidebar-count test exceeded 5000ms; its isolated file rerun passed 38/38. A preceding full run timed out in Share; isolated Share plus scoped-mock rerun passed 37/37. Library/skill screen rerun passed 42/42. The earlier requested default-worker run reported 1030 passed, 58 failed, 91 skipped during implementation. Fail-before scratch run: 93 failed, 448 passed across 19 files.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [
+    {
+      "question": "Is the quoted governing ruling complete without its referenced decision-walk file?",
+      "specSection": "Governing ruling",
+      "conservativeChoice": "Used the supplied ruling. Reading the named file returned 'No such file or directory'; filename search also found no match."
+    },
+    {
+      "question": "How should the existing onboarding Library caller satisfy the new seam while Onboarding is described as unchanged?",
+      "specSection": "§1.2 and §1.13",
+      "conservativeChoice": "Changed only its scope argument and matching query key; its existing scope:'Global' call was incompatible with LibraryScope."
+    },
+    {
+      "question": "How should the project-only installed-state recording be tested under the instruction to migrate installed cases to Global?",
+      "specSection": "§4",
+      "conservativeChoice": "Queried its checkout to preserve the installed-state assertions. The recording contains zero Global rows and one project row; added separate empty-Global coverage."
+    },
+    {
+      "question": "How can origin/main identity be independently verified while all git commands are forbidden?",
+      "specSection": "§4 fail-before and standing constraints",
+      "conservativeChoice": "Restored pre-edit product files in a filesystem scratch copy, copied all 19 current Vitest files, and ran them. Did not claim independent verification of commit 67f1f57."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "Mechanical onboarding caller migration outside the file-by-file plan.",
+      "why": "Its existing Library call must conform to the new required scope type."
+    },
+    {
+      "what": "Project-only installed-state coverage queries its actual checkout.",
+      "why": "Querying Global would discard the original project-occurrence assertions because that recording's Global section is empty."
+    },
+    {
+      "what": "Exact origin/main fail-before verification was not performed.",
+      "why": "Git commands were prohibited. The reconstructed pre-edit scratch suite instead produced 93 failures, including missing roots/localSkill contracts."
+    },
+    {
+      "what": "Full test verification remains red; subsequent full runs used two workers.",
+      "why": "Different tests exceeded the unchanged five-second timeout in separate full runs. Both affected files passed in isolation; no timeout or assertion was weakened."
+    }
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"All CLI operations remain behind Backend; checkout commands use the existing run seam."},
+    {"number":2,"howSatisfied":"checkouts gates registration affordances; additive local-section fields are optional and cliLocalRow remains strict."},
+    {"number":3,"howSatisfied":"Generated fixture and token files were not edited."},
+    {"number":4,"howSatisfied":"Oracle images, tolerance rules, and fidelity files were untouched; Playwright was not run as instructed."},
+    {"number":5,"howSatisfied":"Preserved mock labels, counts, overviews, and existing chevron markup; Checkouts settings remain hidden on the mock. Pixel parity was not browser-verified."},
+    {"number":6,"howSatisfied":"inventoryDetail and the team skill read remain unchanged; local joined details reuse validation and eval-report merging."},
+    {"number":7,"howSatisfied":"Declared every test change, retained behavioral assertions, added URL-reachable scenarios, and used no eslint-disable or timeout increases."},
+    {"number":8,"howSatisfied":"Ran desktop gates, verified writes by reading them back, and used no git, network, installation, or protected-file edits."}
+  ],
+  "testsModified": [
+    {"path":"desktop/src/app/invalidation.test.ts","whatChanged":"Expanded expected config prefixes.","justification":"Registry changes affect Library, skill, and catalog."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","whatChanged":"Migrated scopes and asserted roots/checkouts surface.","justification":"Required seam replacement; existing verb assertions retained."},
+    {"path":"desktop/src/backend/mock/__tests__/scoped-library.test.ts","whatChanged":"Uses canonical roots and rejects unknown roots.","justification":"Replaces label scopes while retaining exact overview assertions."},
+    {"path":"desktop/src/backend/mock/__tests__/status-counts.test.ts","whatChanged":"Migrated checkout URLs and query separators.","justification":"Preserves existing derived-count expectations on the new route."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Rewrote Library/count assertions and added local-detail, deduplication, and registration tests.","justification":"Asserts the new roots contract while preserving provenance and strict-schema coverage."},
+    {"path":"desktop/src/backend/tauri/__tests__/library-replay.test.ts","whatChanged":"Added eight recorded-frame regression cases.","justification":"Verifies supplied recordings and typed local failures; all eight fail against pre-edit product code."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","whatChanged":"Migrated S7g scopes, titles, and team assertions.","justification":"Library now represents scanned folders rather than team project packages."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay-screens.test.tsx","whatChanged":"Asserts seed checkout navigation and missing older-CLI counts.","justification":"Required recorded-screen contract changes."},
+    {"path":"desktop/src/backend/tauri/__tests__/path-true-screens.test.tsx","whatChanged":"Unknown-root cases assert No such checkout errors.","justification":"Unknown checkout roots must fail honestly."},
+    {"path":"desktop/src/backend/tauri/__tests__/setup-replay.test.tsx","whatChanged":"Expects omitted Global counts and a Global root.","justification":"The recording provides no authoritative counts; ledger assertions retained."},
+    {"path":"desktop/src/components/domain/Shell.test.tsx","whatChanged":"Explicit Global count case retains checkout counts.","justification":"Checkout counts now come from roots."},
+    {"path":"desktop/src/components/domain/Sidebar.test.tsx","whatChanged":"Migrated roots and added identity, Add, gating, and missing-root coverage.","justification":"Required canonical-path navigation and registration behavior."},
+    {"path":"desktop/src/components/domain/collapse.test.tsx","whatChanged":"Updated checkout URL.","justification":"Preserves collapse behavior on the replacement route."},
+    {"path":"desktop/src/components/domain/s7q-surfaces.test.tsx","whatChanged":"Migrated Library scope argument.","justification":"Preserves feature-gating assertions with the new seam."},
+    {"path":"desktop/src/screens/library/library-skill.test.tsx","whatChanged":"Added local-path, URL-state, error, no-team, selection, and removal regressions.","justification":"Verifies the new flows and prevents checkout removal from folder-error boards."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","whatChanged":"Added gated checkout management coverage.","justification":"Verifies canonical arguments, field clearing, and one error alert."},
+    {"path":"desktop/src/screens/inbox/inbox.test.tsx","whatChanged":"Replaced count-length assertion with exact Global-plus-root values.","justification":"Preserves explicit Global count and asserts the new checkout count source."},
+    {"path":"desktop/src/screens/share/share.test.tsx","whatChanged":"Replaced count-length assertion with exact Global-plus-root values.","justification":"Required sidebar contract change; timed-out roster test was untouched."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","whatChanged":"Replaced count-length assertion with exact Global-plus-root values.","justification":"Required sidebar contract change; assertion and timeout were retained during reruns."},
+    {"path":"desktop/e2e/routes/scroll.spec.ts","whatChanged":"Updated Terum checkout URL only.","justification":"Retains existing scroll and geometry assertions; not executed as instructed."},
+    {"path":"desktop/e2e/routes/collapse.spec.ts","whatChanged":"Updated Terum checkout URL only.","justification":"Retains exact overview values and collapse assertions; not executed as instructed."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Existing mock boards remain pixel-identical: their data and geometry were preserved, but browser fidelity checks were explicitly prohibited."
+}
