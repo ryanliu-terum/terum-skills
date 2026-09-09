@@ -1,12 +1,15 @@
+import { ghState, gitState } from '../lib/auth.js';
+import type { Config } from '../lib/schema.js';
+import { joinCommand, joinLines } from './invite.js';
 import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { getStartedLines } from '../lib/invocation.js';
-import { staleLine } from '../lib/hook.js';
+import { stampedAt, staleLine } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
-import { normalizeRemote, repositoryUrl } from '../lib/remote.js';
+import { githubOwnerRepo, normalizeRemote, repositoryUrl } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { readRoster, readTeam, RosterEntry, SkillProblem, skillRecords } from '../lib/skills.js';
@@ -18,18 +21,42 @@ export interface TeamStatus {
   team: string; handle: string; repository: string | null; clone: CloneState; readable: boolean;
   members: RosterEntry[]; memberCount: number | null; unreadableMembers: number | null;
   sharedSkills: number | null; unreadableSkills: number | null;
+  pending: { op: 'install' | 'uninstall'; id: string; scope: Config['pending'][number]['scope']; version: string | null; started: string }[];
+  syncedAt: string | null; policy: { publish: 'pr' | 'push'; skill_license: string } | null; categories: string[] | null;
+  clonePath: string | null; joinCommand: string | null; joinBlock: readonly string[] | null;
   membership: 'active' | 'inactive' | 'missing' | null; stale: boolean;
 }
-export interface StatusResult { version: string | null; teams: TeamStatus[]; }
+export interface StatusResult {
+  version: string | null; teams: TeamStatus[];
+  ledger: {
+    placements: { path: string; id: string; team: string; version: string | null; scope: Config['pending'][number]['scope']; placed_at: string }[];
+    approvals: { id: string; grants: string; approved_at: string }[];
+    shared: { id: string; source: string; team: string }[];
+  };
+  identity: { default_handle: string | null; email: string | null; display_name: string | null; github: string | null } | null;
+  tools: { git: boolean; gh: boolean };
+}
 
 /** Offline local team summary; a successful query is not a setup-readiness or membership test. */
 export async function run(args: StatusArgs, io: Prompter): Promise<Result<StatusResult>> {
   const version = packageVersion();
   const teams: TeamStatus[] = [];
+  const ledger: StatusResult['ledger'] = { placements: [], approvals: [], shared: [] };
+  let identity: StatusResult['identity'] = null;
+  const tools = { git: false, gh: false };
   try {
     io.print(version === null ? 'terum-skills (version unknown)' : `terum-skills ${version}`);
     const store = args.config ?? createConfigStore();
     const config = await store.read();
+    ledger.placements = Object.entries(config.placements).map(([path, e]) => ({ path, id: e.id, team: e.team, version: e.version ?? null, scope: e.scope.kind === 'global' ? { kind: 'global' } : { kind: 'project', project: e.scope.project }, placed_at: e.placed_at }));
+    ledger.approvals = Object.entries(config.approvals).map(([id, e]) => ({ id, grants: e.grants, approved_at: e.approved_at }));
+    ledger.shared = Object.entries(config.shared).map(([id, e]) => ({ id, source: e.source, team: e.team }));
+    if ([config.default_handle, config.email, config.display_name, config.github].some(value => value !== undefined)) {
+      identity = { default_handle: config.default_handle ?? null, email: config.email ?? null, display_name: config.display_name ?? null, github: config.github ?? null };
+    }
+    const runner = args.runner ?? systemRunner;
+    tools.git = (await gitState(runner)).installed;
+    tools.gh = (await ghState(runner, { presenceOnly: true })).installed;
     const selected = args.team !== undefined ? [selectTeam(config.teams, args.team, args.form)] : Object.entries(config.teams);
     if (!selected.length) for (const line of getStartedLines(args.form)) io.print(line);
     const lines: string[] = [];
@@ -38,12 +65,19 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
       const detail: TeamStatus = {
         team, handle: binding.handle, repository: null, clone: { state: 'incomplete', reason: 'unverifiable' }, readable: false,
         members: [], memberCount: null, unreadableMembers: null, sharedSkills: null, unreadableSkills: null, membership: null, stale: false,
+        pending: config.pending.filter(e => e.team === team).map(e => ({ op: e.op, id: e.id, scope: e.scope.kind === 'global' ? { kind: 'global' } : { kind: 'project', project: e.scope.project }, version: typeof e.version === 'string' ? e.version : null, started: e.started })),
+        syncedAt: null, policy: null, categories: null, clonePath: null, joinCommand: null, joinBlock: null,
       };
       teams.push(detail);
       let headerPrinted = false;
       try {
         const clone = store.teamClone(team);
+        detail.clonePath = clone;
+        detail.syncedAt = await stampedAt(store.root, team);
         detail.repository = repositoryUrl(binding.remote);
+        const ownerRepo = githubOwnerRepo(binding.remote);
+        detail.joinCommand = ownerRepo === null ? null : joinCommand(ownerRepo);
+        detail.joinBlock = ownerRepo === null ? null : joinLines(ownerRepo);
         const remote = normalizeRemote(binding.remote);
         detail.clone = await describeClone(clone, remote, args.runner ?? systemRunner);
         io.print(`Team ${team} (${detail.clone.state === 'ok' ? 'you are' : 'configured handle'} @${binding.handle})`);
@@ -68,6 +102,8 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
           if (roster.length > 5) io.print(`    … and ${roster.length - 5} more`);
           for (const problem of problems) io.print(`    ${problem.file}: ${problem.message}`);
           const teamJson = await readTeam(clone);
+          detail.policy = teamJson.policy ?? null;
+          detail.categories = teamJson.categories ?? null;
           if (teamJson.archived.includes(binding.handle)) detail.membership = 'inactive';
           else {
             try { await access(join(clone, 'people', `${binding.handle}.json`)); detail.membership = 'active'; }
@@ -88,6 +124,8 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
           detail.readable = true;
         }
       } catch (error) {
+        detail.policy = null;
+        detail.categories = null;
         const message = error instanceof Error ? error.message : String(error);
         if (!headerPrinted) {
           io.print(`Team ${team} (configured handle @${binding.handle})`);
@@ -97,6 +135,6 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
       }
       if (!detail.readable) lines.push(`${team}: local team details could not be read.`);
     }
-    return lines.length ? failure(lines.join('\n'), { version, teams }) : success({ version, teams });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error), { version, teams }); }
+    return lines.length ? failure(lines.join('\n'), { version, teams, ledger, identity, tools }) : success({ version, teams, ledger, identity, tools });
+  } catch (error) { return failure(error instanceof Error ? error.message : String(error), { version, teams, ledger, identity, tools }); }
 }

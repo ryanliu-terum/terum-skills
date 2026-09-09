@@ -18,7 +18,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       team: async (args) => { calls.push({ verb: 'team', ...args }); return args.kind === 'join' && args.target === 'fail/fail' ? failure('nope') : success({ team: 't', remote: 'r' }); },
       setup: async (args) => { calls.push({ verb: 'setup', ...args }); return success({ role: args.target ? 'joiner' : 'creator', team: 't', remote: 'r', steps: {} as never }); },
       invite: async (args) => { calls.push({ verb: 'invite', ...args }); return success({ team: 't', invited: [], already: [] }); },
-      status: async (args) => { calls.push({ verb: 'status', ...args }); return success({ version: '0.1.1', teams: [] }); },
+      status: async (args) => { calls.push({ verb: 'status', ...args }); return success({ version: '0.1.1', teams: [], ledger: { placements: [], approvals: [], shared: [] }, identity: null, tools: { git: true, gh: false } }); },
       ls: async (args) => { calls.push({ verb: 'ls', ...args }); return success({ roster: [], skills: [], problems: [] }); },
       readme: async (args) => { calls.push({ verb: 'readme', ...args }); return success({ changed: false }); },
       publish: async (args) => { calls.push({ verb: 'publish', ...args }); return args.ref === 'fail' ? failure('nope') : success({ team: 't', id: 'id', name: args.ref, scope: { kind: 'global' as const }, policy: 'pr' as const, changed: false, branch: null, prUrl: null, compareUrl: null }); },
