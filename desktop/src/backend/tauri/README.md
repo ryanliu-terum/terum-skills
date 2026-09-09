@@ -15,4 +15,5 @@ Honest gaps in this first adapter (each is a seam ask, not a bug to paper over):
 - `sync` returns empty `placed`/`removed` lists: the CLI returns counts, the seam wants names. The run's `print` frames carry the story.
 - `publish.version` is the PR URL or branch; `eval.receipt` is null (the CLI writes receipts to the repo, it does not return them).
 - `install.scope`, `invite.scope`/`role`, `connect.keepSource`/`keepRepo`/`relocate`/`forget` are not passed: the CLI has no such options or wants ids the seam does not carry (GAPS.md).
-- Preferences live in the webview's localStorage (same keys as the mock), not the store plugin, so a preference set in browser mode reads in the shell.
+- Preferences use the store plugin at the absolute app config directory, with a one-time migration of chrome keys from localStorage. The synchronous PrefStore cache hydrates before launch routing; geometry remains owned by the window-state plugin.
+- Setup Boot drives the setup Run directly and retains partial step outcomes; the fixture-only tour read model and the Inbox feed remain unserved.

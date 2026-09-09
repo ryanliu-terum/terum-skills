@@ -1,0 +1,118 @@
+{
+  "status": "partial",
+  "summary": "Implemented native preferences, theme chrome, launch routing, the setup/progress driver, explicit Sync workflows, served-surface guards, and reading rules. Desktop typecheck and lint passed; tests passed across 63 files: 872 passed, 88 skipped. Acceptance remains partial because the recorded CLI setup run returns an ordinary failure when stdin closes at the first ask, preventing the required real typed-decline proof.",
+  "filesChanged": [
+    {"path":"desktop/src/app/App.tsx","change":"modified","why":"Preference hydration and drawn keyboard shortcuts."},
+    {"path":"desktop/src/app/providers.tsx","change":"modified","why":"Persisted theme hydration, live System theme, and native background updates."},
+    {"path":"desktop/src/app/refresh-policy.test.tsx","change":"added","why":"Verify explicit Sync actions and absence of polling."},
+    {"path":"desktop/src/app/routes.tsx","change":"modified","why":"Launch routing, served-surface guards, and navigation comments."},
+    {"path":"desktop/src/app/store.ts","change":"modified","why":"Route UI persistence through PrefStore."},
+    {"path":"desktop/src/app/theme.test.ts","change":"added","why":"Five theme cases, including native background updates."},
+    {"path":"desktop/src/backend/Backend.ts","change":"modified","why":"Expose platform window-background behavior through the seam."},
+    {"path":"desktop/src/backend/README.md","change":"added","why":"Document the eight required reading rules and known payload limitations."},
+    {"path":"desktop/src/backend/__tests__/setup-steps.test.ts","change":"added","why":"Verify setup-step mappings and printed-step handling."},
+    {"path":"desktop/src/backend/drive.ts","change":"modified","why":"Consume progress frames through the existing workflow driver."},
+    {"path":"desktop/src/backend/index.ts","change":"modified","why":"Expose preference, launch-target, and setup-session consumers."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Use the shared browser preference implementation."},
+    {"path":"desktop/src/backend/prefs.ts","change":"added","why":"Shared preference validation, browser storage, and migration keys."},
+    {"path":"desktop/src/backend/setup-session.ts","change":"added","why":"Drive setup once per launch timestamp and consume successful or declined results."},
+    {"path":"desktop/src/backend/tauri/README.md","change":"modified","why":"Document native preferences and served read models."},
+    {"path":"desktop/src/backend/tauri/__tests__/chrome.test.ts","change":"added","why":"Verify native chrome behavior."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Assert real placement timestamps."},
+    {"path":"desktop/src/backend/tauri/__tests__/prefs.test.ts","change":"added","why":"Test preference round trips, unreadable storage, and migration."},
+    {"path":"desktop/src/backend/tauri/__tests__/setup-replay.test.tsx","change":"added","why":"Replay recorded setup/status frames and verify real surface routing."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Integrate native preferences, setup steps, background color, and ledger-derived values."},
+    {"path":"desktop/src/backend/tauri/prefs.ts","change":"added","why":"Store native chrome preferences in the app config directory."},
+    {"path":"desktop/src/backend/theme.ts","change":"added","why":"Centralize theme stamping and the prepaint cache."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Declare preference lifecycle, setup-step, and status-ledger types."},
+    {"path":"desktop/src/components/domain/Footer.tsx","change":"modified","why":"Honor machine-label preferences without fabricating a hostname."},
+    {"path":"desktop/src/components/domain/Primitives.tsx","change":"modified","why":"Support the disappearing-Inbox-item state with one return action."},
+    {"path":"desktop/src/components/domain/Shell.tsx","change":"modified","why":"Pass served Inbox availability into shell chrome."},
+    {"path":"desktop/src/components/domain/Sidebar.test.tsx","change":"modified","why":"Verify Inbox visibility follows served-surface availability."},
+    {"path":"desktop/src/components/domain/Sidebar.tsx","change":"modified","why":"Apply surface visibility, count preferences, and Marketplace selection."},
+    {"path":"desktop/src/components/domain/SkillCard.tsx","change":"modified","why":"Preserve Marketplace origin in skill links."},
+    {"path":"desktop/src/components/domain/TopBar.tsx","change":"modified","why":"Apply Inbox availability and per-machine bell preferences."},
+    {"path":"desktop/src/components/domain/useSyncAction.tsx","change":"added","why":"Provide one user-initiated Sync workflow with team resolution."},
+    {"path":"desktop/src/components/domain/useWorkflow.ts","change":"modified","why":"Expose printed workflow output and persistence failures."},
+    {"path":"desktop/src/lib/relative-time.test.ts","change":"added","why":"Verify ISO-based relative formatting with an injectable clock."},
+    {"path":"desktop/src/lib/relative-time.ts","change":"added","why":"Provide the shared Intl.RelativeTimeFormat implementation."},
+    {"path":"desktop/src/screens/inbox/InboxScreen.tsx","change":"modified","why":"Persist kind/seen preferences and handle disappearing selections honestly."},
+    {"path":"desktop/src/screens/inbox/reading-rules.test.tsx","change":"added","why":"Test Inbox filtering and disappearing-selection behavior."},
+    {"path":"desktop/src/screens/library/library-skill.test.tsx","change":"modified","why":"Verify Marketplace crumbs survive installation."},
+    {"path":"desktop/src/screens/marketplace/MarketplaceScreen.tsx","change":"modified","why":"Connect the existing Sync action to the workflow popup."},
+    {"path":"desktop/src/screens/marketplace/market-components.tsx","change":"modified","why":"Preserve Marketplace origin in deep links."},
+    {"path":"desktop/src/screens/onboarding/OnboardingParts.tsx","change":"modified","why":"Support honest progress counts and a setup-specific accessible label."},
+    {"path":"desktop/src/screens/onboarding/OnboardingScreen.tsx","change":"modified","why":"Select driven setup versus served mock onboarding."},
+    {"path":"desktop/src/screens/onboarding/SetupBoot.tsx","change":"added","why":"Render setup prints, prompts, progress, outcomes, and errors."},
+    {"path":"desktop/src/screens/onboarding/setup-driver.test.tsx","change":"added","why":"Test human prompt answers, progress, declines, and timestamp consumption."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"Render ledger-derived placement counts, timestamps, and explicit Sync actions."},
+    {"path":"desktop/src/screens/settings/SettingsScreen.tsx","change":"modified","why":"Hide unserved Inbox settings."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","change":"modified","why":"Verify Sync uses the resolved team through its popup."},
+    {"path":"desktop/src/screens/share/ShareScreen.tsx","change":"modified","why":"Connect the existing Sync action to the workflow popup."},
+    {"path":"desktop/src/screens/skill/SkillScreen.tsx","change":"modified","why":"Preserve Marketplace crumb roots."},
+    {"path":"desktop/src/styles/__tests__/contrast.test.ts","change":"added","why":"Port the contrast gate against the generated app tokens."},
+    {"path":"desktop/src-tauri/tauri.conf.json","change":"modified","why":"Set the initial window background to the dark chrome color."},
+    {"path":"desktop/src-tauri/capabilities/default.json","change":"modified","why":"Permit runtime window-background updates."},
+    {"path":".planning/codex-runs/m7-S7r/fixture.sh","change":"modified","why":"Point the authorized scratch fixture at this worktree's built CLI."},
+    {"path":".planning/codex-runs/m7-S7r/frames/status.jsonl","change":"modified","why":"Record current fixture status for replay verification."},
+    {"path":".planning/codex-runs/m7-S7r/frames/ls-local.jsonl","change":"modified","why":"Refresh local-skill fixture evidence."},
+    {"path":".planning/codex-runs/m7-S7r/frames/setup.jsonl","change":"added","why":"Record the actual first-ask setup failure without fabricating a decline."}
+  ],
+  "gates": {
+    "lint": {"ran":true,"passed":true,"output":"Desktop ESLint exited 0 with --max-warnings 0.","preExistingFailures":""},
+    "typecheck": {"ran":true,"passed":true,"output":"Desktop TypeScript typecheck exited 0.","preExistingFailures":""},
+    "test": {"ran":true,"passed":true,"output":"NODE_OPTIONS=--no-experimental-webstorage: 63 files passed; 872 tests passed, 88 skipped; 960 total.","preExistingFailures":""}
+  },
+  "openQuestions": [
+    {
+      "question":"How should the required real first-ask decline be produced when this CLI reports closed stdin as an ordinary setup failure?",
+      "specSection":"§4, §7 and recording instructions",
+      "conservativeChoice":"Preserved the recorded error and left its timestamp unconsumed. Tested neutral typed declines separately; made no CLI change."
+    },
+    {
+      "question":"Which exact live Boot captions are intended when SetupResult.steps carries no fetch, placement-count, or sync-stamp evidence for the PR #61 rows?",
+      "specSection":"§4 RM-17",
+      "conservativeChoice":"Used four honest setup-outcome rows with existing card components; preserved the mock boards and omitted fabricated counters."
+    },
+    {
+      "question":"Should existing browser-mock action state be relocated to satisfy a strictly chrome-only PrefStore?",
+      "specSection":"§1 MC-08",
+      "conservativeChoice":"Restricted the native persisted record to chrome while retaining existing browser-mock simulated action persistence."
+    },
+    {
+      "question":"Where should additional always-visible Sync now controls go on healthy Marketplace and Share boards without changing locked geometry?",
+      "specSection":"§5 and locked-board constraint",
+      "conservativeChoice":"Wired existing Sync controls and the drawn keyboard shortcut; added no new permanent controls."
+    },
+    {
+      "question":"How should new Playwright route smokes be supplied when edits under e2e are explicitly prohibited?",
+      "specSection":"§3, §6 and standing constraints",
+      "conservativeChoice":"Added Vitest routing coverage and left e2e files unchanged."
+    }
+  ],
+  "deviations": [
+    {"what":"The real recorded setup run does not satisfy the neutral-decline acceptance proof.","why":"The CLI emits ok:false without declined:true when stdin closes at the first ask. Correcting CLI behavior is outside this app-only batch."},
+    {"what":"Live Boot uses conservative setup-outcome captions instead of the exact four sync-oriented captions.","why":"The available setup result does not substantiate those sync facts."},
+    {"what":"Browser-mock simulated action preferences remain alongside chrome preferences.","why":"Preserved existing mock behavior; the native store enforces the chrome-only boundary."},
+    {"what":"No additional permanent Sync controls were added to healthy Marketplace or Share boards.","why":"Their placement would require a design decision; existing controls and the drawn shortcut drive Sync."},
+    {"what":"Playwright route/fidelity gates and export:check were not run; no e2e files were edited.","why":"The task reserves those gates for maintainers and prohibits Playwright and e2e edits. Pixel fidelity remains unverified."},
+    {"what":"Hostname remains —.","why":"The current CLI payload supplies no hostname, and the spec prohibits adding another native command."}
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Native store and window APIs remain inside the backend seam; screens use backend exports and types."},
+    {"number":2,"howSatisfied":"Preserved CLI feature gating and kept the real Inbox hidden with its typed gap."},
+    {"number":3,"howSatisfied":"Did not edit generated tokens or fixture data; contrast tests read existing tokens."},
+    {"number":4,"howSatisfied":"Did not modify snapshots, tolerances, masks, or fidelity status files; did not claim a pixel-gate pass."},
+    {"number":5,"howSatisfied":"Reused existing board components and token colors; retained mock board layouts."},
+    {"number":7,"howSatisfied":"Added behavioral tests and explicitly declared all four existing-test changes; no tests were deleted or disabled."},
+    {"number":8,"howSatisfied":"Ran all required desktop gates, verified writes, and used no repository git operations, network, installs, commits, or Playwright."}
+  ],
+  "testsModified": [
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Placement timestamp expectation now asserts the returned ISO instant.","justification":"The adapter now preserves real timestamps for shared relative-time formatting."},
+    {"path":"desktop/src/components/domain/Sidebar.test.tsx","whatChanged":"Assert Inbox is hidden while availability is unresolved and shown for the served mock.","justification":"Enforces the served-surfaces rule."},
+    {"path":"desktop/src/screens/library/library-skill.test.tsx","whatChanged":"Assert root=marketplace survives installation and the Marketplace crumb renders.","justification":"Verifies AC-12 while retaining scope and consent assertions."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","whatChanged":"Assert Sync opens its workflow and passes the resolved team.","justification":"Matches the required explicit team-scoped Sync workflow."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim":"The changes preserve all locked-board pixels; component reuse and tests support this, but the prohibited browser fidelity gate was not run."
+}

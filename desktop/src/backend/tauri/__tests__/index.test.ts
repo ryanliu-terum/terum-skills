@@ -198,7 +198,7 @@ it.each([false,true])('serves recorded status and settings with real team data (
  expect(status.value?.teams[0]?.clone).toContain('/fx/home/.terum/skills/teams/acme');
  expect(status.value?.teams[0]?.joinBlock?.join('\n')).toContain('npx -y terum-skills@latest setup acme/team');
  expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,PINNED_N:1,APPROVALS:[],QUARANTINE:[],HOOK:{installed:false},AGENT_CLI:'—',CLI_LATEST:'—'});
- expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'—','up to date']);
+ expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'2026-09-01T00:00:00Z','up to date']);
  expect(settings.value?.SHARED[0]).toEqual(['22222222-2222-4222-8222-222222222222',expect.stringContaining('/skills/tdd'),'acme','—']);
  expect(status.value?.tools).toEqual(settings.value?.tools);
  expect(status.value?.tools.git).toBe(true);
@@ -279,12 +279,11 @@ function peopleReplay(change?: (frame: Record<string, unknown>, name: string) =>
 }
 it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and installs', async () => {
   const f = peopleReplay(), backend = createTauriBackend(f.bridge);
-  backend.prefs.set('role:mira', 'admin');
   const roster = await backend.roster();
   expect(roster.ok).toBe(true);
   expect(roster.value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
   expect(roster.value?.members[0]).toMatchObject({ name: 'Mira Chen', role: 'Platform', projects: ['terum'], joined: '—', lastSeen: '—', status: 'active' });
-  expect(backend.prefs.get('role:mira', '')).toBe('admin');
+
   expect(await backend.features()).toMatchObject({ memberRole: true, roles: false, follow: false });
   const catalog = await backend.catalog();
   if (!catalog.ok) throw new Error(catalog.error);
@@ -356,7 +355,7 @@ it.each(healthCases)('maps local health %s onto the drawn placement state withou
  const f=statusReplay(false,(frame,verb)=>{if(verb!=='ls-local')return;const value=frame.value as {local:{rows:Record<string,unknown>[]}[]};Object.assign(value.local[0]!.rows[0]!,{health,state:'arbitrary prose'});});
  const settings=await createTauriBackend(f.bridge).settings();
  expect(settings.ok).toBe(true);
- expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'—',state]]);
+ expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'2026-09-01T00:00:00Z',state]]);
  expect(settings.value?.PINNED_N).toBe(1);
 });
 it('joins Skill provenance by ledger team and id (a relocated folder), never by name or prose',async()=>{
@@ -370,7 +369,7 @@ it('keeps a null tracking version and a missing placement folder honest',async()
   else{const row=value.local![0]!.rows.shift()!;value.local![0]!.problems.push({path:row.path as string,reason:'placement recorded in the ledger but the folder is missing'});}
  });
  const settings=await createTauriBackend(f.bridge).settings();
- expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'11111111-1111-4111-8111-111111111111','Global',null,'—','folder missing']]);
+ expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'11111111-1111-4111-8111-111111111111','Global',null,'2026-09-01T00:00:00Z','folder missing']]);
  expect(settings.value?.PINNED_N).toBe(0);
  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'unrelated',tracked:true,shared:[],placement:{id:'id-a',team:'acme',version:null},health:'unknown',problem:'symbolic link'}],notOffered:[],problems:[]}]};
  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a'})).toMatchObject({ok:true,value:{installed:true,version:'—',version_full:null}});

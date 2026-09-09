@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useParams, useSearchParams, useNavigate } from 'react-router';
+import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
-import { useBackend } from '../../backend';
+import { useBackend, useLaunchTarget, usePreference, existingSetupSession } from '../../backend';
 import type { Onboarding, StatusResult, Theme } from '../../backend/types';
 import { useUrlState } from '../../app/url-state';
 import { useUiStore } from '../../app/store';
@@ -19,11 +19,21 @@ import { OnboardingBasics } from './OnboardingBasics';
 import { OnboardingDone } from './OnboardingDone';
 import { ThemeCards } from './ThemeCards';
 import { useOnboardingStore } from './onboarding-store';
+import { SetupBoot } from './SetupBoot';
 import './onboarding.css';
 const basicsRows=z.array(z.tuple([z.enum(['Manage','Eval','Share','Search','More to come']),z.string()]));
 const steps=['boot','welcome','style','basics','team','feedback','done'];
 
 export function OnboardingScreen(){
+ const backend=useBackend(),launch=useLaunchTarget(),{step}=useParams();
+ const consumed=usePreference('launch:consumedWrittenAt','');
+ const surfaces=useQuery({queryKey:['surfaces'],queryFn:()=>backend.surfaces()});
+ if(launch.isPending||surfaces.isPending)return <ScreenFrame ready={false}><Frame current={null} steps={[]} skipped={[]}><Column><Tile/><Title>Setting up your workspace</Title></Column></Frame></ScreenFrame>;
+ if(step==='boot'&&launch.data&&(launch.data.writtenAt!==consumed||existingSetupSession(backend,launch.data)))return <SetupBoot launch={launch.data}/>;
+ if(!surfaces.data?.onboarding)return <Navigate to="/library/global" replace/>;
+ return <OnboardingReadScreen/>;
+}
+function OnboardingReadScreen(){
   const {step:raw}=useParams(),state=useUrlState(),backend=useBackend();
   const step=steps.includes(raw??'')?raw??'boot':'boot';
   const query=useQuery({queryKey:['onboarding',state.mock],queryFn:({signal})=>backend.onboarding(undefined,{signal})});

@@ -1,0 +1,10 @@
+{"t":"hello","protocol":1,"version":"0.1.6","verbs":["login","setup","team create","team join","team remove","team leave","team workflow-update","invite","ls","status","publish","validate","eval","connect","install","uninstall-skill","uninstall","sync","search","update"],"features":{"favorites":false,"follow":false,"roles":false,"lastSeen":false,"installScope":false,"inviteScoping":false,"disablePerMachine":false,"projectMembers":false,"liftOnCards":false,"runEvalInApp":false,"perCase":false,"progress":false}}
+{"t":"print","level":"info","line":"Welcome to terum-skills."}
+{"t":"print","level":"info","line":"Your team's skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have."}
+{"t":"print","level":"info","line":"This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it."}
+{"t":"print","level":"info","line":"GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again."}
+{"t":"print","level":"info","line":"GitHub: gh is installed but logged out; you will be asked to accept the invitation in your browser."}
+{"t":"print","level":"info","line":"GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again."}
+{"t":"print","level":"info","line":"Identity: @seed — Seed <seed@example.com> (GitHub: seed)"}
+{"t":"ask","id":"q1","kind":"confirm","question":"Use this identity?"}
+{"t":"result","verb":"setup","ok":false,"exitCode":1,"error":"Input ended before \"Use this identity?\" was answered.","value":{"role":"joiner","team":"","remote":"","steps":{"welcome":"printed","app":"skipped","github":"done"}}}

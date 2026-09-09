@@ -8,6 +8,7 @@ export function useWorkflow() {
   const backend = useBackend();
   const ask = useContext(PromptContext);
   const [, setSearch] = useSearchParams();
+  const [lines, setLines] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const print = useContext(PrintContext);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +34,7 @@ export function useWorkflow() {
     setBusy(true);
     setError(null);
     setNotice(null);
+    setLines([]);
     try {
       const result = await start();
       if (!mounted.current) return;
@@ -52,12 +54,12 @@ export function useWorkflow() {
     return perform(() => {
       const operation = start();
       active.current = operation;
-      return driveRun(operation, answers, ask, print);
+      return driveRun(operation, answers, ask, line => { if (mounted.current) setLines(lines => [...lines, line]); print(line); });
     }, success);
   }
   function pref(key: string, value: unknown): boolean {
-    try { backend.prefs.set(key, value); setError(null); refreshPrefs(n => n + 1); return true; }
+    try { backend.prefs.set(key, value); void backend.prefs.flush?.().catch(fail); setError(null); refreshPrefs(n => n + 1); return true; }
     catch (reason) { fail(reason); return false; }
   }
-  return { error, notice, busy, run, perform, pref, fail, open: (path: string) => perform(() => backend.openInEditor(path)) };
+  return { error, notice, lines, busy, run, perform, pref, fail, open: (path: string) => perform(() => backend.openInEditor(path)) };
 }

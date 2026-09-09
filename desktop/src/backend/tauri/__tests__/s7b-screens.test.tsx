@@ -19,20 +19,18 @@ function open(route: string) {
     for (const line of lines) emit({ kind: 'stdout', line });
   });
   const backend = createTauriBackend(f.bridge);
-  backend.prefs.set('role:mira', 'admin');
   location.hash = route;
   render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Tooltip.Provider><App/></Tooltip.Provider></QueryClientProvider></BackendContext>);
   return backend;
 }
 it('serves Share with committed labels and Teams while hiding the permission chip', async () => {
-  const backend = open('#/share');
+  open('#/share');
   const row = await screen.findByTestId('member-row-0');
   expect(row).toHaveTextContent('Mira Chen');
   expect(row).toHaveTextContent('mira · Platform');
   expect(within(row).getByText('terum')).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Role for mira' })).toBeNull();
   expect(within(row).getByRole('button', { name: 'Remove from team' })).toBeVisible();
-  expect(backend.prefs.get('role:mira', '')).toBe('admin');
 });
 it('serves Marketplace people with real labels, installs and projects, and no follow control', async () => {
   open('#/marketplace/people');

@@ -1,14 +1,15 @@
 import { z } from 'zod';
 import appPackage from '../../../package.json';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { FEATURE_KEYS } from '../types';
+import { nativePrefs } from './prefs';
+import { SETUP_STEP_KEYS, FEATURE_KEYS } from '../types';
 import type { Features } from '../types';
 import type { CliFrame } from './frames';
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
-import type { IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
+import type { IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { abbreviateHome } from '../paths';
@@ -34,7 +35,7 @@ const cliPublish = z.object({ name: z.string(), branch: z.string().nullable(), p
 const cliSync = z.object({ placed: z.number(), deferred: z.array(z.string()) }).passthrough();
 const cliInvite = z.object({ team: z.string(), invited: z.array(z.string()) }).passthrough();
 const cliTeam = z.object({ team: z.string() }).passthrough();
-const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string() }).passthrough();
+const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(), steps: z.partialRecord(z.enum(SETUP_STEP_KEYS), z.enum(['done','skipped','printed'])).nullish().transform(value => value ?? null) });
 const cliEval = z.object({ name: z.string() }).passthrough();
 const cliValidate = z.object({ name: z.string(), findings: z.number(), warnings: z.number() });
 const cliSearch = z.array(z.object({ team: z.string().optional(), endorsed: z.string().optional(), id: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), unresolved: z.boolean(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string() }));
@@ -101,14 +102,20 @@ const cliLocal=z.object({local:z.array(z.object({root:z.string(),scope:z.enum(['
 type CliStatus=z.infer<typeof cliStatus>;
 type CliLocal=z.infer<typeof cliLocal>;
 
-function statusModel(value:CliStatus, local:CliLocal|null, platform:string):StatusResult {
+function placementCounts(placements:CliStatus['ledger']['placements']):Record<string,string> {
+ const counts:Record<string,number>={Global:0};
+ for(const p of placements){const scope=p.scope.kind==='global'?'Global':p.scope.project;counts[scope]=(counts[scope]??0)+1;}
+ return Object.fromEntries(Object.entries(counts).map(([scope,count])=>[scope,String(count)]));
+}
+function statusModel(value:CliStatus, _local:CliLocal|null, platform:string):StatusResult {
  const name=value.identity?.display_name??'';
  const handle=value.teams[0]?.handle??'';
  return {
+  ledger:value.ledger??null,
   machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
   me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:handle||value.identity?.default_handle||''},
   teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath??null,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{publish:team.policy.publish==='pr'?'Pull request':'Push',license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
-  counts:local===null?{}:{Global:String(local.local.filter(root=>root.scope==='global').reduce((n,root)=>n+root.rows.length,0))},tools:value.tools,projects:null,
+  counts:placementCounts(value.ledger.placements),tools:value.tools,projects:null,
  };
 }
 // AD-23: the drawn placement states (design fixture PLACEMENTS: 'up to date', 'update available', 'edited locally', 'pinned'); a health the board has no word for is '—'.
@@ -119,7 +126,7 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
  return {
   MACHINE:status.machine,ME:status.me,TEAMS:status.teams,tools:status.tools,
   TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams[0]?.categories??null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'},
-  PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [p.path,row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,p.version?.slice(0,12)??null,'—',row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
+  PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [p.path,row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,p.version?.slice(0,12)??null,p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
   SHARED:value.ledger.shared.map(item=>[item.id,item.source,item.team,'—']),
   QUARANTINE:[],LOCAL_UNSHARED:[],HOOK:{installed:false,file:'',timeout:0},
@@ -146,8 +153,6 @@ function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, lo
   });
   return { repository: team.repository ?? null, skills: skills.filter(skill => !query || `${skill.name} ${skill.desc}`.toLowerCase().includes(query.toLowerCase())), extras: [], people, projects, categories: Object.entries(categorySkills).map(([name, rows]) => [name, 'tag', rows.length]), categoryRemaining: {}, topRated: [...skills].sort((a, b) => b.installsN - a.installsN).map(skill => skill.name), peopleByAdoption: [...people].sort((a, b) => b.adoption - a.adoption).map(person => person.handle), projectsByMembers: [...projects].sort((a, b) => b.members - a.members).map(project => project.name), categorySkills, filterDefault: { verdicts: [], lift_min: 0, tokens_max: 0, installs_min: 0 }, filterCount: skills.length, verdictCounts: { PASS: null, NEUTRAL: null, FAIL: null, 'Not evaluated': null }, catalogN: skills.length, teamN: people.length, bulkInstall: {} };
 }
-
-const PREF = 'terum-skills-app:pref:';
 
 export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   // Share in-flight reads and cache success; a terminal launch can repair a missing or broken file.
@@ -228,6 +233,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     return inventory.ok ? { ok: true as const, value: { team, inventory: inventory.value } } : inventory;
   }
   const backend: Backend = {
+    async setWindowBackground(color) { try { await getCurrentWindow().setBackgroundColor(color); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async launchTarget() {
       const launch = await state();
       const target = launch?.target ?? null;
@@ -323,7 +329,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     sync: (args: SyncArgs) => run(['sync', ...(args.prune ? ['--prune'] : []), ...(args.team ? ['--team', args.team] : [])], cliSync, (value): SyncResult => ({ placed: value.deferred.length || value.placed ? [] : [], removed: [] }), ['clone', 'placed', 'stamp']),
     invite: (args: InviteArgs) => run(['invite', ...(args.team ? ['--team', args.team] : []), ...(args.logins.length ? ['--', ...args.logins] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited] }), ['clone']),
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
-    setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role }), ['config', 'clone', 'placed']),
+    setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
     eval: (args: EvalArgs) => run(['eval', ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name: value.name, receipt: null }), ['clone']),
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
     update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
@@ -333,8 +339,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async openInEditor(path) { try { await openPath(await localPath(path)); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyToClipboard(text) { try { await writeText(text); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyImage(png) { try { await writeImage(await Image.fromBytes(new Uint8Array(await png.arrayBuffer()))); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
-    // The webview's own storage is app-owned and survives relaunches; same key scheme as the mock so a preference set in one mode reads in the other.
-    prefs: prefStore(),
+    // App-config-dir storage, with one-time migration from the old webview keys.
+    prefs: nativePrefs(),
     subscribe(listener): Subscription { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };
   return backend;
@@ -347,24 +353,6 @@ function teamArgv(args: TeamArgs): string[] {
     case 'remove': return ['team', 'remove', ...(args.team ? ['--team', args.team] : []), '--', args.handle ?? ''];
     case 'leave': return ['team', 'leave', '--', args.name ?? args.team ?? ''];
   }
-}
-
-function prefStore(): PrefStore {
-  return {
-    get<T>(key: string, fallback: T): T {
-      try {
-        const raw = localStorage.getItem(PREF + key);
-        if (raw === null) return fallback;
-        const parsed: unknown = JSON.parse(raw);
-        return (parsed === null) === (fallback === null) && typeof parsed === typeof fallback && Array.isArray(parsed) === Array.isArray(fallback) ? (parsed as T) : fallback;
-      } catch { return fallback; }
-    },
-    set(key, value) {
-      const text = JSON.stringify(z.json().parse(value));
-      if (text === undefined) throw new Error('Preference must be JSON-safe.');
-      localStorage.setItem(PREF + key, text);
-    },
-  };
 }
 
 /** Drive a read-only run without answering questions, retaining diagnostics and partial values. */

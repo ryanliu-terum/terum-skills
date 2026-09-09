@@ -1,3 +1,6 @@
+import { useLaunchTarget, usePreference, useBackend } from '../backend';
+import { useQuery } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { FrameScreen } from '../screens/frame/FrameScreen';
 import { LibraryScreen } from '../screens/library/LibraryScreen';
 import { SkillScreen } from '../screens/skill/SkillScreen';
@@ -12,14 +15,28 @@ import type { RouteObject } from 'react-router';
 import { Shell } from '../components/domain/Shell';
 import { ScreenFrame } from '../components/domain/ScreenFrame';
 function NotFoundScreen(){return <Shell><ScreenFrame><div className="not-found">No such page<a href="#/library/global">Library</a></div></ScreenFrame></Shell>;}
+// Navigation contract (AC-10): native hash history owns Back/Forward; links push and launch redirects replace.
+// Sidebar selection follows the route family, with Global and each /library/project/:name explicit scopes.
+// Settings defaults to Account. Marketplace skill links carry ?root=marketplace, including copied deep links.
+// The tour order is boot → welcome → style → basics → team → feedback → done; only Boot has a real setup read model.
+function LaunchRoute(){
+ const launch=useLaunchTarget(),consumed=usePreference('launch:consumedWrittenAt','');
+ if(launch.isPending)return <ScreenFrame ready={false}/>;
+ return <Navigate to={launch.data&&launch.data.writtenAt!==consumed?'/onboarding/boot':'/library/global'} replace/>;
+}
+function InboxRoute({children}:{children:ReactNode}){
+ const backend=useBackend(),surfaces=useQuery({queryKey:['surfaces'],queryFn:()=>backend.surfaces()});
+ if(surfaces.isPending)return <ScreenFrame ready={false}/>;
+ return surfaces.data?.inbox?children:<Navigate to="/library/global" replace/>;
+}
 export const routes:RouteObject[]=[
-{path:"/",element:<Navigate to="/library/global" replace/>},
+{path:"/",element:<LaunchRoute/>},
 {path:"/frame",element:<FrameScreen/>},
 {path:"/library/global",element:<LibraryScreen/>},
 {path:"/library/project/:name",element:<LibraryScreen/>},
 {path:"/skill/:ref",element:<SkillScreen/>},
-{path:"/inbox",element:<InboxScreen/>},
-{path:"/inbox/:id",element:<InboxScreen/>},
+{path:"/inbox",element:<InboxRoute><InboxScreen/></InboxRoute>},
+{path:"/inbox/:id",element:<InboxRoute><InboxScreen/></InboxRoute>},
 {path:"/marketplace",element:<MarketplaceScreen/>},
 {path:"/marketplace/skills",element:<MarketplaceScreen/>},
 {path:"/marketplace/projects",element:<MarketplaceScreen/>},
@@ -29,6 +46,7 @@ export const routes:RouteObject[]=[
 {path:"/marketplace/categories",element:<MarketplaceScreen/>},
 {path:"/marketplace/categories/:key",element:<MarketplaceScreen/>},
 {path:"/share",element:<ShareScreen/>},
+{path:"/settings",element:<Navigate to="/settings/account" replace/>},
 {path:"/settings/:section",element:<SettingsScreen/>},
 {path:"/onboarding/:step",element:<OnboardingScreen/>},
 {path:"/search",element:<SearchScreen/>},

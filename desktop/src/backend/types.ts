@@ -43,7 +43,12 @@ export interface TeamStatus {
 export type Machine=Design['MACHINE'] & {hostname:string};
 export type Identity=Design['ME'] & {initials:string;footerLabel:string};
 /** `projects`: the sidebar's project rows; the mock draws the design's list, the real adapter serves null until a project read model exists (a screen with real registry data passes its own). */
-export interface StatusResult {machine:Machine;me:Identity;teams:TeamStatus[];counts:Record<string,string>;tools:{git:boolean;gh:boolean};projects:string[]|null}
+export interface StatusLedger {
+ placements:{path:string;id:string;team:string;version:string|null;scope:{kind:'global'}|{kind:'project';project:string};placed_at:string}[];
+ approvals:{id:string;grants:string;approved_at:string}[];
+ shared:{id:string;source:string;team:string}[];
+}
+export interface StatusResult {ledger?:StatusLedger|null;machine:Machine;me:Identity;teams:TeamStatus[];counts:Record<string,string>;tools:{git:boolean;gh:boolean};projects:string[]|null}
 export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project')[]}
 export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null;endorsed:string|null;unresolved:boolean|null}
 export interface IdentityArgs {name?:string;email?:string;defaultHandle?:string}
@@ -66,13 +71,15 @@ export interface InviteResult {invited:string[]}
 export interface TeamArgs {kind:'create'|'join'|'remove'|'leave';name?:string;team?:string;remote?:string;handle?:string}
 export interface TeamResult {name:string;kind:TeamArgs['kind']}
 export interface SetupArgs {target?:string;offerConnect?:boolean}
-export interface SetupResult {team:string;role:'creator'|'joiner';connected?:ConnectOutcome}
+export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','actions','invite','community','hook','wrapper','done'] as const;
+export type SetupStep = typeof SETUP_STEP_KEYS[number];
+export interface SetupResult {team:string;role:'creator'|'joiner';connected?:ConnectOutcome;steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'>>|null}
 export interface EvalArgs {team?:string;ref:string;commit?:boolean;cases?:number}
 export interface EvalResult {name:string;receipt:Receipt|null}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
 export interface ValidateResult {name:string;findings:number;warnings:number}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
-export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void}
+export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void;readonly ready?:Promise<void>;flush?():Promise<void>;subscribe?(listener:()=>void):Subscription}
 export type Subscription=()=>void;
 export type ChangeSource='config'|'clone'|'placed'|'stamp';
 

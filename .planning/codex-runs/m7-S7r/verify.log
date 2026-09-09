@@ -1,0 +1,40 @@
+# m7-S7r: orchestrator's own gates, 2026-09-09 02:08-02:20 UTC, Ryan's Mac (Node 25, Playwright chromium, rustup cargo)
+# Codex: gpt-6-astra, high, workspace-write, one pass (codex-prompt.md -> codex-report.json "partial": its setup recording closed stdin
+# before the first ask could be answered; ruled in NOTES.md with a real join recorded instead). Self-report (hypothesis): desktop 63 files
+# / 872 passed + 88 oracle-skipped; root gates not run (app-only batch).
+# Gated on the tree after: the S7r code commit e7b12cd, the merge of main through S7c (6189500; eight conflicts folded), the frames
+# re-recorded from the merged CLI incl. the real offline setup join (fbfba22, 6901825), then (battery 2) the merge of main through S7b
+# (964df6f; two conflicts folded) and the S7b test fold below. src-tauri changed (window background colour, one capability), so cargo ran.
+
+battery 1 (02:10-02:14 UTC, on 6901825 = main through S7c)
+root lint/typecheck/test/build : rc=0  73 files, 1239 tests
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=0  65 files, 999 tests passed
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (32.5s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (41.3s) — chrome, prefs and routing are pixel-neutral on every locked board
+cargo check       : rc=0  (tauri.conf.json backgroundColor; capabilities gain core:window:allow-set-background-color)
+
+battery 2 (02:15-02:20 UTC, on 964df6f = main through S7b merged)
+root lint/typecheck/test/build : rc=0  75 files, 1263 tests
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=1  4 failed / 1006 passed, one cause: S7b's index.test.ts and s7b-screens.test.tsx wrote the TJ-02 stand-in pref
+                    `role:mira` into the REAL adapter's store, which S7r's native record refuses ("This setting is owned by the CLI, not
+                    app preferences": MC-08 admits chrome only). The rule is right and S7b's own spec keeps that pref only as the mock
+                    chip's backing until S7h; the four tests drop the pref write/read and keep their memberRole assertions (fold commit).
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (38.0s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (54.4s)
+cargo check       : rc=0
+
+desktop unit trio re-run (02:22 UTC, after the S7b test fold 8eadd59): typecheck rc=0, lint rc=0, vitest rc=0  67 files, 1010 tests passed
+real-data proof   : setup-replay.test.tsx replays frames/setup-join.jsonl (recorded from the rebuilt CLI against the fixture's bare remote:
+                    identity confirmed, invitation blank, hook and Claude-skill offers declined -> `skipped`, ok:true with every step)
+                    through launch routing and the driver: three real asks answered by the human in the drawn dialog, "Setup finished",
+                    no alert, launch:consumedWrittenAt written once; frames/setup.jsonl (stdin closed at the first ask) settles the card
+                    on the CLI's own error line without inferring a decline; frames/status.jsonl + ls-local.jsonl drive the ledger-derived
+                    counts and the hidden Inbox on the real adapter. A typed decline is not reachable in `setup` (NOTES.md).

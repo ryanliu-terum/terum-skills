@@ -8,6 +8,7 @@ import { Shell } from '../../components/domain/Shell';
 import { ScreenFrame } from '../../components/domain/ScreenFrame';
 import { Avatar, BoardSkeleton, CenteredState, ErrorLine, IconButton, TerminalHint } from '../../components/domain/Primitives';
 import { WorkflowHeader } from '../../components/domain/WorkflowControls';
+import { useSyncAction } from '../../components/domain/useSyncAction';
 import { useWorkflow } from '../../components/domain/useWorkflow';
 import { Button } from '../../components/ui/Button';
 import { Chip } from '../../components/ui/Chip';
@@ -17,6 +18,7 @@ import './share.css';
 
 export function ShareScreen() {
   const state=useUrlState(), backend=useBackend(), navigate=useNavigate(), [search,setSearch]=useSearchParams(), action=useWorkflow();
+  const syncAction=useSyncAction();
   const query=useQuery({queryKey:['roster',state.mock],queryFn:({signal})=>backend.roster(undefined,{signal})});
   const onboarding=useQuery({queryKey:['onboarding',state.mock],enabled:state.dialog==='invite',queryFn:({signal})=>backend.onboarding(undefined,{signal})});
   const catalog=useQuery({queryKey:['catalog',state.mock],enabled:state.dialog==='invite',queryFn:({signal})=>backend.catalog(undefined,{signal})});
@@ -32,13 +34,13 @@ export function ShareScreen() {
   const matches=(row:{name:string;handle:string})=>`${row.name} ${row.handle}`.toLowerCase().includes(q);
   return <Shell selected="Share" counts={loading||error?null:undefined}><ScreenFrame ready={(!query.isPending||state.mock==='loading')&&(state.dialog!=='invite'||(!onboarding.isPending&&!catalog.isPending)||state.mock==='loading')}>
     <WorkflowHeader title="Members" icon="users" subtitle={data?empty?'1 member':`${data.members.length} members · ${data.invited.length} invitation${data.invited.length===1?'':'s'}`:undefined}>{<Button icon="user-plus" state={state.dialog==='invite'?'pressed':'default'} onClick={invite}>Invite</Button>}</WorkflowHeader>
-    {error?<CenteredState alert icon="alert" title="Couldn't read the roster" body="terum-skills could not read the people files in the team clone, so this page shows nothing rather than a stale roster. Sync again, or check the clone in Settings." primary="Sync now" secondary="Open settings" onPrimary={()=>void action.run(()=>backend.sync({}),{},()=>{void query.refetch();})} onSecondary={()=>navigate('/settings/teams')}><ErrorLine>{error}</ErrorLine></CenteredState>:<>
+    {error?<CenteredState alert icon="alert" title="Couldn't read the roster" body="terum-skills could not read the people files in the team clone, so this page shows nothing rather than a stale roster. Sync again, or check the clone in Settings." primary="Sync now" secondary="Open settings" onPrimary={syncAction.open} onSecondary={()=>navigate('/settings/teams')}><ErrorLine>{error}</ErrorLine></CenteredState>:<>
       <div className="share-tools">{loading?<BoardSkeleton width="100%" height={32} radius={8}/>:<div className="share-search"><Icon name="search" size={16}/><input aria-label="Find members" placeholder="Find members" value={search.get('q')??''} onChange={e=>setSearch(p=>{if(e.target.value)p.set('q',e.target.value);else p.delete('q');return p;})}/>{q&&<IconButton label="Clear member search" icon="x" size={20} iconSize={14} onClick={()=>setSearch(p=>{p.delete('q');return p;})}/>}</div>}</div>
       <div className={'share-table-wrap'+(empty?' is-empty':'')}><div role="table" aria-label="Members" className="share-table"><MembersHead/>{loading?Array.from({length:13},(_,i)=><MemberSkeleton key={i}/>):<>{data?.members.map((member,index)=>matches(member)?<MemberRow key={member.handle} member={member} index={index}/>:null)}{data?.invited.map(member=>matches(member)?<InvitedRow key={member.handle} member={member}/>:null)}</>}</div>{data&&!data.members.some(row=>matches(row))&&!data.invited.some(row=>matches(row))&&<p className="share-no-results">No members match your search.</p>}</div>
       {empty&&<CenteredState icon="users" title="Just you so far" body="Invite teammates by their GitHub login. GitHub emails each one; the join block runs the wizard, which accepts the pending invitation with gh signed in and otherwise asks them to accept it in the browser." primary="Invite" secondary="Copy join block" onPrimary={invite} onSecondary={()=>void action.perform(()=>backend.onboarding(),value=>{void backend.copyToClipboard(value.joinBlock).then(result=>{if(!result.ok)action.fail(result.error);},action.fail);})}><TerminalHint command="npx -y terum-skills@latest invite <github-login>..." prefix="From the terminal"/></CenteredState>}
     </>}{action.error&&<div role="alert" className="share-action-error">{action.error}</div>}
     {state.dialog==='invite'&&!loading&&<ShareInvite close={close} data={invitationData} error={invitationError} retry={()=>{void onboarding.refetch();void catalog.refetch();}}/>}
-  </ScreenFrame></Shell>;
+  {syncAction.popup}</ScreenFrame></Shell>;
 }
 function MembersHead(){const features=useFeatures();return <div role="row" className="members-head"><div role="columnheader" className="member-name">Name<Icon name="chevron-down" size={12} stroke="2"/></div>{['Status','Joined','Teams','Last seen'].map(label=><div role="columnheader" key={label} style={label==='Teams'&&!features?.memberRole?{visibility:'hidden'}:undefined}>{label}</div>)}</div>;}
 function MemberRow({member:m,index}:{member:Member;index:number}){
