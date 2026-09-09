@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { version } from './package.json' with { type: 'json' };
+import { version } from '../package.json' with { type: 'json' };
 import tailwindcss from '@tailwindcss/vite';
 const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({

@@ -1,5 +1,5 @@
 import type { Person, SkillCard as Card } from '../../backend/types';
-export function plural(n: number, word: string) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
+export function plural(n: number, word: string, words = word + 's') { return `${n} ${n === 1 ? word : words}`; }
 export function rawGrants(skill: Card): string[] {
   // Catalog preserves raw fields at runtime, but SkillCard's public type omits grants. Validate before rendering them.
   if (!('grants' in skill)) return [];

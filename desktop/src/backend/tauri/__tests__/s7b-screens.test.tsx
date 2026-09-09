@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext } from '../../index';
@@ -11,12 +11,16 @@ import { createTauriBackend } from '../index';
 import { fakeBridge } from './fake-bridge';
 
 afterEach(() => { cleanup(); location.hash = ''; localStorage.clear(); });
-function open(route: string) {
+function open(route: string, change?: (frame: Record<string, unknown>, name: string) => void) {
   useUiStore.setState({ railOpen: true, overviewHidden: false });
   const f = fakeBridge((args, emit) => {
     const name = args[0] === 'ls' ? args.includes('--local') ? 'ls-local' : args[1] === 'member' ? `ls-member-${args.at(-1)}` : 'ls' : args[0]!;
     const lines = readFileSync(resolve('../.planning/codex-runs/m7-S7b/frames', name + '.jsonl'), 'utf8').trim().split('\n');
-    for (const line of lines) emit({ kind: 'stdout', line });
+    for (const line of lines) {
+      const frame = JSON.parse(line) as Record<string, unknown>;
+      change?.(frame, name);
+      emit({ kind: 'stdout', line: JSON.stringify(frame) });
+    }
   });
   const backend = createTauriBackend(f.bridge);
   location.hash = route;
@@ -31,6 +35,43 @@ it('serves Share with committed labels and Teams while hiding the permission chi
   expect(within(row).getByText('terum')).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Role for mira' })).toBeNull();
   expect(within(row).getByRole('button', { name: 'Remove from team' })).toBeVisible();
+});
+it('drops the dangling role separator for a member without a role', async () => {
+  open('#/share');
+  const row = await screen.findByTestId('member-row-2');
+  expect(row).toHaveTextContent('Seed');
+  expect(within(row).getByText('seed')).toBeVisible();
+  expect(row).not.toHaveTextContent('seed ·');
+});
+it('does not repeat the handle when the display name is just the handle', async () => {
+  open('#/share', (frame, name) => {
+    if (name !== 'status' || frame.t !== 'result') return;
+    const value = frame.value as { teams: { members: { handle: string; displayName: string }[] }[] };
+    const ravi = value.teams[0]?.members.find(member => member.handle === 'ravi');
+    if (ravi) ravi.displayName = 'ravi';
+  });
+  const row = await screen.findByTestId('member-row-1');
+  expect(within(row).getAllByText('ravi')).toHaveLength(1);
+  expect(row).not.toHaveTextContent('·');
+});
+it('renders a person heading without a duplicate handle or a dangling role separator', async () => {
+  open('#/marketplace/people/ravi', (frame, name) => {
+    if (name !== 'status' || frame.t !== 'result') return;
+    const value = frame.value as { teams: { members: { handle: string; displayName: string }[] }[] };
+    const ravi = value.teams[0]?.members.find(member => member.handle === 'ravi');
+    if (ravi) ravi.displayName = 'ravi';
+  });
+  await screen.findByRole('heading', { name: 'ravi' });
+  const heading = document.querySelector('.market-person-heading') as HTMLElement;
+  expect(within(heading).getAllByText('ravi')).toHaveLength(1);
+  expect(heading.querySelector('.board-small')?.textContent).toBe('acme');
+});
+it('keeps a person card identity clean when the member has no role', async () => {
+  open('#/marketplace/people');
+  const card = await screen.findByTestId('person-card-ravi');
+  expect(card).toHaveTextContent('Ravi Patel');
+  expect(within(card).getByText('ravi')).toBeVisible();
+  expect(card).not.toHaveTextContent('· ravi');
 });
 it('serves Marketplace people with real labels, installs and projects, and no follow control', async () => {
   open('#/marketplace/people');
@@ -48,3 +89,40 @@ it('opens a real project install dialog without inventing an unavailable bulk gr
   expect(within(dialog).getByRole('button', { name: 'Install 1 skills' })).toBeVisible();
   expect(within(dialog).queryByText(/Tool grants to approve/)).toBeNull();
 });
+
+function openShare(route: string, invite?: {frame: object}, options: {joinBlock?: boolean} = {}) {
+  useUiStore.setState({ railOpen: true, overviewHidden: false });
+  const fake = fakeBridge((args, emit) => {
+    if (args[0] === 'invite') {
+      if (!invite) throw new Error('Unexpected invitation run');
+      emit({ kind: 'stdout', line: JSON.stringify({t:'result',verb:'invite',...invite.frame}) });
+      return;
+    }
+    const name = args[0] === 'ls' ? args.includes('--local') ? 'ls-local' : args[1] === 'member' ? `ls-member-${args.at(-1)}` : 'ls' : args[0]!;
+    const lines = readFileSync(resolve('../.planning/codex-runs/m7-S7b/frames', name + '.jsonl'), 'utf8').trim().split('\n');
+    for (const line of lines) {
+      if (name === 'status' && options.joinBlock !== false) {
+        const frame = JSON.parse(line);
+        if (frame.t === 'result') {
+          for (const team of frame.value.teams) {
+            team.repository = 'https://github.com/terum/team-skills.git';
+            team.joinCommand = 'npx -y terum-skills@latest setup terum/team-skills';
+            team.joinBlock = ['Send this to your teammate:', '```', 'npm install -g terum-skills', 'npx -y terum-skills@latest setup terum/team-skills', '', 'Bare equivalent: npx -y terum-skills@latest team join terum/team-skills', '```', 'If you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.'];
+          }
+          emit({kind:'stdout',line:JSON.stringify(frame)});
+          continue;
+        }
+      }
+      emit({ kind: 'stdout', line });
+    }
+  });
+  const backend = createTauriBackend(fake.bridge);
+  location.hash = route;
+  render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Tooltip.Provider><App/></Tooltip.Provider></QueryClientProvider></BackendContext>);
+  return { backend, fake };
+}
+it('invite from status renders an empty real form using settings',async()=>{const {fake}=openShare('#/share?dialog=invite');expect(await screen.findByRole('textbox',{name:'GitHub logins'})).toHaveValue('');const dialog=screen.getByRole('dialog');expect(dialog).toHaveTextContent('npx -y terum-skills@latest setup terum/team-skills');const verbs=fake.spawns.map(s=>s.args[0]);expect(verbs).toContain('status');expect(verbs).not.toContain('onboarding');expect(verbs).not.toContain('invite');expect(dialog).not.toHaveTextContent('Onboarding data');});
+it('invite from status drives the team verb and shows success on the page',async()=>{const {fake}=openShare('#/share?dialog=invite',{frame:{ok:true,value:{team:'acme',invited:['sortiz'],already:[]}}});fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value:'sortiz'}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(fake.spawns.some(s=>s.args[0]==='invite')).toBe(true));expect(fake.spawns.find(s=>s.args[0]==='invite')?.args).toEqual(['invite','--team','acme','--','sortiz']);await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(await screen.findByRole('status')).toHaveTextContent('Invited @sortiz.');});
+it('invite from status reports invited and existing collaborators',async()=>{openShare('#/share?dialog=invite',{frame:{ok:true,value:{team:'acme',invited:['sortiz'],already:['mira']}}});fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value:'sortiz, mira'}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));expect(await screen.findByRole('status')).toHaveTextContent('Invited @sortiz. @mira already has access.');await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());});
+it('invite from status keeps partial outcomes and the error in the dialog',async()=>{const error='Could not invite @bad (GitHub status 422). gh: Validation Failed (HTTP 422)';openShare('#/share?dialog=invite',{frame:{ok:false,error,value:{team:'acme',invited:['sortiz'],already:[],failed:[{login:'bad',error}]}}});fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value:'sortiz, bad'}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(within(screen.getByRole('dialog')).getByRole('status')).toHaveTextContent('Invited @sortiz.'));const dialog=screen.getByRole('dialog');expect(dialog).toHaveTextContent('@bad: Could not invite @bad');expect(within(dialog).getByRole('alert')).toHaveTextContent('Could not invite @bad');});
+it('invite from status reports a missing join command without a CLI box',async()=>{openShare('#/share?dialog=invite',undefined,{joinBlock:false});await screen.findByRole('textbox',{name:'GitHub logins'});const dialog=screen.getByRole('dialog');expect(dialog.querySelector('.cli-box')).toBeNull();expect(dialog).toHaveTextContent('terum-skills reports no join command for');});

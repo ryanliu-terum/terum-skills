@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext } from '../../index';
@@ -43,6 +43,16 @@ it('renders recorded markdown and validation, omitting unknown counts and fabric
   expect(screen.queryByText(/12 days ago/)).toBeNull();
   expect(screen.getByText('none')).toBeVisible();
   expect(f.spawns.find(spawn => spawn.args[0] === 'validate')?.args).toEqual(['validate', '--team', 'acme', '--', 'deploy-check']);
+});
+it('omits the missing-project crumb instead of drawing a dash segment', async () => {
+  open('#/skill/diagnose');
+  await waitFor(() => expect(document.querySelector('.detail-crumbs')).toHaveTextContent('diagnose'));
+  expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/debugging/diagnose');
+});
+it('omits the unknown quarantine size instead of a dangling dash clause', async () => {
+  open('#/settings/sync');
+  expect(await screen.findByText(/0 folders\. Only prune deletes here/)).toBeVisible();
+  expect(screen.queryByText(/folders · —/)).toBeNull();
 });
 it('preserves the project route key when the displayed title is capitalized', async () => {
   const f = open('#/library/project/terum');

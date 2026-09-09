@@ -71,7 +71,7 @@ Protocol stays 1. `hello.features.localIdentity` advertises the additive `ls --l
 
 `hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, and `checkouts`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and remains false. `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `installScope` is true: install destinations and destination-aware removal are available.
 
-`hello.protocol` is `1`. `detail` is an additive optional field: protocol stays 1. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.
+`hello.protocol` is `1`. `install`, `sync`, and `uninstall-skill` carry `detail` on their confirmation asks. `detail` is an additive optional field: protocol stays 1. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.
 
 ## Verbs added for the desktop app
 

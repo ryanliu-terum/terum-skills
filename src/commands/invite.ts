@@ -4,7 +4,7 @@ import { createConfigStore, ConfigStore, selectTeam } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, hostOperationAllowed } from '../lib/remote.js';
 import { fromError, failure, Result, success } from '../lib/result.js';
-import { Runner, systemRunner } from '../lib/runner.js';
+import { CommandResult, Runner, systemRunner } from '../lib/runner.js';
 import { githubLoginSchema, parseOrExplain } from '../lib/schema.js';
 
 export interface InviteArgs extends WithForm { logins: readonly string[]; team?: string; config?: ConfigStore; runner?: Runner; }
@@ -14,6 +14,13 @@ export interface InviteResult { team: string; invited: readonly string[]; alread
 export async function run(args: InviteArgs, io: Prompter): Promise<Result<InviteResult>> {
   try {
     if (args.logins.length === 0) throw new Error('Provide at least one GitHub login.');
+    const seen = new Set<string>();
+    const logins = args.logins.map(rawLogin => parseOrExplain(githubLoginSchema, rawLogin.trim(), `GitHub login ${JSON.stringify(rawLogin.trim())}`)).filter(login => {
+      const key = login.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     const store = args.config ?? createConfigStore();
     const config = await store.read();
     const [team, binding] = selectTeam(config.teams, args.team, args.form);
@@ -24,8 +31,7 @@ export async function run(args: InviteArgs, io: Prompter): Promise<Result<Invite
     const invited: string[] = [];
     const already: string[] = [];
     const failed: { login: string; error: string }[] = [];
-    for (const rawLogin of args.logins) {
-      const login = parseOrExplain(githubLoginSchema, rawLogin.trim(), 'GitHub login');
+    for (const login of logins) {
       const response = await runner.run('gh', ['api', '-X', 'PUT', '--include', `repos/${endpoint}/collaborators/${login}`]).catch(async (error: unknown) => { throw new Error((await explainGhFailure(runner)) ?? (error instanceof Error ? error.message : String(error))); });
       const status = httpStatus(response.code, response.stdout, response.stderr);
       // A failure with no HTTP status, or a 401, is gh itself rather than GitHub: say which, instead of the invitation cap.
@@ -38,7 +44,7 @@ export async function run(args: InviteArgs, io: Prompter): Promise<Result<Invite
       // 404 on PUT .../collaborators/<login> is GitHub saying the login does not exist; it has nothing to do with the daily cap (2026-09-08, D6).
       const error = status === 404
         ? `Could not invite @${login}: there is no GitHub user named @${login}. Check the spelling; GitHub logins are case-insensitive but must exist.`
-        : `Could not invite @${login} (GitHub status ${status ?? 'unknown'}). GitHub caps invitations at 50 per repository per day. ${(response.stderr || response.stdout).trim()}`.trim();
+        : `Could not invite @${login} (GitHub status ${status ?? 'unknown'}). ${invitationCapHit(status, response) ? 'GitHub caps invitations at 50 per repository per day. ' : ''}${(response.stderr || response.stdout).trim()}`.trim();
       failed.push({ login, error });
       io.print(error);
     }
@@ -63,6 +69,10 @@ export function githubRepository(remote: string): string {
   const repository = githubOwnerRepo(remote);
   if (repository === null) throw new Error(`${remote} is not a GitHub repository.`);
   return repository;
+}
+// Only a 403 that mentions invitations identifies GitHub's invitation limit.
+function invitationCapHit(status: number | null, response: CommandResult): boolean {
+  return status === 403 && /invit/i.test(response.stdout + response.stderr);
 }
 function httpStatus(code: number, stdout: string, stderr: string): number | null {
   const header = /^HTTP\/\S+\s+(\d{3})/m.exec(stdout);
