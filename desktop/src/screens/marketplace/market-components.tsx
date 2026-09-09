@@ -21,7 +21,7 @@ function MarketplaceSkillCard({ skill }: { skill: Card }) {
   const navigate = useNavigate();
   // The shared card has no install-hint slot. Keep its layout and reserve that button's space,
   // then supply the board's icon + label in this family wrapper (footer top = 13 + 50 + 8 + 32 + 8).
-  return <div className="market-card-wrap"><SkillCard skill={skill}/>{!skill.installed && <button className="market-card-install" type="button" onClick={() => navigate('/skill/' + skill.name + '?__mock=not-installed&dialog=install')}><Icon name="arrow-down-to-line" size={14} stroke="1.75"/><span>Install</span></button>}</div>;
+  return <div className="market-card-wrap"><SkillCard skill={skill}/>{!skill.installed && <button className="market-card-install" type="button" onClick={() => navigate('/skill/' + skill.name + '?__mock=not-installed&dialog=install&root=marketplace')}><Icon name="arrow-down-to-line" size={14} stroke="1.75"/><span>Install</span></button>}</div>;
 }
 export function Mark({ name, small = false }: { name: string; small?: boolean }) { return <span className={'market-mark' + (small ? ' small' : '')}><Icon name={iconName(name)} size={small ? 15 : 16}/></span>; }
 function FollowControl({ person, compact = false }: { person: Person; compact?: boolean }) {

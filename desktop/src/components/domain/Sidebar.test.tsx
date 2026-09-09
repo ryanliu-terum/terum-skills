@@ -18,10 +18,11 @@ it('omits the entire Inbox group when its surface is unavailable', async () => {
   expect(screen.getByRole('link', { name: 'Share' })).toBeVisible();
 });
 
-it.each([true, false])('renders all navigation with mock surfaces or while surfaces load: %s', async loaded => {
+it.each([true, false])('renders served navigation and hides Inbox until its surface resolves: %s', async loaded => {
   const status = await createMockBackend().status();
   render(<QueryClientProvider client={new QueryClient()}><Sidebar selected="Global" counts={null} machine={undefined} surfaces={loaded ? await createMockBackend().surfaces() : undefined} projects={status.ok ? status.value.projects ?? undefined : undefined}/></QueryClientProvider>);
-  for (const name of ['Global', 'Projects', 'Terum', 'SSM', 'MRF', 'Inbox', 'Pushes', 'Updates', 'Alerts', 'Marketplace', 'Share']) expect(screen.getByRole('link', { name })).toBeVisible();
+  for (const name of ['Global', 'Projects', 'Terum', 'SSM', 'MRF', 'Marketplace', 'Share']) expect(screen.getByRole('link', { name })).toBeVisible();
+  for (const name of ['Inbox','Pushes','Updates','Alerts']) { if (loaded) expect(screen.getByRole('link',{name})).toBeVisible(); else expect(screen.queryByRole('link',{name})).toBeNull(); }
   expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
 });
 

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { browserPrefs } from '../prefs';
 import { FEATURE_KEYS } from '../types';
 import type { Features } from '../types';
 import { decodeText } from '../../lib/fixture-text';
@@ -48,6 +48,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   }
  }
  const backend:Backend = {
+  async setWindowBackground(){return ok(undefined);},
   async launchTarget(){return null;},
   async features(){return Object.fromEntries(FEATURE_KEYS.map(key=>[key,true])) as Features;},
   async windowAction(){return ok(undefined);},
@@ -80,7 +81,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   async openInEditor(path){return path.trim()?ok(undefined):fail('An editor path is required.');},
   async copyToClipboard(text){try{if(!navigator.clipboard?.writeText)return fail('Clipboard unavailable.');await navigator.clipboard.writeText(text);return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:'Clipboard unavailable.');}},
   async copyImage(png){try{if(png.type!=='image/png')return fail('Expected a PNG image.');if(!navigator.clipboard?.write||typeof ClipboardItem==='undefined')return fail('Clipboard unavailable.');await navigator.clipboard.write([new ClipboardItem({'image/png':png})]);return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:'Clipboard unavailable.');}},
-  prefs:{get<T>(key:string,fallback:T):T{try{const raw=localStorage.getItem('terum-skills-app:pref:'+key);if(raw===null)return fallback;const parsed:unknown=JSON.parse(raw);return (parsed===null)===(fallback===null)&&typeof parsed===typeof fallback&&Array.isArray(parsed)===Array.isArray(fallback)?parsed as T:fallback;}catch{return fallback; /* Unavailable or malformed storage preserves the caller's default. */}},set(key,value){const text=JSON.stringify(z.json().parse(value));if(text===undefined)throw new Error('Preference must be JSON-safe.');localStorage.setItem('terum-skills-app:pref:'+key,text);}},
+  prefs:browserPrefs(),
   subscribe:()=>()=>{ /* Static fixtures never emit change events. */ }
  };
  return backend;

@@ -12,7 +12,8 @@ import { applyTheme, useUiStore } from './store';
 export function Providers({children}:PropsWithChildren){
  const [client]=useState(()=>new QueryClient({defaultOptions:{queries:{retry:false,staleTime:30_000,refetchOnWindowFocus:true,refetchOnReconnect:false,refetchOnMount:'always'}}}));const theme=useUiStore(s=>s.theme);const backend=pickBackend();
  useEffect(()=>{const off=backend.subscribe(source=>{void client.invalidateQueries({predicate:q=>affects(source,q.queryKey)});});return off;},[backend,client]);
- useEffect(()=>{applyTheme(theme);if(theme!=='system'||typeof matchMedia!=='function')return;const media=matchMedia('(prefers-color-scheme: light)');const change=()=>applyTheme('system');media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[theme]);
+ useEffect(()=>{const stamp=()=>{applyTheme(theme);const color=getComputedStyle(document.documentElement).getPropertyValue('--tk-chrome').trim();if(color)void backend.setWindowBackground(color);};stamp();if(theme!=='system'||typeof matchMedia!=='function')return;const media=matchMedia('(prefers-color-scheme: light)');const change=stamp;media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[theme,backend]);
+ useEffect(()=>{void backend.prefs.ready?.then(async()=>{await useUiStore.persist.rehydrate();});},[backend]);
  return <BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><PromptProvider>{children}</PromptProvider></Tooltip.Provider></QueryClientProvider></BackendContext>;
 }
 

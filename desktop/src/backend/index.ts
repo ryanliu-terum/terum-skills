@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useSyncExternalStore } from 'react';
 import type { Backend } from './Backend';
 import { createMockBackend } from './mock';
 import { isNativeShell } from './tauri/detect';
@@ -25,3 +25,12 @@ export { githubUrl } from './paths';
 export { cloneStateCopy } from './mock/derive';
 export { driveRun } from './drive';
 export { selectedInboxId, defaultInboxId } from './mock/data';
+
+export function usePreference<T>(key:string,fallback:T):T {
+ const {prefs}=useBackend();
+ const json=useSyncExternalStore(listener=>prefs.subscribe?.(listener)??(()=>{}),()=>JSON.stringify(prefs.get(key,fallback)));
+ return JSON.parse(json) as T;
+}
+
+export { setupSession, existingSetupSession, SETUP_STEP_TO_BOARD } from './setup-session';
+export function useLaunchTarget(){const backend=useBackend();return useQuery({queryKey:['launch-target'],queryFn:async()=>{await backend.prefs.ready;return backend.launchTarget();},staleTime:Infinity});}
