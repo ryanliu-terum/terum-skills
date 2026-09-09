@@ -1,0 +1,29 @@
+# m7-S7d: orchestrator's own gates, 2026-09-09 00:56-01:04 UTC, Ryan's Mac (Node 25, Playwright chromium)
+# Codex: gpt-6-astra, high, workspace-write, one pass (codex-prompt.md -> codex-report.json "partial": the retained cancellation
+# line has no drawn display location; ruled in NOTES.md). Self-report (hypothesis): root and desktop gates green.
+# Gated on the tree after: the S7d code commit f8ddd76, the merge of main through S7ad (7dcb3fa; S7f/S7q five conflicts, S7k, S7ad
+# one additive test conflict), the GAPS.md maintainer edit, then (unit re-run) the two argv-expectation updates below.
+
+full battery (00:56-01:01 UTC, on 411e5ac)
+root lint         : rc=0
+root typecheck    : rc=0
+root test         : rc=0  73 files, 1203 tests passed
+root build        : rc=0
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=1  2 failed / 749 passed: index.test.ts "maps the detail body..." and replay-screens.test.tsx "renders recorded
+                    markdown and validation..." both asserted the pre-S7d validate argv (['validate','a','--team','acme']). Not load
+                    flakes: the expectations arrived with main's S7f/S7k tests and predate AD-17 (verb, flags, '--', positionals).
+                    The adapter is right per the spec; the two expectations were updated to ['validate','--team','acme','--',<name>].
+                    No assertion removed, no timeout changed.
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (40.4s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (55.0s)
+cargo check       : rc=0
+
+desktop unit trio re-run (01:03-01:04 UTC, after the two test-expectation updates): typecheck rc=0, lint rc=0, vitest rc=0  53 files, 751 tests passed
+real-data proof   : replay.test.ts replays this batch's frames/usage-error.jsonl (`install -x` under --frames: exactly one failed result
+                    frame naming the attempted verb, no `declined`) and frames/decline.jsonl (an explicit-path connect answered no:
+                    `declined: true` -> Result.cancelled), both recorded from the rebuilt CLI (fixture.sh beside this file), beside S7f's
+                    data-verb frames for status/ls/search.

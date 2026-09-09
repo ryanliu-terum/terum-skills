@@ -7,8 +7,9 @@ import { cliRun } from '../run';
 import { fakeBridge, STATE } from './fake-bridge';
 
 const directory = resolve('../.planning/codex-runs/m7-S7f/frames');
+const s7dDirectory = resolve('../.planning/codex-runs/m7-S7d/frames');
 function recorded(name: string) {
-  return readFileSync(resolve(directory, name + '.jsonl'), 'utf8').trim().split('\n');
+  return readFileSync(resolve(name === 'usage-error' || name === 'decline' ? s7dDirectory : directory, name + '.jsonl'), 'utf8').trim().split('\n');
 }
 function replay(lines: string[]) {
   return fakeBridge((_args, emit) => {
@@ -17,13 +18,16 @@ function replay(lines: string[]) {
 }
 const status = z.object({ version: z.string(), teams: z.array(z.object({ team: z.string() }).passthrough()) }).passthrough();
 
-it('replays recorded status through the read driver while the served status remains a typed gap', async () => {
+it('replays older status through the generic read driver but rejects it as an incomplete served schema', async () => {
   const f = replay(recorded('status'));
   const result = await read(cliRun(f.bridge, Promise.resolve(STATE), ['status'], { map: value => status.parse(value) }));
   expect(result.ok).toBe(true);
   expect(result.value?.teams.map(team => team.team)).toEqual(['acme']);
-  expect(await createTauriBackend(f.bridge).status()).toEqual({ ok: false, error: 'Team status in the design’s shape (machine, me, teams, counts) is not available from terum-skills yet: the CLI has no verb that returns it (desktop/GAPS.md). The terminal has everything the app shows here.' });
-  expect(f.spawns).toHaveLength(1);
+  const served = await createTauriBackend(f.bridge).status();
+  expect(served.ok).toBe(false);
+  expect(served.value).toBeUndefined();
+  if (!served.ok) expect(served.error).toContain('ledger');
+  expect(f.spawns).toHaveLength(3);
 });
 
 it('retains the recorded status payload when its result frame fails', async () => {
@@ -72,4 +76,21 @@ it('replays the rebuilt fixture through Library, project and installed scopes an
   expect(await backend.library({scope:'installed',team:'acme'})).toMatchObject({ok:true,value:{skills:[{name:'deploy-check'}]}});
   const member=recorded('ls-member-mira').map(line=>JSON.parse(line) as {t:string;value?:unknown}).find(frame=>frame.t==='result');
   expect(member?.value).toMatchObject({member:{handle:'mira',declined:[]},projects:[{name:'terum'}]});
+});
+
+it.each([
+  ['usage-error', false, "error: unknown option '-x'"],
+  ['decline', true, 'Connect was declined.'],
+])('replays the rebuilt CLI %s result without inferring cancellation', async (name, cancelled, error) => {
+  const f = replay(recorded(name));
+  const run = cliRun(f.bridge, Promise.resolve(STATE), [name], { map: value => value });
+  expect(await run.done).toEqual({ ok: false, error, ...(cancelled ? { cancelled: true } : {}) });
+  const frames = []; for await (const frame of run.frames) frames.push(frame);
+  expect(frames.at(-1)).toEqual({ t: 'result', ok: false, error, ...(cancelled ? { declined: true } : {}) });
+});
+it('replays the rebuilt ls recording through the read consumer', async () => {
+  const f = replay(recorded('ls'));
+  const result = await read(cliRun(f.bridge, Promise.resolve(STATE), ['ls'], { map: value => value }));
+  expect(result.ok).toBe(true);
+  expect(result.value).toBeDefined();
 });

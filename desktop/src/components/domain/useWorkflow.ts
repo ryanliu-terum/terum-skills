@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router';
 import { useContext, useEffect, useRef, useState } from 'react';
 import { driveRun, PrintContext, PromptContext, useBackend } from '../../backend';
 import type { Result, Run } from '../../backend/types';
@@ -6,6 +7,8 @@ import type { Result, Run } from '../../backend/types';
 export function useWorkflow() {
   const backend = useBackend();
   const ask = useContext(PromptContext);
+  const [, setSearch] = useSearchParams();
+  const [notice, setNotice] = useState<string | null>(null);
   const print = useContext(PrintContext);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29,11 +32,15 @@ export function useWorkflow() {
     locked.current = true;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const result = await start();
       if (!mounted.current) return;
       if (result.ok) success?.(result.value);
-      else setError(result.error);
+      else if (result.cancelled) {
+        setNotice(result.error);
+        setSearch(params => { params.delete('dialog'); return params; }, { replace: true });
+      } else setError(result.error);
     } catch (reason) { fail(reason); }
     finally {
       locked.current = false;
@@ -52,5 +59,5 @@ export function useWorkflow() {
     try { backend.prefs.set(key, value); setError(null); refreshPrefs(n => n + 1); return true; }
     catch (reason) { fail(reason); return false; }
   }
-  return { error, busy, run, perform, pref, fail, open: (path: string) => perform(() => backend.openInEditor(path)) };
+  return { error, notice, busy, run, perform, pref, fail, open: (path: string) => perform(() => backend.openInEditor(path)) };
 }

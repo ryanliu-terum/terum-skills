@@ -3,7 +3,7 @@ import { explainGhFailure } from '../lib/auth.js';
 import { createConfigStore, ConfigStore, selectTeam } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, hostOperationAllowed } from '../lib/remote.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { githubLoginSchema, parseOrExplain } from '../lib/schema.js';
 
@@ -45,7 +45,7 @@ export async function run(args: InviteArgs, io: Prompter): Promise<Result<Invite
     io.print(slackBlock(endpoint));
     if (failed.length) return failure(failed.map((outcome) => outcome.error).join('\n'), { team, invited, already, failed });
     return success({ team, invited, already, failed });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 /** Optional global install so the bare `terum-skills` command exists on the teammate's machine (Ryan, 2026-09-06); the npx line below works without it. */
@@ -53,8 +53,10 @@ export const GLOBAL_INSTALL = 'npm install -g terum-skills';
 
 export function joinCommand(target: string): string { return `npx -y terum-skills@latest setup ${target}`; }
 
-export function slackBlock(ownerRepo: string): string {
-  return [`Send this to your teammate:`, '```', GLOBAL_INSTALL, joinCommand(ownerRepo), '', `Bare equivalent: npx -y terum-skills@latest team join ${ownerRepo}`, '```', 'If you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.'].join('\n');
+export function slackBlock(ownerRepo: string): string { return joinLines(ownerRepo).join('\n'); }
+
+export function joinLines(ownerRepo: string): readonly string[] {
+  return [`Send this to your teammate:`, '```', GLOBAL_INSTALL, joinCommand(ownerRepo), '', `Bare equivalent: npx -y terum-skills@latest team join ${ownerRepo}`, '```', 'If you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.'];
 }
 
 export function githubRepository(remote: string): string {

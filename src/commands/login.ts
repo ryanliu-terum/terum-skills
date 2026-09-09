@@ -3,7 +3,7 @@ import { configSchema, parseOrExplain } from '../lib/schema.js';
 import type { Identity } from '../lib/auth.js';
 import { createConfigStore } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
-import { Result, failure, success } from '../lib/result.js';
+import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 
 /**
@@ -54,6 +54,6 @@ export async function run(args: LoginArgs, io: Prompter): Promise<Result<LoginRe
     io.print(`Identity saved: ${identity.displayName} <${identity.email}>${identity.github ? ` (@${identity.github})` : ''}, default handle ${identity.handle}.`);
     return success({ gh, handle: identity.handle, updated: [], notice: null });
   } catch (error) {
-    return failure(error instanceof Error ? error.message : String(error));
+    return fromError(error);
   }
 }

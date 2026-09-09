@@ -6,7 +6,7 @@ import { createConfigStore } from '../../lib/config.js';
 import { ScriptedPrompter, ghOnlyRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { assetSuffix, detectPlatform } from '../../lib/platform.js';
 import type { CommandResult, Exec } from '../../lib/runner.js';
-import { APP_REPOSITORY, run } from '../app.js';
+import { APP_REPOSITORY, readAppState, run } from '../app.js';
 
 const ok: CommandResult = { code: 0, stdout: '', stderr: '' };
 const V = '0.1.6';
@@ -93,13 +93,36 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     expect(calls.map((call) => call.command)).toEqual(['tar', 'open']);
     expect(calls[1]!.args).toEqual([join(root, 'app', V, 'Terum Skills.app')]);
     const state = JSON.parse(await readFile(join(root, 'run', 'app.json'), 'utf8'));
-    expect(state).toMatchObject({ schema: 1, node: '/opt/node/bin/node', entry: '/opt/lib/node_modules/terum-skills/dist/index.js', version: V });
+    expect(state).toMatchObject({ schema: 1, node: '/opt/node/bin/node', entry: '/opt/lib/node_modules/terum-skills/dist/index.js', path: process.env.PATH ?? null, version: V });
+    expect(state).not.toHaveProperty('target');
     expect((await store.read()).app).toMatchObject({ choice: 'opted-in' });
     expect(await readdir(join(root, 'app'))).toEqual([V]);  // no staging directory left behind
     expect(io.lines.at(-1)).toBe(`Installed and opened Terum Skills ${V}.`);
 
     const again = await run({ config: store, runner: fakeGhRelease({ download: 'no-release' }), exec: fakeExec().exec, version: V, evidence: mac }, new ScriptedPrompter());
     expect(again).toMatchObject({ ok: true, value: { action: 'launched' } });
+  });
+
+  it('records a join target and verbatim PATH, then clears the target on a plain launch', async () => {
+    const root = await temporaryDirectory();
+    const args = { config: createConfigStore(root), runner: fakeGhRelease(), exec: fakeExec().exec, version: V, evidence: mac, open: false };
+    const path = 'C:\\Program Files\\node;C:\\git\\bin';
+    expect((await run({ ...args, target: 'acme/team', path }, new ScriptedPrompter())).ok).toBe(true);
+    expect(await readAppState(root)).toMatchObject({ target: 'acme/team', path });
+    expect((await run(args, new ScriptedPrompter())).ok).toBe(true);
+    const plain = await readAppState(root);
+    expect(plain).not.toHaveProperty('target');
+    expect(plain?.path).toBe(process.env.PATH ?? null);
+    expect((await run({ ...args, path: null }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await readAppState(root))?.path).toBeNull();
+  });
+
+  it('reads legacy state without PATH or a join target', async () => {
+    const root = await temporaryDirectory();
+    const legacy = { schema: 1, node: '/opt/node', entry: '/cli/index.js', version: V, writtenAt: '2026-09-08T00:00:00Z' };
+    await mkdir(join(root, 'run'));
+    await writeFile(join(root, 'run', 'app.json'), JSON.stringify(legacy));
+    expect(await readAppState(root)).toEqual(legacy);
   });
 
   it('a checksum mismatch discards the download, leaves no <version>/ directory, and says so with the two next steps', async () => {

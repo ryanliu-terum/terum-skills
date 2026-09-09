@@ -50,7 +50,7 @@ it('writes k without deriving a new statistic',async()=>{open('#/settings/evals'
 it('runs Sync now with an empty argument',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));await waitFor(()=>expect(sync).toHaveBeenCalledWith({}));});
 it('opens the exact update command',async()=>{const editor=vi.spyOn(backend,'openInEditor');open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('npx -y terum-skills@latest update'));});
 it('opens the local storage path in Finder',async()=>{const editor=vi.spyOn(backend,'revealPath');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Show in Finder'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('~/.terum/skills'));});
-it('declines machine removal and leaves the screen intact',async()=>{const uninstall=vi.spyOn(backend,'uninstallMachine');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));expect(await screen.findByRole('alert')).toHaveTextContent('Remove was declined.');expect(uninstall).toHaveBeenCalledWith({});expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('heading',{name:'Advanced'})).toBeInTheDocument();});
+it('declines machine removal and leaves the screen intact',async()=>{const uninstall=vi.spyOn(backend,'uninstallMachine');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));await waitFor(()=>expect(screen.getByRole('button',{name:'Remove…'})).toBeEnabled());expect(uninstall).toHaveBeenCalledWith({});expect(screen.queryByRole('alert')).toBeNull();expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('heading',{name:'Advanced'})).toBeInTheDocument();});
 it('does not change a toggle when its preference write fails',async()=>{open('#/settings/sync');const control=await screen.findByRole('switch',{name:'Sync at session start'});vi.spyOn(backend.prefs,'set').mockImplementation(()=>{throw new Error('Storage denied.');});fireEvent.click(control);expect(await screen.findByRole('alert')).toHaveTextContent('Storage denied.');expect(control).toHaveAttribute('aria-checked','true');});
 it('surfaces failed editor results',async()=>{vi.spyOn(backend,'openInEditor').mockResolvedValue({ok:false,error:'Editor unavailable.'});open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));expect(await screen.findByRole('alert')).toHaveTextContent('Editor unavailable.');});
 it('renders the placement hover selector and every raw placement',async()=>{open('#/settings/machine');expect(await screen.findByTestId('placement-row-1')).toHaveTextContent('pr-review');expect(screen.getAllByTestId(/^placement-row-/)).toHaveLength(design.PLACEMENTS.length);});
@@ -88,4 +88,37 @@ it('uses the status team display name on Account',async()=>{
  const team=status.value.teams[0];if(!team)throw new Error('Expected team');team.name='Acme Team';team.key='acme-key';
  vi.spyOn(backend,'status').mockResolvedValue(status);
  open('#/settings/account');expect(await screen.findByText('Handle on Acme Team')).toBeInTheDocument();
+});
+it('renders team category strings without reading the catalog',async()=>{
+ const status=await backend.status(),settings=await backend.settings();
+ if(!status.ok||!settings.ok)throw new Error('mock data expected');
+ status.value.teams[0]!.categories=['ops','engineering','debugging'];
+ settings.value.TEAM_POLICY.categoriesNote='From team.json; an admin extends it by pull request.';
+ vi.spyOn(backend,'status').mockResolvedValue(status);vi.spyOn(backend,'settings').mockResolvedValue(settings);
+ const catalog=vi.spyOn(backend,'catalog').mockResolvedValue({ok:false,error:'Catalog unavailable.'});
+ open('#/settings/teams');
+ expect(await screen.findByText('From team.json; an admin extends it by pull request.')).toBeInTheDocument();
+ const row=screen.getByText('Categories').closest('.setting-row')??screen.getByText('Categories').parentElement!.parentElement!;
+ for(const category of ['ops','engineering','debugging'])expect(within(row as HTMLElement).getByText(category)).toBeInTheDocument();
+ expect(catalog).not.toHaveBeenCalled();
+});
+it('serves Settings alongside the status error and discloses absent stamps and unfinished work',async()=>{
+ const status=await backend.status(),settings=await backend.settings();
+ if(!status.ok||!settings.ok)throw new Error('mock data expected');
+ status.value.teams[0]!.last_sync=null;status.value.teams[0]!.stamp=null;
+ status.value.teams[0]!.pending=[{op:'install',id:'id',scope:{kind:'global'},version:null,started:'2026-09-01'}];
+ settings.value.syncNote='The recorded timestamp is shown without clock-skew correction.';
+ vi.spyOn(backend,'status').mockResolvedValue({ok:false,error:'Unreadable clone.',value:status.value});
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:false,error:'Unreadable clone.',value:settings.value});
+ open('#/settings/sync');
+ expect(await screen.findByRole('heading',{name:'Sync'})).toBeInTheDocument();
+ expect(screen.getByText(/Last sync No sync recorded on this machine/)).toBeInTheDocument();
+ expect(screen.getByText('Work left undone; run sync')).toBeInTheDocument();
+ expect(screen.getByText(/without clock-skew correction/)).toBeInTheDocument();
+ expect(screen.getAllByText('Unreadable clone.').length).toBeGreaterThan(0);
+});
+it('shows tool presence without claiming an authenticated GitHub account',async()=>{
+ open('#/settings/account');
+ expect(await screen.findByText('git present · gh present')).toBeInTheDocument();
+ expect(screen.queryByText(/Signed in as/)).toBeNull();
 });

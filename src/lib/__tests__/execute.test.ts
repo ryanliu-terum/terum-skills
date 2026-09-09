@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createExecute } from '../execute.js';
 import { PromptClosedError } from '../prompt.js';
-import { failure, success } from '../result.js';
+import { failure, success, cancelled, CancelledError } from '../result.js';
 import { ScriptedPrompter } from './fixtures.js';
 
 const sink = () => {
@@ -72,4 +72,13 @@ describe('release notice tail', () => {
     await expect(execute(async () => success(undefined), { verb: 'ls', notices: true })).resolves.toBeUndefined();
     expect(codes).toEqual([]);
   });
+});
+
+it.each([false, true])('carries typed cancellation to the result sink without changing stderr or exit (throw=%s)', async thrown => {
+  const outcomes: unknown[] = [], lines: string[] = [], codes: number[] = [];
+  const execute = createExecute({ io: new ScriptedPrompter(), stderr: line => { lines.push(line); }, setExitCode: code => { codes.push(code); }, result: outcome => { outcomes.push(outcome); } });
+  await execute(async () => { if (thrown) throw new CancelledError('Leave was cancelled.'); return cancelled('Leave was cancelled.'); }, { verb: 'team leave', notices: false });
+  expect(outcomes).toEqual([{ verb: 'team leave', ok: false, error: 'Leave was cancelled.', cancelled: true, exitCode: 1, ...(thrown ? {} : { value: undefined }) }]);
+  expect(lines).toEqual(['Leave was cancelled.']);
+  expect(codes).toEqual([1]);
 });

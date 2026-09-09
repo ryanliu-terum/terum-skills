@@ -1,0 +1,73 @@
+{
+  "status": "complete",
+  "summary": "Implemented PATH recording/replay, setup target hand-off, Backend.launchTarget(), and retryable state reads with recovery guidance. Added regression coverage, updated §4.2, and captured three verified app.json outputs. All gates ran; root tests retain one failure in the unchanged process-cleanup test.",
+  "filesChanged": [
+    {"path":"src/commands/app.ts","change":"modified","why":"Record PATH and optional target; preserve legacy reads."},
+    {"path":"src/commands/setup.ts","change":"modified","why":"Forward the invite target to app."},
+    {"path":"src/commands/__tests__/app.test.ts","change":"modified","why":"Verify PATH, target clearing, and legacy files."},
+    {"path":"src/commands/__tests__/setup.test.ts","change":"modified","why":"Assert target reaches verbs.app."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"Document app.json in §4.2."},
+    {"path":"desktop/src-tauri/src/lib.rs","change":"modified","why":"Replay nonempty recorded PATH into CLI children."},
+    {"path":"desktop/src/backend/Backend.ts","change":"modified","why":"Declare launchTarget seam method."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Return null for mock launchTarget."},
+    {"path":"desktop/src/backend/tauri/bridge.ts","change":"modified","why":"Parse launch fields, require writtenAt, forward PATH, and wrap parse errors."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Retry failed state reads and expose launch target."},
+    {"path":"desktop/src/backend/tauri/__tests__/bridge.test.ts","change":"added","why":"Test parsing guidance, legacy state, and spawn payloads."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"Test retry, memoisation, and launchTarget."},
+    {"path":"desktop/src/backend/tauri/__tests__/fake-bridge.ts","change":"modified","why":"Include required writtenAt in test state."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Include required writtenAt in test state."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"Verify mock launchTarget returns null."},
+    {"path":".planning/codex-runs/m7-S7ad/fixture.sh","change":"added","why":"Copy the supplied offline fixture with this worktree's CLI path."},
+    {"path":".planning/codex-runs/m7-S7ad/prove-app-state.mjs","change":"added","why":"Reproduce built-CLI state verification using the existing no-open knob."},
+    {"path":".planning/codex-runs/m7-S7ad/app.json","change":"added","why":"Capture actual launch PATH without a target."},
+    {"path":".planning/codex-runs/m7-S7ad/setup-app.json","change":"added","why":"Capture actual setup target hand-off."},
+    {"path":".planning/codex-runs/m7-S7ad/plain-after-setup-app.json","change":"added","why":"Capture target clearing on a subsequent plain launch."},
+    {"path":".planning/codex-runs/m7-S7ad/validation.md","change":"added","why":"Record gate results, reproduction instructions, and D4 as decided."}
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop lint passed with zero errors. Initial desktop error-cause finding was fixed.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop typechecks passed. Root build passed. Offline cargo check passed using /private/tmp/m7-S7ad-cargo-target.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": false,
+      "output": "Root: 1132 passed, 1 failed across 72 files. Desktop: 552 passed, 88 skipped across 46 passing files. Focused root rerun: 59 passed, 1 failed; app/setup passed, unchanged runner.test.ts:73 failed again. Three app.json captures verified.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [],
+  "deviations": [
+    {
+      "what": "Cargo used a writable temporary target instead of the specified warm target.",
+      "why": "The sandbox denied the warm target's build lock; offline compilation succeeded in /private/tmp."
+    },
+    {
+      "what": "The root test gate is not green.",
+      "why": "The unchanged sleeping-child cleanup test observed a live child, including on focused rerun. No pre-change baseline was established; the test was not altered."
+    }
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Desktop native behavior remains behind the backend seam; Rust retains exactly five commands. No network capability was added."},
+    {"number":7,"howSatisfied":"Added regression coverage and updated fixtures for the required timestamp; no assertions were weakened or tests newly skipped."},
+    {"number":8,"howSatisfied":"Ran all required gates, verified writes by reading them back, and avoided installs, network, Playwright, commits, and git against this repository."}
+  ],
+  "testsModified": [
+    {"path":"src/commands/__tests__/app.test.ts","whatChanged":"Extended state assertions and added legacy/PATH/target tests.","justification":"Required S7ad coverage."},
+    {"path":"src/commands/__tests__/setup.test.ts","whatChanged":"Added target-forwarding assertion.","justification":"Required setup hand-off coverage."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","whatChanged":"Added retry, caching, and launchTarget tests.","justification":"Required AD-18/AD-19 coverage."},
+    {"path":"desktop/src/backend/tauri/__tests__/fake-bridge.ts","whatChanged":"Added writtenAt to shared state fixture.","justification":"The parsed state now requires writtenAt."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Added writtenAt to inline state fixture.","justification":"Preserve existing test behavior under the required schema."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","whatChanged":"Added null launchTarget assertion.","justification":"Verify the new mock seam contract."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The runner failure appears unrelated to S7ad because its code was unchanged, but no pre-change baseline was run."
+}

@@ -42,7 +42,7 @@ it('renders recorded markdown and validation, omitting unknown counts and fabric
   expect(await screen.findByText('Hygiene checks · pass on connect')).toBeVisible();
   expect(screen.queryByText(/12 days ago/)).toBeNull();
   expect(screen.getByText('none')).toBeVisible();
-  expect(f.spawns.find(spawn => spawn.args[0] === 'validate')?.args).toEqual(['validate', 'deploy-check', '--team', 'acme']);
+  expect(f.spawns.find(spawn => spawn.args[0] === 'validate')?.args).toEqual(['validate', '--team', 'acme', '--', 'deploy-check']);
 });
 it('preserves the project route key when the displayed title is capitalized', async () => {
   const f = open('#/library/project/terum');

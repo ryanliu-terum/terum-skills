@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import appPackage from '../../../package.json';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { FEATURE_KEYS } from '../types';
 import type { Features } from '../types';
@@ -7,7 +8,7 @@ import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
-import type { IdentityWrite, Library, SkillCard, SkillDetail, Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
+import type { IdentityWrite, Library, SkillCard, SkillDetail, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { abbreviateHome } from '../paths';
@@ -42,10 +43,10 @@ const cliLs = z.object({
   roster: z.array(z.object({ handle: z.string(), active: z.boolean() })), skills: z.array(cliLsSkill), problems: z.array(z.object({ source: z.string(), message: z.string() })), projects: z.array(cliProject).optional(), member: z.object({ handle: z.string(), declined: z.array(z.string()) }).optional(),
   local: z.array(z.object({ root: z.string(), scope: z.enum(['global', 'project']), repoRoot: z.string().optional(), rows: z.array(z.object({ name: z.string(), path: z.string(), state: z.string(), problem: z.string().optional() })), notOffered: z.array(z.object({ name: z.string(), path: z.string(), reason: z.string() })), problems: z.array(z.object({ path: z.string(), reason: z.string() })) })).optional(),
 });
-const cliStatus = z.object({ version: z.string().nullable(), teams: z.array(z.object({ team: z.string(), handle: z.string(), repository: z.string().nullable(), readable: z.boolean(), sharedSkills: z.number().nullable(), memberCount: z.number().nullable() })) });
+const cliStatusTeams = z.object({ version: z.string().nullable(), teams: z.array(z.object({ team: z.string(), handle: z.string(), repository: z.string().nullable(), readable: z.boolean(), sharedSkills: z.number().nullable(), memberCount: z.number().nullable() })) });
 type Inventory = z.infer<typeof cliLs>;
 type InventorySkill = z.infer<typeof cliLsSkill>;
-type InventoryTeam = z.infer<typeof cliStatus>['teams'][number];
+type InventoryTeam = z.infer<typeof cliStatusTeams>['teams'][number];
 
 // Until S7g supplies structured placement provenance, accept only the CLI's explicit ledger sentence.
 function placement(local: Inventory, team: string, name: string) {
@@ -66,15 +67,76 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
   };
 }
 
+// S7k: explicitly declare every status field; an older payload must not look like unset data.
+const cliStatus = z.object({
+ version:z.string().nullable(),
+ teams:z.array(z.object({
+  team:z.string(),handle:z.string(),repository:z.string().nullable(),
+  clone:z.discriminatedUnion('state',[
+   z.object({state:z.literal('ok')}),z.object({state:z.literal('absent')}),
+   z.object({state:z.literal('foreign'),origin:z.string()}),
+   z.object({state:z.literal('incomplete'),reason:z.string(),error:z.string().optional()}),
+  ]),readable:z.boolean(),
+  members:z.array(z.object({handle:z.string(),displayName:z.string()})),memberCount:z.number().nullable(),unreadableMembers:z.number().nullable(),sharedSkills:z.number().nullable(),unreadableSkills:z.number().nullable(),membership:z.enum(['active','inactive','missing']).nullable(),stale:z.boolean(),
+  pending:z.array(z.object({op:z.enum(['install','uninstall']),id:z.string(),scope:cliScope,version:z.string().nullable(),started:z.string()})),
+  syncedAt:z.string().nullable(),policy:z.object({publish:z.enum(['pr','push']),skill_license:z.string()}).nullable(),categories:z.array(z.string()).nullable(),clonePath:z.string().nullable(),joinCommand:z.string().nullable(),joinBlock:z.array(z.string()).nullable(),
+ })),
+ ledger:z.object({
+  placements:z.array(z.object({path:z.string(),id:z.string(),team:z.string(),version:z.string().nullable(),scope:cliScope,placed_at:z.string()})),
+  approvals:z.array(z.object({id:z.string(),grants:z.string(),approved_at:z.string()})),
+  shared:z.array(z.object({id:z.string(),source:z.string(),team:z.string()})),
+ }),
+ identity:z.object({default_handle:z.string().nullable(),email:z.string().nullable(),display_name:z.string().nullable(),github:z.string().nullable()}).nullable(),
+ tools:z.object({git:z.boolean(),gh:z.boolean()}),
+});
+const cliLocalRow=z.object({name:z.string(),path:z.string(),state:z.string()});
+const cliLocal=z.object({local:z.array(z.object({root:z.string(),scope:z.enum(['global','project']),rows:z.array(cliLocalRow)})),skills:z.array(z.object({id:z.string(),name:z.string(),grantsHash:z.string().nullish().transform(v=>v??null),grants:z.string().nullish().transform(v=>v??null)}))});
+type CliStatus=z.infer<typeof cliStatus>;
+type CliLocal=z.infer<typeof cliLocal>;
+
+function statusModel(value:CliStatus, local:CliLocal|null, platform:string):StatusResult {
+ const name=value.identity?.display_name??'';
+ const handle=value.teams[0]?.handle??'';
+ return {
+  machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
+  me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:handle||value.identity?.default_handle||''},
+  teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath??null,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{publish:team.policy.publish==='pr'?'Pull request':'Push',license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
+  counts:local===null?{}:{Global:String(local.local.filter(root=>root.scope==='global').reduce((n,root)=>n+root.rows.length,0))},tools:value.tools,projects:null,
+ };
+}
+function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult):Settings {
+ const rows=local?.local.flatMap(root=>root.rows)??[];
+ const policy=status.teams[0]?.policy??null;
+ return {
+  MACHINE:status.machine,ME:status.me,TEAMS:status.teams,tools:status.tools,
+  TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams[0]?.categories??null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'},
+  PLACEMENTS:value.ledger.placements.map(p=>[p.path,rows.find(row=>row.path===p.path)?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,p.version??null,'—','—']),PLACEMENTS_N:value.ledger.placements.length,
+  APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
+  SHARED:value.ledger.shared.map(item=>[item.id,item.source,item.team,'—']),
+  QUARANTINE:[],LOCAL_UNSHARED:[],HOOK:{installed:false,file:'',timeout:0},
+  APP_VERSION:appPackage.version,AGENT_CLI:'—',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
+  STORAGE:{cache:'—',cache_n:0,evals:'—',evals_n:0,quarantine:'—'},PINNED_N:0,
+  CLI_VERSION:value.version??'—',CLI_LATEST:'—',FOLLOWING:[],SHARED_SPECIMEN:null,
+  SETTINGS_NAV:[],SHORTCUTS:[],INBOX_KIND_TEXT:{share:'Shared with you',update:'Update',alert:'Alert',eval:'Eval finished',review:'Review request',author:'Your skill',team:'Team'},THEME_OPTIONS:['System','Light','Dark'],
+  syncNote:'The recorded timestamp is shown without clock-skew correction. No sync recorded on this machine does not mean never synced: leaving a team removes its stamp. Work left undone beside an old timestamp means run sync, not an error.',
+ };
+}
+
 const PREF = 'terum-skills-app:pref:';
 
 export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
-  // Read once per app session; `terum-skills app` rewrites the file on every launch, and the app is launched by it.
+  // Share in-flight reads and cache success; a terminal launch can repair a missing or broken file.
   let hello: Extract<CliFrame, { t: 'hello' }> | null = null;
   let featuresOnce: Promise<void> | undefined;
   const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { hello = frame; };
   let stateOnce: Promise<AppState | null> | undefined;
-  const state = () => (stateOnce ??= bridge.readAppState());
+  const state = () => (stateOnce ??= bridge.readAppState().then((value) => {
+    if (value === null) stateOnce = undefined;
+    return value;
+  }, (error: unknown) => {
+    stateOnce = undefined;
+    throw error;
+  }));
   let homeOnce: Promise<string> | undefined;
   const home = () => (homeOnce ??= bridge.homeDirectory().catch(() => ''));
   async function localPath(path:string):Promise<string> {
@@ -111,8 +173,20 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     };
   }
 
+  async function readModels<T>(options:ReadOptions|undefined, map:(value:CliStatus,local:CliLocal|null,platform:string)=>T):Promise<Result<T>> {
+    const [status,local,platform]=await Promise.all([
+      read(run(['status'],cliStatus,value=>value,[]),options),
+      read(run(['ls','--local'],cliLocal,value=>value,[]),options),
+      bridge.hostPlatform().then(value=>({ok:true as const,value})).catch((error:unknown)=>({ok:false as const,error:error instanceof Error?error.message:String(error),value:''})),
+    ]);
+    if (status.value===undefined) return result({ok:false,error:status.ok?'Status returned no data.':status.error});
+    const value=map(status.value,local.value??null,platform.value);
+    const errors=[status,local,platform].flatMap(outcome=>outcome.ok?[]:[outcome.error]);
+    return result(errors.length?{ok:false,error:errors.join('\n'),value}:{ok:true,value});
+  }
+
   async function inventoryTeam(team: string | undefined, options?: ReadOptions): Promise<Result<InventoryTeam>> {
-    const status = await read(run(['status', ...(team ? ['--team', team] : [])], cliStatus, value => value, []), options);
+    const status = await read(run(['status', ...(team ? ['--team', team] : [])], cliStatusTeams, value => value, []), options);
     if (!status.ok) return { ok: false, error: status.error };
     const selected = team ? status.value.teams.find(value => value.team === team) : status.value.teams.length === 1 ? status.value.teams[0] : undefined;
     if (!selected) return fail('Select a team explicitly to read its skills.');
@@ -120,6 +194,11 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     return { ok: true, value: selected };
   }
   const backend: Backend = {
+    async launchTarget() {
+      const launch = await state();
+      const target = launch?.target ?? null;
+      return launch && target !== null ? { target, writtenAt: launch.writtenAt } : null;
+    },
     async features(): Promise<Features> {
       if (!hello) await (featuresOnce ??= read(run(['status'], z.unknown(), value => value, [])).then(() => undefined));
       return Object.fromEntries(FEATURE_KEYS.map(key => [key, hello?.features[key] ?? false])) as Features;
@@ -129,11 +208,11 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return { windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
-      return { status: false, settings: false, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: false, roster: false, update: false };
+      return { status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: false, roster: false, update: false };
     },
-    // Read models the CLI cannot produce yet (GAPS.md): the drawn error boards render, nothing is invented.
-    status: async () => gap('Team status in the design’s shape (machine, me, teams, counts)'),
-    settings: async () => gap('Settings'),
+    // Status and Settings are offline reads; the remaining surfaces retain their explicit gaps.
+    status: (_, options) => readModels(options, (value, local, platform) => statusModel(value, local, platform)),
+    settings: (_, options) => readModels(options, (value, local, platform) => settingsModel(value, local, statusModel(value, local, platform))),
     onboarding: async () => gap('Onboarding data'),
     async library({ scope, team }, options) {
       const selected = await inventoryTeam(team, options);
@@ -172,24 +251,24 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     inbox: async () => gap('The Inbox'),
     catalog: async () => gap('The Marketplace catalog'),
     roster: async () => gap('The roster'),
-    search: (args: SearchArgs, options?: ReadOptions) => read(run(['search', args.q], cliSearch, (hits): SearchHit[] => hits.map((hit) => ({ kind: 'skill', ref: hit.team === undefined ? hit.name : `${hit.team}/${hit.name}`, name: hit.name, description: hit.description, team: hit.team ?? null, category: hit.category ?? null, author: hit.author ?? null, installs: hit.installs ?? null, latest: hit.latest ?? null, endorsed: hit.endorsed ?? null, unresolved: hit.unresolved ?? null })), []), options).then(result),
+    search: (args: SearchArgs, options?: ReadOptions) => read(run(['search', '--', args.q], cliSearch, (hits): SearchHit[] => hits.map((hit) => ({ kind: 'skill', ref: hit.team === undefined ? hit.name : `${hit.team}/${hit.name}`, name: hit.name, description: hit.description, team: hit.team ?? null, category: hit.category ?? null, author: hit.author ?? null, installs: hit.installs ?? null, latest: hit.latest ?? null, endorsed: hit.endorsed ?? null, unresolved: hit.unresolved ?? null })), []), options).then(result),
     // Long verbs: one process each, questions become dialogs, the CLI's own decline messages come back as `ok:false`.
     setIdentity: (args) => {
       const pairs = [args.name === undefined ? [] : [`name=${args.name}`], args.email === undefined ? [] : [`email=${args.email}`], args.defaultHandle === undefined ? [] : [`default-handle=${args.defaultHandle}`]].flat();
       return run(['login', ...pairs.flatMap(pair => ['--set', pair])], cliLogin, (value): IdentityWrite => ({ updated: value.updated, notice: value.notice ?? null }), ['config']);
     },
-    install: (args: InstallArgs) => run([...(args.kind === 'member' && args.member ? ['install', 'member', args.member] : args.kind === 'project' && args.project ? ['install', 'project', args.project] : ['install', args.ref, ...(args.force ? ['--force'] : [])]), ...(args.team ? ['--team', args.team] : [])], cliInstalled, (installed): InstalledResult[] => installed.map((item) => ({ id: item.id, name: item.id, scope: args.scope ?? 'Global' }))),
-    uninstallSkill: (args: UninstallArgs) => run(['uninstall-skill', args.ref, ...(args.team ? ['--team', args.team] : [])], cliUninstalled, (removed): UninstalledResult[] => removed.map((item) => ({ id: item.id, name: item.id }))),
+    install: (args: InstallArgs) => run(['install', ...(!(args.kind === 'member' && args.member || args.kind === 'project' && args.project) && args.force ? ['--force'] : []), ...(args.team ? ['--team', args.team] : []), '--', ...(args.kind === 'member' && args.member ? ['member', args.member] : args.kind === 'project' && args.project ? ['project', args.project] : [args.ref])], cliInstalled, (installed): InstalledResult[] => installed.map((item) => ({ id: item.id, name: item.id, scope: args.scope ?? 'Global' }))),
+    uninstallSkill: (args: UninstallArgs) => run(['uninstall-skill', ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliUninstalled, (removed): UninstalledResult[] => removed.map((item) => ({ id: item.id, name: item.id }))),
     uninstallMachine: () => run(['uninstall'], cliMachine, (value): MachineUninstallResult => ({ removed: value.teams })),
-    connect: (args: ConnectArgs) => run<z.infer<typeof cliConnect>, ConnectOutcome | undefined>(['connect', ...(args.path ? [args.path] : []), ...(args.team ? ['--team', args.team] : []), ...(args.allowPrivileged ? ['--allow-privileged'] : [])], cliConnect, (value) => value as ConnectOutcome | undefined, ['config', 'clone']),
-    publish: (args: PublishArgs) => run(['publish', args.ref, ...(args.team ? ['--team', args.team] : [])], cliPublish, (value): PublishResult => ({ name: value.name, version: value.prUrl ?? value.branch ?? null, changed: value.changed ?? true }), ['clone']),
+    connect: (args: ConnectArgs) => run<z.infer<typeof cliConnect>, ConnectOutcome | undefined>(['connect', ...(args.team ? ['--team', args.team] : []), ...(args.allowPrivileged ? ['--allow-privileged'] : []), ...(args.path ? ['--', args.path] : [])], cliConnect, (value) => value as ConnectOutcome | undefined, ['config', 'clone']),
+    publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, version: value.prUrl ?? value.branch ?? null, changed: value.changed ?? true }), ['clone']),
     // Never `--hook` from the app: its stdout is the reload directive (frame mode refuses it anyway).
     sync: (args: SyncArgs) => run(['sync', ...(args.prune ? ['--prune'] : []), ...(args.team ? ['--team', args.team] : [])], cliSync, (value): SyncResult => ({ placed: value.deferred.length || value.placed ? [] : [], removed: [] }), ['clone', 'placed', 'stamp']),
-    invite: (args: InviteArgs) => run(['invite', ...args.logins, ...(args.team ? ['--team', args.team] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited] }), ['clone']),
+    invite: (args: InviteArgs) => run(['invite', ...(args.team ? ['--team', args.team] : []), ...(args.logins.length ? ['--', ...args.logins] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited] }), ['clone']),
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
-    setup: (args: SetupArgs) => run(['setup', ...(args.target ? [args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role }), ['config', 'clone', 'placed']),
-    eval: (args: EvalArgs) => run(['eval', args.ref, ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : [])], cliEval, (value): EvalResult => ({ name: value.name, receipt: null }), ['clone']),
-    validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', args.ref || args.cwd || '', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : [])], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
+    setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role }), ['config', 'clone', 'placed']),
+    eval: (args: EvalArgs) => run(['eval', ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name: value.name, receipt: null }), ['clone']),
+    validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
     // `update` prints its advice and returns no value; the printed lines are the advice. The seam wants numbers the CLI does not return.
     update: async () => gap('Update advice as structured data'),
     async windowAction(action) { try { const window = getCurrentWindow(); if (action === 'toggle-maximize') await window.toggleMaximize(); else await window.startDragging(); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
@@ -207,10 +286,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
 
 function teamArgv(args: TeamArgs): string[] {
   switch (args.kind) {
-    case 'create': return ['team', 'create', ...(args.name ? [args.name] : []), ...(args.remote ? ['--remote', args.remote] : [])];
-    case 'join': return ['team', 'join', args.remote ?? args.name ?? '', ...(args.remote && args.name ? ['--as', args.name] : [])];
-    case 'remove': return ['team', 'remove', args.handle ?? '', ...(args.team ? ['--team', args.team] : [])];
-    case 'leave': return ['team', 'leave', args.name ?? args.team ?? ''];
+    case 'create': return ['team', 'create', ...(args.remote ? ['--remote', args.remote] : []), ...(args.name ? ['--', args.name] : [])];
+    case 'join': return ['team', 'join', ...(args.remote && args.name ? ['--as', args.name] : []), '--', args.remote ?? args.name ?? ''];
+    case 'remove': return ['team', 'remove', ...(args.team ? ['--team', args.team] : []), '--', args.handle ?? ''];
+    case 'leave': return ['team', 'leave', '--', args.name ?? args.team ?? ''];
   }
 }
 

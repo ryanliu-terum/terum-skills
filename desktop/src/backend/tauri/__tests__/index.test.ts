@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Bridge } from '../bridge';
 import type { Backend } from '../../Backend';
@@ -28,19 +30,30 @@ it('keeps errors without value when the failing value cannot be parsed', async (
 });
 
 const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = [
-  ['install skill', b => b.install({ ref: 'a', force: true, team: 'acme' }).done, ['install', 'a', '--force', '--team', 'acme']],
-  ['install member', b => b.install({ ref: '', kind: 'member', member: 'mira', team: 'acme' }).done, ['install', 'member', 'mira', '--team', 'acme']],
-  ['install project', b => b.install({ ref: '', kind: 'project', project: 'ops', team: 'acme' }).done, ['install', 'project', 'ops', '--team', 'acme']],
-  ['uninstallSkill', b => b.uninstallSkill({ ref: 'a', team: 'acme' }).done, ['uninstall-skill', 'a', '--team', 'acme']],
-  ['connect', b => b.connect({ path: '/a', team: 'acme', allowPrivileged: true }).done, ['connect', '/a', '--team', 'acme', '--allow-privileged']],
-  ['publish', b => b.publish({ ref: 'a', team: 'acme' }).done, ['publish', 'a', '--team', 'acme']],
+  ['leading-dash install', b => b.install({ ref: '-x', team: 'acme' }).done, ['install', '--team', 'acme', '--', '-x']],
+  ['team create', b => b.team({ kind: 'create', name: '-x', remote: '/repo' }).done, ['team', 'create', '--remote', '/repo', '--', '-x']],
+  ['team create without name', b => b.team({ kind: 'create', remote: '/repo' }).done, ['team', 'create', '--remote', '/repo']],
+  ['team join', b => b.team({ kind: 'join', remote: '-x', name: 'acme' }).done, ['team', 'join', '--as', 'acme', '--', '-x']],
+  ['team leave', b => b.team({ kind: 'leave', team: '-x' }).done, ['team', 'leave', '--', '-x']],
+  ['setup', b => b.setup({ target: '-x' }).done, ['setup', '--', '-x']],
+  ['bare setup', b => b.setup({}).done, ['setup']],
+  ['search', b => b.search({ q: '--frames' }), ['search', '--', '--frames']],
+  ['empty search', b => b.search({ q: '' }), ['search', '--', '']],
+  ['empty invite', b => b.invite({ logins: [], team: 'acme' }).done, ['invite', '--team', 'acme']],
+  ['uninstall machine', b => b.uninstallMachine({}).done, ['uninstall']],
+  ['install skill', b => b.install({ ref: 'a', force: true, team: 'acme' }).done, ['install', '--force', '--team', 'acme', '--', 'a']],
+  ['install member', b => b.install({ ref: '', kind: 'member', member: 'mira', team: 'acme' }).done, ['install', '--team', 'acme', '--', 'member', 'mira']],
+  ['install project', b => b.install({ ref: '', kind: 'project', project: 'ops', team: 'acme' }).done, ['install', '--team', 'acme', '--', 'project', 'ops']],
+  ['uninstallSkill', b => b.uninstallSkill({ ref: 'a', team: 'acme' }).done, ['uninstall-skill', '--team', 'acme', '--', 'a']],
+  ['connect', b => b.connect({ path: '/a', team: 'acme', allowPrivileged: true }).done, ['connect', '--team', 'acme', '--allow-privileged', '--', '/a']],
+  ['publish', b => b.publish({ ref: 'a', team: 'acme' }).done, ['publish', '--team', 'acme', '--', 'a']],
   ['sync', b => b.sync({ prune: true, team: 'acme' }).done, ['sync', '--prune', '--team', 'acme']],
-  ['invite', b => b.invite({ logins: ['mira', 'ravi'], team: 'acme' }).done, ['invite', 'mira', 'ravi', '--team', 'acme']],
-  ['eval', b => b.eval({ ref: 'a', commit: true, team: 'acme' }).done, ['eval', 'a', '--commit', '--team', 'acme']],
-  ['validate', b => b.validate({ ref: 'a', cwd: '/checkout', team: 'acme' }), ['validate', 'a', '--cwd', '/checkout', '--team', 'acme']],
-  ['team remove', b => b.team({ kind: 'remove', handle: 'mira', team: 'acme' }).done, ['team', 'remove', 'mira', '--team', 'acme']],
+  ['invite', b => b.invite({ logins: ['mira', 'ravi'], team: 'acme' }).done, ['invite', '--team', 'acme', '--', 'mira', 'ravi']],
+  ['eval', b => b.eval({ ref: 'a', commit: true, team: 'acme' }).done, ['eval', '--commit', '--team', 'acme', '--', 'a']],
+  ['validate', b => b.validate({ ref: 'a', cwd: '/checkout', team: 'acme' }), ['validate', '--cwd', '/checkout', '--team', 'acme', '--', 'a']],
+  ['team remove', b => b.team({ kind: 'remove', handle: 'mira', team: 'acme' }).done, ['team', 'remove', '--team', 'acme', '--', 'mira']],
 ];
-it.each(teamCases)('forwards --team on %s without reordering existing arguments', async (_name, call, argv) => {
+it.each(teamCases)('orders %s as verb, flags, separator, positionals', async (_name, call, argv) => {
   const f = replay(undefined, false);
   await call(createTauriBackend(f.bridge));
   expect(f.spawns.map(s => s.args)).toEqual([argv]);
@@ -71,7 +84,7 @@ it('refuses empty validate targets and uses cwd when ref is empty', async () => 
   expect(await b.validate({ ref: '', cwd: '' })).toEqual({ ok: false, error: 'validate needs a skill name or a folder.' });
   expect(f.spawns).toHaveLength(0);
   expect((await b.validate({ ref: '', cwd: '/checkout' })).ok).toBe(true);
-  expect(f.spawns[0]?.args).toEqual(['validate', '/checkout']);
+  expect(f.spawns[0]?.args).toEqual(['validate', '--', '/checkout']);
 });
 
 it.each([true, false])('maps every search field including its real description (optional metadata=%s)', async metadata => {
@@ -80,11 +93,11 @@ it.each([true, false])('maps every search field including its real description (
   expect(result).toEqual({ ok: true, value: [{ kind: 'skill', ref: metadata ? 'acme/a' : 'a', name: 'a', description: 'Real description', team: metadata ? 'acme' : null, author: hit.author, category: 'ops', installs: 0, latest: 'abc', unresolved: false, endorsed: metadata ? 'global' : null }] });
 });
 
-it('serves library and skill while the remaining eight surfaces stay typed gaps', async () => {
+it('serves status, settings, library and skill while the other six surfaces stay typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ status: false, settings: false, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: false, roster: false, update: false });
-  for (const result of await Promise.all([b.status(), b.settings(), b.onboarding(), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox(), b.catalog(), b.roster(), b.update()])) {
+  expect(await b.surfaces()).toEqual({ status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: false, roster: false, update: false });
+  for (const result of await Promise.all([b.onboarding(), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox(), b.catalog(), b.roster(), b.update()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }
   expect(f.spawns).toHaveLength(0);
@@ -132,7 +145,7 @@ describe('read-only calls preserve spawn rejection', () => {
       spawn,
       write: vi.fn<Bridge['write']>(),
       kill: vi.fn<Bridge['kill']>(),
-      readAppState: async () => ({ schema: 1, node: '/usr/local/bin/node', entry: '/cli/index.js', version: '0.1.6' }),
+      readAppState: async () => ({ schema: 1, node: '/usr/local/bin/node', entry: '/cli/index.js', version: '0.1.6', writtenAt: '2026-09-08T00:00:00Z' }),
       hostPlatform: async () => 'macos',
       homeDirectory: async () => '/Users/teddy',
     };
@@ -145,6 +158,57 @@ describe('read-only calls preserve spawn rejection', () => {
   });
 });
 
+
+const framesDirectory=resolve('../.planning/codex-runs/m7-S7k/frames');
+function statusReplay(failed=false, change?:(frame:Record<string,unknown>,verb:string)=>void){
+ return fakeBridge((args,emit)=>{
+  const name=args[0]==='status'?'status':'ls-local';
+  for(const line of readFileSync(resolve(framesDirectory,name+'.jsonl'),'utf8').trim().split('\n')){
+   const frame=JSON.parse(line) as Record<string,unknown>;
+   if(frame.t==='result'){
+    if(failed&&name==='status')Object.assign(frame,{ok:false,exitCode:1,error:'Unreadable team clone.'});
+    change?.(frame,name);
+   }
+   emit({kind:'stdout',line:JSON.stringify(frame)});
+  }
+ });
+}
+it.each([false,true])('serves recorded status and settings with real team data (partial failure=%s)',async failed=>{
+ const f=statusReplay(failed),backend=createTauriBackend(f.bridge);
+ const status=await backend.status(),settings=await backend.settings();
+ expect(status.ok).toBe(!failed);expect(settings.ok).toBe(!failed);
+ expect(status.value).toMatchObject({machine:{os:'macos',hostname:'',gh_login:''},me:{handle:'seed',name:'Seed',email:'seed@example.com'},counts:{Global:'1'},teams:[{name:'acme',key:'acme',handle:'seed',remote:'https://github.com/acme/team',members:3,skills:3,policy:{publish:'Pull request',license:'UNLICENSED'},categories:['ops','engineering','debugging'],pending:[],last_sync:null,stamp:null}]});
+ expect(Object.keys(status.value?.counts??{})).toEqual(['Global']);
+ expect(status.value?.teams[0]?.clone).toContain('/fx/home/.terum/skills/teams/acme');
+ expect(status.value?.teams[0]?.joinBlock?.join('\n')).toContain('npx -y terum-skills@latest setup acme/team');
+ expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,APPROVALS:[],QUARANTINE:[],HOOK:{installed:false},AGENT_CLI:'—',CLI_LATEST:'—'});
+ expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{40}$/),'—','—']);
+ expect(settings.value?.SHARED[0]).toEqual(['22222222-2222-4222-8222-222222222222',expect.stringContaining('/skills/tdd'),'acme','—']);
+ expect(status.value?.tools).toEqual(settings.value?.tools);
+ expect(status.value?.tools.git).toBe(true);
+ if(failed){expect(status).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});expect(settings).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});}
+ expect(f.spawns.map(s=>s.args)).toEqual([['status'],['ls','--local'],['status'],['ls','--local']]);expect(f.writes).toEqual([]);
+});
+it.each([null,'old','current'])('only displays approvals joined to current grants (hash=%s)',async hash=>{
+ const f=statusReplay(false,(frame,verb)=>{
+  const value=frame.value as {ledger?:{approvals:unknown[]};skills?:Record<string,unknown>[]};
+  if(verb==='status')value.ledger!.approvals=[{id:'skill-id',grants:'current',approved_at:'2026-09-01'}];
+  else value.skills=[{id:'skill-id',name:'deploy-check',grantsHash:hash,grants:'Bash\nRead'}];
+ });
+ const result=await createTauriBackend(f.bridge).settings();
+ expect(result.ok).toBe(true);
+ expect(result.value?.APPROVALS).toEqual(hash==='current'?[['deploy-check',['Bash','Read'],'2026-09-01']]:[]);
+});
+it('preserves a future stamp and null fields from an unreadable clone',async()=>{
+ const stamp='2099-01-01T00:00:00.000Z';
+ const f=statusReplay(true,(frame,verb)=>{
+  if(verb!=='status')return;
+  const value=frame.value as {teams:Record<string,unknown>[]};
+  Object.assign(value.teams[0]!,{clone:{state:'absent'},readable:false,memberCount:null,sharedSkills:null,policy:null,categories:null,syncedAt:stamp});
+ });
+ const result=await createTauriBackend(f.bridge).status();
+ expect(result.value?.teams[0]).toMatchObject({stamp,last_sync:stamp,members:null,skills:null,policy:null,categories:null});
+});
 
 const lsRow = { id: 'id-a', name: 'a', description: 'Live description', author: 'Mira Chen <mira@example.com>', category: 'ops', installs: 1, latest: 'abcd1234', endorsement: 'global', unresolved: false, grants: 'Bash\nRead', grantsHash: 'sha256:real', updated: '2026-08-20T00:00:00Z', body: '# Live body\n', installedBy: [{ handle: 'mira', displayName: 'Mira Chen', scope: {kind:'global'}, since: '2026-08-01' }, { handle: 'mira', displayName: 'Mira Chen', scope: {kind:'project',project:'ops'}, since: '2026-08-02' }] };
 const lsValue = { roster: [{handle:'mira',active:true}], skills: [lsRow], projects: [{ name:'ops',skills:['id-a'],remotes:[],description:'Hand maintained' },{name:'empty',skills:[],remotes:[]}], problems: [] };
@@ -163,7 +227,7 @@ it.each(['Global','ops','installed'])('maps the %s library from real counts and 
 it('maps the detail body, grants and all install records without fabricating missing values',async()=>{
   const f=inventoryBridge();const result=await createTauriBackend(f.bridge).skill({ref:'acme/a'});
   expect(result).toMatchObject({ok:true,value:{desc:'Live description',skillMd:{frontmatter:'',body:[],markdown:'# Live body\n'},favorites:null,lines:null,receipt:null,summary:null,wlt:null,evalEstimate:null,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},hygiene:[],hygieneCaption:'Hygiene checks · pass on connect',grants:['Bash','Read'],grants_approved:'',history:[],activity:[],files:['SKILL.md'],used_by:['MC'],users:[['mira','MC','Global · since 2026-08-01'],['mira','MC','ops · since 2026-08-02']],path:'/home/.claude/skills/a',repo:'https://github.com/acme/team'}});
-  expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--team','acme'],['ls','--local'],['validate','a','--team','acme']]);
+  expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--team','acme'],['ls','--local'],['validate','--team','acme','--','a']]);
 });
 it('retains null grants/body/date and marks unresolved skills broken, with a failed validation caption',async()=>{
   const f=inventoryBridge({row:{grants:null,grantsHash:null,body:null,updated:'—',unresolved:true} as unknown as Partial<typeof lsRow>,validation:{name:'a',findings:2,warnings:0},validateOk:false});

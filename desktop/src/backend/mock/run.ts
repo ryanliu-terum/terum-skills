@@ -11,7 +11,7 @@ export function createRun<T>(script:(ctx:RunContext)=>Promise<Result<T>>):Run<T>
  const push=(frame:Frame)=>{if(finished)return;buffer.push(frame);for(const wake of readers)wake();readers.clear();};
  const finish=(result:Result<T>)=>{
   if(finished)return;
-  push({t:'result',ok:result.ok,...(result.ok?{}:{error:result.error})});finished=true;
+  push({t:'result',ok:result.ok,...(result.ok?{}:{error:result.error,...(result.cancelled?{declined:true}:{})})});finished=true;
   for(const ask of asks.values())ask.reject(new Error(result.ok?'Run completed.':result.error));asks.clear();
   for(const stop of sleepers)stop();sleepers.clear();
   for(const wake of readers)wake();readers.clear();

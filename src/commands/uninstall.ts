@@ -5,7 +5,7 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
 import { lockTarget, remove } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, personSchema, sameScope, teamSchema } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam } from '../lib/skills.js';
@@ -56,7 +56,7 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
     const installed = person.installed.filter((entry) => entry.id === record.id);
     const targets = (await ledgerScopes(store, team, record.id, installed.map((entry) => entry.scope))).map((scope) => ({ id: record.id, scope }));
     return success(await uninstallMany({ team, targets, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 export interface UninstallTarget { id: string; scope: { kind: 'global' } | { kind: 'project'; project: string }; }
@@ -138,7 +138,7 @@ export async function removePlacements(store: ConfigStore, matching: ReadonlyArr
 }
 
 function samePending(a: { op: string; id: string; team: string; scope: unknown }, b: { op: string; id: string; team: string; scope: unknown }): boolean { return a.op === b.op && a.id === b.id && a.team === b.team && sameScope(a.scope, b.scope); }
-async function ledgerScopes(store: ConfigStore, team: string, id: string, peopleScopes: Array<{ kind: 'global' } | { kind: 'project'; project: string }>): Promise<Array<{ kind: 'global' } | { kind: 'project'; project: string }>> {
+export async function ledgerScopes(store: ConfigStore, team: string, id: string, peopleScopes: Array<{ kind: 'global' } | { kind: 'project'; project: string }>): Promise<Array<{ kind: 'global' } | { kind: 'project'; project: string }>> {
   const scopes = [...peopleScopes, ...Object.values((await store.read()).placements).filter((entry) => entry.team === team && entry.id === id).map((entry) => entry.scope)];
   return scopes.filter((scope, index) => scopes.findIndex((candidate) => sameScope(candidate, scope)) === index) as Array<{ kind: 'global' } | { kind: 'project'; project: string }>;
 }

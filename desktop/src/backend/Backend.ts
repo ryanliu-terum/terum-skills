@@ -6,6 +6,7 @@ export interface Backend {
   revealPath(path: string): Promise<Result<void>>;
   capabilities(): Promise<Capabilities>;
   surfaces(): Promise<Surfaces>;
+  launchTarget(): Promise<{ target: string; writtenAt: string } | null>;
   status(q?: undefined, options?: ReadOptions): Promise<Result<StatusResult>>;
   settings(q?: undefined, options?: ReadOptions): Promise<Result<Settings>>;
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;

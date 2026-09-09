@@ -452,7 +452,7 @@ describe('connect (§5.3)', () => {
     const { fixture, store } = await sharedFixture();
     const id = Object.keys((await store.read()).shared)[0]!;
     const sha = await originSha(fixture.bare);
-    expect(await run({ forget: id, config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: false, error: 'Forget was declined.' });
+    expect(await run({ forget: id, config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: false, error: 'Forget was declined.', cancelled: true });
     expect((await store.read()).shared[id]).toBeDefined();
     expect(await originSha(fixture.bare)).toBe(sha);
     expect((await run({ forget: id, config: store }, new ScriptedPrompter([], [true]))).ok).toBe(true);
@@ -470,7 +470,7 @@ describe('connect (§5.3)', () => {
     const original = '---\nname: sample\ndescription: x\nmetadata:\n  terum-category: testing\n---\n';
     await writeFile(join(source, 'SKILL.md'), original);
     const sha = await originSha(fixture.bare);
-    expect(await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: false, error: 'Connect was declined.' });
+    expect(await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: false, error: 'Connect was declined.', cancelled: true });
     expect(await readFile(join(source, 'SKILL.md'), 'utf8')).toBe(original);
     expect(await originSha(fixture.bare)).toBe(sha);
     expect((await store.read()).shared).toEqual({});
