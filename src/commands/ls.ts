@@ -20,8 +20,8 @@ import { skillVersions } from '../lib/teamRepo.js';
 export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
 export interface LsSkill { id: string; name: string; author: string; category: string; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; updated: string; unresolved: boolean; }
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
-export interface LocalSection extends LocalRoot { rows: { name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; problem?: string }[]; notOffered: { name: string; path: string; reason: string }[]; problems: { path: string; reason: string }[]; }
-export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
+export interface LocalSection extends LocalRoot { rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: string }[]; problems: { path: string; reason: string }[]; }
+export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
 export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>> {
@@ -92,7 +92,7 @@ async function showMember(handle: string | undefined, people: Awaited<ReturnType
   io.print(`Member ${member.handle}:`);
   io.print(`  Authored: ${authored.map((skill) => skill.name).join(', ') || '—'}`);
   io.print(`  Installed: ${member.installed.map((item) => namesById.get(item.id) ?? item.id).join(', ') || '—'}`);
-  return success({ roster, skills: authored, projects, problems, member: { handle: member.handle, declined: member.declined, role: member.role ?? null, projects: member.projects ?? [] } });
+  return success({ roster, skills: authored, projects, problems, member: { installed: member.installed.map(({id,scope,since}) => ({id,scope,since})), handle: member.handle, declined: member.declined, role: member.role ?? null, projects: member.projects ?? [] } });
 }
 async function showProject(projectName: string | undefined, team: ReturnType<typeof teamSchema.parse>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems']): Promise<Result<LsResult>> {
   if (!projectName || !Object.hasOwn(team.projects, projectName)) throw new Error(`No project named ${projectName ?? ''}.`);
@@ -174,8 +174,8 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
       const inspection = entry.inspection;
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (connect needs --allow-privileged)' : undefined;
-        local.rows.push({ name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: await healthOf(entry), ...(problem === undefined ? {} : { problem }) });
-      } else if (inspection.kind === 'rejected') local.notOffered.push({ name: entry.name, path: entry.path, reason: inspection.detail });
+        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: await healthOf(entry), ...(problem === undefined ? {} : { problem }) });
+      } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.detail });
       if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
     }
     for (const row of local.rows) io.print(`  ${printable(row.name)} — ${printable(row.state)}${row.problem === undefined ? '' : `; source problem: ${printable(row.problem)}`}; path: ${printable(row.path)}`);

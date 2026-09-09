@@ -1,0 +1,164 @@
+{
+  "status": "complete",
+  "summary": "Sidebar Global counts now come from scanned rows and disappear when scanning fails. Library subtitles include per-root totals, and display paths use home-abbreviated labels while action paths remain unchanged. All gates passed; no §5 remnants were found.",
+  "filesChanged": [
+    {
+      "path": "desktop/src/backend/tauri/index.ts",
+      "change": "modified",
+      "why": "Derives scan counts and subtitles, removes placementCounts, and abbreviates display paths."
+    },
+    {
+      "path": "desktop/src/backend/types.ts",
+      "change": "modified",
+      "why": "Adds SkillDetail.pathLabel."
+    },
+    {
+      "path": "desktop/src/backend/mock/data.ts",
+      "change": "modified",
+      "why": "Fills pathLabel from the existing mock path."
+    },
+    {
+      "path": "desktop/src/backend/mock/index.ts",
+      "change": "modified",
+      "why": "Keeps the on-disk-only scenario's pathLabel consistent with its path."
+    },
+    {
+      "path": "desktop/src/screens/skill/SkillScreen.tsx",
+      "change": "modified",
+      "why": "Uses pathLabel for meta, ownership, and Remove copy while preserving mock strings."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/installed-fixture.ts",
+      "change": "modified",
+      "why": "Allows replay tests to vary the status ledger."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/index.test.ts",
+      "change": "modified",
+      "why": "Covers scan counts, failures, subtitles, and display-path contracts."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/installed-screens.test.tsx",
+      "change": "modified",
+      "why": "Verifies abbreviated display labels and absolute Edit/Connect arguments."
+    },
+    {
+      "path": "desktop/src/components/domain/Sidebar.test.tsx",
+      "change": "modified",
+      "why": "Pins Global rendering without a number when its count is missing."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/path-true-screens.test.tsx",
+      "change": "modified",
+      "why": "Supplies pathLabel alongside the overridden project path."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/replay-screens.test.tsx",
+      "change": "modified",
+      "why": "Updates exact subtitle expectations to include scanned-root totals."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/replay.test.ts",
+      "change": "modified",
+      "why": "Updates exact Library DTO subtitle expectations."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/setup-replay.test.tsx",
+      "change": "modified",
+      "why": "Asserts scan-derived Global counts and absence of inferred project counts."
+    }
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop lint exited 0; no diagnostics.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop typecheck exited 0. Root build also exited 0.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": true,
+      "output": "Desktop: 70 files passed; 959 tests passed, 88 skipped. Root: 75 files passed; 1270 tests passed. Targeted tests demonstrated failures before implementation and passed afterward.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [],
+  "deviations": [
+    {
+      "what": "Both test suites used --configLoader runner.",
+      "why": "Default config loading failed with sandbox EPERM writing shared node_modules/.vite-temp. The runner loader executed the unchanged suite configurations successfully."
+    }
+  ],
+  "invariantsTouched": [
+    {
+      "number": 1,
+      "howSatisfied": "Path abbreviation and scan derivation remain inside the backend seam."
+    },
+    {
+      "number": 2,
+      "howSatisfied": "Presence counting uses cached hello.features.localIdentity, with missing features treated as false."
+    },
+    {
+      "number": 5,
+      "howSatisfied": "Preserved mock title logic, drawn strings, styles, and the existing markdown discriminator."
+    },
+    {
+      "number": 7,
+      "howSatisfied": "Added regression coverage; updated exact expectations only for specified contract changes. No tests were removed or weakened."
+    },
+    {
+      "number": 8,
+      "howSatisfied": "Ran root and desktop gates within the sandbox; no direct git commands, network, installs, or Playwright."
+    }
+  ],
+  "testsModified": [
+    {
+      "path": "desktop/src/backend/tauri/__tests__/index.test.ts",
+      "whatChanged": "Added regressions and updated subtitle/path expectations.",
+      "justification": "Deliberate display-string contract changes: paths use ~/ while action paths remain absolute."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/installed-fixture.ts",
+      "whatChanged": "Added an optional status-frame mutation callback.",
+      "justification": "Supports empty-ledger replay coverage without changing existing defaults."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/installed-screens.test.tsx",
+      "whatChanged": "Added display-label and action-path tests.",
+      "justification": "Verifies §9.2 end to end through the screen."
+    },
+    {
+      "path": "desktop/src/components/domain/Sidebar.test.tsx",
+      "whatChanged": "Added missing-Global-count coverage.",
+      "justification": "Pins existing behavior explicitly required by §9.1."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/path-true-screens.test.tsx",
+      "whatChanged": "Added pathLabel to the project-path stub.",
+      "justification": "Keeps the stub consistent with the additive DTO contract; assertions remain unchanged."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/replay-screens.test.tsx",
+      "whatChanged": "Updated two exact subtitle assertions.",
+      "justification": "§9.1 requires per-root totals; assertions remain exact."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/replay.test.ts",
+      "whatChanged": "Updated Global and project subtitle expectations.",
+      "justification": "Matches §9.1's specified subtitle contract."
+    },
+    {
+      "path": "desktop/src/backend/tauri/__tests__/setup-replay.test.tsx",
+      "whatChanged": "Replaced the ledger-count expectation with an exact Global-only count.",
+      "justification": "§9.1 explicitly replaces ledger counts and prohibits inferred project counts; ledger/settings assertions remain intact."
+    }
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Locked-board pixel identity is supported by preserved mock rendering logic, but was not visually verified because Playwright was prohibited."
+}

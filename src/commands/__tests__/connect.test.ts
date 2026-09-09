@@ -6,7 +6,7 @@ import { reconcileShared, run } from '../connect.js';
 import { run as sync } from '../sync.js';
 import { run as install } from '../install.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, originSha, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, ghOnlyRunner, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { temporaryDirectory, TEAM_JSON, bareTeam, cloneWithIdentity, git, originSha, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, ghOnlyRunner, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { canonicalDigest } from '../../lib/skills.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
@@ -1191,4 +1191,42 @@ describe('HYG6 size warnings', () => {
     expect(await originSha(fixture.bare)).toBe(before);
     expect(await readFile(join(tracked.source, 'SKILL.md'), 'utf8')).toBe(bytes);
   });
+});
+
+it('adopts an existing identity only with matching name and consent, preserving refusals',async()=>{
+ for(const mode of ['accept','decline','different-name','missing-id','different-id']) {
+  const root=await temporaryDirectory(),store=createConfigStore(join(root,'state')),clone=store.teamClone('team');
+  const id='11111111-1111-4111-8111-111111111111',remote='https://github.com/acme/team';
+  await store.update(config=>{config.display_name='Me';config.email='me@example.com';config.teams.team={remote,handle:'seed'};});
+  const repoSource=join(clone,'skills','sample');await mkdir(repoSource,{recursive:true});
+  const original=`---\nname: sample\ndescription: x\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: testing\n---\nOriginal body.\n`;
+  await writeFile(join(repoSource,'SKILL.md'),original);await writeFile(join(clone,'team.json'),JSON.stringify(TEAM_JSON));
+  const path=join(root,mode==='different-name'?'other':'sample');await mkdir(path);
+  let raw=original;
+  if(mode==='different-name')raw=raw.replace('name: sample','name: other');
+  if(mode==='missing-id')raw=raw.replace(`  id: ${id}\n`,'');
+  if(mode==='different-id')raw=raw.replace(id,'99999999-9999-4999-8999-999999999999');
+  raw+='A local edit.\n';await writeFile(join(path,'SKILL.md'),raw);
+  const calls:string[]=[];
+  const runner={run:async(_command:Parameters<typeof systemRunner.run>[0],args:readonly string[])=>{
+   calls.push(args.join(' '));
+   if(args[0]==='remote')return {code:0,stdout:remote,stderr:''};
+   if(!['fetch','reset','ls-files'].includes(args[0]??''))throw new Error(`Unexpected write: ${args.join(' ')}`);
+   return {code:0,stdout:'',stderr:''};
+  }};
+  const configBefore=await readFile(join(store.root,'config.json'),'utf8'),io=new ScriptedPrompter([],[mode==='accept']);
+  const result=await run({path,config:store,runner},io);
+  if(mode==='accept'){
+   expect(result).toEqual({ok:true,value:{id,name:'sample',reconciled:false,adopted:true}});
+   expect((await store.read()).shared[id]).toEqual({source:path,team:'team',baseline:await canonicalDigest(path)});
+  }else{
+   expect(result.ok).toBe(false);expect(await readFile(join(store.root,'config.json'),'utf8')).toBe(configBefore);
+   if(mode==='decline')expect(result).toMatchObject({error:'Connect was declined.',cancelled:true});
+  }
+  if(mode==='accept'||mode==='decline')expect(io.asked).toEqual(['This folder already carries the id of sample in team team. Record it as your connected source on this machine? (y/N)']);
+  else expect(io.asked).toEqual([]);
+  expect(await readFile(join(path,'SKILL.md'),'utf8')).toBe(raw);
+  expect(await readFile(join(repoSource,'SKILL.md'),'utf8')).toBe(original);
+  expect(calls.some(call=>/^(push|commit|add) /.test(call))).toBe(false);
+ }
 });

@@ -2,12 +2,12 @@ import { realpathSync } from 'node:fs';
 import { lstat, readFile, readdir, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import YAML from 'yaml';
-import { allowedTools, describeRaw, FRONTMATTER, isSkillName } from './schema.js';
+import { allowedTools, describeRaw, FRONTMATTER, isSkillName, skillIdSchema } from './schema.js';
 import { isManagedFrontmatter } from './wrapper.js';
 
 export { FRONTMATTER } from './schema.js';
 export type SourceProblem = 'symlink' | 'not-a-directory' | 'skill-md-missing' | 'skill-md-not-a-file' | 'no-frontmatter' | 'invalid-yaml' | 'illegal-name' | 'name-mismatch' | 'description-missing' | 'unsupported-field' | 'malformed-allowed-tools' | 'nested-symlink' | 'inside-state-root' | 'managed-wrapper';
-type SourceInspection = { ok: true; description: string } | { ok: false; reason: SourceProblem; detail: string };
+type SourceInspection = { ok: true; description: string; id: string | null } | { ok: false; reason: SourceProblem; detail: string };
 
 /** Terminal rendering only: filesystem paths and ledger values retain their original bytes. */
 export function printable(value: string): string { return value.replace(/\p{Cc}/gu, '?'); }
@@ -36,7 +36,7 @@ export function assertSkillSource(raw: string, folderName: string): string {
   return result.description;
 }
 
-function inspect(raw: string, folderName?: string): { ok: true; description: string } | { ok: false; reason: SourceProblem; detail: string; shareMessage: string } {
+function inspect(raw: string, folderName?: string): { ok: true; description: string; id: string | null } | { ok: false; reason: SourceProblem; detail: string; shareMessage: string } {
   const reject = (reason: SourceProblem, detail: string, shareMessage = detail) => ({ ok: false as const, reason, detail, shareMessage });
   if (folderName !== undefined && !isSkillName(folderName)) return reject('illegal-name', 'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)', `Skill name ${folderName} must be 1–64 lowercase alphanumerics or single hyphens.`);
   const match = FRONTMATTER.exec(raw);
@@ -63,7 +63,9 @@ function inspect(raw: string, folderName?: string): { ok: true; description: str
     const line = raw.split(/\r?\n/).findIndex((text) => /^allowed-tools\s*:/.test(text)) + 1;
     return reject('malformed-allowed-tools', `allowed-tools is malformed (SKILL.md line ${line})`, `${folderName}: allowed-tools is malformed${line ? ` (SKILL.md line ${line})` : ''}: ${describeRaw(grants.raw)}. Use a YAML list of tool patterns, or one comma-separated string.`);
   }
-  return { ok: true, description: parsed.description };
+  const metadata = parsed.metadata as Record<string, unknown> | null | undefined;
+  const id = skillIdSchema.safeParse(metadata?.id);
+  return { ok: true, description: parsed.description, id: id.success ? id.data : null };
 }
 
 /** File bytes and the mode facts hygiene needs; callers validate the directory/symlink invariant first. */
