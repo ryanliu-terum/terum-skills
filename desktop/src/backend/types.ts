@@ -5,7 +5,7 @@ export type AskKind='confirm'|'text'|'select';
 export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string}
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
-export interface Capabilities {windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
+export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
 export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
@@ -32,6 +32,7 @@ export interface Roster {members:Member[];invited:Design['INVITED'];member:Recor
 export interface Library {skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;provenance?:string|null;projects?:readonly {name:string;skills:readonly string[];remotes:readonly string[];[key:string]:unknown}[];problems?:readonly {source:string;message:string}[]}
 /** attention = failingEvals + updatesAvailable + notEvaluated; counts.Alerts = attention, counts.Updates = updatesAvailable. Absent CLI counters are omitted. */
 export type CloneState = {state:'absent'} | {state:'incomplete';reason:'not-a-repository'|'no-team-json'|'unverifiable';error?:string} | {state:'foreign'|'ok';origin:string};
+/** name comes from team.json via status; key is the config identifier. They may differ; there is no label. */
 export interface TeamStatus {
  name:string;key:string;remote:string|null;handle:string;clone:string|null;members:number|null;skills:number|null;
  last_sync:string|null;stamp:string|null;policy:{publish:string;license:string}|null;categories:string[]|null;
@@ -50,6 +51,8 @@ export interface StatusLedger {
 export interface StatusResult {ledger?:StatusLedger|null;machine:Machine;me:Identity;teams:TeamStatus[];counts:Record<string,string>;tools:{git:boolean;gh:boolean};projects:string[]|null}
 export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project')[]}
 export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null;endorsed:string|null;unresolved:boolean|null}
+export interface IdentityArgs {name?:string;email?:string;defaultHandle?:string}
+export interface IdentityWrite {updated:{key:string;value:string}[];notice:string|null}
 export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}
 export interface InstalledResult {id:string;name:string;scope:Scope}
 export interface UninstallArgs {team?:string;ref:string}
@@ -75,7 +78,7 @@ export interface EvalArgs {team?:string;ref:string;commit?:boolean;cases?:number
 export interface EvalResult {name:string;receipt:Receipt|null}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
 export interface ValidateResult {name:string;findings:number;warnings:number}
-export interface UpdateAdvice {current:string;latest:string;available:boolean}
+export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
 export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void;readonly ready?:Promise<void>;flush?():Promise<void>;subscribe?(listener:()=>void):Subscription}
 export type Subscription=()=>void;
 export type ChangeSource='config'|'clone'|'placed'|'stamp';

@@ -50,7 +50,8 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program
     .command('login')
     .description('Check the GitHub CLI and record your identity (name, email, GitHub login, default handle); writes no team entry')
-    .action(async () => execute((io) => active.login({ form: context.form }, io), { verb: 'login', notices: true }));
+    .option('--set <key=value>', 'Set name, email, or default-handle without prompting (repeatable)', (value: string, previous: string[] = []) => [...previous, value])
+    .action(async (options: { set?: string[] }) => execute((io) => active.login({ form: context.form, ...options }, io), { verb: 'login', notices: true }));
 
   program
     .command('setup [target]')

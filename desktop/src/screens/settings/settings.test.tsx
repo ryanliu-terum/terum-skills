@@ -1,5 +1,5 @@
 import { afterEach,beforeEach,expect,it,vi } from 'vitest';
-import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
+import { act,cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
@@ -48,17 +48,74 @@ it('persists the hook toggle and updates its explanation',async()=>{open('#/sett
 it('persists each inbox kind independently',async()=>{open('#/settings/inbox');const controls=await screen.findAllByRole('checkbox');expect(controls).toHaveLength(7);fireEvent.click(screen.getByRole('checkbox',{name:'Alert'}));expect(backend.prefs.get('inbox:kind:alert',true)).toBe(false);expect(backend.prefs.get('inbox:kind:share',true)).toBe(true);});
 it('writes k without deriving a new statistic',async()=>{open('#/settings/evals');fireEvent.click(await screen.findByRole('combobox',{name:'Repetitions per case'}));const option=await screen.findByRole('option',{name:'10'});fireEvent.pointerDown(option,{pointerType:'mouse'});fireEvent.click(option);expect(backend.prefs.get('eval:k','')).toBe('10');});
 it('runs Sync now for the selected team through the workflow popup from a user action',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));expect(await screen.findByRole('dialog')).toHaveTextContent('Sync now');await waitFor(()=>expect(sync).toHaveBeenCalledWith({team:'terum'}));});
-it('opens the exact update command',async()=>{const editor=vi.spyOn(backend,'openInEditor');open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('npx -y terum-skills@latest update'));});
+it('renders update advice verbatim from the DTO without opening a command in an editor',async()=>{
+ const report=await backend.update();if(!report.ok)throw new Error(report.error);
+ report.value.advice=['Running from a source checkout.','  custom build <command> & preserve spacing'];
+ vi.spyOn(backend,'update').mockResolvedValue(report);const editor=vi.spyOn(backend,'openInEditor');
+ open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));
+ const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('pre')?.textContent).toBe(report.value.advice.join('\n')));
+ expect(editor).not.toHaveBeenCalled();expect(location.hash).toContain('dialog=update');
+ fireEvent.click(within(dialog).getByRole('button',{name:'Close'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+});
 it('opens the local storage path in Finder',async()=>{const editor=vi.spyOn(backend,'revealPath');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Show in Finder'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('~/.terum/skills'));});
 it('declines machine removal and leaves the screen intact',async()=>{const uninstall=vi.spyOn(backend,'uninstallMachine');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));await waitFor(()=>expect(screen.getByRole('button',{name:'Remove…'})).toBeEnabled());expect(uninstall).toHaveBeenCalledWith({});expect(screen.queryByRole('alert')).toBeNull();expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('heading',{name:'Advanced'})).toBeInTheDocument();});
 it('does not change a toggle when its preference write fails',async()=>{open('#/settings/sync');const control=await screen.findByRole('switch',{name:'Sync at session start'});vi.spyOn(backend.prefs,'set').mockImplementation(()=>{throw new Error('Storage denied.');});fireEvent.click(control);expect(await screen.findByRole('alert')).toHaveTextContent('Storage denied.');expect(control).toHaveAttribute('aria-checked','true');});
-it('surfaces failed editor results',async()=>{vi.spyOn(backend,'openInEditor').mockResolvedValue({ok:false,error:'Editor unavailable.'});open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));expect(await screen.findByRole('alert')).toHaveTextContent('Editor unavailable.');});
 it('renders the placement hover selector and every raw placement',async()=>{open('#/settings/machine');expect(await screen.findByTestId('placement-row-1')).toHaveTextContent('pr-review');expect(screen.getAllByTestId(/^placement-row-/)).toHaveLength(design.PLACEMENTS.length);});
 it('rejects malformed placement data with its field path',async()=>{const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);settings.value.PLACEMENTS=[['broken']];vi.spyOn(backend,'settings').mockResolvedValue(settings);const consoleError=vi.spyOn(console,'error').mockImplementation(()=>{ /* React reports the intentionally malformed DTO caught by ErrorBoundary. */ });open('#/settings/machine');expect(await screen.findByRole('alert')).toHaveTextContent('PLACEMENTS');expect(consoleError).toHaveBeenCalled();});
 
 it.each(['teams?dialog=leave','machine?dialog=prune'])('keeps the page landmark accessible for %s',async(route)=>{open('#/settings/'+route);const dialog=await screen.findByRole('dialog');const main=screen.getByRole('main');expect(main).toBeInTheDocument();expect(main.closest('[aria-hidden="true"], [inert]')).toBeNull();expect(main.closest('.shell')).not.toBeNull();expect(dialog.closest('.shell')).toBe(main.closest('.shell'));expect(main).not.toContainElement(dialog);});
 
+it('reads the app version from capabilities rather than settings',async()=>{
+ const capabilities=await backend.capabilities();vi.spyOn(backend,'capabilities').mockResolvedValue({...capabilities,appVersion:'9.8.7'});
+ open('#/settings/updates');expect(await screen.findByText('9.8.7 · no update channel yet.')).toBeInTheDocument();
+});
+it('shows an update failure without substituting fixture advice',async()=>{
+ vi.spyOn(backend,'update').mockResolvedValue({ok:false,error:'Cannot read release state.'});
+ open('#/settings/updates?dialog=update');const dialog=await screen.findByRole('dialog');
+ await waitFor(()=>expect(dialog).toHaveTextContent('Cannot read release state.'));
+ expect(within(dialog).getByRole('alert')).toHaveTextContent('Cannot read release state.');
+ expect((await screen.findByRole('dialog')).querySelector('pre')).toBeNull();
+});
 
+it('waits for update data before declaring the Updates board ready',async()=>{
+ const report=await backend.update();let finish!:(value:typeof report)=>void;
+ vi.spyOn(backend,'update').mockReturnValue(new Promise(resolve=>{finish=resolve;}));
+ open('#/settings/updates');expect(await screen.findByRole('button',{name:'Show update command'})).toBeInTheDocument();
+ expect(document.documentElement.dataset.appReady).not.toBe('true');
+ await act(async()=>{finish(report);});
+ await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));
+});
+
+it.each([['Name','name','Ryan Liu'],['Email','email','ryan@example.com'],['Default handle','defaultHandle','ryan']])('saves Account %s through the seam and shows the returned notice without print frames',async(label,key,value)=>{
+ const notice='The next sync refreshes connected skills on this machine.';
+ const save=vi.spyOn(backend,'setIdentity').mockImplementation(()=>createRun(async()=>({ok:true,value:{updated:[{key:key==='defaultHandle'?'default-handle':key,value}],notice}})));
+ const pref=vi.spyOn(backend.prefs,'set');open('#/settings/account');
+ const field=await screen.findByRole('textbox',{name:label});fireEvent.change(field,{target:{value}});expect(save).not.toHaveBeenCalled();fireEvent.blur(field);
+ await waitFor(()=>expect(save.mock.calls).toEqual([[{[key]:value}]]));
+ expect(await screen.findByRole('dialog')).toHaveTextContent(notice);expect(pref).not.toHaveBeenCalled();expect(field).toHaveValue(value);
+});
+it('shows a failed Account write and retains the draft for correction',async()=>{
+ vi.spyOn(backend,'setIdentity').mockImplementation(()=>createRun(async()=>({ok:false,error:'Invalid email.'})));
+ open('#/settings/account');const field=await screen.findByRole('textbox',{name:'Email'});fireEvent.change(field,{target:{value:'bad'}});fireEvent.blur(field);
+ expect(await screen.findByRole('alert')).toHaveTextContent('Invalid email.');expect(field).toHaveValue('bad');expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('uses settings identity rather than stale identity preferences',async()=>{
+ backend.prefs.set('identity:name','Stale name');open('#/settings/account');expect(await screen.findByRole('textbox',{name:'Name'})).toHaveValue(design.ME.name);
+});
+
+
+it('keeps the team display name separate from its command identifier',async()=>{
+ const status=await backend.status();if(!status.ok)throw new Error(status.error);
+ const team=status.value.teams[0];if(!team)throw new Error('Expected team');team.name='Acme Team';team.key='acme-key';
+ vi.spyOn(backend,'status').mockResolvedValue(status);
+ open('#/settings/teams');expect(await screen.findByText('Acme Team')).toBeInTheDocument();expect(document.querySelector('.terminal-hint .board-mono')?.textContent).toBe('npx -y terum-skills@latest team leave acme-key');
+});
+it('uses the status team display name on Account',async()=>{
+ const status=await backend.status();if(!status.ok)throw new Error(status.error);
+ const team=status.value.teams[0];if(!team)throw new Error('Expected team');team.name='Acme Team';team.key='acme-key';
+ vi.spyOn(backend,'status').mockResolvedValue(status);
+ open('#/settings/account');expect(await screen.findByText('Handle on Acme Team')).toBeInTheDocument();
+});
 it('renders team category strings without reading the catalog',async()=>{
  const status=await backend.status(),settings=await backend.settings();
  if(!status.ok||!settings.ok)throw new Error('mock data expected');

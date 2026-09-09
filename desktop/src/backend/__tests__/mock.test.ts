@@ -4,7 +4,7 @@ import { design } from '../mock/data';
 import type { Run, Frame } from '../types';
 afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();});
 async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
-it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true});expect((await b.library({scope:'Global'})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:'Global'});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
+it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true});expect((await b.library({scope:'Global'})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:'Global'});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
 it.each([
  ['library',"EACCES: permission denied, scandir '~/.terum/skills'"],
  ['skill',"ENOENT: no such file or directory, open '~/.claude/skills/deploy-check/SKILL.md'"],
@@ -79,6 +79,26 @@ it('reads skill refs from the configured remote, never project membership (CP-34
  for(const item of inbox.value)expect(item.skillRef).toBe(`${item.repo||design.TEAM_REPO}/${item.name}`);
 });
 
+
+it('writes identity in memory, returns the CLI shape and notifies only config',async()=>{
+ const b=createMockBackend();const listener=vi.fn();b.subscribe(listener);
+ const notice='This changes the author line (Ryan Liu <ryan@example.com>) that the next sync writes into the skills you have connected on this machine; skills you authored elsewhere keep their recorded author.';
+ expect(await b.setIdentity({name:'Ryan Liu',email:'ryan@example.com',defaultHandle:' Ryan '}).done).toEqual({ok:true,value:{updated:[{key:'name',value:'Ryan Liu'},{key:'email',value:'ryan@example.com'},{key:'default-handle',value:'ryan'}],notice}});
+ const settings=await b.settings();if(!settings.ok)throw new Error(settings.error);
+ expect(settings.value.ME).toEqual({...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login,name:'Ryan Liu',email:'ryan@example.com',default_handle:'ryan'});
+ const status=await b.status();if(!status.ok)throw new Error(status.error);expect(status.value.me).toEqual(settings.value.ME);
+ expect(listener.mock.calls).toEqual([['config']]);expect(localStorage.length).toBe(0);
+ expect((await createMockBackend().status()).value?.me).toEqual({...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login});
+});
+it('rejects invalid mock identity atomically',async()=>{
+ const b=createMockBackend();const before=await b.settings();const listener=vi.fn();b.subscribe(listener);
+ expect((await b.setIdentity({name:'Changed',email:''}).done).ok).toBe(false);
+ expect(await b.settings()).toEqual(before);expect(listener).not.toHaveBeenCalled();
+});
+it('returns CLI fixture versions and the complete update report', async () => {
+  const advice = ['Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'];
+  expect(await createMockBackend().update()).toEqual({ ok: true, value: { running: design.CLI_VERSION, latest: design.CLI_LATEST, observation: 'newer', launch: 'npx', description: `${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`, advice, lines: [`terum-skills ${design.CLI_VERSION}`, `Latest advertised release: ${design.CLI_LATEST}`, ...advice] } });
+});
 it('keeps a declined prune on the success path and emits the CLI line', async()=>{
  const run=createMockBackend().sync({prune:true});
  expect(await answerAll(run,()=>false)).toEqual({ok:true,value:{placed:[],removed:[]}});

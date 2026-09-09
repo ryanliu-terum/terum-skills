@@ -1,0 +1,88 @@
+{
+  "status": "complete",
+  "summary": "Implemented login --set and Account saves through the backend seam, preserving unrelated config bytes and returning the author-change notice. Recorded and replayed the real fixture write, documented CP-D1, and retained the S7k surface gates. Build and final lint, typecheck, and test runs passed.",
+  "filesChanged": [
+    {"path":"src/cli.ts","change":"modified","why":"Register repeatable --set without a default."},
+    {"path":"src/commands/login.ts","change":"modified","why":"Validate identity edits, avoid prompts/probes, and return updated fields and notice."},
+    {"path":"src/lib/auth.ts","change":"modified","why":"Extend the existing identity writer for partial updates."},
+    {"path":"src/lib/config.ts","change":"modified","why":"Preserve untouched config bytes through the existing locked writer."},
+    {"path":"src/commands/__tests__/login.test.ts","change":"modified","why":"Test validation, atomicity, byte preservation, and notice ordering."},
+    {"path":"src/__tests__/cli.test.ts","change":"modified","why":"Verify option registration and exact forwarded arguments."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"Document identity editing and CP-D1 closure."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Declare identity write types and document team name/key distinction."},
+    {"path":"desktop/src/backend/Backend.ts","change":"modified","why":"Add Backend.setIdentity."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Map login --set results and emit config invalidation."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Implement validated in-memory identity writes."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"Save Account fields through the seam, display notices, and distinguish team names from identifiers."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Test identity argv, mapping, failures, and invalidation."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"Verify exact mock results and atomic identity updates."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","change":"modified","why":"Test Account saves, notices, failures, and team name/key separation."},
+    {"path":"desktop/src/backend/tauri/__tests__/identity-replay.test.ts","change":"added","why":"Replay recorded identity/status frames and assert byte preservation."},
+    {"path":".planning/codex-runs/m7-S7c/fixture.sh","change":"added","why":"Reproduce the fixture using this worktree's CLI."},
+    {"path":".planning/codex-runs/m7-S7c/config-before.json","change":"added","why":"Preserve the original fixture config for comparison."},
+    {"path":".planning/codex-runs/m7-S7c/config-after.json","change":"added","why":"Record the identity-only config change."},
+    {"path":".planning/codex-runs/m7-S7c/frames/status-before.jsonl","change":"added","why":"Record status before the identity edit."},
+    {"path":".planning/codex-runs/m7-S7c/frames/login-set-name.jsonl","change":"added","why":"Record the real notice and updated result."},
+    {"path":".planning/codex-runs/m7-S7c/frames/status-after.jsonl","change":"added","why":"Record status after the identity edit."},
+    {"path":".planning/codex-runs/m7-S7c/proof.json","change":"added","why":"Record successful exits, frame sequences, and the byte comparison."}
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop lint exited 0.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop typecheck exited 0. Root build also exited 0.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": true,
+      "output": "Final: root 72 files, 1158 passed; desktop 52 files, 634 passed, 88 skipped. Initial concurrent runs: root 1156 passed/2 failed; desktop 628 passed/1 failed/88 skipped. A subsequent desktop run exposed a new test's nested-text matcher error, corrected before the final passing run.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [
+    {
+      "question": "What triggers an Account field save?",
+      "specSection": "§2 Settings Account",
+      "conservativeChoice": "Save changed fields on blur or Enter, retaining the existing layout."
+    },
+    {
+      "question": "What should legacy LoginResult fields contain without probing gh or requiring complete identity?",
+      "specSection": "§1 LoginResult",
+      "conservativeChoice": "Return gh:null and the existing handle or null; retain placeholders for missing author fields. Bare login returns updated:[] and notice:null."
+    },
+    {
+      "question": "How should repeated assignments to the same key behave?",
+      "specSection": "§1 Repeatable --set",
+      "conservativeChoice": "The last assignment wins; updated preserves the supplied order and normalized values."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "Final test runs used --maxWorkers=2.",
+      "why": "Concurrent default runs encountered existing concurrency-test failures and a dialog timeout. No test deadlines, assertions, or skips were weakened."
+    }
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Account uses Backend.setIdentity; CLI spawning remains inside the backend adapter."},
+    {"number":2,"howSatisfied":"Added no flags and kept real status/settings surfaces gated for S7k."},
+    {"number":5,"howSatisfied":"Reused existing fields and popup components without changing styles or generated assets."},
+    {"number":7,"howSatisfied":"Added regression coverage and updated existing expectations only for the new contract."},
+    {"number":8,"howSatisfied":"Ran required gates, verified writes by reading them back, and used no repository git, network, installs, or Playwright."}
+  ],
+  "testsModified": [
+    {"path":"src/commands/__tests__/login.test.ts","whatChanged":"Extended two strict result expectations and added --set tests.","justification":"LoginResult now includes updated and notice; new behavior requires validation and byte-preservation coverage."},
+    {"path":"src/__tests__/cli.test.ts","whatChanged":"Updated login stubs, changed the no-options assertion to exactly --set, and added forwarding coverage.","justification":"The accepted CLI surface changed; --team rejection remains enforced."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Added identity adapter tests.","justification":"Verify exact argv, result mapping, and config-only invalidation."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","whatChanged":"Added strict identity-write tests.","justification":"Verify in-memory persistence and atomic validation."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","whatChanged":"Added Account and team-name tests; corrected a new assertion to compare exact container text across nested spans.","justification":"Verify seam calls, returned notices, failures, and name/key separation without weakening existing tests."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Blur/Enter matches the intended Account save interaction; the spec does not define the trigger."
+}
