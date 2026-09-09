@@ -480,7 +480,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/lib/teamRepo.ts",
     "line": 486,
     "policy": "not-a-hint",
-    "pattern": "if ((error as NodeJS.ErrnoException).code === 'ELOCKED') throw new CloneBusy(`Another terum-skills operation holds the write lock on ${options.label ?? clone}; retry when it finishes.`);"
+    "pattern": "if ((error as NodeJS.ErrnoException).code === 'ELOCKED') throw new CloneBusy(`Another terum-skills operation holds the write lock on ${options.label ?? root}; retry when it finishes.`);"
   },
   {
     "file": "src/lib/update.ts",

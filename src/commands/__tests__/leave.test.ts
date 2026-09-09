@@ -55,6 +55,18 @@ describe('team leave (§6)', () => {
     expect(await readFile(lock, 'utf8')).toBe(record);
   });
 
+  it('a clone another operation is writing to fails leave with the classified busy message, not proper-lockfile\'s raw error', async () => {
+    const { store } = await prepared();
+    const release = await holdCloneLock(store.teamClone('team'));
+    try {
+      const result = await run({ name: 'team', config: store }, new ScriptedPrompter([], [true]));
+      expect(result).toMatchObject({ ok: false, error: `Another terum-skills operation holds the write lock on ${store.teamClone('team')}; retry when it finishes.` });
+      // The clone and the binding survive: the teardown stopped at the busy lock, so a retry can finish the leave.
+      await expect(access(store.teamClone('team'))).resolves.toBeUndefined();
+      expect(Object.keys((await store.read()).teams)).toEqual(['team']);
+    } finally { await release(); }
+  });
+
   it('does nothing when declined, quarantines edits, and then becomes idempotently unconfigured', async () => {
     const { store, placed } = await prepared();
     await expect(run({ name: 'team', config: store }, new ScriptedPrompter([], [false]))).resolves.toMatchObject({ ok: false, error: 'Leave was cancelled.' });
