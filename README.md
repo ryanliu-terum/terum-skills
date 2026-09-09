@@ -64,7 +64,8 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `login` | Check `gh` and record your name, email, and handle |
 | | `team create` / `team join` / `team leave` / `team remove <handle>` | Manage the repo and its roster |
 | | `invite <github-user>…` | Grant repo access and print the join line |
-| | `ls [--local]` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
+| | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
+| | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
 | Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
 | | `install <ref>` / `uninstall-skill <ref>` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists) |
 | | `sync` | Pull, finish pending installs, mirror connected edits, refresh placed copies |
@@ -72,6 +73,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | Evals | `validate <path\|name>` | Deterministic safety and formatting checks, no model |
 | | `eval <skill>` | Run the skill's evals on your own Claude Code login; `--commit` files a receipt |
 | Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
+| | `app` | Install and open the desktop app for this CLI version |
 
 `npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option.
 
@@ -180,17 +182,21 @@ CI never runs a model and never holds an API key; every eval token is a member's
 - **Global:** `npm install -g terum-skills`. If `terum-skills: command not found`, add `$(npm prefix -g)/bin` (the prefix itself on Windows) to PATH.
 - **Project-local:** `npm install terum-skills` puts the binary under `node_modules/.bin`; run it as `npx terum-skills …` from that folder.
 - **Update:** `terum-skills update` prints this copy's version, the newest advertised release, and the exact command that updates *this* copy. It never runs a package manager. `npx -y terum-skills@latest` fetches the newest release every run and updates nothing else.
-- **Uninstall:** `terum-skills uninstall` removes every team from this machine (placed skills, clones, cache), the session-start hook, the `/terum-skills` Claude Code skill it placed, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill.
+- **Uninstall:** `terum-skills uninstall` removes every team from this machine (placed skills, clones, cache), the session-start hook, the `/terum-skills` Claude Code skill it placed, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`) and local eval runs (`evals/`); it also removes the downloaded desktop app bundle (`app/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill.
 
 Release notices appear last on stderr, at most once per release per day, and are suppressed in CI, when stderr is piped, or when `NO_UPDATE_NOTIFIER` or `TERUM_SKILLS_NO_UPDATE_NOTIFIER` is set. Version checks read git tags from this repository only, never the npm registry, and only when a configured team is on GitHub.
 
 ## Desktop app (preview)
 
-`desktop/` holds the desktop frontend: a Vite + React app that today runs in a browser on a mock backend and
-renders every screen of the design, ahead of its Tauri shell. It has its own package, lockfile and gates
-(`cd desktop && npm install && npm run dev`, then open `http://localhost:1420/#/library/global`); nothing in it
-ships in the npm package. `desktop/GAPS.md` lists what the drawn screens need from the CLI that it does not
-have yet.
+`terum-skills app` installs and opens the desktop app for the running CLI version, downloading the bundle
+through `gh` when needed. The shipped Tauri shell drives the CLI over JSON frames; it records the CLI's
+location on launch. The boards render real data as M7 lands, with unavailable read models reported explicitly.
+Browser development still uses the mock backend. The app bundle is separate from the npm package.
+
+Every app-spawned CLI child, including under `tauri dev`, has piped stderr and
+`TERUM_SKILLS_NO_UPDATE_NOTIFIER=1`; `--frames` forces `noUpdateCheck`, and `update` is registered with
+`notices: false`. Background terminal release notices are therefore suppressed in the app. Explicit update
+checks still return release observations and installation-specific advice; the app has no update channel yet.
 
 ## Releasing (maintainers)
 

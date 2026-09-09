@@ -80,11 +80,11 @@ it.each([true, false])('maps every search field and leaves description empty (op
   expect(result).toEqual({ ok: true, value: [{ kind: 'skill', ref: metadata ? 'acme/a' : 'a', name: 'a', description: '', team: metadata ? 'acme' : null, author: hit.author, category: 'ops', installs: 0, latest: 'abc', unresolved: false, endorsed: metadata ? 'global' : null }] });
 });
 
-it('advertises no real read surfaces while all ten remain typed gaps', async () => {
+it('advertises the served update surface while the other nine remain typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ status: false, settings: false, onboarding: false, library: false, skill: false, receipts: false, inbox: false, catalog: false, roster: false, update: false });
-  for (const result of await Promise.all([b.status(), b.settings(), b.onboarding(), b.library({ scope: 'Global' }), b.skill({ ref: 'a' }), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox(), b.catalog(), b.roster(), b.update()])) {
+  expect(await b.surfaces()).toEqual({ status: false, settings: false, onboarding: false, library: false, skill: false, receipts: false, inbox: false, catalog: false, roster: false, update: true });
+  for (const result of await Promise.all([b.status(), b.settings(), b.onboarding(), b.library({ scope: 'Global' }), b.skill({ ref: 'a' }), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox(), b.catalog(), b.roster()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }
   expect(f.spawns).toHaveLength(0);
@@ -143,4 +143,18 @@ describe('read-only calls preserve spawn rejection', () => {
     expect(bridge.write).not.toHaveBeenCalled();
     expect(bridge.kill).not.toHaveBeenCalled();
   });
+});
+
+const updateReport = { running: '0.1.6', latest: '0.2.0', observation: 'newer', launch: 'local', description: 'Observed release 0.2.0', advice: ['If managed with npm, run in /work:', '  npm install --save-dev terum-skills@latest'], lines: ['terum-skills 0.1.6', '  npm install --save-dev terum-skills@latest'] };
+it('maps the complete update report and preserves advice verbatim', async () => {
+  const f = replay(updateReport, true, updateReport.lines);
+  expect(await createTauriBackend(f.bridge).update()).toEqual({ ok: true, value: updateReport });
+  expect(f.spawns[0]?.args).toEqual(['update']);
+});
+it('preserves null versions for an unprobed update', async () => {
+  const report = { ...updateReport, running: null, latest: null, observation: 'unknown' };
+  expect(await createTauriBackend(replay(report).bridge).update()).toEqual({ ok: true, value: report });
+});
+it.each([{ ...updateReport, unexpected: true }, { ...updateReport, advice: undefined }, { ...updateReport, launch: 'invented' }])('rejects an invalid or widened update payload', async report => {
+  expect((await createTauriBackend(replay(report).bridge).update()).ok).toBe(false);
 });

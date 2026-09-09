@@ -3,7 +3,7 @@ import { openPath } from '@tauri-apps/plugin-opener';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
-import type { Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
+import type { Capabilities, UpdateAdvice, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { abbreviateHome } from '../paths';
@@ -29,6 +29,8 @@ const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(
 const cliEval = z.object({ name: z.string() }).passthrough();
 const cliValidate = z.object({ name: z.string(), findings: z.number(), warnings: z.number() });
 const cliSearch = z.array(z.object({ team: z.string().optional(), endorsed: z.string().optional(), id: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), unresolved: z.boolean() }).passthrough());
+
+const cliUpdate = z.strictObject({ running: z.string().nullable(), latest: z.string().nullable(), observation: z.enum(['newer', 'same', 'older', 'unknown']), launch: z.enum(['global', 'local', 'npx', 'source', 'unknown']), description: z.string(), advice: z.array(z.string()), lines: z.array(z.string()) });
 
 const PREF = 'terum-skills-app:pref:';
 
@@ -69,10 +71,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const backend: Backend = {
     async capabilities(): Promise<Capabilities> {
       const platform = await bridge.hostPlatform().catch(() => 'unknown');
-      return { windowChrome: platform === 'macos' ? 'mac-overlay' : 'drawn-controls', disablePerMachine: false, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: false, openInEditor: true, clipboard: true };
+      return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: platform === 'macos' ? 'mac-overlay' : 'drawn-controls', disablePerMachine: false, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: false, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
-      return { status: false, settings: false, onboarding: false, library: false, skill: false, receipts: false, inbox: false, catalog: false, roster: false, update: false };
+      return { status: false, settings: false, onboarding: false, library: false, skill: false, receipts: false, inbox: false, catalog: false, roster: false, update: true };
     },
     // Read models the CLI cannot produce yet (GAPS.md): the drawn error boards render, nothing is invented.
     status: async () => gap('Team status in the design’s shape (machine, me, teams, counts)'),
@@ -98,8 +100,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? [args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role }), ['config', 'clone', 'placed']),
     eval: (args: EvalArgs) => run(['eval', args.ref, ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : [])], cliEval, (value): EvalResult => ({ name: value.name, receipt: null }), ['clone']),
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', args.ref || args.cwd || '', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : [])], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
-    // `update` prints its advice and returns no value; the printed lines are the advice. The seam wants numbers the CLI does not return.
-    update: async () => gap('Update advice as structured data'),
+    update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
     async openInEditor(path) { try { await openPath(path); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyToClipboard(text) { try { await writeText(text); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyImage(png) { try { await writeImage(await Image.fromBytes(new Uint8Array(await png.arrayBuffer()))); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },

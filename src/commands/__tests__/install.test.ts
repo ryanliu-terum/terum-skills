@@ -1,3 +1,4 @@
+import { getStartedLines } from '../../lib/invocation.js';
 import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -41,7 +42,7 @@ describe('install (§6 refs)', () => {
 
   it('says no team is configured — the one sentence every verb uses — for a bare ref on an unjoined machine, and refuses a missing member or project selector as a usage error', async () => {
     const store = createConfigStore(await temporaryDirectory());
-    expect(await run({ ref: 'sample', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No team is configured. Run `npx -y terum-skills@latest team join` first.' });
+    expect(await run({ ref: 'sample', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: getStartedLines(undefined).join('\n') });
     expect(await run({ kind: 'member', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a member handle: `npx -y terum-skills@latest install member <handle>`.' });
     expect(await run({ kind: 'project', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Provide a project name: `npx -y terum-skills@latest install project <name>`.' });
     // A handle is held to the handle rule before it can become a path segment: no traversal, and no path echoed back.

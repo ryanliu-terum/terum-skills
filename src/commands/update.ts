@@ -4,12 +4,14 @@ import { packageVersion } from '../lib/package.js';
 import type { Prompter } from '../lib/prompt.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { createReleaseState, describeUpdate, maintainReleaseState, ProbePolicy, probePolicy, ReleaseStateStore } from '../lib/update.js';
+import { compare, createReleaseState, describeUpdate, maintainReleaseState, ProbePolicy, probePolicy, ReleaseStateStore } from '../lib/update.js';
 
 export interface UpdateArgs { config?: ConfigStore; runner?: Runner; launch?: Launch; noUpdateCheck?: boolean; probe?: ProbePolicy; upstream?: string; state?: ReleaseStateStore; running?: string | null; now?: () => number; }
 
+export interface UpdateReport { running: string | null; latest: string | null; observation: 'newer' | 'same' | 'older' | 'unknown'; launch: Launch['kind']; description: string; advice: string[]; lines: string[]; }
+
 /** Exit 0 means advice was produced. Package managers are printed, never executed. */
-export async function run(args: UpdateArgs, io: Prompter): Promise<Result<void>> {
+export async function run(args: UpdateArgs, io: Prompter): Promise<Result<UpdateReport>> {
   try {
     const store = args.config ?? createConfigStore();
     const state = args.state ?? createReleaseState(store.root, args.upstream);
@@ -25,18 +27,21 @@ export async function run(args: UpdateArgs, io: Prompter): Promise<Result<void>>
     if (launch.kind === 'local' && !description.matches) lines.push(`Declared dependency of: ${launch.root}`);
     if (policy === 'nobody') lines.push('Release advertisements are not checked on this machine.');
     else if (result && !result.ok) lines.push(`Could not check release advertisements: ${result.error}`, `Last successful observation: ${observation ? observed : 'none'}`, 'npm availability was not checked.');
-    else if (description.matches || launch.kind === 'global' || launch.kind === 'local' || !observation) lines.push(`Latest advertised release: ${observed}`);
+    else lines.push(`Latest advertised release: ${observed}`);
     if (result?.ok && result.prereleases) lines.push('pre-release tags are not compared');
     const registry = description.registry;
     if (registry && description.registryNewer) lines.push(`Latest observed registry release: ${registry.version} (npx cache, ${registry.at})`);
+    const releaseDescription = lines.slice(launch.kind === 'local' && !description.matches ? 3 : 2).join('\n');
     if (description.matches && policy !== 'nobody' && result?.ok) lines.push('This copy matches the release advertisement. npm availability was not checked.');
     else lines.push(...advice(launch));
     for (const line of lines) io.print(line);
-    return success(undefined);
+    const latest = description.latest?.version ?? null;
+    const comparison = compare(latest, running);
+    return success({ running, latest, observation: comparison === null ? 'unknown' : comparison > 0 ? 'newer' : comparison < 0 ? 'older' : 'same', launch: launch.kind, description: releaseDescription, advice: advice(launch), lines });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
 }
 
-function advice(launch: Launch): string[] {
+export function advice(launch: Launch): string[] {
   switch (launch.kind) {
     case 'global': return ['If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'];
     case 'local': return [`If managed with npm, run in ${launch.root}:`, `  npm install ${launch.dependencyKind === 'devDependencies' ? '--save-dev ' : ''}terum-skills@latest`];

@@ -1,7 +1,8 @@
 import { chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createConfigStore } from '../config.js';
+import { getStartedLines } from '../invocation.js';
+import { createConfigStore, selectTeam } from '../config.js';
 import { emptyConfig } from '../schema.js';
 import { temporaryDirectory } from './fixtures.js';
 
@@ -140,4 +141,8 @@ describe('guarded config removal', () => {
     await store.update((c) => { c.teams.new = { remote: 'github.com/a/new', handle: 'me' }; });
     expect((await store.read()).teams.new).toEqual({ remote: 'github.com/a/new', handle: 'me' });
   });
+});
+
+it.each([undefined, 'bare'] as const)('uses the shared setup hints for zero teams (form=%s)', (form) => {
+  expect(() => selectTeam(emptyConfig().teams, undefined, form)).toThrow(getStartedLines(form).join('\n'));
 });

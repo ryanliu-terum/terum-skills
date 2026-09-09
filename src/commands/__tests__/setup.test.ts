@@ -525,6 +525,7 @@ describe('setup (§6.1)', () => {
     ]);
     expect(result.value.steps).toMatchObject({ invite: 'skipped', community: 'printed', wrapper: 'skipped' });
     expect(io.lines.join('\n')).toContain('The /terum-skills Claude Code skill is not bundled in this copy of terum-skills');
+    expect(COMMUNITY_URL).toBe('https://discord.gg/8tnRrxRM3Z');
     expect(io.lines).toContain(`Feedback and requests: ${COMMUNITY_URL}`);
     expect(io.lines.join('\n')).not.toMatch(/\bui\b/i);
     expect(io.lines).toContain('  npx -y terum-skills@latest eval <skill>             — evaluate a shared skill locally before publishing');

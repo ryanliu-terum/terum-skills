@@ -1,3 +1,4 @@
+import { getStartedLines } from '../../lib/invocation.js';
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -10,7 +11,7 @@ import { systemRunner } from '../../lib/runner.js';
 
 describe('uninstall (§6 pending)', () => {
   it('says no team is configured for a bare ref on an unjoined machine, refuses a missing member or project selector as a usage error, and does not take an inherited key for a project', async () => {
-    expect(await run({ ref: 'sample', config: createConfigStore(await temporaryDirectory()) }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No team is configured. Run `npx -y terum-skills@latest team join` first.' });
+    expect(await run({ ref: 'sample', config: createConfigStore(await temporaryDirectory()) }, new ScriptedPrompter())).toMatchObject({ ok: false, error: getStartedLines(undefined).join('\n') });
     const fixture = await bareTeam();
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));

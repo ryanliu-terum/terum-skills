@@ -45,6 +45,10 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     await exists(backups); // Inventory also surfaces an unreadable backup directory before confirmation.
     const configPath = join(store.root, 'config.json');
     const kept: string[] = [];
+    const app = join(store.root, 'app');
+    const appPresent = await exists(app);
+    const evals = join(store.root, 'evals');
+    const evalsPresent = await exists(evals);
 
     io.print('terum-skills will be removed from this machine.');
     io.print(`  Teams (${bindings.length})${bindings.length ? `: ${bindings.map(([name, binding]) => `${name} (${stripRemoteCredentials(binding.remote)}, ${binding.handle === null ? 'no handle' : `handle ${binding.handle}`})`).join(', ')}` : ''}`);
@@ -57,10 +61,12 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     io.print(`  ${hookPresent ? 'Session-start hook in' : 'No session hook in'} ${options.settingsFile}`);
     if (wrapperPresence.kind === 'foreign') io.print(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (${wrapperPresence.why}); left alone`);
     else io.print(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);
+    if (appPresent) io.print(`  Downloaded desktop app bundle at ${app} (all versions)`);
     io.print(`  ${configPath}`);
-    io.print(`Kept: ${quarantineCount ? `${quarantine} (${quarantineCount} items), ` : ''}${backups} (settings backups and a record of this uninstall)`);
+    io.print(`Kept: ${quarantineCount ? `${quarantine} (${quarantineCount} items), ` : ''}${backups} (settings backups and a record of this uninstall)${evalsPresent ? `, ${evals} (eval runs and transcripts)` : ''}`);
     if (quarantineCount) kept.push(quarantine);
     kept.push(backups);
+    if (evalsPresent) kept.push(evals);
     if (shared.length) io.print(`Connected-skill sources stay where they are: ${shared.map(({ source }) => `${basename(source)}: ${source}`).join(', ')}`);
     io.print('Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
     io.print('The package itself is not removed by this command; the last line tells you how.');
@@ -132,8 +138,8 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     if (configRemoved) io.print(`Removed ${configPath}.`);
 
     let directoryFailure: string | undefined;
-    for (const path of ['run', 'cache', 'teams', 'quarantine'].map((name) => join(store.root, name)).concat(store.root)) {
-      try { await fsForTests.rmdir(path); }
+    for (const path of ['app', 'run', 'cache', 'teams', 'quarantine'].map((name) => join(store.root, name)).concat(store.root)) {
+      try { if (path === app) await fsForTests.rm(path, { recursive: true, force: true }); else await fsForTests.rmdir(path); }
       catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code === 'ENOENT') continue;

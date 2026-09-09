@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { getStartedLines } from '../../lib/invocation.js';
 import { createConfigStore, selectTeam } from '../../lib/config.js';
 import { creatorAuthenticationError } from '../../lib/auth.js';
 import { guardRawPush } from '../../lib/guard.js';
@@ -27,7 +28,7 @@ describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (f
   const prefix = form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest';
   it('routes no-team, not-joined, selector, eval, authentication and workflow remedies', async () => {
     const config = createConfigStore(join(await temporaryDirectory(), 'state'));
-    expect(() => selectTeam({}, undefined, form)).toThrow(`Run \`${prefix} team join\` first.`);
+    expect(() => selectTeam({}, undefined, form)).toThrow(getStartedLines(form).join('\n'));
     await expect(teamForReference(await config.read(), undefined, 'github.com/acme/team', undefined, form)).rejects.toThrow(`run \`${prefix} team join 'acme/team'\` first.`);
     for (const kind of ['member', 'project'] as const) {
       const grammar = kind === 'member' ? 'member <handle>' : 'project <name>';
