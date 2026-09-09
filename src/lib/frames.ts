@@ -41,9 +41,18 @@ export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: false, perCase: false, progress: false,
 });
 
-/** A failing Result whose error is one of the CLI's decline messages: the person said no, nothing broke. */
-export function isDecline(error: string): boolean {
-  return /\bdeclined\b/i.test(error);
+export const COMMANDER_NON_ERRORS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);
+
+/** Longest leading verb name; options and the operand separator end the prefix. */
+export function attemptedVerb(operands: readonly string[]): string {
+  let prefix = '';
+  let verb: string | undefined;
+  for (const operand of operands) {
+    if (operand.startsWith('-')) break;
+    prefix = prefix ? `${prefix} ${operand}` : operand;
+    if (FRAME_VERBS.some((candidate) => candidate === prefix)) verb = prefix;
+  }
+  return verb || operands[0] || 'terum-skills';
 }
 
 export interface FrameStreams {
@@ -53,7 +62,7 @@ export interface FrameStreams {
   diagnostic?(line: string): void;
 }
 
-export interface ResultOutcome { verb: string; ok: boolean; error?: string; value?: unknown; exitCode: 0 | 1; }
+export interface ResultOutcome { verb: string; ok: boolean; error?: string; cancelled?: true; value?: unknown; exitCode: 0 | 1; }
 
 export interface FrameChannel {
   /** The Prompter a verb is handed: questions become `ask` frames, `print` becomes `print` frames. */
@@ -170,7 +179,8 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
     hello(version) { writeFrame(output, { t: 'hello', protocol: FRAME_PROTOCOL, version, verbs: FRAME_VERBS, features: FRAME_FEATURES }); },
     result(outcome) {
       const frame: ResultFrame = { t: 'result', verb: outcome.verb, ok: outcome.ok, exitCode: outcome.exitCode };
-      if (outcome.error !== undefined) { frame.error = outcome.error; if (isDecline(outcome.error)) frame.declined = true; }
+      if (outcome.error !== undefined) frame.error = outcome.error;
+      if (outcome.cancelled === true) frame.declined = true;
       if (outcome.value !== undefined) frame.value = outcome.value;
       writeFrame(output, frame);
       // The run is over: stop holding stdin open so the process can exit without the shell closing the

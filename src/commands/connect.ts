@@ -9,7 +9,7 @@ import { assertNotInsideStateRoot, assertSkillDirectory, printable, scanSkillFol
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
 import { Prompter } from '../lib/prompt.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, CancelledError, failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
 import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
@@ -153,7 +153,7 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
   } catch (error) {
     // `--keep-source` refusals surface here directly; connectOne reports its own before wrapping.
     if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment);
-    return failure(error instanceof Error ? error.message : String(error));
+    return fromError(error instanceof ConnectStepError && error.cause instanceof CancelledError ? error.cause : error);
   }
 }
 
@@ -200,7 +200,7 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
     io.print(`Will add:\nlicense: ${teamDoc.policy.skill_license}\nmetadata.id: ${id}\nmetadata.author: ${author}${categoryLine}`);
     if (!(await io.confirm(`Connect ${name}?`))) {
       recoverable = true;
-      throw new Error('Connect was declined.');
+      throw new CancelledError('Connect was declined.');
     }
     phase = 'source-mutated';
     await writeFile(join(source, 'SKILL.md'), updated, 'utf8');
@@ -379,7 +379,7 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
   return { id, name: record.name, reconciled: true };
 }
 async function forget(store: ConfigStore, id: string, io: Prompter): Promise<undefined> {
-  if (!(await io.confirm(`Forget local tracking for ${id}? The repository copy remains.`))) throw new Error('Forget was declined.');
+  if (!(await io.confirm(`Forget local tracking for ${id}? The repository copy remains.`))) throw new CancelledError('Forget was declined.');
   await store.update((config) => { delete config.shared[id]; });
   return undefined;
 }

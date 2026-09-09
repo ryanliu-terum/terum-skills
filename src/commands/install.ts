@@ -8,7 +8,7 @@ import type { WrapperOptions } from '../lib/wrapper.js';
 import { inspect, lockTarget, moveToQuarantine, place, quarantineDrift, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { normalizeRemote } from '../lib/remote.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, CancelledError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { Config, Team, describeRaw, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
@@ -74,7 +74,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       return bootstrapped.value.team;
     });
     return success([await installOne({ team, reference: reference.name, version: reference.version, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 /** Shared by team join and sync: exactly one install/consent/placement path. */
@@ -145,14 +145,14 @@ export async function installOne(input: { team: string; reference?: string; id?:
 async function ensureConsent(store: ConfigStore, skill: SkillRecord, io: Prompter): Promise<void> {
   if (!skill.grants.ok) {
     io.print(`allowed-tools for ${skill.name} could not be parsed: ${describeRaw(skill.grants.raw)}`);
-    if (!(await io.confirm(`Install ${skill.name} despite malformed allowed-tools?`))) throw new Error(`Consent was declined for malformed allowed-tools on ${skill.name}.`);
+    if (!(await io.confirm(`Install ${skill.name} despite malformed allowed-tools?`))) throw new CancelledError(`Consent was declined for malformed allowed-tools on ${skill.name}.`);
     return;
   }
   if (skill.grants.normalized === 'none') return;
   const config = await store.read();
   if (config.approvals[skill.id]?.grants === skill.grants.hash) return;
   io.print(`${skill.name} requests allowed-tools:\n${skill.grants.normalized}`);
-  if (!(await io.confirm(`Approve these tools for ${skill.name}?`))) throw new Error(`Consent was declined for ${skill.name}.`);
+  if (!(await io.confirm(`Approve these tools for ${skill.name}?`))) throw new CancelledError(`Consent was declined for ${skill.name}.`);
   await store.update((fresh) => { fresh.approvals[skill.id] = { grants: skill.grants.ok ? skill.grants.hash : '', approved_at: new Date().toISOString().slice(0, 10) }; });
 }
 

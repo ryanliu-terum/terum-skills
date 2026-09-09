@@ -8,7 +8,7 @@ import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { ghState } from '../lib/auth.js';
 import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, isGitHubRemote, stripRemoteCredentials } from '../lib/remote.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, CancelledError, failure, Result, success } from '../lib/result.js';
 import { parseJson, parseSkillFrontmatter, Team, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { findSkill, readTeam } from '../lib/skills.js';
@@ -81,7 +81,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
 
     if (teamJson.policy.publish === 'push') {
       printCard(record, scopeLabel, io);
-      if (!(await io.confirm(`Publish ${record.name} to ${team} (${scopeLabel})?`))) throw new Error('Publish was cancelled.');
+      if (!(await io.confirm(`Publish ${record.name} to ${team} (${scopeLabel})?`))) throw new CancelledError('Publish was cancelled.');
     }
 
     const repo = openTeamRepo(clone, binding.remote, runner);
@@ -143,7 +143,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     return success({ ...base, changed: true, branch, prUrl: null, compareUrl });
   } catch (error) {
     if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment);
-    return failure(error instanceof Error ? error.message : String(error));
+    return fromError(error);
   }
 }
 

@@ -90,9 +90,10 @@ describe('machine uninstall', () => {
   it('cancels without writing when declined or the prompt channel is closed', async () => {
     for (const confirms of [[false], []]) {
       const { store, hook, placements } = await prepared(); const before = await readFile(join(store.root, 'config.json'), 'utf8');
-      const error = confirms.length ? 'Uninstall was cancelled.' : new PromptClosedError('Remove terum-skills from this machine?', 'closed').message;
+      const declined = confirms.length > 0;
+      const error = declined ? 'Uninstall was cancelled.' : new PromptClosedError('Remove terum-skills from this machine?', 'closed').message;
       const result = await run({ config: store, hook }, new ScriptedPrompter([], confirms));
-      expect(result).toEqual({ ok: false, error });
+      expect(result).toEqual({ ok: false, error, ...(declined ? { cancelled: true } : {}) });
       await gone(hook.backupDir); await expect(access(store.teamClone('team'))).resolves.toBeUndefined(); await expect(access(placements[0]!)).resolves.toBeUndefined();
       expect(await readFile(join(store.root, 'config.json'), 'utf8')).toBe(before);
     }

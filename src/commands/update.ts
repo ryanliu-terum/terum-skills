@@ -2,7 +2,7 @@ import { ConfigStore, createConfigStore } from '../lib/config.js';
 import type { Launch } from '../lib/launch.js';
 import { packageVersion } from '../lib/package.js';
 import type { Prompter } from '../lib/prompt.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { compare, createReleaseState, describeUpdate, maintainReleaseState, ProbePolicy, probePolicy, ReleaseStateStore } from '../lib/update.js';
 
@@ -38,7 +38,7 @@ export async function run(args: UpdateArgs, io: Prompter): Promise<Result<Update
     const latest = description.latest?.version ?? null;
     const comparison = compare(latest, running);
     return success({ running, latest, observation: comparison === null ? 'unknown' : comparison > 0 ? 'newer' : comparison < 0 ? 'older' : 'same', launch: launch.kind, description: releaseDescription, advice: advice(launch), lines });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 export function advice(launch: Launch): string[] {

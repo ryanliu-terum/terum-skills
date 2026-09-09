@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { receiptSchema, Receipt } from '../lib/evals/receipt.js';
 import { verdictBand } from '../lib/evals/stats.js';
 import { Prompter } from '../lib/prompt.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { teamSchema } from '../lib/schema.js';
 import { readTeam, skillRecords } from '../lib/skills.js';
@@ -41,7 +41,7 @@ export async function run(args: ReceiptCheckArgs, io: Prompter): Promise<Result<
     }
     if (failures.length) return failure(`Receipt check failed:\n${failures.join('\n')}`, { endorsed, checked: endorsed.length });
     return success({ endorsed, checked: endorsed.length });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 /** Per-scope diff: adding an already-project-endorsed skill to global (or another project) is
