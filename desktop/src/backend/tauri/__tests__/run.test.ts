@@ -232,6 +232,23 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     const asking = createTauriBackend(fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'ask', id: 'q1', kind: 'confirm', question: 'Really?' }) }); }).bridge);
     expect(await asking.search({ q: 'x' })).toEqual({ ok: false, error: expect.stringContaining('asked "Really?" during a read-only call') });
   });
+  it.each([false, true])('uninstall notifies only when the result carries changes (cancelled=%s)', async cancelled => {
+    const f = fakeBridge((_args, emit) => {
+      emit({ kind: 'stdout', line: line({ t: 'result', verb: 'uninstall-skill', ok: false, exitCode: 1, error: cancelled ? 'Remove was declined.' : 'push refused', ...(cancelled ? { declined: true } : { value: [{ id: 'a', team: 't', removed: 1 }] }) }) });
+      emit({ kind: 'exit', code: 1 });
+    });
+    const backend = createTauriBackend(f.bridge), seen = vi.fn();
+    backend.subscribe(seen);
+    const result = await backend.uninstallSkill({ ref: 'product', kind: 'project', project: 'product', team: 't' }).done;
+    expect(f.spawns[0]?.args).toEqual(['uninstall-skill', '--team', 't', '--', 'project', 'product']);
+    expect(result).toEqual(cancelled ? { ok: false, error: 'Remove was declined.', cancelled: true } : { ok: false, error: 'push refused', value: [{ id: 'a', name: 'a' }] });
+    expect(seen.mock.calls).toEqual(cancelled ? [] : [['config'], ['placed']]);
+  });
+  it('routes member removal through a single member command', async () => {
+    const f = fakeBridge(ok('uninstall-skill', []));
+    expect(await createTauriBackend(f.bridge).uninstallSkill({ ref: 'seed', kind: 'member', member: 'seed' }).done).toEqual({ ok: true, value: [] });
+    expect(f.spawns[0]?.args).toEqual(['uninstall-skill', '--', 'member', 'seed']);
+  });
   it('subscribe is notified after a successful run and not after a failure', async () => {
     const f = fakeBridge(ok('sync', { placed: 1, deferred: [] }));
     const backend = createTauriBackend(f.bridge);

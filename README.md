@@ -69,7 +69,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
 | | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
 | Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
-| | `install <ref>` / `uninstall-skill <ref>` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists) |
+| | `install <ref>` / `uninstall-skill <ref>` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |
 | | `sync` | Pull, finish pending installs, mirror connected edits, refresh placed copies |
 | | `publish <skill>` | Endorse a skill for the team: a PR (default policy) or a direct commit |
 | Evals | `validate <path\|name>` | Deterministic safety and formatting checks, no model |

@@ -1,4 +1,7 @@
 import { getStartedLines } from '../../lib/invocation.js';
+import { PassThrough } from 'node:stream';
+import { frameChannel } from '../../lib/frames.js';
+import { type NonInteractivePrompter } from '../../lib/prompt.js';
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,7 +9,7 @@ import { run, ledgerScopes } from '../uninstall.js';
 import { run as install } from '../install.js';
 import { run as sync } from '../sync.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter as NonTtyPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 
 describe('uninstall (§6 pending)', () => {
@@ -36,7 +39,7 @@ describe('uninstall (§6 pending)', () => {
     });
     expect((await install({ ref: 'team/sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
     // `install team/sample --team other` installs team's copy; the inverse must not delete other's.
-    expect(await run({ ref: 'team/sample', team: 'other', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: true, value: [{ id, team: 'team', removed: 1 }] });
+    expect(await run({ ref: 'team/sample', team: 'other', config: store, home }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true, value: [{ id, team: 'team', removed: 1 }] });
     expect((await store.read()).placements).toEqual({});
   });
 
@@ -58,7 +61,9 @@ describe('uninstall (§6 pending)', () => {
       config.placements[join(home, '.claude', 'skills', 'second')] = { id: second, team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:second' };
     });
     const commitsBefore = Number((await git(['rev-list', '--count', 'main'], fixture.bare)).trim());
-    const result = await run({ kind: 'member', member: 'seed', team: 'team', config: store, home }, new ScriptedPrompter());
+    const io = new ScriptedPrompter([], [true]);
+    const result = await run({ kind: 'member', member: 'seed', team: 'team', config: store, home }, io);
+    expect(io.asked).toEqual(['Remove everything you installed (2 skills)?']);
     expect(result).toMatchObject({ ok: true, value: [{ id: first }, { id: second }] });
     expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
     // One write for the whole member, not one push per skill (M2 review 4b, D9 sweep).
@@ -80,13 +85,21 @@ describe('uninstall (§6 pending)', () => {
     const rejecting = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'push'
       ? { code: 1, stdout: '', stderr: ' ! [rejected] HEAD -> main (non-fast-forward)' }
       : next());
-    const interrupted = await run({ ref: 'sample', team: 'team', config: store, runner: rejecting, safeWrite: { deadlineMs: 1, now: () => clock, sleep: async () => { clock = 2; } } }, new ScriptedPrompter());
-    expect(interrupted.ok).toBe(false);
+    const interrupted = await run({ ref: 'sample', team: 'team', config: store, runner: rejecting, safeWrite: { deadlineMs: 1, now: () => clock, sleep: async () => { clock = 2; } } }, new ScriptedPrompter([], [true]));
+    expect(interrupted).toMatchObject({ ok: false, error: 'safeWrite deadline exhausted after 2 attempt(s); the remote kept moving ahead: ! [rejected] HEAD -> main (non-fast-forward)', value: [{ id, team: 'team', removed: 1 }] });
+    expect(interrupted).not.toHaveProperty('cancelled');
+    const output = new PassThrough(); let frames = '';
+    output.on('data', (chunk) => { frames += String(chunk); });
+    frameChannel({ input: new PassThrough(), output }).result({ ...interrupted, verb: 'uninstall-skill', exitCode: 1 });
+    expect(JSON.parse(frames)).toMatchObject({ t: 'result', ok: false, value: [{ id, removed: 1 }] });
+    expect(JSON.parse(frames)).not.toHaveProperty('declined');
     const path = join(home, '.claude', 'skills', 'sample');
     await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await store.read()).placements).toEqual({});
     expect((await store.read()).pending).toHaveLength(1);
-    expect((await sync({ config: store }, new ScriptedPrompter())).ok).toBe(true);
+    const hookIo: NonInteractivePrompter & { lines: string[]; asked: string[] } = { interactive: false, lines: [], asked: [], print(line) { this.lines.push(line); } };
+    expect((await sync({ config: store, hook: true }, hookIo)).ok).toBe(true);
+    expect(hookIo.asked).toEqual([]);
     expect((await store.read()).pending).toEqual([]);
     expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
     await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -105,7 +118,7 @@ describe('uninstall (§6 pending)', () => {
     const rejecting = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'push'
       ? { code: 1, stdout: '', stderr: ' ! [rejected] HEAD -> main (non-fast-forward)' }
       : next());
-    expect((await run({ ref: 'sample', team: 'team', config: store, runner: rejecting, safeWrite: { deadlineMs: 1, now: () => clock, sleep: async () => { clock = 2; } } }, new ScriptedPrompter())).ok).toBe(false);
+    expect((await run({ ref: 'sample', team: 'team', config: store, runner: rejecting, safeWrite: { deadlineMs: 1, now: () => clock, sleep: async () => { clock = 2; } } }, new ScriptedPrompter([], [true]))).ok).toBe(false);
     expect((await store.read()).pending).toHaveLength(1);
     // The skill leaves the repository before this machine syncs: the replay needs only local state, so it still completes.
     await git(['fetch', '-q', 'origin'], fixture.seed); await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
@@ -127,7 +140,7 @@ describe('uninstall (§6 pending)', () => {
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const approved = (await store.read()).approvals[id];
-    expect((await run({ ref: 'sample', team: 'team', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'sample', team: 'team', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     expect(JSON.parse(await readFile(join(store.teamClone('team'), 'people', 'seed.json'), 'utf8')).declined).toContain(id);
     expect((await store.read()).approvals[id]).toEqual(approved);
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
@@ -157,7 +170,7 @@ describe('uninstall (§6 pending)', () => {
     const projectPath = join(checkout, '.claude', 'skills', 'projected');
     const personalPath = join(home, '.claude', 'skills', 'personal');
 
-    expect((await run({ ref: 'projected', team: 'team', config: store, home, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'projected', team: 'team', config: store, home, cwd: checkout }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const afterProject = JSON.parse(await readFile(join(store.teamClone('team'), 'people', 'seed.json'), 'utf8'));
     expect(afterProject.declined).toContain(projectId);
     expect(afterProject.installed.map((entry: { id: string }) => entry.id)).not.toContain(projectId);
@@ -165,7 +178,7 @@ describe('uninstall (§6 pending)', () => {
     expect(Object.values((await store.read()).placements).some((entry) => entry.id === projectId)).toBe(false);
     expect((await store.read()).approvals[projectId]).toEqual(projectApproval);
 
-    expect((await run({ ref: 'personal', team: 'team', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'personal', team: 'team', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const afterPersonal = JSON.parse(await readFile(join(store.teamClone('team'), 'people', 'seed.json'), 'utf8'));
     expect(afterPersonal.declined).not.toContain(personalId);
     expect(afterPersonal.installed.map((entry: { id: string }) => entry.id)).not.toContain(personalId);
@@ -190,7 +203,7 @@ describe('uninstall (§6 pending)', () => {
     const globalPath = join(home, '.claude', 'skills', 'sample'); const projectPath = join(checkout, '.claude', 'skills', 'sample');
     // (The project key is git's realpath of the checkout — /private/var on macOS — so count, do not compare it.)
     expect(Object.keys((await store.read()).placements)).toHaveLength(2);
-    expect((await run({ kind: 'project', project: 'product', team: 'team', config: store, home, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ kind: 'project', project: 'product', team: 'team', config: store, home, cwd: checkout }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     await expect(access(projectPath)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(globalPath)).resolves.toBeUndefined();
     expect(Object.keys((await store.read()).placements)).toEqual([globalPath]);
@@ -218,7 +231,7 @@ describe('uninstall (§6 pending)', () => {
         if (entry.id === id && entry.scope.kind === 'project') Object.assign(entry.scope, { future_passthrough: 'kept' });
       }
     });
-    expect((await run({ ref: 'projected', team: 'team', config: store, home, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'projected', team: 'team', config: store, home, cwd: checkoutA }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     await expect(access(join(checkoutA, '.claude', 'skills', 'projected'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(join(checkoutB, '.claude', 'skills', 'projected'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await store.read()).placements).toEqual({});
@@ -237,14 +250,14 @@ describe('uninstall (§6 pending)', () => {
     for (const store of [storeA, storeB]) await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ ref: 'sample', config: storeA, home: homeA }, new ScriptedPrompter())).ok).toBe(true);
     await git(['pull', '--ff-only'], cloneB);
-    const onB = new ScriptedPrompter();
+    const onB = new ScriptedPrompter([], [true]);
     expect((await run({ ref: 'team/sample', config: storeB, home: homeB }, onB)).ok).toBe(true);
     expect(onB.lines.join('\n')).toContain('not placed on this machine');
     expect((await storeB.read()).placements).toEqual({});
     expect(JSON.parse(await readFile(join(cloneB, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
     await expect(access(join(homeA, '.claude', 'skills', 'sample'))).resolves.toBeUndefined();
     // A's clone still has its pre-B record, so it proves the locally-owned folder is removable.
-    expect((await run({ ref: 'team/sample', config: storeA, home: homeA }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'team/sample', config: storeA, home: homeA }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     await expect(access(join(homeA, '.claude', 'skills', 'sample'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(JSON.parse(await readFile(join(cloneA, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
   });
@@ -257,7 +270,7 @@ describe('uninstall (§6 pending)', () => {
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
-    expect((await run({ ref: 'team/sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'team/sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).declined).not.toContain(id);
     expect((await store.read()).placements).toEqual({});
   });
@@ -277,4 +290,97 @@ it('unions people scopes and matching ledger scopes without borrowing another te
     { kind: 'global' }, { kind: 'project', project: 'people-only' }, { kind: 'project', project: 'local' },
   ]);
   expect(await store.read()).toEqual(before);
+});
+
+async function projectPreviewFixture() {
+  const fixture = await bareTeam(), product = await bareTeam();
+  const ids = ['91919191-9191-4191-8191-919191919191', '92929292-9292-4292-8292-929292929292'];
+  for (const [index, name] of ['shared', 'projected'].entries()) await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${ids[index]}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+  await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: [product.bare], skills: ids } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }));
+  const store = createConfigStore(join(fixture.root, 'state')), home = join(fixture.root, 'home');
+  const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  const checkouts = await Promise.all(['a', 'b'].map(name => cloneWithIdentity(product.bare, join(product.root, name))));
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  expect((await install({ ref: 'shared', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+  for (const cwd of checkouts) expect((await install({ kind: 'project', project: 'product', config: store, home, cwd }, new ScriptedPrompter())).ok).toBe(true);
+  const before = await store.read();
+  const projectPaths = Object.entries(before.placements).filter(([, entry]) => entry.scope.kind === 'project').map(([path]) => path);
+  const title = "Remove product's 2 skills from this machine?";
+  const detail = ['Folders removed (4):', ...projectPaths.map(path => `  ${path}  ·  project product`), `Local changes are moved to ${join(store.root, 'quarantine')}, never deleted.`, 'Install records dropped from your people file (2): shared, projected', 'Not offered again until you install them: projected', 'These have no remaining install record, so sync stops placing them anywhere.', 'Copies installed to Global stay.'];
+  return { fixture, store, home, clone, checkouts, ids, before, projectPaths, title, detail, args: { kind: 'project' as const, project: 'product', config: store, home } };
+}
+
+it('previews a project once and declining writes nothing', async () => {
+  const f = await projectPreviewFixture(), io = new ScriptedPrompter([], [false]);
+  const people = await readFile(join(f.clone, 'people/seed.json'), 'utf8');
+  const commits = await git(['rev-list', '--count', 'main'], f.fixture.bare);
+  expect(await run(f.args, io)).toEqual({ ok: false, cancelled: true, error: 'Remove was declined.' });
+  expect(io.asked).toEqual([f.title]); expect(io.details[f.title]).toEqual(f.detail);
+  expect(await f.store.read()).toEqual(f.before);
+  expect(await readFile(join(f.clone, 'people/seed.json'), 'utf8')).toBe(people);
+  expect(await git(['rev-list', '--count', 'main'], f.fixture.bare)).toBe(commits);
+  for (const path of Object.keys(f.before.placements)) await expect(access(path)).resolves.toBeUndefined();
+});
+
+it('confirms every project path across two checkouts, keeps global, and commits once', async () => {
+  const f = await projectPreviewFixture(), io = new ScriptedPrompter([], [true]);
+  const commits = Number(await git(['rev-list', '--count', 'main'], f.fixture.bare));
+  expect((await run(f.args, io)).ok).toBe(true);
+  expect(io.asked).toEqual([f.title]); expect(io.details[f.title]).toEqual(f.detail);
+  const globalPath = join(f.home, '.claude/skills/shared');
+  expect(io.details[f.title]?.join('\n')).not.toContain(globalPath);
+  expect(Object.keys((await f.store.read()).placements)).toEqual([globalPath]);
+  await expect(access(globalPath)).resolves.toBeUndefined();
+  for (const path of f.projectPaths) await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' });
+  const caller = JSON.parse(await readFile(join(f.clone, 'people/seed.json'), 'utf8'));
+  expect(caller.installed).toEqual([expect.objectContaining({ id: f.ids[0], scope: { kind: 'global' } })]);
+  expect(caller.declined).toEqual([f.ids[1]]);
+  expect((await f.store.read()).pending).toEqual([]);
+  expect(Number(await git(['rev-list', '--count', 'main'], f.fixture.bare))).toBe(commits + 1);
+});
+
+it('fails closed at the non-interactive confirm before any project write', async () => {
+  const f = await projectPreviewFixture(), io = new NonTtyPrompter();
+  const people = await readFile(join(f.clone, 'people/seed.json'), 'utf8');
+  const commits = await git(['rev-list', '--count', 'main'], f.fixture.bare);
+  expect(await run(f.args, io)).toEqual({ ok: false, error: `Cannot ask "${f.title}": this command needs an interactive terminal (stdin is not a TTY).` });
+  expect(io.asked).toEqual([f.title]);
+  expect(await f.store.read()).toEqual(f.before);
+  expect(await readFile(join(f.clone, 'people/seed.json'), 'utf8')).toBe(people);
+  expect(await git(['rev-list', '--count', 'main'], f.fixture.bare)).toBe(commits);
+  for (const path of Object.keys(f.before.placements)) await expect(access(path)).resolves.toBeUndefined();
+});
+
+it('removes a member installed list and leaves authored-only skills untouched', async () => {
+  const fixture = await bareTeam();
+  const authored = '93939393-9393-4393-8393-939393939393', installed = '94949494-9494-4494-8494-949494949494';
+  for (const [name, id, author] of [['authored', authored, 'Member <member@example.com>'], ['used', installed, 'Seed <seed@example.com>']]) await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: ${author}\n  terum-category: testing\n---\n`);
+  await pushFromSeed(fixture.seed, 'people/member.json', JSON.stringify(person('member', { installed: [{ id: installed, scope: { kind: 'global' }, version: null, since: '2026-09-04' }] })));
+  const store = createConfigStore(join(fixture.root, 'state')), home = join(fixture.root, 'home');
+  const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  for (const ref of ['authored', 'used']) expect((await install({ ref, config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+  const io = new ScriptedPrompter([], [true]), title = "Remove member's 1 skills from this machine?";
+  expect(await run({ kind: 'member', member: 'member', config: store }, io)).toMatchObject({ ok: true, value: [{ id: installed, removed: 1 }] });
+  expect(io.asked).toEqual([title]);
+  expect(io.details[title]).toEqual(['Folders removed (1):', `  ${join(home, '.claude/skills/used')}  ·  Global`, `Local changes are moved to ${join(store.root, 'quarantine')}, never deleted.`, 'Install records dropped from your people file (1): used', "Targets are member's current installed list, not what you installed from them."]);
+  await expect(access(join(home, '.claude/skills/authored'))).resolves.toBeUndefined();
+  await expect(access(join(home, '.claude/skills/used'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(JSON.parse(await readFile(join(clone, 'people/seed.json'), 'utf8')).installed).toEqual([expect.objectContaining({ id: authored })]);
+  expect(JSON.parse(await readFile(join(clone, 'people/member.json'), 'utf8')).installed).toEqual([expect.objectContaining({ id: installed })]);
+});
+
+it.each(['member', 'project'] as const)('does not ask, print, or write for an empty %s preview', async kind => {
+  const fixture = await bareTeam();
+  await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: [], skills: ['95959595-9595-4595-8595-959595959595'] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }));
+  const store = createConfigStore(join(fixture.root, 'state'));
+  const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  const before = await store.read(), people = await readFile(join(clone, 'people/seed.json'), 'utf8');
+  const commits = await git(['rev-list', '--count', 'main'], fixture.bare), io = new ScriptedPrompter();
+  expect(await run({ ...(kind === 'member' ? { kind, member: 'seed' } : { kind, project: 'product' }), config: store }, io)).toEqual({ ok: true, value: [] });
+  expect(io.asked).toEqual([]); expect(io.lines).toEqual([]);
+  expect(await store.read()).toEqual(before);
+  expect(await readFile(join(clone, 'people/seed.json'), 'utf8')).toBe(people);
+  expect(await git(['rev-list', '--count', 'main'], fixture.bare)).toBe(commits);
 });

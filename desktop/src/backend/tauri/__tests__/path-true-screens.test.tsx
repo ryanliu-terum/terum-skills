@@ -54,5 +54,5 @@ it('shows the installed person action when the real catalog has scan roots', asy
  await screen.findByRole('heading', { name: 'Mira Chen' });
  expect(screen.getByText('Installed')).toBeInTheDocument();
  expect(screen.queryByRole('button', { name: 'Install 2 skills' })).toBeNull();
- expect(screen.getByRole('button', { name: "Remove mira's 2 skills from this machine" })).toBeInTheDocument();
+ expect(screen.getByRole('button', { name: "Remove mira's 2 installed skills from this machine" })).toBeInTheDocument();
 });
