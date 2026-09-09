@@ -201,6 +201,9 @@ mod tests {
   }
 }
 
+#[tauri::command]
+fn quit(app: tauri::AppHandle) { app.exit(0); }
+
 /// The state file `terum-skills app` writes on every launch (decision walk D1): where Node and the CLI are.
 #[tauri::command]
 fn read_app_state() -> Result<Option<String>, String> {
@@ -226,7 +229,7 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_clipboard_manager::init())
-    .invoke_handler(tauri::generate_handler![cli_spawn, cli_write, cli_kill, read_app_state, host_platform]);
+    .invoke_handler(tauri::generate_handler![cli_spawn, cli_write, cli_kill, read_app_state, host_platform, quit]);
 
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());

@@ -65,7 +65,7 @@ export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'
 export interface InstalledResult {id:string;name:string;scope:Scope}
 export interface UninstallArgs {team?:string;ref:string}
 export interface UninstalledResult {id:string;name:string}
-export interface MachineUninstallResult {removed:string[]}
+export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
 export interface ConnectArgs {path?:string;home?:string;cwd?:string;team?:string;keepSource?:boolean;keepRepo?:boolean;relocate?:boolean;forget?:boolean;allowPrivileged?:boolean}
 export interface ConnectResult {id:string;name:string;reconciled?:boolean;adopted?:boolean}
 export interface ConnectBatch {kind:'batch';shared:ConnectResult[];declined:string[];refused:{name:string;reason:string}[]}

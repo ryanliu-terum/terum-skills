@@ -213,3 +213,14 @@ it.each(['', undefined])('select carries its default and accepts an empty or abs
   expect(s.diagnostics).toEqual([]);
   s.channel.result({ verb: 'install', ok: true, exitCode: 0 });
 });
+
+
+it('carries uninstall disclosure in exactly one ask frame with no preceding print', async () => {
+  const s = shell(), question = 'Remove terum-skills from this machine?';
+  const detail = Array.from({ length: 24 }, (_, i) => `  Inventory ${i}`);
+  const pending = s.channel.io.confirm(question, { detail });
+  const ask = await s.answer(false);
+  expect(await pending).toBe(false);
+  expect(s.frames).toEqual([{ t: 'ask', id: ask.id, kind: 'confirm', question, detail }]);
+  s.input.end();
+});

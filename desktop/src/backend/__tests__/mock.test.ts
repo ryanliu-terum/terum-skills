@@ -1,5 +1,5 @@
 import { it, expect, afterEach, vi } from 'vitest';
-import { createMockBackend } from '../mock';
+import { createMockBackend, MOCK_REMOVE_DETAIL, MOCK_REMOVE_ADVICE } from '../mock';
 import { design } from '../mock/data';
 import type { Run, Frame } from '../types';
 afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();});
@@ -128,4 +128,18 @@ it('prints diagnostics from the fixture and reports status read failures',async(
  for(const [index,team] of design.TEAMS.entries())for(const fact of [team.name,team.remote,team.handle,String(team.members),String(team.skills),team.last_sync])expect(lines[index+1]).toContain(fact);
  location.hash='#/settings/advanced?__mock=error';
  expect(await backend.diagnostics().done).toEqual({ok:false,error:'Could not read ~/.terum/skills/config.json.'});
+});
+
+
+it.each([false,true])('models machine removal with CLI consent and team keys (accept=%s)',async accepted=>{
+ const run=createMockBackend().uninstallMachine({});
+ const ask=vi.fn((frame:Extract<Frame,{t:'ask'}>)=>{expect(frame).toMatchObject({kind:'confirm',question:'Remove terum-skills from this machine?',detail:MOCK_REMOVE_DETAIL});return accepted;});
+ const result=await answerAll(run,ask);expect(ask).toHaveBeenCalledOnce();
+ if(accepted)expect(result).toEqual({ok:true,value:{removed:design.TEAMS.map(t=>t.key),removedPlacements:design.PLACEMENTS_N,hookRemoved:true,wrapperRemoved:true,configRemoved:true,kept:['~/.terum/skills/backups'],record:'~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json',advice:MOCK_REMOVE_ADVICE}});
+ else expect(result).toEqual({ok:false,cancelled:true,error:'Uninstall was cancelled.'});
+});
+it('records a mock quit request and closes the window',async()=>{
+ const backend=createMockBackend(),close=vi.spyOn(window,'close').mockImplementation(()=>{});
+ expect(backend.quitRequested).toBe(false);await backend.quit();
+ expect(backend.quitRequested).toBe(true);expect(close).toHaveBeenCalledOnce();
 });

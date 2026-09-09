@@ -13,6 +13,28 @@ import { readScenario } from './scenario';
 import { statusCounts } from './status-counts';
 import { createRun } from './run';
 import type { RunContext } from './run';
+export const MOCK_REMOVE_DETAIL = [
+ 'terum-skills will be removed from this machine.',
+ ...design.TEAMS.map(t=>`  Team: ${t.key} (${t.remote}, handle ${t.handle})`),
+ `  Placed skills (${design.PLACEMENTS_N}): ${design.PLACEMENTS.map(p=>p[0]).join(', ')}`,
+ `  Local clones (1): ${design.TEAMS.map(t=>t.clone).join(', ')}`,
+ '    (a clone holding uncommitted or unpushed work is moved to ~/.terum/skills/quarantine instead)',
+ '  Version cache and run files for these teams',
+ '  Session-start hook in ~/.claude/settings.json',
+ '  /terum-skills Claude Code skill at ~/.claude/skills/terum-skills',
+ '  Downloaded desktop app bundle at ~/.terum/skills/app (all versions)',
+ '  Desktop launch state in ~/.terum/skills/run (app.json, latest-version.json)',
+ '  ~/.terum/skills/config.json',
+ 'Kept: ~/.terum/skills/backups (settings backups and a record of this uninstall)',
+ 'Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.',
+ 'The package itself is not removed by this command; the last line tells you how.',
+];
+export const MOCK_REMOVE_ADVICE = [
+ 'This copy of terum-skills runs from ~/.npm/_npx/terum-skills/node_modules/terum-skills/dist/index.js.',
+ 'It is an npx cache copy, so there is nothing to uninstall for it. If you also installed the package globally or in a project, remove that with the tool you used, e.g. npm uninstall -g terum-skills.',
+ 'The desktop app was deleted from ~/.terum/skills/app. A copy that is running keeps running until you quit it; it cannot be reopened from the Dock. `npx -y terum-skills@latest app` downloads it again (needs gh and the release).',
+ "This app's own preferences (theme, layout) are kept by the app and were not touched.",
+];
 const updateAdvice=['Cache request recorded as: terum-skills@latest',"To request the registry's latest release, run:",'  npx -y terum-skills@latest <command>','This does not update other local or global installations.'];
 const cancelled=(error:string):Result<never>=>({ok:false,error,cancelled:true});
 const fatal=decodeText(design.ONBOARD_FETCH_ERROR);
@@ -21,7 +43,7 @@ const ok=<T>(value:T):Result<T>=>({ok:true,value});
 const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeText(error),'')});
 const zeroCopy=design.LIBRARY_OVERVIEW.zero;
 const zeroOverview={skills:'0',skills_note:zeroCopy.skills,evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:zeroCopy.evaluated,installs:'0',installs_note:zeroCopy.installs,attention:'0',attention_lines:[zeroCopy.attention],attention_link:design.LIBRARY_OVERVIEW.attention_link,zero:zeroCopy};
-export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
+export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readonly quitRequested:boolean} {
  const identity:Identity=structuredClone({...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login});
  const listeners=new Set<(source:ChangeSource)=>void>();
  const latency=opts.latencyMs??0;
@@ -55,7 +77,10 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
    if(await ctx.ask('confirm',`Connect ${name}?`)){batch.shared.push({id:name,name});ctx.print(`Connected ${name}.`);}else batch.declined.push(name);
   }
  }
- const backend:Backend = {
+ let quitRequested=false;
+ const backend:Backend & {readonly quitRequested:boolean} = {
+  get quitRequested(){return quitRequested;},
+  async quit(){quitRequested=true;try{window.close();}catch{ /* jsdom / Playwright: no-op */ }},
   async setWindowBackground(){return ok(undefined);},
   async launchContext(){return null;},
   async refreshLaunch(){return null;},
@@ -90,7 +115,13 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
    const notice=`This changes the author line (${next.name} <${next.email}>) that the next sync writes into the skills you have connected on this machine; skills you authored elsewhere keep their recorded author.`;
    ctx.print(notice);Object.assign(identity,next);for(const listener of listeners)listener('config');return ok({updated,notice});
   }),
-  uninstallMachine:()=>long('settings',async ctx=>{ctx.print('Removing terum-skills…');return await ctx.ask('confirm','Remove terum-skills from this machine?')?ok({removed:design.SKILLS.map(s=>s.name)}):cancelled('Remove was declined.');}),
+  uninstallMachine:()=>long('settings',async ctx=>{
+   const detail=[...MOCK_REMOVE_DETAIL];
+   if(!await ctx.ask('confirm','Remove terum-skills from this machine?',{detail}))return cancelled('Uninstall was cancelled.');
+   ctx.print("Wrote a record of this machine's terum-skills state to ~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json.");
+   for(const t of design.TEAMS){ctx.print(`Leaving ${t.key}…`);ctx.print(`Left ${t.key}.`);}
+   return ok({removed:design.TEAMS.map(t=>t.key),removedPlacements:design.PLACEMENTS_N,hookRemoved:true,wrapperRemoved:true,configRemoved:true,kept:['~/.terum/skills/backups'],record:'~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json',advice:[...MOCK_REMOVE_ADVICE]});
+  }),
   connect:args=>long<ConnectOutcome|undefined>('share',async ctx=>{ctx.print('Connecting local skills…');if(Object.values(args).some(v=>v!==undefined)){const name=(args.path??design.LOCAL_UNSHARED[0]??'local-skill').replace(/\/$/,'').split('/').pop();if(!name)return fail('A skill folder is required.');return await ctx.ask('confirm',`Connect ${name}?`)?ok({id:name,name}):cancelled('Connect was declined.');}return connectPicker(ctx,design.TEAMS[0]?.key??'terum');}),
   profile:args=>long('share',async()=>{
     if(args.role!==undefined&&args.role.length>32)return fail('Role must be at most 32 characters.');
