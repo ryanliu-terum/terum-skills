@@ -3,7 +3,7 @@ import type { Frame } from '../../types';
 import type { LineEvent } from '../bridge';
 import { fakeBridge, STATE } from './fake-bridge';
 import { parseCliFrame } from '../frames';
-import { cliRun, NO_STATE } from '../run';
+import { cliRun, GH_LOGIN_OFFER, GH_LOGIN_REMEDY, NO_STATE } from '../run';
 import { createTauriBackend } from '../index';
 
 const line = (frame: object) => JSON.stringify(frame);
@@ -18,6 +18,15 @@ describe('parseCliFrame', () => {
     expect(parseCliFrame(line({ t: 'progress', step: 'clone', current: 2, total: 5 }))).toEqual({ t: 'progress', step: 'clone', current: 2, total: 5 });
     expect(parseCliFrame(line({ t: 'result', verb: 'status', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true }))).toEqual({ t: 'result', verb: 'status', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true });
     for (const bad of ['not json', '{}', line({ t: 'ask', id: 1 }), line({ t: 'print', line: 'no level' }), line({ t: 'nope' })]) expect(parseCliFrame(bad), bad).toBeNull();
+  });
+  it('passes the wire exitCode through and derives it from ok only when absent', () => {
+    expect(parseCliFrame(line({ t: 'result', verb: 'eval', ok: false, exitCode: 143, error: 'Killed.' }))).toEqual({ t: 'result', verb: 'eval', ok: false, exitCode: 143, error: 'Killed.' });
+    expect(parseCliFrame(line({ t: 'result', verb: 'status', ok: true }))).toEqual({ t: 'result', verb: 'status', ok: true, exitCode: 0 });
+    expect(parseCliFrame(line({ t: 'result', verb: 'status', ok: false }))).toEqual({ t: 'result', verb: 'status', ok: false, exitCode: 1 });
+  });
+  it('a select with a non-string choice is a malformed frame, not a silently reindexed one', () => {
+    // Dropping the entry would shift the 1-based indices an answer may use; positions are load-bearing.
+    expect(parseCliFrame(line({ t: 'ask', id: 'q1', kind: 'select', question: 'Pick', choices: ['a', 2, 'c'] }))).toBeNull();
   });
 });
 
@@ -48,6 +57,7 @@ describe('cliRun — a CLI process as a seam Run<T>', () => {
     const onSettled = vi.fn();
     const run = cliRun(f.bridge, Promise.resolve(STATE), ['status'], { map, onSettled });
     await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
+    f.emit({ kind: 'stdout', line: hello });
     f.emit({ kind: 'exit', code: 0 });
     const expected = { ok: false, error: 'terum-skills exited with code 0 before reporting a result.' };
     expect(await run.done).toEqual(expected);
@@ -108,7 +118,7 @@ describe('cliRun — a CLI process as a seam Run<T>', () => {
   });
 
   it('exit without a result is a failure that quotes the last stderr lines', async () => {
-    const { bridge } = fakeBridge((_a, emit) => { emit({ kind: 'stderr', line: 'node: cannot find module' }); emit({ kind: 'exit', code: 1 }); });
+    const { bridge } = fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: hello }); emit({ kind: 'stderr', line: 'node: cannot find module' }); emit({ kind: 'exit', code: 1 }); });
     const run = cliRun(bridge, Promise.resolve(STATE), ['status'], { map: (v) => v });
     expect(await run.done).toEqual({ ok: false, error: expect.stringContaining('exited with code 1 before reporting a result. node: cannot find module') });
   });
@@ -126,33 +136,106 @@ describe('cliRun — a CLI process as a seam Run<T>', () => {
     expect(unlisten).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps Cancelled when the CLI sends a result during graceful cancellation', async () => {
+  it('reports the finished mutation, not a clean Cancelled, when the CLI result outruns cancellation', async () => {
     const f = fakeBridge(() => undefined);
     f.bridge.kill = async () => {
       f.emit({ kind: 'stdout', line: line({ t: 'result', verb: 'setup', ok: true, exitCode: 0, value: 'stopped' }) });
     };
-    const run = cliRun(f.bridge, Promise.resolve(STATE), ['setup'], { map: (value) => value });
+    const onSettled = vi.fn();
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['setup'], { map: (value) => value, onSettled });
     await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
     await run.cancel();
-    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
+    const error = 'Cancelled, but setup had already finished; its changes are on disk.';
+    expect(await run.done).toEqual({ ok: false, error, value: 'stopped' });
+    expect(onSettled).toHaveBeenCalledExactlyOnceWith({ ok: false, error, value: 'stopped' });
     expect(f.unlisten).toHaveBeenCalledTimes(1);
     f.emit({ kind: 'exit', code: 0 });
     expect(f.unlisten).toHaveBeenCalledTimes(1);
   });
 
-  it('releases the listener once when cancellation finishes before spawn returns', async () => {
+  it('cancel during a spawn in flight waits for the child, then signals it (the spawn race)', async () => {
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
     const f = fakeBridge(() => pending);
-    const run = cliRun(f.bridge, Promise.resolve(STATE), ['setup'], { map: (value) => value });
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['install', 'x'], { map: (value) => value });
     await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
-    await run.cancel();
-    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
-    expect(f.unlisten).not.toHaveBeenCalled();
+    const cancelling = run.cancel();
+    // The child is not registered yet: nothing may be written or killed until the spawn resolves.
+    expect(f.writes).toEqual([]);
+    expect(f.kills).toEqual([]);
     release();
-    await vi.waitFor(() => expect(f.unlisten).toHaveBeenCalledTimes(1));
+    await cancelling;
+    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
+    expect(f.writes.map((w) => JSON.parse(w))).toEqual([{ t: 'cancel' }]);
+    expect(f.kills).toEqual([f.spawns[0]!.id]);
+    expect(f.unlisten).toHaveBeenCalledTimes(1);
     f.emit({ kind: 'exit', code: null });
     expect(f.unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('a verb that completes while its spawn is still in flight is not settled as a clean Cancelled (P6)', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const f = fakeBridge(async (_a, emit) => {
+      await pending;
+      emit({ kind: 'stdout', line: line({ t: 'result', verb: 'install', ok: true, exitCode: 0, value: [{ id: 'a' }] }) });
+      emit({ kind: 'exit', code: 0 });
+    });
+    const onSettled = vi.fn();
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['install', 'a'], { map: (value) => value, onSettled });
+    await vi.waitFor(() => expect(f.spawns).toHaveLength(1));
+    const cancelling = run.cancel();
+    release();
+    await cancelling;
+    const error = 'Cancelled, but install had already finished; its changes are on disk.';
+    expect(await run.done).toEqual({ ok: false, error, value: [{ id: 'a' }] });
+    expect(onSettled).toHaveBeenCalledExactlyOnceWith({ ok: false, error, value: [{ id: 'a' }] });
+    expect(await collect(run.frames)).toEqual([{ t: 'result', ok: false, error }]);
+    await vi.waitFor(() => expect(f.unlisten).toHaveBeenCalledTimes(1));
+  });
+
+  it('cancel before the app state resolves prevents the spawn entirely', async () => {
+    let resolveState!: (state: typeof STATE) => void;
+    const state = new Promise<typeof STATE>((resolve) => { resolveState = resolve; });
+    const f = fakeBridge(() => undefined);
+    const run = cliRun(f.bridge, state, ['install', 'x'], { map: (value) => value });
+    await run.cancel();
+    expect(await run.done).toEqual({ ok: false, error: 'Cancelled.' });
+    resolveState(STATE);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.spawns).toEqual([]);
+  });
+
+  it('rule 1: the pre-0.1.6 gh auth login confirm is answered No and never shown (docs/frame-protocol.md)', async () => {
+    const f = fakeBridge(async (_a, emit, w) => {
+      emit({ kind: 'stdout', line: line({ t: 'hello', protocol: 1, version: '0.1.5', verbs: ['publish'], features: {} }) });
+      emit({ kind: 'stdout', line: line({ t: 'ask', id: 'q1', kind: 'confirm', question: GH_LOGIN_OFFER }) });
+      while (!w.length) await new Promise((r) => setTimeout(r, 1));
+      expect(JSON.parse(w[0]!)).toEqual({ t: 'answer', id: 'q1', value: false });
+      emit({ kind: 'stdout', line: line({ t: 'result', verb: 'publish', ok: false, exitCode: 1, error: 'GitHub authentication is required: run `gh auth login` and retry.' }) });
+      emit({ kind: 'exit', code: 1 });
+    });
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['publish'], { map: (value) => value });
+    const frames = await collect(run.frames);
+    expect(frames.some((frame) => frame.t === 'ask')).toBe(false);
+    expect(frames[0]).toEqual({ t: 'print', line: GH_LOGIN_REMEDY });
+    expect(await run.done).toEqual({ ok: false, error: 'GitHub authentication is required: run `gh auth login` and retry.' });
+    expect(f.writes).toHaveLength(1);
+  });
+
+  it('an unknown hello protocol fails the run with a remedy and kills the process', async () => {
+    const f = fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'hello', protocol: 2, version: '0.3.0', verbs: [], features: {} }) }); });
+    const onHello = vi.fn();
+    const run = cliRun(f.bridge, Promise.resolve(STATE), ['status'], { map: (value) => value, onHello });
+    expect(await run.done).toEqual({ ok: false, error: 'terum-skills 0.3.0 speaks frame protocol 2; this app speaks protocol 1. Update the desktop app.' });
+    expect(onHello).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(f.kills).toHaveLength(1));
+  });
+
+  it('an exit without any hello names the too-old CLI and the remedy, not a cryptic per-verb failure', async () => {
+    const { bridge } = fakeBridge((_a, emit) => { emit({ kind: 'stderr', line: "error: unknown option '--frames'" }); emit({ kind: 'exit', code: 1 }); });
+    const run = cliRun(bridge, Promise.resolve(STATE), ['status'], { map: (value) => value });
+    expect(await run.done).toEqual({ ok: false, error: "terum-skills exited with code 1 without a hello frame — this terum-skills is probably older than 0.1.5, before frame mode existed. Update terum-skills, then run `terum-skills app` from a terminal again. error: unknown option '--frames'" });
   });
 
   it('without the app state file, nothing is spawned and the failure tells the person what to run', async () => {
@@ -280,6 +363,7 @@ describe('D13 home abbreviation at the native backend seam', () => {
   });
   it('abbreviates read errors and startup errors without requiring frame consumption', async () => {
     const { bridge } = fakeBridge((_args, emit) => {
+      emit({ kind: 'stdout', line: hello });
       emit({ kind: 'stderr', line: 'Cannot read /Users/teddy/.terum/skills' });
       emit({ kind: 'exit', code: 1 });
     });
