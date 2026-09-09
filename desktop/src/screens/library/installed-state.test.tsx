@@ -29,7 +29,7 @@ it.each([true,false])('manages a present copy using its exact path and closes af
  const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('nothing is edited or pushed');
  fireEvent.click(within(dialog).getByRole('button',{name:'Continue'}));
  const consent=await screen.findByRole('dialog',{name:'Record this connected source?'});
- fireEvent.click(within(consent).getByRole('button',{name:accepted?'Confirm':'Cancel'}));
+ fireEvent.click(within(consent).getByRole('button',{name:accepted?'Yes':'No'}));
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  expect(connect).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check'});
  expect(screen.queryByRole('alert')).toBeNull();
