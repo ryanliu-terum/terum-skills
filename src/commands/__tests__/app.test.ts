@@ -60,16 +60,17 @@ describe('platform table (D3)', () => {
     expect(assetSuffix('darwin-arm64')).toBe('aarch64.app.tar.gz');
     expect(assetSuffix('darwin-x64')).toBe('x64.app.tar.gz');
     expect(assetSuffix('win32-arm64')).toBe('arm64-setup.exe');
-    for (const p of ['win32-x64', 'linux', 'wsl', 'unsupported'] as const) expect(assetSuffix(p), p).toBeNull();
+    expect(assetSuffix('win32-x64')).toBe('x64-setup.exe');
+    for (const p of ['linux', 'wsl', 'unsupported'] as const) expect(assetSuffix(p), p).toBeNull();
   });
 });
 
 describe('terum-skills app (D1, D3, D7, D8)', () => {
-  it('Linux, WSL and Windows x64 get one honest line, exit 0, and no download attempt', async () => {
+  it('Linux, WSL and unsupported machines get one honest line, exit 0, and no download attempt', async () => {
     for (const [evidence, fragment] of [
       [{ platform: 'linux', arch: 'x64', procVersion: 'Linux 6.8' }, 'no Linux desktop app yet'],
       [{ platform: 'linux', arch: 'x64', procVersion: 'microsoft-standard-WSL2' }, 'Windows side of this machine'],
-      [{ platform: 'win32', arch: 'x64' }, 'no Windows x64 desktop app yet'],
+      [{ platform: 'freebsd', arch: 'x64' }, 'no desktop app for this machine'],
     ] as const) {
       const runner = fakeGhRelease();
       const io = new ScriptedPrompter();
@@ -145,7 +146,10 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     for (const dir of await readdir(join(root, 'app'))) expect(dir).not.toMatch(/^\.download-/);
   });
 
-  it('Windows on ARM: runs the per-user installer silently, then launches the installed exe (built blind, D8)', async () => {
+  it.each([
+    ['arm64', 'win32-arm64', 'arm64-setup.exe'],
+    ['x64', 'win32-x64', 'x64-setup.exe'],
+  ] as const)('Windows %s: runs the per-user installer silently, then launches the installed exe (built blind, D8)', async (arch, platform, suffix) => {
     const root = await temporaryDirectory();
     const localAppData = join(root, 'LocalAppData');
     const calls: { command: string; args: readonly string[] }[] = [];
@@ -153,12 +157,13 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     const runner = ghOnlyRunner(async (args) => {
       if (args[0] === '--version') return { code: 0, stdout: 'gh version 2.0.0', stderr: '' };
       if (args.join(' ') === 'auth status') return ok;
-      const dir = args[args.indexOf('--dir') + 1]!; const name = `terum-skills-desktop_${V}_arm64-setup.exe`; const bytes = Buffer.from('nsis');
+      const dir = args[args.indexOf('--dir') + 1]!; const name = `terum-skills-desktop_${V}_${suffix}`; const bytes = Buffer.from('nsis');
       await writeFile(join(dir, name), bytes); await writeFile(join(dir, `${name}.sha256`), `${createHash('sha256').update(bytes).digest('hex')} *${name}\n`); return ok;
     });
-    const result = await run({ config: createConfigStore(root), runner, exec, version: V, evidence: { platform: 'win32', arch: 'arm64' }, localAppData }, new ScriptedPrompter());
-    expect(result).toMatchObject({ ok: true, value: { platform: 'win32-arm64', action: 'installed-and-launched', appPath: join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe') } });
-    expect(calls.map((call) => [call.command.endsWith('-setup.exe') ? 'installer' : call.command, [...call.args]])).toEqual([['installer', ['/S']], [join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe'), []]]);
+    const result = await run({ config: createConfigStore(root), runner, exec, version: V, evidence: { platform: 'win32', arch }, localAppData }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { platform, action: 'installed-and-launched', appPath: join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe') } });
+    expect(calls.map((call) => [call.command.endsWith(suffix) ? 'installer' : call.command, [...call.args]])).toEqual([['installer', ['/S']], [join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe'), []]]);
+    expect(runner.calls.some((call) => call.args.includes(`terum-skills-desktop_${V}_${suffix}`))).toBe(true);
   });
 });
 

@@ -180,7 +180,8 @@ jobs:
 
   # Decision walk D2 (2026-09-08): the desktop app is built here, before the npm approval, and attached to the
   # same Release, so a CLI version can never be published without its app. Section 7 defaults: ad-hoc signing
-  # ("-") plus .app.tar.gz, artifact-exists gate, windows-11-vs2026-arm with NSIS, no updater JSON. Linux is
+  # ("-") plus .app.tar.gz, artifact-exists gate, windows-11-vs2026-arm with NSIS, no updater JSON. Windows x64 (NSIS on
+  # windows-latest) was added 2026-09-09 once the ARM64-only matrix left x64 machines without a build. Linux is
   # gated (D3). Runs on dry runs too: that is how the matrix is proven without publishing.
   desktop:
     needs: validate
@@ -201,6 +202,10 @@ jobs:
             target: aarch64-pc-windows-msvc
             bundles: nsis
             suffix: arm64-setup.exe
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            suffix: x64-setup.exe
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -370,7 +375,7 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          for suffix in aarch64.app.tar.gz x64.app.tar.gz arm64-setup.exe; do
+          for suffix in aarch64.app.tar.gz x64.app.tar.gz arm64-setup.exe x64-setup.exe; do
             f="desktop-assets/terum-skills-desktop_${V}_${suffix}"
             if [ ! -f "$f" ]; then echo "::error::missing desktop asset $f"; fail=1; continue; fi
             size=$(wc -c < "$f")

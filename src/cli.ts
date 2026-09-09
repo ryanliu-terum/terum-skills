@@ -146,7 +146,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program.command('search <term>').description('Search shared skills by name, description, or category (read-only)').option('--category <category>').option('--author <author>').option('--project <project>').action(async (term: string, options: { category?: string; author?: string; project?: string }) => execute((io) => active.search({ form: context.form, term, ...options }, io), { verb: 'search', notices: true }));
 
   program.command('app')
-    .description('Open the Terum Skills desktop app for this version, downloading it first if needed (macOS, Windows on ARM); records where this CLI is so the app can drive it')
+    .description('Open the Terum Skills desktop app for this version, downloading it first if needed (macOS, Windows); records where this CLI is so the app can drive it')
     .action(async () => execute((io) => active.app({ form: context.form, launch: context.launch }, io), { verb: 'app', notices: false }));
 
   program.command('update')
