@@ -868,7 +868,7 @@ describe('issue 9 connect picker', () => {
     const { fixture, home, store, source, original } = await pickerFixture();
     const before = await originSha(fixture.bare); const config = await readFile(join(store.root, 'config.json'), 'utf8');
     const io = new NonInteractivePrompter();
-    expect(await run({ home, config: store }, io)).toEqual({ ok: false, error: "No skill selected. In an interactive terminal, run `npx -y terum-skills@latest connect --team 'team'`, or pass an explicit skill folder path." });
+    expect(await run({ home, config: store }, io)).toEqual({ ok: false, error: "No skill selected. In an interactive terminal, run `npx -y terum-skills@latest connect`, or pass an explicit skill folder path." });
     expect(io.lines).toEqual([`Local candidates under ${join(home, '.claude', 'skills')}:`, `  ${source}`]);
     expect(io.asked).toEqual([]);
     expect(await originSha(fixture.bare)).toBe(before);

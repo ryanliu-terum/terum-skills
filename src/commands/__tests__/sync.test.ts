@@ -801,6 +801,7 @@ describe('sync --hook (§3, §6)', () => {
     expect(await run({ config: two.store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { teams: [{ state: 'complete', counts: { removed: 2 } }] } });
   });
 
+  // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
   it('prints each healthy configured team followed by the complete summary', async () => {
     const { store } = await configuredSkill();
     const other = await bareTeam();
@@ -998,6 +999,7 @@ describe('sync --hook mutex and rate limit (§8, §12 "hook mutex")', () => {
     await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
   });
 
+  // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
   it('two teams do not serialize: a held lock on one team leaves the other fully synced and stamped', async () => {
     const { fixture, store, clone } = await configuredSkill();
     const other = await bareTeam();

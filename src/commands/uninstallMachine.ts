@@ -51,7 +51,11 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     const evalsPresent = await exists(evals);
 
     io.print('terum-skills will be removed from this machine.');
-    io.print(`  Teams (${bindings.length})${bindings.length ? `: ${bindings.map(([name, binding]) => `${name} (${stripRemoteCredentials(binding.remote)}, ${binding.handle === null ? 'no handle' : `handle ${binding.handle}`})`).join(', ')}` : ''}`);
+    if (bindings.length === 0) io.print('  No team');
+    else if (bindings.length === 1) {
+      const [name, binding] = bindings[0]!;
+      io.print(`  Team: ${name} (${stripRemoteCredentials(binding.remote)}, ${binding.handle === null ? 'no handle' : `handle ${binding.handle}`})`);
+    } else io.print(`  Teams (${bindings.length})${bindings.length ? `: ${bindings.map(([name, binding]) => `${name} (${stripRemoteCredentials(binding.remote)}, ${binding.handle === null ? 'no handle' : `handle ${binding.handle}`})`).join(', ')}` : ''}`);
     if (placements.length) io.print(`  Placed skills (${placements.length}): ${placements.join(', ')}`);
     if (clones.length) {
       io.print(`  Local clones (${clones.length}): ${clones.join(', ')}`);
@@ -68,7 +72,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     kept.push(backups);
     if (evalsPresent) kept.push(evals);
     if (shared.length) io.print(`Connected-skill sources stay where they are: ${shared.map(({ source }) => `${basename(source)}: ${source}`).join(', ')}`);
-    io.print('Your membership and installed-skill records in each team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
+    io.print('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
     io.print('The package itself is not removed by this command; the last line tells you how.');
     if (!(await io.confirm('Remove terum-skills from this machine?'))) return cancelled('Uninstall was cancelled.');
 
