@@ -25,11 +25,11 @@ it('replays the rebuilt offline update report with exact printed lines and nonem
   expect(result.value.observation).toBe('unknown');
   expect(bridge.spawns[0]?.args).toEqual(['update']);
 });
-it('replays status from the same rebuilt offline fixture without claiming the status surface is served', async () => {
+it('replays status from the same rebuilt offline fixture; the status surface is served (S7k) and update beside it', async () => {
   const { bridge } = recording('status');
   const schema = z.object({ version: z.string(), teams: z.array(z.object({ team: z.string() }).passthrough()) }).passthrough();
   const result = await read(cliRun(bridge.bridge, Promise.resolve(STATE), ['status'], { map: value => schema.parse(value) }));
   expect(result.ok).toBe(true);
   expect(result.value?.teams.map(team => team.team)).toEqual(['acme']);
-  expect((await createTauriBackend(bridge.bridge).surfaces()).status).toBe(false);
+  expect(await createTauriBackend(bridge.bridge).surfaces()).toMatchObject({ status: true, settings: true, update: true });
 });

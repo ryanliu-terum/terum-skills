@@ -1,0 +1,23 @@
+lock acquired Wed Sep  9 01:18:55 UTC 2026
+root lint: rc=0
+root typecheck: rc=0
+root test: rc=0
+root build: rc=0
+desktop typecheck: rc=0
+desktop lint: rc=0
+desktop vitest: rc=1
+desktop build: rc=0
+e2e routes: rc=0
+export:check: rc=0
+e2e fidelity: rc=0
+done Wed Sep  9 01:23:08 UTC 2026
+ Test Files  73 passed (73)
+      Tests  1216 passed (1216)
+ ❯ src/screens/settings/settings.test.tsx (46 tests | 1 failed) 22717ms
+   × surfaces failed editor results 1295ms
+ ❯ src/backend/tauri/__tests__/update-replay.test.ts (2 tests | 1 failed) 18ms
+ FAIL  src/screens/settings/settings.test.tsx > surfaces failed editor results
+ Test Files  2 failed | 52 passed (54)
+      Tests  2 failed | 760 passed (762)
+  91 passed (31.2s)
+  88 passed (38.8s)

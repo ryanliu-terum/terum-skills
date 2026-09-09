@@ -1,0 +1,32 @@
+# m7-S7e: orchestrator's own gates, 2026-09-09 01:18-01:27 UTC, Ryan's Mac (Node 25, Playwright chromium)
+# Codex: gpt-6-astra, high, workspace-write, one pass (codex-prompt.md -> codex-report.json "complete"; three open questions ruled in NOTES.md).
+# Gated on the tree after: the S7e code commit 1b9da00, the merges of main through S7q (86226c6), S7k, S7ad, and S7d (04cfc76; four
+# conflicts folded: both sides' mock tests kept, main's AD-17 argv for setup/eval/validate beside S7e's served update, S7e's structured
+# update result with S7d's fromError), then (unit re-run) the two test updates below.
+
+full battery (01:18-01:23 UTC, on 04cfc76; no src-tauri change, so no cargo step)
+root lint         : rc=0
+root typecheck    : rc=0
+root test         : rc=0  73 files, 1216 tests passed
+root build        : rc=0
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=1  2 failed / 760 passed:
+                    update-replay.test.ts "replays status ... without claiming the status surface is served" asserted surfaces().status
+                    is false, a premise S7k retired on main (status is served); updated to the new truth (status, settings and update
+                    served), the replay assertions unchanged.
+                    settings.test.tsx "surfaces failed editor results" mocked openInEditor and clicked Settings ▸ Advanced "Show in
+                    Finder", which S7q rerouted to revealPath, and main's rewrite of the test clicked "Show update command", which S7e
+                    turns into the drawn update dialog; Settings has no openInEditor caller left, so the test has no target. Retired;
+                    the editor-failure path stays covered by inbox.test.tsx "handles editor failures explicitly" and settings.test.tsx
+                    asserts the update dialog never calls the editor.
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (31.2s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (38.8s)
+
+desktop unit trio re-run (01:26-01:27 UTC, after the two test updates): typecheck rc=0, lint rc=0, vitest rc=0  54 files, 761 tests passed
+real-data proof   : update-replay.test.ts replays frames/update.jsonl and frames/status.jsonl recorded from the rebuilt CLI under the fixture
+                    team (offline: a local bare remote, so update cannot probe the registry): the served UpdateReport carries the four
+                    non-empty advice lines, seven printed lines equal to value.lines, latest null and observation unknown; nothing from
+                    the design fixture reaches the DTO.
