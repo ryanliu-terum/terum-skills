@@ -48,16 +48,19 @@ describe('invite (§6 host scoping)', () => {
     const runner = ghOnlyRunner((args) => {
       const endpoint = args.at(-1)!;
       if (endpoint.endsWith('/nosuchuser')) return { code: 1, stdout: 'HTTP/2.0 404 Not Found\r\n', stderr: 'gh: Not Found (HTTP 404)' };
-      if (endpoint.endsWith('/capped')) return { code: 1, stdout: 'HTTP/2.0 403 Forbidden\r\n', stderr: 'gh: Forbidden (HTTP 403)' };
+      if (endpoint.endsWith('/capped')) return { code: 1, stdout: 'HTTP/2.0 403 Forbidden\r\n\r\n{"message":"You have exceeded the number of invitations for this repository"}', stderr: 'gh: Forbidden (HTTP 403)' };
+      if (endpoint.endsWith('/blocked')) return { code: 1, stdout: 'HTTP/2.0 403 Forbidden\r\n', stderr: 'gh: Forbidden (HTTP 403)' };
       return { code: 0, stdout: 'HTTP/2.0 201 Created\r\n', stderr: '' };
     });
     const io = new ScriptedPrompter();
-    const result = await run({ logins: ['nosuchuser', 'capped', 'real'], config: store, runner }, io);
-    expect(result).toMatchObject({ ok: false, value: { invited: ['real'], failed: [{ login: 'nosuchuser' }, { login: 'capped' }] } });
+    const result = await run({ logins: ['nosuchuser', 'capped', 'blocked', 'real'], config: store, runner }, io);
+    expect(result).toMatchObject({ ok: false, value: { invited: ['real'], failed: [{ login: 'nosuchuser' }, { login: 'capped' }, { login: 'blocked' }] } });
     const lines = io.lines.join('\n');
     expect(lines).toContain('Could not invite @nosuchuser: there is no GitHub user named @nosuchuser.');
     expect(lines).not.toMatch(/nosuchuser.*caps invitations/);
     expect(lines).toContain('Could not invite @capped (GitHub status 403). GitHub caps invitations at 50 per repository per day.');
+    expect(io.lines).toContain('Could not invite @blocked (GitHub status 403). gh: Forbidden (HTTP 403)');
+    expect(lines).not.toMatch(/blocked.*caps invitations/);
   });
 
   it('refuses a generic remote before it invokes gh', async () => {
@@ -99,3 +102,30 @@ it('issue 5 labels the teammate invitation as Send', async () => {
 });
 
 it('join lines preserve the portable invite block byte for byte', () => { expect(joinLines('acme/team').join('\n')).toBe(slackBlock('acme/team')); });
+
+it('prevalidates the entire invite batch before any host call', async () => {
+  const store = createConfigStore(await temporaryDirectory());
+  await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'admin' }; });
+  const runner = ghOnlyRunner(() => ({ code: 0, stdout: 'HTTP/2.0 201 Created\r\n', stderr: '' }));
+  const result = await run({ logins: ['valid', 'a--b'], config: store, runner }, new ScriptedPrompter());
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining('a--b') });
+  expect(runner.calls).toEqual([]);
+});
+it('reports a non-owner 422 without blaming the invitation cap', async () => {
+  const store = createConfigStore(await temporaryDirectory());
+  await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'admin' }; });
+  const runner = ghOnlyRunner(() => ({ code: 1, stdout: 'HTTP/2.0 422 Unprocessable Entity\r\n', stderr: 'gh: Validation Failed (HTTP 422)' }));
+  const result = await run({ logins: ['bad'], config: store, runner }, new ScriptedPrompter());
+  expect(result).toMatchObject({ ok: false, error: 'Could not invite @bad (GitHub status 422). gh: Validation Failed (HTTP 422)' });
+  if (result.ok) throw new Error('Expected an invitation failure');
+  expect(result.error).not.toContain('caps invitations');
+});
+it('deduplicates invite logins case-insensitively with the first spelling', async () => {
+  const store = createConfigStore(await temporaryDirectory());
+  await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'admin' }; });
+  const runner = ghOnlyRunner(() => ({ code: 0, stdout: 'HTTP/2.0 201 Created\r\n', stderr: '' }));
+  const result = await run({ logins: ['New', 'new'], config: store, runner }, new ScriptedPrompter());
+  expect(result).toMatchObject({ ok: true, value: { invited: ['New'] } });
+  expect(runner.calls).toHaveLength(1);
+  expect(runner.calls[0]).toMatchObject({ command: 'gh', args: ['api', '-X', 'PUT', '--include', 'repos/acme/team/collaborators/New'] });
+});
