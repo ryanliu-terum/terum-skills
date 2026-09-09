@@ -57,6 +57,28 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
     expect(s.frames.at(-1)).toEqual({ t: 'print', level: 'info', line: 'done' });
   });
 
+  it('carries decision detail on the ask and omits an empty detail list', async () => {
+    const s = shell();
+    const detail = ['Identity: @me — Me <me@x.test> (GitHub: octocat)'];
+    const identity = s.channel.io.confirm('Use this identity?', { detail });
+    expect(await s.answer(true)).toEqual({ t: 'ask', id: 'q1', kind: 'confirm', question: 'Use this identity?', detail });
+    expect(await identity).toBe(true);
+    const proceed = s.channel.io.confirm('Proceed?', { detail: [] });
+    expect(await s.answer(false)).toEqual({ t: 'ask', id: 'q2', kind: 'confirm', question: 'Proceed?' });
+    expect(await proceed).toBe(false);
+  });
+
+  it('text and every select attempt carry the whole decision context', async () => {
+    const s = shell(), detail = ['Read this first'];
+    const text = s.channel.io.text('Name', 'old', { detail });
+    expect(await s.answer('new')).toEqual({ t: 'ask', id: 'q1', kind: 'text', question: 'Name', default: 'old', detail });
+    expect(await text).toBe('new');
+    const select = s.channel.io.select('Pick', ['a'], { detail });
+    expect(await s.answer('invalid')).toEqual({ t: 'ask', id: 'q2', kind: 'select', question: 'Pick', choices: ['a'], detail });
+    expect(await s.answer('a')).toEqual({ t: 'ask', id: 'q3', kind: 'select', question: 'Pick', choices: ['a'], detail });
+    expect(await select).toBe('a');
+  });
+
   it('confirm accepts booleans and y/yes/true strings; anything else is no', async () => {
     const s = shell();
     for (const [value, expected] of [[true, true], [false, false], ['y', true], ['YES', true], ['true', true], ['n', false], ['', false], [1, false]] as const) {
@@ -173,4 +195,10 @@ it('CP-19: every feature is named in the protocol features sentence', () => {
   const sentence = doc.split('\n').find(line => line.startsWith('`hello.features` names'));
   expect(sentence).toBeDefined();
   for (const key of Object.keys(FRAME_FEATURES)) expect(sentence).toContain(`\`${key}\``);
+});
+
+it('a typed refusal emits refused without declined', () => {
+  const s = shell();
+  s.channel.result({ verb: 'setup', ok: false, error: 'One team per machine: stop', refused: true, exitCode: 1 });
+  expect(s.frames).toEqual([{ t: 'result', verb: 'setup', ok: false, error: 'One team per machine: stop', refused: true, exitCode: 1 }]);
 });

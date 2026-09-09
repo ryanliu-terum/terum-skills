@@ -1,5 +1,6 @@
+import { RefusedError } from '../result.js';
 import { describe, expect, it } from 'vitest';
-import { gitState, ghState, askUntilValid, assertBindable, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, identityForJoiner, teamByRemote } from '../auth.js';
+import { gitState, ghState, askUntilValid, assertBindable, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, identityForJoiner, refuseSecondTeam, teamByRemote } from '../auth.js';
 import { ConfigStore } from '../config.js';
 import { emptyConfig } from '../schema.js';
 import { Runner } from '../runner.js';
@@ -129,9 +130,15 @@ describe('team binding (§5.4, rev 9)', () => {
     const config = emptyConfig();
     bindTeam(config, 't', { remote: 'github.com/acme/team', handle: 'me' });
     expect(() => assertBindable(config, 't', 'https://github.com/ACME/Team.git')).not.toThrow();
-    expect(() => assertBindable(config, 'other', 'github.com/acme/other')).not.toThrow();
-    expect(() => assertBindable(config, 'other', 'git@github.com:acme/team.git')).toThrow('already configured as team t');
+    expect(() => assertBindable(config, 'other', 'github.com/acme/other')).toThrow(RefusedError);
+    expect(() => assertBindable(config, 'other', 'git@github.com:acme/team.git')).toThrow(RefusedError);
     expect(() => assertBindable(config, 't', 'github.com/acme/other')).toThrow(/configured for github\.com\/acme\/team, not github\.com\/acme\/other/);
+    expect(() => assertBindable(config, 'other', 'github.com/acme/other', { form: 'bare', retry: 'terum-skills team create other' })).toThrow("run `terum-skills team leave 't'` first, then re-run `terum-skills team create other`.");
+    // Legacy two-team config: rejoining an existing key must not increase the count.
+    config.teams.other = { remote: 'github.com/acme/other', handle: 'me' };
+    expect(() => assertBindable(config, 't', 'github.com/acme/team')).not.toThrow();
+    expect(() => assertBindable(config, 'third', 'github.com/acme/third')).toThrow(RefusedError);
+    expect(() => assertBindable(config, 'third', 'github.com/acme/third')).toThrow('One team per machine: This machine is configured for teams t, other; Terum Skills keeps one team per machine. Run `npx -y terum-skills@latest team leave <name>` for each team you no longer want, then re-run.');
   });
 describe('explainGhFailure', () => {
   it('names the missing or logged-out gh, and stays silent when gh itself is fine', async () => {
@@ -168,7 +175,8 @@ describe('one-line identity confirmation (acceptance A2, 2026-09-06)', () => {
     const identity = await collectIdentity(io, known, noGhRunner);
     expect(identity).toEqual({ handle: 'me', displayName: 'Me', email: 'me@x.test', github: 'octocat' });
     expect(io.asked).toEqual(['Use this identity?']);
-    expect(io.lines).toEqual(['Identity: @me — Me <me@x.test> (GitHub: octocat)']);
+    expect(io.lines).toEqual([]);
+    expect(io.details['Use this identity?']).toEqual(['Identity: @me — Me <me@x.test> (GitHub: octocat)']);
   });
 
   it('n re-asks every value with the same defaults, so one field can change without retyping the rest', async () => {
@@ -210,7 +218,8 @@ describe('one-line identity confirmation (acceptance A2, 2026-09-06)', () => {
     const io = new ScriptedPrompter(['', 'Me', 'me@x.test'], [false]);
     const identity = await collectIdentity(io, known, noGhRunner, { fixedHandle: 'bound' });
     expect(identity.handle).toBe('bound');
-    expect(io.lines[0]).toBe('Identity: @bound — Me <me@x.test> (GitHub: octocat)');
+    expect(io.lines).toEqual([]);
+    expect(io.details['Use this identity?']).toEqual(['Identity: @bound — Me <me@x.test> (GitHub: octocat)']);
     expect(io.asked).toEqual(['Use this identity?', 'GitHub login (- for none)', 'Your name', 'Your email']);
   });
 
@@ -218,7 +227,8 @@ describe('one-line identity confirmation (acceptance A2, 2026-09-06)', () => {
     const io = new ScriptedPrompter([], [true]);
     const identity = await collectIdentity(io, { ...known, github: '' }, noGhRunner);
     expect(identity.github).toBe('');
-    expect(io.lines).toEqual(['Identity: @me — Me <me@x.test> (no GitHub login)']);
+    expect(io.lines).toEqual([]);
+    expect(io.details['Use this identity?']).toEqual(['Identity: @me — Me <me@x.test> (no GitHub login)']);
   });
 });
 
@@ -240,4 +250,40 @@ it('status gh presence never probes authentication', async () => {
   const runner = ghOnlyRunner(fakeGh('seed'));
   expect(await ghState(runner, { presenceOnly: true })).toEqual({ installed: true, authenticated: false });
   expect(runner.calls.map(call => call.args)).toEqual([['--version']]);
+});
+
+it('matches noncanonical stored remote strings and ignores malformed stored entries', () => {
+  const config = emptyConfig();
+  config.teams.broken = { remote: '--invalid', handle: 'me' };
+  config.teams.x = { remote: 'https://github.com/acme/x.git', handle: 'me' };
+  expect(teamByRemote(config, 'github.com/acme/x')?.[0]).toBe('x');
+});
+
+it('the shared pre-flight permits empty machines and same-remote legacy rejoins, refusing only new bindings', () => {
+  const config = emptyConfig();
+  expect(() => refuseSecondTeam(config, { create: true }, 'retry')).not.toThrow();
+  Object.assign(config.teams, { constructor: { remote: 'https://github.com/acme/x.git', handle: 'me' } });
+  expect(() => refuseSecondTeam(config, {}, 'retry')).not.toThrow();
+  expect(() => refuseSecondTeam(config, { remote: 'github.com/acme/x' }, 'retry')).not.toThrow();
+  expect(() => refuseSecondTeam(config, { create: true }, 'retry')).toThrow(RefusedError);
+  expect(() => refuseSecondTeam(config, { remote: 'github.com/acme/y' }, 'retry', 'bare')).toThrow("One team per machine: This machine is on team constructor (https://github.com/acme/x.git). Terum Skills keeps one team per machine: run `terum-skills team leave 'constructor'` first, then re-run `retry`.");
+  config.teams.other = { remote: 'github.com/acme/y', handle: 'me' };
+  expect(() => refuseSecondTeam(config, { remote: 'github.com/acme/x' }, 'retry')).not.toThrow();
+  for (const target of [{}, { create: true } as const, { remote: 'github.com/acme/z' }]) {
+    expect(() => refuseSecondTeam(config, target, 'retry', 'bare')).toThrow('One team per machine: This machine is configured for teams constructor, other; Terum Skills keeps one team per machine. Run `terum-skills team leave <name>` for each team you no longer want, then re-run.');
+  }
+});
+
+it('the refusal strips stored remote credentials', () => {
+  const config = emptyConfig();
+  config.teams.team = { remote: 'https://user:secret@git.example/team.git', handle: 'me' };
+  expect(() => refuseSecondTeam(config, { create: true }, 'retry')).toThrow('team team (https://git.example/team.git)');
+});
+
+it('bindTeam cannot add a second own key, and refuses without changing config', () => {
+  const config = emptyConfig();
+  config.teams.t = { remote: 'github.com/acme/t', handle: 'me' };
+  const before = JSON.stringify(config);
+  expect(() => bindTeam(config, 'other', { remote: 'github.com/acme/other', handle: 'me' })).toThrow(RefusedError);
+  expect(JSON.stringify(config)).toBe(before);
 });

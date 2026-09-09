@@ -1,0 +1,106 @@
+{
+  "status": "partial",
+  "summary": "Implemented stretched card links, preserved embedded controls, and made the onboarding preview inert. Added four Vitest tests and ten Playwright cases. Typecheck and lint passed; Vitest was blocked by sandbox permissions, and browser validation remains with the orchestrator.",
+  "filesChanged": [
+    {
+      "path": "desktop/src/components/domain/SkillCard.css",
+      "change": "modified",
+      "why": "Added stretched link, control positioning, drag suppression, and guarded focus/pressed states."
+    },
+    {
+      "path": "desktop/src/screens/marketplace/marketplace.css",
+      "change": "modified",
+      "why": "Added PersonCard positioning and stretched-link interaction states."
+    },
+    {
+      "path": "desktop/src/screens/marketplace/market-components.tsx",
+      "change": "modified",
+      "why": "Replaced the duplicate avatar link with a plain div wrapper."
+    },
+    {
+      "path": "desktop/src/screens/onboarding/OnboardingBasics.tsx",
+      "change": "modified",
+      "why": "Added inert and the preview label."
+    },
+    {
+      "path": "desktop/src/screens/library/library-skill.test.tsx",
+      "change": "modified",
+      "why": "Added link, article semantics, control isolation, and install-route assertions."
+    },
+    {
+      "path": "desktop/src/screens/marketplace/marketplace.test.tsx",
+      "change": "modified",
+      "why": "Added single-link and Follow navigation assertions."
+    },
+    {
+      "path": "desktop/e2e/routes/card-click.spec.ts",
+      "change": "added",
+      "why": "Added all ten requested browser interaction tests."
+    }
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Exit 0; eslint . --max-warnings 0; no diagnostics.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Exit 0; tsc --noEmit; no diagnostics.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": false,
+      "output": "Full Vitest and focused npx fallback exited 1 before executing tests: EPERM writing desktop/node_modules/.vite-temp. NODE_OPTIONS=--no-experimental-webstorage was set. No pass/skip counts available.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [
+    {
+      "question": "The existing layout rule is shared by ProjectCard and PersonCard; should positioning affect both?",
+      "specSection": "2. Marketplace PersonCard",
+      "conservativeChoice": "Added a separate .market-person-card positioning rule, keeping ProjectCard unchanged."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "PersonCard positioning was added in a separate rule.",
+      "why": "The existing layout rule also targets ProjectCard."
+    },
+    {
+      "what": "Passing Vitest results and browser/fidelity validation remain unverified.",
+      "why": "Vitest and its prescribed fallback hit sandbox EPERM. Playwright execution was explicitly reserved for the orchestrator."
+    }
+  ],
+  "invariantsTouched": [
+    {
+      "number": 5,
+      "howSatisfied": "Preserved layout declarations and avatar wrapping; used specified tokens and interaction states. Pixel fidelity awaits external validation."
+    },
+    {
+      "number": 7,
+      "howSatisfied": "Retained every existing test unchanged; added regression coverage without lint suppressions or component test branches."
+    },
+    {
+      "number": 8,
+      "howSatisfied": "Ran required gates and focused fallback, read back every write, and used no git, network, installs, or browser launches."
+    }
+  ],
+  "testsModified": [
+    {
+      "path": "desktop/src/screens/library/library-skill.test.tsx",
+      "whatChanged": "Appended three tests; existing content preserved verbatim.",
+      "justification": "Required DOM and navigation invariants."
+    },
+    {
+      "path": "desktop/src/screens/marketplace/marketplace.test.tsx",
+      "whatChanged": "Appended one test; existing content preserved verbatim.",
+      "justification": "Required PersonCard link and Follow invariants."
+    }
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The overlay preserves every browser interaction and locked-board pixel result; these require the orchestrator's Playwright and fidelity runs."
+}

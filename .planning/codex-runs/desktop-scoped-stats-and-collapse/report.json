@@ -1,0 +1,73 @@
+{
+  "status": "partial",
+  "summary": "Implemented scoped Library statistics, Settings K, and persisted sidebar/section collapse controls with temporary URL overrides. Added unit and route coverage and updated stale count expectations. Typecheck and lint pass; tests report 959 passed, 1 failed, 91 skipped. The remaining failure is a protected fidelity test expecting 88 boards instead of 91.",
+  "filesChanged": [
+    {"path":"desktop/src/app/store.ts","change":"modified","why":"Persist sidebar and section collapse preferences with validated hydration."},
+    {"path":"desktop/src/app/url-state.ts","change":"modified","why":"Apply three collapse URL parameters without saving preferences."},
+    {"path":"desktop/src/app/collapse-state.test.tsx","change":"added","why":"Test persistence, invalid storage, storage failures, and temporary URL overrides."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Add nullable Settings K."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Serve scoped overviews, zero fallbacks, scoped titles, and Settings K."},
+    {"path":"desktop/src/backend/mock/derive.ts","change":"modified","why":"Use fixture titles and scope Library attention independently from Inbox badges."},
+    {"path":"desktop/src/backend/mock/status-counts.ts","change":"modified","why":"Preserve fixture Inbox counts instead of replacing Alerts with Library attention."},
+    {"path":"desktop/src/backend/mock/__tests__/scoped-library.test.ts","change":"added","why":"Verify scoped results, unknown scopes, empty scenarios, K, and schema validation."},
+    {"path":"desktop/src/backend/__tests__/s7q.test.ts","change":"modified","why":"Preserve the attention relationship using scoped counts."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Serve scoped titles and endorsement notes, plus null Settings K."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Assert new real-adapter titles and project notes."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","change":"modified","why":"Update titles and add recorded-inventory note and Settings K tests."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay-screens.test.tsx","change":"modified","why":"Assert scope-only Library titles."},
+    {"path":"desktop/src/components/domain/Shell.tsx","change":"modified","why":"Connect collapse controls, omit hidden sidebar, and retain panel inset."},
+    {"path":"desktop/src/components/domain/Sidebar.tsx","change":"modified","why":"Implement hide and section-collapse buttons with accessible states."},
+    {"path":"desktop/src/components/domain/TopBar.tsx","change":"modified","why":"Render the specified reopen button after Forward."},
+    {"path":"desktop/src/components/domain/Shell.test.tsx","change":"modified","why":"Update exact sidebar count expectations."},
+    {"path":"desktop/src/components/domain/collapse.test.tsx","change":"added","why":"Verify shell controls, chevrons, navigation, geometry, All clear, and rendered K."},
+    {"path":"desktop/src/fixtures/schema.ts","change":"modified","why":"Validate and retain OVERVIEW_BY_SCOPE using the shared overview schema."},
+    {"path":"desktop/src/screens/library/LibraryScreen.tsx","change":"modified","why":"Derive search placeholder directly from the scoped title."},
+    {"path":"desktop/src/screens/library/library-skill.test.tsx","change":"modified","why":"Update Global title expectations."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"Render typed K and preserve the null placeholder."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","change":"modified","why":"Update placement totals and retain boundary and invalid-input coverage."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","change":"modified","why":"Update project counts and verify complete category listings without remaining-count suffixes."},
+    {"path":"desktop/src/screens/onboarding/onboarding.test.tsx","change":"modified","why":"Update embedded Library title expectations."},
+    {"path":"desktop/src/screens/inbox/inbox.test.tsx","change":"modified","why":"Update Global sidebar count expectation."},
+    {"path":"desktop/src/screens/share/share.test.tsx","change":"modified","why":"Update Global sidebar count expectation."},
+    {"path":"desktop/e2e/routes/collapse.spec.ts","change":"added","why":"Cover collapse controls, persistence, URL-only states, scoped statistics, and console errors."}
+  ],
+  "gates": {
+    "lint":{"ran":true,"passed":true,"output":"npm run lint: exit 0; no errors or warnings.","preExistingFailures":""},
+    "typecheck":{"ran":true,"passed":true,"output":"npm run typecheck: exit 0; no diagnostics.","preExistingFailures":""},
+    "test":{"ran":true,"passed":false,"output":"npm test: 959 passed, 1 failed, 91 skipped; 69 test files passed, 1 failed.","preExistingFailures":"Baseline: 86 failed, 840 passed, 91 skipped. Remaining baseline failure: desktop/e2e/fidelity/__tests__/boards.test.ts:9 expects 88 boards; manifest contains 91."}
+  },
+  "openQuestions": [
+    {
+      "question":"The protected fidelity test still asserts 88 boards although the manifest contains 91; the orchestrator needs to update its expected count.",
+      "specSection":"Sections 6–7 and standing constraints",
+      "conservativeChoice":"Left all e2e/fidelity files unchanged and reported the failing gate."
+    }
+  ],
+  "deviations": [
+    {"what":"The full unit gate remains red on one protected fidelity-manifest assertion.","why":"The user explicitly prohibited editing e2e/fidelity/**."},
+    {"what":"Playwright route/fidelity tests and export:check were not run.","why":"These gates are assigned to the orchestrator outside the sandbox; Playwright cannot launch here."}
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Backend DTOs own scoped data and K; shared components use the existing backend seam."},
+    {"number":3,"howSatisfied":"Generated fixture, tokens, and exporter were untouched; only the handwritten validator changed."},
+    {"number":5,"howSatisfied":"Preserved specified button dimensions, chevron slots, top-bar width, and hidden-sidebar inset."},
+    {"number":6,"howSatisfied":"Components consume served statistics; real-adapter receipt placeholders remain unchanged."},
+    {"number":7,"howSatisfied":"Added URL-accessible states and meaningful regression tests; retained existing assertions and declared every changed test."},
+    {"number":8,"howSatisfied":"Ran all three sandbox gates, read back every write, used no git or network commands, and reported external verification limits."}
+  ],
+  "testsModified": [
+    {"path":"desktop/src/backend/__tests__/s7q.test.ts","whatChanged":"Updated attention to 6 = 2 + 2 + 2; retained Inbox badge assertions and added explicit sum assertion.","justification":"Library attention and Inbox badges now have separate scopes."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Updated titles and project endorsement-note expectations.","justification":"Required real-adapter contract change."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","whatChanged":"Updated titles; added scoped-note replay and null K tests.","justification":"Required recorded-inventory and Settings coverage."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay-screens.test.tsx","whatChanged":"Updated exact rendered titles.","justification":"Removed the N-of-M title format."},
+    {"path":"desktop/src/components/domain/Shell.test.tsx","whatChanged":"Updated exact sidebar count arrays.","justification":"Regenerated fixture counts."},
+    {"path":"desktop/src/screens/library/library-skill.test.tsx","whatChanged":"Updated Global title assertions.","justification":"Required scope-only title."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","whatChanged":"Updated placement totals; retained invalid cases and added valid maximum/over-maximum cases.","justification":"Fixture now has 28 placements; boundary coverage remains explicit."},
+    {"path":"desktop/src/screens/marketplace/marketplace.test.tsx","whatChanged":"Updated project and sidebar counts; asserted every category has zero remaining and its exact supplied skill list.","justification":"Fixture now renders the entire catalog."},
+    {"path":"desktop/src/screens/onboarding/onboarding.test.tsx","whatChanged":"Updated embedded Library titles.","justification":"Onboarding uses the shared Library screen."},
+    {"path":"desktop/src/screens/inbox/inbox.test.tsx","whatChanged":"Changed Global sidebar expectation to 15.","justification":"Regenerated fixture count."},
+    {"path":"desktop/src/screens/share/share.test.tsx","whatChanged":"Changed Global sidebar expectation to 15.","justification":"Regenerated fixture count."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The collapse states match the boards pixel-for-pixel: specified geometry is implemented, but browser fidelity verification remains unrun."
+}

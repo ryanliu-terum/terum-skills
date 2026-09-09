@@ -30,7 +30,7 @@ export function createExecute(sink: ExecuteSink): Execute {
       if (!outcome.ok) {
         sink.stderr(outcome.error);
         sink.setExitCode(1);
-        sink.result?.({ verb: meta.verb, ok: false, error: outcome.error, ...(outcome.cancelled ? { cancelled: true } : {}), value: outcome.value, exitCode: 1 });
+        sink.result?.({ verb: meta.verb, ok: false, error: outcome.error, ...(outcome.cancelled ? { cancelled: true } : {}), ...(outcome.refused ? { refused: true } : {}), value: outcome.value, exitCode: 1 });
       } else {
         sink.result?.({ verb: meta.verb, ok: true, value: outcome.value, exitCode: 0 });
       }
@@ -40,7 +40,7 @@ export function createExecute(sink: ExecuteSink): Execute {
       const message = outcome.error;
       sink.stderr(message);
       sink.setExitCode(1);
-      sink.result?.({ verb: meta.verb, ok: false, error: message, ...(outcome.cancelled ? { cancelled: true } : {}), exitCode: 1 });
+      sink.result?.({ verb: meta.verb, ok: false, error: message, ...(outcome.cancelled ? { cancelled: true } : {}), ...(outcome.refused ? { refused: true } : {}), exitCode: 1 });
     } finally {
       if (meta.notices) {
         try { await sink.afterVerb?.(); } catch { /* A notice must never replace the verb outcome. */ }

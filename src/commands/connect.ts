@@ -15,7 +15,7 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
 import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
 import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedFields, skillRecords } from '../lib/skills.js';
-import { MutableTree, openTeamRepo, shellQuote, treeText } from '../lib/teamRepo.js';
+import { MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 import { assessHygiene, type HygieneAssessment, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 
 export interface ConnectArgs extends WithForm {
@@ -112,7 +112,7 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
               io.print(`Local candidates under ${printable(inventory.root)}:`);
               for (const candidate of candidatesOf(inventory, args.allowPrivileged)) io.print(`  ${printable(candidate.path)}`);
             }
-            throw new Error(`No skill selected. In an interactive terminal, run \`${printable(invocation(args.form, 'connect'))} --team ${printable(shellQuote(team))}\`, or pass an explicit skill folder path.`);
+            throw new Error(`No skill selected. In an interactive terminal, run \`${printable(invocation(args.form, 'connect'))}\`, or pass an explicit skill folder path.`);
           }
           qualify = new Set();
         }

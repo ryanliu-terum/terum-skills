@@ -1,6 +1,9 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin as processStdin, stdout as processStdout } from 'node:process';
 
+/** Lines the person needs in order to answer; a terminal prints them once, immediately before the question; frame mode carries them on the ask frame. */
+export interface AskOptions { detail?: readonly string[]; }
+
 /**
  * §3 library-first: the ONLY channel a verb uses to talk to a human. Verbs never touch
  * process.stdin / stdout / console; the ESLint rule in eslint.config.js enforces that and
@@ -19,9 +22,9 @@ export interface Prompter {
    * setup and the `gh auth login` offer (decision walk D5, 2026-09-08). Absent means terminal.
    */
   readonly channel?: 'terminal' | 'frames';
-  confirm(question: string): Promise<boolean>;
-  text(question: string, defaultValue?: string): Promise<string>;
-  select(question: string, choices: readonly string[]): Promise<string>;
+  confirm(question: string, options?: AskOptions): Promise<boolean>;
+  text(question: string, defaultValue?: string, options?: AskOptions): Promise<string>;
+  select(question: string, choices: readonly string[], options?: AskOptions): Promise<string>;
   print(line: string): void;
 }
 
@@ -91,16 +94,19 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
   return {
     interactive,
     channel: 'terminal',
-    async confirm(question) {
+    async confirm(question, options) {
+      for (const line of options?.detail ?? []) output.write(`${line}\n`);
       const answer = await ask(`${question} [y/N] `);
       return /^(y|yes)$/i.test(answer.trim());
     },
-    async text(question, defaultValue) {
+    async text(question, defaultValue, options) {
+      for (const line of options?.detail ?? []) output.write(`${line}\n`);
       const suffix = defaultValue === undefined || defaultValue === '' ? '' : ` [${defaultValue}]`;
       const answer = await ask(`${question}${suffix}: `);
       return answer.trim() || defaultValue || '';
     },
-    async select(question, choices) {
+    async select(question, choices, options) {
+      for (const line of options?.detail ?? []) output.write(`${line}\n`);
       const lines = choices.map((choice, index) => `${index + 1}. ${choice}`).join('\n');
       for (let attempt = 0; attempt < MAX_SELECT_ATTEMPTS; attempt++) {
         const answer = (await ask(`${question}\n${lines}\n> `)).trim();
