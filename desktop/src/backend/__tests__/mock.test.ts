@@ -83,3 +83,4 @@ it('returns CLI fixture versions and the complete update report', async () => {
   const advice = ['Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'];
   expect(await createMockBackend().update()).toEqual({ ok: true, value: { running: design.CLI_VERSION, latest: design.CLI_LATEST, observation: 'newer', launch: 'npx', description: `${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`, advice, lines: [`terum-skills ${design.CLI_VERSION}`, `Latest advertised release: ${design.CLI_LATEST}`, ...advice] } });
 });
+it('has no launch target in the mock',async()=>{expect(await createMockBackend().launchTarget()).toBeNull();});

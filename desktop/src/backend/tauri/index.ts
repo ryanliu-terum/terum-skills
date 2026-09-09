@@ -126,12 +126,18 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
 const PREF = 'terum-skills-app:pref:';
 
 export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
-  // Read once per app session; `terum-skills app` rewrites the file on every launch, and the app is launched by it.
+  // Share in-flight reads and cache success; a terminal launch can repair a missing or broken file.
   let hello: Extract<CliFrame, { t: 'hello' }> | null = null;
   let featuresOnce: Promise<void> | undefined;
   const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { hello = frame; };
   let stateOnce: Promise<AppState | null> | undefined;
-  const state = () => (stateOnce ??= bridge.readAppState());
+  const state = () => (stateOnce ??= bridge.readAppState().then((value) => {
+    if (value === null) stateOnce = undefined;
+    return value;
+  }, (error: unknown) => {
+    stateOnce = undefined;
+    throw error;
+  }));
   let homeOnce: Promise<string> | undefined;
   const home = () => (homeOnce ??= bridge.homeDirectory().catch(() => ''));
   async function localPath(path:string):Promise<string> {
@@ -189,6 +195,11 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     return { ok: true, value: selected };
   }
   const backend: Backend = {
+    async launchTarget() {
+      const launch = await state();
+      const target = launch?.target ?? null;
+      return launch && target !== null ? { target, writtenAt: launch.writtenAt } : null;
+    },
     async features(): Promise<Features> {
       if (!hello) await (featuresOnce ??= read(run(['status'], z.unknown(), value => value, [])).then(() => undefined));
       return Object.fromEntries(FEATURE_KEYS.map(key => [key, hello?.features[key] ?? false])) as Features;

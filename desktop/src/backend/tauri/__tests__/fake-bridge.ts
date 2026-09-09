@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
 import type { AppState, Bridge, LineEvent } from '../bridge';
 
-export const STATE: AppState = { schema: 1, node: '/usr/local/bin/node', entry: '/usr/local/lib/node_modules/terum-skills/dist/index.js', version: '0.1.6' };
+export const STATE: AppState = { schema: 1, node: '/usr/local/bin/node', entry: '/usr/local/lib/node_modules/terum-skills/dist/index.js', version: '0.1.6', writtenAt: '2026-09-08T00:00:00Z' };
 
 /** A fake shell: records spawns and writes, replays scripted CLI stdout lines, honours cancel/kill. */
 export function fakeBridge(script: (args: readonly string[], emit: (e: LineEvent) => void, writes: string[]) => void | Promise<void>, state: AppState | null = STATE) {

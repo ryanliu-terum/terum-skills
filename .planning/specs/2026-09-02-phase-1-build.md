@@ -111,11 +111,14 @@ Rules the tree encodes:
 ├── teams/<team>/                full clone — the working copy sync pulls
 ├── cache/<team>/<full-tree-hash>/<skill>/    immutable pinned checkouts (git archive <tree>)
 ├── run/<team>.lock, <team>.stamp             hook mutex + hourly rate-limit stamp (§8)
+├── run/app.json                             desktop launch state (0600; machine-local, never an owner file)
 ├── run/latest-version.json                  schema 1 release observations + notice ack (0600; safe to delete)
 ├── quarantine/<ISO8601>/<name>/              folders moved aside by orphan handling, --force, and
 │                                             local-changed (§6); only `sync prune` deletes here
 └── backups/settings.<ISO>.json, uninstall.<ISO>.json   previous settings.json contents (§8) and the pre-teardown config record (§6 uninstall)
 ```
+
+**Desktop launch state.** `run/app.json` contains `{ schema: 1, node, entry, path, version, writtenAt, target? }`: absolute Node binary and CLI entry, the writing process’s PATH (`string | null`), CLI version, write timestamp, and optional setup join target. Each `app` launch, including a `setup` hand-off, refreshes the file atomically; a later plain `app` omits and therefore clears `target`. D4 is decided: replay the recorded PATH verbatim into CLI children (including Windows’s semicolon-delimited PATH), with no login-shell probe. A missing, null, or empty `path` falls back to the shell process’s environment. The shell consumes `target` once per `writtenAt`, remembering the consumed timestamp in its own preferences so a later Dock relaunch does not re-route a joined user into the wizard (routing and that preference are S7r). This is machine-local run state, never an owner file.
 
 **Release-state schema (rev 11).** `run/latest-version.json` is machine-local, never team truth. It contains:
 
