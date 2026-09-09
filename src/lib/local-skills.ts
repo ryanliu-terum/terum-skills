@@ -92,7 +92,7 @@ export async function canonicalLedger(config: Pick<Config, 'shared' | 'placement
 }
 
 /** Canonicalize only the parent: a child symlink must remain a distinct, rejected entry. */
-async function canonicalParentPath(path: string): Promise<string | undefined> {
+export async function canonicalParentPath(path: string): Promise<string | undefined> {
   try { return join(await realpath(dirname(path)), basename(path)); }
   catch { return undefined; }
 }

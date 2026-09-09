@@ -480,9 +480,10 @@ deterministic jobs:
 
 ## 12. UI contract (Teddy)
 
-The receipt JSON is the API. The UI never runs evals and never derives new statistics.
-For a given version the UI renders the **latest** receipt (max `run_id`); older receipts
-are history — kept, never displayed side by side or merged.
+The receipt JSON is the API. The UI never runs an eval itself: it may hand a run off to the CLI through the Prompter (the `eval` verb over `--frames`, with the CLI asking its own questions and the person's own Claude login doing the work), and it never derives a new statistic. Per receipt it may show the lift, the verdict and the per-arm scores exactly as the committed receipt states them, a pre-run cost estimate computed from that one receipt's own `efficiency` numbers and labelled as arm-run pricing for the receipt's `model`, and the receipt's provenance beside every number. It may not derive any statistic across receipts, rank or sort skills by a receipt number, show a number when there is no receipt, or show an estimate whose arm model differs from `receipt.provenance.model`. For a given version the UI renders the latest receipt (max `run_id`); an invalid latest receipt is reported as invalid, never replaced by an older one; older receipts are history — listed, never displayed side by side or merged.
+
+Reconciliation (2026-09-09, eval-button decision walk D1): PR #68's §12 clauses (a), (c) and (d) stand; clause (b) — the UI composes the command and hands the person to a terminal — is replaced by the sentence above.
+
 Card (per the D29 resolution, commit `25ff226`):
 
 | Card slot | Source |

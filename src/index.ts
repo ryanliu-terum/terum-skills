@@ -43,7 +43,8 @@ const separator = process.argv.indexOf('--');
 const prefixEnd = separator === -1 ? process.argv.length : separator;
 const frames = process.argv.slice(0, prefixEnd).includes(FRAMES_FLAG);
 const argv = process.argv.filter((argument, index) => index >= prefixEnd || argument !== FRAMES_FLAG);
-const channel = frames ? frameChannel({ input: process.stdin, output: process.stdout, diagnostic: (line) => { process.stderr.write(`${line}\n`); } }) : undefined;
+// A verb that never asks (eval) would otherwise keep running after cancel.
+const channel = frames ? frameChannel({ onCancel: () => { process.kill(process.pid, 'SIGTERM'); }, input: process.stdin, output: process.stdout, diagnostic: (line) => { process.stderr.write(`${line}\n`); } }) : undefined;
 let reported = false;
 const report = (outcome: ResultOutcome) => {
   if (!channel || reported) return;

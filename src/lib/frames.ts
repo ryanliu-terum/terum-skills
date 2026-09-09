@@ -24,12 +24,12 @@ export interface ProgressFrame { t: 'progress'; step: string; current?: number; 
 export interface ResultFrame { t: 'result'; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; refused?: boolean; value?: unknown; }
 export type Frame = HelloFrame | PrintFrame | AskFrame | ProgressFrame | ResultFrame;
 
-export interface AnswerFrame { t: 'answer'; id: string; value: string | number | boolean; }
+export interface AnswerFrame { t: 'answer'; id: string; value?: string | number | boolean; }
 export interface CancelFrame { t: 'cancel'; }
 export type InboundFrame = AnswerFrame | CancelFrame;
 
 /** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed). */
-export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline'] as const;
+export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline'] as const;
 
 /**
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
@@ -39,8 +39,8 @@ export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 
 export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   checkouts: true,
   memberRole: true, localIdentity: true,
-  favorites: false, follow: false, roles: false, lastSeen: false, installScope: false, inviteScoping: false,
-  disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: false, perCase: false, progress: false,
+  favorites: false, follow: false, roles: false, lastSeen: false, installScope: true, inviteScoping: false,
+  disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: false,
 });
 
 export const COMMANDER_NON_ERRORS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);
@@ -62,6 +62,7 @@ export interface FrameStreams {
   output: NodeJS.WritableStream;
   /** Where malformed or unexpected inbound lines are reported (the bin passes stderr). */
   diagnostic?(line: string): void;
+  onCancel?(): void;
 }
 
 export interface ResultOutcome { verb: string; ok: boolean; error?: string; cancelled?: true; refused?: true; value?: unknown; exitCode: 0 | 1; }
@@ -109,7 +110,7 @@ function readFrames(input: NodeJS.ReadableStream, onFrame: (frame: InboundFrame)
 function isAnswer(value: unknown): value is AnswerFrame {
   if (!value || typeof value !== 'object') return false;
   const frame = value as Partial<AnswerFrame>;
-  return frame.t === 'answer' && typeof frame.id === 'string' && ['string', 'number', 'boolean'].includes(typeof frame.value);
+  return frame.t === 'answer' && typeof frame.id === 'string' && (frame.value === undefined || ['string', 'number', 'boolean'].includes(typeof frame.value));
 }
 function isCancel(value: unknown): value is CancelFrame {
   return Boolean(value) && typeof value === 'object' && (value as Partial<CancelFrame>).t === 'cancel';
@@ -125,7 +126,7 @@ function isCancel(value: unknown): value is CancelFrame {
 export function frameChannel(streams: FrameStreams): FrameChannel {
   const { input, output } = streams;
   const diagnostic = streams.diagnostic ?? (() => undefined);
-  const pending = new Map<string, { question: string; resolve(value: string | number | boolean): void; reject(error: Error): void }>();
+  const pending = new Map<string, { question: string; defaultChoice?: string; resolve(value: string | number | boolean): void; reject(error: Error): void }>();
   let sequence = 0;
   let closed = false;
   let closedReason: 'closed' | 'output-closed' = 'closed';
@@ -134,18 +135,20 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
     for (const [id, ask] of pending) { pending.delete(id); ask.reject(new PromptClosedError(ask.question, closedReason)); }
   };
   const stop = readFrames(input, (frame) => {
-    if (frame.t === 'cancel') { closed = true; failPending(); return; }
+    if (frame.t === 'cancel') { closed = true; failPending(); streams.onCancel?.(); return; }
     const ask = pending.get(frame.id);
     if (!ask) { diagnostic(`frames: answer for unknown question id ${JSON.stringify(frame.id)} ignored`); return; }
+    const value = frame.value ?? ask.defaultChoice;
+    if (value === undefined) { diagnostic(`frames: answer without a value for ${JSON.stringify(frame.id)} ignored`); return; }
     pending.delete(frame.id);
-    ask.resolve(frame.value);
+    ask.resolve(value);
   }, (line) => diagnostic(`frames: ignored malformed line ${JSON.stringify(line.length > 200 ? `${line.slice(0, 200)}…` : line)}`), () => { closed = true; failPending(); });
 
   const ask = (kind: AskKind, question: string, extra: Pick<AskFrame, 'default' | 'choices' | 'detail'> = {}): Promise<string | number | boolean> => {
     if (closed) return Promise.reject(new PromptClosedError(question, closedReason));
     const id = `q${++sequence}`;
     return new Promise((resolve, reject) => {
-      pending.set(id, { question, resolve, reject });
+      pending.set(id, { question, resolve, reject, defaultChoice: kind === 'select' ? extra.default : undefined });
       const { detail, ...rest } = extra;
       writeFrame(output, { t: 'ask', id, kind, question, ...rest, ...(detail?.length ? { detail } : {}) });
     });
@@ -162,9 +165,10 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
       const answer = String(await ask('text', question, { ...(defaultValue === undefined || defaultValue === '' ? {} : { default: defaultValue }), ...(options?.detail?.length ? { detail: options.detail } : {}) })).trim();
       return answer || defaultValue || '';
     },
-    async select(question, choices, options) {
+    async select(question, choices, defaultChoice, options) {
       for (let attempt = 0; attempt < MAX_SELECT_ATTEMPTS; attempt++) {
-        const answer = await ask('select', question, { choices, ...(options?.detail?.length ? { detail: options.detail } : {}) });
+        const answer = await ask('select', question, { choices, ...(defaultChoice === undefined ? {} : { default: defaultChoice }), ...(options?.detail?.length ? { detail: options.detail } : {}) });
+        if ((answer === undefined || answer === null || String(answer).trim() === '') && defaultChoice !== undefined) return defaultChoice;
         const index = typeof answer === 'number' ? answer : /^\d+$/.test(String(answer).trim()) ? Number(String(answer).trim()) : NaN;
         const picked = Number.isInteger(index) && index >= 1 && index <= choices.length ? choices[index - 1] : choices.find((choice) => choice === String(answer));
         if (picked !== undefined) return picked;

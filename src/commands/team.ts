@@ -14,8 +14,8 @@ import { fromError, CancelledError, Result, failure, success } from '../lib/resu
 import { Runner, systemRunner } from '../lib/runner.js';
 import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
 import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
-import { endorsedCandidates, readRoster, RosterEntry } from '../lib/skills.js';
-import { installOne } from './install.js';
+import { endorsedCandidates, readTeam, readRoster, RosterEntry } from '../lib/skills.js';
+import { installOne, placementHome, resolveDestination } from './install.js';
 
 /**
  * §6 `team create` and `team join` (milestone M1). Both are `run(args, io)` over the Prompter.
@@ -369,8 +369,9 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     // one question, as §6 requires.
     const endorsed = await endorsedCandidates(clone, team, identity.handle, { onProblem: (problem) => io.print(`Skipping ${problem.name}: ${problem.message}`) });
     if (endorsed.length && await io.confirm(`Install ${endorsed.length} team-endorsed skill(s)?`)) {
+      const destination = await resolveDestination(store, await readTeam(clone), undefined, io, io.interactive, { runner, home: placementHome(store) });
       for (const skill of endorsed) {
-        try { await installOne({ team, id: skill.id, store, runner }, io); }
+        try { await installOne({ team, destination, id: skill.id, store, runner }, io); }
         catch (error) { io.print(`Could not install endorsed skill ${skill.name}: ${error instanceof Error ? error.message : String(error)}`); }
       }
     }

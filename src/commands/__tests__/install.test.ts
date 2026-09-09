@@ -1,7 +1,7 @@
 import { createExecute } from '../../lib/execute.js';
 import type { ResultOutcome } from '../../lib/frames.js';
 import { getStartedLines } from '../../lib/invocation.js';
-import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join, posix, win32 } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as setup from '../setup.js';
@@ -272,7 +272,7 @@ describe('install (§6 refs)', () => {
     await expect(access(quarantine)).rejects.toMatchObject({ code: 'ENOENT' });
     const projectHome = join(fixture.root, 'project-home'); const foreign = join(projectHome, '.claude', 'skills', 'sample');
     await mkdir(foreign, { recursive: true }); await writeFile(join(foreign, 'SKILL.md'), 'user-owned');
-    expect((await run({ kind: 'project', project: 'product', config: store, home: projectHome, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ kind: 'project', project: 'product', config: store, home: projectHome, into: checkout, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
     expect(await readFile(join(foreign, 'SKILL.md'), 'utf8')).toBe('user-owned');
     await expect(access(join(checkout, '.claude', 'skills', 'sample', 'SKILL.md'))).resolves.toBeUndefined();
   });
@@ -297,7 +297,7 @@ describe('install (§6 refs)', () => {
     expect(io.lines.filter((line) => line.startsWith(`Local changes at ${placed} moved to `))).toHaveLength(1);
   });
 
-  it('keeps project placements worktree-local across two projects and two checkouts, and sync never guesses an unrelated checkout', async () => {
+  it('places project packages in explicit checkouts from any cwd and refreshes Global from outside', async () => {
     const fixture = await bareTeam();
     const productA = await bareTeam();
     const productB = await bareTeam();
@@ -323,37 +323,37 @@ describe('install (§6 refs)', () => {
     const beta = await cloneWithIdentity(productB.bare, join(productB.root, 'beta'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
 
-    expect((await run({ kind: 'project', project: 'alpha', config: store, home, cwd: alphaOne }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ kind: 'project', project: 'alpha', config: store, home, into: alphaOne, cwd: alphaOne }, new ScriptedPrompter())).ok).toBe(true);
     await expect(access(join(alphaOne, '.claude', 'skills', 'project-a', 'SKILL.md'))).resolves.toBeUndefined();
     await expect(access(join(beta, '.claude', 'skills', 'project-a'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(join(alphaOne, '.git', 'info', 'exclude'), 'utf8')).toContain('.claude/skills/project-a');
     expect(await readFile(join(beta, '.git', 'info', 'exclude'), 'utf8')).not.toContain('.claude/skills/project-a');
 
-    expect((await run({ kind: 'project', project: 'beta', config: store, home, cwd: beta }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ kind: 'project', project: 'beta', config: store, home, into: beta, cwd: beta }, new ScriptedPrompter())).ok).toBe(true);
     await expect(access(join(beta, '.claude', 'skills', 'project-b', 'SKILL.md'))).resolves.toBeUndefined();
     expect(await readFile(join(beta, '.git', 'info', 'exclude'), 'utf8')).toContain('.claude/skills/project-b');
     expect(await readFile(join(alphaOne, '.git', 'info', 'exclude'), 'utf8')).not.toContain('.claude/skills/project-b');
 
-    expect((await run({ kind: 'project', project: 'alpha', config: store, home, cwd: alphaTwo }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ kind: 'project', project: 'alpha', config: store, home, into: alphaTwo, cwd: alphaTwo }, new ScriptedPrompter())).ok).toBe(true);
     const alphaPlacements = Object.entries((await store.read()).placements).filter(([, entry]) => entry.id === projectAId && entry.scope.kind === 'project' && entry.scope.project === 'alpha');
     expect(alphaPlacements).toHaveLength(2);
     const installed = JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).installed;
     expect(installed.filter((entry: { id: string; scope: { kind: string; project?: string } }) => entry.id === projectAId && entry.scope.kind === 'project' && entry.scope.project === 'alpha')).toHaveLength(1);
 
     const outside = await temporaryDirectory('terum-unmatched-project-');
-    const ledgerBeforeOutside = JSON.stringify((await store.read()).placements);
-    const outsideInstall = await run({ kind: 'project', project: 'alpha', config: store, home, cwd: outside }, new ScriptedPrompter());
-    expect(outsideInstall).toMatchObject({ ok: false, error: expect.stringContaining('no matching project context') });
+    const ledgerBeforeOutside = Object.keys((await store.read()).placements);
+    const outsideInstall = await run({ kind: 'project', project: 'alpha', config: store, home, into: alphaOne, cwd: outside }, new ScriptedPrompter());
+    expect(outsideInstall).toMatchObject({ ok: true, value: [{ path: join(await realpath(alphaOne), '.claude', 'skills', 'project-a') }] });
     expect((await store.read()).pending).toEqual([]);
-    expect(JSON.stringify((await store.read()).placements)).toBe(ledgerBeforeOutside);
+    expect(Object.keys((await store.read()).placements)).toEqual(ledgerBeforeOutside);
     await expect(access(join(outside, '.claude', 'skills', 'project-a'))).rejects.toMatchObject({ code: 'ENOENT' });
 
-    expect((await run({ ref: 'global', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'global', into: 'global', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
     const globalPath = join(home, '.claude', 'skills', 'global', 'SKILL.md');
     const alphaBeforeSync = await readFile(join(alphaOne, '.claude', 'skills', 'project-a', 'SKILL.md'), 'utf8');
     const betaBeforeSync = await readFile(join(beta, '.claude', 'skills', 'project-b', 'SKILL.md'), 'utf8');
     await pushFromSeed(fixture.seed, 'skills/global/SKILL.md', `---\nname: global\ndescription: global after\nlicense: UNLICENSED\nmetadata:\n  id: ${globalId}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    expect((await sync({ config: store, cwd: outside }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await sync({ config: store, home, cwd: outside }, new ScriptedPrompter())).ok).toBe(true);
     expect(await readFile(globalPath, 'utf8')).toContain('description: global after');
     expect(await readFile(join(alphaOne, '.claude', 'skills', 'project-a', 'SKILL.md'), 'utf8')).toBe(alphaBeforeSync);
     expect(await readFile(join(beta, '.claude', 'skills', 'project-b', 'SKILL.md'), 'utf8')).toBe(betaBeforeSync);
@@ -464,4 +464,85 @@ it('install refusal survives createExecute without bootstrap or runner calls', a
   await execute(io => run({ config, runner, ref: 'other/repo/skill' }, io), { verb: 'install', notices: false });
   expect(frames).toEqual([expect.objectContaining({ ok: false, refused: true, exitCode: 1 })]);
   expect(runner.calls).toEqual([]);
+});
+
+async function destinationFixture() {
+  const fixture = await bareTeam();
+  const id = 'abababab-abab-4bab-8bab-abababababab';
+  const content = `---\nname: sample\ndescription: first\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`;
+  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', content);
+  const home = join(fixture.root, 'home');
+  const store = createConfigStore(join(home, '.terum', 'skills'));
+  const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  const checkout = join(fixture.root, 'checkout'); await mkdir(checkout);
+  return { ...fixture, id, content, home, store, clone, checkout };
+}
+
+describe('Library install destinations', () => {
+  it('places a Global package in a checkout, registers it exactly once, and keeps Global scope', async () => {
+    const f = await destinationFixture(); const io = new ScriptedPrompter();
+    for (let i = 0; i < 2; i++) expect(await run({ ref: 'sample', config: f.store, home: f.home, into: f.checkout }, io)).toMatchObject({ ok: true });
+    const root = await realpath(f.checkout); const config = await f.store.read();
+    expect(config.checkouts).toEqual([root]);
+    expect(config.placements[join(root, '.claude', 'skills', 'sample')]).toMatchObject({ id: f.id, scope: { kind: 'global' } });
+    expect(io.lines.filter(line => line === `Registered ${root} in your library.`)).toHaveLength(1);
+    await expect(access(join(f.home, '.claude', 'skills', 'sample'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses a missing destination without creating it, intent, or a placement', async () => {
+    const f = await destinationFixture(); const missing = join(f.root, 'missing');
+    expect(await run({ ref: 'sample', config: f.store, into: missing }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `Checkout folder ${missing} is missing` });
+    await expect(access(missing)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await f.store.read()).toMatchObject({ pending: [], placements: {} });
+  });
+
+  it('offers both matching checkouts without a default or an unregistered cwd choice', async () => {
+    const f = await destinationFixture(); const other = join(f.root, 'other'); await mkdir(other);
+    await f.store.update(config => { config.checkouts = [f.checkout, other]; });
+    const { resolveDestination } = await import('../install.js'); const { readTeam } = await import('../../lib/skills.js');
+    const team = await readTeam(f.clone); team.projects.alpha = { remotes: ['git@github.com:acme/product.git'], skills: [f.id] };
+    const runner = wrapRunner(systemRunner, async () => ({ code: 0, stdout: 'https://github.com/acme/product.git\n', stderr: '' }));
+    const io = new ScriptedPrompter([''], [], true);
+    expect(await resolveDestination(f.store, team, 'alpha', io, true, { cwd: f.seed, runner, home: f.home })).toEqual({ kind: 'global' });
+    expect(io.asked).toEqual(['Install to']);
+    expect(io.offered).toEqual([['Global (~/.claude/skills)', `checkout · ${await realpath(f.checkout)}`, `other · ${await realpath(other)}`]]);
+    expect(io.offeredDefaults).toEqual([undefined]);
+  });
+
+  it('keeps Global first and defaults to the sole origin match; Global packages still ask', async () => {
+    const f = await destinationFixture(); await f.store.update(config => { config.checkouts = [f.seed]; });
+    const { resolveDestination } = await import('../install.js'); const { readTeam } = await import('../../lib/skills.js');
+    const team = await readTeam(f.clone); team.projects.alpha = { remotes: [f.bare], skills: [f.id] };
+    const io = new ScriptedPrompter(['', ''], [], true);
+    const opts = { cwd: f.seed, runner: systemRunner, home: f.home };
+    expect(await resolveDestination(f.store, team, 'alpha', io, true, opts)).toEqual({ kind: 'checkout', root: await realpath(f.seed) });
+    expect(await resolveDestination(f.store, team, undefined, io, true, opts)).toEqual({ kind: 'global' });
+    expect(io.offered[0]?.[0]).toBe('Global (~/.claude/skills)');
+    expect(io.offeredDefaults).toEqual([`seed · ${await realpath(f.seed)} · current repository`, 'Global (~/.claude/skills)']);
+    expect(io.countAsked('Install to')).toBe(2);
+    expect(await run({ ref: 'sample', config: f.store }, new NonInteractivePrompter())).toMatchObject({ ok: false, error: 'Pass --into global or --into <checkout root>' });
+  });
+
+  it('updates the version of matching pending intent in place and retains its destination', async () => {
+    const f = await destinationFixture();
+    const v1 = (await git(['rev-parse', 'HEAD:skills/sample'], f.clone)).trim();
+    await pushFromSeed(f.seed, 'skills/sample/SKILL.md', f.content.replace('first', 'second'));
+    await git(['fetch', 'origin'], f.clone); await git(['reset', '--hard', 'origin/main'], f.clone);
+    const v2 = (await git(['rev-parse', 'HEAD:skills/sample'], f.clone)).trim();
+    const target = join(f.checkout, '.claude', 'skills', 'sample'); await mkdir(target, { recursive: true }); await writeFile(join(target, 'SKILL.md'), 'foreign');
+    for (const version of [v1, v2]) expect((await run({ ref: `sample@${version}`, into: f.checkout, config: f.store }, new ScriptedPrompter())).ok).toBe(false);
+    expect((await f.store.read()).pending).toEqual([expect.objectContaining({ version: v2, destination: { kind: 'checkout', root: await realpath(f.checkout) } })]);
+  });
+
+  it('recognizes owned placement through a symlinked parent and keeps one ledger key', async () => {
+    const f = await destinationFixture();
+    expect((await run({ ref: 'sample', config: f.store, into: f.checkout }, new ScriptedPrompter())).ok).toBe(true);
+    const alias = join(f.root, 'alias'); await symlink(f.checkout, alias);
+    const { installOne } = await import('../install.js');
+    await writeFile(join(f.checkout, '.claude', 'skills', 'sample', 'SKILL.md'), 'local edit');
+    await expect(installOne({ team: 'team', id: f.id, destination: { kind: 'checkout', root: alias }, store: f.store, runner: systemRunner }, new ScriptedPrompter())).resolves.toMatchObject({ path: join(alias, '.claude', 'skills', 'sample') });
+    expect(Object.keys((await f.store.read()).placements)).toHaveLength(1);
+    expect(await readFile(join(alias, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: first');
+  });
 });

@@ -1,7 +1,10 @@
 import { invocation, type InvocationForm } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
-import { readFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join } from 'node:path';
+import { checkoutPath, registerCheckout, writableCheckout } from '../lib/checkouts.js';
+import { canonicalParentPath } from '../lib/local-skills.js';
+import { checkoutRootOf } from '../lib/placer/agent-paths.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { HookOptions } from '../lib/hook.js';
 import type { WrapperOptions } from '../lib/wrapper.js';
@@ -11,12 +14,13 @@ import { refuseSecondTeam, teamByRemote } from '../lib/auth.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { fromError, CancelledError, RefusedError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { Config, Team, describeRaw, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
+import { Config, Destination, Team, describeRaw, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { materializeVersion, resolveVersion } from '../lib/version.js';
 
 export interface InstallArgs extends WithForm {
+  into?: string;
   ref?: string;
   kind?: 'skill' | 'member' | 'project';
   member?: string;
@@ -42,12 +46,14 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const operation = parseOperation(args);
+    const destinationFor = async (team: string, project?: string) => resolveDestination(store, await readTeam(store.teamClone(team)), project, io, io.interactive, { into: args.into, cwd: args.cwd, runner, home: args.home ?? placementHome(store) });
     if (operation.kind === 'member') {
       const [team] = selectTeam(config.teams, args.team, args.form);
       const person = await readPerson(store.teamClone(team), operation.member);
+      const destination = await destinationFor(team);
       const results: InstalledResult[] = [];
       for (const item of person.installed) {
-        const result = await installOne({ team, id: item.id, version: item.version ?? undefined, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io);
+        const result = await installOne({ team, destination, id: item.id, version: item.version ?? undefined, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io);
         results.push(result);
       }
       return success(results);
@@ -57,8 +63,9 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       const teamJson = await readTeam(store.teamClone(team));
       const project = Object.hasOwn(teamJson.projects, operation.project) ? teamJson.projects[operation.project] : undefined;
       if (!project) throw new Error(`Unknown project ${operation.project}.`);
+      const destination = await destinationFor(team, operation.project);
       const results: InstalledResult[] = [];
-      for (const id of project.skills) results.push(await installOne({ team, id, project: operation.project, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
+      for (const id of project.skills) results.push(await installOne({ team, destination, id, project: operation.project, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
       return success(results);
     }
     const reference = parseRef(operation.ref);
@@ -78,42 +85,46 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       }
       return bootstrapped.value.team;
     });
-    return success([await installOne({ team, reference: reference.name, version: reference.version, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
+    const destination = await destinationFor(team);
+    return success([await installOne({ team, destination, reference: reference.name, version: reference.version, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
   } catch (error) { return fromError(error); }
 }
 
 /** Shared by team join and sync: exactly one install/consent/placement path. */
-export async function installOne(input: { team: string; reference?: string; id?: string; version?: string; project?: string; scope?: { kind: 'global' } | { kind: 'project'; project: string }; force?: boolean; store: ConfigStore; runner: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'> }, io: Prompter): Promise<InstalledResult> {
+export async function installOne(input: { team: string; destination: Destination; reference?: string; id?: string; version?: string; project?: string; scope?: { kind: 'global' } | { kind: 'project'; project: string }; force?: boolean; store: ConfigStore; runner: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'> }, io: Prompter): Promise<InstalledResult> {
   const config = await input.store.read();
   const binding = config.teams[input.team];
   if (!binding?.handle) throw new Error(`Team ${input.team} has no joined handle.`);
   const clone = input.store.teamClone(input.team);
   const skill = await resolveSkill(clone, input.team, input.reference ?? input.id!);
   const teamJson = await readTeam(clone);
-  const matchedProject = await matchingProject(teamJson, input.runner, input.cwd);
-  const project = input.project ?? matchedProject;
-  const scope = input.scope ?? selectScope(teamJson, skill.id, project, input.project);
-  if (scope.kind === 'project' && (!project || matchedProject !== scope.project)) throw new Error(`Install project ${scope.project} from a checkout registered for that project; no matching project context was found.`);
+  const packageProject = input.project && teamJson.projects[input.project]?.skills.includes(skill.id) ? input.project : undefined;
+  const scope = input.scope ?? (packageProject ? { kind: 'project' as const, project: packageProject } : { kind: 'global' as const });
+  if (input.destination.kind === 'checkout') await assertCheckoutFolder(input.destination.root);
   const latest = input.version ? await resolveVersion(clone, skill.name, input.version, input.runner) : null;
-  const pending = { op: 'install' as const, id: skill.id, team: input.team, scope, version: latest, started: new Date().toISOString() };
+  const pending = { op: 'install' as const, id: skill.id, team: input.team, scope, destination: input.destination, version: latest, started: new Date().toISOString() };
   const pendingAlreadyExists = (await input.store.read()).pending.some((entry) => samePending(entry, pending));
-  await input.store.update((fresh) => { if (!fresh.pending.some((entry) => samePending(entry, pending))) fresh.pending.push(pending); });
+  await input.store.update((fresh) => { const existing = fresh.pending.find((entry) => samePending(entry, pending)); if (existing) existing.version = latest; else fresh.pending.push(pending); });
   const source = latest ? await materializeVersion(input.store, input.team, clone, skill.name, latest, input.runner) : skill.directory;
   const sourceSkill = await skillAtSource(source, skill);
   try {
     await ensureConsent(input.store, sourceSkill, io);
   } catch (error) {
     // A declined pre-placement consent is not an interrupted install: nothing observable moved.
-    if (!pendingAlreadyExists) await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => entry.started !== pending.started); });
+    if (!pendingAlreadyExists) await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
     throw error;
   }
-  const repoRoot = scope.kind === 'project' ? await currentRepoRoot(input.runner, input.cwd) : undefined;
-  const root = resolveTarget('claude-code', scope, repoRoot, input.home ?? placementHome(input.store));
+  const repoRoot = input.destination.kind === 'checkout' ? input.destination.root : undefined;
+  const root = resolveTarget('claude-code', repoRoot ? { kind: 'project', project: packageProject ?? '' } : { kind: 'global' }, repoRoot, input.home ?? placementHome(input.store));
   const destination = join(root, skill.name);
+  if (repoRoot) await assertCheckoutFolder(repoRoot);
   const release = await lockTarget(root, skill.name);
   let placed: { path: string; snapshot: { fingerprint: string }; notices: string[] };
   try {
-    const entry = (await input.store.read()).placements[destination];
+    const canonical = await canonicalParentPath(destination);
+    const ledger = (await input.store.read()).placements;
+    const ownedKey = (await Promise.all(Object.keys(ledger).map(async key => ({ key, canonical: await canonicalParentPath(key) })))).find(item => item.key === destination || (canonical !== undefined && item.canonical === canonical))?.key;
+    const entry = ownedKey === undefined ? undefined : ledger[ownedKey];
     const owned = entry?.id === skill.id;
     const collision = await inspect(destination, owned);
     if (collision.kind === 'foreign') {
@@ -126,8 +137,9 @@ export async function installOne(input: { team: string; reference?: string; id?:
       const drift = await quarantineDrift(destination, entry.fingerprint, join(input.store.root, 'quarantine'));
       if (drift.quarantined) io.print(`Local changes at ${destination} moved to ${drift.quarantined}.`);
     }
-    placed = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot: repoRoot, runner: input.runner, quarantineRoot: join(input.store.root, 'quarantine') });
+    placed = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot: repoRoot ? checkoutRootOf(destination) : undefined, runner: input.runner, quarantineRoot: join(input.store.root, 'quarantine') });
     await input.store.update((fresh) => {
+      if (ownedKey && ownedKey !== placed.path) delete fresh.placements[ownedKey];
       fresh.placements[placed.path] = { id: skill.id, team: input.team, version: latest, scope, placed_at: new Date().toISOString().slice(0, 10), fingerprint: placed.snapshot.fingerprint };
     });
     for (const notice of placed.notices) io.print(notice);
@@ -223,25 +235,42 @@ export async function teamForReference(config: Config, explicit: string | undefi
   }
   return selectTeam(config.teams, explicit, form)[0];
 }
-async function matchingProject(team: Team, runner: Runner, cwd?: string): Promise<string | undefined> {
-  const root = await currentRepoRoot(runner, cwd).catch(() => undefined);
-  if (!root) return undefined;
-  const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: root });
-  if (origin.code !== 0) return undefined;
-  return Object.entries(team.projects).find(([, project]) => project.remotes.some((remote) => normalizeRemote(remote) === normalizeRemote(origin.stdout.trim())))?.[0];
+/** Validate before pending intent or a target lock can create directories. */
+export async function assertCheckoutFolder(root: string): Promise<void> {
+  if (!isAbsolute(root) || !(await stat(root).catch(() => undefined))?.isDirectory()) throw new Error(`Checkout folder ${root} is missing`);
 }
-async function currentRepoRoot(runner: Runner, cwd?: string): Promise<string> {
-  const answer = await runner.run('git', ['rev-parse', '--show-toplevel'], cwd ? { cwd } : undefined);
-  if (answer.code !== 0 || !answer.stdout.trim()) throw new Error('No git worktree is available for project placement.');
-  return answer.stdout.trim();
+
+export async function resolveDestination(store: ConfigStore, teamJson: Team, packageProject: string | undefined, io: Prompter, interactive: boolean, opts: { into?: string; cwd?: string; runner: Runner; home: string }): Promise<Destination> {
+  if (opts.into === 'global') return { kind: 'global' };
+  if (opts.into !== undefined) {
+    await assertCheckoutFolder(opts.into);
+    const { path } = await registerCheckout(store, opts.into, io, { home: opts.home });
+    return { kind: 'checkout', root: path };
+  }
+  const roots = [...new Set(await Promise.all(((await store.read()).checkouts ?? []).map(checkoutPath)))];
+  if (!roots.length) return { kind: 'global' };
+  if (!interactive) throw new Error('Pass --into global or --into <checkout root>');
+  const current = await writableCheckout(opts.cwd, opts.home, store.root);
+  const currentPath = current ? await checkoutPath(current) : undefined;
+  const global = 'Global (~/.claude/skills)';
+  const choices = [global, ...roots.map(root => `${basename(root)} · ${root}${root === currentPath ? ' · current repository' : ''}`)];
+  const remotes = packageProject ? teamJson.projects[packageProject]?.remotes ?? [] : [];
+  const matches: number[] = [];
+  for (const [index, root] of roots.entries()) {
+    if (!remotes.length) break;
+    const origin = await opts.runner.run('git', ['remote', 'get-url', 'origin'], { cwd: root });
+    if (origin.code === 0 && remotes.some(remote => normalizeRemote(remote) === normalizeRemote(origin.stdout.trim()))) matches.push(index + 1);
+  }
+  const defaultChoice = matches.length === 1 ? choices[matches[0]!] : matches.length > 1 ? undefined : global;
+  const selected = await io.select('Install to', choices, defaultChoice);
+  const index = choices.indexOf(selected);
+  if (index < 0) throw new Error('Invalid install destination.');
+  return index === 0 ? { kind: 'global' } : { kind: 'checkout', root: roots[index - 1]! };
 }
-function selectScope(team: Team, id: string, matching: string | undefined, explicit: string | undefined): { kind: 'global' } | { kind: 'project'; project: string } {
-  const endorses = (name: string): boolean => Object.hasOwn(team.projects, name) && team.projects[name]!.skills.includes(id);
-  const project = explicit ?? (matching && endorses(matching) ? matching : undefined);
-  if (project && endorses(project)) return { kind: 'project', project };
-  return { kind: 'global' };
+
+export function samePending(a: { op: string; id: string; team: string; scope: unknown; destination?: Destination }, b: { op: string; id: string; team: string; scope: unknown; destination?: Destination }): boolean {
+  return a.op === b.op && a.id === b.id && a.team === b.team && sameScope(a.scope, b.scope) && a.destination?.kind === b.destination?.kind && (a.destination?.kind !== 'checkout' || (b.destination?.kind === 'checkout' && a.destination.root === b.destination.root));
 }
-function samePending(a: { op: string; id: string; team: string; scope: unknown }, b: { op: string; id: string; team: string; scope: unknown }): boolean { return a.op === b.op && a.id === b.id && a.team === b.team && sameScope(a.scope, b.scope); }
 /**
  * HOME for a global placement: the default store root is `~/.terum/skills`, so HOME is two path
  * segments up — judged segment-wise, because win32 roots are backslash-separated and a hard-coded

@@ -24,7 +24,7 @@ export interface Prompter {
   readonly channel?: 'terminal' | 'frames';
   confirm(question: string, options?: AskOptions): Promise<boolean>;
   text(question: string, defaultValue?: string, options?: AskOptions): Promise<string>;
-  select(question: string, choices: readonly string[], options?: AskOptions): Promise<string>;
+  select(question: string, choices: readonly string[], defaultChoice?: string, options?: AskOptions): Promise<string>;
   print(line: string): void;
 }
 
@@ -105,11 +105,13 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
       const answer = await ask(`${question}${suffix}: `);
       return answer.trim() || defaultValue || '';
     },
-    async select(question, choices, options) {
+    async select(question, choices, defaultChoice, options) {
       for (const line of options?.detail ?? []) output.write(`${line}\n`);
       const lines = choices.map((choice, index) => `${index + 1}. ${choice}`).join('\n');
       for (let attempt = 0; attempt < MAX_SELECT_ATTEMPTS; attempt++) {
-        const answer = (await ask(`${question}\n${lines}\n> `)).trim();
+        const suffix = defaultChoice === undefined ? '' : ` [${defaultChoice}]`;
+        const answer = (await ask(`${question}${suffix}\n${lines}\n> `)).trim();
+        if (!answer && defaultChoice !== undefined) return defaultChoice;
         const byNumber = /^\d+$/.test(answer) ? choices[Number(answer) - 1] : undefined;
         const picked = byNumber ?? choices.find((choice) => choice === answer);
         if (picked !== undefined) return picked;

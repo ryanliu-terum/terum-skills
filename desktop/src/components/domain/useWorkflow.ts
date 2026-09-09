@@ -61,5 +61,5 @@ export function useWorkflow() {
     try { backend.prefs.set(key, value); void backend.prefs.flush?.().catch(fail); setError(null); refreshPrefs(n => n + 1); return true; }
     catch (reason) { fail(reason); return false; }
   }
-  return { error, notice, lines, busy, run, perform, pref, fail };
+  return { error, notice, lines, busy, stop: (): Promise<void> => active.current?.cancel() ?? Promise.resolve(), run, perform, pref, fail };
 }

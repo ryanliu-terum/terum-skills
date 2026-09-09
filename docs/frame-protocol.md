@@ -8,7 +8,7 @@ The flag is position-independent before the first `--` (`--frames status` and `s
 
 ## Frames the CLI writes (stdout)
 
-One per line, in this order: `hello` once, then any number of `print` and `ask`, then exactly one `result`, including on a usage error.
+One per line, in this order: `hello` once, then any number of `print` and `ask`, then exactly one `result`, including on a usage error, unless the run is cancelled by terminating the process.
 
 | Frame | Shape | Meaning |
 |---|---|---|
@@ -16,7 +16,7 @@ One per line, in this order: `hello` once, then any number of `print` and `ask`,
 | `print` | `{"t":"print","level":"info"\|"warn"\|"error","line":"..."}` | Text the verb would have printed. Render it where the verb's output belongs. |
 | `ask` | `{"t":"ask","id":"q1","kind":"confirm"\|"text"\|"select","question":"...","default":"...","choices":[...],"detail":["..."]}` | The verb is blocked until an `answer` with the same `id` arrives. `default` appears only for `text` when the verb offers one; `choices` only for `select`. `detail` is optional and carries the lines the person needs in order to answer (for example the identity line, or a skill's requested allowed-tools); render it with the question, as the dialog's description, not in the transcript; absent means none. |
 | `progress` | `{"t":"progress","step":"...","current":n,"total":n}` | Reserved. No verb emits progress today (`features.progress` is `false`); the shape is fixed so a shell can render it when one does. |
-| `result` | `{"t":"result","verb":"install","ok":true,"exitCode":0,"value":{...}}` | Always last. `verb` is the invoked verb. `value` is the verb's own result object when it has one. On failure: `ok:false`, `exitCode:1`, `error` is the one-line message, and `declined:true` when set by the CLI's typed decline (the person said no) rather than by matching the error text, and `refused:true` when the CLI refused the operation before any side effect (one team per machine); a refusal is not a decline. After `result` the CLI stops reading stdin and exits. |
+| `result` | `{"t":"result","verb":"install","ok":true,"exitCode":0,"value":{...}}` | Always last. `verb` is the invoked verb. `value` is the verb's own result object when it has one. A failing result may also carry `value`, the verb's partial result (for example, `eval` after a completed evaluation whose receipt commit failed). On failure: `ok:false`, `exitCode:1`, `error` is the one-line message, and `declined:true` when set by the CLI's typed decline (the person said no) rather than by matching the error text, and `refused:true` when the CLI refused the operation before any side effect (one team per machine); a refusal is not a decline. After `result` the CLI stops reading stdin and exits. |
 
 The process exit code matches `result.exitCode`. The failure line is also written to stderr, exactly as without the flag, so a shell that only watches the exit code and stderr still works.
 
@@ -25,16 +25,16 @@ The process exit code matches `result.exitCode`. The failure line is also writte
 | Frame | Shape | Meaning |
 |---|---|---|
 | `answer` | `{"t":"answer","id":"q1","value":...}` | Answers the `ask` with that `id`. For `confirm`: a boolean, or one of `y`, `yes`, `true` (anything else is no). For `text`: a string; empty means take the default. For `select`: the 1-based index as a number, or the exact choice string. An invalid `select` answer gets a `print` warn frame and the same question is asked again with a new `id`, up to three times, then the verb fails. |
-| `cancel` | `{"t":"cancel"}` | Abandons the run. Every pending question fails closed, the verb throws, and the run ends in a `result` with `ok:false`. |
+| `cancel` | `{"t":"cancel"}` | Abandons the run. Every pending question fails closed and the bin sends itself SIGTERM. During eval, the CLI kills its live agent children with SIGKILL and exits 143; a terminal `result` frame is not guaranteed after cancellation. |
 
-Closing stdin behaves like `cancel`. Malformed lines and answers to unknown ids are reported on stderr and ignored; they never disturb a pending question.
+Closing stdin fails pending questions closed; it does not invoke the bin’s cancellation hook. Send `cancel` to stop work that does not ask questions. Malformed lines and answers to unknown ids are reported on stderr and ignored; they never disturb a pending question.
 
 ## Rules a shell must follow
 
 1. **The `gh auth login` offer never arrives over frames.** When `gh` is installed but logged out, the CLI in frame mode prints `GitHub CLI is installed but logged out. Run \`gh auth login\` in a terminal, then try again.` instead of asking (it would otherwise hand its stdio to `gh`, which here means the frame pipes). Likewise `setup` never asks the desktop-app opt-in question over frames. If a shell ever does see that confirm, the CLI is older than 0.1.6: answer `false`.
 2. **Never use `sync --hook` over frames.** Its stdout is the Claude Code reload directive, not frames; the CLI refuses it with a `result` frame and exit 1. Call plain `sync`.
 3. **Never ask the CLI for `--help` or `--version` in frame mode.** Commander prints those as text.
-4. **Set `cwd` deliberately.** Project-scoped skills exist only relative to the working directory the CLI is started in; a shell passes the chosen workspace as the child's cwd. For reads (`ls --local`), `cwd` is a suggestion: the detected cwd repository is reported as not registered, and registered checkouts are listed regardless of `cwd`.
+4. **`cwd` is advisory; every write names its destination.** `install` asks `Install to` (or takes `--into`), `sync` refreshes every registered checkout from any cwd, `uninstall-skill` takes `--from`.
 5. **One run per verb.** Start the process, read frames until `result`, let it exit.
 
 ## Example
@@ -68,6 +68,15 @@ A second-team binding refused before any side effect:
 
 Protocol stays 1. `hello.features.localIdentity` advertises the additive `ls --local` identity fields: every row and `notOffered` entry carries `skillId` (UUID or null), and every row carries independent `placed` and `connected` booleans. The app declares these keys optional while keeping local rows strict, so older CLIs remain readable; presence joins require the feature. `ls member` adds `member.installed` records (`id`, `scope`, `since`), and `connect` may return `adopted: true` after consent to record an existing identity. These are additive result fields.
 
-`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, and `checkouts`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and remains false. `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist.
+`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, and `checkouts`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and remains false. `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `installScope` is true: install destinations and destination-aware removal are available.
 
 `hello.protocol` is `1`. `install`, `sync`, and `uninstall-skill` carry `detail` on their confirmation asks. `detail` is an additive optional field: protocol stays 1. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.
+
+## Verbs added for the desktop app
+
+`eval-report <skill> [--team <team>]` is read-only: it reads the local clone and this machine's run tree without fetching, networking, or prompting. `result.value` is an `EvalReport`:
+
+- `skill: { id, name }` and `versions: { placed, teamCurrent, evaluated }`; versions are full tree hashes, with `placed` and `evaluated` nullable.
+- `latest`: the newest committed receipt for `teamCurrent`, verbatim with an absolute `path`, or null; `latestState` is `ok`, `none`, or `invalid`. An invalid newest receipt produces one warning and is never replaced by an older receipt.
+- `history`: schema-valid committed receipts across version directories, newest first by `run_id`, as `{ version, run_id, verdict, execution_status, model, cc_version, runner_handle, timestamp, comparison, committed: true }` rows. `runner_handle` and `timestamp` come verbatim from provenance; `comparison` is the receipt's `candidate-vs-baseline` comparison (`win`, `loss`, `tie`, `net_lift`, `sign_p`), or null.
+- `localRuns`: directories containing `run.jsonl`, newest first, as `{ run_id, run_dir, execution_status, committed, receipt }` rows. `run_dir` is absolute; `receipt` is the schema-valid local `receipt.json` with an absolute `path`, or null. Status comes from that receipt or is `unknown`; `committed` indicates a matching run ID in history. No statistics are derived from the log.
