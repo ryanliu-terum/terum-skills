@@ -1,0 +1,36 @@
+# m7-S7c: orchestrator's own gates, 2026-09-09 01:36-01:49 UTC, Ryan's Mac (Node 25, Playwright chromium)
+# Codex: gpt-6-astra, high, workspace-write, one pass (codex-prompt.md -> codex-report.json "complete"; three open questions ruled in NOTES.md).
+# Self-report (hypothesis): root 72 files / 1158 tests; desktop 52 files / 634 passed + 88 oracle-skipped (--maxWorkers=2).
+# Gated on the tree after: the S7c code commit 2c92f8a, the merges of main through S7d (42e3cd9; six conflicts folded), S7g (150ff41;
+# one test-file conflict) and (battery 2) S7e (1e1d749; four conflicts folded, one duplicate Dialog import removed), plus the identity
+# replay's `ls --local` answer (ec54f7f). No src-tauri change, so no cargo step.
+
+battery 1 (01:36-01:42 UTC, on 150ff41 = main through S7g)
+root lint/typecheck/build : rc=0
+root test         : rc=1  1 failed / 1225 passed: runner.test.ts "kills a sleeping git alias and its child" — the known load flake
+                    (load 42: two Codex runs plus this battery). Not a regression.
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=1  3 failed / 776 passed: identity-replay.test.ts x2 — status() reads `status` AND `ls --local` since S7k, and
+                    the replay bridge answered every spawn with the status recording; fixed by answering `ls --local` from this batch's
+                    own recording (assertions unchanged). share.test.tsx "invites ... closes only after success" — a waitFor on the dialog
+                    closing timed out under load 42 (this batch touches nothing in Share); green in battery 2 with no change.
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (the Account row and the identity-saved popup are pixel-neutral on the boards)
+
+battery 2 (01:45-01:49 UTC, on 29598d9 = main through S7e merged, the final tree)
+root lint/typecheck/test/build : rc=0  73 files, 1239 tests
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=0  55 files, 789 tests passed
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (46.3s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (36.7s)
+real-data proof   : identity-replay.test.ts replays frames/login-set-name.jsonl, status-before.jsonl, status-after.jsonl and ls-local.jsonl
+                    recorded from the rebuilt CLI against the fixture team (fixture.sh beside this file; cwd = the seed repo): the real
+                    `login --set name=Seed2` result carries updated [name=Seed2] and the consequence notice; config-before.json ->
+                    config-after.json differ only in the display_name bytes (proof.json); the served status() shows me.name Seed before
+                    and Seed2 after, with the surfaces status/settings true.

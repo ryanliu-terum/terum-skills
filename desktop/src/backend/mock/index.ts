@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FEATURE_KEYS } from '../types';
-import type { Features } from '../types';
+import type { ChangeSource, Features, Identity } from '../types';
 import { decodeText } from '../../lib/fixture-text';
 import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
@@ -19,6 +19,8 @@ const errors={library:"EACCES: permission denied, scandir '~/.terum/skills'",set
 const ok=<T>(value:T):Result<T>=>({ok:true,value});
 const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeText(error),'')});
 export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
+ const identity:Identity=structuredClone({...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login});
+ const listeners=new Set<(source:ChangeSource)=>void>();
  const latency=opts.latencyMs??0;
  if(!Number.isFinite(latency)||latency<0)throw new Error('latencyMs must be a finite nonnegative number.');
  async function read<T>(family:keyof typeof errors,get:(scenario:ReturnType<typeof readScenario>)=>Result<T>,ref=''):Promise<Result<T>>{
@@ -58,8 +60,8 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   async revealPath(){return ok(undefined);},
   async capabilities(){return {appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
   async surfaces(){return {status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true};},
-  async status(){return structuredClone(ok({machine:{...design.MACHINE,hostname:design.MACHINE.name},me:{...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login},teams:mockTeams(),tools:{git:true,gh:true},projects:sidebarProjects(),counts:statusCounts(location.hash,readScenario())}));},
-  settings:()=>read('settings',()=>ok({MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:{...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login},TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,SHARED:design.SHARED,LOCAL_UNSHARED:design.LOCAL_UNSHARED,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN})),
+  async status(){return structuredClone(ok({machine:{...design.MACHINE,hostname:design.MACHINE.name},me:identity,teams:mockTeams(),tools:{git:true,gh:true},projects:sidebarProjects(),counts:statusCounts(location.hash,readScenario())}));},
+  settings:()=>read('settings',()=>ok({MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:identity,TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,SHARED:design.SHARED,LOCAL_UNSHARED:design.LOCAL_UNSHARED,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN})),
   onboarding:async()=>{const result=await read('onboarding',()=>ok(onboardingData()));return result.ok?result:{...result,value:onboardingData()};},
   library:({scope})=>read('library',scenario=>{const scopes:Record<string,readonly string[]>=design.LIST_OF;const canonical=['Global','Terum','SSM','MRF'].find(s=>s.toLowerCase()===scope.toLowerCase())??scope;const skills=scenario==='empty'?[]:canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.project!=='local'&&scopes[skill.name]?.includes(canonical));return ok({skills:skills.map(s=>({...cardOf(s),enabled:backend.prefs.get('enabled:'+s.name,s.enabled??true),favorite:backend.prefs.get('favorite:'+s.name,s.favorite??false)})),overview:design.LIBRARY_OVERVIEW,title:scenario==='empty'?'0 skills':`${skills.length} of ${library_title(canonical)}`});}),
   skill:({ref})=>read('skill',scenario=>{if(scenario==='not-installed'&&ref==='deploy-check')return ok(detailOf(design.DETAIL_NOT_INSTALLED));const result=skillByRef(ref);return result.ok?ok({...result.value,enabled:scenario==='disabled'?false:backend.prefs.get('enabled:'+ref,result.value.enabled),favorite:backend.prefs.get('favorite:'+ref,result.value.favorite)}):result;},ref),
@@ -70,6 +72,14 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   search:args=>read('marketplace',()=>{const hits:SearchHit[]=[...design.CATALOG.map(s=>({kind:'skill' as const,ref:s.name,name:s.name,description:s.desc})),...design.PEOPLE.map(p=>({kind:'member' as const,ref:p.handle,name:p.name,description:p.role})),...design.PROJECTS.map(p=>({kind:'project' as const,ref:p.key,name:p.name,description:p.desc}))].map(hit=>({...hit,team:null,category:null,author:null,installs:null,latest:null,endorsed:null,unresolved:null}));return ok(hits.filter(h=>(!args.kinds||args.kinds.includes(h.kind))&&(h.name+' '+h.description).toLowerCase().includes(args.q.toLowerCase())));}),
   install:args=>long('library',async ctx=>{ctx.print(`Installing ${args.ref}…`);if(!args.ref.trim())return fail('A ref is required.');const detail=skillByRef(args.ref);if((args.kind??'skill')==='skill'&&!detail.ok)return fail(detail.error);if(!await ctx.ask('confirm',`Approve these tools for ${args.ref}?`))return cancelled('Install was declined.');ctx.progress(1,1,'Installed');return ok([{id:args.ref,name:args.ref,scope:args.scope??'Global'}]);}),
   uninstallSkill:args=>long('library',async ctx=>{const skill=skillByRef(args.ref);if(!skill.ok)return fail(skill.error);ctx.print(`Removing ${args.ref}…`);if(!await ctx.ask('confirm',`Remove ${args.ref}?`))return cancelled('Remove was declined.');return ok([{id:args.ref,name:args.ref}]);}),
+  setIdentity:args=>long('settings',async ctx=>{
+   const fields=[['name','name',args.name,z.string().min(1)],['email','email',args.email,z.email()],['default-handle','default_handle',args.defaultHandle,z.string().transform(value=>value.trim().toLowerCase()).pipe(z.string().min(1).max(39).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/))]] as const;
+   const next={...identity};const updated:{key:string;value:string}[]=[];
+   for(const [key,field,value,schema] of fields){if(value===undefined)continue;const parsed=schema.safeParse(value);if(!parsed.success)return fail(`Invalid ${key}: ${parsed.error.issues.map(issue=>issue.message).join('; ')}`);next[field]=parsed.data;updated.push({key,value:parsed.data});}
+   if(!updated.length)return fail('Use --set <key>=<value>. Accepted keys: name, email, default-handle.');
+   const notice=`This changes the author line (${next.name} <${next.email}>) that the next sync writes into the skills you have connected on this machine; skills you authored elsewhere keep their recorded author.`;
+   ctx.print(notice);Object.assign(identity,next);for(const listener of listeners)listener('config');return ok({updated,notice});
+  }),
   uninstallMachine:()=>long('settings',async ctx=>{ctx.print('Removing terum-skills…');return await ctx.ask('confirm','Remove terum-skills from this machine?')?ok({removed:design.SKILLS.map(s=>s.name)}):cancelled('Remove was declined.');}),
   connect:args=>long<ConnectOutcome|undefined>('share',async ctx=>{ctx.print('Connecting local skills…');if(Object.values(args).some(v=>v!==undefined)){const name=(args.path??design.LOCAL_UNSHARED[0]??'local-skill').replace(/\/$/,'').split('/').pop();if(!name)return fail('A skill folder is required.');return await ctx.ask('confirm',`Connect ${name}?`)?ok({id:name,name}):cancelled('Connect was declined.');}return connectPicker(ctx,design.TEAMS[0]?.key??'terum');}),
   profile:args=>long('share',async()=>{
@@ -93,7 +103,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   async copyToClipboard(text){try{if(!navigator.clipboard?.writeText)return fail('Clipboard unavailable.');await navigator.clipboard.writeText(text);return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:'Clipboard unavailable.');}},
   async copyImage(png){try{if(png.type!=='image/png')return fail('Expected a PNG image.');if(!navigator.clipboard?.write||typeof ClipboardItem==='undefined')return fail('Clipboard unavailable.');await navigator.clipboard.write([new ClipboardItem({'image/png':png})]);return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:'Clipboard unavailable.');}},
   prefs:{get<T>(key:string,fallback:T):T{try{const raw=localStorage.getItem('terum-skills-app:pref:'+key);if(raw===null)return fallback;const parsed:unknown=JSON.parse(raw);return (parsed===null)===(fallback===null)&&typeof parsed===typeof fallback&&Array.isArray(parsed)===Array.isArray(fallback)?parsed as T:fallback;}catch{return fallback; /* Unavailable or malformed storage preserves the caller's default. */}},set(key,value){const text=JSON.stringify(z.json().parse(value));if(text===undefined)throw new Error('Preference must be JSON-safe.');localStorage.setItem('terum-skills-app:pref:'+key,text);}},
-  subscribe:()=>()=>{ /* Static fixtures never emit change events. */ }
+  subscribe:listener=>{listeners.add(listener);return ()=>{listeners.delete(listener);};}
  };
  return backend;
 }

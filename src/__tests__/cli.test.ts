@@ -14,7 +14,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const outcomes: boolean[] = [];
     const execute: Execute = async (invoke) => { const result = await invoke(new ScriptedPrompter()); outcomes.push(result.ok); };
     const program = buildProgram(execute, {
-      login: async (args) => { calls.push({ verb: 'login', ...args }); return success({ gh: { installed: true, authenticated: true }, handle: 'me' }); },
+      login: async (args) => { calls.push({ verb: 'login', ...args }); return success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }); },
       team: async (args) => { calls.push({ verb: 'team', ...args }); return args.kind === 'join' && args.target === 'fail/fail' ? failure('nope') : success({ team: 't', remote: 'r' }); },
       setup: async (args) => { calls.push({ verb: 'setup', ...args }); return success({ role: args.target ? 'joiner' : 'creator', team: 't', remote: 'r', steps: {} as never }); },
       invite: async (args) => { calls.push({ verb: 'invite', ...args }); return success({ team: 't', invited: [], already: [] }); },
@@ -69,7 +69,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const { program, outcomes } = harness();
     await program.parseAsync(['team', 'join', 'fail/fail'], { from: 'user' });
     expect(outcomes).toEqual([false]);
-    expect(program.commands.find((command) => command.name() === 'login')?.options).toEqual([]);
+    expect(program.commands.find((command) => command.name() === 'login')?.options.map(option => option.long)).toEqual(['--set']);
     await expect(program.parseAsync(['login', '--team', 'alpha'], { from: 'user' })).rejects.toMatchObject({ code: 'commander.unknownOption' });
   });
 
@@ -77,7 +77,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const calls: unknown[] = []; const outcomes: boolean[] = [];
     const execute: Execute = async (invoke) => { outcomes.push((await invoke(new ScriptedPrompter())).ok); };
     const program = buildProgram(execute, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
       connect: async (args) => { calls.push(['connect', args]); return success(undefined); },
       install: async (args) => { calls.push(['install', args]); return success([]); },
       uninstall: async (args) => { calls.push(['uninstall', args]); return success([]); },
@@ -146,7 +146,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
   it('wires validate with its target and team selection', async () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
       validate: async (args) => { calls.push(args); return success({ name: args.target, findings: 0, warnings: 0 }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
@@ -166,7 +166,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
   it('wires workflow-update as print-only and keeps receipt-check hidden like readme', async () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }),
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
       team: async (args) => { calls.push(['team', args]); return success({ workflow: 'yaml' }); },
       receiptCheck: async (args) => { calls.push(['receipt-check', args]); return success({ endorsed: [], checked: 0 }); },
     });
@@ -180,7 +180,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
   it('wires eval as an injectable verb with every local-only option', async () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
       eval: async (args) => { calls.push(args); return success({ team: 't', id: 'id', name: args.ref, runDir: '/tmp/run', ccVersion: 'stub', executionStatus: 'complete' }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
@@ -198,7 +198,7 @@ describe('the pre-push hook\'s verb (D12)', () => {
     const calls: unknown[] = [];
     const execute: Execute = async (invoke) => { await invoke(new ScriptedPrompter()); };
     const program = buildProgram(execute, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
       guardPush: async (args) => { calls.push(args); return success({ team: 't', checked: 0 }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
@@ -215,7 +215,7 @@ describe('machine uninstall wiring', () => {
     const calls: unknown[] = []; const outcomes: boolean[] = []; const errors: string[] = [];
     const execute: Execute = async (invoke) => { const result = await invoke(new ScriptedPrompter()); outcomes.push(result.ok); if (!result.ok) errors.push(result.error); };
     const program = buildProgram(execute, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }),
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
       team: async () => success({ team: 't', remote: 'r' }),
       uninstall: async (args) => { calls.push(args); return success([]); },
       uninstallMachine: async (args) => { calls.push(args); return success({ teams: [], removedPlacements: 0, hookRemoved: false, wrapperRemoved: false, configRemoved: false, kept: [], record: '', launch: args.launch ?? null }); },
@@ -261,7 +261,7 @@ describe('release command eligibility', () => {
   it('passes launch and opt-out data through to sync and update', async () => {
     const calls: unknown[] = []; const launch = { kind: 'unknown' as const, path: '/copy/index.js' };
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
       sync: async (args) => { calls.push(args); return success({ placed: 0, deferred: [], notices: [], changed: false, hook: Boolean(args.hook), teams: [] }); },
       update: async (args) => { calls.push(args); return success({ running: null, latest: null, observation: 'unknown', launch: 'unknown', description: 'Latest advertised release: unknown', advice: ['Update this copy with the tool that installed it.'], lines: [] }); },
     }, { launch, noUpdateCheck: true });
@@ -284,7 +284,7 @@ describe('release command eligibility', () => {
 it('issue 9 bare connect reaches the verb with an undefined path', async () => {
   const calls: unknown[] = []; const io = new ScriptedPrompter();
   const program = buildProgram(async (invoke) => { await invoke(io); }, {
-    login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }), team: async () => success({ team: 't', remote: 'r' }),
+    login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
     connect: async (args) => { calls.push(args); return success(undefined); },
   });
   await program.parseAsync(['connect'], { from: 'user' });
@@ -312,7 +312,7 @@ describe('issue 5 connect command contract', () => {
   ])('routes %j with cwd and update notices enabled', async (argv, expected) => {
     const calls: unknown[] = []; const metadata: unknown[] = [];
     const program = buildProgram(async (invoke, meta) => { metadata.push(meta); await invoke(new ScriptedPrompter()); }, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }),
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
       team: async () => success({ team: 't', remote: 'r' }),
       connect: async (args) => { calls.push(args); return success(undefined); },
     });
@@ -338,7 +338,7 @@ describe('issue 5 connect command contract', () => {
     // Cast, not annotate: an arrow cannot satisfy `run`'s three overloads directly; the stub forwards every call, so the overloaded type is honest at runtime.
     const connectStub = (async (args, received) => { connected++; return connect({ ...args, config: store }, received); }) as typeof connect;
     const program = buildProgram(execute, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me' }),
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
       team: async () => success({ team: 't', remote: 'r' }),
       connect: connectStub,
     });
@@ -359,6 +359,22 @@ describe('issue 5 connect command contract', () => {
   });
 });
 
+
+it('registers repeatable login --set once with no default and forwards only explicit pairs', async () => {
+  for (const pairs of [[], ['name=Ryan Liu'], ['name=Ryan Liu', 'email=ryan@example.com']]) {
+    const calls: unknown[] = [];
+    const program = buildProgram(async invoke => { await invoke(new ScriptedPrompter()); }, {
+      login: async args => { calls.push(args); return success({ gh: null, handle: null, updated: [], notice: null }); },
+      team: async () => success({ team: 't', remote: 'r' }),
+    });
+    const options = program.commands.find(command => command.name() === 'login')!.options;
+    expect(options.filter(option => option.long === '--set')).toHaveLength(1);
+    expect(options.find(option => option.long === '--set')!.defaultValue).toBeUndefined();
+    expect(options.some(option => option.long === '--team')).toBe(false);
+    await program.parseAsync(['login', ...pairs.flatMap(pair => ['--set', pair])], { from: 'user' });
+    expect(calls).toEqual([{ form: undefined, ...(pairs.length ? { set: pairs } : {}) }]);
+  }
+});
 it('documents every public command path in a README code span and excludes hidden paths', async () => {
   const { readFile } = await import('node:fs/promises');
   const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8');
