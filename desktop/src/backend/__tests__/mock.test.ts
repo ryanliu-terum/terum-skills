@@ -40,7 +40,7 @@ const expectedTeams=design.TEAMS.map(team=>({...team,policy:design.TEAM_POLICY,c
 it.each(['loading','error','slow','disabled','not-installed','default'])('status resolves immediately with identity during %s',async scenario=>{
  location.hash='#/library/global?__mock='+scenario;vi.useFakeTimers();
  const status=await createMockBackend({latencyMs:500}).status();
- expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true},roots:[{id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,detected:false,count:design.COUNTS.Global},...(['Terum','SSM','MRF'] as const).map(name=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:'scanned',registered:true,detected:false,count:design.COUNTS[name]}))]}});
+ expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true},roots:[{id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,detected:false,count:design.COUNTS.Global,remote:null},...([['Terum','ryanliu-terum/terum-skills'],['SSM','ryanliu-terum/ssm'],['MRF',null]] as const).map(([name,slug])=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:'scanned',registered:true,detected:false,count:design.COUNTS[name],remote:slug===null?null:{url:'https://github.com/'+slug,slug}}))]}});
  expect(status.ok&&status.value.machine.gh_login).toBe('teniroo');
  expect(vi.getTimerCount()).toBe(0);
 });

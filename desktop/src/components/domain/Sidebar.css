@@ -1,1 +1,6 @@
 .nav-add {font-size:12px;color:var(--tk-text3);background:none;white-space:nowrap;}
+/* The Add-project row is a button, so it needs the anchor rows' own box back. */
+.nav-add-project {width:100%;border:0;cursor:pointer;text-align:left;font:inherit;font-size:13px;font-weight:500;}
+.nav-add-project:disabled {cursor:default;opacity:0.6;}
+.nav-empty {font-size:13px;font-weight:400;}
+.nav-error {padding:4px 8px 4px 32px;font-size:12px;color:var(--tk-bad);}

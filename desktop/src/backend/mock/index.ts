@@ -93,6 +93,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   async windowAction(){return ok(undefined);},
   async openUrl(url){try{window.open(url,'_blank','noopener');return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:String(error));}},
   async revealPath(){return ok(undefined);},
+  async pickFolder(){return ok('/Users/you/code/new-project');},
   async capabilities(){return {appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,evalCommitChoice:false,openInEditor:true,clipboard:true};},
   async surfaces(){return {divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,checkouts:false};},
   async status(){return structuredClone(ok({machine:{...design.MACHINE,hostname:design.MACHINE.name},me:identity,teams:readScenario()==='no-team'?[]:mockTeams(),tools:{git:true,gh:true},roots:mockRoots(),counts:statusCounts(location.hash,readScenario())}));},
@@ -184,5 +185,9 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
  return backend;
 }
 
-function mockRoots():Root[]{const scenario=readScenario();return [{id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,detected:false,count:design.COUNTS.Global},...(['Terum','SSM','MRF'] as const).map((name):Root=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:scenario==='missing-root'&&name==='SSM'?'absent':'scanned',registered:!(scenario==='detected-root'&&name==='SSM'),detected:scenario==='detected-root'&&name==='SSM',count:scenario==='missing-root'&&name==='SSM'?undefined:design.COUNTS[name]}))];}
+// MRF has no origin, so the header's "GitHub: not connected" state is reachable in the mock too.
+const MOCK_ORIGIN:Record<string,string|null>={Terum:'ryanliu-terum/terum-skills',SSM:'ryanliu-terum/ssm',MRF:null};
+function mockRoots():Root[]{const scenario=readScenario();const global:Root={id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,detected:false,count:design.COUNTS.Global,remote:null};
+ if(scenario==='no-projects')return [global];
+ return [global,...(['Terum','SSM','MRF'] as const).map((name):Root=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:scenario==='missing-root'&&name==='SSM'?'absent':'scanned',registered:!(scenario==='detected-root'&&name==='SSM'),detected:scenario==='detected-root'&&name==='SSM',count:scenario==='missing-root'&&name==='SSM'?undefined:design.COUNTS[name],remote:MOCK_ORIGIN[name]===null?null:{url:'https://github.com/'+MOCK_ORIGIN[name],slug:MOCK_ORIGIN[name]!}}))];}
 function mockTeams(){return design.TEAMS.map(team=>({...team,policy:design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),pending:[],joinCommand:cli(`setup ${design.TEAM_REPO}`),joinBlock:['Send this to your teammate:', '```', 'npm install -g terum-skills', `npx -y terum-skills@latest setup ${design.TEAM_REPO}`, '', `Bare equivalent: npx -y terum-skills@latest team join ${design.TEAM_REPO}`, '```', 'If you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.']}));}

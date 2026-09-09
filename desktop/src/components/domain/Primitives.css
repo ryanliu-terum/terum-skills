@@ -3,3 +3,4 @@
 .board-table-head,.board-table-row{gap:16px;border-bottom:0;flex-shrink:0}.board-table-head{height:28px}.board-table-row{height:32px;border-top:1px solid var(--tk-border1)}.board-table-head>span{letter-spacing:.06em}.board-table span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 
 .board-table-row{box-sizing:content-box}
+.board-view-meta{display:flex;align-items:center;gap:6px;min-width:0;font-size:12px}.board-view-meta>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

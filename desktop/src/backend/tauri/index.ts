@@ -5,6 +5,7 @@ import { SETUP_STEP_KEYS, FEATURE_KEYS } from '../types';
 import type { Features } from '../types';
 import type { CliFrame } from './frames';
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
@@ -46,7 +47,7 @@ const cliProject = z.object({ name: z.string(), skills: z.array(z.string()), rem
 // S7g: every `ls --local` row carries typed provenance and a read-only health; the prose `state` is never parsed.
 const cliLocalHealth = z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']);
 const cliLocalRow = z.object({ name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), shared: z.array(z.strictObject({ id: z.string(), team: z.string() })), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().length(40).nullable() }).nullable(), health: cliLocalHealth, description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional(), connected: z.boolean().optional() }).strict();
-const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), registered:z.boolean().optional(), detected:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null)})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
+const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), remote:z.object({url:z.string(),slug:z.string().nullable()}).nullish(), registered:z.boolean().optional(), detected:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null)})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
 const cliCheckoutAdded = z.object({path:z.string(),registered:z.boolean()});
 const cliCheckoutRemoved = z.object({path:z.string(),placementsRemaining:z.number()});
 const cliLs = z.object({
@@ -76,7 +77,7 @@ function tokenLabel(characters:number|null):{size:string;tokensK:number}{
 }
 function rootOf(section:LocalSection,home=''):Root {
   const global=section.scope==='global',repoRoot=section.repoRoot??section.root;
-  return {id:global?'global':repoRoot,kind:global?'global':'checkout',label:labelOf(section),root:global?(home?abbreviateHome(section.root,home):'~/.claude/skills'):repoRoot,rootState:section.rootState,registered:section.registered??false,detected:section.detected??false,count:section.counts?String(section.counts.skillFolders):undefined};
+  return {id:global?'global':repoRoot,kind:global?'global':'checkout',label:labelOf(section),root:global?(home?abbreviateHome(section.root,home):'~/.claude/skills'):repoRoot,rootState:section.rootState,registered:section.registered??false,detected:section.detected??false,count:section.counts?String(section.counts.skillFolders):undefined,remote:section.remote??null};
 }
 // D2: only these frontmatter failures still describe folders holding SKILL.md. 'managed-wrapper' is
 // deliberately absent: the bundled /terum-skills skill is counted as a folder by the CLI, but it is
@@ -503,6 +504,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async windowAction(action) { try { const window = getCurrentWindow(); if (action === 'toggle-maximize') await window.toggleMaximize(); else await window.startDragging(); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async openUrl(url) { try { await openUrl(url); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async revealPath(path) { try { await revealItemInDir(await localPath(path)); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
+    async pickFolder() { try { const chosen = await openDialog({ directory: true, multiple: false, title: 'Choose a project folder' }); return { ok: true, value: typeof chosen === 'string' ? chosen : null }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async openInEditor(path) { try { await openPath(await localPath(path)); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyToClipboard(text) { try { await writeText(text); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyImage(png) { try { await writeImage(await Image.fromBytes(new Uint8Array(await png.arrayBuffer()))); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },

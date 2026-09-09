@@ -1,6 +1,6 @@
 //! The shell. It owns exactly three things the web frontend cannot do itself: a native window with the
 //! macOS overlay chrome (tauri.conf.json), the plugins the seam's capabilities need (opener, clipboard,
-//! store, window-state), and the CLI bridge below: spawn the globally installed `terum-skills` bin under
+//! store, dialog, window-state), and the CLI bridge below: spawn the globally installed `terum-skills` bin under
 //! the Node the CLI recorded, pipe its stdout lines to the webview as events, write answers to its stdin.
 //! Sleep/resume is not handled; window destruction and application exit terminate every child.
 //! Frame parsing stays in TypeScript (desktop/src/backend/tauri/); Rust never interprets a line.
@@ -229,6 +229,7 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_clipboard_manager::init())
+    .plugin(tauri_plugin_dialog::init())
     .invoke_handler(tauri::generate_handler![cli_spawn, cli_write, cli_kill, read_app_state, host_platform, quit]);
 
   #[cfg(not(any(target_os = "android", target_os = "ios")))]

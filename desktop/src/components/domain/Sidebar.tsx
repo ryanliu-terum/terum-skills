@@ -1,4 +1,5 @@
 import { useBackend, useFeatures, usePreference } from '../../backend';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Root, StatusResult, Surfaces, TeamStatus } from '../../backend/types';
 import type { IconName } from '../ui/icon-paths';
@@ -13,8 +14,8 @@ function NavRow({label,icon,href,selected=false,nested=false,expandable=false,co
 export function Sidebar({selected,counts,machine,me,surfaces,team,roots,collapsedSections=[],onToggleSection,onHide}:{collapsedSections?:readonly string[];onToggleSection?:(section:string)=>void;onHide?:()=>void;team?:TeamStatus|undefined;selected:string;counts:Record<string,string>|null;machine:StatusResult['machine']|undefined;me?:StatusResult['me']|undefined;surfaces?:Surfaces|undefined;roots?:readonly Root[]|undefined}){
  const checkoutRoots=roots?.filter(r=>r.kind==='checkout')??[];const showCounts=usePreference('appearance:counts',true);const displayedCounts=showCounts?counts:null;
  return <aside className="sidebar"><nav className="sidebar-inner" aria-label="Main navigation"><div className="nav-group"><SectionHeader label="Library" trailing={<button type="button" className="icon-button" aria-label="Hide sidebar" aria-expanded={true} onClick={onHide} style={{width:20,height:20,color:'var(--tk-text4)'}}><Icon name="panel-left" size={14}/></button>}/>
- <NavRow label="Global" icon="globe" href="#/library/global" selected={selected==='Global'} count={displayedCounts?.Global}/>{surfaces?.library!==false&&checkoutRoots.length?<><NavRow label="Projects" icon="folder" href="#/marketplace/projects" expandable collapsed={collapsedSections.includes('projects')} onToggle={()=>onToggleSection?.('projects')}/>
- {!collapsedSections.includes('projects')&&checkoutRoots.map(root=><CheckoutRow key={root.id} root={root} selected={selected===root.id} showCount={displayedCounts!==null}/>)}</>:null}
+ <NavRow label="Global" icon="globe" href="#/library/global" selected={selected==='Global'} count={displayedCounts?.Global}/>{surfaces?.library!==false?<><NavRow label="Projects" icon="folder" href="#/marketplace/projects" expandable collapsed={collapsedSections.includes('projects')} onToggle={()=>onToggleSection?.('projects')}/>
+ {!collapsedSections.includes('projects')&&<>{checkoutRoots.length?checkoutRoots.map(root=><CheckoutRow key={root.id} root={root} selected={selected===root.id} showCount={displayedCounts!==null}/>):<div className="nav-row nav-empty" style={{paddingLeft:32}}><div className="nav-label"><span style={{color:'var(--tk-text4)'}}>0 projects</span></div></div>}<AddProjectRow/></>}</>:null}
  {surfaces?.inbox===true?<><NavRow label="Inbox" icon="inbox" href="#/inbox" expandable collapsed={collapsedSections.includes('inbox')} onToggle={()=>onToggleSection?.('inbox')} selected={selected==='Inbox'}/>{!collapsedSections.includes('inbox')&&<><NavRow label="Pushes" icon="arrow-down-to-line" href="#/inbox?tab=pushes" nested count={displayedCounts?.Pushes}/><NavRow label="Updates" icon="refresh" href="#/inbox?tab=updates" nested count={displayedCounts?.Updates}/><NavRow label="Alerts" icon="alert" href="#/inbox?tab=alerts" nested count={displayedCounts?.Alerts}/></>}</>:null}
  </div>{surfaces?.catalog!==false||surfaces?.roster!==false?<div className="nav-group"><SectionHeader label="Team"/>{surfaces?.catalog!==false?<NavRow label="Marketplace" icon="store" href="#/marketplace" selected={selected==='Marketplace'}/>:null}{surfaces?.roster!==false?<NavRow label="Share" icon="users" href="#/share" selected={selected==='Share'}/>:null}</div>:null}</nav><Footer team={team} machine={machine} me={me} settings={selected==='Settings'}/></aside>;
 }
@@ -22,4 +23,23 @@ export function Sidebar({selected,counts,machine,me,surfaces,team,roots,collapse
 function CheckoutRow({root,selected,showCount}:{root:Root;selected:boolean;showCount:boolean}) {
  const backend=useBackend(),features=useFeatures(),action=useWorkflow();
  return <><NavRow label={root.label} icon="box" href={'#/library/checkout?root='+encodeURIComponent(root.id)} selected={selected} nested count={!showCount?undefined:root.rootState==='absent'||root.rootState==='unreadable'?'—':root.count} trailing={root.detected&&!root.registered&&features?.checkouts?<button type="button" className="icon-button nav-add" aria-label={'Add '+root.label+' to your library'} disabled={action.busy} onClick={e=>{e.preventDefault();e.stopPropagation();void action.run(()=>backend.checkouts.add(root.id));}}>+ Add</button>:null}/>{action.error?<div role="alert">{action.error}</div>:null}</>;
+}
+
+/**
+ * D1 registration by an explicit Add: the native chooser names the folder, `checkout add` registers it.
+ * A cancelled dialog is not an error, so it leaves the sidebar exactly as it was.
+ */
+function AddProjectRow() {
+ const backend=useBackend(),features=useFeatures(),action=useWorkflow(),[error,setError]=useState<string|null>(null);
+ async function choose(){
+  setError(null);
+  const picked=await backend.pickFolder();
+  if(!picked.ok){setError(picked.error);return;}
+  const path=picked.value;
+  if(path===null)return;
+  await action.run(()=>backend.checkouts.add(path));
+ }
+ const message=error??action.error;
+ if(!features?.checkouts)return null; // an older CLI has no `checkout add`; the existing per-row + Add is hidden the same way
+ return <><button type="button" className="shell-link nav-row nav-add-project" style={{paddingLeft:32,background:'transparent',color:'var(--tk-text3)'}} disabled={action.busy} onClick={()=>{void choose();}}><div className="nav-label"><Icon name="plus" color="var(--tk-text3)"/><span>Add project</span></div></button>{message?<div role="alert" className="nav-error">{message}</div>:null}</>;
 }
