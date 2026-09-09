@@ -13,7 +13,7 @@ const recorded=(name:string)=>readFileSync(resolve(directory,name+'.jsonl'),'utf
 afterEach(()=>{cleanup();localStorage.clear();location.hash='';});
 it('replays the real setup recording through launch routing, the ask dialog, and the partial result',async()=>{
  const lines=recorded('setup'),askIndex=lines.findIndex(line=>(JSON.parse(line) as {t:string}).t==='ask');
- const target='/fixture/team.git';
+ const target='acme/team';
  const fake=fakeBridge((args,emit)=>{
   const selected=args[0]==='setup'?lines.slice(0,askIndex+1):recorded(args[0]==='ls'?'ls-local':'status');
   for(const line of selected)emit({kind:'stdout',line});
@@ -23,8 +23,11 @@ it('replays the real setup recording through launch routing, the ask dialog, and
  const backend={...createTauriBackend(fake.bridge),prefs:browserPrefs()};
  location.hash='#/';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
  const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Use this identity?');expect(fake.writes).toEqual([]);
+ expect(dialog).toHaveTextContent('Identity: @seed — Seed <seed@example.com> (GitHub: seed)');
+ expect(screen.getByText('Configuring the team').parentElement).toHaveAttribute('data-state','current');
+ expect(screen.getByLabelText('Setup output')).not.toHaveTextContent('Identity:');
  expect(location.hash).toBe('#/onboarding/boot');expect(fake.spawns.filter(spawn=>spawn.args[0]==='setup').map(spawn=>spawn.args)).toEqual([['setup','--',target]]);
- fireEvent.click(within(dialog).getByRole('button',{name:'Cancel'}));
+ fireEvent.click(within(dialog).getByRole('button',{name:'No'}));
  // This CLI recording is an ordinary stdin-ended failure, not a typed decline. Never infer consent semantics from English.
  expect(await screen.findByRole('alert')).toHaveTextContent('Input ended before "Use this identity?" was answered.');
  expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe('');expect(screen.getByText('Checking GitHub access').parentElement).toHaveAttribute('data-state','done');
@@ -33,14 +36,19 @@ it('replays the real offline setup join: the human answers each ask, the card se
  // Recorded from the rebuilt CLI against the fixture (fixture.sh): identity confirmed, the invitation left blank, the hook and skill offers declined.
  const lines=recorded('setup-join'),segments:string[][]=[[]];
  for(const line of lines){segments[segments.length-1]!.push(line);if((JSON.parse(line) as {t:string}).t==='ask')segments.push([]);}
- const target='/fixture/team.git';let next=1;
+ const target='acme/team';let next=1;
  const fake=fakeBridge((args,emit)=>{const selected=args[0]==='setup'?segments[0]!:recorded(args[0]==='ls'?'ls-local':'status');for(const line of selected)emit({kind:'stdout',line});},{...STATE,target});
  const original=fake.bridge.write;
  fake.bridge.write=async(id,line)=>{await original(id,line);for(const tail of segments[next++]??[])fake.emit({kind:'stdout',line:tail});};
  const backend={...createTauriBackend(fake.bridge),prefs:browserPrefs()};
  location.hash='#/';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
- for(const [question,button] of [['Use this identity?','Confirm'],['session-start hook','Cancel'],['/terum-skills Claude Code skill','Cancel']] as const){
+ for(const [question,button] of [['Use this identity?','Yes'],['session-start hook','No'],['/terum-skills Claude Code skill','No']] as const){
   const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent(question);
+  if(question==='Use this identity?'){
+   expect(dialog).toHaveTextContent('Identity: @seed — Seed <seed@example.com> (GitHub: seed)');
+   expect(screen.getByText('Configuring the team').parentElement).toHaveAttribute('data-state','current');
+   expect(screen.getByLabelText('Setup output')).not.toHaveTextContent('Identity:');
+  }
   fireEvent.click(within(dialog).getByRole('button',{name:button}));
   await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  }
@@ -121,9 +129,22 @@ it('replays configured-machine resume because setup intent wins over the existin
  const {fake,backend}=firstRunReplay('setup-resume',{...STATE,intent:'setup'},true);
  const invite=await screen.findByRole('dialog');expect(invite).toHaveTextContent('Invite teammates');
  expect(location.hash).toBe('#/onboarding/boot');fireEvent.click(within(invite).getByRole('button',{name:'Continue'}));
- const hook=await screen.findByRole('dialog',{name:/Install the Claude Code session-start hook/});fireEvent.click(within(hook).getByRole('button',{name:'Cancel'}));
- const skill=await screen.findByRole('dialog',{name:/Install the \/terum-skills Claude Code skill/});fireEvent.click(within(skill).getByRole('button',{name:'Cancel'}));
+ const hook=await screen.findByRole('dialog',{name:/Install the Claude Code session-start hook/});fireEvent.click(within(hook).getByRole('button',{name:'No'}));
+ const skill=await screen.findByRole('dialog',{name:/Install the \/terum-skills Claude Code skill/});fireEvent.click(within(skill).getByRole('button',{name:'No'}));
  await screen.findByRole('heading',{name:'Setup finished'});
  expect(fake.writes.map(line=>(JSON.parse(line) as {value:unknown}).value)).toEqual(['',false,false]);
  expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe(STATE.writtenAt);
+});
+
+it('refuses a foreign target against the recorded status without spawning setup',async()=>{
+ const target='github.com/other/repo';
+ const fake=fakeBridge((args,emit)=>{for(const line of recorded(args[0]==='ls'?'ls-local':'status'))emit({kind:'stdout',line});},{...STATE,target});
+ const backend={...createTauriBackend(fake.bridge),prefs:browserPrefs()};
+ location.hash='#/';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
+ await screen.findByRole('heading',{name:'Setup not started'});
+ expect(fake.spawns.filter(spawn=>spawn.args[0]==='setup')).toEqual([]);
+ expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe(STATE.writtenAt);
+ expect(screen.getByRole('status')).toHaveTextContent('This machine is on team acme. To join github.com/other/repo, leave acme first (Settings ▸ Team).');
+ expect(screen.queryByRole('alert')).toBeNull();expect(screen.getByRole('progressbar')).not.toHaveAttribute('data-failed');
+ fireEvent.click(screen.getByRole('button',{name:'Open Settings ▸ Team'}));await waitFor(()=>expect(location.hash).toBe('#/settings/teams'));
 });

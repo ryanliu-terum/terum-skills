@@ -8,7 +8,7 @@ export type CliAskKind = 'confirm' | 'text' | 'select';
 export type CliFrame =
   | { t: 'hello'; protocol: number; version: string | null; verbs: readonly string[]; features: Readonly<Record<string, boolean>> }
   | { t: 'print'; level: CliLevel; line: string }
-  | { t: 'ask'; id: string; kind: CliAskKind; question: string; default?: string; choices?: readonly string[] }
+  | { t: 'ask'; id: string; kind: CliAskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[] }
   | { t: 'progress'; step: string; current?: number; total?: number }
   | { t: 'result'; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; refused?: boolean; value?: unknown };
 export type CliInbound = { t: 'answer'; id: string; value: string | number | boolean } | { t: 'cancel' };
@@ -35,6 +35,8 @@ export function parseCliFrame(line: string): CliFrame | null {
       const frame: Extract<CliFrame, { t: 'ask' }> = { t: 'ask', id: f['id'], kind: f['kind'] as CliAskKind, question: f['question'] };
       if (str(f['default'])) frame.default = f['default'];
       if (Array.isArray(f['choices'])) frame.choices = (f['choices'] as unknown[]).filter(str);
+      const detail = Array.isArray(f['detail']) ? f['detail'].filter(str) : [];
+      if (detail.length) frame.detail = detail;
       return frame;
     }
     case 'progress': {
@@ -50,6 +52,7 @@ export function parseCliFrame(line: string): CliFrame | null {
       if (str(f['error'])) frame.error = f['error'];
       if (typeof f['refused'] === 'boolean') frame.refused = f['refused'];
       if (f['declined'] === true) frame.declined = true;
+      if (f['refused'] === true) frame.refused = true;
       if ('value' in f && f['value'] !== undefined) frame.value = f['value'];
       return frame;
     }

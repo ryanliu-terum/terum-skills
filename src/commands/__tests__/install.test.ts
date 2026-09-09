@@ -118,6 +118,8 @@ describe('install (§6 refs)', () => {
     const io = new ScriptedPrompter([], [true]);
     expect(await run({ ref: `helper@${pinned}`, config: store, home: join(fixture.root, 'home') }, io)).toMatchObject({ ok: true });
     expect(io.askedAbout('Approve these tools')).toBe(true);
+    expect(io.lines.join('\n')).not.toContain('helper requests allowed-tools:');
+    expect(io.details['Approve these tools for helper?']).toEqual(['helper requests allowed-tools:', 'Bash(*)']);
     const grants = allowedTools('Bash(*)'); if (!grants.ok) throw new Error('test grant must normalize');
     expect((await store.read()).approvals[id]?.grants).toBe(grants.hash);
   });
@@ -165,7 +167,9 @@ describe('install (§6 refs)', () => {
     const io = new ScriptedPrompter([], [false]);
     const result = await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, io);
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('malformed allowed-tools') });
-    expect(io.lines.join('\n')).toContain('{"Bash":"*"}');
+    expect(io.lines.join('\n')).not.toContain('{"Bash":"*"}');
+    expect(io.details['Install sample despite malformed allowed-tools?']).toEqual([expect.stringMatching(/^allowed-tools for sample could not be parsed: /)]);
+    expect(io.details['Install sample despite malformed allowed-tools?']![0]).toContain('{"Bash":"*"}');
     expect(io.askedAbout('despite malformed')).toBe(true);
     expect((await store.read()).approvals).toEqual({});
     expect((await store.read()).pending).toEqual([]);
@@ -182,7 +186,8 @@ describe('install (§6 refs)', () => {
     const io = new ScriptedPrompter([], [false]);
     expect(await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, io)).toMatchObject({ ok: false, error: expect.stringContaining('malformed allowed-tools') });
     expect(io.askedAbout('despite malformed')).toBe(true);
-    expect(io.lines.join('\n')).toContain('allowed-tools for sample could not be parsed: ');
+    expect(io.lines.join('\n')).not.toContain('allowed-tools for sample could not be parsed: ');
+    expect(io.details['Install sample despite malformed allowed-tools?']).toEqual([expect.stringMatching(/^allowed-tools for sample could not be parsed: /)]);
   });
 
   it('keeps an earlier matching pending install when this attempt declines consent', async () => {

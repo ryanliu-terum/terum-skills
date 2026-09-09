@@ -45,7 +45,7 @@ it('opens a dialog for an unexpected run prompt', async () => {
   vi.spyOn(backend, 'install').mockImplementation(() => original({ ref: 'deploy-check' }));
   open('#/inbox'); fireEvent.click(await screen.findByRole('button', { name: 'Install to Global' }));
   const dialog = await screen.findByRole('dialog'); expect(dialog).toHaveTextContent('Approve these tools for deploy-check?');
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); expect(await screen.findByRole('alert')).toHaveTextContent('Install was declined.');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'No' })); expect(await screen.findByRole('alert')).toHaveTextContent('Install was declined.');
 });
 it('keeps secondary decline pixels unchanged', async () => { open('#/inbox'); const pane = await screen.findByRole('region', { name: 'Inbox report' }); const before = pane.textContent; fireEvent.click(within(pane).getByRole('button', { name: 'Decline' })); expect(pane.textContent).toBe(before); });
 

@@ -20,23 +20,23 @@ function harness(initial:LaunchContext|null=null){
 }
 it('delivers a new target from Library once, deduplicates events, and ignores consumed requests',async()=>{
  const h=harness();h.open();await screen.findByText('15 skills');
- const ctx={writtenAt:'B',target:'org/team'};await h.reopen(ctx);
+ const ctx={writtenAt:'B',target:'terum/team-skills'};await h.reopen(ctx);
  await screen.findByRole('heading',{name:'Setup finished'});
- expect(location.hash).toBe('#/onboarding/boot');expect(h.setup).toHaveBeenCalledExactlyOnceWith({target:'org/team',offerConnect:true});
+ expect(location.hash).toBe('#/onboarding/boot');expect(h.setup).toHaveBeenCalledExactlyOnceWith({target:'terum/team-skills',offerConnect:true});
  await h.reopen(ctx);expect(h.setup).toHaveBeenCalledTimes(1);
  fireEvent.click(screen.getByRole('button',{name:'Open the Library'}));await screen.findByText('15 skills');
  h.backend.prefs.set('launch:consumedWrittenAt','consumed');await h.reopen({writtenAt:'consumed',target:'other/team'});
  expect(location.hash).toBe('#/library/global');expect(h.setup).toHaveBeenCalledTimes(1);
 });
 it('holds B while A is active, then remounts Boot for B after A settles',async()=>{
- const h=harness({writtenAt:'A',target:'org/a'});let finish!: (result:Result<SetupResult>)=>void;
+ const h=harness({writtenAt:'A',target:'terum/team-skills'});let finish!: (result:Result<SetupResult>)=>void;
  h.setup.mockImplementationOnce(()=>createRun(()=>new Promise(resolve=>{finish=resolve;})));
  h.open('#/');await screen.findByRole('button',{name:'Stop'});await waitFor(()=>expect(h.setup).toHaveBeenCalledTimes(1));
- await h.reopen({writtenAt:'B',target:'org/b'});
- expect(h.setup).toHaveBeenCalledTimes(1);expect(screen.getByText('org/a')).toBeInTheDocument();
+ await h.reopen({writtenAt:'B',target:'https://github.com/terum/team-skills'});
+ expect(h.setup).toHaveBeenCalledTimes(1);expect(screen.getByText('terum/team-skills')).toBeInTheDocument();
  expect(h.backend.prefs.get('launch:consumedWrittenAt','')).toBe('');
  await act(async()=>{finish({ok:false,error:'A failed.'});});
  await screen.findByRole('heading',{name:'Setup finished'});
- expect(h.setup.mock.calls).toEqual([[{target:'org/a',offerConnect:true}],[{target:'org/b',offerConnect:true}]]);
- expect(screen.getByText('org/b')).toBeInTheDocument();expect(h.backend.prefs.get('launch:consumedWrittenAt','')).toBe('B');
+ expect(h.setup.mock.calls).toEqual([[{target:'terum/team-skills',offerConnect:true}],[{target:'https://github.com/terum/team-skills',offerConnect:true}]]);
+ expect(screen.getByText('https://github.com/terum/team-skills')).toBeInTheDocument();expect(h.backend.prefs.get('launch:consumedWrittenAt','')).toBe('B');
 });

@@ -149,15 +149,13 @@ export async function installOne(input: { team: string; reference?: string; id?:
 
 async function ensureConsent(store: ConfigStore, skill: SkillRecord, io: Prompter): Promise<void> {
   if (!skill.grants.ok) {
-    io.print(`allowed-tools for ${skill.name} could not be parsed: ${describeRaw(skill.grants.raw)}`);
-    if (!(await io.confirm(`Install ${skill.name} despite malformed allowed-tools?`))) throw new CancelledError(`Consent was declined for malformed allowed-tools on ${skill.name}.`);
+    if (!(await io.confirm(`Install ${skill.name} despite malformed allowed-tools?`, { detail: [`allowed-tools for ${skill.name} could not be parsed: ${describeRaw(skill.grants.raw)}`] }))) throw new CancelledError(`Consent was declined for malformed allowed-tools on ${skill.name}.`);
     return;
   }
   if (skill.grants.normalized === 'none') return;
   const config = await store.read();
   if (config.approvals[skill.id]?.grants === skill.grants.hash) return;
-  io.print(`${skill.name} requests allowed-tools:\n${skill.grants.normalized}`);
-  if (!(await io.confirm(`Approve these tools for ${skill.name}?`))) throw new CancelledError(`Consent was declined for ${skill.name}.`);
+  if (!(await io.confirm(`Approve these tools for ${skill.name}?`, { detail: [`${skill.name} requests allowed-tools:`, ...skill.grants.normalized.split('\n')] }))) throw new CancelledError(`Consent was declined for ${skill.name}.`);
   await store.update((fresh) => { fresh.approvals[skill.id] = { grants: skill.grants.ok ? skill.grants.hash : '', approved_at: new Date().toISOString().slice(0, 10) }; });
 }
 
