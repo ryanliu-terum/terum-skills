@@ -440,6 +440,31 @@ it.each(['missing-id','old-cli'])('does not infer presence by name with %s',asyn
  expect((await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).value?.skills).toMatchObject([{name:'deploy-check',project:'local',installed:true,placed:false,onDiskOnly:true}]);
  expect((await createTauriBackend(f.bridge).skill({ref:'deploy-check'})).value?.installed).toBe(false);
 });
+// A CLI without `localIdentity` cannot identify a folder, so a same-named one leaves presence
+// unknown — never "absent", and never an Install that would collide with it.
+it('reports an unidentifiable same-named folder as unknown rather than absent',async()=>{
+ const old=installedReplay('on-disk-only','none',frame=>{
+  if(frame.t==='hello')delete (frame.features as Record<string,unknown>).localIdentity;
+ });
+ const unknown=await createTauriBackend(old.bridge).skill({ref:'deploy-check'});
+ expect(unknown.value).toMatchObject({installed:false,unidentifiedLocal:{path:'/Users/teddy/.claude/skills/deploy-check',pathLabel:'~/.claude/skills/deploy-check'}});
+ // With the feature present the same scan is proof, so the skill reads installed and unambiguous.
+ const current=await createTauriBackend(installedReplay().bridge).skill({ref:'deploy-check'});
+ expect(current.value).toMatchObject({installed:true,unidentifiedLocal:null});
+});
+// A connected source carries {id,team} on every CLI that reaches the app, so it proves presence
+// without `skillId` — the clause an old CLI otherwise had no way to satisfy.
+it('accepts a connected source as identity on a CLI without localIdentity',async()=>{
+ const shared=installedReplay('on-disk-only','none',frame=>{
+  if(frame.t==='hello')delete (frame.features as Record<string,unknown>).localIdentity;
+  if(frame.t==='result'){
+   const row=(frame.value as {local:{rows:Record<string,unknown>[]}[]}).local[0]!.rows[0]!;
+   row.shared=[{id:row.skillId,team:'acme'}];row.connected=true;row.tracked=true;
+  }
+ });
+ const detail=await createTauriBackend(shared.bridge).skill({ref:'deploy-check'});
+ expect(detail.value).toMatchObject({installed:true,placed:false,onDiskOnly:true,unidentifiedLocal:null,connectedSources:['/Users/teddy/.claude/skills/deploy-check']});
+});
 it('copies recorded member installs rather than authored skills',async()=>{
  const none=await createTauriBackend(installedReplay('on-disk-only','none').bridge).catalog();
  expect(none.value?.people[0]).toMatchObject({skills:['deploy-check'],installable:[],onDisk:[0,0]});

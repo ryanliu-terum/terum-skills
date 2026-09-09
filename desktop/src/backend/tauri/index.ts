@@ -81,12 +81,28 @@ function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):Skill
 }
 function localDetail(card:SkillCard,section:LocalSection,path:string,home:string):SkillDetail {
   const pathLabel=abbreviateHome(path,home);
-  return {...card,team:null,skillRef:'local:'+path,root:'Global',installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,path,pathLabel,repo:null,version:'—',version_full:null,scope:section.scope==='global'?'Global':section.label??basename(section.repoRoot??section.root),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:['SKILL.md'],size_bytes:'—',desc_long:'',grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:'',body:[],markdown:null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest connect '+pathLabel,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},method:'',versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[]};
+  return {...card,team:null,skillRef:'local:'+path,root:'Global',installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,path,pathLabel,repo:null,version:'—',version_full:null,scope:section.scope==='global'?'Global':section.label??basename(section.repoRoot??section.root),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:['SKILL.md'],size_bytes:'—',desc_long:'',grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:'',body:[],markdown:null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest connect '+pathLabel,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},method:'',versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[],unidentifiedLocal:null};
 }
 
-// Join provenance by team and ID, including relocated or conflicting tracked folders.
+function localRows(local: Inventory) {
+  return local.local?.flatMap(section => section.rows.map(row => ({ ...row, scope: section.scope, root: section.root, repoRoot: section.repoRoot }))) ?? [];
+}
+// Join provenance by team and ID, including relocated or conflicting tracked folders. Every clause
+// is an id the CLI itself reported: a ledger placement, a connected source, or identity read from
+// the folder. A ref carrying a team is matched with it; `skillId` is a uuid and needs none.
 function onDisk(local: Inventory, team: string, id: string, features: Pick<Features, 'localIdentity'>) {
-  return local.local?.flatMap(section => section.rows.map(row => ({ ...row, scope: section.scope, root: section.root, repoRoot: section.repoRoot }))).filter(row => (row.placement?.id === id && row.placement.team === team) || (features.localIdentity && row.skillId === id)) ?? [];
+  return localRows(local).filter(row => (row.placement?.id === id && row.placement.team === team) || row.shared.some(source => source.id === id && source.team === team) || (features.localIdentity && row.skillId === id));
+}
+/**
+ * `skillId` reaches `ls --local` rows only from CLI 0.1.8 (the `localIdentity` feature). An older
+ * CLI reports an untracked folder with no id at all, so a same-named one is not evidence of
+ * absence — presence is unknowable. Name spots that ambiguity and never infers presence: the
+ * caller reports "unknown" and the skill still does not count as installed.
+ */
+function unidentifiedLocal(local: Inventory, name: string, features: Pick<Features, 'localIdentity'>, home: string) {
+  if (features.localIdentity) return null;
+  const row = localRows(local).find(row => row.name === name && row.placement === null && row.shared.length === 0);
+  return row ? { path: row.path, pathLabel: abbreviateHome(row.path, home) } : null;
 }
 function inventoryCard(row: InventorySkill, local: Inventory, team: string, features: Pick<Features, 'localIdentity'>, home: string): SkillCard {
   const rows = onDisk(local, team, row.id, features);
@@ -102,6 +118,7 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
   const name = row.author.replace(/\s*<[^>]*>$/, '');
   const installers = row.installedBy;
   return { ...card, team: team.team, installScopes: [], projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: null, skillRef: `${team.team}/${row.name}`, root: 'Global', desc_long: row.description, files: ['SKILL.md'], size_bytes: '—', version: placed?.placement?.version?.slice(0, 12) ?? '—', version_full: placed?.placement?.version ?? null, scope: placed?.scope === 'global' ? 'Global' : placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
+    unidentifiedLocal: card.installed ? null : unidentifiedLocal(local, row.name, features, home),
     used_by: [...new Map(installers.map(person => [person.handle, initials(person.displayName)])).values()], users: installers.map(person => [person.handle, initials(person.displayName), `${person.scope.kind === 'global' ? 'Global' : person.scope.project} · since ${person.since}`]),
     author: { name, handle: '', role: '', initials: initials(name) }, repo: team.repository ?? null, path, pathLabel: abbreviateHome(path, home), grants_approved: '', versions:null,latestState:'none',invalidReceiptFile:null,localRuns:[],evalReportError:null, receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: validation.value === undefined ? null : `Hygiene checks · ${validation.ok && validation.value.findings === 0 ? 'pass' : 'fail'} on connect`,
     skillMd: { frontmatter: '', body: [], markdown: row.body ?? null }, evalEstimate: null, evalEstimateText: '', evalEstimateTip: '', evalCommand: `npx -y terum-skills@latest eval ${row.name}`, shareCommand: `npx -y terum-skills@latest install ${team.team}/${row.name}`, incumbentLift: null, reportNumbers: null, scoreFractions: { routesExpected: null, roi: null, quality: null }, method: '',

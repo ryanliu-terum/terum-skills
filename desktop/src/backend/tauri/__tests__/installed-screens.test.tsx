@@ -8,9 +8,9 @@ import { useUiStore } from '../../../app/store';
 import { createTauriBackend } from '../index';
 import { installedReplay } from './installed-fixture';
 afterEach(()=>{cleanup();location.hash='';localStorage.clear();vi.restoreAllMocks();});
-function open(member:string,route='#/marketplace/people/mira',local='on-disk-only') {
+function open(member:string,route='#/marketplace/people/mira',local='on-disk-only',change?:(frame:Record<string,unknown>)=>void) {
  useUiStore.setState({railOpen:true,overviewHidden:false});
- const f=installedReplay(local,member),backend=createTauriBackend(f.bridge);
+ const f=installedReplay(local,member,change),backend=createTauriBackend(f.bridge);
  location.hash=route;
  render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><Tooltip.Provider><App/></Tooltip.Provider></QueryClientProvider></BackendContext>);
  return {backend,f};
@@ -54,4 +54,15 @@ it('abbreviates the real detail labels while Edit and Manage keep the absolute o
 it('uses the resolved path label in the real Global Remove dialog',async()=>{
  open('none','#/skill/deploy-check?dialog=remove','placed');
  expect(await screen.findByRole('dialog')).toHaveTextContent('Its files leave ~/.claude/skills/deploy-check on this machine');
+});
+
+// The old-CLI ambiguity must read as unknown on the page, with no Install to collide with the folder.
+it('states an unknown install rather than offering an Install that would collide',async()=>{
+ open('none','#/skill/deploy-check','on-disk-only',frame=>{
+  if(frame.t==='hello')delete (frame.features as Record<string,unknown>).localIdentity;
+ });
+ expect(await screen.findByText('Install state unknown')).toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Install'})).toBeNull();
+ expect(document.querySelector('.detail-rail')).toHaveTextContent('~/.claude/skills/deploy-check');
+ expect(document.querySelector('.detail-flags')).toHaveTextContent('Install state unknown');
 });
