@@ -68,7 +68,7 @@ it.each(['#/inbox','#/inbox/missing','#/onboarding/welcome'])('hides an unserved
  await waitFor(()=>expect(location.hash).toBe('#/library/global'));
  expect(screen.queryByRole('link',{name:'Inbox'})).toBeNull();expect(screen.queryByLabelText('Inbox items')).toBeNull();expect(screen.queryByLabelText('Inbox report')).toBeNull();
 });
-it('counts ledger placements by scope rather than local inventory rows',async()=>{
+it('counts the global scan without inferring project counts from ledger placements',async()=>{
  const fake=fakeBridge((args,emit)=>{
   for(const line of recorded(args[0]==='ls'?'ls-local':'status')){
    const frame=JSON.parse(line) as {t:string;value?:{ledger:{placements:unknown[]}}};
@@ -77,7 +77,7 @@ it('counts ledger placements by scope rather than local inventory rows',async()=
   }
  });
  const backend=createTauriBackend(fake.bridge),status=await backend.status(),settings=await backend.settings();
- expect(status.value?.counts).toEqual({Global:'1',docs:'1'});expect(status.value?.ledger?.placements).toHaveLength(2);
+ expect(status.value?.counts).toEqual({Global:'1'});expect(status.value?.ledger?.placements).toHaveLength(2);
  expect(settings.value?.PLACEMENTS_N).toBe(2);expect(settings.value?.PINNED_N).toBe(1);expect(settings.value?.PLACEMENTS[1]?.[3]).toBeNull();
 });
 

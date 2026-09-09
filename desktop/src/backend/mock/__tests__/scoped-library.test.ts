@@ -16,7 +16,9 @@ it.each(['Global','Terum','SSM','MRF'] as const)('serves the exact %s title and 
 });
 it.each(['unknown','toString','__proto__'])('serves zero overview for unknown scope %s',async scope=>{
  const result=await createMockBackend().library({scope});
- expect(result).toEqual({ok:true,value:{skills:[],title:'0 skills',overview:{
+ expect(result.ok&&result.value.scanned).toBeNull();
+ expect(result.ok?result.value.projects?.map(project=>project.name):[]).toEqual(['Terum','SSM','MRF']);
+ expect(result).toEqual({ok:true,value:{scanned:null,projects:result.ok?result.value.projects:[],skills:[],title:'0 skills',overview:{
   skills:'0',skills_note:design.LIBRARY_OVERVIEW.zero.skills,evaluated:'—',
   meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:design.LIBRARY_OVERVIEW.zero.evaluated,
   installs:'0',installs_note:design.LIBRARY_OVERVIEW.zero.installs,attention:'0',

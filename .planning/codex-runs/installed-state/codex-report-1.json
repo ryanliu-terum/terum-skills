@@ -1,0 +1,106 @@
+{
+  "status": "partial",
+  "summary": "Implemented id-based presence, placement-only management actions, project checkout scanning, People install targets, and consented source adoption. Added replay fixtures, regression tests, and authorized documentation amendments. One contradictory rejected-id requirement remains conservatively implemented; standard test commands hit sandbox EPERM.",
+  "filesChanged": [
+    {"path":"src/lib/frames.ts","change":"modified","why":"Advertise localIdentity."},
+    {"path":"src/lib/skill-source.ts","change":"modified","why":"Extract schema-valid UUID identity."},
+    {"path":"src/lib/local-skills.ts","change":"modified","why":"Carry skillId through discovery."},
+    {"path":"src/commands/ls.ts","change":"modified","why":"Expose local identity and member installs."},
+    {"path":"src/commands/connect.ts","change":"modified","why":"Consent to adopting matching existing identities."},
+    {"path":"src/commands/__tests__/ls.test.ts","change":"modified","why":"Test identity, unchanged print lines, and member installs."},
+    {"path":"src/commands/__tests__/connect.test.ts","change":"modified","why":"Test adoption, refusal, consent, and unchanged files."},
+    {"path":"src/lib/__tests__/skill-source.test.ts","change":"modified","why":"Expect additive inspection identity."},
+    {"path":"src/lib/__tests__/local-skills.test.ts","change":"modified","why":"Expect null identity for rejected inspection."},
+    {"path":"src/lib/__tests__/frames.test.ts","change":"modified","why":"Expect localIdentity feature."},
+    {"path":"desktop/src/backend/prefs.ts","change":"modified","why":"Allow machine:projectRoot."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Define additive identity, scanning, adoption, and People DTOs."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Implement strict optional schemas, presence derivation, cwd separation, and invalidation."},
+    {"path":"desktop/src/backend/tauri/run.ts","change":"modified","why":"Resolve explicit asynchronous cwd before spawning."},
+    {"path":"desktop/src/backend/mock/data.ts","change":"modified","why":"Fill new DTO fields while preserving default data."},
+    {"path":"desktop/src/backend/mock/scenario.ts","change":"modified","why":"Add on-disk-only scenario."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Serve new scenario and additive defaults."},
+    {"path":"desktop/src/components/domain/SkillCard.tsx","change":"modified","why":"Render presence chip and gate placement actions."},
+    {"path":"desktop/src/components/domain/ScanCoverage.tsx","change":"added","why":"Share scan coverage and machine/placement counts."},
+    {"path":"desktop/src/screens/library/LibraryScreen.tsx","change":"modified","why":"Display scan coverage."},
+    {"path":"desktop/src/screens/skill/SkillScreen.tsx","change":"modified","why":"Render installed states and consented Manage dialog."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"Add checkout path field and Clear action."},
+    {"path":"desktop/src/screens/settings/SettingsScreen.tsx","change":"modified","why":"Gate checkout controls through Surfaces."},
+    {"path":"desktop/src/screens/marketplace/market-data.ts","change":"modified","why":"Share personStatus logic."},
+    {"path":"desktop/src/screens/marketplace/market-components.tsx","change":"modified","why":"Use consistent People rail status."},
+    {"path":"desktop/src/screens/marketplace/MarketplaceScreen.tsx","change":"modified","why":"Use recorded install targets, empty-state copy, and scan coverage."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"Expect authorized additive mock fields."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Test identity joins, compatibility, People targets, and cwd invalidation."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"Verify known-home cwd across verbs."},
+    {"path":"desktop/src/backend/tauri/__tests__/installed-fixture.ts","change":"added","why":"Replay installed-state frames."},
+    {"path":"desktop/src/backend/tauri/__tests__/installed-screens.test.tsx","change":"added","why":"Test People, checkout controls, and placement states."},
+    {"path":"desktop/src/screens/library/installed-state.test.tsx","change":"added","why":"Test presence affordances and adoption dialog consent."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"Insert verbatim installed-state amendment."},
+    {"path":".planning/specs/m7-S7g.md","change":"modified","why":"Insert both verbatim supersession notes."},
+    {"path":"docs/frame-protocol.md","change":"modified","why":"Document additive fields and protocol-1 compatibility."},
+    {"path":"desktop/AGENTS.md","change":"modified","why":"Add optional-key compatibility rule."},
+    {"path":"desktop/GAPS.md","change":"modified","why":"Document checkout cwd rules and rejected-folder limitation."},
+    {"path":".planning/codex-runs/installed-state/frames/ls-local-on-disk-only.jsonl","change":"added","why":"Replay unplaced presence."},
+    {"path":".planning/codex-runs/installed-state/frames/ls-local-placed.jsonl","change":"added","why":"Replay placement."},
+    {"path":".planning/codex-runs/installed-state/frames/ls-local-placed-problem.jsonl","change":"added","why":"Replay damaged placement."},
+    {"path":".planning/codex-runs/installed-state/frames/ls-local-project.jsonl","change":"added","why":"Replay project presence."},
+    {"path":".planning/codex-runs/installed-state/frames/ls-member-installed.jsonl","change":"added","why":"Replay recorded member installs."},
+    {"path":".planning/codex-runs/installed-state/frames/ls-member-none.jsonl","change":"added","why":"Replay empty member installs."}
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop lint exited 0; 0 errors or warnings.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "Root and desktop typechecks exited 0 with 0 diagnostics. Root build also exited 0.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": false,
+      "output": "Standard root and desktop commands could not run in sandbox: EPERM at node_modules/.vite-temp, 0 tests collected. Supplemental runner-loader checks: desktop full suite 938 passed, 88 skipped; final targeted desktop run 127 passed. Git-free root selections totaled 75 passed. All 7 new CLI and 19 new desktop cases failed against saved pre-change source and passed after implementation.",
+      "preExistingFailures": "Root Vite startup EPERM was observed before implementation; no full root baseline was established."
+    }
+  },
+  "openQuestions": [
+    {
+      "question": "Should rejected folders retain readable UUIDs? §2 requires null for rejected inspections, while §7 describes rejected folders retaining their id.",
+      "specSection": "§2 and §7",
+      "conservativeChoice": "Rejected inspections retain skillId:null and never count as present; GAPS documents this limitation."
+    }
+  ],
+  "deviations": [
+    {
+      "what": "Rejected-folder UUIDs are not retained.",
+      "why": "Followed §2's explicit null requirement where §7 conflicts."
+    },
+    {
+      "what": "Standard test commands were blocked; the full root suite remains unexecuted.",
+      "why": "Vite temporary-config writes hit EPERM. Supplemental desktop tests used --configLoader runner --maxWorkers 2; root selections avoided fixtures that execute git."
+    }
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Filesystem and CLI capabilities remain behind the backend seam."},
+    {"number":2,"howSatisfied":"Added declared feature/surface fields and optional local keys without weakening strict row parsing; documentation edits stayed within authorization."},
+    {"number":4,"howSatisfied":"Did not access the design oracle or run Playwright."},
+    {"number":5,"howSatisfied":"Default mock DTO values preserve existing drawn states; new presence behavior has an additive scenario."},
+    {"number":7,"howSatisfied":"Preserved existing assertions except required additive expectations; verified all 26 new regression cases fail before and pass after."},
+    {"number":8,"howSatisfied":"Used the sandbox without network or git commands, ran required gates, and reported blocked checks explicitly."}
+  ],
+  "testsModified": [
+    {"path":"src/commands/__tests__/ls.test.ts","whatChanged":"Added six regression cases and installed:[] to an exact member expectation.","justification":"Required local identity and member-install schema changes."},
+    {"path":"src/commands/__tests__/connect.test.ts","whatChanged":"Added adoption/consent/refusal regression coverage using an in-memory runner.","justification":"Verify recovery without executing git or changing source bytes."},
+    {"path":"src/lib/__tests__/skill-source.test.ts","whatChanged":"Added id:null to the stock-source expectation.","justification":"Required additive inspection field."},
+    {"path":"src/lib/__tests__/local-skills.test.ts","whatChanged":"Added skillId:null to a rejected-entry expectation.","justification":"Required additive LocalEntry field."},
+    {"path":"src/lib/__tests__/frames.test.ts","whatChanged":"Added localIdentity:true to the exact feature map.","justification":"Required hello feature."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","whatChanged":"Added projectRoot:false/null to exact DTO expectations.","justification":"Required additive mock defaults."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Added regression cases, projectRoot surface expectation, and empty installable/onDisk expectations for legacy member frames.","justification":"Legacy frames lack recorded installs; authored skills must no longer substitute for them."},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","whatChanged":"Added known-home cwd coverage across 17 calls.","justification":"Verify scan preferences cannot redirect writes."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Default mock boards remain pixel-identical: unit tests pass, but the prohibited visual gate was not run."
+}

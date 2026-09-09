@@ -6,7 +6,7 @@ import { temporaryDirectory } from './fixtures.js';
 
 describe('shared source inspection', () => {
   it('accepts stock sources and the stored frontmatter delimiter, including CRLF', () => {
-    expect(inspectSkillSource('---\r\nname: stock\r\ndescription: x\r\n---\r\n', 'stock')).toEqual({ ok: true, description: 'x' });
+    expect(inspectSkillSource('---\r\nname: stock\r\ndescription: x\r\n---\r\n', 'stock')).toEqual({ ok: true, description: 'x', id: null });
     expect(inspectSkillSource('---\nname: stock\ndescription: x\n---invalid', 'stock')).toMatchObject({ ok: false, reason: 'no-frontmatter', detail: 'SKILL.md has no YAML frontmatter' });
   });
 

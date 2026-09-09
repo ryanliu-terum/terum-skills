@@ -1,0 +1,30 @@
+{
+  "status": "complete",
+  "summary": "Resolved all five conflicted files, preserving both sides’ behavior and tests. Verified the auto-merged backend and types, including zero-team handling before ls. No conflict markers remain; no git commands were run. Root build passed.",
+  "filesChanged": [
+    {"path":"desktop/src/backend/mock/scenario.ts","change":"modified","why":"rebase conflict resolution, both sides kept"},
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","change":"modified","why":"rebase conflict resolution, both sides kept"},
+    {"path":"desktop/src/screens/library/LibraryScreen.tsx","change":"modified","why":"rebase conflict resolution, both sides kept"},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"rebase conflict resolution, both sides kept"},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"rebase conflict resolution, both sides kept"}
+  ],
+  "gates": {
+    "lint": {"ran":true,"passed":true,"output":"Root and desktop passed; 0 diagnostics.","preExistingFailures":""},
+    "typecheck": {"ran":true,"passed":true,"output":"Final root and desktop runs passed; 0 diagnostics.","preExistingFailures":""},
+    "test": {"ran":true,"passed":true,"output":"Desktop: 71 files passed; 984 tests passed, 88 skipped, 0 failed. Default startup hit .vite-temp EPERM; passed using --configLoader runner and NODE_OPTIONS=--no-experimental-webstorage.","preExistingFailures":""}
+  },
+  "openQuestions": [],
+  "deviations": [],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Preserved backend launch methods and typed no-team handling through the seam."},
+    {"number":2,"howSatisfied":"Preserved feature-gated installed identity and optional local-row fields."},
+    {"number":7,"howSatisfied":"Retained all tests and assertions from both sides without weakening."},
+    {"number":8,"howSatisfied":"Ran requested gates within the sandbox, verified edits by read-back, and ran no git commands."}
+  ],
+  "testsModified": [
+    {"path":"desktop/src/backend/tauri/__tests__/run.test.ts","whatChanged":"Removed conflict markers; retained HEAD’s three tests verbatim.","justification":"Required conflict resolution."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Retained HEAD’s complete tests before the batch tests, restored separate closures, and moved installedReplay into the import block.","justification":"Required conflict resolution; all assertions preserved."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Mock visual fidelity is preserved by retaining existing rendering text and props; no visual gates were run."
+}
