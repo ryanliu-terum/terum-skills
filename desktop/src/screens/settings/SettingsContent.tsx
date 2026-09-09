@@ -8,7 +8,6 @@ import { useUiStore } from '../../app/store';
 import { RichText, TerminalHint } from '../../components/domain/Primitives';
 import { InlineChoice, WorkflowDialog, WorkflowField } from '../../components/domain/WorkflowControls';
 import { useWorkflow } from '../../components/domain/useWorkflow';
-import { Dialog, DialogTitle } from '../../components/ui/Dialog';
 import { WorkflowPopup } from '../../components/domain/WorkflowPopup';
 import { Button } from '../../components/ui/Button';
 import { Switch } from '../../components/ui/Switch';
