@@ -57,3 +57,35 @@ it('renders the placement hover selector and every raw placement',async()=>{open
 it('rejects malformed placement data with its field path',async()=>{const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);settings.value.PLACEMENTS=[['broken']];vi.spyOn(backend,'settings').mockResolvedValue(settings);const consoleError=vi.spyOn(console,'error').mockImplementation(()=>{ /* React reports the intentionally malformed DTO caught by ErrorBoundary. */ });open('#/settings/machine');expect(await screen.findByRole('alert')).toHaveTextContent('PLACEMENTS');expect(consoleError).toHaveBeenCalled();});
 
 it.each(['teams?dialog=leave','machine?dialog=prune'])('keeps the page landmark accessible for %s',async(route)=>{open('#/settings/'+route);const dialog=await screen.findByRole('dialog');const main=screen.getByRole('main');expect(main).toBeInTheDocument();expect(main.closest('[aria-hidden="true"], [inert]')).toBeNull();expect(main.closest('.shell')).not.toBeNull();expect(dialog.closest('.shell')).toBe(main.closest('.shell'));expect(main).not.toContainElement(dialog);});
+
+
+it.each([['Name','name','Ryan Liu'],['Email','email','ryan@example.com'],['Default handle','defaultHandle','ryan']])('saves Account %s through the seam and shows the returned notice without print frames',async(label,key,value)=>{
+ const notice='The next sync refreshes connected skills on this machine.';
+ const save=vi.spyOn(backend,'setIdentity').mockImplementation(()=>createRun(async()=>({ok:true,value:{updated:[{key:key==='defaultHandle'?'default-handle':key,value}],notice}})));
+ const pref=vi.spyOn(backend.prefs,'set');open('#/settings/account');
+ const field=await screen.findByRole('textbox',{name:label});fireEvent.change(field,{target:{value}});expect(save).not.toHaveBeenCalled();fireEvent.blur(field);
+ await waitFor(()=>expect(save.mock.calls).toEqual([[{[key]:value}]]));
+ expect(await screen.findByRole('dialog')).toHaveTextContent(notice);expect(pref).not.toHaveBeenCalled();expect(field).toHaveValue(value);
+});
+it('shows a failed Account write and retains the draft for correction',async()=>{
+ vi.spyOn(backend,'setIdentity').mockImplementation(()=>createRun(async()=>({ok:false,error:'Invalid email.'})));
+ open('#/settings/account');const field=await screen.findByRole('textbox',{name:'Email'});fireEvent.change(field,{target:{value:'bad'}});fireEvent.blur(field);
+ expect(await screen.findByRole('alert')).toHaveTextContent('Invalid email.');expect(field).toHaveValue('bad');expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('uses settings identity rather than stale identity preferences',async()=>{
+ backend.prefs.set('identity:name','Stale name');open('#/settings/account');expect(await screen.findByRole('textbox',{name:'Name'})).toHaveValue(design.ME.name);
+});
+
+
+it('keeps the team display name separate from its command identifier',async()=>{
+ const status=await backend.status();if(!status.ok)throw new Error(status.error);
+ const team=status.value.teams[0];if(!team)throw new Error('Expected team');team.name='Acme Team';team.key='acme-key';
+ vi.spyOn(backend,'status').mockResolvedValue(status);
+ open('#/settings/teams');expect(await screen.findByText('Acme Team')).toBeInTheDocument();expect(document.querySelector('.terminal-hint .board-mono')?.textContent).toBe('npx -y terum-skills@latest team leave acme-key');
+});
+it('uses the status team display name on Account',async()=>{
+ const status=await backend.status();if(!status.ok)throw new Error(status.error);
+ const team=status.value.teams[0];if(!team)throw new Error('Expected team');team.name='Acme Team';team.key='acme-key';
+ vi.spyOn(backend,'status').mockResolvedValue(status);
+ open('#/settings/account');expect(await screen.findByText('Handle on Acme Team')).toBeInTheDocument();
+});

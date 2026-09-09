@@ -1,4 +1,4 @@
-import type { Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, Scope, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, Scope, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   features(): Promise<Features>;
   windowAction(action: 'toggle-maximize' | 'start-drag'): Promise<Result<void>>;
@@ -16,6 +16,7 @@ export interface Backend {
   catalog(q?: { q?: string }, options?: ReadOptions): Promise<Result<Catalog>>;
   roster(q?: undefined, options?: ReadOptions): Promise<Result<Roster>>;
   search(args: SearchArgs, options?: ReadOptions): Promise<Result<SearchHit[]>>;
+  setIdentity(args: IdentityArgs): Run<IdentityWrite>;
   install(args: InstallArgs): Run<InstalledResult[]>;
   uninstallSkill(args: UninstallArgs): Run<UninstalledResult[]>;
   uninstallMachine(args: Record<string, never>): Run<MachineUninstallResult>;

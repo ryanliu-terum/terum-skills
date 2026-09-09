@@ -173,11 +173,11 @@ export async function identityForJoiner(io: Prompter, dependencies: AuthDependen
 }
 
 /** The machine-wide defaults every verb refreshes after collecting identity (§5.4). */
-export function setIdentity(config: Config, identity: Identity): void {
-  config.default_handle = identity.handle;
-  config.display_name = identity.displayName;
-  config.email = identity.email;
-  config.github = identity.github;
+export function setIdentity(config: Config, identity: Partial<Identity>): void {
+  if (identity.handle !== undefined) config.default_handle = identity.handle;
+  if (identity.displayName !== undefined) config.display_name = identity.displayName;
+  if (identity.email !== undefined) config.email = identity.email;
+  if (identity.github !== undefined) config.github = identity.github;
 }
 
 /**

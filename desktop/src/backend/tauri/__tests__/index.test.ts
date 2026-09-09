@@ -185,3 +185,22 @@ it('does not turn unreadable validation into a passing caption',async()=>{
   const f=inventoryBridge({validation:'broken',validateOk:false});
   expect(await createTauriBackend(f.bridge).skill({ref:'a'})).toEqual({ok:false,error:'Validation failed'});
 });
+
+
+it('sets identity with exact pairs, no team option, and config-only invalidation', async () => {
+  const value = { updated: [{key:'name',value:'Ryan Liu'},{key:'email',value:'ryan@example.com'},{key:'default-handle',value:'ryan'}], notice: 'Author line notice.' };
+  const f = replay(value); const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
+  expect(await backend.setIdentity({name:'Ryan Liu',email:'ryan@example.com',defaultHandle:'ryan'}).done).toEqual({ok:true,value});
+  expect(f.spawns.map(spawn=>spawn.args)).toEqual([['login','--set','name=Ryan Liu','--set','email=ryan@example.com','--set','default-handle=ryan']]);
+  expect(listener.mock.calls).toEqual([['config']]);
+});
+it.each([undefined,null])('maps an absent identity notice to null (%s)', async notice => {
+  const f = replay({updated:[{key:'name',value:'Ryan Liu'}],notice});
+  expect(await createTauriBackend(f.bridge).setIdentity({name:'Ryan Liu'}).done).toEqual({ok:true,value:{updated:[{key:'name',value:'Ryan Liu'}],notice:null}});
+  expect(f.spawns.map(spawn=>spawn.args)).toEqual([['login','--set','name=Ryan Liu']]);
+});
+it('passes empty identity values through for CLI validation and does not invalidate on failure', async () => {
+  const f = replay(undefined,false); const backend=createTauriBackend(f.bridge);const listener=vi.fn();backend.subscribe(listener);
+  expect(await backend.setIdentity({email:''}).done).toEqual({ok:false,error:'CLI failure.'});
+  expect(f.spawns.map(spawn=>spawn.args)).toEqual([['login','--set','email=']]);expect(listener).not.toHaveBeenCalled();
+});
