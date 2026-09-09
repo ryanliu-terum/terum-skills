@@ -33,6 +33,7 @@
     },
     "opener:allow-reveal-item-in-dir",
     "store:default",
+    "dialog:allow-open",
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-write-image",
     "window-state:default",

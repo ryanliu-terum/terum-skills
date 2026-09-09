@@ -14,13 +14,16 @@ import { installCounts, installersById, type Installer, isActivePerson, latestCh
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
+import { githubOwnerRepo, repositoryUrl } from '../lib/remote.js';
 
 import { skillVersions } from '../lib/teamRepo.js';
 
 export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
 export interface LsSkill { id: string; name: string; author: string; category: string; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; updated: string; unresolved: boolean; }
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
-export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string }[]; problems: { path: string; reason: string }[]; }
+/** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
+export interface LocalRemote { url: string; slug: string | null; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string }[]; problems: { path: string; reason: string }[]; }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
@@ -29,7 +32,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     if (args.local && (args.kind === 'member' || args.kind === 'project')) throw new Error('--local cannot be combined with member or project.');
     if (args.local && args.team) throw new Error('--local lists every configured team; drop --team.');
     const store = args.config ?? createConfigStore();
-    if (args.local) return await showLocal(store, args.home ?? homedir(), io, args.cwd, args.form);
+    if (args.local) return await showLocal(store, args.home ?? homedir(), io, args.runner ?? systemRunner, args.cwd, args.form);
     const [teamName] = selectTeam((await store.read()).teams, args.team, args.form);
     const clone = store.teamClone(teamName);
     const runner = args.runner ?? systemRunner;
@@ -106,8 +109,20 @@ async function showProject(projectName: string | undefined, team: ReturnType<typ
 export function format(skill: LsSkill): string { return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${skill.latest}; ${skill.endorsement}; ${skill.updated}`; }
 
 
+/**
+ * The checkout's `origin`, read live. A folder with no git, no origin, or an origin git refuses to
+ * name is simply not connected: a read-only listing never fails because a remote is unreadable.
+ */
+async function originRemote(repoRoot: string | undefined, runner: Runner): Promise<LocalRemote | null> {
+  if (repoRoot === undefined) return null;
+  const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).catch(() => undefined);
+  const raw = origin?.code === 0 ? origin.stdout.trim() : '';
+  if (!raw) return null;
+  try { return { url: repositoryUrl(raw), slug: githubOwnerRepo(raw) }; }
+  catch { return null; } // not a remote shape this product accepts; the folder is still a Library row
+}
 /** Local discovery is independent of team selection, and only enriches ledger references. */
-async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: string, form?: InvocationForm): Promise<Result<LsResult>> {
+async function showLocal(store: ConfigStore, home: string, io: Prompter, runner: Runner, cwd?: string, form?: InvocationForm): Promise<Result<LsResult>> {
   const config = await store.read();
   const ledger = await canonicalLedger(config);
   const extraRoots = (await Promise.all([
@@ -151,10 +166,11 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
     } catch { return 'unknown'; }
   };
   for (const { inventory, ...root } of inventories) {
-    const local: LocalSection = { ...root, root: inventory.root, rootState: inventory.rootState, label: localRootLabel(root), counts: localSkillCounts(inventory), rows: [], notOffered: [], problems: [...inventory.problems] };
+    const local: LocalSection = { ...root, root: inventory.root, rootState: inventory.rootState, label: localRootLabel(root), remote: await originRemote(root.repoRoot, runner), counts: localSkillCounts(inventory), rows: [], notOffered: [], problems: [...inventory.problems] };
     sections.push(local);
     const registration = root.registered ? '; registered' : root.detected ? `; detected, not registered — \`${invocation(form, 'checkout add', root.repoRoot!)}\` keeps it in your library` : '';
     io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}${registration}):`);
+    if (root.repoRoot !== undefined) io.print(`  GitHub: ${local.remote === null ? 'not connected' : local.remote.slug === null ? `not connected (origin is ${printable(local.remote.url)})` : printable(local.remote.slug)}`);
     for (const entry of inventory.entries) {
       for (const ref of [...entry.shared, ...(entry.placement ? [entry.placement] : [])]) {
         if (snapshots.has(ref.team)) continue;

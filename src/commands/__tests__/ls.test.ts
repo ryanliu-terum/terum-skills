@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
 import { run, format } from '../ls.js';
-import { systemRunner } from '../../lib/runner.js';
+import { systemRunner, type Runner } from '../../lib/runner.js';
 import { allowedTools } from '../../lib/schema.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { candidatesOf, localSkills } from '../../lib/local-skills.js';
@@ -182,7 +182,7 @@ describe('issue 9 local ls', () => {
 
 
 describe('global and project local sections', () => {
-  it('lists both roots, retains project placements and malformed YAML, and caches team snapshots across roots without runner calls', async () => {
+  it('lists both roots, retains project placements and malformed YAML, and caches team snapshots across roots with no runner call beyond each checkout\'s origin probe', async () => {
     const home = await temporaryDirectory(); const repo = join(home, 'repo'); await mkdir(join(repo, '.git'), { recursive: true });
     const store = createConfigStore(join(home, 'state'));
     const global = await localSource(home, 'global'); const project = await localSource(repo, 'project'); const placed = await localSource(repo, 'placed');
@@ -209,7 +209,7 @@ describe('global and project local sections', () => {
     expect(io.lines).toContain(`  placed — placement recorded from team; path: ${placed}`);
     expect(io.lines).toContain('Cannot be connected:');
     expect(io.lines.filter((line) => line === FOOTER)).toHaveLength(1); expect(io.lines.at(-1)).toBe(FOOTER);
-    expect(teamCalls).toEqual(['team']); expect(runner.calls).toEqual([]); expect(io.asked).toEqual([]);
+    expect(teamCalls).toEqual(['team']); expect(runner.calls).toEqual([{ command: 'git', args: ['remote', 'get-url', 'origin'], cwd: repo, env: undefined, stdio: undefined }]); expect(io.asked).toEqual([]);
     expect(await readFile(join(store.root, 'config.json'))).toEqual(before);
     expect(candidatesOf(await localSkills(join(repo, '.claude', 'skills'), await store.read(), { scope: 'project', stateRoot: store.root }))).toEqual([]);
   });
@@ -218,7 +218,28 @@ describe('global and project local sections', () => {
     const home = await temporaryDirectory(); const repo = join(home, 'repo'); await mkdir(join(repo, '.git'), { recursive: true });
     const io = new ScriptedPrompter();
     expect(await run({ local: true, home, cwd: repo, config: createConfigStore(join(home, 'state')) }, io)).toMatchObject({ ok: true, value: { local: [{ scope: 'global' }, { scope: 'project', rows: [] }] } });
-    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `  none (${join(home, '.claude', 'skills')} does not exist)`, '  0 skill folders (0 connectable)', `Local Claude Code skills (${join(repo, '.claude', 'skills')}; project; detected, not registered — \`npx -y terum-skills@latest checkout add '${repo}'\` keeps it in your library):`, `  none (${join(repo, '.claude', 'skills')} does not exist)`, '  0 skill folders (0 connectable)', FOOTER]);
+    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `  none (${join(home, '.claude', 'skills')} does not exist)`, '  0 skill folders (0 connectable)', `Local Claude Code skills (${join(repo, '.claude', 'skills')}; project; detected, not registered — \`npx -y terum-skills@latest checkout add '${repo}'\` keeps it in your library):`, '  GitHub: not connected', `  none (${join(repo, '.claude', 'skills')} does not exist)`, '  0 skill folders (0 connectable)', FOOTER]);
+  });
+
+  it("names each checkout's GitHub origin, and says not connected for every other origin", async () => {
+    const originRunner = (stdout: string): Runner => ({ async run(command, args) { return command === 'git' && args.join(' ') === 'remote get-url origin' ? { code: 0, stdout, stderr: '' } : { code: 1, stdout: '', stderr: '' }; } });
+    const github = await temporaryDirectory(); await mkdir(join(github, 'repo', '.git'), { recursive: true });
+    const githubIo = new ScriptedPrompter();
+    expect(await run({ local: true, home: github, cwd: join(github, 'repo'), config: createConfigStore(join(github, 'state')), runner: originRunner('git@github.com:ryanliu-terum/terum-skills.git\n') }, githubIo))
+      .toMatchObject({ ok: true, value: { local: [{ scope: 'global', remote: null }, { scope: 'project', remote: { url: 'https://github.com/ryanliu-terum/terum-skills', slug: 'ryanliu-terum/terum-skills' } }] } });
+    expect(githubIo.lines).toContain('  GitHub: ryanliu-terum/terum-skills');
+
+    const elsewhere = await temporaryDirectory(); await mkdir(join(elsewhere, 'repo', '.git'), { recursive: true });
+    const elsewhereIo = new ScriptedPrompter();
+    expect(await run({ local: true, home: elsewhere, cwd: join(elsewhere, 'repo'), config: createConfigStore(join(elsewhere, 'state')), runner: originRunner('https://gitlab.com/acme/tools.git\n') }, elsewhereIo))
+      .toMatchObject({ ok: true, value: { local: [{ scope: 'global' }, { scope: 'project', remote: { url: 'https://gitlab.com/acme/tools.git', slug: null } }] } });
+    expect(elsewhereIo.lines).toContain('  GitHub: not connected (origin is https://gitlab.com/acme/tools.git)');
+
+    const bare = await temporaryDirectory(); await mkdir(join(bare, 'repo', '.git'), { recursive: true });
+    const bareIo = new ScriptedPrompter();
+    expect(await run({ local: true, home: bare, cwd: join(bare, 'repo'), config: createConfigStore(join(bare, 'state')), runner: originRunner('') }, bareIo))
+      .toMatchObject({ ok: true, value: { local: [{ scope: 'global' }, { scope: 'project', remote: null }] } });
+    expect(bareIo.lines).toContain('  GitHub: not connected');
   });
 
   it('keeps outside-repository listing successful (regression) and adds the explicit cwd line before the footer', async () => {

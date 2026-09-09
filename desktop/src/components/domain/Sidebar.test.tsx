@@ -14,7 +14,7 @@ afterEach(() => { cleanup(); location.hash = ''; vi.restoreAllMocks(); });
 
 it('omits the entire Inbox group when its surface is unavailable', async () => {
   const surfaces = { ...await createMockBackend().surfaces(), inbox: false };
-  render(<QueryClientProvider client={new QueryClient()}><Sidebar selected="Global" counts={null} machine={undefined} surfaces={surfaces}/></QueryClientProvider>);
+  render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={surfaces}/></HashRouter></QueryClientProvider></BackendContext>);
   for (const name of ['Inbox', 'Pushes', 'Updates', 'Alerts']) expect(screen.queryByRole('link', { name })).toBeNull();
   expect(screen.getByRole('link', { name: 'Share' })).toBeVisible();
 });
@@ -30,9 +30,11 @@ it.each([true, false])('renders served navigation and hides Inbox until its surf
 it('renders Global, Share and Marketplace navigation for the real adapter, retaining the settings gear', async () => {
   const backend = createTauriBackend(fakeBridge(() => undefined).bridge);
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><BackendContext value={backend}><HashRouter><Shell/></HashRouter></BackendContext></QueryClientProvider>);
-  // The real adapter serves no project list here (status has no frames), so the Projects row never renders; wait for the surfaces read instead.
-  await waitFor(() => expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(3));
-  expect(screen.queryByRole('link', { name: 'Projects' })).toBeNull();
+  // The real adapter serves no project list here (status has no frames), so Projects renders empty; wait for the surfaces read.
+  await waitFor(() => expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(4));
+  expect(screen.getByRole('link', { name: 'Projects' })).toBeVisible();
+  expect(screen.getByText('0 projects')).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull(); // this fake CLI answers no features, so registration is not offered
   expect(screen.getByRole('link', { name: 'Global' })).toBeVisible();
   expect(screen.getByRole('link', { name: 'Marketplace' })).toBeVisible();
   expect(screen.getByRole('link', { name: 'Share' })).toBeVisible();
@@ -97,9 +99,39 @@ it('hides detected Add when the CLI does not support registration',async()=>{
  vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),checkouts:false});
  await openSidebar(backend);await screen.findByRole('link',{name:'SSM 3'});
  expect(screen.queryByRole('button',{name:'Add SSM to your library'})).toBeNull();
+
+ expect(screen.queryByRole('button',{name:'Add project'})).toBeNull();
 });
 it.each([false,true])('shows an absent root dash only with counts enabled (hidden=%s)',async hidden=>{
  location.hash='#/library/global?__mock=missing-root';await openSidebar(createMockBackend(),'Global',hidden?null:{Global:'15'});
  expect(screen.getByRole('link',{name:hidden?'SSM':'SSM —'})).toBeVisible();
  if(hidden)expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
+});
+it('keeps Projects and its Add button with zero checkouts, and says 0 projects',async()=>{
+ location.hash='#/library/global?__mock=no-projects';await openSidebar();
+ expect(screen.getByRole('link',{name:'Projects'})).toBeVisible();
+ expect(screen.getByText('0 projects')).toBeVisible();
+ expect(await screen.findByRole('button',{name:'Add project'})).toBeVisible();
+ expect(screen.queryByRole('link',{name:'Terum 8'})).toBeNull();
+});
+it('registers the folder the chooser returns, and leaves the library alone when the chooser is cancelled',async()=>{
+ const backend=createMockBackend();
+ const add=vi.spyOn(backend.checkouts,'add');
+ const pick=vi.spyOn(backend,'pickFolder').mockResolvedValue({ok:true,value:null});
+ await openSidebar(backend);
+ fireEvent.click(await screen.findByRole('button',{name:'Add project'}));
+ await waitFor(()=>expect(pick).toHaveBeenCalled());
+ expect(add).not.toHaveBeenCalled();
+ pick.mockResolvedValue({ok:true,value:'/Users/you/code/new-project'});
+ fireEvent.click(await screen.findByRole('button',{name:'Add project'}));
+ await waitFor(()=>expect(add).toHaveBeenCalledWith('/Users/you/code/new-project'));
+});
+it('reports a chooser failure below the Add row without calling checkout add',async()=>{
+ const backend=createMockBackend();
+ const add=vi.spyOn(backend.checkouts,'add');
+ vi.spyOn(backend,'pickFolder').mockResolvedValue({ok:false,error:'No folder chooser on this shell'});
+ await openSidebar(backend);
+ fireEvent.click(await screen.findByRole('button',{name:'Add project'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('No folder chooser on this shell');
+ expect(add).not.toHaveBeenCalled();
 });

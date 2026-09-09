@@ -84,7 +84,7 @@ For a program driving the CLI (the desktop app, a script), `--frames` turns any 
 
 ## How it works
 
-**Your library is your folders.** `ls --local` scans `~/.claude/skills` (Global), every checkout registered with `checkout add`, and the repository you run it from. Registering a folder only tells this machine to scan and refresh it; connecting a skill or approving a tool grant is still a separate yes.
+**Your library is your folders.** `ls --local` scans `~/.claude/skills` (Global), every checkout registered with `checkout add`, and the repository you run it from. Each checkout also reports its `origin`, so the listing (and the app's Library header) says whether the folder has a GitHub home and which repository it is. Registering a folder only tells this machine to scan and refresh it; connecting a skill or approving a tool grant is still a separate yes.
 
 **One repo, one copy of each skill.** The team repo holds `skills/<name>/` (the flat store, folder name equals frontmatter `name`, unique repo-wide), `team.json` (endorsed lists and policy), `people/<handle>.json` (each member's identity and installed list, the only file that member's installs touch), and `evals/` (committed receipts, keyed by skill id). A generated GitHub workflow runs the eval checks on PRs.
 

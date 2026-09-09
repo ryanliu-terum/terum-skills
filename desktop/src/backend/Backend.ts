@@ -6,6 +6,8 @@ export interface Backend {
   windowAction(action: 'toggle-maximize' | 'start-drag'): Promise<Result<void>>;
   openUrl(url: string): Promise<Result<void>>;
   revealPath(path: string): Promise<Result<void>>;
+  /** Native folder chooser. `null` is a cancelled dialog, not a failure. */
+  pickFolder(): Promise<Result<string | null>>;
   capabilities(): Promise<Capabilities>;
   surfaces(): Promise<Surfaces>;
   launchContext(): Promise<LaunchContext | null>;

@@ -31,7 +31,8 @@ it.each([
 ] as const)('collapses and restores %s without navigating, while its label stays a link',async(section,label,rows,href)=>{
  openShell();const collapse=await screen.findByRole('button',{name:'Collapse '+label});
  expect(collapse).toHaveAttribute('aria-expanded','true');expect(collapse.querySelector('svg')?.innerHTML).toBe(ICON_PATHS['chevron-down']);
- for(const row of rows)expect(screen.getByRole('link',{name:new RegExp('^'+row+' ')})).toBeVisible();
+ // Projects now renders before its roots resolve (it is there at zero checkouts), so the rows are awaited rather than read.
+ for(const row of rows)expect(await screen.findByRole('link',{name:new RegExp('^'+row+' ')})).toBeVisible();
  fireEvent.click(collapse);const expand=screen.getByRole('button',{name:'Expand '+label});
  expect(location.hash).toBe('#/library/global?'+section+'=collapsed');
  expect(useUiStore.getState().collapsedSections).toEqual([section]);
