@@ -1,4 +1,4 @@
-import type { Receipt, ReceiptSummary } from '../types';
+import type { CloneState, Receipt, ReceiptSummary } from '../types';
 import { design as d } from './fixture';
 type Sample = { wlt?: readonly number[] | null | undefined; cases?: number | undefined; partial?: readonly number[] | null | undefined };
 type Card = (typeof d.CATALOG)[number];
@@ -76,3 +76,20 @@ export function person_on_disk(handle:string):[number,number]{const mine=skills_
 export function category_remaining(key:string,n:number):number{return n-category_skills(key).length;}
 export function library_title(scope:string):string{const counts:Record<string,string>=d.COUNTS;return (counts[scope]??'0')+' skills';}
 export function score_fractions(rc:Receipt|null):{roi:[number,number]|null;quality:[number,number]|null}{if(!rc)return {roi:null,quality:null};const c=Number.parseFloat(rc.eff.candidate[2]!.replace('$','')),b=Number.parseFloat(rc.eff.baseline[2]!.replace('$','')),max=Math.max(c,b);return {roi:[c/max,b/max],quality:[rc.arm.candidate,rc.arm.baseline]};}
+
+/** The same three buckets feed the overview and sidebar; Updates is already part of Alerts. */
+export function attentionCounts() {
+ const failingEvals=d.LIBRARY_OVERVIEW.meter.fail;
+ const updatesAvailable=Number(d.COUNTS.Updates);
+ const notEvaluated=d.LIBRARY_OVERVIEW.meter.total-d.LIBRARY_OVERVIEW.meter.pass_-d.LIBRARY_OVERVIEW.meter.neutral-failingEvals;
+ return {failingEvals,updatesAvailable,notEvaluated,attention:failingEvals+updatesAvailable+notEvaluated};
+}
+/** CLI status wording, without indentation; no repair or credential action is inferred. */
+export function cloneStateCopy(state:CloneState,clone:string,remote:string,readable=true):string {
+ switch(state.state){
+  case 'absent':return `Clone: ${clone} is missing.`;
+  case 'foreign':return `Clone: ${clone} is a clone of ${state.origin}, not ${remote}.`;
+  case 'incomplete':return state.reason==='unverifiable'?`Clone: ${clone} could not be verified (${state.error??'unknown error'}); check that git is installed before repairing anything.`:`Clone: ${clone} exists but is not a complete clone.`;
+  case 'ok':return readable?'From the local clone; GitHub access is not checked.':'Local team details could not be read.';
+ }
+}

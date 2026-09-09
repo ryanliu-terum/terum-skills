@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PropsWithChildren } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
-import { BackendContext, PromptContext, pickBackend } from '../backend';
+import { BackendContext, PrintContext, PromptContext, pickBackend } from '../backend';
 import type { PromptQuestion } from '../backend/types';
 import { Dialog, DialogPopup, DialogTitle } from '../components/ui/Dialog';
+import { WorkflowPopup } from '../components/domain/WorkflowPopup';
 import { Button } from '../components/ui/Button';
 import { affects } from './invalidation';
 import { applyTheme, useUiStore } from './store';
@@ -17,13 +18,15 @@ export function Providers({children}:PropsWithChildren){
 
 interface PendingPrompt {id:number;question:PromptQuestion;resolve:(value:string|boolean)=>void;reject:(error:Error)=>void}
 function PromptProvider({children}:PropsWithChildren){
+ const [notice,setNotice]=useState<string|null>(null);
+ const print=useCallback((line:string)=>{if(line.includes('GitHub CLI is installed but logged out.'))setNotice(line);},[]);
  const [pending,setPending]=useState<PendingPrompt[]>([]);const live=useRef<PendingPrompt[]>([]);const serial=useRef(0);
  const ask=useCallback((question:PromptQuestion)=>new Promise<string|boolean>((resolve,reject)=>{const prompt={id:++serial.current,question,resolve,reject};live.current=[...live.current,prompt];setPending(live.current);}),[]);
  useEffect(()=>()=>{for(const prompt of live.current)prompt.reject(new Error('Cancelled.'));live.current=[];},[]);
  function finish(value:string|boolean){const prompt=live.current[0];if(!prompt)return;live.current=live.current.slice(1);setPending(live.current);prompt.resolve(value);}
  function cancel(){const prompt=live.current[0];if(!prompt)return;live.current=live.current.slice(1);setPending(live.current);if(prompt.question.kind==='confirm')prompt.resolve(false);else prompt.reject(new Error('Cancelled.'));}
  const first=pending[0];
- return <PromptContext value={ask}>{children}{first?<PromptDialog key={first.id} question={first.question} answer={finish} cancel={cancel}/>:null}</PromptContext>;
+ return <PrintContext value={print}><PromptContext value={ask}>{children}{first?<PromptDialog key={first.id} question={first.question} answer={finish} cancel={cancel}/>:null}</PromptContext>{notice?<Dialog open onOpenChange={open=>{if(!open)setNotice(null);}}><WorkflowPopup><DialogTitle>Terminal action needed</DialogTitle><div role="alert" style={{color:'var(--tk-warn)'}}>{notice}</div><Button onClick={()=>setNotice(null)}>Close</Button></WorkflowPopup></Dialog>:null}</PrintContext>;
 }
 function PromptDialog({question,answer,cancel}:{question:PromptQuestion;answer:(value:string|boolean)=>void;cancel:()=>void}){
  const [value,setValue]=useState(question.default??question.choices?.[0]??'');
