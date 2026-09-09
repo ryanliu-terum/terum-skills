@@ -19,6 +19,15 @@ describe('parseCliFrame', () => {
     expect(parseCliFrame(line({ t: 'result', verb: 'status', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true }))).toEqual({ t: 'result', verb: 'status', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true });
     for (const bad of ['not json', '{}', line({ t: 'ask', id: 1 }), line({ t: 'print', line: 'no level' }), line({ t: 'nope' })]) expect(parseCliFrame(bad), bad).toBeNull();
   });
+  it('passes the wire exitCode through and derives it from ok only when absent', () => {
+    expect(parseCliFrame(line({ t: 'result', verb: 'eval', ok: false, exitCode: 143, error: 'Killed.' }))).toEqual({ t: 'result', verb: 'eval', ok: false, exitCode: 143, error: 'Killed.' });
+    expect(parseCliFrame(line({ t: 'result', verb: 'status', ok: true }))).toEqual({ t: 'result', verb: 'status', ok: true, exitCode: 0 });
+    expect(parseCliFrame(line({ t: 'result', verb: 'status', ok: false }))).toEqual({ t: 'result', verb: 'status', ok: false, exitCode: 1 });
+  });
+  it('a select with a non-string choice is a malformed frame, not a silently reindexed one', () => {
+    // Dropping the entry would shift the 1-based indices an answer may use; positions are load-bearing.
+    expect(parseCliFrame(line({ t: 'ask', id: 'q1', kind: 'select', question: 'Pick', choices: ['a', 2, 'c'] }))).toBeNull();
+  });
 });
 
 describe('cliRun — a CLI process as a seam Run<T>', () => {

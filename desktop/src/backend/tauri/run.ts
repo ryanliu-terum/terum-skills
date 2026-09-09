@@ -43,7 +43,8 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
   let cancelled = false;
   let settle!: (result: Result<TOut>) => void;
   const done = new Promise<Result<TOut>>((resolve) => { settle = resolve; });
-  const stderr: string[] = [];
+  // Channel diagnostics — stderr lines, unparseable stdout, stdout after settle — quoted when the run dies without a result.
+  const diagnostics: string[] = [];
   let unlisten: (() => void) | undefined;
   let cleanupRequested = false;
   const cleanup = () => {
@@ -66,23 +67,23 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
 
   const onEvent = (event: LineEvent) => {
     if (finished && event.kind !== 'exit') {
-      if (event.kind === 'stdout') stderr.push(`stdout after settle: ${event.line}`);
+      if (event.kind === 'stdout') diagnostics.push(`stdout after settle: ${event.line}`);
       return;
     }
     switch (event.kind) {
       case 'stdout': {
         const frame = parseCliFrame(event.line);
-        if (!frame) { stderr.push(`unparseable line from terum-skills: ${event.line.slice(0, 200)}`); return; }
+        if (!frame) { diagnostics.push(`unparseable line from terum-skills: ${event.line.slice(0, 200)}`); return; }
         onFrame(frame);
         return;
       }
-      case 'stderr': stderr.push(event.line); return;
+      case 'stderr': diagnostics.push(event.line); return;
       case 'exit': {
         if (!finished) {
           // No hello means the CLI never spoke the protocol at all — almost always a pre-0.1.5 bin with no
           // --frames support, which Commander rejects as text. Name the remedy instead of a cryptic per-verb failure.
           const why = sawHello ? 'before reporting a result.' : 'without a hello frame — this terum-skills is probably older than 0.1.5, before frame mode existed. Update terum-skills, then run `terum-skills app` from a terminal again.';
-          finish({ ok: false, error: cancelled ? 'Cancelled.' : `terum-skills exited${event.code === null ? '' : ` with code ${event.code}`} ${why}${stderr.length ? ` ${stderr.slice(-3).join(' ')}` : ''}` });
+          finish({ ok: false, error: cancelled ? 'Cancelled.' : `terum-skills exited${event.code === null ? '' : ` with code ${event.code}`} ${why}${diagnostics.length ? ` ${diagnostics.slice(-3).join(' ')}` : ''}` });
         }
         cleanup();
         return;
