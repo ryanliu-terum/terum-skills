@@ -84,7 +84,7 @@ describe('search (§6)', () => {
     const result = await run({ term: 'needle', config: store }, io);
     const tree = (await git(['rev-parse', 'HEAD:skills/sample'], clone)).trim().slice(0, 8);
     expect(result).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'sample', installs: 1, endorsed: 'global', latest: tree })] });
-    expect(io.lines).toEqual([`  sample — Seed <seed@example.com>; testing; 1 installs; ${tree}; global`]);
+    expect(io.lines).toEqual([`  sample — Seed <seed@example.com>; testing; 1 installs; ${tree}; global; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/sample'], clone)).trim()}`]);
   });
 
   it('matches a skill name even when the term is absent from its description and category', async () => {
@@ -110,7 +110,7 @@ describe('search (§6)', () => {
     // (`ghost` sorts first) and one report line. An extra or duplicated row, a report printed per
     // skill, or a dropped `formatSkill` row for the degraded hit has to fail here.
     expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'ghost', latest: '—', unresolved: true }), expect.objectContaining({ name: 'healthy', latest: tree, unresolved: false })] });
-    expect(io.lines).toEqual([expect.stringContaining('team/ghost: Could not resolve the latest version of ghost'), '  ghost — Seed <seed@example.com>; testing; 0 installs; —; —', `  healthy — Seed <seed@example.com>; testing; 0 installs; ${tree}; —`]);
+    expect(io.lines).toEqual([expect.stringContaining('team/ghost: Could not resolve the latest version of ghost'), '  ghost — Seed <seed@example.com>; testing; 0 installs; —; —; —', `  healthy — Seed <seed@example.com>; testing; 0 installs; ${tree}; —; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/healthy'], clone)).trim()}`]);
   });
 
   it('fails instead of returning a page of dashes when no team could resolve any hit', async () => {
@@ -215,3 +215,15 @@ async function freshStamp(store: ConfigStore, team: string): Promise<void> {
   await mkdir(join(store.root, 'run'), { recursive: true });
   await writeFile(join(store.root, 'run', `${team}.stamp`), new Date().toISOString());
 }
+
+
+it('returns verbatim long descriptions, normalized grants and committed dates on search hits',async()=>{
+  const {allowedTools}=await import('../../lib/schema.js');
+  const description=('needle '+ 'long '.repeat(5000)).trimEnd();
+  const {store,clone}=await searchFixture('team',[{name:'sample',description,category:'testing',author:'Seed <seed@example.com>',id:'11111111-1111-4111-8111-111111111111'}]);
+  const path=join(clone,'skills','sample','SKILL.md');
+  const {readFile}=await import('node:fs/promises');await writeFile(path,(await readFile(path,'utf8')).replace('license:','allowed-tools: [Read, Bash]\nlicense:'));
+  const result=await run({term:'needle',config:store},new ScriptedPrompter());
+  const grants=allowedTools(['Read','Bash']);if(!grants.ok)throw new Error('invalid grant');
+  expect(result).toMatchObject({ok:true,value:[{description,grants:grants.normalized,grantsHash:grants.hash,updated:(await git(['log','-1','--format=%cI','--','skills/sample'],clone)).trim()}]});
+});

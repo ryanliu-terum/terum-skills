@@ -1,0 +1,25 @@
+# m7-S7f: orchestrator's own gates, 2026-09-08 23:46-23:52 UTC, Ryan's Mac (Node 25, Playwright chromium), four Codex runs live alongside
+# Codex: gpt-6-astra, high, workspace-write, one pass (codex-prompt.md -> codex-report.json "partial": seven open questions, ruled in NOTES.md).
+# Self-report (hypothesis): root 72 files / 1147 tests; desktop 46 files / 549 passed + 88 oracle-skipped.
+# Orchestrator edits before the battery: inventoryDetail.root always 'Global'; overview note pluralised; Library title from the real registry;
+# '(rev N)' dropped from the spec amendment; tauri README and GAPS.md updated (maintainer files). The first battery ran red on exactly the
+# three index.test.ts cases that pinned the un-pluralised note; the expectation moved to the new truth and the desktop unit trio was re-run.
+
+root lint         : rc=0
+root typecheck    : rc=0
+root test         : rc=0  72 files, 1147 tests passed
+root build        : rc=0
+desktop typecheck : rc=0  (re-run after the test-expectation fix: rc=0)
+desktop lint      : rc=0  (re-run: rc=0, eslint . --max-warnings 0)
+desktop vitest    : rc=1 then rc=0  first run 3 failed / 634 passed (the pluralised note); re-run 46 files passed, 637 tests passed
+                    (TERUM_DESIGN_DIR set; NODE_OPTIONS=--no-experimental-webstorage)
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (34.3s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (44.7s) against the pre-AL oracle (this branch draws "New skill"; the Connect relabel is S7q's)
+cargo check       : not run (no src-tauri change)
+real-data proof   : replay.test.ts + replay-screens.test.tsx (in vitest above) replay .planning/codex-runs/m7-S7f/frames/{status,ls,ls-local,
+                    ls-project-terum,ls-member-mira,search,validate-deploy-check}.jsonl, recorded by Codex from the fixture team (fixture.sh
+                    beside this file, HOME=<fx>/home) against this branch's rebuilt dist/index.js at 16:26 PDT; asserts the fixture's
+                    description, grants hash, installers, ISO date, body and project registry from the wire and the rendered Library and
+                    Skill screens with no favorite control, no fabricated frontmatter and no sample provenance.
