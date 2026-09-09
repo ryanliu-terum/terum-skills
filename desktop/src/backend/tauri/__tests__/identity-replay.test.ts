@@ -1,10 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
-import { z } from 'zod';
-import { createTauriBackend, read } from '../index';
-import { cliRun } from '../run';
-import { fakeBridge, STATE } from './fake-bridge';
+import { createTauriBackend } from '../index';
+import { fakeBridge } from './fake-bridge';
 
 const directory = resolve('../.planning/codex-runs/m7-S7c');
 function replay(name: string) {
@@ -27,11 +25,11 @@ it('replays the real login write and proves that only display_name bytes changed
   expect(f.spawns.map(spawn => spawn.args)).toEqual([['login', '--set', 'name=Seed2']]);
 });
 
-it.each(['status-before', 'status-after'])('replays %s while the S7k read surfaces remain gaps', async name => {
+it.each([['status-before', 'Seed'], ['status-after', 'Seed2']])('replays %s through the served status (S7k) and shows the identity the CLI recorded', async (name, displayName) => {
   const f = replay(name);
-  const schema = z.object({ version: z.string(), teams: z.array(z.object({ team: z.string() })) });
-  const result = await read(cliRun(f.bridge, Promise.resolve(STATE), ['status'], { map: value => schema.parse(value) }));
-  expect(result).toEqual({ ok: true, value: { version: '0.1.6', teams: [{ team: 'acme' }] } });
-  const surfaces = await createTauriBackend(f.bridge).surfaces();
-  expect(surfaces.status).toBe(false); expect(surfaces.settings).toBe(false);
+  const served = await createTauriBackend(f.bridge).status();
+  expect(served.ok).toBe(true);
+  expect(served.value?.me).toMatchObject({ name: displayName, email: 'seed@example.com', handle: 'seed' });
+  expect(served.value?.teams.map(team => team.key)).toEqual(['acme']);
+  expect((await createTauriBackend(f.bridge).surfaces())).toMatchObject({ status: true, settings: true });
 });
