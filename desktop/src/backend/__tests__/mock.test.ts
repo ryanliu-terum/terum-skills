@@ -74,3 +74,5 @@ it('reads skill refs from the configured remote, never project membership (CP-34
  expect(inbox.value.find(it=>it.name==='secret-scan')?.category).toBe('security');
  for(const item of inbox.value)expect(item.skillRef).toBe(`${item.repo||design.TEAM_REPO}/${item.name}`);
 });
+
+it('has no launch target in the mock',async()=>{expect(await createMockBackend().launchTarget()).toBeNull();});

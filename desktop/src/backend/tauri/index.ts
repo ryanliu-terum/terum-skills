@@ -33,9 +33,15 @@ const cliSearch = z.array(z.object({ team: z.string().optional(), endorsed: z.st
 const PREF = 'terum-skills-app:pref:';
 
 export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
-  // Read once per app session; `terum-skills app` rewrites the file on every launch, and the app is launched by it.
+  // Share in-flight reads and cache success; a terminal launch can repair a missing or broken file.
   let stateOnce: Promise<AppState | null> | undefined;
-  const state = () => (stateOnce ??= bridge.readAppState());
+  const state = () => (stateOnce ??= bridge.readAppState().then((value) => {
+    if (value === null) stateOnce = undefined;
+    return value;
+  }, (error: unknown) => {
+    stateOnce = undefined;
+    throw error;
+  }));
   let homeOnce: Promise<string> | undefined;
   const home = () => (homeOnce ??= bridge.homeDirectory().catch(() => ''));
   async function result<T>(value: Result<T>): Promise<Result<T>> {
@@ -67,6 +73,11 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   }
 
   const backend: Backend = {
+    async launchTarget() {
+      const launch = await state();
+      const target = launch?.target ?? null;
+      return launch && target !== null ? { target, writtenAt: launch.writtenAt } : null;
+    },
     async capabilities(): Promise<Capabilities> {
       const platform = await bridge.hostPlatform().catch(() => 'unknown');
       return { windowChrome: platform === 'macos' ? 'mac-overlay' : 'drawn-controls', disablePerMachine: false, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: false, openInEditor: true, clipboard: true };

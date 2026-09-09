@@ -47,7 +47,7 @@ fn event_name(id: &str) -> String {
 /// Start `node <entry> --frames <args...>` with piped stdio. `id` is chosen by the webview so it can
 /// subscribe to `cli:<id>` before the first line is emitted; lines are events `{kind: stdout|stderr|exit|error}`.
 #[tauri::command]
-fn cli_spawn(app: AppHandle, bridge: State<'_, Bridge>, id: String, node: String, entry: String, args: Vec<String>, cwd: Option<String>) -> Result<(), String> {
+fn cli_spawn(app: AppHandle, bridge: State<'_, Bridge>, id: String, node: String, entry: String, args: Vec<String>, cwd: Option<String>, path: Option<String>) -> Result<(), String> {
   if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { return Err("bad id".into()); }
   // Keep admission and insertion under one lock so concurrent spawns cannot exceed the cap.
   let mut children = bridge.children.lock().map_err(|e| e.to_string())?;
@@ -60,7 +60,10 @@ fn cli_spawn(app: AppHandle, bridge: State<'_, Bridge>, id: String, node: String
   if let Some(dir) = cwd.as_deref().filter(|dir| !dir.is_empty()) {
     command.current_dir(dir);
   }
-  // A GUI app has no shell environment; the CLI needs only PATH-independent inputs (node and entry are absolute).
+  // D4: replay the recorded launch PATH; older state files inherit the shell process environment.
+  if let Some(path) = path.filter(|path| !path.is_empty()) {
+    command.env("PATH", path);
+  }
   command.env("TERUM_SKILLS_NO_UPDATE_NOTIFIER", "1");
   let mut child = command.spawn().map_err(|e| format!("could not start {node}: {e}"))?;
   let stdout = child.stdout.take().ok_or("no stdout")?;

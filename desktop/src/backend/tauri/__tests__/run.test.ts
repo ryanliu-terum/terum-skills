@@ -175,6 +175,34 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     const backend = createTauriBackend(fakeBridge(() => undefined).bridge);
     expect(await backend.capabilities()).toEqual({ windowChrome: 'mac-overlay', disablePerMachine: false, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: false, openInEditor: true, clipboard: true });
   });
+  it.each(['missing', 'malformed'] as const)('retries a %s state read on the next run, then memoises success', async (kind) => {
+    const f = fakeBridge(ok('sync', { placed: 0, deferred: [] }));
+    const read = vi.spyOn(f.bridge, 'readAppState');
+    if (kind === 'missing') read.mockResolvedValueOnce(null);
+    else read.mockRejectedValueOnce(new Error(`${NO_STATE} app.json could not be parsed: truncated`));
+    const backend = createTauriBackend(f.bridge);
+    expect(await backend.sync({}).done).toMatchObject({ ok: false, error: expect.stringContaining(NO_STATE) });
+    expect(f.spawns).toHaveLength(0);
+    expect((await backend.sync({}).done).ok).toBe(true);
+    expect((await backend.sync({}).done).ok).toBe(true);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(f.spawns).toHaveLength(2);
+  });
+  it('shares concurrent state reads and exposes the target without consuming it', async () => {
+    const f = fakeBridge(ok('sync', { placed: 0, deferred: [] }), { ...STATE, target: 'acme/team' });
+    const read = vi.spyOn(f.bridge, 'readAppState');
+    const backend = createTauriBackend(f.bridge);
+    const [first, second, run] = await Promise.all([backend.launchTarget(), backend.launchTarget(), backend.sync({}).done]);
+    expect(first).toEqual({ target: 'acme/team', writtenAt: STATE.writtenAt });
+    expect(second).toEqual(first);
+    expect(run.ok).toBe(true);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+  it('has no launch target for missing or legacy state', async () => {
+    for (const state of [null, STATE]) {
+      expect(await createTauriBackend(fakeBridge(() => undefined, state).bridge).launchTarget()).toBeNull();
+    }
+  });
   it('install builds the three argv shapes and maps the CLI rows to the seam', async () => {
     const f = fakeBridge(ok('install', [{ id: 'deploy-check', team: 'terum', path: '/p', version: 'abc' }]));
     const backend = createTauriBackend(f.bridge);

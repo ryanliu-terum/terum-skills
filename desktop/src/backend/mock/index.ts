@@ -45,6 +45,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   }
  }
  const backend:Backend = {
+  async launchTarget(){return null;},
   async capabilities(){return {windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
   async surfaces(){return {status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true};},
   async status(){return structuredClone(ok({machine:design.MACHINE,me:design.ME,teams:design.TEAMS,counts:statusCounts(location.hash,readScenario())}));},
