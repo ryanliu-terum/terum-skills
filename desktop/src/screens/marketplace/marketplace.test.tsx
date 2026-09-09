@@ -49,3 +49,13 @@ it('uses only status-supplied sidebar counts on the empty scenario', async () =>
   expect(await screen.findByRole('link', { name: 'Global 71' })).toBeInTheDocument();
   expect(document.querySelectorAll('.nav-count')).toHaveLength(1);
 });
+
+it('keeps one person link and follows without leaving the people list', async () => {
+  open('#/marketplace/people');
+  const card = await screen.findByTestId('person-card-ryan');
+  expect(within(card).getAllByRole('link')).toHaveLength(1);
+  expect(within(card).getByRole('link', { name: 'Ryan Liu' })).toHaveAttribute('href', '#/marketplace/people/ryan');
+  fireEvent.click(within(card).getByRole('button', { name: 'Follow ryan' }));
+  expect(within(card).getByRole('button', { name: 'Unfollow ryan' })).toHaveAttribute('aria-pressed', 'true');
+  expect(location.hash).toBe('#/marketplace/people');
+});

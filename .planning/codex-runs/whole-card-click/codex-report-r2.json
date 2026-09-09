@@ -1,0 +1,52 @@
+{
+  "status": "complete",
+  "summary": "Removed only the Switch tag-name assertion and read the file back to verify it. All requested behavioral assertions remain. Typecheck and lint passed; the focused Vitest attempt was blocked by sandbox EPERM.",
+  "filesChanged": [
+    {
+      "path": "desktop/src/screens/library/library-skill.test.tsx",
+      "change": "modified",
+      "why": "Removed the unsupported Switch BUTTON assertion exactly as requested."
+    }
+  ],
+  "gates": {
+    "lint": {
+      "ran": true,
+      "passed": true,
+      "output": "eslint . --max-warnings 0 exited 0.",
+      "preExistingFailures": ""
+    },
+    "typecheck": {
+      "ran": true,
+      "passed": true,
+      "output": "tsc --noEmit exited 0.",
+      "preExistingFailures": ""
+    },
+    "test": {
+      "ran": true,
+      "passed": false,
+      "output": "Focused Vitest run exited 1 before executing tests: EPERM writing desktop/node_modules/.vite-temp bundled config.",
+      "preExistingFailures": ""
+    }
+  },
+  "openQuestions": [],
+  "deviations": [],
+  "invariantsTouched": [
+    {
+      "number": 7,
+      "howSatisfied": "User explicitly authorized removing the unsupported assertion; all behavioral checks remain, and the test change is declared."
+    },
+    {
+      "number": 8,
+      "howSatisfied": "Used absolute paths, verified the edit by reading it back, attempted requested gates, and used no git, network, or installation commands."
+    }
+  ],
+  "testsModified": [
+    {
+      "path": "desktop/src/screens/library/library-skill.test.tsx",
+      "whatChanged": "Deleted only expect(toggle.tagName).toBe('BUTTON');.",
+      "justification": "Explicit user correction: Base UI renders the switch as a span; the required contract concerns state changes and preserving location.hash."
+    }
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The focused test will pass outside the sandbox; its execution could not be verified because Vitest startup hit EPERM."
+}
