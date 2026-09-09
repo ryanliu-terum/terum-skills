@@ -18,13 +18,16 @@ function replay(lines: string[]) {
 }
 const status = z.object({ version: z.string(), teams: z.array(z.object({ team: z.string() }).passthrough()) }).passthrough();
 
-it('replays recorded status through the read driver while the served status remains a typed gap', async () => {
+it('replays older status through the generic read driver but rejects it as an incomplete served schema', async () => {
   const f = replay(recorded('status'));
   const result = await read(cliRun(f.bridge, Promise.resolve(STATE), ['status'], { map: value => status.parse(value) }));
   expect(result.ok).toBe(true);
   expect(result.value?.teams.map(team => team.team)).toEqual(['acme']);
-  expect(await createTauriBackend(f.bridge).status()).toEqual({ ok: false, error: 'Team status in the design’s shape (machine, me, teams, counts) is not available from terum-skills yet: the CLI has no verb that returns it (desktop/GAPS.md). The terminal has everything the app shows here.' });
-  expect(f.spawns).toHaveLength(1);
+  const served = await createTauriBackend(f.bridge).status();
+  expect(served.ok).toBe(false);
+  expect(served.value).toBeUndefined();
+  if (!served.ok) expect(served.error).toContain('ledger');
+  expect(f.spawns).toHaveLength(3);
 });
 
 it('retains the recorded status payload when its result frame fails', async () => {

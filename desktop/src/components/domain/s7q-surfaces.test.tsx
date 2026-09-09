@@ -125,7 +125,7 @@ it('Account sign-in hands the command to the user without opening it as a file o
  status.value.machine.gh_login='';vi.spyOn(backend,'status').mockResolvedValue(status);
  const copy=vi.spyOn(backend,'copyToClipboard').mockResolvedValue({ok:true,value:undefined}),openEditor=vi.spyOn(backend,'openInEditor');
  location.hash='#/settings/account';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
- fireEvent.click(await screen.findByRole('button',{name:'Sign in'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Open gh'}));
  const popup=await screen.findByRole('dialog');expect(popup).toHaveTextContent('Run gh auth login in a terminal');
  fireEvent.click(within(popup).getByRole('button',{name:'Copy command'}));
  expect(copy).toHaveBeenCalledWith('gh auth login');expect(openEditor).not.toHaveBeenCalled();

@@ -19,7 +19,8 @@ it('omits the entire Inbox group when its surface is unavailable', async () => {
 });
 
 it.each([true, false])('renders all navigation with mock surfaces or while surfaces load: %s', async loaded => {
-  render(<QueryClientProvider client={new QueryClient()}><Sidebar selected="Global" counts={null} machine={undefined} surfaces={loaded ? await createMockBackend().surfaces() : undefined}/></QueryClientProvider>);
+  const status = await createMockBackend().status();
+  render(<QueryClientProvider client={new QueryClient()}><Sidebar selected="Global" counts={null} machine={undefined} surfaces={loaded ? await createMockBackend().surfaces() : undefined} projects={status.ok ? status.value.projects ?? undefined : undefined}/></QueryClientProvider>);
   for (const name of ['Global', 'Projects', 'Terum', 'SSM', 'MRF', 'Inbox', 'Pushes', 'Updates', 'Alerts', 'Marketplace', 'Share']) expect(screen.getByRole('link', { name })).toBeVisible();
   expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
 });
@@ -27,8 +28,9 @@ it.each([true, false])('renders all navigation with mock surfaces or while surfa
 it('renders only Global navigation for the real adapter, retaining the settings gear', async () => {
   const backend = createTauriBackend(fakeBridge(() => undefined).bridge);
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><BackendContext value={backend}><HashRouter><Shell/></HashRouter></BackendContext></QueryClientProvider>);
-  await waitFor(() => expect(screen.queryByRole('link', { name: 'Projects' })).toBeNull());
-  expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(1);
+  // The real adapter serves no project list here (status has no frames), so the Projects row never renders; wait for the surfaces read instead.
+  await waitFor(() => expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(1));
+  expect(screen.queryByRole('link', { name: 'Projects' })).toBeNull();
   expect(screen.getByRole('link', { name: 'Global' })).toBeVisible();
   expect(screen.queryByText('Team')).toBeNull();
   expect(document.querySelectorAll('.nav-count')).toHaveLength(0);

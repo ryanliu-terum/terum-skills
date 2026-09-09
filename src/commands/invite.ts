@@ -53,8 +53,10 @@ export const GLOBAL_INSTALL = 'npm install -g terum-skills';
 
 export function joinCommand(target: string): string { return `npx -y terum-skills@latest setup ${target}`; }
 
-export function slackBlock(ownerRepo: string): string {
-  return [`Send this to your teammate:`, '```', GLOBAL_INSTALL, joinCommand(ownerRepo), '', `Bare equivalent: npx -y terum-skills@latest team join ${ownerRepo}`, '```', 'If you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.'].join('\n');
+export function slackBlock(ownerRepo: string): string { return joinLines(ownerRepo).join('\n'); }
+
+export function joinLines(ownerRepo: string): readonly string[] {
+  return [`Send this to your teammate:`, '```', GLOBAL_INSTALL, joinCommand(ownerRepo), '', `Bare equivalent: npx -y terum-skills@latest team join ${ownerRepo}`, '```', 'If you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.'];
 }
 
 export function githubRepository(remote: string): string {

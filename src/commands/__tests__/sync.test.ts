@@ -4,7 +4,8 @@ import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, utimes, write
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { acquireTeamLock, lockPath, removeRunArtifacts, stampPath } from '../../lib/hook.js';
-import { run } from '../sync.js';
+import { approved, run } from '../sync.js';
+import { allowedTools, emptyConfig } from '../../lib/schema.js';
 import { run as connect } from '../connect.js';
 import { createExecute } from '../../lib/execute.js';
 import { run as install } from '../install.js';
@@ -1231,4 +1232,17 @@ it.each([false, true])('hook mirrors an oversized edit with notices and stamps o
     const second = await run({ hook: true, config: store }, io);
     expect(second).toMatchObject({ ok: true, value: { deferred: [], notices: [] } });
   }
+});
+
+
+it('exports the unchanged normalized-grant approval predicate', () => {
+  const config = emptyConfig();
+  const grants = allowedTools(['Read', 'Bash']);
+  if (!grants.ok) throw new Error('valid grants expected');
+  expect(approved(config, 'id', grants)).toBe(false);
+  config.approvals.id = { grants: grants.hash, approved_at: '2026-09-01' };
+  expect(approved(config, 'id', allowedTools(['Bash', 'Read']))).toBe(true);
+  expect(approved(config, 'id', allowedTools(['Bash', 'Read', 'Write']))).toBe(false);
+  expect(approved(emptyConfig(), 'id', allowedTools([]))).toBe(true);
+  expect(approved(config, 'id', allowedTools({ invalid: true }))).toBe(false);
 });
