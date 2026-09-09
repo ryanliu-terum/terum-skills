@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowedTools, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, teamNameSchema, teamSchema } from '../schema.js';
+import { configSchema, emptyConfig, allowedTools, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, teamNameSchema, teamSchema } from '../schema.js';
 
 const FRONT = (extra = '') => `---\nname: x\ndescription: x\nlicense: x\nmetadata:\n  id: 4e80fd2a-04bc-4d9f-88f7-a849d92879f1\n  author: A <a@b.test>\n  terum-category: docs\n${extra}---\n\n# Title\n\nBody: with a colon\n- and a list\n`;
 
@@ -82,4 +82,11 @@ it('keeps optional people metadata absent on round trip and validates present va
   expect(personSchema.parse({ ...person, role: 'Platform', projects: ['terum'] })).toMatchObject({ role: 'Platform', projects: ['terum'] });
   expect(personSchema.safeParse({ ...person, role: 'x'.repeat(33) }).success).toBe(false);
   expect(personSchema.safeParse({ ...person, projects: [''] }).success).toBe(false);
+});
+
+
+it('accepts optional checkout arrays and refuses a scalar', () => {
+  expect(configSchema.safeParse(emptyConfig()).success).toBe(true);
+  expect(configSchema.parse({ ...emptyConfig(), checkouts: ['/a'] }).checkouts).toEqual(['/a']);
+  expect(configSchema.safeParse({ ...emptyConfig(), checkouts: 'x' }).success).toBe(false);
 });

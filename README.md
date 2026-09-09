@@ -65,6 +65,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `team create` / `team join` / `team leave` / `team remove <handle>` | Manage the repo and its roster |
 | | `invite <github-user>…` | Grant repo access and print the join line |
 | | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
+| | `checkout add [<path>]` / `checkout remove <path>` / `checkout list` | Register, forget, or list the checkout folders this machine scans (`ls --local` also shows the current repository, labelled not registered) |
 | | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
 | | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
 | Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
@@ -82,6 +83,8 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 For a program driving the CLI (the desktop app, a script), `--frames` turns any verb into one JSON object per line on stdout and stdin, questions included. See [docs/frame-protocol.md](docs/frame-protocol.md).
 
 ## How it works
+
+**Your library is your folders.** `ls --local` scans `~/.claude/skills` (Global), every checkout registered with `checkout add`, and the repository you run it from. Registering a folder only tells this machine to scan and refresh it; connecting a skill or approving a tool grant is still a separate yes.
 
 **One repo, one copy of each skill.** The team repo holds `skills/<name>/` (the flat store, folder name equals frontmatter `name`, unique repo-wide), `team.json` (endorsed lists and policy), `people/<handle>.json` (each member's identity and installed list, the only file that member's installs touch), and `evals/` (committed receipts, keyed by skill id). A generated GitHub workflow runs the eval checks on PRs.
 

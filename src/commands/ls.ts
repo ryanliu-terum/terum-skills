@@ -1,11 +1,11 @@
 import { invocation } from '../lib/invocation.js';
-import type { WithForm } from '../lib/invocation.js';
+import type { WithForm, InvocationForm } from '../lib/invocation.js';
 import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
+import { canonicalLedger, localSkillCounts, localRootLabel, nearestRepoRoot, localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
-import { printable } from '../lib/skill-source.js';
+import { printable, type SourceProblem } from '../lib/skill-source.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
@@ -20,7 +20,7 @@ import { skillVersions } from '../lib/teamRepo.js';
 export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
 export interface LsSkill { id: string; name: string; author: string; category: string; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; updated: string; unresolved: boolean; }
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
-export interface LocalSection extends LocalRoot { rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: string }[]; problems: { path: string; reason: string }[]; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string }[]; problems: { path: string; reason: string }[]; }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
@@ -29,7 +29,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     if (args.local && (args.kind === 'member' || args.kind === 'project')) throw new Error('--local cannot be combined with member or project.');
     if (args.local && args.team) throw new Error('--local lists every configured team; drop --team.');
     const store = args.config ?? createConfigStore();
-    if (args.local) return await showLocal(store, args.home ?? homedir(), io, args.cwd);
+    if (args.local) return await showLocal(store, args.home ?? homedir(), io, args.cwd, args.form);
     const [teamName] = selectTeam((await store.read()).teams, args.team, args.form);
     const clone = store.teamClone(teamName);
     const runner = args.runner ?? systemRunner;
@@ -107,10 +107,15 @@ export function format(skill: LsSkill): string { return `  ${skill.name} — ${s
 
 
 /** Local discovery is independent of team selection, and only enriches ledger references. */
-async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: string): Promise<Result<LsResult>> {
-  const discovery = await localSkillRoots(home, cwd);
+async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: string, form?: InvocationForm): Promise<Result<LsResult>> {
   const config = await store.read();
-  const inventories = await Promise.all(discovery.roots.map(async (root) => ({ ...root, inventory: await localSkills(root.root, config, { scope: root.scope, stateRoot: store.root }) })));
+  const ledger = await canonicalLedger(config);
+  const extraRoots = (await Promise.all([
+    ...Object.values(config.shared).map(ref => nearestRepoRoot(dirname(ref.source))),
+    ...Object.entries(config.placements).filter(([, ref]) => ref.scope.kind === 'project').map(([path]) => nearestRepoRoot(dirname(path))),
+  ])).filter((root): root is string => root !== undefined);
+  const discovery = await localSkillRoots(home, cwd, config.checkouts ?? [], extraRoots);
+  const inventories = await Promise.all(discovery.roots.map(async (root) => ({ ...root, inventory: await localSkills(root.root, config, { scope: root.scope, stateRoot: store.root, ledger }) })));
   const sections: LocalSection[] = [];
   const snapshots = new Map<string, { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; fingerprints?: Map<string, string>; complete: boolean }>();
   const stateOf = (entry: LocalEntry): string => {
@@ -145,10 +150,11 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
       return localChanged ? repoChanged ? 'both' : 'local-changed' : repoChanged ? 'update-available' : 'up-to-date';
     } catch { return 'unknown'; }
   };
-  for (const { inventory, repoRoot } of inventories) {
-    const local: LocalSection = { root: inventory.root, scope: inventory.scope, ...(repoRoot === undefined ? {} : { repoRoot }), rows: [], notOffered: [], problems: [...inventory.problems] };
+  for (const { inventory, ...root } of inventories) {
+    const local: LocalSection = { ...root, root: inventory.root, rootState: inventory.rootState, label: localRootLabel(root), counts: localSkillCounts(inventory), rows: [], notOffered: [], problems: [...inventory.problems] };
     sections.push(local);
-    io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}):`);
+    const registration = root.registered ? '; registered' : root.detected ? `; detected, not registered — \`${invocation(form, 'checkout add', root.repoRoot!)}\` keeps it in your library` : '';
+    io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}${registration}):`);
     for (const entry of inventory.entries) {
       for (const ref of [...entry.shared, ...(entry.placement ? [entry.placement] : [])]) {
         if (snapshots.has(ref.team)) continue;
@@ -175,17 +181,18 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (connect needs --allow-privileged)' : undefined;
         local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: await healthOf(entry), ...(problem === undefined ? {} : { problem }) });
-      } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.detail });
+      } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail });
       if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
     }
     for (const row of local.rows) io.print(`  ${printable(row.name)} — ${printable(row.state)}${row.problem === undefined ? '' : `; source problem: ${printable(row.problem)}`}; path: ${printable(row.path)}`);
     if (local.notOffered.length) {
       io.print('Cannot be connected:');
-      for (const entry of local.notOffered) io.print(`  ${printable(entry.name)} — ${printable(entry.reason)}; path: ${printable(entry.path)}`);
+      for (const entry of local.notOffered) io.print(`  ${printable(entry.name)} — ${printable(entry.detail)}; path: ${printable(entry.path)}`);
     }
     if (inventory.rootState === 'absent') io.print(`  none (${printable(inventory.root)} does not exist)`);
     else if (inventory.rootState === 'scanned' && !inventory.entries.length) io.print('  none');
     for (const problem of local.problems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
+    io.print(`  ${local.counts.skillFolders} skill ${local.counts.skillFolders === 1 ? 'folder' : 'folders'} (${local.counts.connectable} connectable)`);
   }
   for (const problem of discovery.problems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
   if (discovery.noRepository !== undefined) io.print(`Project skills: none (${printable(discovery.noRepository)} is not inside a git repository).`);

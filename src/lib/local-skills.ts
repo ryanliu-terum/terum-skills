@@ -19,45 +19,76 @@ export interface LocalInventory {
   entries: LocalEntry[];
   problems: { path: string; reason: string }[];
 }
-export interface LocalRoot { root: string; scope: 'global' | 'project'; repoRoot?: string; }
+export interface LocalRoot { root: string; scope: 'global' | 'project'; repoRoot?: string; registered: boolean; detected: boolean; }
 
 /**
  * Discovery is filesystem-only: the nearest .git file or directory selects the project root.
  * install's currentRepoRoot and sync's matchingProjectRoot are git+remote-validated PLACEMENT
  * resolvers (§5.2); they deliberately remain separate from this read-only discovery operation.
  */
-export async function localSkillRoots(home: string, cwd?: string): Promise<{ roots: LocalRoot[]; noRepository?: string; problems: { path: string; reason: string }[] }> {
-  const roots: LocalRoot[] = [{ root: AGENT_PATHS['claude-code'].global(home), scope: 'global' }];
-  const problems: { path: string; reason: string }[] = [];
-  if (cwd === undefined) return { roots, problems };
+export async function nearestRepoRoot(cwd: string, problems: { path: string; reason: string }[] = []): Promise<string | undefined> {
   let dir = resolve(cwd);
   for (;;) {
     const marker = join(dir, '.git');
     try {
       const entry = await lstat(marker);
-      if (entry.isFile() || entry.isDirectory()) break;
+      if (entry.isFile() || entry.isDirectory()) return dir;
     } catch (error) {
       if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) {
         problems.push({ path: marker, reason: error instanceof Error ? error.message : String(error) });
-        return { roots, problems };
+        return undefined;
       }
     }
     const parent = dirname(dir);
-    if (parent === dir) return { roots, noRepository: cwd, problems };
+    if (parent === dir) return undefined;
     dir = parent;
   }
-  const project = AGENT_PATHS['claude-code'].project(dir);
-  try { await access(project, constants.R_OK | constants.X_OK); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      problems.push({ path: project, reason: error instanceof Error ? error.message : String(error) });
-      return { roots, problems };
+}
+
+export async function localSkillRoots(home: string, cwd?: string, checkouts: readonly string[] = [], extraRoots: readonly string[] = []): Promise<{ roots: LocalRoot[]; noRepository?: string; problems: { path: string; reason: string }[] }> {
+  const roots: LocalRoot[] = [{ root: AGENT_PATHS['claude-code'].global(home), scope: 'global', registered: false, detected: false }];
+  const problems: { path: string; reason: string }[] = [];
+  const canonicalHome = await realpath(home).catch(() => resolve(home));
+  const seenRepos = new Set([canonicalHome]);
+  const seenSkills = new Set([await realpath(roots[0]!.root).catch(() => resolve(roots[0]!.root))]);
+  const append = async (dir: string, registered: boolean): Promise<void> => {
+    const canonical = await realpath(dir).catch(() => resolve(dir));
+    const project = AGENT_PATHS['claude-code'].project(dir);
+    // Retain cwd discovery's permission diagnostics. Registered roots stay visible even unreadable.
+    if (!registered) {
+      try { await access(project, constants.R_OK | constants.X_OK); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          problems.push({ path: project, reason: error instanceof Error ? error.message : String(error) });
+          return;
+        }
+      }
     }
+    const projectPath = await realpath(project).catch(() => AGENT_PATHS['claude-code'].project(canonical));
+    if (seenRepos.has(canonical) || seenSkills.has(projectPath)) return;
+    seenRepos.add(canonical); seenSkills.add(projectPath);
+    roots.push({ root: project, scope: 'project', repoRoot: dir, registered, detected: !registered });
+  };
+  for (const root of checkouts) await append(root, true);
+  let noRepository: string | undefined;
+  if (cwd !== undefined) {
+    const before = problems.length;
+    const repo = await nearestRepoRoot(cwd, problems);
+    if (repo) await append(repo, false);
+    else if (before === problems.length) noRepository = cwd;
   }
-  const globalPath = await realpath(roots[0]!.root).catch(() => resolve(roots[0]!.root));
-  const projectPath = await realpath(project).catch(() => resolve(project));
-  if (globalPath !== projectPath) roots.push({ root: project, scope: 'project', repoRoot: dir });
-  return { roots, problems };
+  for (const root of extraRoots) await append(root, false);
+  return { roots, ...(noRepository === undefined ? {} : { noRepository }), problems };
+}
+
+export function localRootLabel(root: LocalRoot): string { return root.repoRoot === undefined ? 'Global' : basename(root.repoRoot); }
+
+export async function canonicalLedger(config: Pick<Config, 'shared' | 'placements'>) {
+  const [sharedPaths, placementPaths] = await Promise.all([
+    Promise.all(Object.entries(config.shared).map(async ([id, ref]) => ({ id, ref, canonical: await canonicalParentPath(resolve(ref.source)) }))),
+    Promise.all(Object.entries(config.placements).map(async ([target, ref]) => ({ target, ref, canonical: await canonicalParentPath(resolve(target)) }))),
+  ]);
+  return { sharedPaths, placementPaths };
 }
 
 /** Canonicalize only the parent: a child symlink must remain a distinct, rejected entry. */
@@ -67,7 +98,7 @@ async function canonicalParentPath(path: string): Promise<string | undefined> {
 }
 
 /** Direct entries only. Provenance is ledger evidence, independent of inspection success. */
-export async function localSkills(root: string, config: Pick<Config, 'shared' | 'placements'>, options: { scope: LocalRoot['scope']; stateRoot: string }): Promise<LocalInventory> {
+export async function localSkills(root: string, config: Pick<Config, 'shared' | 'placements'>, options: { scope: LocalRoot['scope']; stateRoot: string; ledger?: Awaited<ReturnType<typeof canonicalLedger>> }): Promise<LocalInventory> {
   root = resolve(root);
   const inventory: LocalInventory = { root, scope: options.scope, rootState: 'scanned', entries: [], problems: [] };
   let names: string[];
@@ -77,8 +108,7 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
     else { inventory.rootState = 'unreadable'; inventory.problems.push({ path: root, reason: error instanceof Error ? error.message : String(error) }); }
     names = [];
   }
-  const sharedPaths = await Promise.all(Object.entries(config.shared).map(async ([id, ref]) => ({ id, ref, canonical: await canonicalParentPath(resolve(ref.source)) })));
-  const placementPaths = await Promise.all(Object.entries(config.placements).map(async ([target, ref]) => ({ target, ref, canonical: await canonicalParentPath(resolve(target)) })));
+  const { sharedPaths, placementPaths } = options.ledger ?? await canonicalLedger(config);
   const canonicalRoot = await realpath(root).catch(() => root);
   for (const { target, canonical } of placementPaths) {
     if (dirname(resolve(target)) !== root && (canonical === undefined || dirname(canonical) !== canonicalRoot)) continue;
@@ -140,3 +170,10 @@ export function candidatesOf(inventory: LocalInventory, allowPrivileged = false)
   return inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && entry.inspection.kind === 'candidate' && (allowPrivileged || !entry.inspection.privileged));
 }
 
+
+/** F2 wire formula: every displayed row, plus untracked folders rejected for frontmatter. */
+const FRONTMATTER_PROBLEMS: ReadonlySet<SourceProblem> = new Set(['no-frontmatter', 'invalid-yaml', 'illegal-name', 'name-mismatch', 'description-missing', 'unsupported-field', 'malformed-allowed-tools', 'managed-wrapper']);
+export function localSkillCounts(inventory: LocalInventory): { skillFolders: number; connectable: number } {
+  const skillFolders = inventory.entries.filter(entry => entry.shared.length > 0 || entry.placement !== undefined || entry.inspection.kind === 'candidate' || (entry.inspection.kind === 'rejected' && FRONTMATTER_PROBLEMS.has(entry.inspection.reason))).length;
+  return { skillFolders, connectable: candidatesOf(inventory).length };
+}

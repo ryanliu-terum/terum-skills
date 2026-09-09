@@ -34,7 +34,7 @@ Closing stdin fails pending questions closed; it does not invoke the bin’s can
 1. **The `gh auth login` offer never arrives over frames.** When `gh` is installed but logged out, the CLI in frame mode prints `GitHub CLI is installed but logged out. Run \`gh auth login\` in a terminal, then try again.` instead of asking (it would otherwise hand its stdio to `gh`, which here means the frame pipes). Likewise `setup` never asks the desktop-app opt-in question over frames. If a shell ever does see that confirm, the CLI is older than 0.1.6: answer `false`.
 2. **Never use `sync --hook` over frames.** Its stdout is the Claude Code reload directive, not frames; the CLI refuses it with a `result` frame and exit 1. Call plain `sync`.
 3. **Never ask the CLI for `--help` or `--version` in frame mode.** Commander prints those as text.
-4. **Set `cwd` deliberately.** Project-scoped skills exist only relative to the working directory the CLI is started in; a shell passes the chosen workspace as the child's cwd.
+4. **Set `cwd` deliberately.** Project-scoped skills exist only relative to the working directory the CLI is started in; a shell passes the chosen workspace as the child's cwd. For reads (`ls --local`), `cwd` is a suggestion: the detected cwd repository is reported as not registered, and registered checkouts are listed regardless of `cwd`.
 5. **One run per verb.** Start the process, read frames until `result`, let it exit.
 
 ## Example
@@ -68,7 +68,7 @@ A second-team binding refused before any side effect:
 
 Protocol stays 1. `hello.features.localIdentity` advertises the additive `ls --local` identity fields: every row and `notOffered` entry carries `skillId` (UUID or null), and every row carries independent `placed` and `connected` booleans. The app declares these keys optional while keeping local rows strict, so older CLIs remain readable; presence joins require the feature. `ls member` adds `member.installed` records (`id`, `scope`, `since`), and `connect` may return `adopted: true` after consent to record an existing identity. These are additive result fields.
 
-`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, and `localIdentity`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and remains false.
+`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, and `checkouts`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and remains false. `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist.
 
 `hello.protocol` is `1`. `detail` is an additive optional field: protocol stays 1. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.
 
