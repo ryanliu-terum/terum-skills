@@ -175,7 +175,7 @@ describe('status (offline local team summary)', () => {
 it.each(['missing', 'incomplete', 'foreign'] as const)('returns pending and the recorded stamp even with a %s clone', async state => {
   const f = await fixture();
   const id = '11111111-1111-4111-8111-111111111111', version = 'a'.repeat(40), started = '2026-09-01T00:00:00.000Z';
-  await f.store.update(config => { config.pending = [{ op: 'install', id, team: 'acme', scope: { kind: 'global' }, version, started }, { op: 'uninstall', id, team: 'other', scope: { kind: 'global' }, started }]; });
+  await f.store.update(config => { config.pending = [{ op: 'install', id, team: 'acme', scope: { kind: 'global' }, destination: { kind: 'checkout', root: '/checkout' }, version, started }, { op: 'uninstall', id, team: 'other', scope: { kind: 'global' }, started }]; });
   await mkdir(join(f.store.root, 'run'));
   await writeFile(stampPath(f.store.root, 'acme'), 'ignored');
   await utimes(stampPath(f.store.root, 'acme'), new Date(started), new Date(started));
@@ -183,7 +183,7 @@ it.each(['missing', 'incomplete', 'foreign'] as const)('returns pending and the 
   if (state === 'incomplete') await mkdir(f.clone);
   if (state === 'foreign') { const other = await bareTeam(); await cloneWithIdentity(other.bare, f.clone); }
   const { result } = await query(f, {}, state === 'foreign' ? [f.clone] : [], state === 'missing' ? [] : [f.clone]);
-  expect(result.value?.teams[0]).toMatchObject({ clonePath: f.clone, syncedAt: started, policy: null, categories: null, pending: [{ op: 'install', id, scope: { kind: 'global' }, version, started }] });
+  expect(result.value?.teams[0]).toMatchObject({ clonePath: f.clone, syncedAt: started, policy: null, categories: null, pending: [{ op: 'install', id, scope: { kind: 'global' }, destination: { kind: 'checkout', root: '/checkout' }, version, started }] });
   expect(result.value?.teams[0]?.pending[0]).not.toHaveProperty('team');
 });
 it('returns policy, categories, the join block, and an empty pending list without new print lines', async () => {
@@ -224,4 +224,5 @@ it('carries an explicit null version for an unpinned pending operation', async (
   await f.store.update(config => { config.pending.push({ op: 'uninstall', id: '11111111-1111-4111-8111-111111111111', team: 'acme', scope: { kind: 'global' }, started: '2026-09-01' }); });
   const { result } = await query(f);
   expect(JSON.parse(JSON.stringify(result.value)).teams[0].pending[0].version).toBeNull();
+  expect(JSON.parse(JSON.stringify(result.value)).teams[0].pending[0].destination).toBeNull();
 });

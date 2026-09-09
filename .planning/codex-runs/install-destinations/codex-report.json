@@ -1,0 +1,58 @@
+{
+  "status": "complete",
+  "summary": "Implemented explicit install destinations, destination-aware pending replay and uninstall, and sync across registered checkouts. Updated prompts, status, documentation, and regression tests. Lint, typecheck, all 1,332 tests, and build passed; changes remain uncommitted.",
+  "filesChanged": [
+    {"path":"src/cli.ts","change":"modified","why":"Expose --into and --from."},
+    {"path":"src/commands/install.ts","change":"modified","why":"Resolve destinations, reuse registration, separate scope, and preserve destination-aware intent and ownership."},
+    {"path":"src/commands/sync.ts","change":"modified","why":"Refresh registered destinations, replay saved destinations, and group unregistered notices."},
+    {"path":"src/commands/uninstall.ts","change":"modified","why":"Select copies and enforce last-copy shared-record updates."},
+    {"path":"src/commands/team.ts","change":"modified","why":"Choose one destination per endorsement batch."},
+    {"path":"src/commands/status.ts","change":"modified","why":"Serialize pending destinations or null."},
+    {"path":"src/lib/schema.ts","change":"modified","why":"Define Destination and optional pending destinations."},
+    {"path":"src/lib/local-skills.ts","change":"modified","why":"Export canonicalParentPath for ownership lookup."},
+    {"path":"src/lib/placer/agent-paths.ts","change":"modified","why":"Add checkoutRootOf."},
+    {"path":"src/lib/prompt.ts","change":"modified","why":"Support terminal select defaults."},
+    {"path":"src/lib/frames.ts","change":"modified","why":"Support select defaults and advertise installScope."},
+    {"path":"src/lib/__tests__/fixtures.ts","change":"modified","why":"Record and honor scripted select defaults."},
+    {"path":"src/commands/__tests__/install.test.ts","change":"modified","why":"Verify destination selection, registration, missing roots, pending versions, and aliased ownership."},
+    {"path":"src/commands/__tests__/sync.test.ts","change":"modified","why":"Verify registered refresh, exclude placement, pending replay, and grouped skips."},
+    {"path":"src/commands/__tests__/uninstall.test.ts","change":"modified","why":"Verify copy selection and last-copy behavior."},
+    {"path":"src/commands/__tests__/join.test.ts","change":"modified","why":"Verify one destination question per endorsement batch."},
+    {"path":"src/commands/__tests__/status.test.ts","change":"modified","why":"Verify destination objects and null serialization."},
+    {"path":"src/commands/__tests__/connect.test.ts","change":"modified","why":"Pass the installer's explicit home to sync."},
+    {"path":"src/lib/__tests__/frames.test.ts","change":"modified","why":"Verify installScope and empty or absent default answers."},
+    {"path":"src/lib/__tests__/prompt.test.ts","change":"modified","why":"Verify terminal select defaults."},
+    {"path":"docs/frame-protocol.md","change":"modified","why":"Document destination behavior and installScope."},
+    {"path":".claude/skills/terum-skills/SKILL.md","change":"modified","why":"Document --into and --from; build regenerates the bundled copy."},
+    {"path":"README.md","change":"modified","why":"Document destinations and sync from anywhere."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"Apply the requested Library ruling amendments."},
+    {"path":".planning/specs/2026-09-01-team-skill-sharing.md","change":"modified","why":"Update D14, D17, and scope terminology."}
+  ],
+  "gates": {
+    "lint": {"ran":true,"passed":true,"output":"ESLint exited 0; no diagnostics.","preExistingFailures":""},
+    "typecheck": {"ran":true,"passed":true,"output":"TypeScript exited 0; no diagnostics.","preExistingFailures":""},
+    "test": {"ran":true,"passed":true,"output":"1332 passed across 76 files using --maxWorkers=4. Invocation tripwire and bundled-skill checks passed. Subsequent npm run build exited 0.","preExistingFailures":""}
+  },
+  "openQuestions": [],
+  "deviations": [],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Reused Runner and existing local helpers; added no network client or service."},
+    {"number":2,"howSatisfied":"Shared writes still use safeWrite; removing a non-last copy skips it."},
+    {"number":3,"howSatisfied":"Preserved existing guard actions and authorization paths."},
+    {"number":4,"howSatisfied":"Preserved per-skill tool consent and hook output restrictions."},
+    {"number":5,"howSatisfied":"Used ledger provenance and canonical parent ownership; retained quarantine handling."},
+    {"number":6,"howSatisfied":"Kept native locked placement and checked checkout existence before placement locks."}
+  ],
+  "testsModified": [
+    {"path":"src/commands/__tests__/install.test.ts","whatChanged":"Replaced cwd-based project expectations with explicit destinations and successful outside-cwd installation.","justification":"F6 removes cwd-derived scope and destination restrictions."},
+    {"path":"src/commands/__tests__/sync.test.ts","whatChanged":"Aligned fixture homes; replaced outside-checkout skipping with registered refresh; updated legacy pending expectations.","justification":"F10 changes eligibility and the spec defines explicit home and legacy destination handling."},
+    {"path":"src/commands/__tests__/uninstall.test.ts","whatChanged":"Added explicit installation destinations and replaced remove-all expectations with copy selection.","justification":"F9 requires destination-aware removal."},
+    {"path":"src/commands/__tests__/join.test.ts","whatChanged":"Registered a checkout and asserted one destination prompt in the existing endorsement batch test.","justification":"Required batch destination behavior."},
+    {"path":"src/commands/__tests__/status.test.ts","whatChanged":"Added destination and null assertions to pending-status cases.","justification":"Required serialized pending field."},
+    {"path":"src/commands/__tests__/connect.test.ts","whatChanged":"Passed the same explicit home to install and subsequent sync.","justification":"Sync now distinguishes Global using its home root."},
+    {"path":"src/lib/__tests__/frames.test.ts","whatChanged":"Changed installScope expectation to true; added default-answer cases.","justification":"Required capability and protocol behavior."},
+    {"path":"src/lib/__tests__/fixtures.ts","whatChanged":"Scripted select records and honors defaultChoice.","justification":"Required Prompter default support."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Every new regression would fail on the base tree; this was assessed against the original behavior but not independently rerun on a base checkout."
+}

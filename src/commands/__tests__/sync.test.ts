@@ -8,7 +8,7 @@ import { approved, run, underQuarantine } from '../sync.js';
 import { allowedTools, emptyConfig } from '../../lib/schema.js';
 import { run as connect } from '../connect.js';
 import { createExecute } from '../../lib/execute.js';
-import { run as install } from '../install.js';
+import { placementHome, run as install } from '../install.js';
 import { NonInteractivePrompter } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, git, holdCloneLock, mappedRunner, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
@@ -39,7 +39,7 @@ const toolSkill = (description: string, tools: string[]) => `---\nname: sample\n
 async function configuredSkill() {
   const fixture = await bareTeam();
   await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('old'));
-  const store = createConfigStore(join(fixture.root, 'state'));
+  const store = createConfigStore(join(fixture.root, 'home', '.terum', 'skills'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   return { fixture, store, clone };
@@ -47,7 +47,7 @@ async function configuredSkill() {
 
 async function sharedSyncFixture() {
   const fixture = await bareTeam();
-  const store = createConfigStore(join(fixture.root, 'state'));
+  const store = createConfigStore(join(fixture.root, 'home', '.terum', 'skills'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   const source = join(fixture.root, 'sample');
@@ -352,12 +352,12 @@ describe('sync --hook (§3, §6)', () => {
     await pushFromSeed(fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID, SECOND_ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
     // sync's endorsed batch places under the store's own home; a stranger's folder sits at the first candidate's target.
-    const stranger = join(store.root, '.claude', 'skills', 'sample');
+    const stranger = join(placementHome(store), '.claude', 'skills', 'sample');
     await mkdir(stranger, { recursive: true }); await writeFile(join(stranger, 'SKILL.md'), 'user-owned, not a placement');
     const io = new ScriptedPrompter([], [true], true);
     expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 1, deferred: ['sample'] } });
     expect(io.lines.filter((line) => line.startsWith('Deferred endorsed sample: '))).toHaveLength(1);
-    expect(await readFile(join(store.root, '.claude', 'skills', 'second', 'SKILL.md'), 'utf8')).toContain('description: second');
+    expect(await readFile(join(placementHome(store), '.claude', 'skills', 'second', 'SKILL.md'), 'utf8')).toContain('description: second');
     expect(await readFile(join(stranger, 'SKILL.md'), 'utf8')).toBe('user-owned, not a placement');
     await expect(access(join(store.root, 'run', 'team.stamp'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
@@ -556,7 +556,7 @@ describe('sync --hook (§3, §6)', () => {
   it('replays a pending install in hook mode with its placement notice on notices, stdout holding the reload directive alone', async () => {
     const { fixture, store, clone } = await configuredSkill();
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { project: { remotes: [fixture.bare], skills: [ID] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
-    await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'project', project: 'project' }, started: '2026-09-04T00:00:00Z' }); });
+    await store.update((config) => { config.checkouts = [fixture.seed]; config.pending.push({ op: 'install', id: ID, team: 'team', version: null, destination: { kind: 'checkout', root: fixture.seed }, scope: { kind: 'project', project: 'project' }, started: '2026-09-04T00:00:00Z' }); });
     const runner = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'rev-parse' && args.includes('info/exclude') ? { code: 1, stdout: '', stderr: 'no exclude here' } : next());
     const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
     const result = await run({ hook: true, config: store, runner, cwd: clone }, io);
@@ -567,20 +567,13 @@ describe('sync --hook (§3, §6)', () => {
     expect((await store.read()).pending).toHaveLength(0);
   });
 
-  it('leaves a project pending install deferred outside its worktree — without stamping, so the next session inside the checkout is not rate-limited — and replays it inside', async () => {
-    const { fixture, store, clone } = await configuredSkill();
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { project: { remotes: [fixture.bare], skills: [ID] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
-    await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'project', project: 'project' }, started: '2026-09-04T00:00:00Z' }); });
+  it('replays legacy project pending intent into Global from an unregistered cwd', async () => {
+    const { fixture, store } = await configuredSkill();
+    await store.update(config => { config.pending.push({ op: 'install', id: ID, team: 'team', scope: { kind: 'project', project: 'project' }, started: '2026-09-04T00:00:00Z' }); });
     const outside = await temporaryDirectory();
-    const hook: NonInteractivePrompter = { interactive: false, print: () => undefined };
-    expect(await run({ hook: true, config: store, cwd: outside }, hook)).toMatchObject({ ok: true, value: { deferred: [expect.stringContaining('project')] } });
-    expect((await store.read()).pending).toHaveLength(1);
-    // §8: the deferral left the stamp unwritten, so the hook run five minutes later — in the checkout the
-    // deferral was waiting for — really runs instead of being an hourly no-op.
-    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await run({ hook: true, config: store, cwd: clone }, hook)).toMatchObject({ ok: true, value: { placed: 1, deferred: [] } });
-    expect((await store.read()).pending).toHaveLength(0);
-    expect(await readFile(join(clone, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
+    expect(await run({ hook: true, config: store, cwd: outside }, { interactive: false, print: () => undefined })).toMatchObject({ ok: true, value: { placed: 1, deferred: [] } });
+    expect((await store.read()).pending).toEqual([]);
+    expect(await readFile(join(fixture.root, 'home', '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
     await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
   });
 
@@ -649,30 +642,27 @@ describe('sync --hook (§3, §6)', () => {
     expect(io.lines.some((line) => line.includes('Local changes at'))).toBe(true);
   });
 
-  it('leaves a hand-edited project placement untouched outside its checkout, then repairs it in that checkout', async () => {
+  it('repairs registered checkout B from cwd A and writes the exclude line in B', async () => {
     const fixture = await bareTeam();
     const product = await bareTeam();
     const id = '99999999-9999-4999-8999-999999999999';
     await pushFromSeed(fixture.seed, 'skills/projected/SKILL.md', `---\nname: projected\ndescription: projected\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: [product.bare], skills: [id] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home');
-    const store = createConfigStore(join(fixture.root, 'state'));
+    const store = createConfigStore(join(fixture.root, 'home', '.terum', 'skills'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkoutA = await cloneWithIdentity(product.bare, join(product.root, 'checkout-a'));
     const checkoutB = await cloneWithIdentity(product.bare, join(product.root, 'checkout-b'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
-    expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkoutB }, new ScriptedPrompter())).ok).toBe(true);
-    const path = join(checkoutA, '.claude', 'skills', 'projected', 'SKILL.md');
+    expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkoutA, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkoutB, cwd: checkoutB }, new ScriptedPrompter())).ok).toBe(true);
+    const path = join(checkoutB, '.claude', 'skills', 'projected', 'SKILL.md');
     await writeFile(path, 'hand-edited placement');
-    const ledgerBefore = JSON.stringify((await store.read()).placements);
-    const outside = await temporaryDirectory('terum-unrelated-sync-');
-    expect((await run({ config: store, cwd: outside }, new ScriptedPrompter())).ok).toBe(true);
-    expect(await readFile(path, 'utf8')).toBe('hand-edited placement');
-    await expect(access(join(store.root, 'quarantine'))).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(JSON.stringify((await store.read()).placements)).toBe(ledgerBefore);
-
-    expect((await run({ config: store, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
+    await writeFile(join(checkoutB, '.git', 'info', 'exclude'), '');
+    await writeFile(join(checkoutA, '.git', 'info', 'exclude'), '');
+    expect((await run({ config: store, home, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
+    expect(await readFile(join(checkoutB, '.git', 'info', 'exclude'), 'utf8')).toContain('.claude/skills/projected');
+    expect(await readFile(join(checkoutA, '.git', 'info', 'exclude'), 'utf8')).not.toContain('.claude/skills/projected');
     expect(await readFile(path, 'utf8')).toContain('description: projected');
     expect((await readdir(join(store.root, 'quarantine'), { recursive: true })).some((entry) => entry.endsWith('projected/SKILL.md'))).toBe(true);
   });
@@ -680,7 +670,7 @@ describe('sync --hook (§3, §6)', () => {
   it('normalizes reordered grants but defers an added or widened grant in hook mode', async () => {
     const fixture = await bareTeam();
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('old', ['Bash(ls)', 'Read(*)']));
-    const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
+    const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'home', '.terum', 'skills'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
@@ -991,7 +981,7 @@ async function orphanedPlacement(installed = false) {
 async function configuredToolSkill() {
   const fixture = await bareTeam();
   await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('old', ['Bash(ls)']));
-  const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
+  const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'home', '.terum', 'skills'));
   await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
@@ -1180,7 +1170,7 @@ describe('sync --hook keeps shared-source reconciliation off stdout (§8)', () =
 
 describe('release maintenance after sync', () => {
   async function releaseFixture(remote = 'https://github.com/acme/skills.git') {
-    const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
+    const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'home', '.terum', 'skills'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote, handle: 'seed' }; });
     const { denyingRunner } = await import('../../lib/__tests__/fixtures.js');
@@ -1204,7 +1194,7 @@ describe('release maintenance after sync', () => {
   it('probes the approved upstream under the shipped default policy when no override is passed (RELEASE_PROBE_POLICY governs)', async () => {
     const { denyingRunner } = await import('../../lib/__tests__/fixtures.js');
     const { APPROVED_UPSTREAM } = await import('../../lib/package.js');
-    const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
+    const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'home', '.terum', 'skills'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: 'https://github.com/acme/skills.git', handle: 'seed' }; });
     let probes = 0;
@@ -1292,6 +1282,53 @@ it.each(['install', 'adopt', 'decline'] as const)('preserves role/projects byte-
   expect(result.ok).toBe(true);
   const after = JSON.parse(await git(['show', 'main:people/seed.json'], prepared.fixture.bare)) as typeof metadata;
   expect(JSON.stringify({ role: after.role, projects: after.projects })).toBe(JSON.stringify(metadata));
+});
+
+describe('Library sync destinations', () => {
+  it.each([1, 2])('groups %i unregistered placements once, skips orphan adoption, and still stamps', async count => {
+    const f = await configuredSkill(); const checkout = await temporaryDirectory();
+    const paths = [];
+    for (let i = 0; i < count; i++) {
+      const path = join(checkout, '.claude', 'skills', `copy-${i}`); paths.push(path);
+      await mkdir(path, { recursive: true }); await writeFile(join(path, 'SKILL.md'), 'do not touch');
+      await f.store.update(config => { config.placements[path] = { id: ID, team: 'team', scope: { kind: 'project', project: 'alpha' }, version: null, fingerprint: 'old', placed_at: '2026-09-09' }; });
+    }
+    const personBefore = await readFile(join(f.clone, 'people', 'seed.json'), 'utf8');
+    const io = new ScriptedPrompter([], [], true);
+    const result = await run({ config: f.store, noUpdateCheck: true, cwd: f.fixture.seed }, io);
+    expect(result).toMatchObject({ ok: true, value: { teams: [{ state: 'complete' }], deferred: [], notices: [`Skipped ${count} placements under folders not in your library: ${checkout}`] } });
+    expect(io.lines.filter(line => line.startsWith('Skipped '))).toHaveLength(1);
+    expect(io.asked).toEqual([]);
+    for (const path of paths) expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toBe('do not touch');
+    expect(await readFile(join(f.clone, 'people', 'seed.json'), 'utf8')).toBe(personBefore);
+    await expect(access(stampPath(f.store.root, 'team'))).resolves.toBeUndefined();
+  });
+
+  it('replays a saved checkout destination from elsewhere and never recreates a missing checkout', async () => {
+    const f = await configuredSkill(); const checkout = join(f.fixture.root, 'missing-checkout');
+    await f.store.update(config => { config.checkouts = [checkout]; config.pending.push({ op: 'install', id: ID, team: 'team', scope: { kind: 'global' }, destination: { kind: 'checkout', root: checkout }, started: '2026-09-09' }); });
+    const first = await run({ hook: true, config: f.store, cwd: f.fixture.seed }, { interactive: false, print: () => undefined });
+    expect(first).toMatchObject({ ok: true, value: { deferred: [expect.stringContaining(`needs its checkout ${checkout}`)] } });
+    await expect(access(checkout)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await f.store.read()).pending).toHaveLength(1);
+    await mkdir(checkout);
+    expect(await run({ hook: true, config: f.store, cwd: f.fixture.seed }, { interactive: false, print: () => undefined })).toMatchObject({ ok: true, value: { placed: 1 } });
+    expect(await readFile(join(checkout, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
+    expect((await f.store.read()).pending).toEqual([]);
+  });
+
+  it('asks for one destination for a two-skill endorsed batch', async () => {
+    const f = await configuredSkill(); const checkout = await temporaryDirectory();
+    await pushFromSeed(f.fixture.seed, 'skills/second/SKILL.md', skill('second').replaceAll(ID, SECOND_ID).replace('name: sample', 'name: second'));
+    const team = JSON.parse(await readFile(join(f.fixture.seed, 'team.json'), 'utf8')); team.global = [ID, SECOND_ID];
+    await pushFromSeed(f.fixture.seed, 'team.json', JSON.stringify(team));
+    await f.store.update(config => { config.checkouts = [checkout]; });
+    const io = new ScriptedPrompter([''], [true], true);
+    expect(await run({ config: f.store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { placed: 2 } });
+    expect(io.countAsked('Install to')).toBe(1);
+    expect(io.offeredDefaults).toEqual(['Global (~/.claude/skills)']);
+    expect(Object.keys((await f.store.read()).placements)).toEqual(expect.arrayContaining([join(placementHome(f.store), '.claude', 'skills', 'sample'), join(placementHome(f.store), '.claude', 'skills', 'second')]));
+  });
 });
 
 it('forwards allowed-tools decision detail through the endorsed batch child prompter', async () => {

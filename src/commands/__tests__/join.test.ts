@@ -327,17 +327,20 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(await systemRunner.run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: store.teamClone('team') })).toMatchObject({ code: 0 });
   });
 
-  it('offers one endorsed-set confirmation and one individual tool-grant confirmation at join', async () => {
+  it('offers one endorsed-set confirmation and one destination and one individual tool-grant confirmation at join', async () => {
     const { fixture, store, runner } = await setup();
     const plain = '77777777-7777-4777-8777-777777777777';
     const tool = '88888888-8888-4888-8888-888888888888';
     await pushFromSeed(fixture.seed, 'skills/plain/SKILL.md', `---\nname: plain\ndescription: plain\nlicense: UNLICENSED\nmetadata:\n  id: ${plain}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(fixture.seed, 'skills/tool/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${tool}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [plain, tool], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
-    const io = new ScriptedPrompter(answers(), [true, true]);
+    await store.update(config => { config.checkouts = [fixture.seed]; });
+    const io = new ScriptedPrompter([...answers(), ''], [true, true], true);
     const joined = await join({ target: REMOTE, config: store, runner }, io);
     if (!joined.ok) throw new Error(joined.error);
     expect(io.countAsked('Install 2 team-endorsed')).toBe(1);
+    expect(io.countAsked('Install to')).toBe(1);
+    expect(io.offeredDefaults).toContain('Global (~/.claude/skills)');
     expect(io.countAsked('Approve these tools')).toBe(1);
     expect((await store.read()).approvals[tool]).toBeDefined();
     expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare)).installed.map((entry: { id: string }) => entry.id)).toEqual(expect.arrayContaining([plain, tool]));

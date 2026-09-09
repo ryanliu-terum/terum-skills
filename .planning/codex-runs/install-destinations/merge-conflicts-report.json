@@ -1,0 +1,14 @@
+{
+  "resolved": [
+    "src/commands/publish.ts",
+    "src/commands/__tests__/publish.test.ts",
+    "src/commands/__tests__/setup.test.ts",
+    ".claude/skills/terum-skills/SKILL.md"
+  ],
+  "gates": {
+    "lint": "Passed (exit 0).",
+    "typecheck": "Passed (exit 0).",
+    "tests": "Passed: 108 tests across 3 files (exit 0)."
+  },
+  "notes": "Resolved all five hunks, preserving label/Global and checkout rows while removing --team hints. No conflict markers remain; teamOption is absent. The src/lib invocation-hints test path does not exist. Only the four specified files were edited. No git commands were issued and no commit was made."
+}

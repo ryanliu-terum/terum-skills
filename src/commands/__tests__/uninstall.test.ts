@@ -150,14 +150,14 @@ describe('uninstall (§6 pending)', () => {
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
 
-    expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkout }, new ScriptedPrompter([], [true]))).ok).toBe(true);
-    expect((await install({ ref: 'personal', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
+    expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkout, cwd: checkout }, new ScriptedPrompter([], [true]))).ok).toBe(true);
+    expect((await install({ ref: 'personal', into: 'global', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const projectApproval = (await store.read()).approvals[projectId];
     const personalApproval = (await store.read()).approvals[personalId];
     const projectPath = join(checkout, '.claude', 'skills', 'projected');
     const personalPath = join(home, '.claude', 'skills', 'personal');
 
-    expect((await run({ ref: 'projected', team: 'team', config: store, home, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'projected', team: 'team', config: store, home, from: checkout, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
     const afterProject = JSON.parse(await readFile(join(store.teamClone('team'), 'people', 'seed.json'), 'utf8'));
     expect(afterProject.declined).toContain(projectId);
     expect(afterProject.installed.map((entry: { id: string }) => entry.id)).not.toContain(projectId);
@@ -165,7 +165,7 @@ describe('uninstall (§6 pending)', () => {
     expect(Object.values((await store.read()).placements).some((entry) => entry.id === projectId)).toBe(false);
     expect((await store.read()).approvals[projectId]).toEqual(projectApproval);
 
-    expect((await run({ ref: 'personal', team: 'team', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'personal', from: 'global', team: 'team', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
     const afterPersonal = JSON.parse(await readFile(join(store.teamClone('team'), 'people', 'seed.json'), 'utf8'));
     expect(afterPersonal.declined).not.toContain(personalId);
     expect(afterPersonal.installed.map((entry: { id: string }) => entry.id)).not.toContain(personalId);
@@ -186,11 +186,11 @@ describe('uninstall (§6 pending)', () => {
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     // Installed globally from outside any checkout, and into the project from its checkout.
     expect((await install({ ref: 'sample', config: store, home, cwd: await temporaryDirectory() }, new ScriptedPrompter())).ok).toBe(true);
-    expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkout, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
     const globalPath = join(home, '.claude', 'skills', 'sample'); const projectPath = join(checkout, '.claude', 'skills', 'sample');
     // (The project key is git's realpath of the checkout — /private/var on macOS — so count, do not compare it.)
     expect(Object.keys((await store.read()).placements)).toHaveLength(2);
-    expect((await run({ kind: 'project', project: 'product', team: 'team', config: store, home, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ kind: 'project', project: 'product', team: 'team', config: store, home, from: checkout, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
     await expect(access(projectPath)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(globalPath)).resolves.toBeUndefined();
     expect(Object.keys((await store.read()).placements)).toEqual([globalPath]);
@@ -199,7 +199,7 @@ describe('uninstall (§6 pending)', () => {
     expect(seed.declined).toEqual([]);
   });
 
-  it('removes every project placement for a skill installed in two checkouts', async () => {
+  it('requires a copy selector for two project copies and removes only the selected copy', async () => {
     const fixture = await bareTeam();
     const product = await bareTeam();
     const id = '99999999-9999-4999-8999-999999999999';
@@ -211,14 +211,17 @@ describe('uninstall (§6 pending)', () => {
     const checkoutA = await cloneWithIdentity(product.bare, join(product.root, 'checkout-a'));
     const checkoutB = await cloneWithIdentity(product.bare, join(product.root, 'checkout-b'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
-    expect((await install({ kind: 'project', project: 'product', config: store, home, cwd: checkoutB }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkoutA, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkoutB, cwd: checkoutB }, new ScriptedPrompter())).ok).toBe(true);
     await store.update((config) => {
       for (const entry of Object.values(config.placements)) {
         if (entry.id === id && entry.scope.kind === 'project') Object.assign(entry.scope, { future_passthrough: 'kept' });
       }
     });
-    expect((await run({ ref: 'projected', team: 'team', config: store, home, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
+    expect(await run({ ref: 'projected', team: 'team', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Pass --from global or --from <checkout root>' });
+    expect((await run({ ref: 'projected', team: 'team', config: store, home, from: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
+    await expect(access(join(checkoutB, '.claude', 'skills', 'projected'))).resolves.toBeUndefined();
+    expect((await run({ ref: 'projected', team: 'team', config: store, home, from: checkoutB }, new ScriptedPrompter())).ok).toBe(true);
     await expect(access(join(checkoutA, '.claude', 'skills', 'projected'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(join(checkoutB, '.claude', 'skills', 'projected'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await store.read()).placements).toEqual({});
@@ -277,4 +280,27 @@ it('unions people scopes and matching ledger scopes without borrowing another te
     { kind: 'global' }, { kind: 'project', project: 'people-only' }, { kind: 'project', project: 'local' },
   ]);
   expect(await store.read()).toEqual(before);
+});
+
+it('removes only --from and updates the shared record and decline only after the last Global-scope copy', async () => {
+  const fixture = await bareTeam(); const id = 'acacacac-acac-4cac-8cac-acacacacacac';
+  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+  const team = JSON.parse(await readFile(join(fixture.seed, 'team.json'), 'utf8')); team.global = [id];
+  await pushFromSeed(fixture.seed, 'team.json', JSON.stringify(team));
+  const home = join(fixture.root, 'home'); const store = createConfigStore(join(home, '.terum', 'skills'));
+  const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  const checkout = await temporaryDirectory();
+  for (const into of ['global', checkout]) expect((await install({ ref: 'sample', into, config: store }, new ScriptedPrompter())).ok).toBe(true);
+  const personPath = join(clone, 'people', 'seed.json'); const before = await readFile(personPath, 'utf8');
+  const runner = wrapRunner(systemRunner, async () => { throw new Error('No team write is allowed while another copy remains'); });
+  expect(await run({ ref: 'sample', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Pass --from global or --from <checkout root>' });
+  expect((await store.read()).pending).toEqual([]);
+  expect(await run({ ref: 'sample', from: checkout, config: store, runner }, new ScriptedPrompter())).toMatchObject({ ok: true, value: [{ removed: 1 }] });
+  expect(await readFile(personPath, 'utf8')).toBe(before);
+  await expect(access(join(checkout, '.claude', 'skills', 'sample'))).rejects.toMatchObject({ code: 'ENOENT' });
+  await expect(access(join(home, '.claude', 'skills', 'sample'))).resolves.toBeUndefined();
+  expect(await run({ ref: 'sample', from: 'global', config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: [{ removed: 1 }] });
+  expect(JSON.parse(await readFile(personPath, 'utf8'))).toMatchObject({ installed: [], declined: [id] });
+  expect(await store.read()).toMatchObject({ pending: [], placements: {} });
 });

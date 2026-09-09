@@ -34,7 +34,7 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
     expect(s.frames).toEqual([{ t: 'hello', protocol: FRAME_PROTOCOL, version: '0.1.5', verbs: [...FRAME_VERBS], features: FRAME_FEATURES }]);
     expect(FRAME_FEATURES).toEqual({
       memberRole: true, localIdentity: true, checkouts: true,
-      favorites: false, follow: false, roles: false, lastSeen: false, installScope: false, inviteScoping: false,
+      favorites: false, follow: false, roles: false, lastSeen: false, installScope: true, inviteScoping: false,
       disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: false,
     });
   });
@@ -73,7 +73,7 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
     const text = s.channel.io.text('Name', 'old', { detail });
     expect(await s.answer('new')).toEqual({ t: 'ask', id: 'q1', kind: 'text', question: 'Name', default: 'old', detail });
     expect(await text).toBe('new');
-    const select = s.channel.io.select('Pick', ['a'], { detail });
+    const select = s.channel.io.select('Pick', ['a'], undefined, { detail });
     expect(await s.answer('invalid')).toEqual({ t: 'ask', id: 'q2', kind: 'select', question: 'Pick', choices: ['a'], detail });
     expect(await s.answer('a')).toEqual({ t: 'ask', id: 'q3', kind: 'select', question: 'Pick', choices: ['a'], detail });
     expect(await select).toBe('a');
@@ -201,4 +201,15 @@ it('a typed refusal emits refused without declined', () => {
   const s = shell();
   s.channel.result({ verb: 'setup', ok: false, error: 'One team per machine: stop', refused: true, exitCode: 1 });
   expect(s.frames).toEqual([{ t: 'result', verb: 'setup', ok: false, error: 'One team per machine: stop', refused: true, exitCode: 1 }]);
+});
+
+
+it.each(['', undefined])('select carries its default and accepts an empty or absent answer (%s)', async value => {
+  const s = shell();
+  const pending = s.channel.io.select('Install to', ['Global', 'Checkout'], 'Checkout');
+  expect(s.asks()[0]).toMatchObject({ choices: ['Global', 'Checkout'], default: 'Checkout' });
+  s.raw(JSON.stringify({ t: 'answer', id: s.asks()[0]!.id, value }));
+  expect(await pending).toBe('Checkout');
+  expect(s.diagnostics).toEqual([]);
+  s.channel.result({ verb: 'install', ok: true, exitCode: 0 });
 });

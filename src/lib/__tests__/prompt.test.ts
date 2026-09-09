@@ -164,6 +164,13 @@ describe('terminalPrompter behaviour', () => {
     expect(out().match(/Enter a number from 1 to 2\./g)).toHaveLength(3);
   });
 
+  it('select accepts Enter as the supplied default without reordering choices', async () => {
+    const { io, out } = channel(['']);
+    expect(await io.select('Install to', ['Global', 'Checkout'], 'Checkout')).toBe('Checkout');
+    expect(out()).toContain('1. Global');
+    expect(out()).toContain('2. Checkout');
+  });
+
   it('prints identity detail once immediately before its confirm question', async () => {
     const { io, out } = channel(['y']);
     const pending = io.confirm('Use this identity?', { detail: ['Identity: @me — Me <me@x.test> (GitHub: octocat)'] });
@@ -181,7 +188,7 @@ describe('terminalPrompter behaviour', () => {
   it('prints text and select detail once, including across select retries', async () => {
     const { io, out } = channel(['name', 'bad', '1']);
     expect(await io.text('Name', '', { detail: ['Text context'] })).toBe('name');
-    expect(await io.select('Pick', ['a'], { detail: ['Select context'] })).toBe('a');
+    expect(await io.select('Pick', ['a'], undefined, { detail: ['Select context'] })).toBe('a');
     expect(out().match(/Text context\n/g)).toHaveLength(1);
     expect(out().match(/Select context\n/g)).toHaveLength(1);
   });
