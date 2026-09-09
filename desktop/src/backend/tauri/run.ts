@@ -4,6 +4,15 @@ import { parseCliFrame, type CliFrame } from './frames';
 
 export const NO_STATE = 'The desktop app could not find where terum-skills is installed. Run `terum-skills app` from a terminal once; it records the location and opens this app.';
 
+/**
+ * Frame-protocol rule 1: a CLI older than 0.1.6 asks this confirm instead of printing (src/lib/auth.ts at
+ * 0.1.5). A yes would run `gh auth login` with inherited stdio — here the frame pipes — and wedge the run
+ * forever, so the shell answers no itself and never shows the question.
+ */
+export const GH_LOGIN_OFFER = 'GitHub CLI is installed but logged out. Run `gh auth login` now?';
+/** What a 0.1.6+ CLI prints in frame mode instead of asking; shown in place of the swallowed confirm. */
+export const GH_LOGIN_REMEDY = 'GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again.';
+
 let serial = 0;
 function nextId(): string {
   serial += 1;
@@ -29,10 +38,13 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
   const readers = new Set<() => void>();
   let finished = false;
   let started = false;
+  let spawnSettled: Promise<void> | undefined;
+  let sawHello = false;
   let cancelled = false;
   let settle!: (result: Result<TOut>) => void;
   const done = new Promise<Result<TOut>>((resolve) => { settle = resolve; });
-  const stderr: string[] = [];
+  // Channel diagnostics — stderr lines, unparseable stdout, stdout after settle — quoted when the run dies without a result.
+  const diagnostics: string[] = [];
   let unlisten: (() => void) | undefined;
   let cleanupRequested = false;
   const cleanup = () => {
@@ -55,20 +67,23 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
 
   const onEvent = (event: LineEvent) => {
     if (finished && event.kind !== 'exit') {
-      if (event.kind === 'stdout') stderr.push(`stdout after settle: ${event.line}`);
+      if (event.kind === 'stdout') diagnostics.push(`stdout after settle: ${event.line}`);
       return;
     }
     switch (event.kind) {
       case 'stdout': {
         const frame = parseCliFrame(event.line);
-        if (!frame) { stderr.push(`unparseable line from terum-skills: ${event.line.slice(0, 200)}`); return; }
+        if (!frame) { diagnostics.push(`unparseable line from terum-skills: ${event.line.slice(0, 200)}`); return; }
         onFrame(frame);
         return;
       }
-      case 'stderr': stderr.push(event.line); return;
+      case 'stderr': diagnostics.push(event.line); return;
       case 'exit': {
         if (!finished) {
-          finish({ ok: false, error: cancelled ? 'Cancelled.' : `terum-skills exited${event.code === null ? '' : ` with code ${event.code}`} before reporting a result.${stderr.length ? ` ${stderr.slice(-3).join(' ')}` : ''}` });
+          // No hello means the CLI never spoke the protocol at all — almost always a pre-0.1.5 bin with no
+          // --frames support, which Commander rejects as text. Name the remedy instead of a cryptic per-verb failure.
+          const why = sawHello ? 'before reporting a result.' : 'without a hello frame — this terum-skills is probably older than 0.1.5, before frame mode existed. Update terum-skills, then run `terum-skills app` from a terminal again.';
+          finish({ ok: false, error: cancelled ? 'Cancelled.' : `terum-skills exited${event.code === null ? '' : ` with code ${event.code}`} ${why}${diagnostics.length ? ` ${diagnostics.slice(-3).join(' ')}` : ''}` });
         }
         cleanup();
         return;
@@ -78,22 +93,56 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
   };
   const onFrame = (frame: CliFrame) => {
     switch (frame.t) {
-      case 'hello': options.onHello?.(frame); return;
+      case 'hello': {
+        sawHello = true;
+        if (frame.protocol !== 1) {
+          // The protocol number only moves when the meaning of an existing field changes (docs/frame-protocol.md
+          // §Versioning), so a mismatch means this app cannot read this CLI. Stop before a verb misbehaves.
+          finish({ ok: false, error: `terum-skills${frame.version === null ? '' : ` ${frame.version}`} speaks frame protocol ${frame.protocol}; this app speaks protocol 1. ${frame.protocol > 1 ? 'Update the desktop app.' : 'Update terum-skills, then run `terum-skills app` from a terminal again.'}` });
+          void bridge.kill(id).catch(() => undefined);
+          return;
+        }
+        options.onHello?.(frame);
+        return;
+      }
       case 'print': push({ t: 'print', line: frame.level === 'info' ? frame.line : `${frame.level}: ${frame.line}` }); return;
-      case 'ask': push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }), ...(frame.detail === undefined ? {} : { detail: frame.detail }) }); return;
+      case 'ask': {
+        if (frame.kind === 'confirm' && frame.question === GH_LOGIN_OFFER) {
+          // Rule 1: only a pre-0.1.6 CLI asks this over frames; answer no for the person and say what to do.
+          push({ t: 'print', line: GH_LOGIN_REMEDY });
+          void bridge.write(id, JSON.stringify({ t: 'answer', id: frame.id, value: false })).catch((error: unknown) => finish({ ok: false, error: `Could not answer terum-skills: ${error instanceof Error ? error.message : String(error)}` }));
+          return;
+        }
+        push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }), ...(frame.detail === undefined ? {} : { detail: frame.detail }) });
+        return;
+      }
       case 'progress': { const current = frame.current ?? 0; push({ t: 'progress', done: current, total: Math.max(frame.total ?? current, current, 1), label: frame.step }); return; }
       case 'result': {
-        if (cancelled) { finish({ ok: false, error: 'Cancelled.' }); return; }
         if (frame.ok) {
-          let mapped: TOut;
-          try { mapped = options.map(frame.value as TIn); } catch (error) { finish({ ok: false, error: `terum-skills answered, but the desktop app could not read the result: ${error instanceof Error ? error.message : String(error)}` }); return; }
-          finish({ ok: true, value: mapped }, { t: 'result', ok: true });
+          let mapped: TOut | undefined;
+          let unreadable: string | undefined;
+          try { mapped = options.map(frame.value as TIn); } catch (error) { unreadable = error instanceof Error ? error.message : String(error); }
+          if (cancelled) {
+            // The verb finished before the cancel landed: its mutation is on disk, so the settle must say so
+            // (and carry the value so invalidation still runs), never report a clean cancellation.
+            const error = `Cancelled, but ${frame.verb} had already finished; its changes are on disk.`;
+            finish({ ok: false, error, ...(unreadable === undefined && mapped !== undefined ? { value: mapped } : {}) }, { t: 'result', ok: false, error });
+            return;
+          }
+          if (unreadable !== undefined) { finish({ ok: false, error: `terum-skills answered, but the desktop app could not read the result: ${unreadable}` }); return; }
+          finish({ ok: true, value: mapped as TOut }, { t: 'result', ok: true });
         } else {
-          const error = frame.error ?? 'terum-skills reported a failure.';
           let value: TOut | undefined;
           if (frame.value !== undefined) {
             try { value = options.map(frame.value as TIn); } catch { value = undefined; }
           }
+          if (cancelled) {
+            // A failing result during cancellation is still a cancellation, but a partial value (eval's
+            // completed run whose receipt commit failed) has mutated disk and must reach invalidation.
+            finish({ ok: false, error: 'Cancelled.', ...(value === undefined ? {} : { value }) }, { t: 'result', ok: false, error: 'Cancelled.' });
+            return;
+          }
+          const error = frame.error ?? 'terum-skills reported a failure.';
           finish({ ok: false, error, ...(frame.refused === true ? { refused: true } : {}), ...(frame.declined === true ? { cancelled: true } : {}), ...(value === undefined ? {} : { value }) }, { t: 'result', ok: false, error, ...(frame.refused === true ? { refused: true } : {}), ...(frame.declined === true ? { declined: true } : {}) });
         }
         return;
@@ -108,13 +157,15 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
     if (finished) return;
     if (!resolved) { finish({ ok: false, error: NO_STATE }); return; }
     started = true;
-    try {
-      unlisten = await bridge.spawn(id, resolved, argv, options.cwd, onEvent);
-      // A short-lived child can exit (or be cancelled) before spawn returns the listener.
-      if (cleanupRequested) cleanup();
-    } catch (error) {
-      finish({ ok: false, error: `Could not start terum-skills: ${error instanceof Error ? error.message : String(error)}` });
-    }
+    spawnSettled = (async () => {
+      try {
+        unlisten = await bridge.spawn(id, resolved, argv, options.cwd, onEvent);
+        // A short-lived child can exit (or be cancelled) before spawn returns the listener.
+        if (cleanupRequested) cleanup();
+      } catch (error) {
+        finish({ ok: false, error: `Could not start terum-skills: ${error instanceof Error ? error.message : String(error)}` });
+      }
+    })();
   });
 
   return {
@@ -138,8 +189,14 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
       if (!finished) {
         cancelled = true;
         if (started) {
-          await bridge.write(id, JSON.stringify({ t: 'cancel' })).catch(() => undefined);
-          await bridge.kill(id).catch(() => undefined);
+          // A spawn still in flight has no registered child to signal: write and kill would both miss it
+          // ("no such process") and the just-spawned verb would run to completion behind a "Cancelled." settle.
+          // Wait for the spawn to resolve, then signal the child it registered.
+          await spawnSettled;
+          if (!finished) {
+            await bridge.write(id, JSON.stringify({ t: 'cancel' })).catch(() => undefined);
+            await bridge.kill(id).catch(() => undefined);
+          }
         }
         finish({ ok: false, error: 'Cancelled.' });
       }

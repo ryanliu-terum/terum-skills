@@ -10,7 +10,7 @@ export type CliFrame =
   | { t: 'print'; level: CliLevel; line: string }
   | { t: 'ask'; id: string; kind: CliAskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[] }
   | { t: 'progress'; step: string; current?: number; total?: number }
-  | { t: 'result'; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; refused?: boolean; value?: unknown };
+  | { t: 'result'; verb: string; ok: boolean; exitCode: number; error?: string; declined?: boolean; refused?: boolean; value?: unknown };
 export type CliInbound = { t: 'answer'; id: string; value: string | number | boolean } | { t: 'cancel' };
 
 const KINDS = new Set(['confirm', 'text', 'select']);
@@ -34,7 +34,12 @@ export function parseCliFrame(line: string): CliFrame | null {
       if (!str(f['id']) || !str(f['question']) || !str(f['kind']) || !KINDS.has(f['kind'])) return null;
       const frame: Extract<CliFrame, { t: 'ask' }> = { t: 'ask', id: f['id'], kind: f['kind'] as CliAskKind, question: f['question'] };
       if (str(f['default'])) frame.default = f['default'];
-      if (Array.isArray(f['choices'])) frame.choices = (f['choices'] as unknown[]).filter(str);
+      // Answers may name a choice by 1-based index, so positions are load-bearing: a non-string entry cannot
+      // be dropped without shifting every later index. Such an ask is malformed; fail the frame, not silently.
+      if (Array.isArray(f['choices'])) {
+        if (!(f['choices'] as unknown[]).every(str)) return null;
+        frame.choices = f['choices'] as string[];
+      }
       const detail = Array.isArray(f['detail']) ? f['detail'].filter(str) : [];
       if (detail.length) frame.detail = detail;
       return frame;
@@ -48,7 +53,8 @@ export function parseCliFrame(line: string): CliFrame | null {
     }
     case 'result': {
       if (!str(f['verb']) || typeof f['ok'] !== 'boolean') return null;
-      const frame: Extract<CliFrame, { t: 'result' }> = { t: 'result', verb: f['verb'], ok: f['ok'], exitCode: f['ok'] ? 0 : 1 };
+      // The wire value wins (the process exit code matches it); derive from ok only when it is absent.
+      const frame: Extract<CliFrame, { t: 'result' }> = { t: 'result', verb: f['verb'], ok: f['ok'], exitCode: typeof f['exitCode'] === 'number' ? f['exitCode'] : f['ok'] ? 0 : 1 };
       if (str(f['error'])) frame.error = f['error'];
       if (typeof f['refused'] === 'boolean') frame.refused = f['refused'];
       if (f['declined'] === true) frame.declined = true;
