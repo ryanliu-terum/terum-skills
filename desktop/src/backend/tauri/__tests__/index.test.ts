@@ -159,7 +159,7 @@ describe('read-only calls preserve spawn rejection', () => {
 });
 
 
-const framesDirectory=resolve('../.planning/codex-runs/m7-S7k/frames');
+const framesDirectory=resolve('../.planning/codex-runs/m7-S7g/frames');
 function statusReplay(failed=false, change?:(frame:Record<string,unknown>,verb:string)=>void){
  return fakeBridge((args,emit)=>{
   const name=args[0]==='status'?'status':'ls-local';
@@ -181,8 +181,8 @@ it.each([false,true])('serves recorded status and settings with real team data (
  expect(Object.keys(status.value?.counts??{})).toEqual(['Global']);
  expect(status.value?.teams[0]?.clone).toContain('/fx/home/.terum/skills/teams/acme');
  expect(status.value?.teams[0]?.joinBlock?.join('\n')).toContain('npx -y terum-skills@latest setup acme/team');
- expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,APPROVALS:[],QUARANTINE:[],HOOK:{installed:false},AGENT_CLI:'—',CLI_LATEST:'—'});
- expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{40}$/),'—','—']);
+ expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,PINNED_N:1,APPROVALS:[],QUARANTINE:[],HOOK:{installed:false},AGENT_CLI:'—',CLI_LATEST:'—'});
+ expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'—','up to date']);
  expect(settings.value?.SHARED[0]).toEqual(['22222222-2222-4222-8222-222222222222',expect.stringContaining('/skills/tdd'),'acme','—']);
  expect(status.value?.tools).toEqual(settings.value?.tools);
  expect(status.value?.tools.git).toBe(true);
@@ -214,7 +214,7 @@ const lsRow = { id: 'id-a', name: 'a', description: 'Live description', author: 
 const lsValue = { roster: [{handle:'mira',active:true}], skills: [lsRow], projects: [{ name:'ops',skills:['id-a'],remotes:[],description:'Hand maintained' },{name:'empty',skills:[],remotes:[]}], problems: [] };
 function inventoryBridge(overrides: { row?: Partial<typeof lsRow>; validation?: unknown; validateOk?: boolean; teams?: string[]; local?: unknown } = {}) {
   return fakeBridge((args, emit) => {
-    const value = args[0] === 'status' ? {version:'0.1.6',teams:(overrides.teams??['acme']).map(team=>({team,handle:'mira',repository:'https://github.com/acme/team',readable:true,sharedSkills:3,memberCount:1}))} : args[0] === 'validate' ? overrides.validation??{name:'a',findings:0,warnings:0} : args.includes('--local') ? overrides.local??{roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[{name:'a',path:'/home/.claude/skills/a',state:'placement recorded from acme @abcdef'}],notOffered:[],problems:[]}]} : {...lsValue,skills:[{...lsRow,...overrides.row}]};
+    const value = args[0] === 'status' ? {version:'0.1.6',teams:(overrides.teams??['acme']).map(team=>({team,handle:'mira',repository:'https://github.com/acme/team',readable:true,sharedSkills:3,memberCount:1}))} : args[0] === 'validate' ? overrides.validation??{name:'a',findings:0,warnings:0} : args.includes('--local') ? overrides.local??{roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[{name:'a',path:'/home/.claude/skills/a',state:'prose is not provenance',tracked:true,shared:[],placement:{id:'id-a',team:'acme',version:'a'.repeat(40)},health:'up-to-date'}],notOffered:[],problems:[]}]} : {...lsValue,skills:[{...lsRow,...overrides.row}]};
     const ok = args[0]!=='validate'||overrides.validateOk!==false;
     emit({kind:'stdout',line:JSON.stringify({t:'result',verb:args[0],ok,exitCode:ok?0:1,value,...(ok?{}:{error:'Validation failed'})})});
   });
@@ -235,7 +235,7 @@ it('retains null grants/body/date and marks unresolved skills broken, with a fai
 });
 it('does not infer installation from an untracked or other-team same-name folder',async()=>{
   for(const state of ['untracked locally','placement recorded from other @abc','connected source for acme; endorsed (global)']){
-    const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state}],notOffered:[],problems:[]}]}});
+    const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state,tracked:state!=='untracked locally',shared:state.startsWith('connected')?[{id:'id-a',team:'acme'}]:[],placement:state.includes('other')?{id:'id-a',team:'other',version:null}:null,health:'unknown'}],notOffered:[],problems:[]}]}});
     expect(await createTauriBackend(f.bridge).library({scope:'installed',team:'acme'})).toMatchObject({ok:true,value:{skills:[],title:'0 of 3 skills'}});
   }
 });
@@ -267,4 +267,38 @@ it('passes empty identity values through for CLI validation and does not invalid
   const f = replay(undefined,false); const backend=createTauriBackend(f.bridge);const listener=vi.fn();backend.subscribe(listener);
   expect(await backend.setIdentity({email:''}).done).toEqual({ok:false,error:'CLI failure.'});
   expect(f.spawns.map(spawn=>spawn.args)).toEqual([['login','--set','email=']]);expect(listener).not.toHaveBeenCalled();
+});
+// S7g: the placement state is the board's own vocabulary (design fixture PLACEMENTS), keyed by the CLI's typed health, never by the prose.
+const healthCases = [
+  ['up-to-date','up to date'], ['update-available','update available'], ['local-changed','edited locally'],
+  ['both','edited locally · update available'], ['gone-from-repo','removed from the team'], ['unknown','—'], ['untracked','—'],
+] as const;
+it.each(healthCases)('maps local health %s onto the drawn placement state without reading the prose',async(health,state)=>{
+ const f=statusReplay(false,(frame,verb)=>{if(verb!=='ls-local')return;const value=frame.value as {local:{rows:Record<string,unknown>[]}[]};Object.assign(value.local[0]!.rows[0]!,{health,state:'arbitrary prose'});});
+ const settings=await createTauriBackend(f.bridge).settings();
+ expect(settings.ok).toBe(true);
+ expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'—',state]]);
+ expect(settings.value?.PINNED_N).toBe(1);
+});
+it('joins Skill provenance by ledger team and id (a relocated folder), never by name or prose',async()=>{
+  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'relocated',path:'/skills/relocated',state:'arbitrary prose',tracked:true,shared:[{id:'shared-id',team:'other'}],placement:{id:'id-a',team:'acme',version:'1234567890abcdef'.repeat(2)+'12345678'},health:'up-to-date'}],notOffered:[],problems:[]}]};
+  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'acme/a'})).toMatchObject({ok:true,value:{installed:true,path:'/skills/relocated',version:'1234567890ab',version_full:'1234567890abcdef'.repeat(2)+'12345678'}});
+});
+it('keeps a null tracking version and a missing placement folder honest',async()=>{
+ const f=statusReplay(false,(frame,verb)=>{
+  const value=frame.value as {ledger?:{placements:Record<string,unknown>[]};local?:{rows:Record<string,unknown>[];problems:{path:string;reason:string}[]}[]};
+  if(verb==='status')value.ledger!.placements[0]!.version=null;
+  else{const row=value.local![0]!.rows.shift()!;value.local![0]!.problems.push({path:row.path as string,reason:'placement recorded in the ledger but the folder is missing'});}
+ });
+ const settings=await createTauriBackend(f.bridge).settings();
+ expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'11111111-1111-4111-8111-111111111111','Global',null,'—','folder missing']]);
+ expect(settings.value?.PINNED_N).toBe(0);
+ const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'unrelated',tracked:true,shared:[],placement:{id:'id-a',team:'acme',version:null},health:'unknown',problem:'symbolic link'}],notOffered:[],problems:[]}]};
+ expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a'})).toMatchObject({ok:true,value:{installed:true,version:'—',version_full:null}});
+});
+it('rejects undeclared local row keys and missing typed provenance',async()=>{
+  for(const extra of [{sharedState:'in-sync'}, {placement:undefined}]) {
+    const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'x',tracked:true,shared:[],placement:null,health:'unknown',...extra}],notOffered:[],problems:[]}]};
+    expect((await createTauriBackend(inventoryBridge({local}).bridge).library({scope:'installed',team:'acme'})).ok).toBe(false);
+  }
 });
