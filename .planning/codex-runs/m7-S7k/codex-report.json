@@ -1,0 +1,78 @@
+{
+  "status": "partial",
+  "summary": "Implemented the offline status read model, real desktop status/Settings surfaces, partial-error rendering, and recorded replay coverage. Build, lint, typechecks and full test suites passed with four CLI test workers; the mandated Account copy conflicts with mock pixel neutrality and remains unresolved.",
+  "filesChanged": [
+    {"path":"src/commands/status.ts","change":"modified","why":"Returns pending work, timestamps, policy, categories, paths, join instructions, ledger, identity and tools."},
+    {"path":"src/lib/hook.ts","change":"modified","why":"Adds stampedAt using unmodified stamp mtime."},
+    {"path":"src/lib/auth.ts","change":"modified","why":"Adds git presence and presence-only gh probing."},
+    {"path":"src/commands/invite.ts","change":"modified","why":"Extracts joinLines while preserving invite output."},
+    {"path":"src/commands/sync.ts","change":"modified","why":"Exports the unchanged approved predicate."},
+    {"path":"src/__tests__/cli.test.ts","change":"modified","why":"Updates the typed status stub."},
+    {"path":"src/commands/__tests__/status.test.ts","change":"modified","why":"Covers new fields, damaged clones, read-only behavior and failure returns."},
+    {"path":"src/commands/__tests__/invite.test.ts","change":"modified","why":"Checks join-block byte preservation."},
+    {"path":"src/commands/__tests__/sync.test.ts","change":"modified","why":"Checks exported approval semantics."},
+    {"path":"src/lib/__tests__/auth.test.ts","change":"modified","why":"Checks executable presence without authentication probes."},
+    {"path":"src/lib/__tests__/hook.test.ts","change":"modified","why":"Checks missing, future and erroneous stamp reads."},
+    {"path":"src/lib/__tests__/invocation-catalog.ts","change":"modified","why":"Updates the exact source-literal entry after extracting joinLines."},
+    {"path":"desktop/src/backend/types.ts","change":"modified","why":"Defines nullable status fields and widened Settings DTOs."},
+    {"path":"desktop/src/backend/tauri/index.ts","change":"modified","why":"Validates CLI payloads, implements both read surfaces and preserves partial results."},
+    {"path":"desktop/src/backend/mock/index.ts","change":"modified","why":"Supplies new DTO fields while retaining fixture presentation values."},
+    {"path":"desktop/src/components/domain/Shell.tsx","change":"modified","why":"Retains partial status data and displays errors."},
+    {"path":"desktop/src/components/domain/Sidebar.tsx","change":"modified","why":"Passes identity to the footer."},
+    {"path":"desktop/src/components/domain/Footer.tsx","change":"modified","why":"Uses identity data with absent-value fallbacks."},
+    {"path":"desktop/src/screens/settings/SettingsScreen.tsx","change":"modified","why":"Removes catalog dependency and renders served data alongside errors."},
+    {"path":"desktop/src/screens/settings/SettingsContent.tsx","change":"modified","why":"Renders category strings, sync disclosures and tool presence."},
+    {"path":"desktop/src/screens/onboarding/OnboardingScreen.tsx","change":"modified","why":"Handles nullable team repositories."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","change":"modified","why":"Checks extended mock DTOs and fixture isolation."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","change":"modified","why":"Replays rebuilt CLI recordings and verifies approval comparisons and partial results."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","change":"modified","why":"Checks explicit rejection of older, incomplete status payloads."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","change":"modified","why":"Tests category strings, partial-error sync copy and tool presence."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"Adds required read-model paragraphs without changing section 12."},
+    {"path":".planning/decisions/2026-09-08-m7-takeover-decision-walk.md","change":"modified","why":"Adds the D7 category read contract and seventh-category correction."},
+    {"path":".planning/codex-runs/m7-S7k/fixture.sh","change":"added","why":"Records the supplied fixture setup with this worktree's CLI path."},
+    {"path":".planning/codex-runs/m7-S7k/frames/status.jsonl","change":"modified","why":"Records status from the rebuilt CLI."},
+    {"path":".planning/codex-runs/m7-S7k/frames/ls-local.jsonl","change":"added","why":"Records ls --local for adapter replay."},
+    {"path":".planning/codex-runs/m7-S7k/NOTES.md","change":"added","why":"Records verification history, required PR wording and unresolved forks."}
+  ],
+  "gates": {
+    "lint":{"ran":true,"passed":true,"output":"Root and desktop lint exited 0.","preExistingFailures":""},
+    "typecheck":{"ran":true,"passed":true,"output":"Root and desktop typecheck exited 0. Root build also exited 0.","preExistingFailures":""},
+    "test":{"ran":true,"passed":true,"output":"Final root full suite with --maxWorkers=4: 72 files, 1149 passed. Desktop: 45 files, 546 passed, 88 skipped. Earlier default root run: 1148 passed, 1 unchanged concurrency test failed; that test subsequently passed in isolation and in the four-worker full suite.","preExistingFailures":""}
+  },
+  "openQuestions": [
+    {"question":"Does the required Account presence-only copy override mock pixel neutrality?","specSection":"S7k §2 Screens","conservativeChoice":"Used presence-only labels in both backends without platform branching; confirmation remains pending."},
+    {"question":"How should status use ghState without its existing authentication probe?","specSection":"S7k §1 RM-22","conservativeChoice":"Added a presenceOnly option for status; existing authentication callers retain their behavior."},
+    {"question":"How should hostname map onto the existing machine.name DTO?","specSection":"S7k §2 AD-20","conservativeChoice":"Carries both fields; both remain empty in the real adapter pending S7r."},
+    {"question":"What should existing Settings presentation fields outside this batch carry?","specSection":"S7k §2 AD-24","conservativeChoice":"Retained mock values; real project names and the specimen are null, and unspecified presentation arrays remain empty."},
+    {"question":"Which maintainer-owned gap documentation should be updated?","specSection":"S7k §5 and standing constraints","conservativeChoice":"Left protected files unchanged. GAPS.md needs its S7k entry and shifted source anchors updated; the adapter README's status/settings blanket gaps are obsolete."}
+  ],
+  "deviations": [
+    {"what":"Absolute mock pixel neutrality is not satisfied for Account copy.","why":"The same spec requires replacing its signed-in claim with presence-only labels. No fidelity gate was permitted."},
+    {"what":"Final root full-suite verification used --maxWorkers=4.","why":"A default-concurrency rerun exhausted the unchanged eight-writer test's deadline. Its writers, assertions and deadline were preserved."},
+    {"what":"Terum MCP decision preflight was unavailable.","why":"No decision tools were exposed; implementation followed the locked supplied spec and local governing documents."}
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Native capabilities remain behind the backend seam; CLI tool probes use Runner."},
+    {"number":2,"howSatisfied":"Flipped only status/settings surfaces; protected maintainer files remain unchanged."},
+    {"number":3,"howSatisfied":"Generated design.json and tokens.css were verified unchanged."},
+    {"number":4,"howSatisfied":"No fidelity assets, tolerances or masks changed; no Playwright ran."},
+    {"number":5,"howSatisfied":"Preserved CSS, fonts, icons and chip geometry; the Account copy conflict is explicitly reported."},
+    {"number":7,"howSatisfied":"Retained test coverage and exact assertions, declaring every existing test change; partial failures remain visible."},
+    {"number":8,"howSatisfied":"Ran required gates, read edits back, and performed no installs, network operations, working-repository git operations, commits or pushes."}
+  ],
+  "testsModified": [
+    {"path":"src/__tests__/cli.test.ts","whatChanged":"Extended status stub.","justification":"Matches required StatusResult fields."},
+    {"path":"src/commands/__tests__/status.test.ts","whatChanged":"Extended exact result/probe expectations and added cases.","justification":"New offline probes and payload fields are required; printed-output assertions remain intact."},
+    {"path":"src/commands/__tests__/invite.test.ts","whatChanged":"Added join-line equivalence test.","justification":"Protects portable invite output."},
+    {"path":"src/commands/__tests__/sync.test.ts","whatChanged":"Added exported-predicate test.","justification":"Verifies unchanged consent semantics."},
+    {"path":"src/lib/__tests__/auth.test.ts","whatChanged":"Added presence-probe cases.","justification":"Verifies exit codes, spawn failures and absence of authentication probing."},
+    {"path":"src/lib/__tests__/hook.test.ts","whatChanged":"Added stamp accessor cases.","justification":"Verifies verbatim mtime and error behavior."},
+    {"path":"src/lib/__tests__/invocation-catalog.ts","whatChanged":"Removed .join suffix from one exact catalog pattern.","justification":"Joining moved into slackBlock; command bytes and exemption scope are unchanged."},
+    {"path":"desktop/src/backend/__tests__/mock.test.ts","whatChanged":"Extended exact DTO expectations.","justification":"Checks new fields while preserving existing fixture and isolation assertions."},
+    {"path":"desktop/src/backend/tauri/__tests__/index.test.ts","whatChanged":"Updated served-surface expectations and added replay cases.","justification":"Status/settings are now implemented; remaining gap assertions are retained."},
+    {"path":"desktop/src/backend/tauri/__tests__/replay.test.ts","whatChanged":"Replaced obsolete status-gap expectation with older-schema rejection.","justification":"Preserves generic replay coverage and verifies honest failure for missing required fields."},
+    {"path":"desktop/src/screens/settings/settings.test.tsx","whatChanged":"Added three screen cases.","justification":"Verifies category strings, partial-error sync disclosures and presence-only Account copy."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "The default-run concurrency failure was caused by contention: isolated and four-worker runs passed, but no pre-change baseline established its cause."
+}

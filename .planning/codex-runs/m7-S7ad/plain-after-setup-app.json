@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "node": "/opt/homebrew/Cellar/node/25.8.2/bin/node",
+  "entry": "/Users/ryanliu/Documents/Terum/terum-codex/m7-S7ad/dist/index.js",
+  "path": "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/opt/pmk/env/global/bin:/Users/ryanliu/.cargo/bin:/opt/homebrew/Caskroom/codex/0.153.4/codex-path:/Users/ryanliu/.codex/tmp/arg0/codex-arg0Nn1A4s:/Users/ryanliu/.local/bin:/Users/ryanliu/.claude/plugins/cache/claude-plugins-official/context7/85cce0381e78/bin:/Users/ryanliu/.claude/plugins/cache/claude-plugins-official/playwright/85cce0381e78/bin:/Users/ryanliu/.claude/plugins/cache/claude-plugins-official/typescript-lsp/1.0.0/bin:/Users/ryanliu/.claude/plugins/cache/claude-plugins-official/chrome-devtools-mcp/1.8.0/bin",
+  "version": "0.1.6",
+  "writtenAt": "2026-09-08T23:47:14.273Z"
+}

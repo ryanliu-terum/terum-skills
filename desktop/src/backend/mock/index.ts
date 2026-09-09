@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FEATURE_KEYS } from '../types';
-import type { Features, FullSettings, ReadOptions } from '../types';
+import type { Features } from '../types';
 import { decodeText } from '../../lib/fixture-text';
 import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
@@ -16,8 +16,7 @@ const fatal=decodeText(design.ONBOARD_FETCH_ERROR);
 const errors={library:"EACCES: permission denied, scandir '~/.terum/skills'",settings:"Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)",inbox:fatal,marketplace:"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com",share:"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'",skill:(ref:string)=>`ENOENT: no such file or directory, open '~/.claude/skills/${ref}/SKILL.md'`,onboarding:design.ONBOARD_FETCH_ERROR.replaceAll("&#39;", "'")};
 const ok=<T>(value:T):Result<T>=>({ok:true,value});
 const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeText(error),'')});
-type MockBackend = Omit<Backend, 'settings'> & { settings(q?: undefined, options?: ReadOptions): Promise<Result<FullSettings>> };
-export function createMockBackend(opts:{latencyMs?:number}={}):MockBackend {
+export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
  const latency=opts.latencyMs??0;
  if(!Number.isFinite(latency)||latency<0)throw new Error('latencyMs must be a finite nonnegative number.');
  async function read<T>(family:keyof typeof errors,get:(scenario:ReturnType<typeof readScenario>)=>Result<T>,ref=''):Promise<Result<T>>{
@@ -47,15 +46,16 @@ export function createMockBackend(opts:{latencyMs?:number}={}):MockBackend {
    if(await ctx.ask('confirm',`Connect ${name}?`)){batch.shared.push({id:name,name});ctx.print(`Connected ${name}.`);}else batch.declined.push(name);
   }
  }
- const backend:MockBackend = {
+ const backend:Backend = {
+  async launchTarget(){return null;},
   async features(){return Object.fromEntries(FEATURE_KEYS.map(key=>[key,true])) as Features;},
   async windowAction(){return ok(undefined);},
   async openUrl(url){try{window.open(url,'_blank','noopener');return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:String(error));}},
   async revealPath(){return ok(undefined);},
   async capabilities(){return {windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
   async surfaces(){return {status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true};},
-  async status(){return structuredClone(ok({machine:design.MACHINE,me:design.ME,teams:design.TEAMS,counts:statusCounts(location.hash,readScenario())}));},
-  settings:()=>read('settings',()=>ok({MACHINE:design.MACHINE,ME:design.ME,TEAMS:design.TEAMS,TEAM_POLICY:design.TEAM_POLICY,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,SHARED:design.SHARED,LOCAL_UNSHARED:design.LOCAL_UNSHARED,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN})),
+  async status(){return structuredClone(ok({machine:{...design.MACHINE,hostname:design.MACHINE.name},me:{...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login},teams:mockTeams(),tools:{git:true,gh:true},projects:sidebarProjects(),counts:statusCounts(location.hash,readScenario())}));},
+  settings:()=>read('settings',()=>ok({MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:{...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login},TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,SHARED:design.SHARED,LOCAL_UNSHARED:design.LOCAL_UNSHARED,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN})),
   onboarding:async()=>{const result=await read('onboarding',()=>ok(onboardingData()));return result.ok?result:{...result,value:onboardingData()};},
   library:({scope})=>read('library',scenario=>{const scopes:Record<string,readonly string[]>=design.LIST_OF;const canonical=['Global','Terum','SSM','MRF'].find(s=>s.toLowerCase()===scope.toLowerCase())??scope;const skills=scenario==='empty'?[]:canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.project!=='local'&&scopes[skill.name]?.includes(canonical));return ok({skills:skills.map(s=>({...cardOf(s),enabled:backend.prefs.get('enabled:'+s.name,s.enabled??true),favorite:backend.prefs.get('favorite:'+s.name,s.favorite??false)})),overview:design.LIBRARY_OVERVIEW,title:scenario==='empty'?'0 skills':`${skills.length} of ${library_title(canonical)}`});}),
   skill:({ref})=>read('skill',scenario=>{if(scenario==='not-installed'&&ref==='deploy-check')return ok(detailOf(design.DETAIL_NOT_INSTALLED));const result=skillByRef(ref);return result.ok?ok({...result.value,enabled:scenario==='disabled'?false:backend.prefs.get('enabled:'+ref,result.value.enabled),favorite:backend.prefs.get('favorite:'+ref,result.value.favorite)}):result;},ref),
@@ -84,3 +84,6 @@ export function createMockBackend(opts:{latencyMs?:number}={}):MockBackend {
  };
  return backend;
 }
+
+function sidebarProjects(){return Object.keys(design.COUNTS).filter(key=>!['Global','Pushes','Updates','Alerts'].includes(key));}
+function mockTeams(){return design.TEAMS.map(team=>({...team,policy:design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),pending:[],joinCommand:null,joinBlock:null}));}

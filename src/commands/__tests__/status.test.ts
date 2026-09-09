@@ -1,9 +1,10 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { stampPath } from '../../lib/hook.js';
 import { bareTeam, cloneWithIdentity, git, mappedRunner, person, ScriptedPrompter, TEAM_JSON, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { slackBlock } from '../invite.js';
 import { run, StatusArgs } from '../status.js';
 
 const REMOTE = 'github.com/acme/team';
@@ -41,7 +42,7 @@ async function query(f: Awaited<ReturnType<typeof fixture>>, args: Partial<Statu
     expect(await git(['rev-parse', 'HEAD'], clone)).toBe(heads[index]);
     expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
   }
-  expect(f.runner.calls.map(({ command, args, cwd }) => ({ command, args, cwd }))).toEqual(probes.map((cwd) => ({ command: 'git', args: ['remote', 'get-url', 'origin'], cwd })));
+  expect(f.runner.calls.map(({ command, args, cwd }) => ({ command, args, cwd }))).toEqual([{ command: 'git', args: ['--version'], cwd: undefined }, { command: 'gh', args: ['--version'], cwd: undefined }, ...probes.map((cwd) => ({ command: 'git', args: ['remote', 'get-url', 'origin'], cwd }))]);
   return { result, io };
 }
 
@@ -99,7 +100,7 @@ describe('status (offline local team summary)', () => {
     const { result, io } = await query(f, { team }, [f.clone], []);
     if (team) { expect(result).toMatchObject({ ok: false, error: 'Team nope is not configured.' }); expect(io.lines).toHaveLength(1); }
     else {
-      expect(result).toEqual({ ok: true, value: { version, teams: [] } });
+      expect(result).toEqual({ ok: true, value: { version, teams: [], ledger: { placements: [], approvals: [], shared: [] }, identity: null, tools: { git: true, gh: false } } });
       expect(io.lines.slice(1)).toEqual(['No team is configured on this machine.', '  Create a team: npx -y terum-skills@latest setup', '  Join a team:   npx -y terum-skills@latest setup <org>/<repo>']);
     }
   });
@@ -168,4 +169,59 @@ describe('status (offline local team summary)', () => {
     if (directory === 'skills') expect(io.lines).toContain('  Members: 1');
     expect(io.lines.at(-1)).toMatch(/^  Team details could not be read: /);
   });
+});
+
+
+it.each(['missing', 'incomplete', 'foreign'] as const)('returns pending and the recorded stamp even with a %s clone', async state => {
+  const f = await fixture();
+  const id = '11111111-1111-4111-8111-111111111111', version = 'a'.repeat(40), started = '2026-09-01T00:00:00.000Z';
+  await f.store.update(config => { config.pending = [{ op: 'install', id, team: 'acme', scope: { kind: 'global' }, version, started }, { op: 'uninstall', id, team: 'other', scope: { kind: 'global' }, started }]; });
+  await mkdir(join(f.store.root, 'run'));
+  await writeFile(stampPath(f.store.root, 'acme'), 'ignored');
+  await utimes(stampPath(f.store.root, 'acme'), new Date(started), new Date(started));
+  await rm(f.clone, { recursive: true });
+  if (state === 'incomplete') await mkdir(f.clone);
+  if (state === 'foreign') { const other = await bareTeam(); await cloneWithIdentity(other.bare, f.clone); }
+  const { result } = await query(f, {}, state === 'foreign' ? [f.clone] : [], state === 'missing' ? [] : [f.clone]);
+  expect(result.value?.teams[0]).toMatchObject({ clonePath: f.clone, syncedAt: started, policy: null, categories: null, pending: [{ op: 'install', id, scope: { kind: 'global' }, version, started }] });
+  expect(result.value?.teams[0]?.pending[0]).not.toHaveProperty('team');
+});
+it('returns policy, categories, the join block, and an empty pending list without new print lines', async () => {
+  const f = await fixture();
+  const { result, io } = await query(f);
+  expect(result.value?.teams[0]).toMatchObject({ pending: [], syncedAt: null, clonePath: f.clone, policy: TEAM_JSON.policy, categories: TEAM_JSON.categories, joinCommand: 'npx -y terum-skills@latest setup acme/team' });
+  expect(result.value?.teams[0]?.joinBlock?.join('\n')).toBe(slackBlock('acme/team'));
+  expect(io.lines.join('\n')).not.toMatch(/Policy:|Categories:|Pending:|Synced at:/);
+});
+it('keeps policy and categories null when team.json cannot be read', async () => {
+  const f = await fixture(); await writeFile(join(f.clone, 'team.json'), '{'); await commit(f.clone);
+  const { result } = await query(f);
+  expect(result.ok).toBe(false);
+  expect(result.value?.teams[0]).toMatchObject({ policy: null, categories: null });
+});
+it('keeps generic git join instructions null', async () => {
+  const f = await fixture();
+  await f.store.update(config => { config.teams.acme!.remote = 'gitlab.com/acme/team'; });
+  const { result } = await query(f);
+  expect(result.value?.teams[0]).toMatchObject({ joinCommand: null, joinBlock: null });
+});
+it('returns the full machine ledger and identity before a missing --team fails', async () => {
+  const f = await fixture(), id = '11111111-1111-4111-8111-111111111111';
+  const placement = { id, team: 'other', version: 'b'.repeat(40), scope: { kind: 'project' as const, project: 'ops', ignored: 'extra' }, placed_at: '2026-09-01' };
+  await f.store.update(config => {
+    config.placements['/placed'] = { ...placement, fingerprint: 'private' };
+    config.shared[id] = { source: '/source', team: 'other', baseline: 'private' };
+    config.approvals[id] = { grants: 'hash', approved_at: '2026-09-02' };
+    config.default_handle = 'seed'; config.github = '';
+  });
+  const { result } = await query(f, { team: 'missing' }, [f.clone], []);
+  expect(result.ok).toBe(false);
+  expect(result.value?.identity).toEqual({ default_handle: 'seed', github: '', email: null, display_name: null });
+  expect(result.value?.ledger).toEqual({ placements: [{ ...placement, path: '/placed', scope: { kind: 'project', project: 'ops' } }], shared: [{ id, source: '/source', team: 'other' }], approvals: [{ id, grants: 'hash', approved_at: '2026-09-02' }] });
+});
+it('carries an explicit null version for an unpinned pending operation', async () => {
+  const f = await fixture();
+  await f.store.update(config => { config.pending.push({ op: 'uninstall', id: '11111111-1111-4111-8111-111111111111', team: 'acme', scope: { kind: 'global' }, started: '2026-09-01' }); });
+  const { result } = await query(f);
+  expect(JSON.parse(JSON.stringify(result.value)).teams[0].pending[0].version).toBeNull();
 });

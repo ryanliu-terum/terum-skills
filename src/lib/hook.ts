@@ -155,6 +155,12 @@ export const LOCK_STALE_MS = 10 * 60_000;
 export interface TeamLockOptions { now?: () => number; host?: string; pidAlive?: (pid: number) => boolean; }
 
 export function stampPath(storeRoot: string, team: string): string { return join(storeRoot, 'run', `${team}.stamp`); }
+/** The recorded filesystem timestamp, without freshness or clock-skew correction. */
+export async function stampedAt(storeRoot: string, team: string): Promise<string | null> {
+  try { return new Date((await stat(stampPath(storeRoot, team))).mtimeMs).toISOString(); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+}
+
 export function lockPath(storeRoot: string, team: string): string { return join(storeRoot, 'run', `${team}.lock`); }
 
 /**

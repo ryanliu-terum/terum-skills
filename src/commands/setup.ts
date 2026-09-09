@@ -108,7 +108,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       steps.app = 'skipped';
     } else {
       const wanted = args.app === true || (await store.read()).app?.choice === 'opted-in';
-      const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, offer: !wanted }, io);
+      const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, target: args.target, offer: !wanted }, io);
       if (opened.ok && (opened.value.action === 'launched' || opened.value.action === 'installed-and-launched')) {
         io.print(args.target === undefined ? 'Continuing in the app.' : `Continuing in the app. Join ${args.target} there.`);
         steps.app = 'done';

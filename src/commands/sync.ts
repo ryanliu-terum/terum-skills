@@ -361,7 +361,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
   finally { for (const release of releases) await release().catch(() => undefined); }
 }
 
-function approved(config: Awaited<ReturnType<ConfigStore['read']>>, id: string, grants: ReturnType<typeof allowedTools>): boolean {
+export function approved(config: Awaited<ReturnType<ConfigStore['read']>>, id: string, grants: ReturnType<typeof allowedTools>): boolean {
   return grants.ok && (grants.normalized === 'none' || config.approvals[id]?.grants === grants.hash);
 }
 async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, defer: (team: string, label: string) => void, notice: (line: string) => void, skipTeams: ReadonlySet<string>, record: (team: string, path: string, kind: 'adopted' | 'declined') => void): Promise<void> {

@@ -1,4 +1,3 @@
-import { LocalSettingsContent } from './LocalSettingsContent';
 import { useParams, useSearchParams, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useBackend } from '../../backend';
@@ -16,21 +15,17 @@ import './settings.css';
 
 export function SettingsScreen(){
   const params=useParams(),state=useUrlState(),backend=useBackend(),action=useWorkflow(),navigate=useNavigate(),[search]=useSearchParams();
-  const requestedSection=settingsSections.find(([key])=>key===params.section)?.[0]??'account';
+  const section=settingsSections.find(([key])=>key===params.section)?.[0]??'account';
   const query=useQuery({queryKey:['settings',state.mock],queryFn:({signal})=>backend.settings(undefined,{signal})});
-  const data=query.data?.ok?query.data.value:undefined;
-  const local=data && 'kind' in data ? data : undefined;
-  const section=local && requestedSection!=='sharing' ? 'machine' : requestedSection;
-  const status=useQuery({queryKey:['status',state.mock],queryFn:({signal})=>backend.status(undefined,{signal}),enabled:!local});
-  const catalog=useQuery({queryKey:['catalog',state.mock],queryFn:({signal})=>backend.catalog(undefined,{signal}),enabled:!local&&section==='teams'});
-  const identity=status.data?.ok?status.data.value:undefined;
-  const error=query.data?.ok===false?query.data.error:query.isError?query.error.message:!local&&status.data?.ok===false?status.data.error:!local&&status.isError?status.error.message:section==='teams'&&catalog.data?.ok===false?catalog.data.error:section==='teams'&&catalog.isError?catalog.error.message:null;
-  const loading=!data||(!local&&!identity)||(section==='teams'&&catalog.isPending);
-  const selected=error||state.mock==='loading'?'account':section;
-  return <Shell selected="Settings" counts={loading||error?null:undefined}><ScreenFrame ready={(!query.isPending||state.mock==='loading')&&(!!local||!status.isPending||!!error||state.mock==='loading')&&(section!=='teams'||!catalog.isPending||state.mock==='loading')}><WorkflowHeader title="Settings" icon="settings"/>
-    <div className="settings-body"><nav className="settings-nav" aria-label="Settings sections">{settingsSections.filter(([key])=>!local||key==='machine'||key==='sharing').map(([key,label,icon])=><a key={key} href={'#/settings/'+key+(search.size?'?'+search.toString():'')} aria-current={key===selected?'page':undefined} onClick={event=>{event.preventDefault();const next=new URLSearchParams(search);next.delete('dialog');navigate('/settings/'+key+(next.size?'?'+next.toString():''));}}><Icon name={icon} size={16}/><span>{label}</span></a>)}</nav>
-    <div className="settings-scroll"><div className={'settings-content'+(error?' wide':'')}>
-      {error?<CenteredState alert icon="alert" title="Couldn't read your settings" body="config.json in ~/.terum/skills is not valid JSON. terum-skills never rewrites a file it could not read, so nothing was lost: fix the file or move it aside, then try again." primary="Try again" secondary="Show in Finder" onPrimary={()=>{void query.refetch();void status.refetch();}} onSecondary={()=>void action.perform(()=>backend.revealPath('~/.terum/skills/config.json'))}><ErrorLine>{error}</ErrorLine></CenteredState>:loading?<SettingsLoading/>:local?<LocalSettingsContent data={local} section={section}/>:data&&!('kind' in data)&&identity?<SettingsContent key={section} section={section} data={data} status={identity} catalog={catalog.data?.ok?catalog.data.value:undefined}/>:null}
+  const status=useQuery({queryKey:['status',state.mock],queryFn:({signal})=>backend.status(undefined,{signal})});
+  const data=query.data?.value, identity=status.data?.value;
+  const error=query.data?.ok===false?query.data.error:query.isError?query.error.message:status.data?.ok===false?status.data.error:status.isError?status.error.message:null;
+  const loading=!data||!identity;
+  const selected=(error&&loading)||state.mock==='loading'?'account':section;
+  return <Shell selected="Settings" counts={loading?null:undefined}><ScreenFrame ready={(!query.isPending||state.mock==='loading')&&!status.isPending}><WorkflowHeader title="Settings" icon="settings"/>
+    <div className="settings-body"><nav className="settings-nav" aria-label="Settings sections">{settingsSections.map(([key,label,icon])=><a key={key} href={'#/settings/'+key+(search.size?'?'+search.toString():'')} aria-current={key===selected?'page':undefined} onClick={event=>{event.preventDefault();const next=new URLSearchParams(search);next.delete('dialog');navigate('/settings/'+key+(next.size?'?'+next.toString():''));}}><Icon name={icon} size={16}/><span>{label}</span></a>)}</nav>
+    <div className="settings-scroll"><div className={'settings-content'+(error&&loading?' wide':'')}>
+      {error&&loading?<CenteredState alert icon="alert" title="Couldn't read your settings" body="config.json in ~/.terum/skills is not valid JSON. terum-skills never rewrites a file it could not read, so nothing was lost: fix the file or move it aside, then try again." primary="Try again" secondary="Show in Finder" onPrimary={()=>{void query.refetch();void status.refetch();}} onSecondary={()=>void action.perform(()=>backend.revealPath('~/.terum/skills/config.json'))}><ErrorLine>{error}</ErrorLine></CenteredState>:loading?<SettingsLoading/>:<>{error&&<ErrorLine>{error}</ErrorLine>}<SettingsContent key={section} section={section} data={data} status={identity}/></>}
       {action.error&&<div role="alert" className="settings-action-error">{action.error}</div>}
     </div></div></div>
   </ScreenFrame></Shell>;

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Bridge } from '../bridge';
 import type { Backend } from '../../Backend';
@@ -80,11 +82,11 @@ it.each([true, false])('maps every search field including its real description (
   expect(result).toEqual({ ok: true, value: [{ kind: 'skill', ref: metadata ? 'acme/a' : 'a', name: 'a', description: 'Real description', team: metadata ? 'acme' : null, author: hit.author, category: 'ops', installs: 0, latest: 'abc', unresolved: false, endorsed: metadata ? 'global' : null }] });
 });
 
-it('serves library, skill and local settings while the remaining seven surfaces stay typed gaps', async () => {
+it('serves status, settings, library and skill while the other six surfaces stay typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ status: false, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: false, roster: false, update: false });
-  for (const result of await Promise.all([b.status(), b.onboarding(), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox(), b.catalog(), b.roster(), b.update()])) {
+  expect(await b.surfaces()).toEqual({ status: true, settings: true, onboarding: false, library: true, skill: true, receipts: false, inbox: false, catalog: false, roster: false, update: false });
+  for (const result of await Promise.all([b.onboarding(), b.receipts({ skillId: 'a', version: 'abc' }), b.inbox(), b.catalog(), b.roster(), b.update()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }
   expect(f.spawns).toHaveLength(0);
@@ -132,7 +134,7 @@ describe('read-only calls preserve spawn rejection', () => {
       spawn,
       write: vi.fn<Bridge['write']>(),
       kill: vi.fn<Bridge['kill']>(),
-      readAppState: async () => ({ schema: 1, node: '/usr/local/bin/node', entry: '/cli/index.js', version: '0.1.6' }),
+      readAppState: async () => ({ schema: 1, node: '/usr/local/bin/node', entry: '/cli/index.js', version: '0.1.6', writtenAt: '2026-09-08T00:00:00Z' }),
       hostPlatform: async () => 'macos',
       homeDirectory: async () => '/Users/teddy',
     };
@@ -145,6 +147,57 @@ describe('read-only calls preserve spawn rejection', () => {
   });
 });
 
+
+const framesDirectory=resolve('../.planning/codex-runs/m7-S7g/frames');
+function statusReplay(failed=false, change?:(frame:Record<string,unknown>,verb:string)=>void){
+ return fakeBridge((args,emit)=>{
+  const name=args[0]==='status'?'status':'ls-local';
+  for(const line of readFileSync(resolve(framesDirectory,name+'.jsonl'),'utf8').trim().split('\n')){
+   const frame=JSON.parse(line) as Record<string,unknown>;
+   if(frame.t==='result'){
+    if(failed&&name==='status')Object.assign(frame,{ok:false,exitCode:1,error:'Unreadable team clone.'});
+    change?.(frame,name);
+   }
+   emit({kind:'stdout',line:JSON.stringify(frame)});
+  }
+ });
+}
+it.each([false,true])('serves recorded status and settings with real team data (partial failure=%s)',async failed=>{
+ const f=statusReplay(failed),backend=createTauriBackend(f.bridge);
+ const status=await backend.status(),settings=await backend.settings();
+ expect(status.ok).toBe(!failed);expect(settings.ok).toBe(!failed);
+ expect(status.value).toMatchObject({machine:{os:'macos',hostname:'',gh_login:''},me:{handle:'seed',name:'Seed',email:'seed@example.com'},counts:{Global:'1'},teams:[{name:'acme',key:'acme',handle:'seed',remote:'https://github.com/acme/team',members:3,skills:3,policy:{publish:'Pull request',license:'UNLICENSED'},categories:['ops','engineering','debugging'],pending:[],last_sync:null,stamp:null}]});
+ expect(Object.keys(status.value?.counts??{})).toEqual(['Global']);
+ expect(status.value?.teams[0]?.clone).toContain('/fx/home/.terum/skills/teams/acme');
+ expect(status.value?.teams[0]?.joinBlock?.join('\n')).toContain('npx -y terum-skills@latest setup acme/team');
+ expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,PINNED_N:1,APPROVALS:[],QUARANTINE:[],HOOK:{installed:false},AGENT_CLI:'—',CLI_LATEST:'—'});
+ expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'—','up to date']);
+ expect(settings.value?.SHARED[0]).toEqual(['22222222-2222-4222-8222-222222222222',expect.stringContaining('/skills/tdd'),'acme','—']);
+ expect(status.value?.tools).toEqual(settings.value?.tools);
+ expect(status.value?.tools.git).toBe(true);
+ if(failed){expect(status).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});expect(settings).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});}
+ expect(f.spawns.map(s=>s.args)).toEqual([['status'],['ls','--local'],['status'],['ls','--local']]);expect(f.writes).toEqual([]);
+});
+it.each([null,'old','current'])('only displays approvals joined to current grants (hash=%s)',async hash=>{
+ const f=statusReplay(false,(frame,verb)=>{
+  const value=frame.value as {ledger?:{approvals:unknown[]};skills?:Record<string,unknown>[]};
+  if(verb==='status')value.ledger!.approvals=[{id:'skill-id',grants:'current',approved_at:'2026-09-01'}];
+  else value.skills=[{id:'skill-id',name:'deploy-check',grantsHash:hash,grants:'Bash\nRead'}];
+ });
+ const result=await createTauriBackend(f.bridge).settings();
+ expect(result.ok).toBe(true);
+ expect(result.value?.APPROVALS).toEqual(hash==='current'?[['deploy-check',['Bash','Read'],'2026-09-01']]:[]);
+});
+it('preserves a future stamp and null fields from an unreadable clone',async()=>{
+ const stamp='2099-01-01T00:00:00.000Z';
+ const f=statusReplay(true,(frame,verb)=>{
+  if(verb!=='status')return;
+  const value=frame.value as {teams:Record<string,unknown>[]};
+  Object.assign(value.teams[0]!,{clone:{state:'absent'},readable:false,memberCount:null,sharedSkills:null,policy:null,categories:null,syncedAt:stamp});
+ });
+ const result=await createTauriBackend(f.bridge).status();
+ expect(result.value?.teams[0]).toMatchObject({stamp,last_sync:stamp,members:null,skills:null,policy:null,categories:null});
+});
 
 const lsRow = { id: 'id-a', name: 'a', description: 'Live description', author: 'Mira Chen <mira@example.com>', category: 'ops', installs: 1, latest: 'abcd1234', endorsement: 'global', unresolved: false, grants: 'Bash\nRead', grantsHash: 'sha256:real', updated: '2026-08-20T00:00:00Z', body: '# Live body\n', installedBy: [{ handle: 'mira', displayName: 'Mira Chen', scope: {kind:'global'}, since: '2026-08-01' }, { handle: 'mira', displayName: 'Mira Chen', scope: {kind:'project',project:'ops'}, since: '2026-08-02' }] };
 const lsValue = { roster: [{handle:'mira',active:true}], skills: [lsRow], projects: [{ name:'ops',skills:['id-a'],remotes:[],description:'Hand maintained' },{name:'empty',skills:[],remotes:[]}], problems: [] };
@@ -187,26 +240,37 @@ it('does not turn unreadable validation into a passing caption',async()=>{
 });
 
 
+// S7g: the placement state is the board's own vocabulary (design fixture PLACEMENTS), keyed by the CLI's typed health, never by the prose.
 const healthCases = [
-  ['up-to-date','In sync'], ['update-available','Update available'], ['local-changed','Edited here'],
-  ['both','Edited here · update available'], ['gone-from-repo','Removed from the team'], ['unknown','—'], ['untracked','—'],
+  ['up-to-date','up to date'], ['update-available','update available'], ['local-changed','edited locally'],
+  ['both','edited locally · update available'], ['gone-from-repo','removed from the team'], ['unknown','—'], ['untracked','—'],
 ] as const;
-it.each(healthCases)('maps local health %s into Settings without reading the prose',async(health,state)=>{
-  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'relocated',path:'/skills/relocated',state:'arbitrary prose',tracked:true,shared:[{id:'shared-id',team:'other'}],placement:{id:'id-a',team:'acme',version:'1234567890abcdef'.repeat(2)+'12345678'},health}],notOffered:[],problems:[]}]};
-  const f=inventoryBridge({local}), backend=createTauriBackend(f.bridge);
-  expect(await backend.settings()).toMatchObject({ok:true,value:{kind:'local',CLI_VERSION:'0.1.6',PLACEMENTS:[{id:'id-a',name:'relocated',path:'/skills/relocated',team:'acme',version:'1234567890ab',state,placed:'—'}],SHARED:[{id:'shared-id',name:'relocated',path:'/skills/relocated',team:'other',state:'—'}]}});
-  expect(f.spawns.map(s=>s.args)).toEqual([['status'],['ls','--local']]);
-  expect(await backend.skill({ref:'acme/a'})).toMatchObject({ok:true,value:{installed:true,path:'/skills/relocated',version:'1234567890ab',version_full:'1234567890abcdef'.repeat(2)+'12345678'}});
+it.each(healthCases)('maps local health %s onto the drawn placement state without reading the prose',async(health,state)=>{
+ const f=statusReplay(false,(frame,verb)=>{if(verb!=='ls-local')return;const value=frame.value as {local:{rows:Record<string,unknown>[]}[]};Object.assign(value.local[0]!.rows[0]!,{health,state:'arbitrary prose'});});
+ const settings=await createTauriBackend(f.bridge).settings();
+ expect(settings.ok).toBe(true);
+ expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'—',state]]);
+ expect(settings.value?.PINNED_N).toBe(1);
 });
-it('keeps null tracking versions and missing placements honest, and retains inspection problems',async()=>{
-  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'unrelated',tracked:true,shared:[],placement:{id:'id-a',team:'acme',version:null},health:'unknown',problem:'symbolic link'},{name:'source',path:'/skills/source',state:'placement recorded from acme @fake',tracked:false,shared:[],placement:null,health:'untracked'}],notOffered:[],problems:[{path:'/skills/gone',reason:'placement recorded in the ledger but the folder is missing'}]}]};
-  const backend=createTauriBackend(inventoryBridge({local}).bridge);
-  expect(await backend.settings()).toMatchObject({ok:true,value:{PLACEMENTS:[{id:'id-a',version:'—',placed:'—',state:'—'}],SHARED:[],problems:[{path:'/skills/gone',reason:'placement recorded in the ledger but the folder is missing'},{path:'/skills/a',reason:'symbolic link'}]}});
-  expect(await backend.skill({ref:'a'})).toMatchObject({ok:true,value:{installed:true,version:'—',version_full:null}});
+it('joins Skill provenance by ledger team and id (a relocated folder), never by name or prose',async()=>{
+  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'relocated',path:'/skills/relocated',state:'arbitrary prose',tracked:true,shared:[{id:'shared-id',team:'other'}],placement:{id:'id-a',team:'acme',version:'1234567890abcdef'.repeat(2)+'12345678'},health:'up-to-date'}],notOffered:[],problems:[]}]};
+  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'acme/a'})).toMatchObject({ok:true,value:{installed:true,path:'/skills/relocated',version:'1234567890ab',version_full:'1234567890abcdef'.repeat(2)+'12345678'}});
+});
+it('keeps a null tracking version and a missing placement folder honest',async()=>{
+ const f=statusReplay(false,(frame,verb)=>{
+  const value=frame.value as {ledger?:{placements:Record<string,unknown>[]};local?:{rows:Record<string,unknown>[];problems:{path:string;reason:string}[]}[]};
+  if(verb==='status')value.ledger!.placements[0]!.version=null;
+  else{const row=value.local![0]!.rows.shift()!;value.local![0]!.problems.push({path:row.path as string,reason:'placement recorded in the ledger but the folder is missing'});}
+ });
+ const settings=await createTauriBackend(f.bridge).settings();
+ expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'11111111-1111-4111-8111-111111111111','Global',null,'—','folder missing']]);
+ expect(settings.value?.PINNED_N).toBe(0);
+ const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'unrelated',tracked:true,shared:[],placement:{id:'id-a',team:'acme',version:null},health:'unknown',problem:'symbolic link'}],notOffered:[],problems:[]}]};
+ expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a'})).toMatchObject({ok:true,value:{installed:true,version:'—',version_full:null}});
 });
 it('rejects undeclared local row keys and missing typed provenance',async()=>{
   for(const extra of [{sharedState:'in-sync'}, {placement:undefined}]) {
     const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'x',tracked:true,shared:[],placement:null,health:'unknown',...extra}],notOffered:[],problems:[]}]};
-    expect((await createTauriBackend(inventoryBridge({local}).bridge).settings()).ok).toBe(false);
+    expect((await createTauriBackend(inventoryBridge({local}).bridge).library({scope:'installed',team:'acme'})).ok).toBe(false);
   }
 });
