@@ -51,13 +51,11 @@ it('preserves the project route key when the displayed title is capitalized', as
   expect(f.spawns.find(spawn => spawn.args[1] === 'project')?.args).toEqual(['ls', 'project', 'terum', '--team', 'acme']);
 });
 
-it('renders the real machine placement table and its supported sections without the unserved status dependency',async()=>{
+it('renders the real machine placement table from typed provenance, in the board\'s vocabulary',async()=>{
   open('#/settings/machine');
   const row=await screen.findByTestId('placement-row-0');
-  expect(row).toHaveTextContent('deploy-check');expect(row).toHaveTextContent('In sync');
-  expect(within(row).getByTitle('deploy-check · acme')).toBeVisible();
-  expect(within(screen.getByRole('navigation',{name:'Settings sections'})).getAllByRole('link')).toHaveLength(2);
-  expect(screen.queryByText('Tool approvals on this machine')).toBeNull();
-  expect(screen.queryByRole('button',{name:'Prune…'})).toBeNull();
+  expect(row).toHaveTextContent('deploy-check');expect(row).toHaveTextContent('up to date');
+  expect(row).not.toHaveTextContent('tracking');expect(row).not.toHaveTextContent('In sync');
+  expect(screen.getByText(/1 placed · 1 global · 1 pinned/)).toBeVisible();
   expect(screen.queryByRole('alert')).toBeNull();
 });
