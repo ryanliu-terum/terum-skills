@@ -1,0 +1,12 @@
+launch Wed Sep  9 02:30:34 UTC 2026 HOME=/Users/ryanliu
+app pid 4823
+t=1s children:  4876 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames ls --t|
+t=44s children:  5196 /Users/ryanliu/Documents/Terum/skill-management-software-wt-m7/dist/index.js --frames ls mem|
+t=45s app still up
+quit Wed Sep  9 02:31:21 UTC 2026
+const fs=require("fs");const [entry,out]=process.argv.slice(1);const prev=JSON.parse(fs.readFileSync(out,"utf8"));
+const state={schema:1,node:process.execPath,entry,path:process.env.PATH,version:"0.1.6",writtenAt:new Date().toISOString()};
+fs.writeFileSync(out,JSON.stringify(state,null,2)+"
+");console.log("wrote",out,"entry",entry,"(was",prev.entry,prev.version+")");
+app stderr lines:        0
+orphaned CLI children after quit: none (the only pgrep match was the driver's own shell)
