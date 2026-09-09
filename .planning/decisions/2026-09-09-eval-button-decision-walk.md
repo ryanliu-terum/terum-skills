@@ -6,6 +6,8 @@ status: complete
 deferred:
   - what: A determinate progress bar for in-app eval runs; the CLI emits no progress frames today, so the running state is lines plus a busy indicator (sub-fork of D1)
     gate: when the CLI's execution.ts emits io.progress frames and features.progress flips (S7ae)
+  - what: Card lift/verdict chip on the real adapter (D4) — the drawn Not-evaluated suggestion is invisible on cards until liftOnCards flips
+    gate: S7v ships the liftOnCards flip and estimate labelling
 ---
 
 # Eval button — Decision Walk
@@ -23,6 +25,7 @@ Ratified by Ryan 2026-09-09 (North Star).
 | 1 | §12 wording: which sentence governs the Eval button | LOCK | Ryan's D11 draft governs: the UI hands the run to the CLI through the Prompter over `--frames`. Driving the CLI is the standing 2026-09-08 rule for every verb and is not spawning an agent in-process (the CLI still spawns `claude`). PR #68 clause (b) is the terminal hand-off the North Star forbids; it is amended in review, not merged as written. The Eval batch ships the flag flip with a streaming WorkflowDialog and an adapter receipt reader. | — |
 | 2 | "Commit the receipt to the team" default in the run dialog | LOCK | Default on, with a visible checkbox. Matches the drawn command (`eval deploy-check --k 3 --commit`); the receipt is the shared unit of truth; the checkbox keeps the team-visible push visible before the click. | — |
 | 3 | Cost gate when no prior receipt exists to price from | LOCK | One dialog with an honest no-estimate line ("No previous run to estimate from. This uses your Claude account and can take a while."); yes runs it; Cancel and Stop stay available. No invented numbers, no second confirm, no fall-back to the terminal. | — |
+| 4 | Evals at install time | LOCK | Team receipt as the default (D) with the non-blocking suggestion (C). Receipts are committed per skill version and publish CI refuses an endorsed skill without one, so after #83 an installer sees the team's verdict with zero spend; the drawn "Not evaluated" chip and the Evals empty-state Run eval are the only nudge, and only when no receipt exists for the current version. No auto-run, no blocking prompt: the North Star forbids spending without a yes and §12 forbids the UI running evals itself. | — |
 
 ---
 
@@ -92,5 +95,31 @@ Ratified by Ryan 2026-09-09 (North Star).
 - **Migration / schema:** none.
 - **Effort / risk / blast radius:** one string; footnote only.
 - **Grounding findings:** `tauri/index.ts:73` sets `evalEstimate: null, evalEstimateText: '', evalEstimateTip: ''` on the real adapter; the eval verb has no API key of its own and relies on a logged-in `claude` on PATH, so the money is the person's.
+
+---
+
+## Decision 4 — Evals at install time
+
+**Verdict: LOCK**
+
+Context: raised by Ryan on 2026-09-09 ("should evals be auto suggested and ran upon installation?") and answered by the 0.1.7 gap audit of the same day.
+
+### Plain English
+- **What's at stake:** Whether installing a team skill should start an eval (tens of minutes of the member's own Claude budget, with no cost confirm in the CLI) or prompt for one. An eval is the most expensive thing the app can do with a person's money, and install is the moment they have thought least about it.
+- **Why it's a fork:** The North Star forbids spending without a yes, but a skill nobody has scored looks unfinished. Both halves pull: silence leaves the installer with an unscored skill; a nudge at install solicits a spend before the person knows whether the team already answered the question.
+- **Options:**
+  - **A — Auto-run after install.** *(decides it: every install spends the installer's Claude budget with no yes; §12 forbids the UI running evals itself; the run duplicates the team's shared receipt. Never.)*
+  - **B — Blocking "Run an eval now?" after install.** *(decides it: a dialog the canvas does not draw, soliciting a spend before the person sees the team's verdict.)*
+  - **C — Non-blocking suggestion only.** *(decides it: the drawn "Not evaluated" card chip, lit by S7v's `liftOnCards` flip, and the Evals tab empty state with Run eval, lit by #83; nothing runs, nothing blocks.)*
+  - **D — Team receipt as the default.** *(decides it: receipts are committed per skill version and publish CI refuses an endorsed skill without one; after #83 the app reads the receipt for the team's current version, so an installer sees the verdict with zero spend; suggest only when no receipt exists for the current version; when the receipt's model differs from the installer's, show provenance rather than a re-run nudge.)*
+- **Recommendation:** D with C. D means the common case costs the installer nothing: the publisher already had to produce a receipt to publish, so the verdict is there to read. C covers the gap where no receipt exists for the current version, and does it with the affordances the canvas already draws rather than a new dialog. A spends with no yes and B asks for one before the person has the information a yes needs.
+- **Zoom-out:** D satisfies both halves of the North Star: the installer does in the app what they would otherwise do in a terminal (see the score), and the app spends nothing on their behalf. A stronger nudge belongs with the publisher, who already needs a receipt to publish, not the installer.
+- **The call:** D with C, confirmed by Ryan 2026-09-09.
+
+### Technical
+- **Files / code paths:** eval-engine spec §12 as amended by D1 of this ledger governs (the UI drives the CLI over `--frames`; it never runs an eval itself, and never without the dialog's yes). Canvas `build.py:604-625` draws the card chip ("Not evaluated") and `:1430-1432` draws the Evals tab empty state with Run eval; both are the C suggestion and both already exist in the design. The `FRAME_FEATURES.liftOnCards` flip that makes the chip visible on the real adapter belongs to S7v; the Evals empty state lights when #83 lands the adapter receipt reader (D1). The receipt-check CI that makes D hold is on scaffolded team repos; older repos need `team workflow-update` to pick it up. No `install.ts` change; no new dialog.
+- **Migration / schema:** none; receipts are already committed per skill version.
+- **Effort / risk / blast radius:** nothing new to build in this batch; the pieces are S7v's flip, #83's reader, and existing CI. Footnote only. The risk is a team repo scaffolded before the receipt check, where an endorsed skill can be current with no receipt; there the C suggestion is the only nudge, which is the intended fallback.
+- **Grounding findings:** 2026-09-09 gap audit, section 3.
 
 ---
