@@ -258,13 +258,13 @@ it('retains null grants/body/date and marks unresolved skills broken, with a fai
 it('shows unjoined folders locally without inferring team membership from name or prose',async()=>{
   for(const state of ['untracked locally','placement recorded from other @abc','connected source for acme; endorsed (global)']){
     const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state,tracked:state!=='untracked locally',shared:state.startsWith('connected')?[{id:'id-a',team:'acme'}]:[],placement:state.includes('other')?{id:'id-a',team:'other',version:null}:null,health:'unknown'}],notOffered:[],problems:[]}]}});
-    expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'},team:'acme'})).toMatchObject({ok:true,value:{skills:[{name:'a',project:'local',path:'/skills/a',installed:true,placed:state.includes('other'),connectedSources:state.startsWith('connected')?['/skills/a']:[]}],title:'1 skill folder in Global'}});
+    expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'},team:'acme'})).toMatchObject({ok:true,value:{skills:[{name:'a',project:'Global',path:'/skills/a',installed:true,placed:state.includes('other'),connectedSources:state.startsWith('connected')?['/skills/a']:[]}],title:'1 skill folder in Global'}});
   }
 });
 it('keeps Library local on ambiguous teams while team detail reports the typed failure',async()=>{
  const f=inventoryBridge({teams:['one','two']}),backend=createTauriBackend(f.bridge);
  const error='This machine is configured for teams one, two; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.';
- expect(await backend.library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{team:{kind:'unreadable',message:error},skills:[{project:'local'}]}});
+ expect(await backend.library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{team:{kind:'unreadable',message:error},skills:[{project:'Global'}]}});
  expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status']]);
  expect(await backend.skill({ref:'a'})).toEqual({ok:false,error,reason:'ambiguous-team'});
  expect((await createTauriBackend(inventoryBridge().bridge).skill({ref:'a'})).ok).toBe(true);
@@ -391,7 +391,7 @@ it('rejects undeclared local row keys and missing typed provenance',async()=>{
 
 it('classifies zero-team inventory after the local scan without spawning team ls',async()=>{
  const f=inventoryBridge({teams:[]});
- expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{team:{kind:'none'},skills:[{project:'local',path:'/home/.claude/skills/a'}]}});
+ expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{team:{kind:'none'},skills:[{project:'Global',path:'/home/.claude/skills/a'}]}});
  expect(f.spawns.map(spawn=>spawn.args)).toEqual([['ls','--local'],['status']]);
 });
 it.each(['octo',''])('uses GitHub login for the footer, falling back to the team handle (%s)',async github=>{
@@ -437,8 +437,33 @@ it.each(['missing-id','old-cli'])('does not infer presence by name with %s',asyn
   if(frame.t==='hello'&&mode==='old-cli')delete (frame.features as Record<string,unknown>).localIdentity;
   if(frame.t==='result'&&mode==='missing-id')delete (frame.value as {local:{rows:Record<string,unknown>[]}[]}).local[0]!.rows[0]!.skillId;
  });
- expect((await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).value?.skills).toMatchObject([{name:'deploy-check',project:'local',installed:true,placed:false,onDiskOnly:true}]);
+ expect((await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).value?.skills).toMatchObject([{name:'deploy-check',project:'Global',installed:true,placed:false,onDiskOnly:true}]);
  expect((await createTauriBackend(f.bridge).skill({ref:'deploy-check'})).value?.installed).toBe(false);
+});
+// A CLI without `localIdentity` cannot identify a folder, so a same-named one leaves presence
+// unknown — never "absent", and never an Install that would collide with it.
+it('reports an unidentifiable same-named folder as unknown rather than absent',async()=>{
+ const old=installedReplay('on-disk-only','none',frame=>{
+  if(frame.t==='hello')delete (frame.features as Record<string,unknown>).localIdentity;
+ });
+ const unknown=await createTauriBackend(old.bridge).skill({ref:'deploy-check'});
+ expect(unknown.value).toMatchObject({installed:false,unidentifiedLocal:{path:'/Users/teddy/.claude/skills/deploy-check',pathLabel:'~/.claude/skills/deploy-check'}});
+ // With the feature present the same scan is proof, so the skill reads installed and unambiguous.
+ const current=await createTauriBackend(installedReplay().bridge).skill({ref:'deploy-check'});
+ expect(current.value).toMatchObject({installed:true,unidentifiedLocal:null});
+});
+// A connected source carries {id,team} on every CLI that reaches the app, so it proves presence
+// without `skillId` — the clause an old CLI otherwise had no way to satisfy.
+it('accepts a connected source as identity on a CLI without localIdentity',async()=>{
+ const shared=installedReplay('on-disk-only','none',frame=>{
+  if(frame.t==='hello')delete (frame.features as Record<string,unknown>).localIdentity;
+  if(frame.t==='result'){
+   const row=(frame.value as {local:{rows:Record<string,unknown>[]}[]}).local[0]!.rows[0]!;
+   row.shared=[{id:row.skillId,team:'acme'}];row.connected=true;row.tracked=true;
+  }
+ });
+ const detail=await createTauriBackend(shared.bridge).skill({ref:'deploy-check'});
+ expect(detail.value).toMatchObject({installed:true,placed:false,onDiskOnly:true,unidentifiedLocal:null,connectedSources:['/Users/teddy/.claude/skills/deploy-check']});
 });
 it('copies recorded member installs rather than authored skills',async()=>{
  const none=await createTauriBackend(installedReplay('on-disk-only','none').bridge).catalog();
@@ -557,13 +582,38 @@ it('returns an empty Global only for an empty scan, even with a team inventory',
  expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{skills:[],root:{count:undefined},title:'0 skill folders in Global',team:{kind:'ok',team:'acme'}}});
 });
 it('deduplicates by path and includes only the D2 countable frontmatter reasons',async()=>{
- const reasons=['no-frontmatter','invalid-yaml','illegal-name','name-mismatch','description-missing','unsupported-field','malformed-allowed-tools','managed-wrapper'];
+ const drawn=['no-frontmatter','invalid-yaml','illegal-name','name-mismatch','description-missing','unsupported-field','malformed-allowed-tools'];
  const entry=(reason:string)=>({name:reason,path:'/skills/'+reason,reason});
- const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[],problems:[],notOffered:[...reasons.map(entry),entry('invalid-yaml'),...['symlink','inside-state-root','unreadable','other'].map(entry)]}]};
+ // The bundled /terum-skills wrapper is a folder the CLI counts and the Library never draws.
+ const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:8,connectable:0},rows:[],problems:[],notOffered:[...drawn.map(entry),entry('managed-wrapper'),entry('invalid-yaml'),...['symlink','inside-state-root','unreadable','other'].map(entry)]}]};
  const result=await createTauriBackend(inventoryBridge({local,teams:[]}).bridge).library({scope:{kind:'global'}});
- expect(result.value?.skills.map(s=>s.name)).toEqual(reasons);
+ expect(result.value?.skills.map(s=>s.name)).toEqual(drawn);
+ // Eight folders on disk, seven cards: the count is the CLI's, not the grid's.
  expect(result.value?.title).toBe('8 skill folders in Global');
- expect(result.value?.root.count).toBeUndefined();
+ expect(result.value?.root.count).toBe('8');
+});
+
+it('fills a local card from the row the CLI now supplies, and estimates tokens with a tilde',async()=>{
+ const row={name:'diagnose',path:'/repo/.claude/skills/diagnose',state:'untracked locally',tracked:false,shared:[],placement:null,health:'untracked',description:'Disciplined diagnosis loop for hard bugs.',characters:7116};
+ const local={roster:[],skills:[],problems:[],local:[{root:'/repo/.claude/skills',repoRoot:'/repo',scope:'project',label:'app',registered:true,counts:{skillFolders:1,connectable:1},rows:[row],problems:[],notOffered:[]}]};
+ const result=await createTauriBackend(inventoryBridge({local,teams:[]}).bridge).library({scope:{kind:'checkout',root:'/repo'}});
+ // 7116 characters / 4 = 1779 tokens. The tilde says it is an estimate, not a measurement.
+ expect(result.value?.skills).toMatchObject([{name:'diagnose',project:'app',desc:'Disciplined diagnosis loop for hard bugs.',size:'~1.8k tokens',installs:'0 installs',installsN:0}]);
+});
+
+it('degrades to a dash when the CLI predates the character count',async()=>{
+ const row={name:'old',path:'/repo/.claude/skills/old',state:'untracked locally',tracked:false,shared:[],placement:null,health:'untracked'};
+ const local={roster:[],skills:[],problems:[],local:[{root:'/repo/.claude/skills',repoRoot:'/repo',scope:'project',label:'app',rows:[row],problems:[],notOffered:[]}]};
+ const result=await createTauriBackend(inventoryBridge({local,teams:[]}).bridge).library({scope:{kind:'checkout',root:'/repo'}});
+ expect(result.value?.skills).toMatchObject([{name:'old',size:'—',tokensK:0,desc:'',installs:'0 installs'}]);
+});
+
+it('never claims zero installs for a placed row whose team could not be read',async()=>{
+ const row={name:'placed',path:'/repo/.claude/skills/placed',state:'placement recorded',tracked:true,shared:[],placement:{id:'11111111-1111-4111-8111-111111111111',team:'acme',version:null},health:'unknown',description:'A placed copy.',characters:400};
+ const local={roster:[],skills:[],problems:[],local:[{root:'/repo/.claude/skills',repoRoot:'/repo',scope:'project',label:'app',rows:[row],problems:[],notOffered:[]}]};
+ const result=await createTauriBackend(inventoryBridge({local,teams:[]}).bridge).library({scope:{kind:'checkout',root:'/repo'}});
+ // The screen already says the team is unreadable; a 0 here would be a number we cannot back.
+ expect(result.value?.skills).toMatchObject([{name:'placed',installs:'—',installsN:0,size:'~100 tokens'}]);
 });
 it.each([false,true])('registration %s never changes connected, placed, or local flags',async registered=>{
  const local={roster:[],skills:[],problems:[],local:[{root:'/repo/.claude/skills',repoRoot:'/repo',scope:'project',registered,detected:!registered,rows:[{name:'local',path:'/repo/.claude/skills/local',state:'local',tracked:false,shared:[],placement:null,health:'untracked'}],problems:[]}]};

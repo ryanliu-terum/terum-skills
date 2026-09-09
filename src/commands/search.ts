@@ -61,7 +61,7 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         if (date.status === 'rejected') io.print(`${team}/${skill.name}: ${date.reason instanceof Error ? date.reason.message : String(date.reason)}`);
         const hit: SearchHit = { team, description: skill.frontmatter.description, grants: skill.grants.ok ? skill.grants.normalized : null, grantsHash: skill.grants.ok ? skill.grants.hash : null, updated: date.status === 'fulfilled' ? date.value : '—', id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: settled.status === 'fulfilled' ? shortHash(settled.value) : '—', endorsed, unresolved: settled.status === 'rejected' };
         hits.push(hit);
-        io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed, description: hit.description, grants: hit.grants, grantsHash: hit.grantsHash, installedBy: [], body: null, unresolved: hit.unresolved, updated: hit.updated }));
+        io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, characters: skill.characters, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed, description: hit.description, grants: hit.grants, grantsHash: hit.grantsHash, installedBy: [], body: null, unresolved: hit.unresolved, updated: hit.updated }));
         }
         const stale = await staleLine(store.root, team, args.now, args.form);
         if (stale) io.print(stale);

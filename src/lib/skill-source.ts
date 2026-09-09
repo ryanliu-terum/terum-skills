@@ -7,7 +7,7 @@ import { isManagedFrontmatter } from './wrapper.js';
 
 export { FRONTMATTER } from './schema.js';
 export type SourceProblem = 'symlink' | 'not-a-directory' | 'skill-md-missing' | 'skill-md-not-a-file' | 'no-frontmatter' | 'invalid-yaml' | 'illegal-name' | 'name-mismatch' | 'description-missing' | 'unsupported-field' | 'malformed-allowed-tools' | 'nested-symlink' | 'inside-state-root' | 'managed-wrapper';
-type SourceInspection = { ok: true; description: string; id: string | null } | { ok: false; reason: SourceProblem; detail: string };
+type SourceInspection = { ok: true; description: string; id: string | null } | { ok: false; reason: SourceProblem; detail: string; description?: string };
 
 /** Terminal rendering only: filesystem paths and ledger values retain their original bytes. */
 export function printable(value: string): string { return value.replace(/\p{Cc}/gu, '?'); }
@@ -26,7 +26,7 @@ export function assertNotInsideStateRoot(source: string, stateRoot: string): voi
 export function inspectSkillSource(raw: string, folderName?: string): SourceInspection {
   const result = inspect(raw, folderName);
   if (result.ok) return result;
-  return { ok: false, reason: result.reason, detail: result.detail };
+  return { ok: false, reason: result.reason, detail: result.detail, ...(result.description === undefined ? {} : { description: result.description }) };
 }
 
 /** Connect keeps its established refusal messages; discovery exposes the more precise reason. */
@@ -36,8 +36,12 @@ export function assertSkillSource(raw: string, folderName: string): string {
   return result.description;
 }
 
-function inspect(raw: string, folderName?: string): { ok: true; description: string; id: string | null } | { ok: false; reason: SourceProblem; detail: string; shareMessage: string } {
-  const reject = (reason: SourceProblem, detail: string, shareMessage = detail) => ({ ok: false as const, reason, detail, shareMessage });
+function inspect(raw: string, folderName?: string): { ok: true; description: string; id: string | null } | { ok: false; reason: SourceProblem; detail: string; description?: string; shareMessage: string } {
+  // Refusing to connect a folder is not a failure to read it. Every rejection raised after the
+  // frontmatter parses carries the description it found, so the Library can describe a folder it
+  // will never offer; a rejection raised before the parse has nothing to carry and stays bare.
+  let described: string | undefined;
+  const reject = (reason: SourceProblem, detail: string, shareMessage = detail) => ({ ok: false as const, reason, detail, ...(described === undefined ? {} : { description: described }), shareMessage });
   if (folderName !== undefined && !isSkillName(folderName)) return reject('illegal-name', 'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)', `Skill name ${folderName} must be 1–64 lowercase alphanumerics or single hyphens.`);
   const match = FRONTMATTER.exec(raw);
   if (!match) return reject('no-frontmatter', 'SKILL.md has no YAML frontmatter', 'SKILL.md has no YAML frontmatter.');
@@ -47,6 +51,7 @@ function inspect(raw: string, folderName?: string): { ok: true; description: str
     const message = error instanceof Error ? error.message : String(error);
     return reject('invalid-yaml', `SKILL.md frontmatter is not valid YAML: ${message}`, message);
   }
+  if (typeof parsed?.description === 'string') described = parsed.description;
   // The /terum-skills Claude Code skill ships inside this package and is placed by setup; it is not a
   // team skill, so discovery never offers it and connect refuses it by name.
   if (isManagedFrontmatter(parsed)) return reject('managed-wrapper', 'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill', 'This folder is the /terum-skills Claude Code skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');

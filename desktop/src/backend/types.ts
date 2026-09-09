@@ -27,6 +27,9 @@ export interface EvalEstimate {cases:number;k:number;arms:number;runs:number;min
 export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'> & SkillCard & {path:string;pathLabel:string;repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null;local?:true})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null;quality:[number,number]|null};method:string;
  versions:{placed:string|null;teamCurrent:string|null;evaluated:string|null}|null;
  latestState:'ok'|'none'|'invalid';invalidReceiptFile:string|null;evalReportError:string|null;
+ /** A same-named local folder the driving CLI is too old to identify: presence is unknown, so the
+  *  page must not claim "Not installed" nor offer an Install that would collide with it. */
+ unidentifiedLocal:{path:string;pathLabel:string}|null;
  localRuns:{runId:string;runDir:string;executionStatus:'complete'|'partial'|'failed'|'unknown';committed:boolean;receipt:Receipt|null;summary:ReceiptSummary|null}[];
 };
 export type EvalReportModel=Pick<SkillDetail,'receipt'|'summary'|'incumbentLift'|'reportNumbers'|'history'|'versions'|'latestState'|'invalidReceiptFile'|'localRuns'|'evalEstimate'|'evalEstimateText'|'evalEstimateTip'|'scoreFractions'|'wlt'>;

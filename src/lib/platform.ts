@@ -28,6 +28,7 @@ export function assetSuffix(platform: AppPlatform): string | null {
     case 'darwin-arm64': return 'aarch64.app.tar.gz';
     case 'darwin-x64': return 'x64.app.tar.gz';
     case 'win32-arm64': return 'arm64-setup.exe';
+    case 'win32-x64': return 'x64-setup.exe';
     default: return null;
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guard, GuardContext, GuardError, isMember } from '../guard.js';
+import { guard, GuardContext, GuardError, guardRawPush, isMember } from '../guard.js';
 
 const ID = '4e80fd2a-04bc-4d9f-88f7-a849d92879f1';
 const team = (overrides: Record<string, unknown> = {}) => JSON.stringify({ layout_version: 2, name: 't', categories: [], global: [], projects: { p: { remotes: ['github.com/a/p'], skills: [] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' }, ...overrides });
@@ -131,6 +131,32 @@ describe('row g — eval receipts are one-file, append-only testimony', () => {
     refuse(receiptTree({ [path]: ['{}', undefined] }), evalContext, path);
     const second = receiptPath(ID, 'b'.repeat(40));
     refuse(receiptTree({ [path]: [undefined, '{}'], [second]: [undefined, '{}'] }), evalContext, path);
+  });
+});
+
+describe('row h — generated eval assets are append-only additions to an existing skill, by any member', () => {
+  const assetsContext: GuardContext = { action: 'eval-assets', handle: 'me' };
+  const other = { 'skills/x/SKILL.md': skill('Other <o@x.test>') };
+
+  it('allows new cases and triggers on an existing skill without any author identity', () => {
+    expect(() => guard(tree({ 'skills/x/evals/cases/happy-path.yaml': [undefined, 'task: t'], 'skills/x/evals/triggers.yaml': [undefined, 'should_trigger: []'] }, other), assetsContext)).not.toThrow();
+    expect(() => guard(tree({ 'skills/x/evals/cases/a.yml': [undefined, 'task: t'] }, other), assetsContext)).not.toThrow();
+  });
+
+  it('refuses overwrites, deletions, non-asset paths, absent skills, and every other action', () => {
+    refuse(tree({ 'skills/x/evals/cases/happy-path.yaml': ['task: authored', 'task: replaced'] }, other), assetsContext, 'skills/x/evals/cases/happy-path.yaml');
+    refuse(tree({ 'skills/x/evals/triggers.yaml': ['should_trigger: []', undefined] }, other), assetsContext, 'skills/x/evals/triggers.yaml');
+    refuse(tree({ 'skills/x/evals/notes.md': [undefined, 'n'] }, other), assetsContext, 'skills/x/evals/notes.md');
+    refuse(tree({ 'skills/x/evals/cases/deep/a.yaml': [undefined, 'task: t'] }, other), assetsContext, 'skills/x/evals/cases/deep/a.yaml');
+    refuse(tree({ 'skills/x/SKILL.md': [skill('Other <o@x.test>'), skill(ME)] }), assetsContext, 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/ghost/evals/triggers.yaml': [undefined, 'should_trigger: []'] }), assetsContext, 'skills/ghost/evals/triggers.yaml');
+    refuse(tree({ 'skills/x/evals/triggers.yaml': [undefined, 'should_trigger: []'] }, other), { action: 'eval', handle: 'me' }, 'skills/x/evals/triggers.yaml');
+    refuse(tree({ 'skills/x/evals/triggers.yaml': [undefined, 'should_trigger: []'] }, other), connect, 'skills/x/evals/triggers.yaml');
+  });
+
+  it('stands open to a raw push, with no author identity on the machine', () => {
+    expect(() => guardRawPush(tree({ 'skills/x/evals/cases/happy-path.yaml': [undefined, 'task: t'] }, other), { handle: 'me' })).not.toThrow();
+    expect(() => guardRawPush(tree({ 'skills/x/evals/cases/happy-path.yaml': ['task: authored', 'task: replaced'] }, other), { handle: 'me' })).toThrow(GuardError);
   });
 });
 

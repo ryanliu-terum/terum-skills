@@ -71,7 +71,6 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
     // D3: honest and quiet; exit 0 because nothing failed.
     if (platform === 'wsl') io.print('The desktop app runs on the Windows side of this machine, not inside WSL. Install terum-skills there and run this command from a Windows terminal; from here, everything works in the terminal.');
     else if (platform === 'linux') io.print('There is no Linux desktop app yet; everything works from the terminal.');
-    else if (platform === 'win32-x64') io.print('There is no Windows x64 desktop app yet (the first builds are Apple Silicon, Intel Mac, and Windows on ARM); everything works from the terminal.');
     else io.print('There is no desktop app for this machine; everything works from the terminal.');
     return success({ platform, version, action: 'unavailable', appPath: null, statePath: null });
   }
@@ -116,7 +115,7 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
           if (!bundle) return failure(`The downloaded archive did not contain an application bundle. ${tail(args.form)}`);
           await writeFile(join(staging, 'installed.json'), JSON.stringify({ schema: 1, version, platform, bundle, installedAt: new Date().toISOString() }, null, 2));
         } else {
-          // Windows on ARM: the asset is a per-user NSIS installer; /S installs silently under %LOCALAPPDATA% with no elevation (D8).
+          // Windows (x64 and ARM64): the asset is a per-user NSIS installer; /S installs silently under %LOCALAPPDATA% with no elevation (D8).
           const install = await exec(file, ['/S']);
           if (install.code !== 0) return failure(`The desktop app installer exited with code ${install.code}. ${(install.stderr || install.stdout).trim()} ${tail(args.form)}`.trim());
           await writeFile(join(staging, 'installed.json'), JSON.stringify({ schema: 1, version, platform, bundle: null, installedAt: new Date().toISOString() }, null, 2));
@@ -130,7 +129,7 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
     }
 
     const appPath = await locateApp(platform, versionDir, args.localAppData);
-    if (!appPath) return failure(`The desktop app ${version} is installed but its executable was not found where it should be (${platform === 'win32-arm64' ? join(args.localAppData ?? process.env['LOCALAPPDATA'] ?? '%LOCALAPPDATA%', APP_PRODUCT) : versionDir}). ${tail(args.form)}`);
+    if (!appPath) return failure(`The desktop app ${version} is installed but its executable was not found where it should be (${platform.startsWith('win32') ? join(args.localAppData ?? process.env['LOCALAPPDATA'] ?? '%LOCALAPPDATA%', APP_PRODUCT) : versionDir}). ${tail(args.form)}`);
 
     // D1: the app finds Node and this CLI through this file, on every launch, so a relaunch from the Dock a week later still works.
     const statePath = join(root, 'run', 'app.json');
