@@ -30,6 +30,11 @@ export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'
  /** A same-named local folder the driving CLI is too old to identify: presence is unknown, so the
   *  page must not claim "Not installed" nor offer an Install that would collide with it. */
  unidentifiedLocal:{path:string;pathLabel:string}|null;
+ /** The viewer's own handle in this team, so the page describes the viewer's install as theirs
+  *  instead of a teammate's. Null when the detail is not team-scoped, as for a local folder that
+  *  belongs to no team and therefore has no per-team handle to compare against.
+  *  This is the per-team handle, never the machine's default identity — they can differ. */
+ viewerHandle:string|null;
  localRuns:{runId:string;runDir:string;executionStatus:'complete'|'partial'|'failed'|'unknown';committed:boolean;receipt:Receipt|null;summary:ReceiptSummary|null}[];
 };
 export type EvalReportModel=Pick<SkillDetail,'receipt'|'summary'|'incumbentLift'|'reportNumbers'|'history'|'versions'|'latestState'|'invalidReceiptFile'|'localRuns'|'evalEstimate'|'evalEstimateText'|'evalEstimateTip'|'scoreFractions'|'wlt'>;

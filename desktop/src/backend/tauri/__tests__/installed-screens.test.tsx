@@ -8,9 +8,9 @@ import { useUiStore } from '../../../app/store';
 import { createTauriBackend } from '../index';
 import { installedReplay } from './installed-fixture';
 afterEach(()=>{cleanup();location.hash='';localStorage.clear();vi.restoreAllMocks();});
-function open(member:string,route='#/marketplace/people/mira',local='on-disk-only',change?:(frame:Record<string,unknown>)=>void) {
+function open(member:string,route='#/marketplace/people/mira',local='on-disk-only',change?:(frame:Record<string,unknown>)=>void,changeStatus?:(frame:Record<string,unknown>)=>void) {
  useUiStore.setState({railOpen:true,overviewHidden:false});
- const f=installedReplay(local,member,change),backend=createTauriBackend(f.bridge);
+ const f=installedReplay(local,member,change,changeStatus),backend=createTauriBackend(f.bridge);
  location.hash=route;
  render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><Tooltip.Provider><App/></Tooltip.Provider></QueryClientProvider></BackendContext>);
  return {backend,f};
@@ -65,4 +65,37 @@ it('states an unknown install rather than offering an Install that would collide
  expect(screen.queryByRole('button',{name:'Install'})).toBeNull();
  expect(document.querySelector('.detail-rail')).toHaveTextContent('~/.claude/skills/deploy-check');
  expect(document.querySelector('.detail-flags')).toHaveTextContent('Install state unknown');
+});
+
+// The viewer is in their own team's people file, so installedBy counts them too: the page must
+// describe the viewer's own install as theirs, not as a teammate's. installs_n is unchanged —
+// it is a team-wide adoption number the marketplace compares across viewers.
+const rowNames=()=>[...document.querySelectorAll('.uses-popover>div')].map(row=>row.querySelector('span:nth-child(2)')?.textContent);
+/** Re-handle the viewer, so the fixture's mira-only install becomes the viewer's own. */
+const viewerIs=(handle:string)=>(frame:Record<string,unknown>)=>{
+ const value=frame.value as {teams?:{handle:string}[]}|undefined;
+ if(frame.t==='result'&&value?.teams)for(const team of value.teams)team.handle=handle;
+};
+it('names the viewer rather than counting them among the teammates',async()=>{
+ open('none','#/skill/deploy-check');
+ await screen.findByTestId('uses-facepile');
+ expect(document.querySelector('.face-label')).toHaveTextContent('Installed by you and 1 teammate');
+ expect(document.querySelector('.uses-popover>span')).toHaveTextContent('Installed by you and 1 teammate');
+ expect(rowNames()).toEqual(['you','mira']);
+ expect(document.querySelector('.detail-rail')).toHaveTextContent('Installs2');
+});
+it('still says teammates when the viewer is not one of the installers',async()=>{
+ open('none','#/skill/tdd');
+ await screen.findByTestId('uses-facepile');
+ expect(document.querySelector('.face-label')).toHaveTextContent('Installed by 1 teammate');
+ expect(document.querySelector('.uses-popover>span')).toHaveTextContent('Installed by 1 teammate');
+ expect(rowNames()).toEqual(['mira']);
+});
+// Ajay's report: sole installer, told a teammate had installed it.
+it("describes a sole install as the viewer's own, naming no teammate",async()=>{
+ open('none','#/skill/tdd','on-disk-only',undefined,viewerIs('mira'));
+ await screen.findByTestId('uses-facepile');
+ expect(document.querySelector('.face-label')).toHaveTextContent('Installed by you');
+ expect(document.querySelector('.face-label')).not.toHaveTextContent('teammate');
+ expect(rowNames()).toEqual(['you']);
 });
