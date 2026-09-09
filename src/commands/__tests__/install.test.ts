@@ -2,11 +2,11 @@ import { createExecute } from '../../lib/execute.js';
 import type { ResultOutcome } from '../../lib/frames.js';
 import { getStartedLines } from '../../lib/invocation.js';
 import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as setup from '../setup.js';
 import { installHook } from '../../lib/hook.js';
-import { run } from '../install.js';
+import { placementHome, run } from '../install.js';
 import { run as sync } from '../sync.js';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, temporaryDirectory, wrapRunner, wrapperFor } from '../../lib/__tests__/fixtures.js';
@@ -453,4 +453,15 @@ it('install refusal survives createExecute without bootstrap or runner calls', a
   await execute(io => run({ config, runner, ref: 'other/repo/skill' }, io), { verb: 'install', notices: false });
   expect(frames).toEqual([expect.objectContaining({ ok: false, refused: true, exitCode: 1 })]);
   expect(runner.calls).toEqual([]);
+});
+
+it('placementHome finds HOME two segments above the default store root on either separator, and keeps a custom root as its own home', () => {
+  // win32 store roots are backslash-separated; a hard-coded `/.terum/skills` suffix missed them and
+  // sent global placements to ~\.terum\skills\.claude\skills, where Claude Code never looks.
+  expect(placementHome({ root: win32.join('C:\\Users\\me', '.terum', 'skills') }, win32)).toBe('C:\\Users\\me');
+  expect(placementHome({ root: 'C:\\Users\\me\\state' }, win32)).toBe('C:\\Users\\me\\state');
+  expect(placementHome({ root: posix.join('/home/me', '.terum', 'skills') }, posix)).toBe('/home/me');
+  expect(placementHome({ root: '/tmp/terum-test/state' }, posix)).toBe('/tmp/terum-test/state');
+  // A test store root that merely LOOKS like the default shape keeps the two-levels-up intent.
+  expect(placementHome({ root: posix.join('/tmp/fixture', '.terum', 'skills') }, posix)).toBe('/tmp/fixture');
 });
