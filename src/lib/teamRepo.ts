@@ -281,6 +281,21 @@ function sameContent(left: string | Buffer | undefined, right: string | Buffer |
 /** Decode a tree value only at a text consumer; binary paths stay byte-for-byte in the tree. */
 export function treeText(value: string | Buffer): string { return Buffer.isBuffer(value) ? value.toString('utf8') : value; }
 
+/** Public read-only wrapper around the batched tree reader; never exposes the private Git seam. */
+export async function skillVersions(runner: Runner, clone: string, ref = 'HEAD'): Promise<Map<string, string>> {
+  const git: Git = async (args) => {
+    const result = await runner.run('git', args, { cwd: clone });
+    // git uses the same missing-object diagnostic for an absent skills tree and an invalid ref.
+    // Verify the ref only on that exceptional path; a normal listing is exactly one child.
+    if (result.code !== 0 && result.stderr.includes(`Not a valid object name ${ref}:skills`)) {
+      const exists = await runner.run('git', ['rev-parse', '--verify', ref], { cwd: clone });
+      if (exists.code === 0) return { code: 0, stdout: '', stderr: '' };
+    }
+    return result;
+  };
+  return skillTrees(git, ref);
+}
+
 /** Every direct child in `skills/` is a skill tree; one ls-tree call resolves all latest versions. */
 async function skillTrees(git: Git, writtenTree: string): Promise<Map<string, string>> {
   const listed = await requireGitResult(git, ['ls-tree', `${writtenTree}:skills`]);

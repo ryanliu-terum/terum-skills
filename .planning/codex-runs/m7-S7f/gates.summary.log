@@ -1,0 +1,20 @@
+lock acquired Tue Sep  8 23:46:05 UTC 2026
+root lint: rc=0
+root typecheck: rc=0
+root test: rc=0
+root build: rc=0
+desktop typecheck: rc=0
+desktop lint: rc=0
+desktop vitest: rc=1
+desktop build: rc=0
+e2e routes: rc=0
+export:check: rc=0
+e2e fidelity: rc=0
+done Tue Sep  8 23:50:07 UTC 2026
+ Test Files  72 passed (72)
+      Tests  1147 passed (1147)
+ ❯ src/backend/tauri/__tests__/index.test.ts (37 tests | 3 failed) 42ms
+ Test Files  1 failed | 45 passed (46)
+      Tests  3 failed | 634 passed (637)
+  91 passed (34.3s)
+  88 passed (44.7s)

@@ -150,7 +150,7 @@ function hashed(normalized: string): AllowedTools & { ok: true } {
 export const FRONTMATTER = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
 /** Parse a whole SKILL.md: the YAML block between the first two `---` lines, then the schema. */
-export function parseSkillFrontmatter(source: string): { ok: true; data: SkillFrontmatter; grants: AllowedTools } | { ok: false; error: string } {
+export function parseSkillFrontmatter(source: string): { ok: true; data: SkillFrontmatter; grants: AllowedTools; body: string } | { ok: false; error: string } {
   const match = FRONTMATTER.exec(source);
   if (!match) return { ok: false, error: 'SKILL.md has no YAML frontmatter' };
   const document = YAML.parseDocument(match[1]!);
@@ -158,7 +158,7 @@ export function parseSkillFrontmatter(source: string): { ok: true; data: SkillFr
   const raw = document.toJS() as unknown;
   const parsed = skillFrontmatterSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: parsed.error.message };
-  return { ok: true, data: parsed.data, grants: allowedTools(parsed.data['allowed-tools']) };
+  return { ok: true, data: parsed.data, grants: allowedTools(parsed.data['allowed-tools']), body: source.slice(match[0].length) };
 }
 
 /** Human-readable zod issues: `field: message; field2: message`. */
