@@ -20,7 +20,7 @@ it('renders Leave and asks the CLI confirmation',async()=>{const leave=vi.spyOn(
  'This is your last team here, so the session-start hook is removed from ~/.claude/settings.json; if that file cannot be written the leave still finishes and says so',
  "Consent you gave for skills' tool permissions may need to be given again for a new team",
  `Your people file in the team repo stays: you remain a member (an admin archives that with team remove ${design.ME.handle}), and setup brings this machine back`,
-]);fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));const prompt=await screen.findByRole('dialog',{name:`Leave terum? This removes ${design.PLACEMENTS_N} placed skill(s) from this machine.`});fireEvent.click(within(prompt).getByRole('button',{name:'Confirm'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledWith({kind:'leave',name:'terum'});expect(location.hash).toBe('#/settings/teams');});
+]);fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));const prompt=await screen.findByRole('dialog',{name:`Leave terum? This removes ${design.PLACEMENTS_N} placed skill(s) from this machine.`});fireEvent.click(within(prompt).getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledWith({kind:'leave',name:'terum'});expect(location.hash).toBe('#/settings/teams');});
 it('renders every prune path and preanswers Delete N quarantined items',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/machine?dialog=prune');const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Delete 2 quarantined folders?');for(const [when,name] of design.QUARANTINE)expect(dialog).toHaveTextContent(`quarantine/${when}/${name}`);fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(sync).toHaveBeenCalledWith({prune:true});expect(location.hash).toBe('#/settings/machine');});
 it('keeps failed prune open',async()=>{vi.spyOn(backend,'sync').mockImplementation(()=>createRun(async()=>({ok:false,error:'Prune failed.'})));open('#/settings/machine?dialog=prune');fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('alert')).toHaveTextContent('Prune failed.');expect(screen.getByRole('dialog')).toBeInTheDocument();});
 it('renders the CLI config error line with hidden counts',async()=>{open('#/settings/account?__mock=error');expect(await screen.findByRole('alert')).toHaveTextContent("Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)");expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
@@ -165,7 +165,7 @@ it('joins only from a zero-team machine, validates input, streams invitations an
  fireEvent.click(within(dialog).getByRole('button',{name:'Join'}));
  expect(await within(dialog).findByText(invitation)).toBeInTheDocument();
  expect(setup).toHaveBeenCalledExactlyOnceWith({target:'acme/skills'});
- const prompt=await screen.findByRole('dialog',{name:'Invitation accepted?'});fireEvent.click(within(prompt).getByRole('button',{name:'Confirm'}));
+ const prompt=await screen.findByRole('dialog',{name:'Invitation accepted?'});fireEvent.click(within(prompt).getByRole('button',{name:'Yes'}));
  expect(await within(dialog).findByRole('status')).toHaveTextContent('Joined acme');
  await waitFor(()=>{expect(statusSpy.mock.calls.length).toBeGreaterThan(statusCalls);expect(settingsSpy.mock.calls.length).toBeGreaterThan(settingsCalls);});
  expect(within(dialog).getByRole('button',{name:'Close'})).toBeEnabled();expect(editor).not.toHaveBeenCalled();
@@ -257,6 +257,6 @@ it('leaves the keyed team, renders inventory and delegates confirmation to the r
  open('#/settings/teams?dialog=leave&team=acme-key');const dialog=await screen.findByRole('dialog',{name:'Leave Acme Team on this machine?'});
  fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));
  expect(await within(dialog).findByText('Inventory: acme-key has placed skills.')).toBeInTheDocument();
- const prompt=await screen.findByRole('dialog',{name:'Really leave acme-key on this machine?'});expect(completed).not.toHaveBeenCalled();fireEvent.click(within(prompt).getByRole('button',{name:'Confirm'}));
+ const prompt=await screen.findByRole('dialog',{name:'Really leave acme-key on this machine?'});expect(completed).not.toHaveBeenCalled();fireEvent.click(within(prompt).getByRole('button',{name:'Yes'}));
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledExactlyOnceWith({kind:'leave',name:'acme-key'});expect(completed).toHaveBeenCalledWith(true);expect(location.hash).not.toContain('dialog=');
 });

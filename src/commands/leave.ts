@@ -33,19 +33,20 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
     if (clonePresent) io.print(`Local clone at ${clone} will be removed.`);
     if (shared.length) io.print(`${shared.length} connected skill record(s) will be removed.`);
     if (pending.length) io.print(`${pending.length} pending operation(s) will be removed.`);
+    const lastTeam = Object.keys(config.teams).length === 1;
+    const approvals = Object.keys(config.approvals).length;
+    if (lastTeam && approvals > 0) io.print(`Skill consent records will be cleared (${approvals}); the next team asks again for skills that need tool permissions.`);
     const remote = stripRemoteCredentials(binding.remote);
-    if (!(await io.confirm(`Leave ${name}? This removes ${matching.length} placed skill(s) and the local clone; your membership in ${remote} is unchanged.`))) {
+    if (!(await io.confirm(`Leave ${name}? This removes ${matching.length} placed skill(s)${lastTeam ? ', the local clone and your skill consent records' : ' and the local clone'}; your membership in ${remote} is unchanged.`))) {
       throw new CancelledError('Leave was cancelled.');
     }
 
-    const { removedPaths, cloneRemoved, kept } = await teardownTeam(store, name, io, args.runner);
-    const lastTeam = Object.keys((await store.read()).teams).length === 0;
-    if (lastTeam) {
+    const { removedPaths, cloneRemoved, kept } = await teardownTeam(store, name, io, args.runner, undefined, async () => {
       const options = { ...defaultHookOptions(store.root), ...args.hook };
       // The local cleanup above already happened; an unreadable settings.json must not turn it into a failure.
       try { if (await removeHook(options) === 'removed') io.print(`Removed the session hook from ${options.settingsFile}.`); }
       catch (error) { io.print(`Left the session hook in place: ${error instanceof Error ? error.message : String(error)}`); }
-    }
+    });
     const removed = removedPaths.length;
     io.print(`Left ${name}. You are still an active member of ${remote}; an admin archives membership with team remove ${binding.handle ?? '<handle>'}.`);
     return success({ team: name, remote, handle: binding.handle, removed, cloneRemoved, kept });
@@ -59,7 +60,7 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
  * for the whole run: this team's teardown drops its own `shared` records, so a later team's
  * placement at one of those paths would otherwise no longer be recognised as a source.
  */
-export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Prompter, 'print'>, runner: Runner = systemRunner, protectedSources?: readonly string[]): Promise<{ removedPaths: string[]; cloneRemoved: boolean; kept: string[] }> {
+export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Prompter, 'print'>, runner: Runner = systemRunner, protectedSources?: readonly string[], onLastTeam?: () => Promise<void>): Promise<{ removedPaths: string[]; cloneRemoved: boolean; kept: string[] }> {
   const releaseTeam = await acquireTeamLock(store.root, name);
   if (!releaseTeam) throw new Error(`Another terum-skills sync holds the session lock on ${name} (${lockPath(store.root, name)}); retry when it finishes, or remove that file if no session is syncing.`);
   const kept: string[] = [];
@@ -110,12 +111,14 @@ export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Pr
         removeRunArtifacts(store.root, name),
       ]);
     });
-    await store.update((fresh) => {
+    const fresh = await store.update((fresh) => {
       delete fresh.teams[name];
+      if (Object.keys(fresh.teams).length === 0) fresh.approvals = {};
       for (const [id, entry] of Object.entries(fresh.shared)) if (entry.team === name) delete fresh.shared[id];
       fresh.pending = fresh.pending.filter((entry) => entry.team !== name);
       for (const path of removedPaths) delete fresh.placements[path];
     });
+    if (Object.keys(fresh.teams).length === 0) await onLastTeam?.();
     return { removedPaths, cloneRemoved, kept };
   } finally { await releaseTeam().catch(() => undefined); } // Preserve the original refusal if release fails.
 }

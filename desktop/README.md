@@ -25,3 +25,5 @@ Gates:
   lock status; only `locked` rows are asserted.
 
 Layout, the seam, generated files and the stack pins: `AGENTS.md`. Keep every gate green before opening a PR.
+
+Card convention: a card with nested controls (SkillCard, the Marketplace PersonCard) is opened by a *stretched title link* — the title `<a>` carries an absolutely positioned `::after` that covers the `position:relative` card, nested controls are raised above it with `position:relative` (no `z-index`), and the card-level focus ring / pressed state come from `@supports selector(:has(a))`-guarded rules so a WKWebView without `:has()` keeps the anchor’s own ring. One accessible link per card; the `<article>` never gets `role`, `tabindex` or `onClick`. (`SkillCard.css`, `marketplace.css`.)

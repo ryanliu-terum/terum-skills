@@ -10,5 +10,5 @@ export function scriptedPrompter(answers:Record<string,boolean|string>,onUnexpec
   if(!valid(value))throw new Error('Invalid answer to: '+q.question);
   return value as boolean|string;
  }
- return {interactive:true,lines,confirm:async question=>(await answer({kind:'confirm',question}))===true,text:async(question,defaultValue)=>String(await answer({kind:'text',question,...(defaultValue===undefined?{}:{default:defaultValue})})),select:async(question,choices)=>String(await answer({kind:'select',question,choices})),print:line=>{lines.push(line);}};
+ return {interactive:true,lines,confirm:async(question,options)=>(await answer({kind:'confirm',question,...(options?.detail?.length?{detail:options.detail}:{})}))===true,text:async(question,defaultValue,options)=>String(await answer({kind:'text',question,...(options?.detail?.length?{detail:options.detail}:{}),...(defaultValue===undefined?{}:{default:defaultValue})})),select:async(question,choices,options)=>String(await answer({kind:'select',question,choices,...(options?.detail?.length?{detail:options.detail}:{})})),print:line=>{lines.push(line);}};
 }

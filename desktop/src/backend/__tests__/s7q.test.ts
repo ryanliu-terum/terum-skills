@@ -10,8 +10,9 @@ it('advertises all thirteen mock feature switches',async()=>{expect(await create
 it('opens external URLs through the browser seam with noopener',async()=>{const open=vi.spyOn(window,'open').mockReturnValue(null);expect(await createMockBackend().openUrl('https://github.com/acme/team')).toEqual({ok:true,value:undefined});expect(open).toHaveBeenCalledWith('https://github.com/acme/team','_blank','noopener');});
 it('reports browser opening failures',async()=>{vi.spyOn(window,'open').mockImplementation(()=>{throw new Error('Blocked');});expect(await createMockBackend().openUrl('https://github.com/acme/team')).toEqual({ok:false,error:'Blocked'});});
 it('reveals paths as a harmless mock no-op',async()=>{expect(await createMockBackend().revealPath('/a')).toEqual({ok:true,value:undefined});});
-it('defines attention once: 8 = 2 + 3 + 3, Updates 3 and Alerts 8',async()=>{
- const counts=attentionCounts();expect(counts).toEqual({failingEvals:2,updatesAvailable:3,notEvaluated:3,attention:8});
+it('scopes Library attention: 6 = 2 + 2 + 2, with Inbox Updates 3 and Alerts 8',async()=>{
+ const counts=attentionCounts();expect(counts).toEqual({failingEvals:2,updatesAvailable:2,notEvaluated:2,attention:6});
+ expect(counts.attention).toBe(counts.failingEvals+counts.updatesAvailable+counts.notEvaluated);
  expect(Number(design.LIBRARY_OVERVIEW.attention)).toBe(counts.attention);
  const result=await createMockBackend().status();expect(result.ok&&result.value.counts).toMatchObject({Updates:'3',Alerts:'8'});
 });

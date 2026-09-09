@@ -303,7 +303,7 @@ it('issue 9 non-interactive bare connect exits 1 through createExecute', async (
   const io = new NonInteractivePrompter(); const errors: string[] = []; const codes: number[] = [];
   const execute = createExecute({ io, stderr: (line) => { errors.push(line); }, setExitCode: (code) => { codes.push(code); } });
   await execute((received) => connect({ config: store, home }, received), { verb: 'connect', notices: false });
-  expect(codes).toEqual([1]); expect(errors).toEqual(["No skill selected. In an interactive terminal, run `npx -y terum-skills@latest connect --team 'team'`, or pass an explicit skill folder path."]); expect(io.asked).toEqual([]);
+  expect(codes).toEqual([1]); expect(errors).toEqual(["No skill selected. In an interactive terminal, run `npx -y terum-skills@latest connect`, or pass an explicit skill folder path."]); expect(io.asked).toEqual([]);
 });
 
 describe('issue 5 connect command contract', () => {
@@ -351,7 +351,7 @@ describe('issue 5 connect command contract', () => {
     program.configureOutput({ writeErr: (line) => { errors.push(line); }, writeOut: (line) => { stdout.push(line); } });
     await program.parseAsync(argv, { from: 'user' });
     expect(codes).toEqual([1]);
-    expect(errors).toEqual(['`share` is now `connect`: run `npx -y terum-skills@latest connect [<path>]` (same options: --team, --allow-privileged, --keep-source, --keep-repo, --relocate, --forget).']);
+    expect(errors).toEqual(['`share` is now `connect`: run `npx -y terum-skills@latest connect [<path>]` (same options: --allow-privileged, --keep-source, --keep-repo, --relocate, --forget).']);
     expect(stdout).toEqual([]); expect(io.lines).toEqual([]); expect(connected).toBe(0);
     expect(io.asked).toEqual([]); expect(afterVerbs).toBe(0);
     expect(await readFile(configPath)).toEqual(before);
@@ -396,4 +396,11 @@ it('documents every public command path in a README code span and excludes hidde
     }
   }
   check(program);
+});
+
+it('hides team and local-name overrides from help while keeping their parsers', () => {
+  const program = buildProgram(async () => {});
+  for (const name of ['install', 'ls', 'status']) expect(program.commands.find(command => command.name() === name)!.helpInformation()).not.toContain('--team');
+  const team = program.commands.find(command => command.name() === 'team')!;
+  expect(team.commands.find(command => command.name() === 'join')!.helpInformation()).not.toContain('--as');
 });

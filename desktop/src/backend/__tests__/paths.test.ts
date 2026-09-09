@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { abbreviateHome } from '../paths';
+import { abbreviateHome, repoIdentity } from '../paths';
 
 it.each([
   ["Invalid /Users/teddy/.terum/skills/config.json", '/Users/teddy', 'Invalid ~/.terum/skills/config.json'],
@@ -13,3 +13,11 @@ it.each([
 ])('abbreviates only known home path tokens: %s', (text, home, expected) => {
   expect(abbreviateHome(text, home)).toBe(expected);
 });
+
+it.each([
+ ['https://github.com/Acme/Team.git','github.com/acme/team'],
+ ['git@github.com:acme/team.git','github.com/acme/team'],
+ ['github.com/acme/team/','github.com/acme/team'], ['acme/team','github.com/acme/team'],
+ [' ssh://git@github.com/Acme/Team.git/ ','github.com/acme/team'],
+ ['/srv/x/team.git','/srv/x/team'], ['file:///srv/x/team.git','/srv/x/team'],
+])('normalizes repository identity: %s',(remote,expected)=>{expect(repoIdentity(remote)).toBe(expected);});
