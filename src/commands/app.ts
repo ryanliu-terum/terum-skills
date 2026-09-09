@@ -41,7 +41,7 @@ export interface AppArgs extends WithForm {
   /** Launch PATH and setup join target; PATH defaults to this process. */
   path?: string | null;
   target?: string; intent?: 'setup';
-  /** Ask first (setup's opt-in, default no). A no is recorded and returns `action: 'declined'` without touching the network. */
+  /** Ask first. Setup no longer asks (auto-launch, Teddy 2026-09-09); kept for callers that want the opt-in. A no is recorded and returns `action: 'declined'` without touching the network. */
   offer?: boolean;
   /** Test knob: skip opening the app (everything else runs). */
   open?: boolean;
@@ -138,7 +138,9 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
     await store.update((config) => { config.app = { choice: 'opted-in', at: new Date().toISOString() }; });
 
     if (args.open !== false) {
-      const opened = platform.startsWith('darwin') ? await exec('open', [appPath]) : await exec(appPath, []);
+      // macOS: `open` returns once Launch Services has the app. Windows: the exe IS the app, so start it detached
+      // rather than waiting for the window to close (a blocking launch held setup until the app quit).
+      const opened = platform.startsWith('darwin') ? await exec('open', [appPath]) : await exec(appPath, [], { detach: true });
       if (opened.code !== 0) return failure(`Could not open ${APP_PRODUCT}: ${(opened.stderr || opened.stdout).trim()} ${tail(args.form)}`.trim());
     }
     io.print(`${installedNow ? 'Installed and opened' : 'Opened'} ${APP_PRODUCT} ${version}.`);

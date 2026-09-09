@@ -29,7 +29,7 @@ export interface SetupVerbs {
 }
 export interface SetupArgs extends WithForm {
   target?: string;
-  /** Desktop app opt-in (D4, 2026-09-08): `true` opens it without asking, `false` never asks; absent asks (default no) unless a yes was remembered. */
+  /** Desktop app: `false` (--no-app) keeps setup in the terminal; otherwise, where an app exists, setup opens it without asking. `true` is accepted for compatibility. */
   app?: boolean;
   /** Test knob for the platform table; defaults to this machine. */
   evidence?: PlatformEvidence;
@@ -105,15 +105,14 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     const target = args.target === undefined ? undefined : parseJoinTarget(args.target);
     refuseSecondTeam(before, target ? { remote: target.remote } : {}, invocation(args.form, 'setup', ...(args.target === undefined ? [] : [args.target])), args.form);
 
-    // The desktop app, first and opt-in (D4/D5, 2026-09-08). Asked only where an app exists for this machine, only to a
-    // person at an interactive terminal (never over a pipe, never over frames, never in install's quiet bootstrap). The question itself belongs to the
-    // `app` verb (setup orchestrates, verbs ask): a remembered yes or --app skips it, a no is recorded and asked again
-    // next run, --no-app never asks. A failed hand-off is printed and the terminal wizard continues.
+    // The desktop app, first (D5, 2026-09-08). Where an app exists for this machine and a person is at an interactive
+    // terminal (never over a pipe, never over frames, never in install's quiet bootstrap), setup installs and opens it
+    // without asking and continues there (Teddy, 2026-09-09: the wizard boots the app; the D4 opt-in question is gone).
+    // --no-app keeps the whole wizard in the terminal. A failed hand-off is printed and the terminal wizard continues.
     if (args.quiet || !io.interactive || io.channel === 'frames' || args.app === false || assetSuffix(detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, procVersion: await readProcVersion() })) === null) {
       steps.app = 'skipped';
     } else {
-      const wanted = args.app === true || (await store.read()).app?.choice === 'opted-in';
-      const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, target: args.target, intent: 'setup', offer: !wanted }, io);
+      const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, target: args.target, intent: 'setup', offer: false }, io);
       if (opened.ok && (opened.value.action === 'launched' || opened.value.action === 'installed-and-launched')) {
         io.print(args.target === undefined ? 'Continuing in the app.' : `Continuing in the app. Join ${args.target} there.`);
         steps.app = 'done';

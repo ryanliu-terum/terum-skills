@@ -662,7 +662,7 @@ it.each([undefined, 'bare'] as const)('threads %s from creator setup to connect 
   expect(lines.map((line) => line.slice(prefix.length+3).split(' ')[0])).toEqual(['install', 'ls', 'search', 'sync', 'publish', 'eval', 'connect']);
 });
 
-describe('the desktop app question (decision walk D4/D5, 2026-09-08)', () => {
+describe('the desktop app hand-off (D4/D5 2026-09-08; auto-launch, Teddy 2026-09-09)', () => {
   const mac = { platform: 'darwin' as const, arch: 'arm64' };
   const linux = { platform: 'linux' as const, arch: 'x64', procVersion: 'Linux 6.8' };
   const appOk = (calls: unknown[]) => (async (args: { offer?: boolean; config: ReturnType<typeof createConfigStore> }, io: Prompter) => {
@@ -675,40 +675,41 @@ describe('the desktop app question (decision walk D4/D5, 2026-09-08)', () => {
   }) as never;
   class SP extends ScriptedPrompter { constructor(answers: string[] = [], confirms: boolean[] = []) { super(answers, confirms, true); } }
 
-  it('is asked first, defaults to no, records the no, and the wizard continues; the offer text is the decided wording', async () => {
+  it('opens the app without asking where one exists, and a failed hand-off is printed and the wizard continues', async () => {
     const store = createConfigStore(join(await temporaryDirectory(), 'state'));
     const calls: unknown[] = [];
-    const io = new SP([JOIN_CHOICE], [false]);
+    const io = new SP([], []);
     const result = await run({ config: store, evidence: mac, verbs: { app: appOk(calls) } }, io);
-    expect(result).toMatchObject({ ok: true, value: { steps: { welcome: 'printed', app: 'skipped', role: 'done', team: 'printed' } } });
-    expect(io.asked[0]).toBe(APP_QUESTION);
-    expect(io.asked[1]).toBe(ROLE_QUESTION);
-    expect(io.lines).toContain(APP_OFFER[0]);
-    expect(calls).toEqual([]);
-    expect((await store.read()).app).toMatchObject({ choice: 'declined' });
-    // A remembered no is asked again next run (D4).
-    const again = new SP([JOIN_CHOICE], [false]);
-    await run({ config: store, evidence: mac, verbs: { app: appOk(calls) } }, again);
-    expect(again.asked[0]).toBe(APP_QUESTION);
+    expect(result).toMatchObject({ ok: true, value: { steps: { welcome: 'printed', app: 'done' } } });
+    expect(io.asked).toEqual([]);
+    expect(io.lines).not.toContain(APP_OFFER[0]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ offer: false, intent: 'setup' });
+    // The app could not be installed (offline, no gh): the reason is printed and the terminal wizard goes on.
+    const failing = new SP([JOIN_CHOICE], []);
+    const failed = await run({ config: store, evidence: mac, verbs: { app: (async () => failure('Could not reach GitHub to download the desktop app; you appear to be offline.')) as never } }, failing);
+    expect(failed).toMatchObject({ ok: true, value: { steps: { app: 'skipped', role: 'done' } } });
+    expect(failing.lines).toContain('Could not reach GitHub to download the desktop app; you appear to be offline.');
+    expect(failing.asked).toEqual([ROLE_QUESTION]);
   });
 
-  it('yes hands off to the app and ends setup there; with a target the person is told to join in the app', async () => {
+  it('the hand-off ends setup in the app; with a target the person is told to join in the app', async () => {
     const store = createConfigStore(join(await temporaryDirectory(), 'state'));
     const calls: unknown[] = [];
-    const io = new SP([], [true]);
+    const io = new SP([], []);
     const result = await run({ config: store, evidence: mac, form: 'bare', verbs: { app: appOk(calls) } }, io);
     expect(result).toMatchObject({ ok: true, value: { steps: { welcome: 'printed', app: 'done' } } });
     expect(result.ok && result.value.steps.role).toBeUndefined();
     expect(io.lines.at(-1)).toBe('Continuing in the app.');
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ form: 'bare', evidence: mac, offer: true, intent: 'setup' });
-    const joiner = new SP([], [true]);
+    expect(calls[0]).toMatchObject({ form: 'bare', evidence: mac, offer: false, intent: 'setup' });
+    const joiner = new SP([], []);
     await run({ target: 'alice/team', config: store, evidence: mac, verbs: { app: appOk(calls) } }, joiner);
     expect(joiner.lines.at(-1)).toBe('Continuing in the app. Join alice/team there.');
     expect(calls[1]).toMatchObject({ target: 'alice/team', intent: 'setup' });
   });
 
-  it('a remembered yes is not asked again and hands off; --app hands off without asking; --no-app never asks', async () => {
+  it('a remembered yes and --app still hand off without asking; --no-app skips the app entirely', async () => {
     const store = createConfigStore(join(await temporaryDirectory(), 'state'));
     await store.update((config) => { config.app = { choice: 'opted-in', at: '2026-09-08T00:00:00Z' }; });
     const calls: unknown[] = [];
