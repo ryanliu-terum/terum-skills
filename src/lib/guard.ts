@@ -3,11 +3,11 @@ import { handleSchema, parseJson, parseSkillFrontmatter, personSchema, Team, tea
 import { canonicalSkillDigest } from './skills.js';
 
 /**
- * §6.0 write guard — the authorization model. A diff may touch only the rows a–f below, and
+ * §6.0 write guard — the authorization model. A diff may touch only the rows a–h below, and
  * nothing else is writable. It runs inside the safeWrite loop against the tree the mutation
  * actually produced; teamRepo additionally proves the staged diff equals that tree's changes.
  */
-export type GuardAction = 'connect' | 'sync' | 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'eval' | 'profile' | 'decline';
+export type GuardAction = 'connect' | 'sync' | 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'eval' | 'eval-assets' | 'profile' | 'decline';
 
 export interface GuardContext {
   action: GuardAction;
@@ -45,6 +45,7 @@ export function guard(tree: GuardTree, rawContext: GuardContext): void {
   const context: GuardContext = { ...rawContext, handle: normalizeHandle(rawContext.handle), targetHandle: rawContext.targetHandle === undefined ? undefined : normalizeHandle(rawContext.targetHandle) };
   for (const path of tree.changedPaths) {
     if (context.action === 'eval' && permitsReceipt(tree, path)) continue; // row g
+    if (context.action === 'eval-assets' && permitsEvalAsset(tree, path)) continue; // row h
     if (path === 'README.md') continue; // row f: generated, regenerated not hand-edited
     if (path === `people/${context.handle}.json` && PEOPLE_ACTIONS.includes(context.action)) continue; // row b
     if (path === 'team.json') { guardTeam(tree, context); continue; } // rows c, d, e
@@ -73,12 +74,29 @@ function permitsReceipt(tree: GuardTree, path: string): boolean {
     });
 }
 
+// Row h admits exactly the files eval-gen produces: cases under evals/cases/ plus evals/triggers.yaml.
+const EVAL_ASSET_PATH = /^skills\/([^/]+)\/evals\/(?:cases\/[^/]+\.ya?ml|triggers\.yaml)$/;
+
+/**
+ * Row h: any member may land generated eval assets on an existing skill (Terum decision 6fafb8d3,
+ * Ajay, 2026-09-09 — eval --commit is no longer author-only). Append-only like row g: only a NEW
+ * cases/*.yaml or triggers.yaml under an existing skill's evals/, so an authored dataset can never
+ * be overwritten or removed through this row, and the skill itself (its SKILL.md included) cannot
+ * change — every other path still falls through to the ownership rows below.
+ */
+function permitsEvalAsset(tree: GuardTree, path: string): boolean {
+  const match = EVAL_ASSET_PATH.exec(path);
+  if (!match) return false;
+  if (tree.before(path) !== undefined || tree.after(path) === undefined) return false;
+  return tree.before(`skills/${match[1]!}/SKILL.md`) !== undefined;
+}
+
 /**
  * D12's clone-local half, run by the pre-push hook. A raw `git push` cannot say which verb it
  * is, so every row any verb could take stands open to the pusher's own identity — README (f),
  * their own people file (b), a team.json change shaped like publish (c), team remove (d) or a
- * rejoin (e), and skill folders they author (a). Nothing else. Accidents, not abuse: the hook is
- * bypassable and the bypass is attributed.
+ * rejoin (e), skill folders they author (a), and new eval assets on an existing skill (h). Nothing
+ * else. Accidents, not abuse: the hook is bypassable and the bypass is attributed.
  */
 export function guardRawPush(tree: GuardTree, identity: { handle: string; author?: string }, form?: InvocationForm): void {
   const handle = normalizeHandle(identity.handle);
@@ -90,6 +108,9 @@ export function guardRawPush(tree: GuardTree, identity: { handle: string; author
       throw new GuardError('Push guard refused team.json: only the skill lists (publish), an archive of someone else (team remove), or your own rejoin may change it');
     }
     const skill = /^skills\/([^/]+)\/.+$/.exec(path);
+    // Row h stands open to a raw push too: the eval verb may append these files for any member,
+    // and the check needs no author identity.
+    if (skill && permitsEvalAsset(tree, path)) continue;
     // Ownership is an author comparison (§5.3): with no local identity there is nothing to compare, and
     // saying so beats reading every skill path as someone else's.
     if (skill && !identity.author) throw new GuardError(`Push guard cannot check ${path}: this machine has no name and email to match a skill's author against. Run \`${invocation(form, 'login')}\`, then retry (or bypass with \`git push --no-verify\`, attributed to you).`);
