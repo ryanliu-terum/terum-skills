@@ -9,9 +9,11 @@ export function fakeBridge(script: (args: readonly string[], emit: (e: LineEvent
   const writes: string[] = [];
   const kills: string[] = [];
   const unlisten = vi.fn();
+  const quit = vi.fn(async () => {});
   let emit: ((e: LineEvent) => void) | undefined;
   const launchListeners = new Set<() => void>();
   const bridge: Bridge = {
+    quit,
     async onLaunchRequest(listener) { launchListeners.add(listener); return () => { launchListeners.delete(listener); }; },
     async spawn(id, _state, args, cwd, onEvent) { spawns.push({ id, args, cwd }); emit = onEvent; await Promise.resolve(); await script(args, onEvent, writes); return unlisten; },
     async write(_id, line) { writes.push(line); },
@@ -20,5 +22,5 @@ export function fakeBridge(script: (args: readonly string[], emit: (e: LineEvent
     async hostPlatform() { return 'macos'; },
     async homeDirectory() { return '/Users/teddy'; },
   };
-  return { reopen: () => { for (const listener of launchListeners) listener(); }, bridge, spawns, writes, kills, unlisten, emit: (event: LineEvent) => emit?.(event) };
+  return { reopen: () => { for (const listener of launchListeners) listener(); }, bridge, spawns, writes, kills, unlisten, quit, emit: (event: LineEvent) => emit?.(event) };
 }

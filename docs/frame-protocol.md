@@ -35,7 +35,8 @@ Closing stdin fails pending questions closed; it does not invoke the bin’s can
 2. **Never use `sync --hook` over frames.** Its stdout is the Claude Code reload directive, not frames; the CLI refuses it with a `result` frame and exit 1. Call plain `sync`.
 3. **Never ask the CLI for `--help` or `--version` in frame mode.** Commander prints those as text.
 4. **`cwd` is advisory; every write names its destination.** `install` asks `Install to` (or takes `--into`), `sync` refreshes every registered checkout from any cwd, `uninstall-skill` takes `--from`.
-5. **One run per verb.** Start the process, read frames until `result`, let it exit.
+5. **`uninstall`: the consent inventory is the confirm's detail.** Render `ask.detail` verbatim in the danger dialog; answer false to cancel. Its result includes cleanup outcomes, `kept`, `record`, and CLI-generated `advice`.
+6. **One run per verb.** Start the process, read frames until `result`, let it exit.
 
 ## Example
 
@@ -70,7 +71,7 @@ Protocol stays 1. `hello.features.localIdentity` advertises the additive `ls --l
 
 `hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, and `checkouts`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and remains false. `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `installScope` is true: install destinations and destination-aware removal are available.
 
-`hello.protocol` is `1`. `detail` is an additive optional field: protocol stays 1. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.
+`hello.protocol` is `1`. `install`, `sync`, and `uninstall-skill` carry `detail` on their confirmation asks. `detail` is an additive optional field: protocol stays 1. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.
 
 ## Verbs added for the desktop app
 

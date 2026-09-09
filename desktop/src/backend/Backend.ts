@@ -1,6 +1,7 @@
-import type { LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, Scope, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, CheckoutAdded, CheckoutRemoved, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
+  quit(): Promise<void>;
   features(): Promise<Features>;
   windowAction(action: 'toggle-maximize' | 'start-drag'): Promise<Result<void>>;
   openUrl(url: string): Promise<Result<void>>;
@@ -13,7 +14,9 @@ export interface Backend {
   status(q?: undefined, options?: ReadOptions): Promise<Result<StatusResult>>;
   settings(q?: undefined, options?: ReadOptions): Promise<Result<Settings>>;
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;
-  library(q: { scope: Scope; team?: string }, options?: ReadOptions): Promise<Result<Library>>;
+  library(q: { scope: LibraryScope; team?: string }, options?: ReadOptions): Promise<Result<Library>>;
+  localSkill(q: { path: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
+  checkouts: { add(path:string):Run<CheckoutAdded>; remove(path:string):Run<CheckoutRemoved> };
   skill(q: { ref: string; team?: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
   evalReport(q: { ref: string; team?: string }, options?: ReadOptions): Promise<Result<EvalReportModel>>;
   receipts(q: { skillId: string; version: string }, options?: ReadOptions): Promise<Result<Receipt | null>>;

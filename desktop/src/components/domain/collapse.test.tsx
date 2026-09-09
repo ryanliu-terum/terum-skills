@@ -55,7 +55,7 @@ it('renders persisted sidebar state on mount',()=>{
  expect(document.querySelector('.sidebar')).toBeNull();expect(screen.getByRole('button',{name:'Show sidebar'})).toBeVisible();
 });
 it('renders All clear with zero attention and retains the alerts link',async()=>{
- location.hash='#/library/project/SSM';render(<Providers><App/></Providers>);
+ location.hash='#/library/checkout?root=%2FUsers%2Fyou%2Fcode%2Fssm';render(<Providers><App/></Providers>);
  await screen.findByText('3 of 3');const attention=screen.getByText('Needs attention').closest('.stat-tile');
  expect(attention?.querySelector('.stat-value')).toHaveTextContent('0');
  expect(attention?.querySelector('.board-column')).toHaveTextContent('All clear');

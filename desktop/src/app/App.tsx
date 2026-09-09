@@ -5,6 +5,7 @@ import { HashRouter, useLocation, useRoutes, useNavigate } from 'react-router';
 import { useSyncAction } from '../components/domain/useSyncAction';
 import { LaunchCoordinator } from './LaunchCoordinator';
 import { routes } from './routes';
+import { MachineRemovalHost } from './MachineRemovalHost';
 import { EvalRunDialogHost } from './EvalRunDialogHost';
 function RouteView(){const location=useLocation();const setLastRoute=useUiStore(s=>s.setLastRoute);useEffect(()=>setLastRoute(location.pathname+location.search),[location.pathname,location.search,setLastRoute]);return useRoutes(routes);}
 function Shortcuts(){
@@ -23,4 +24,4 @@ function Shortcuts(){
  },[navigate,location.pathname,sync]);
  return sync.popup;
 }
-export function App(){const backend=useBackend(),[ready,setReady]=useState(!backend.prefs.ready);useEffect(()=>{void backend.prefs.ready?.then(()=>setReady(true));},[backend]);if(!ready)return null;return <HashRouter><span aria-hidden="true" style={{position:'absolute',width:0,height:0,overflow:'hidden',fontFamily:'var(--font-mono)'}}>0</span><Shortcuts/><LaunchCoordinator/><RouteView/><EvalRunDialogHost/></HashRouter>;}
+export function App(){const backend=useBackend(),[ready,setReady]=useState(!backend.prefs.ready);useEffect(()=>{void backend.prefs.ready?.then(()=>setReady(true));},[backend]);if(!ready)return null;return <HashRouter><span aria-hidden="true" style={{position:'absolute',width:0,height:0,overflow:'hidden',fontFamily:'var(--font-mono)'}}>0</span><Shortcuts/><LaunchCoordinator/><RouteView/><EvalRunDialogHost/><MachineRemovalHost/></HashRouter>;}

@@ -13,7 +13,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const keys = ['status', 'settings', 'onboarding', 'library', 'skill', 'receipts', 'inbox', 'catalog', 'roster', 'update', 'capabilities', 'surfaces'];
 const cases: [ChangeSource, string[]][] = [
-  ['config', ['status', 'settings', 'onboarding']],
+  ['config', ['status', 'settings', 'onboarding', 'library', 'skill', 'catalog']],
   ['clone', ['library', 'skill', 'catalog', 'roster', 'inbox', 'receipts', 'status']],
   ['placed', ['library', 'skill', 'settings', 'status', 'catalog']],
   ['stamp', ['status', 'settings', 'inbox']],

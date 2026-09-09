@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext } from '../../index';
@@ -24,11 +24,11 @@ function open(route: string) {
 }
 it('renders recorded Library cards and the real project registry without favorite controls or sample provenance', async () => {
   open('#/library/global');
-  expect(await screen.findByText('3 skills · 1 in ~/.claude/skills · 0 in seed')).toBeVisible();
+  expect(await screen.findByText('1 skill folder in Global · 1 shared with acme')).toBeVisible();
   const card = screen.getByTestId('skill-card-deploy-check');
   expect(within(card).getByText('a deploy needs a pre-flight checklist.')).toBeVisible();
   expect(within(card).queryByRole('button', { name: 'Favorite deploy-check' })).toBeNull();
-  expect(screen.getByRole('link', { name: 'terum' })).toHaveAttribute('href', '#/library/project/terum');
+  expect(screen.getByRole('link', { name: 'seed' })).toHaveAttribute('href', '#/library/checkout?root='+encodeURIComponent('/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'));
   expect(screen.queryByRole('link', { name: 'SSM' })).toBeNull();
   expect(screen.queryByText(/sonnet · agent CLI/)).toBeNull();
 });
@@ -44,11 +44,21 @@ it('renders recorded markdown and validation, omitting unknown counts and fabric
   expect(screen.getByText('none')).toBeVisible();
   expect(f.spawns.find(spawn => spawn.args[0] === 'validate')?.args).toEqual(['validate', '--team', 'acme', '--', 'deploy-check']);
 });
+it('omits the missing-project crumb instead of drawing a dash segment', async () => {
+  open('#/skill/diagnose');
+  await waitFor(() => expect(document.querySelector('.detail-crumbs')).toHaveTextContent('diagnose'));
+  expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/debugging/diagnose');
+});
+it('omits the unknown quarantine size instead of a dangling dash clause', async () => {
+  open('#/settings/sync');
+  expect(await screen.findByText(/0 folders\. Only prune deletes here/)).toBeVisible();
+  expect(screen.queryByText(/folders · —/)).toBeNull();
+});
 it('preserves the project route key when the displayed title is capitalized', async () => {
-  const f = open('#/library/project/terum');
-  expect(await screen.findByText('1 skills · 0 in ~/.claude/skills · 0 in seed')).toBeVisible();
-  expect(screen.getByTestId('skill-card-tdd')).toBeVisible();
-  expect(f.spawns.find(spawn => spawn.args[1] === 'project')?.args).toEqual(['ls', 'project', 'terum', '--team', 'acme']);
+  const f = open('#/library/checkout?root='+encodeURIComponent('/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'));
+  expect(await screen.findByText('0 skill folders in seed')).toBeVisible();
+  expect(screen.queryAllByTestId(/^skill-card-/)).toHaveLength(0);
+  expect(f.spawns.some(spawn => spawn.args[1] === 'project')).toBe(false);
 });
 
 it('renders the real machine placement table from typed provenance, in the board\'s vocabulary',async()=>{
@@ -56,6 +66,6 @@ it('renders the real machine placement table from typed provenance, in the board
   const row=await screen.findByTestId('placement-row-0');
   expect(row).toHaveTextContent('deploy-check');expect(row).toHaveTextContent('up to date');
   expect(row).not.toHaveTextContent('tracking');expect(row).not.toHaveTextContent('In sync');
-  expect(screen.getByText(/1 placed · 1 global · 1 pinned/)).toBeVisible();
+  expect(screen.getByText(/1 placed · — global · 1 pinned/)).toBeVisible();
   expect(screen.queryByRole('alert')).toBeNull();
 });

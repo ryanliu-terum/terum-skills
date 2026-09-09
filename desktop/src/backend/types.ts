@@ -1,5 +1,5 @@
 import type { Design } from '../fixtures/schema';
-export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team';value?:T};
+export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library';value?:T};
 export interface LaunchContext { writtenAt: string; target?: string; intent?: 'setup' }
 export class PromptCancelledError extends Error { readonly cancelled = true as const; }
 export interface AskOptions {detail?:readonly string[]}
@@ -9,22 +9,22 @@ export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly 
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;evalCommitChoice:boolean;openInEditor:boolean;clipboard:boolean}
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','checkouts'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
-export interface Surfaces {divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean}
+export interface Surfaces {checkouts:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean}
 export interface ReadOptions {signal?:AbortSignal}
 export type Theme='dark'|'light'|'system';
 export type Scope=string;
 export type TokenKey=keyof Design['TOKENS'];
 export type IndicatorKey='update'|'local'|'broken';
 export interface ReceiptSummary {w:number;l:number;t:number;n:number;lift:number;verdict:'PASS'|'NEUTRAL'|'FAIL';partial:[number,number]|null;signP:string}
-export interface SkillCard {updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:boolean;placed:boolean;onDiskOnly:boolean;paths:[string,string][];projectRoots?:string[];connectedSources?:string[];wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
+export interface SkillCard {path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:boolean;placed:boolean;onDiskOnly:boolean;paths:[string,string][];projectRoots?:string[];connectedSources?:string[];wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
 export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
 export interface ReportNumbers {holes:number;nRounds:number;triggerTotal:number;precisionObserved?:string}
 export interface EvalEstimate {cases:number;k:number;arms:number;runs:number;minutes:number;dollars:number;model:string}
-export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'> & SkillCard & {pathLabel:string;repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null;local?:true})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null;quality:[number,number]|null};method:string;
+export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'> & SkillCard & {path:string;pathLabel:string;repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null;local?:true})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null;quality:[number,number]|null};method:string;
  versions:{placed:string|null;teamCurrent:string|null;evaluated:string|null}|null;
  latestState:'ok'|'none'|'invalid';invalidReceiptFile:string|null;evalReportError:string|null;
  localRuns:{runId:string;runDir:string;executionStatus:'complete'|'partial'|'failed'|'unknown';committed:boolean;receipt:Receipt|null;summary:ReceiptSummary|null}[];
@@ -37,7 +37,12 @@ export type Project=Omit<Design['PROJECTS'][number], 'evaluated'|'favorites'> & 
 export interface Catalog {scanned:string[]|null;repository:string|null;skills:SkillCard[];extras:SkillCard[];people:Person[];projects:Project[];categories:Design['CATEGORIES'];categoryRemaining:Record<string,number>;topRated:string[];peopleByAdoption:string[];projectsByMembers:string[];categorySkills:Record<string,string[]>;filterDefault:Design['FILTER_DEFAULT'];filterCount:number;verdictCounts:Record<'PASS'|'NEUTRAL'|'FAIL'|'Not evaluated',number|null>;catalogN:number;teamN:number;bulkInstall:Record<string,{total:number;asking:number}>}
 export type Member=Omit<Design['ROSTER'][number], 'followers'> & {followers:number|null;status:string;projects:string[];lastSeen:string;lastPublish:string};
 export interface Roster {members:Member[];invited:Design['INVITED'];member:Record<string,{status:string;projects:string[];lastSeen:string}>;byAdoption:string[]}
-export interface Library {scanned:string[]|null;skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;provenance?:string|null;projects?:readonly {name:string;skills:readonly string[];remotes:readonly string[];[key:string]:unknown}[];problems?:readonly {source:string;message:string}[]}
+export interface Root {id:string;kind:'global'|'checkout';label:string;root:string;rootState?:'scanned'|'absent'|'unreadable'|undefined;registered:boolean;detected:boolean;count?:string|undefined}
+export type LibraryScope={kind:'global'}|{kind:'checkout';root:string};
+export type LibraryTeam={kind:'ok';team:string}|{kind:'none'}|{kind:'unreadable';message:string};
+export interface CheckoutAdded {path:string;registered:boolean}
+export interface CheckoutRemoved {path:string;placementsRemaining:number}
+export interface Library {scanned:string[]|null;skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;provenance?:string|null;root:Root;team:LibraryTeam;problems?:readonly {source:string;message:string}[]}
 /** attention = failingEvals + updatesAvailable + notEvaluated; counts.Alerts = attention, counts.Updates = updatesAvailable. Absent CLI counters are omitted. */
 export type CloneState = {state:'absent'} | {state:'incomplete';reason:'not-a-repository'|'no-team-json'|'unverifiable';error?:string} | {state:'foreign'|'ok';origin:string};
 /** name comes from team.json via status; key is the config identifier. They may differ; there is no label. */
@@ -50,22 +55,21 @@ export interface TeamStatus {
 }
 export type Machine=Design['MACHINE'] & {hostname:string};
 export type Identity=Design['ME'] & {initials:string;footerLabel:string};
-/** `projects`: the sidebar's project rows; the mock draws the design's list, the real adapter serves null until a project read model exists (a screen with real registry data passes its own). */
 export interface StatusLedger {
  placements:{path:string;id:string;team:string;version:string|null;scope:{kind:'global'}|{kind:'project';project:string};placed_at:string}[];
  approvals:{id:string;grants:string;approved_at:string}[];
  shared:{id:string;source:string;team:string}[];
 }
-export interface StatusResult {ledger?:StatusLedger|null;machine:Machine;me:Identity;teams:TeamStatus[];counts:Record<string,string>;tools:{git:boolean;gh:boolean};projects:string[]|null}
+export interface StatusResult {ledger?:StatusLedger|null;machine:Machine;me:Identity;teams:TeamStatus[];counts:Record<string,string>;tools:{git:boolean;gh:boolean};roots:Root[]}
 export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project')[]}
 export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null;endorsed:string|null;unresolved:boolean|null}
 export interface IdentityArgs {name?:string;email?:string;defaultHandle?:string}
 export interface IdentityWrite {updated:{key:string;value:string}[];notice:string|null}
 export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}
 export interface InstalledResult {id:string;name:string;scope:Scope}
-export interface UninstallArgs {team?:string;ref:string}
+export interface UninstallArgs {team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
 export interface UninstalledResult {id:string;name:string}
-export interface MachineUninstallResult {removed:string[]}
+export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
 export interface ConnectArgs {path?:string;home?:string;cwd?:string;team?:string;keepSource?:boolean;keepRepo?:boolean;relocate?:boolean;forget?:boolean;allowPrivileged?:boolean}
 export interface ConnectResult {id:string;name:string;reconciled?:boolean;adopted?:boolean}
 export interface ConnectBatch {kind:'batch';shared:ConnectResult[];declined:string[];refused:{name:string;reason:string}[]}
@@ -75,7 +79,7 @@ export interface PublishResult {name:string;version:string|null;changed:boolean}
 export interface SyncArgs {team?:string;prune?:boolean;hook?:boolean}
 export interface SyncResult {placed:string[];removed:string[]}
 export interface InviteArgs {team?:string;logins:string[];scope?:Scope;role?:string}
-export interface InviteResult {invited:string[]}
+export interface InviteResult {invited:string[];already:string[];failed:{login:string;error:string}[]}
 export interface TeamArgs {kind:'create'|'join'|'remove'|'leave';name?:string;team?:string;remote?:string;handle?:string}
 export interface TeamResult {name:string;kind:TeamArgs['kind']}
 export interface SetupArgs {target?:string;offerConnect?:boolean}
@@ -91,5 +95,7 @@ export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value
 export type Subscription=()=>void;
 export type ChangeSource='config'|'clone'|'placed'|'stamp';
 
-export type Settings = Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'QUARANTINE'|'LOCAL_UNSHARED'|'HOOK'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'STORAGE'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'CLI_LATEST'|'FOLLOWING' > & {K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{publish:string|null;license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED:[string,string,string,string][];SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
+export type Settings = Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'QUARANTINE'|'LOCAL_UNSHARED'|'HOOK'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'STORAGE'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'CLI_LATEST'|'FOLLOWING'|'INVITE_TIP'|'JOIN_BLOCK_NOTE' > & {
+// mock-only: the drawn specimen login (design INVITEE); the real adapter never sets it
+INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{publish:string|null;license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED:[string,string,string,string][];SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};

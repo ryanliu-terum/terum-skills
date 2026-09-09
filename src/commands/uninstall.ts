@@ -8,15 +8,23 @@ import type { Config, Destination } from '../lib/schema.js';
 import { exists } from '../lib/fs.js';
 import { lockTarget, remove } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
-import { fromError, Result, success } from '../lib/result.js';
+import { cancelled, failure, fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, personSchema, sameScope, teamSchema } from '../lib/schema.js';
-import { findSkill, readPerson, readTeam } from '../lib/skills.js';
+import { findSkill, readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { parseRef, placementHome, samePending, teamForReference } from './install.js';
 
 export interface UninstallArgs extends WithForm { from?: string; ref?: string; kind?: 'skill' | 'member' | 'project'; member?: string; project?: string; team?: string; config?: ConfigStore; runner?: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>; }
 export interface UninstalledResult { id: string; team: string; removed: number; }
+
+/** Placements are already gone but the people-file write failed: `results` is what went, so the caller can still report it. */
+export class UninstallInterruptedError extends Error {
+  constructor(message: string, readonly results: UninstalledResult[], options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'UninstallInterruptedError';
+  }
+}
 
 export async function run(args: UninstallArgs, io: Prompter): Promise<Result<UninstalledResult[]>> {
   try {
@@ -34,7 +42,10 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
       const member = await readPerson(store.teamClone(team), parseOrExplain(handleSchema, handle, 'member handle'));
       const targets: UninstallTarget[] = [];
       for (const item of member.installed) for (const scope of await ledgerScopes(store, team, item.id, [item.scope])) targets.push({ id: item.id, scope });
-      return success(await uninstallMany({ team, targets, from: args.from, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
+      return await confirmAndRemove({ team, targets, from: args.from, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io, (preview) => ({
+        question: config.teams[team]?.handle === handle ? `Remove everything you installed (${preview.ids.length} skills)?` : `Remove ${handle}'s ${preview.ids.length} skills from this machine?`,
+        detail: [...preview.lines, `Targets are ${handle}'s current installed list, not what you installed from them.`],
+      }));
     }
     if (args.kind === 'project' || args.project) {
       const project = args.project ?? args.ref;
@@ -47,7 +58,7 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
       // project's scope: it takes back exactly that. A global copy the user installed separately is
       // not part of the project and survives. The member verb keeps its union of people and ledger scopes.
       for (const id of listed.skills) targets.push({ id, scope: { kind: 'project', project } });
-      return success(await uninstallMany({ team, targets, from: args.from, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
+      return await confirmAndRemove({ team, targets, from: args.from, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io, (preview) => ({ question: `Remove ${project}'s ${preview.ids.length} skills from this machine?`, detail: [...preview.lines, 'Copies installed to Global stay.'] }));
     }
     if (!args.ref) throw new Error('Provide a skill ref, `member <handle>`, or `project <name>`.');
     const record = await findSkill(store.teamClone(team), team, parsedRef?.name ?? args.ref.split('@')[0]!);
@@ -57,30 +68,28 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
     const person = await readPerson(store.teamClone(team), handle);
     const installed = person.installed.filter((entry) => entry.id === record.id);
     const targets = (await ledgerScopes(store, team, record.id, installed.map((entry) => entry.scope))).map((scope) => ({ id: record.id, scope }));
-    // A real team skill that was never installed here resolves to no targets; uninstallMany's
-    // per-target print never runs, so say it here instead of exiting 0 in silence.
-    if (!targets.length) io.print(`${record.id.slice(0, 8)} is not placed on this machine.`);
-    return success(await uninstallMany({ team, targets, from: args.from, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
-  } catch (error) { return fromError(error); }
+    // A real team skill that was never installed here resolves to no targets; confirmAndRemove
+    // would return an empty success without asking, so say it here instead of exiting 0 in silence.
+    if (!targets.length) { io.print(`${record.id.slice(0, 8)} is not placed on this machine.`); return success([]); }
+    return await confirmAndRemove({ team, targets, from: args.from, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io, (preview) => ({ question: `Remove ${record.name}?`, detail: preview.lines }));
+  } catch (error) {
+    if (error instanceof UninstallInterruptedError) return failure(error.message, error.results);
+    return fromError(error);
+  }
 }
 
 export interface UninstallTarget { id: string; scope: { kind: 'global' } | { kind: 'project'; project: string }; }
 interface UninstallInput { from?: string; destination?: Destination; team: string; store: ConfigStore; runner: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>; }
+export interface CopySelection { target: UninstallTarget; matching: Array<[string, Config['placements'][string]]>; destination: Destination; }
 
 /**
- * Remove several placements and unrecord them in ONE team-repo write. `uninstall member` and
- * `uninstall project` used to run one full fetch/commit/push per skill against the same people
- * file (M2 review, contested 4b; D9 sweep 2026-09-05): N pushes for N skills, and a refused push
- * midway left the roster half-updated. Order: record every pending entry, remove every placement
- * under its target lock, rewrite the people file once, clear the pending entries. A crash before
- * the write leaves the pending entries for sync to replay one at a time through uninstallOne —
- * the same primitive with one target.
+ * Which copy of each target goes: `--from` names it, a single copy needs no question, and several
+ * copies at one scope ask `Remove which copy?` (a non-interactive caller gets the --from hint).
+ * The bulk verbs run this BEFORE their confirm so the preview lists exactly the copies that go;
+ * uninstallMany runs it itself when it is called without selections (sync's pending replay).
  */
-export async function uninstallMany(input: UninstallInput & { targets: readonly UninstallTarget[] }, io: Prompter): Promise<UninstalledResult[]> {
+export async function selectCopies(input: UninstallInput & { targets: readonly UninstallTarget[] }, io: Prompter): Promise<CopySelection[]> {
   const config = await input.store.read();
-  const teamConfig = config.teams[input.team];
-  if (!teamConfig?.handle) throw new Error(`Team ${input.team} has no joined handle.`);
-  if (!input.targets.length) return [];
   const home = input.home ?? placementHome(input.store);
   let destination = input.destination;
   if (input.from !== undefined) {
@@ -88,9 +97,7 @@ export async function uninstallMany(input: UninstallInput & { targets: readonly 
     destination = input.from === 'global' ? { kind: 'global' } : { kind: 'checkout', root: await checkoutPath(input.from) };
   }
   const selectedRoot = destination ? await checkoutPath(destination.kind === 'global' ? AGENT_PATHS['claude-code'].global(home) : AGENT_PATHS['claude-code'].project(destination.root)) : undefined;
-  const started = new Date().toISOString();
-  const pendings: Config['pending'] = [];
-  const selections: Array<{ target: UninstallTarget; matching: Array<[string, Config['placements'][string]]> }> = [];
+  const selections: CopySelection[] = [];
   for (const target of input.targets) {
     let matching = Object.entries(config.placements).filter(([, entry]) => entry.id === target.id && entry.team === input.team && sameScope(entry.scope, target.scope));
     if (selectedRoot !== undefined) {
@@ -103,12 +110,77 @@ export async function uninstallMany(input: UninstallInput & { targets: readonly 
       matching = matching.filter(([path]) => path === selected);
       if (!matching.length) throw new Error('Invalid uninstall destination.');
     }
-    selections.push({ target, matching });
     const path = matching[0]?.[0];
     const checkout = path ? checkoutRootOf(path) : undefined;
     const copyDestination: Destination = destination ?? (checkout && await checkoutPath(checkout) !== await checkoutPath(home) ? { kind: 'checkout', root: await checkoutPath(checkout) } : { kind: 'global' });
-    pendings.push({ op: 'uninstall', id: target.id, team: input.team, scope: target.scope, destination: copyDestination, started });
+    selections.push({ target, matching, destination: copyDestination });
   }
+  return selections;
+}
+
+interface UninstallPreview { placements: CopySelection['matching']; records: Awaited<ReturnType<typeof readPerson>>['installed']; declining: string[]; ids: string[]; lines: string[]; }
+
+/**
+ * Read-only: what uninstallMany will do with these selections — the folders, the install records
+ * that go (only where no copy at that scope remains, the same last-copy rule as the write) and the
+ * ids that land in `declined`. The clone is the last synced state; the write re-reads it under
+ * safeWrite, so a preview never touches the store, the placer or the team repo.
+ */
+async function previewUninstall(store: ConfigStore, team: string, selections: readonly CopySelection[]): Promise<UninstallPreview> {
+  const config = await store.read();
+  const handle = config.teams[team]?.handle;
+  if (!handle) throw new Error(`Team ${team} has no joined handle.`);
+  const clone = store.teamClone(team);
+  const person = await readPerson(clone, handle);
+  const endorsed = await readTeam(clone);
+  const placements = selections.flatMap((selection) => selection.matching);
+  const going = new Set(placements.map(([path]) => path));
+  const remaining = Object.entries(config.placements).filter(([path]) => !going.has(path)).map(([, entry]) => entry);
+  const lastCopies = selections.map((selection) => selection.target).filter((target) => !remaining.some((entry) => entry.id === target.id && entry.team === team && sameScope(entry.scope, target.scope)));
+  const records = person.installed.filter((entry) => lastCopies.some((target) => entry.id === target.id && sameScope(entry.scope, target.scope)));
+  const survivingInstalled = person.installed.filter((entry) => !records.includes(entry));
+  const isAuto = (id: string): boolean => endorsed.global.includes(id) || Object.values(endorsed.projects).some((project) => project.skills.includes(id));
+  const declining = [...new Set(lastCopies.map((target) => target.id))].filter((id) => isAuto(id) && !survivingInstalled.some((entry) => entry.id === id) && !person.declined.includes(id));
+  const ids = [...new Set([...placements.map(([, entry]) => entry.id), ...records.map((entry) => entry.id)])];
+  const names = new Map((await skillRecords(clone, team)).map((record) => [record.id, record.name]));
+  const name = (id: string) => names.get(id) ?? id.slice(0, 8);
+  const lines = [
+    `Folders removed (${placements.length}):`,
+    ...placements.map(([path, entry]) => `  ${path}  ·  ${entry.scope.kind === 'global' ? 'Global' : `project ${entry.scope.project}`}`),
+    `Local changes are moved to ${join(store.root, 'quarantine')}, never deleted.`,
+    records.length ? `Install records dropped from your people file (${records.length}): ${records.map((entry) => name(entry.id)).join(', ')}` : `Install records dropped from your people file (0)${lastCopies.length ? '' : ': another copy stays, so your records are kept'}`,
+    ...(declining.length ? [`Not offered again until you install them: ${declining.map(name).join(', ')}`, 'These have no remaining install record, so sync stops placing them anywhere.'] : []),
+  ];
+  return { placements, records, declining, ids, lines };
+}
+
+/** Select the copies, show what goes, ask once, then write. An empty preview asks nothing and writes nothing. */
+async function confirmAndRemove(input: UninstallInput & { targets: readonly UninstallTarget[] }, io: Prompter, ask: (preview: UninstallPreview) => { question: string; detail: string[] }): Promise<Result<UninstalledResult[]>> {
+  const selections = await selectCopies(input, io);
+  const preview = await previewUninstall(input.store, input.team, selections);
+  if (!preview.placements.length && !preview.records.length) return success([]);
+  const { question, detail } = ask(preview);
+  if (!(await io.confirm(question, { detail }))) return cancelled('Remove was declined.');
+  return success(await uninstallMany({ ...input, selections }, io));
+}
+
+/**
+ * Remove several placements and unrecord them in ONE team-repo write. `uninstall member` and
+ * `uninstall project` used to run one full fetch/commit/push per skill against the same people
+ * file (M2 review, contested 4b; D9 sweep 2026-09-05): N pushes for N skills, and a refused push
+ * midway left the roster half-updated. Order: record every pending entry, remove every placement
+ * under its target lock, rewrite the people file once, clear the pending entries. A crash before
+ * the write leaves the pending entries for sync to replay one at a time through uninstallOne —
+ * the same primitive with one target.
+ */
+export async function uninstallMany(input: UninstallInput & { targets: readonly UninstallTarget[]; selections?: readonly CopySelection[] }, io: Prompter): Promise<UninstalledResult[]> {
+  const config = await input.store.read();
+  const teamConfig = config.teams[input.team];
+  if (!teamConfig?.handle) throw new Error(`Team ${input.team} has no joined handle.`);
+  if (!input.targets.length) return [];
+  const selections = input.selections ?? await selectCopies(input, io);
+  const started = new Date().toISOString();
+  const pendings: Config['pending'] = selections.map(({ target, destination }) => ({ op: 'uninstall' as const, id: target.id, team: input.team, scope: target.scope, destination, started }));
   await input.store.update((fresh) => { for (const pending of pendings) if (!fresh.pending.some((entry) => samePending(entry, pending))) fresh.pending.push(pending); });
   const results: UninstalledResult[] = [];
   for (const { target, matching } of selections) {
@@ -120,23 +192,27 @@ export async function uninstallMany(input: UninstallInput & { targets: readonly 
   const lastCopies = input.targets.filter(target => !remaining.some(entry => entry.id === target.id && entry.team === input.team && sameScope(entry.scope, target.scope)));
   const repo = openTeamRepo(input.store.teamClone(input.team), teamConfig.remote, input.runner);
   const label = input.targets.length === 1 ? input.targets[0]!.id.slice(0, 8) : `${input.targets.length} skills`;
-  if (lastCopies.length) await repo.safeWrite((tree) => {
-    const path = `people/${teamConfig.handle}.json`;
-    const raw = tree.before(path);
-    if (!raw) throw new Error(`Missing ${path}.`);
-    const person = parseJson(personSchema, treeText(raw), path);
-    const teamJson = tree.before('team.json');
-    const endorsed = teamJson === undefined ? undefined : parseJson(teamSchema, treeText(teamJson), 'team.json');
-    const isAuto = (id: string): boolean => endorsed ? endorsed.global.includes(id) || Object.values(endorsed.projects).some((project) => project.skills.includes(id)) : false;
-    const installed = person.installed.filter((entry) => !lastCopies.some((target) => entry.id === target.id && sameScope(entry.scope, target.scope)));
-    const declined = [...person.declined];
-    // `declined` is keyed by skill id with no scope: a scope-targeted uninstall must not write an
-    // id-wide suppression while another scope's install record survives, or sync would skip the
-    // surviving placement forever.
-    for (const target of lastCopies) if (isAuto(target.id) && !installed.some((entry) => entry.id === target.id) && !declined.includes(target.id)) declined.push(target.id);
-    tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);
-  }, { action: 'uninstall', handle: teamConfig.handle, message: `${teamConfig.handle}: uninstall ${label}`, ...input.safeWrite });
-  await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !pendings.some((pending) => samePending(entry, pending))); });
+  try {
+    if (lastCopies.length) await repo.safeWrite((tree) => {
+      const path = `people/${teamConfig.handle}.json`;
+      const raw = tree.before(path);
+      if (!raw) throw new Error(`Missing ${path}.`);
+      const person = parseJson(personSchema, treeText(raw), path);
+      const teamJson = tree.before('team.json');
+      const endorsed = teamJson === undefined ? undefined : parseJson(teamSchema, treeText(teamJson), 'team.json');
+      const isAuto = (id: string): boolean => endorsed ? endorsed.global.includes(id) || Object.values(endorsed.projects).some((project) => project.skills.includes(id)) : false;
+      const installed = person.installed.filter((entry) => !lastCopies.some((target) => entry.id === target.id && sameScope(entry.scope, target.scope)));
+      const declined = [...person.declined];
+      // `declined` is keyed by skill id with no scope: a scope-targeted uninstall must not write an
+      // id-wide suppression while another scope's install record survives, or sync would skip the
+      // surviving placement forever.
+      for (const target of lastCopies) if (isAuto(target.id) && !installed.some((entry) => entry.id === target.id) && !declined.includes(target.id)) declined.push(target.id);
+      tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);
+    }, { action: 'uninstall', handle: teamConfig.handle, message: `${teamConfig.handle}: uninstall ${label}`, ...input.safeWrite });
+    await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !pendings.some((pending) => samePending(entry, pending))); });
+  } catch (error) {
+    throw new UninstallInterruptedError(error instanceof Error ? error.message : String(error), results, { cause: error });
+  }
   return results;
 }
 

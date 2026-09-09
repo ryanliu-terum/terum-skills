@@ -185,6 +185,18 @@ describe('terminalPrompter behaviour', () => {
 
   });
 
+  it('keeps a 24-line uninstall disclosure byte-identical to prints before confirm', async () => {
+    const detail = Array.from({ length: 24 }, (_, i) => `  Inventory ${i}: <path> & kept`);
+    const next = channel(['y']), previous = channel(['y']);
+    for (const line of detail) previous.io.print(line);
+    expect(await previous.io.confirm('Remove terum-skills from this machine?')).toBe(true);
+    expect(await next.io.confirm('Remove terum-skills from this machine?', { detail })).toBe(true);
+    expect(next.out()).toBe(previous.out());
+    const nonInteractive = channel([], false);
+    await expect(nonInteractive.io.confirm('Remove terum-skills from this machine?', { detail })).rejects.toThrow(PromptClosedError);
+    expect(nonInteractive.out()).toBe(detail.join('\n') + '\n');
+  });
+
   it('prints text and select detail once, including across select retries', async () => {
     const { io, out } = channel(['name', 'bad', '1']);
     expect(await io.text('Name', '', { detail: ['Text context'] })).toBe('name');

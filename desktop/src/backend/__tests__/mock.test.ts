@@ -1,10 +1,10 @@
 import { it, expect, afterEach, vi } from 'vitest';
-import { createMockBackend } from '../mock';
+import { createMockBackend, MOCK_REMOVE_DETAIL, MOCK_REMOVE_ADVICE } from '../mock';
 import { design } from '../mock/data';
 import type { Run, Frame } from '../types';
 afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();});
 async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
-it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,evalCommitChoice:false,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true});expect((await b.library({scope:'Global'})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:'Global'});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
+it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,evalCommitChoice:false,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,checkouts:false});expect((await b.library({scope:{kind:'global'}})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:{kind:'global'}});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
 it.each([
  ['library',"EACCES: permission denied, scandir '~/.terum/skills'"],
  ['skill',"ENOENT: no such file or directory, open '~/.claude/skills/deploy-check/SKILL.md'"],
@@ -16,7 +16,7 @@ it.each([
 ] as const)('returns the exact %s board error',async(family,error)=>{
  const b=createMockBackend();const onboarding=await b.onboarding();
  location.hash='#/frame?__mock=error';
- const reads={library:()=>b.library({scope:'Global'}),skill:()=>b.skill({ref:'deploy-check'}),inbox:()=>b.inbox(),marketplace:()=>b.catalog(),share:()=>b.roster(),settings:()=>b.settings(),onboarding:()=>b.onboarding()};
+ const reads={library:()=>b.library({scope:{kind:'global'}}),skill:()=>b.skill({ref:'deploy-check'}),inbox:()=>b.inbox(),marketplace:()=>b.catalog(),share:()=>b.roster(),settings:()=>b.settings(),onboarding:()=>b.onboarding()};
  expect(await reads[family]()).toEqual({ok:false,error,...(family==='onboarding'&&onboarding.ok?{value:onboarding.value}:{})});
  if(family==='marketplace')expect(await b.search({q:'deploy'})).toEqual({ok:false,error});
  if(family==='settings')expect(await b.update()).toEqual({ok:false,error});
@@ -29,18 +29,18 @@ it('honours latency, slow, and deliberately pending loading reads',async()=>{vi.
 it('models connect selection, a declined skill, an accepted skill and Done',async()=>{const run=createMockBackend().connect({});let selected=0;const result=await answerAll(run,frame=>frame.kind==='select'?(selected++===0?'api-docs':selected===2?'handoff-note':'Done'):frame.question==='Connect handoff-note?');expect(result).toEqual({ok:true,value:{kind:'batch',shared:[{id:'handoff-note',name:'handoff-note'}],declined:['api-docs'],refused:[]}});});
 it('returns the required decline for Skip and a single result for path connect',async()=>{const b=createMockBackend();expect(await answerAll(b.connect({}),()=> 'Skip')).toEqual({ok:false,error:'Connect was declined.',cancelled:true});expect(await answerAll(b.connect({path:'/skills/api-docs'}),()=>true)).toEqual({ok:true,value:{id:'api-docs',name:'api-docs'}});});
 it('marks declines for install, removal and team leave',async()=>{const b=createMockBackend();for(const run of [b.install({ref:'deploy-check'}),b.uninstallSkill({ref:'deploy-check'}),b.uninstallMachine({}),b.team({kind:'leave'})]){expect(await answerAll<unknown>(run,()=>false)).toMatchObject({ok:false,cancelled:true});}});
-it('returns fixture-shaped results for successful verbs',async()=>{const b=createMockBackend();expect((await answerAll(b.install({ref:'deploy-check',scope:'Terum'}),()=>true))).toEqual({ok:true,value:[{id:'deploy-check',name:'deploy-check',scope:'Terum'}]});expect((await b.invite({logins:['sam']}).done)).toEqual({ok:true,value:{invited:['sam']}});expect((await b.publish({ref:'deploy-check'}).done).ok).toBe(true);expect((await b.eval({ref:'deploy-check'}).done).ok).toBe(true);expect(await b.validate({ref:'deploy-check'})).toEqual({ok:true,value:{name:'deploy-check',findings:0,warnings:0}});expect((await answerAll(b.setup({offerConnect:false}),()=> 'Join an existing team')).ok).toBe(true);});
+it('returns fixture-shaped results for successful verbs',async()=>{const b=createMockBackend();expect((await answerAll(b.install({ref:'deploy-check',scope:'Terum'}),()=>true))).toEqual({ok:true,value:[{id:'deploy-check',name:'deploy-check',scope:'Terum'}]});expect((await b.invite({logins:['sam']}).done)).toEqual({ok:true,value:{invited:['sam'],already:[],failed:[]}});expect((await b.publish({ref:'deploy-check'}).done).ok).toBe(true);expect((await b.eval({ref:'deploy-check'}).done).ok).toBe(true);expect(await b.validate({ref:'deploy-check'})).toEqual({ok:true,value:{name:'deploy-check',findings:0,warnings:0}});expect((await answerAll(b.setup({offerConnect:false}),()=> 'Join an existing team')).ok).toBe(true);});
 it('handles unknown refs, invalid preferences, storage corruption and unavailable clipboard',async()=>{const b=createMockBackend();expect((await b.install({ref:'missing'}).done).ok).toBe(false);b.prefs.set('theme','light');expect(b.prefs.get('theme','dark')).toBe('light');localStorage.setItem('terum-skills-app:pref:bad','{broken');expect(b.prefs.get('bad',42)).toBe(42);expect(()=>b.prefs.set('bad',undefined)).toThrow();expect(()=>b.prefs.set('bad',NaN)).toThrow();expect(await b.copyToClipboard('text')).toEqual({ok:false,error:'Clipboard unavailable.'});expect(await b.copyImage(new Blob(['x'],{type:'text/plain'}))).toEqual({ok:false,error:'Expected a PNG image.'});});
 
-it('filters project scopes and isolates returned data from the source fixtures',async()=>{const b=createMockBackend();const mrf=await b.library({scope:'MRF'});expect(mrf.ok&&mrf.value.skills.every(s=>['migration-guard','csv-profiler'].includes(s.name))).toBe(true);expect(mrf.ok&&mrf.value.skills.length).toBeGreaterThan(0);const first=await b.library({scope:'Global'});if(!first.ok)throw new Error(first.error);const n=first.value.skills.length;first.value.skills.pop();const next=await b.library({scope:'Global'});expect(next.ok&&next.value.skills.length).toBe(n);});
+it('filters project scopes and isolates returned data from the source fixtures',async()=>{const b=createMockBackend();const mrf=await b.library({scope:{kind:'checkout',root:'/Users/you/code/mrf'}});expect(mrf.ok&&mrf.value.skills.every(s=>['migration-guard','csv-profiler'].includes(s.name))).toBe(true);expect(mrf.ok&&mrf.value.skills.length).toBeGreaterThan(0);const first=await b.library({scope:{kind:'global'}});if(!first.ok)throw new Error(first.error);const n=first.value.skills.length;first.value.skills.pop();const next=await b.library({scope:{kind:'global'}});expect(next.ok&&next.value.skills.length).toBe(n);});
 
 const expectedMachine={...design.MACHINE,hostname:design.MACHINE.name};
 const expectedMe={...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login};
-const expectedTeams=design.TEAMS.map(team=>({...team,policy:design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),pending:[],joinCommand:null,joinBlock:null}));
+const expectedTeams=design.TEAMS.map(team=>({...team,policy:design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),pending:[],joinCommand:'npx -y terum-skills@latest setup '+design.TEAM_REPO,joinBlock:['Send this to your teammate:','```','npm install -g terum-skills','npx -y terum-skills@latest setup '+design.TEAM_REPO,'','Bare equivalent: npx -y terum-skills@latest team join '+design.TEAM_REPO,'```','If you have a pending GitHub invitation, setup tries to accept it using your logged-in gh account; without gh authentication, it asks you to accept it in your browser. Git must also have access to this repository.']}));
 it.each(['loading','error','slow','disabled','not-installed','default'])('status resolves immediately with identity during %s',async scenario=>{
  location.hash='#/library/global?__mock='+scenario;vi.useFakeTimers();
  const status=await createMockBackend({latencyMs:500}).status();
- expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true},projects:['Terum','SSM','MRF']}});
+ expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true},roots:[{id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,detected:false,count:design.COUNTS.Global},...(['Terum','SSM','MRF'] as const).map(name=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:'scanned',registered:true,detected:false,count:design.COUNTS[name]}))]}});
  expect(status.ok&&status.value.machine.gh_login).toBe('teniroo');
  expect(vi.getTimerCount()).toBe(0);
 });
@@ -128,4 +128,18 @@ it('prints diagnostics from the fixture and reports status read failures',async(
  for(const [index,team] of design.TEAMS.entries())for(const fact of [team.name,team.remote,team.handle,String(team.members),String(team.skills),team.last_sync])expect(lines[index+1]).toContain(fact);
  location.hash='#/settings/advanced?__mock=error';
  expect(await backend.diagnostics().done).toEqual({ok:false,error:'Could not read ~/.terum/skills/config.json.'});
+});
+
+
+it.each([false,true])('models machine removal with CLI consent and team keys (accept=%s)',async accepted=>{
+ const run=createMockBackend().uninstallMachine({});
+ const ask=vi.fn((frame:Extract<Frame,{t:'ask'}>)=>{expect(frame).toMatchObject({kind:'confirm',question:'Remove terum-skills from this machine?',detail:MOCK_REMOVE_DETAIL});return accepted;});
+ const result=await answerAll(run,ask);expect(ask).toHaveBeenCalledOnce();
+ if(accepted)expect(result).toEqual({ok:true,value:{removed:design.TEAMS.map(t=>t.key),removedPlacements:design.PLACEMENTS_N,hookRemoved:true,wrapperRemoved:true,configRemoved:true,kept:['~/.terum/skills/backups'],record:'~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json',advice:MOCK_REMOVE_ADVICE}});
+ else expect(result).toEqual({ok:false,cancelled:true,error:'Uninstall was cancelled.'});
+});
+it('records a mock quit request and closes the window',async()=>{
+ const backend=createMockBackend(),close=vi.spyOn(window,'close').mockImplementation(()=>{});
+ expect(backend.quitRequested).toBe(false);await backend.quit();
+ expect(backend.quitRequested).toBe(true);expect(close).toHaveBeenCalledOnce();
 });

@@ -1,0 +1,5 @@
+root: lint clean · typecheck clean · vitest 78 files / 1360 passed · build ok
+desktop: typecheck clean · lint clean (--max-warnings 0) · vitest 79 files / 1122 passed, 91 skipped, 0 failed
+playwright e2e/routes (port 1435): 119 passed
+fidelity (port 1435, macOS oracle): 75 passed / 16 failed; the same 16 fail on pristine origin/main 67f1f57 with identical pixel counts (LibraryNoResults 3163, Light 190, Main 186, Marketplace 4596, MarketplaceCategories 7091, MarketplaceFilters 14435, MarketplaceFull 6903, MarketplaceLight 4989, MarketplaceProjects 4974, SettingsAdvanced 4831, SettingsLeave 62700, SettingsSync 9143, SettingsTeams 31140; LibrarySidebarHidden / LibraryProjectsCollapsed / LibraryInboxCollapsed have no oracle PNG)
+fail-before (19 rewritten/new vitest files on origin/main 67f1f57): 18 files failed, 93 tests failed / 448 passed

@@ -22,6 +22,7 @@ export interface Bridge {
   kill(id: string): Promise<void>;
   onLaunchRequest(listener: () => void): Promise<() => void>;
   readAppState(): Promise<AppState | null>;
+  quit(): Promise<void>;
   hostPlatform(): Promise<string>;
   homeDirectory(): Promise<string>;
 }
@@ -56,6 +57,7 @@ export function tauriBridge(): Bridge {
       }
     },
     hostPlatform: () => invoke<string>('host_platform'),
+    quit: () => invoke('quit'),
     homeDirectory: homeDir,
   };
 }

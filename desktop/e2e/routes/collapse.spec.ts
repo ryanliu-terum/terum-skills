@@ -87,7 +87,7 @@ for(const {query,hidden,button,rows} of [
 }
 
 for(const {route,title,values,note} of [
- {route:'#/library/project/Terum',title:'8 skills',values:['8','7 of 8','56','5'],note:'6 also on Global'},
+ {route:'#/library/checkout?root=%2FUsers%2Fyou%2Fcode%2Fterum',title:'8 skills',values:['8','7 of 8','56','5'],note:'6 also on Global'},
  {route:'#/library/global',title:'15 skills',values:['15','13 of 15','91','6'],note:'7 endorsed to Global'},
 ]){
  test(`${route} shows only its scoped statistics`,async({page})=>{

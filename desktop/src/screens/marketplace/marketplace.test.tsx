@@ -5,6 +5,7 @@ import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
 import { pickBackend } from '../../backend';
 import { design } from '../../backend/mock/data';
+import { createRun } from '../../backend/mock/run';
 function open(route: string) { location.hash = route; return render(<Providers><App/></Providers>); }
 function names(prefix: string) { return screen.getAllByTestId(new RegExp('^' + prefix)).map(el => el.getAttribute('data-testid')?.slice(prefix.length)); }
 beforeEach(() => { localStorage.clear(); useUiStore.setState({ railOpen: true, overviewHidden: false, theme: 'dark' }); });
@@ -12,6 +13,7 @@ afterEach(() => { cleanup(); location.hash = ''; vi.restoreAllMocks(); });
 it('renders all four home sections and the first three top-rated skills in DTO order', async () => { open('#/marketplace'); await screen.findByRole('region', { name: 'Top rated' }); for (const title of ['Top rated', 'Teams / Projects', 'People', 'Browse by category']) expect(screen.getByRole('region', { name: title })).toBeInTheDocument(); expect(names('skill-card-')).toEqual(design.DERIVED.topRated.slice(0, 3)); });
 it('renders filter verdict counts and the supplied matching count', async () => { open('#/marketplace?filters=open'); const filters = await screen.findByRole('region', { name: 'Marketplace filters' }); for (const [verdict, count] of Object.entries(design.DERIVED.verdictCounts)) expect(within(filters).getByTestId('verdict-count-' + verdict)).toHaveTextContent(verdict + count); expect(within(filters).getByRole('button', { name: `Show ${design.DERIVED.filterCount} skills` })).toBeInTheDocument(); expect(within(filters).getByRole('checkbox', { name: /PASS/ })).toBeChecked(); });
 it('renders the no-results query and both active filters', async () => { open('#/marketplace?q=deploy%20prod&active=2'); expect(await screen.findByText('No skills match “deploy prod” with 2 filters on')).toBeInTheDocument(); expect(screen.getByRole('textbox', { name: 'Search skills, people and projects' })).toHaveValue('deploy prod'); });
+it('keeps a single active filter singular in the no-results title', async () => { open('#/marketplace?q=deploy%20prod&active=1'); expect(await screen.findByText('No skills match “deploy prod” with 1 filter on')).toBeInTheDocument(); });
 it('renders Terum counts and the two-column project grid', async () => { open('#/marketplace/projects/terum'); expect(await screen.findByText('8 skills placed in ~/Projects/terum')).toBeInTheDocument(); expect(screen.getByRole('button', { name: '♡ 11' })).toBeInTheDocument(); expect(screen.getAllByTestId(/^skill-card-/)[0]?.closest('.market-grid')).toHaveAttribute('data-columns', '2'); expect(names('skill-card-')).toEqual(design.DERIVED.skillsIn.Terum); });
 it('renders the Docs placement note', async () => { open('#/marketplace/projects/docs'); expect(await screen.findByText('Placed by install project, inside a checkout of this repo')).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Install 3 skills' })).toBeInTheDocument(); });
 it('renders the Docs asking count and exact raw grants', async () => { open('#/marketplace/projects/docs?dialog=install'); const dialog = await screen.findByRole('dialog'); expect(dialog).toHaveTextContent(`${design.DERIVED.bulkInstall.docs.asking} of 3 ask`); expect(within(dialog).getByText('a11y-audit')).toBeInTheDocument(); expect(within(dialog).getByText('bundle-budget')).toBeInTheDocument(); expect(within(dialog).getAllByText('Read')).toHaveLength(2); expect(within(dialog).getByText('Bash')).toBeInTheDocument(); });
@@ -35,19 +37,88 @@ it('handles failed Follow preferences without changing following state', async (
 it('opens project install from its primary and closes after successful run', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/projects/docs'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs' }); expect(location.hash).toBe('#/marketplace/projects/docs'); });
 it('cancels the bulk dialog without invoking install', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/projects/docs?dialog=install&rail=closed'); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(location.hash).toBe('#/marketplace/projects/docs?rail=closed'); expect(install).not.toHaveBeenCalled(); });
 it('installs a person through the member verb without navigation', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/people/lena'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); await waitFor(() => expect(install).toHaveBeenCalledWith({ ref: 'lena', kind: 'member', member: 'lena' })); expect(location.hash).toBe('#/marketplace/people/lena'); });
-it('bulk removes each listed project skill without a dialog', async () => { const remove = vi.spyOn(pickBackend(), 'uninstallSkill'); open('#/marketplace/projects/terum'); fireEvent.click(await screen.findByRole('button', { name: "Remove Terum's 8 skills from this machine" })); await waitFor(() => expect(remove).toHaveBeenCalledTimes(design.DERIVED.skillsIn.Terum.length)); expect(remove.mock.calls.map(([args]) => args.ref)).toEqual(design.DERIVED.skillsIn.Terum); expect(screen.queryByRole('dialog')).toBeNull(); });
+it('uses status identity and the installed list for own-handle removal', async () => {
+  const backend = pickBackend(), status = await backend.status(), catalog = await backend.catalog();
+  if (!status.ok || !catalog.ok) throw new Error('Fixture unavailable.');
+  const person = catalog.value.people.find(p => p.handle === 'ryan')!;
+  // A status identity different from the fixture proves the screen reads the seam.
+  vi.spyOn(backend, 'status').mockResolvedValue({ ...status, value: { ...status.value, me: { ...status.value.me, handle: person.handle } } });
+  vi.spyOn(backend, 'catalog').mockResolvedValue({ ...catalog, value: { ...catalog.value, people: catalog.value.people.map(p => p.handle === person.handle ? { ...p, skills: [], buckets: [] } : p) } });
+  const remove = vi.spyOn(backend, 'uninstallSkill');
+  open('#/marketplace/people/' + person.handle);
+  fireEvent.click(await screen.findByRole('button', { name: `Remove everything you installed (${person.installable.length} skills)` }));
+  const dialog = await screen.findByRole('dialog');
+  expect(remove).toHaveBeenCalledExactlyOnceWith({ ref: person.handle, kind: 'member', member: person.handle });
+  expect(dialog).toHaveTextContent(`Install records dropped from your people file (${person.installable.length}): ${person.installable.join(', ')}`);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'No' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+});
+
+it('keeps backend cancellation out of the error board', async () => {
+  const remove = vi.spyOn(pickBackend(), 'uninstallSkill').mockImplementation(() => createRun(async () => ({ ok: false, cancelled: true, error: 'Remove was declined.' })));
+  open('#/marketplace/projects/terum');
+  const trash = await screen.findByRole('button', { name: "Remove Terum's 8 skills from this machine" });
+  fireEvent.click(trash);
+  await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(trash).not.toBeDisabled());
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByText("Couldn't reach the team repo")).toBeNull();
+});
+
+it('asks once per project run, writes nothing before Yes, and keeps No silent', async () => {
+  const backend = pickBackend(), before = await backend.catalog();
+  if (!before.ok) throw new Error(before.error);
+  const project = before.value.projects.find(p => p.key === 'terum')!;
+  const targets = before.value.skills.filter(s => project.skillsIn.includes(s.name) && s.placed);
+  const remove = vi.spyOn(backend, 'uninstallSkill'), seen = vi.fn(), off = backend.subscribe(seen);
+  open('#/marketplace/projects/terum');
+  fireEvent.click(await screen.findByRole('button', { name: "Remove Terum's 8 skills from this machine" }));
+  let dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByRole('heading', { name: `Remove terum's ${targets.length} skills from this machine?` })).toBeInTheDocument();
+  const paths = targets.flatMap(s => s.paths);
+  expect(paths.length).toBeGreaterThan(0);
+  for (const [path, scope] of paths) expect(dialog).toHaveTextContent(`${path} · ${scope === 'global' ? 'Global' : `project ${scope}`}`);
+  expect(remove).toHaveBeenCalledExactlyOnceWith({ ref: 'terum', kind: 'project', project: 'terum' });
+  expect(await backend.catalog()).toEqual(before); expect(seen).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'No' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(screen.queryByRole('alert')).toBeNull(); expect(screen.queryByText("Couldn't reach the team repo")).toBeNull();
+  expect(await backend.catalog()).toEqual(before); expect(seen).not.toHaveBeenCalled();
+  const first = remove.mock.results[0]!;
+  if (first.type !== 'return') throw new Error('Missing run.');
+  expect(await first.value.done).toMatchObject({ ok: false, cancelled: true });
+  fireEvent.click(screen.getByRole('button', { name: "Remove Terum's 8 skills from this machine" }));
+  dialog = await screen.findByRole('dialog');
+  expect(await backend.catalog()).toEqual(before);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Yes' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  const second = remove.mock.results[1]!;
+  if (second.type !== 'return') throw new Error('Missing run.');
+  expect(await second.value.done).toEqual({ ok: true, value: project.skillsIn.filter(name => targets.some(s => s.name === name)).map(name => ({ id: name, name })) });
+  expect(remove).toHaveBeenCalledTimes(2); expect(seen.mock.calls).toEqual([['placed'], ['config']]);
+  const after = await backend.catalog(), library = await backend.library({ scope: { kind: 'global' } });
+  if (!after.ok || !library.ok) throw new Error('Fixture unavailable.');
+  for (const target of targets) {
+    expect(after.value.skills.find(s => s.name === target.name)).toMatchObject({ installed: false, placed: false, onDiskOnly: false, paths: [] });
+    const detail = await backend.skill({ ref: target.name });
+    expect(detail).toMatchObject({ ok: true, value: { installed: false, placed: false, onDiskOnly: false, paths: [] } });
+    const local = library.value.skills.find(s => s.name === target.name);
+    if (local) expect(local).toMatchObject({ installed: false, placed: false, onDiskOnly: false, paths: [] });
+  }
+  off();
+});
 it('shows failures from install in the centered error layout', async () => { vi.spyOn(pickBackend(), 'install').mockImplementation(() => { throw new Error('Cannot install project.'); }); open('#/marketplace/projects/docs?dialog=install'); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); expect(await screen.findByRole('alert')).toHaveTextContent('Cannot install project.'); });
 
 it.each(['-1', 'abc', '9'.repeat(400)])('treats invalid active facet count %s as zero', async active => { open('#/marketplace?q=deploy%20prod&active=' + active); expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument(); expect(screen.queryByText(/with .* filters on/)).toBeNull(); });
 
-it('uses only status-supplied sidebar counts on the empty scenario', async () => {
+it('uses status Global and checkout root counts on the empty scenario', async () => {
   const source = pickBackend();
   const status = await source.status();
   if (!status.ok) throw new Error(status.error);
   vi.spyOn(source, 'status').mockResolvedValue({ ...status, value: { ...status.value, counts: { Global: '71' } } });
   open('#/marketplace?__mock=empty');
   expect(await screen.findByRole('link', { name: 'Global 71' })).toBeInTheDocument();
-  expect(document.querySelectorAll('.nav-count')).toHaveLength(1);
+  expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(['71','8','3','2']);
 });
 
 it('keeps one person link and follows without leaving the people list', async () => {

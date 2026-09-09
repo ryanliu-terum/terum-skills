@@ -190,13 +190,14 @@ describe('setup (§6.1)', () => {
     expect(io.lines).not.toContain('Members:');
   });
 
-  it('stops on invalid syntax after an earlier invitation without pretending that success was undone', async () => {
+  it('stops on invalid syntax before sending any invitation (the batch is validated up front)', async () => {
     const fixture = await configuredCreator({ 'api -X PUT --include repos/alice/team/collaborators/bob': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' } });
     const io = new ScriptedPrompter(['bob @carol']);
     const result = await run(fixture.args, io);
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Invalid GitHub login'), value: { steps: { team: 'skipped' } } });
-    expect(fixture.runner.calls.filter((call) => call.command === 'gh' && call.args.join(' ').includes('collaborators/')).map((call) => call.args.at(-1))).toEqual(['repos/alice/team/collaborators/bob']);
-    expect(io.lines).toContain('Invited @bob.');
+    expect(fixture.runner.calls.filter((call) => call.command === 'gh' && call.args.join(' ').includes('collaborators/'))).toEqual([]);
+    expect(io.lines).not.toContain('Invited @bob.');
+    expect(result.ok ? '' : result.error).toContain('@carol');
     expect(io.lines.join('\n')).not.toContain('Send this to your teammate:');
     expect(result.value?.steps.invite).toBeUndefined();
     expect(fixture.hookOffers()).toBe(0);

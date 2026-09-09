@@ -234,31 +234,31 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/uninstallMachine.ts",
     "line": 49,
     "policy": "prose",
-    "pattern": "io.print('terum-skills will be removed from this machine.');"
+    "pattern": "detail.push('terum-skills will be removed from this machine.');"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
     "line": 58,
     "policy": "not-a-hint",
-    "pattern": "if (wrapperPresence.kind === 'foreign') io.print(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (${wrapperPresence.why}); left alone`);"
+    "pattern": "if (wrapperPresence.kind === 'foreign') detail.push(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (${wrapperPresence.why}); left alone`);"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
     "line": 59,
     "policy": "not-a-hint",
-    "pattern": "else io.print(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);"
+    "pattern": "else detail.push(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
     "line": 65,
     "policy": "fixed",
-    "pattern": "io.print('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');"
+    "pattern": "detail.push('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
     "line": 67,
     "policy": "prose",
-    "pattern": "if (!(await io.confirm('Remove terum-skills from this machine?'))) return cancelled('Uninstall was cancelled.');"
+    "pattern": "if (!(await io.confirm('Remove terum-skills from this machine?', { detail }))) return cancelled('Uninstall was cancelled.');"
   },
   {
     "file": "src/commands/uninstallMachine.ts",

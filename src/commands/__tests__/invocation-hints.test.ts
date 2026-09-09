@@ -127,7 +127,7 @@ describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (f
     expect(await team({ kind: 'create', name: 'team', config, form }, new ScriptedPrompter())).toMatchObject({ ok: false, refused: true, error: expect.stringContaining(`run \`${prefix} team leave 'team'\` first`) });
     const io = new ScriptedPrompter([], [false]);
     await uninstallMachine({ config, form, hook: { settingsFile: join(config.root, 'settings.json') } }, io);
-    expect(io.lines).toContain('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
+    expect(io.details['Remove terum-skills from this machine?']).toContain('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
   });
 
   it('routes setup authentication failure through its nested helper', async () => {

@@ -30,7 +30,7 @@ async function wheelPane(page:Page,pane:Locator){
 
 for(const {scope,route,count} of [
  {scope:'Global',route:'#/library/global',count:15},
- {scope:'Terum',route:'#/library/project/Terum',count:8},
+ {scope:'Terum',route:'#/library/checkout?root=%2FUsers%2Fyou%2Fcode%2Fterum',count:8},
 ]){
  test(`Library ${scope} exposes its last card and keeps the header pinned`,async({page})=>{
   const errors=await openPane(page,route);
