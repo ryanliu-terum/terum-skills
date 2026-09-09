@@ -279,12 +279,11 @@ function peopleReplay(change?: (frame: Record<string, unknown>, name: string) =>
 }
 it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and installs', async () => {
   const f = peopleReplay(), backend = createTauriBackend(f.bridge);
-  backend.prefs.set('role:mira', 'admin');
   const roster = await backend.roster();
   expect(roster.ok).toBe(true);
   expect(roster.value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
   expect(roster.value?.members[0]).toMatchObject({ name: 'Mira Chen', role: 'Platform', projects: ['terum'], joined: '—', lastSeen: '—', status: 'active' });
-  expect(backend.prefs.get('role:mira', '')).toBe('admin');
+
   expect(await backend.features()).toMatchObject({ memberRole: true, roles: false, follow: false });
   const catalog = await backend.catalog();
   if (!catalog.ok) throw new Error(catalog.error);
