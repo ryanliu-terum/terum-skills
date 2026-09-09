@@ -20,10 +20,16 @@ specs; the maintainers write the specs, run every gate themselves, and do all gi
    `Backend.uninstallMachine`, `Backend.setup({ target?, offerConnect? })`, `ValidateResult { name, findings,
    warnings }`. The Prompter has exactly five members: `interactive`, `confirm`, `text`, `select`, `print`
    (there is no `secret()`).
-2. **Capability flags only for the four hard gaps.** `capabilities()` carries `disablePerMachine`,
-   `inboxEventLog`, `offtargetKind`, `machineRegistry`, `perCaseEvalTables`; the mock answers `true` to all of
-   them and the UI renders every board as drawn. Everything else drawn is built as if real (no flag, no
-   greyed control). Gaps are recorded by the maintainers in `GAPS.md`; an implementing agent never edits `GAPS.md`,
+2. **Flags come from the CLI, and every flag has exactly one consumer.** `capabilities()` carries
+   `disablePerMachine`, `inboxEventLog`, `offtargetKind`, `machineRegistry`, `perCaseEvalTables` (plus the
+   platform-shaped `windowChrome`, `openInEditor`, `clipboard`); `features()` carries the CLI's twelve
+   `hello.features` switches plus `memberRole`. The real adapter fills both from the `hello` frame it caches
+   from any run (`disablePerMachine` straight across, `perCaseEvalTables` from `perCase`, a missing key
+   `false`; `inboxEventLog`, `offtargetKind`, `machineRegistry` stay hard `false` until a mechanism exists).
+   The mock answers `true` to all of them and the UI renders every board as drawn. A control whose switch is
+   `false` is hidden (or degraded exactly as the S7q spec table says), never disabled or stubbed; a screen
+   reads a switch through `useFeatures()` / `useCapabilities()`, never by probing the platform, and never
+   invents a flag. Gaps are recorded by the maintainers in `GAPS.md`; an implementing agent never edits `GAPS.md`,
    `FIDELITY.md`, `AGENTS.md`, `README.md` or `package.json` — describe what you found in the report's
    `openQuestions` / `deviations` instead.
 3. **Generated files.** `src/styles/tokens.css` and `src/fixtures/design.json` are written only by

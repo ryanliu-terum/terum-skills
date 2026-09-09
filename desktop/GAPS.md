@@ -1,6 +1,6 @@
 # GAPS.md — drawn affordances the CLI on `main` (re-anchored at b7be3c5, 2026-09-08; first pinned at b5c0507) does not have yet
 
-M7 status (2026-09-08): the real adapter declares which read models it serves (`Backend.surfaces()`, S7af); a surface whose model is still a gap is hidden from the sidebar rather than stubbed, and every line below that names a read model closes in the batch that first serves it from real data (S7f library/skill, S7k status/settings, S7b roster/catalog, S7n receipts, S7e update, S7r inbox/onboarding).
+M7 status (2026-09-08): the real adapter declares which read models it serves (`Backend.surfaces()`, S7af); a surface whose model is still a gap is hidden from the sidebar rather than stubbed, and every line below that names a read model closes in the batch that first serves it from real data (S7f library/skill — served since PR m7-S7f, S7k status/settings, S7b roster/catalog, S7n receipts, S7e update, S7r inbox/onboarding).
 
 One line each: screen or board: affordance or printed string — what changed at b5c0507 or what the CLI would need. Design-side calls (printed strings) are Teddy's; seam-side gaps are asks to Ryan's repo. The app builds every affordance as drawn on the mock backend; the four capability-flagged gaps are listed last.
 
@@ -28,6 +28,8 @@ One line each: screen or board: affordance or printed string — what changed at
 - Settings ▸ Sharing (PF-08, opt out of publishing install records): HARD; ships as drawn. Install records are the team's one adoption signal (D38) and a per-person opt-out would need a committed people-file field, a sync rule and a UI state; nothing in the CLI supports it and no batch builds it.
 
 ## Capability-flagged gaps (Teddy, 2026-09-07: the only affordances behind a flag; the mock reports them as supported)
+
+S7q (2026-09-08): the flags now have consumers. The adapter caches the CLI's `hello` frame from any run and serves `Backend.features()` (the twelve `FRAME_FEATURES` switches plus `memberRole`; a key the frame omits is `false`); `capabilities()` maps `disablePerMachine` straight across and `perCaseEvalTables` from `perCase`, while `inboxEventLog`, `offtargetKind` and `machineRegistry` stay hard `false` on the real adapter (their mechanisms are cut). Every drawn control a `false` switch cannot back is hidden or degraded per the S7q spec table (hearts, follow, role menus, job labels, last seen, invite scoping, per-machine switches, lift figures, Run eval, per-case tables, other-machines rows); the mock reports every switch `true`, so the locked boards are unchanged. A flag flips to `true` for real users only when the CLI's hello frame says so.
 
 - Library / SkillDetail / SkillDetailDisabled (card switch, rail status card): per-machine enable/disable of a placed skill — no verb, no state; placement is the loading mechanism, the only off-states are uninstall and quarantine. Flag `capabilities.disablePerMachine`.
 - Inbox (every board), sidebar Pushes / Updates / Alerts: an Inbox event log (the seven kinds with unread and acted-on state) — the CLI has no event log; the only announcement channels are `sync --hook`'s stderr line and interactive sync's prompts. Flag `capabilities.inboxEventLog`; a real adapter derives what it can at sync time.

@@ -5,19 +5,21 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
 import { printable } from '../lib/skill-source.js';
-import { readTeam, skillRecords } from '../lib/skills.js';
+import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
-import { installCounts, isActivePerson, latestTree, readPeople, shortHash, skillEndorsement } from '../lib/readme.js';
+import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, shortHash, skillEndorsement } from '../lib/readme.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
+import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
+
+import { skillVersions } from '../lib/teamRepo.js';
 
 export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
-export interface LsSkill { id: string; name: string; author: string; category: string; installs: number; latest: string; endorsement: string; }
+export interface LsSkill { id: string; name: string; author: string; category: string; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; updated: string; unresolved: boolean; }
 export interface LocalSection extends LocalRoot { rows: { name: string; path: string; state: string; problem?: string }[]; notOffered: { name: string; path: string; reason: string }[]; problems: { path: string; reason: string }[]; }
-export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean }[]; skills: readonly LsSkill[]; }
+export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { handle: string; declined: Person['declined'] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
 export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>> {
@@ -30,37 +32,55 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     const clone = store.teamClone(teamName);
     const runner = args.runner ?? systemRunner;
     const team = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
-    const people = await readPeople(clone);
+    const projects = Object.entries(team.projects).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([name, project]) => ({ ...project, name }));
+    const problems: { source: string; message: string }[] = [];
+    const report = (source: string, message: string) => { problems.push({ source, message }); io.print(`${source}: ${message}`); };
+    const people = (await Promise.all((await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).sort().map((file) => readPerson(clone, file.slice(0, -5)).catch((error: unknown) => { report(`people/${file}`, error instanceof Error ? error.message : String(error)); return undefined; })))).filter((person) => person !== undefined);
     const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived) }));
-    const skills = await listSkills(team, people, clone, runner, io);
+    const skills = await listSkills(team, people, clone, runner, io, teamName, problems);
     // `return await`: a returned promise leaves the try block before it settles, so a throw inside
     // showMember/showProject would reject run() instead of becoming the failure Result every verb returns.
-    if (args.kind === 'member') return await showMember(args.value, people, skills, io, roster);
-    if (args.kind === 'project') return await showProject(args.value, team, skills, io, roster);
+    if (args.kind === 'member') return await showMember(args.value, people, skills, io, roster, projects, problems);
+    if (args.kind === 'project') return await showProject(args.value, team, skills, io, roster, projects, problems);
     io.print('Members:');
     for (const member of roster) io.print(`  ${member.handle}${member.active ? '' : ' (inactive)'}`);
     io.print('Skills:');
     for (const skill of skills) io.print(format(skill));
     io.print(`Local skills: ${invocation(args.form, 'ls --local')}`);
-    return success({ roster, skills });
+    return success({ roster, skills, projects, problems });
   } catch (error) { return fromError(error); }
 }
 
-async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awaited<ReturnType<typeof readPeople>>, clone: string, runner: Runner, io: Prompter): Promise<LsSkill[]> {
-  const names = (await readdir(join(clone, 'skills'), { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
-  const counts = installCounts(people);
-  return Promise.all(names.map(async (name) => {
-    const parsed = parseSkillFrontmatter(await readFile(join(clone, 'skills', name, 'SKILL.md'), 'utf8'));
-    if (!parsed.ok) throw new Error(`Invalid skills/${name}/SKILL.md: ${parsed.error}`);
-    const id = parsed.data.metadata.id;
-    // One folder git cannot resolve — present on disk but not in HEAD, the leftover of an interrupted
-    // write — costs one row's version and one reported line, never the roster or the other rows
-    // (rulings walk R11, 2026-09-06; search degrades the same way).
-    const latest = await latestTree(runner, clone, name).catch((error: unknown) => { io.print(`${name}: ${error instanceof Error ? error.message : String(error)}`); return '—'; });
-    return { id, name, author: parsed.data.metadata.author, category: parsed.data.metadata['terum-category'], installs: counts.get(id) ?? 0, latest: shortHash(latest), endorsement: skillEndorsement(team, id) };
-  }));
+async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awaited<ReturnType<typeof readPeople>>, clone: string, runner: Runner, io: Prompter, teamName: string, problems: { source: string; message: string }[]): Promise<LsSkill[]> {
+  // Preserve ls's fail-closed root boundary; skillRecords treats an absent root as an empty team.
+  await readdir(join(clone, 'skills'));
+  const records = await skillRecords(clone, teamName, { onProblem: ({ name, message }) => { problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`); } });
+  const counts = installCounts(people), installers = installersById(people);
+  let versionProblem: string | undefined;
+  const versions = await skillVersions(runner, clone).catch((error: unknown) => { versionProblem = error instanceof Error ? error.message : String(error); return new Map<string, string>(); });
+  const skills: LsSkill[] = [];
+  for (let index = 0; index < records.length; index += 8) {
+    const chunk = records.slice(index, index + 8);
+    const dates = await Promise.allSettled(chunk.map((record) => latestChange(runner, clone, record.name)));
+    for (const [offset, record] of chunk.entries()) {
+      const { id, name, frontmatter, grants } = record;
+      const latest = versions.get(name);
+      if (latest === undefined) {
+        const message = versionProblem ?? `Could not resolve the latest version of ${name}: absent from HEAD:skills`;
+        problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`);
+      }
+      const date = dates[offset]!;
+      const updated = date.status === 'fulfilled' ? date.value : '—';
+      if (date.status === 'rejected') {
+        const message = date.reason instanceof Error ? date.reason.message : String(date.reason);
+        problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`);
+      }
+      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], installs: counts.get(id) ?? 0, latest: shortHash(latest ?? '—'), endorsement: skillEndorsement(team, id), unresolved: latest === undefined, grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, updated });
+    }
+  }
+  return skills;
 }
-async function showMember(handle: string | undefined, people: Awaited<ReturnType<typeof readPeople>>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster']): Promise<Result<LsResult>> {
+async function showMember(handle: string | undefined, people: Awaited<ReturnType<typeof readPeople>>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems']): Promise<Result<LsResult>> {
   if (!handle) throw new Error('Specify a member handle.');
   const normalizedHandle = parseOrExplain(handleSchema, handle, 'member handle');
   const member = people.find((person) => person.handle === normalizedHandle);
@@ -70,18 +90,18 @@ async function showMember(handle: string | undefined, people: Awaited<ReturnType
   io.print(`Member ${member.handle}:`);
   io.print(`  Authored: ${authored.map((skill) => skill.name).join(', ') || '—'}`);
   io.print(`  Installed: ${member.installed.map((item) => namesById.get(item.id) ?? item.id).join(', ') || '—'}`);
-  return success({ roster, skills: authored });
+  return success({ roster, skills: authored, projects, problems, member: { handle: member.handle, declined: member.declined } });
 }
-async function showProject(projectName: string | undefined, team: ReturnType<typeof teamSchema.parse>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster']): Promise<Result<LsResult>> {
+async function showProject(projectName: string | undefined, team: ReturnType<typeof teamSchema.parse>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems']): Promise<Result<LsResult>> {
   if (!projectName || !Object.hasOwn(team.projects, projectName)) throw new Error(`No project named ${projectName ?? ''}.`);
   const projectIds = new Set(team.projects[projectName]!.skills);
   const selected = skills.filter((skill) => projectIds.has(skill.id));
   io.print(`Project ${projectName}:`);
   for (const skill of selected) io.print(format(skill));
-  return success({ roster, skills: selected });
+  return success({ roster, skills: selected, projects, problems });
 }
 /** One skill per line, the §6 `ls` format; `search` prints hits through the same function. */
-export function format(skill: LsSkill): string { return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${skill.latest}; ${skill.endorsement}`; }
+export function format(skill: LsSkill): string { return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${skill.latest}; ${skill.endorsement}; ${skill.updated}`; }
 
 
 /** Local discovery is independent of team selection, and only enriches ledger references. */
@@ -148,5 +168,5 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, cwd?: s
   for (const problem of discovery.problems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
   if (discovery.noRepository !== undefined) io.print(`Project skills: none (${printable(discovery.noRepository)} is not inside a git repository).`);
   io.print('Team status is from local clones and may be stale; open endorsement requests are not checked.');
-  return success({ roster: [], skills: [], local: sections });
+  return success({ roster: [], skills: [], problems: [], local: sections });
 }

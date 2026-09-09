@@ -14,6 +14,7 @@ function nextId(): string {
 export interface CliRunOptions<TIn, TOut> {
   cwd?: string | undefined;
   map(value: TIn): TOut;
+  onHello?(frame: Extract<CliFrame, { t: 'hello' }>): void;
   onSettled?(result: Result<TOut>): void;
 }
 
@@ -77,7 +78,7 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
   };
   const onFrame = (frame: CliFrame) => {
     switch (frame.t) {
-      case 'hello': return;
+      case 'hello': options.onHello?.(frame); return;
       case 'print': push({ t: 'print', line: frame.level === 'info' ? frame.line : `${frame.level}: ${frame.line}` }); return;
       case 'ask': push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }) }); return;
       case 'progress': { const current = frame.current ?? 0; push({ t: 'progress', done: current, total: Math.max(frame.total ?? current, current, 1), label: frame.step }); return; }

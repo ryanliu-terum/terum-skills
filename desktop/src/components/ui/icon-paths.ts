@@ -1,4 +1,5 @@
 export const ICON_PATHS = {
+
   "panel-left": "<rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"></rect><path d=\"M9 3v18\"></path>",
   "chevron-left": "<path d=\"m15 18-6-6 6-6\"></path>",
   "chevron-right": "<path d=\"m9 18 6-6-6-6\"></path>",
@@ -53,4 +54,6 @@ export const ICON_PATHS = {
   "lock": "<rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"></rect><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"></path>",
   "external-link": "<path d=\"M15 3h6v6\"></path><path d=\"M10 14 21 3\"></path><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"></path>"
 } as const satisfies Record<string, string>;
-export type IconName = keyof typeof ICON_PATHS;
+// S7q's neutral category fallback; separate from the 53 verbatim canvas icons.
+export const TAG_PATH = '<path d="M3 3h7l11 11-7 7L3 10Z"></path><circle cx="7" cy="7" r="1"></circle>';
+export type IconName = keyof typeof ICON_PATHS | 'tag';

@@ -1,0 +1,25 @@
+# m7-S7q: orchestrator's own gates, 2026-09-09 00:06-00:17 UTC, Ryan's Mac (Node 25, Playwright chromium), three Codex runs live alongside (load 40-110)
+# Codex: gpt-6-astra, high, workspace-write, one pass (codex-prompt.md -> codex-report.json "complete"; seven open questions ruled in NOTES.md).
+# Self-report (hypothesis): desktop typecheck 0 / lint 0 / 50 files 606 passed + 88 oracle-skipped.
+# Gated on the tree after: the S7q code commit, the merge of codex/m7-S7f (seven conflicts folded), canvas patch AL + re-render + export,
+# the LibraryEmpty body restored to the drawn sentence, and the maintainer rewrites of desktop/AGENTS.md invariant 2 and GAPS.md.
+
+root lint         : rc=0
+root typecheck    : rc=0
+root test         : rc=1  72 files: 1 failed / 1146 passed. The one failure is src/lib/__tests__/runner.test.ts "kills a sleeping git alias
+                    and its child" (the grandchild still answered kill -0 at the check, under load ~70-110); this batch changes no file under
+                    src/. Focused re-run of that file right after the battery: 6 passed. Recorded as load flake, not a regression.
+root build        : rc=0
+desktop typecheck : rc=0
+desktop lint      : rc=0  (eslint . --max-warnings 0)
+desktop vitest    : rc=0  51 files passed, 706 tests passed (TERUM_DESIGN_DIR set; NODE_OPTIONS=--no-experimental-webstorage)
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (1.9m)
+export:check      : rc=0  current (fixture regenerated from the AL canvas: md5 line only)
+e2e fidelity      : rc=0  88 locked boards passed (1.3m) against the re-rendered oracle (patch AL, 99 boards through render-mac.mjs)
+cargo check       : rc=0  (capabilities/default.json changed: allow-toggle-maximize added, opener:default replaced by the scoped open-url)
+real-data proof   : app-only batch; no new read model. features.test.ts replays the recorded hello frame
+                    (.planning/codex-runs/m7-S7q/frames/status.jsonl, CLI 0.1.6, every switch false) through features() and capabilities()
+                    and asserts every key maps (perCase -> perCaseEvalTables, absent memberRole -> false, one status spawn shared by
+                    concurrent callers, the hello cached from any later verb); TopBar.test.tsx pins the three chrome geometries and the
+                    permission file; s7q-surfaces.test.tsx renders each gated control in both flag states.

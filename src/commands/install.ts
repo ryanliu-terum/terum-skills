@@ -160,7 +160,7 @@ export async function skillAtSource(source: string, expected: SkillRecord): Prom
   const parsed = parseSkillFrontmatter(await readFile(join(source, 'SKILL.md'), 'utf8'));
   if (!parsed.ok) throw new Error(`Pinned skill at ${source} has invalid SKILL.md: ${parsed.error}`);
   if (parsed.data.name !== expected.name || parsed.data.metadata.id !== expected.id) throw new Error(`Pinned skill at ${source} does not match ${expected.name} (${expected.id}).`);
-  return { ...expected, directory: source, frontmatter: parsed.data, grants: parsed.grants };
+  return { ...expected, directory: source, frontmatter: parsed.data, body: parsed.body, grants: parsed.grants };
 }
 
 async function resolveSkill(clone: string, team: string, ref: string): Promise<SkillRecord> {

@@ -1,6 +1,6 @@
 import { useSearchParams } from 'react-router';
 import { useContext, useEffect, useRef, useState } from 'react';
-import { driveRun, PromptContext, useBackend } from '../../backend';
+import { driveRun, PrintContext, PromptContext, useBackend } from '../../backend';
 import type { Result, Run } from '../../backend/types';
 
 /** Own a screen action, including cancellation and questions not drawn by the board. */
@@ -9,6 +9,7 @@ export function useWorkflow() {
   const ask = useContext(PromptContext);
   const [, setSearch] = useSearchParams();
   const [notice, setNotice] = useState<string | null>(null);
+  const print = useContext(PrintContext);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [, refreshPrefs] = useState(0);
@@ -51,7 +52,7 @@ export function useWorkflow() {
     return perform(() => {
       const operation = start();
       active.current = operation;
-      return driveRun(operation, answers, ask);
+      return driveRun(operation, answers, ask, print);
     }, success);
   }
   function pref(key: string, value: unknown): boolean {
