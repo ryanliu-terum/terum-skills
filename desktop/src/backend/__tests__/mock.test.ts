@@ -26,8 +26,8 @@ it.each([
 it('returns disabled and not-installed details without changing fixture data',async()=>{const b=createMockBackend();location.hash='#/skill/deploy-check?__mock=disabled';const off=await b.skill({ref:'deploy-check'});expect(off.ok).toBe(true);if(!off.ok)throw new Error(off.error);expect(off.value.enabled).toBe(false);location.hash='#/skill/deploy-check?__mock=not-installed';const absent=await b.skill({ref:'deploy-check'});expect(absent.ok&&absent.value.root).toBe('Marketplace');expect(absent.ok&&absent.value.installed).toBe(false);});
 it('honours latency, slow, and deliberately pending loading reads',async()=>{vi.useFakeTimers();const b=createMockBackend({latencyMs:50});const resolved=vi.fn();void b.inbox().then(resolved);await vi.advanceTimersByTimeAsync(49);expect(resolved).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(resolved).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=slow';const slow=vi.fn();void b.inbox().then(slow);await vi.advanceTimersByTimeAsync(1999);expect(slow).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(slow).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=loading';const loading=vi.fn();void b.inbox().then(loading);await vi.advanceTimersByTimeAsync(10000);expect(loading).not.toHaveBeenCalled();});
 it('models connect selection, a declined skill, an accepted skill and Done',async()=>{const run=createMockBackend().connect({});let selected=0;const result=await answerAll(run,frame=>frame.kind==='select'?(selected++===0?'api-docs':selected===2?'handoff-note':'Done'):frame.question==='Connect handoff-note?');expect(result).toEqual({ok:true,value:{kind:'batch',shared:[{id:'handoff-note',name:'handoff-note'}],declined:['api-docs'],refused:[]}});});
-it('returns the required decline for Skip and a single result for path connect',async()=>{const b=createMockBackend();expect(await answerAll(b.connect({}),()=> 'Skip')).toEqual({ok:false,error:'Connect was declined.'});expect(await answerAll(b.connect({path:'/skills/api-docs'}),()=>true)).toEqual({ok:true,value:{id:'api-docs',name:'api-docs'}});});
-it('requires confirmation for install, removal, prune and team leave',async()=>{const b=createMockBackend();for(const run of [b.install({ref:'deploy-check'}),b.uninstallSkill({ref:'deploy-check'}),b.uninstallMachine({}),b.sync({prune:true}),b.team({kind:'leave'})]){expect((await answerAll<unknown>(run,()=>false)).ok).toBe(false);}});
+it('returns the required decline for Skip and a single result for path connect',async()=>{const b=createMockBackend();expect(await answerAll(b.connect({}),()=> 'Skip')).toEqual({ok:false,error:'Connect was declined.',cancelled:true});expect(await answerAll(b.connect({path:'/skills/api-docs'}),()=>true)).toEqual({ok:true,value:{id:'api-docs',name:'api-docs'}});});
+it('marks declines for install, removal and team leave',async()=>{const b=createMockBackend();for(const run of [b.install({ref:'deploy-check'}),b.uninstallSkill({ref:'deploy-check'}),b.uninstallMachine({}),b.team({kind:'leave'})]){expect(await answerAll<unknown>(run,()=>false)).toMatchObject({ok:false,cancelled:true});}});
 it('returns fixture-shaped results for successful verbs',async()=>{const b=createMockBackend();expect((await answerAll(b.install({ref:'deploy-check',scope:'Terum'}),()=>true))).toEqual({ok:true,value:[{id:'deploy-check',name:'deploy-check',scope:'Terum'}]});expect((await b.invite({logins:['sam']}).done)).toEqual({ok:true,value:{invited:['sam']}});expect((await b.publish({ref:'deploy-check'}).done).ok).toBe(true);expect((await b.eval({ref:'deploy-check'}).done).ok).toBe(true);expect(await b.validate({ref:'deploy-check'})).toEqual({ok:true,value:{name:'deploy-check',findings:0,warnings:0}});expect((await answerAll(b.setup({offerConnect:false}),()=> 'Join an existing team')).ok).toBe(true);});
 it('handles unknown refs, invalid preferences, storage corruption and unavailable clipboard',async()=>{const b=createMockBackend();expect((await b.install({ref:'missing'}).done).ok).toBe(false);b.prefs.set('theme','light');expect(b.prefs.get('theme','dark')).toBe('light');localStorage.setItem('terum-skills-app:pref:bad','{broken');expect(b.prefs.get('bad',42)).toBe(42);expect(()=>b.prefs.set('bad',undefined)).toThrow();expect(()=>b.prefs.set('bad',NaN)).toThrow();expect(await b.copyToClipboard('text')).toEqual({ok:false,error:'Clipboard unavailable.'});expect(await b.copyImage(new Blob(['x'],{type:'text/plain'}))).toEqual({ok:false,error:'Expected a PNG image.'});});
 
@@ -79,4 +79,17 @@ it('reads skill refs from the configured remote, never project membership (CP-34
  for(const item of inbox.value)expect(item.skillRef).toBe(`${item.repo||design.TEAM_REPO}/${item.name}`);
 });
 
+it('keeps a declined prune on the success path and emits the CLI line', async()=>{
+ const run=createMockBackend().sync({prune:true});
+ expect(await answerAll(run,()=>false)).toEqual({ok:true,value:{placed:[],removed:[]}});
+ const frames=[];for await(const frame of run.frames)frames.push(frame);
+ expect(frames).toContainEqual({t:'print',line:'Prune cancelled; nothing deleted.'});
+ expect(frames.at(-1)).toEqual({t:'result',ok:true});
+});
+it('marks a mock connect decline on both the result and the terminal frame',async()=>{
+ const run=createMockBackend().connect({path:'/skills/api-docs'});
+ expect(await answerAll(run,()=>false)).toEqual({ok:false,error:'Connect was declined.',cancelled:true});
+ const frames=[];for await(const frame of run.frames)frames.push(frame);
+ expect(frames.at(-1)).toEqual({t:'result',ok:false,error:'Connect was declined.',declined:true});
+});
 it('has no launch target in the mock',async()=>{expect(await createMockBackend().launchTarget()).toBeNull();});

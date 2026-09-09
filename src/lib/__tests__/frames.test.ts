@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { FRAME_FEATURES, FRAME_PROTOCOL, FRAME_VERBS, frameChannel, isDecline, type Frame } from '../frames.js';
+import { FRAME_FEATURES, FRAME_PROTOCOL, FRAME_VERBS, frameChannel, attemptedVerb, type Frame } from '../frames.js';
 import { PromptClosedError } from '../prompt.js';
 
 /** A shell on the other end: collects every frame the CLI writes and answers questions on cue. */
@@ -28,7 +28,10 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
     const s = shell();
     s.channel.hello('0.1.5');
     expect(s.frames).toEqual([{ t: 'hello', protocol: FRAME_PROTOCOL, version: '0.1.5', verbs: [...FRAME_VERBS], features: FRAME_FEATURES }]);
-    expect(Object.values(FRAME_FEATURES).every((value) => value === false)).toBe(true);
+    expect(FRAME_FEATURES).toEqual({
+      favorites: false, follow: false, roles: false, lastSeen: false, installScope: false, inviteScoping: false,
+      disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: false, perCase: false, progress: false,
+    });
   });
 
   it('confirm, text and select each round-trip through one ask frame; defaults and choices travel with the question', async () => {
@@ -114,7 +117,7 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
     s.channel.result({ verb: 'status', ok: true, value: { teams: [] }, exitCode: 0 });
     expect(s.frames.at(-1)).toEqual({ t: 'result', verb: 'status', ok: true, exitCode: 0, value: { teams: [] } });
     const t = shell();
-    t.channel.result({ verb: 'connect', ok: false, error: 'Connect was declined.', exitCode: 1 });
+    t.channel.result({ verb: 'connect', ok: false, error: 'Connect was declined.', cancelled: true, exitCode: 1 });
     expect(t.frames.at(-1)).toEqual({ t: 'result', verb: 'connect', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true });
     const u = shell();
     u.channel.result({ verb: 'sync', ok: false, error: 'Could not fast-forward team: offline', value: { placed: 0 }, exitCode: 1 });
@@ -123,8 +126,27 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
     await expect(u.channel.io.confirm('late?')).rejects.toBeInstanceOf(PromptClosedError);
   });
 
-  it('isDecline recognises every decline message the CLI emits and nothing else', () => {
-    for (const message of ['Connect was declined.', 'Forget was declined.', 'Invitation acceptance was declined.', 'Consent was declined for x.', 'Consent was declined for malformed allowed-tools on x.']) expect(isDecline(message), message).toBe(true);
-    for (const message of ['Unsupported remote: nope', 'Could not fast-forward team: offline', 'No skill selected.']) expect(isDecline(message), message).toBe(false);
+  it.each([
+    'Connect was declined.', 'Forget was declined.', 'Invitation acceptance was declined.',
+    'Consent was declined for x.', 'Consent was declined for malformed allowed-tools on x.',
+    'Publish was cancelled.', 'Leave was cancelled.', 'Team removal was cancelled.', 'Uninstall was cancelled.',
+  ])('uses typed cancellation for %s', (error) => {
+    const s = shell();
+    s.channel.result({ verb: 'install', ok: false, error, cancelled: true, exitCode: 1 });
+    expect(s.frames).toEqual([{ t: 'result', verb: 'install', ok: false, error, declined: true, exitCode: 1 }]);
+  });
+
+  it.each(['Unsupported remote: nope', "error: unknown option '--declined'", 'Connect was declined.'])('never infers a decline from error text: %s', error => {
+    const s = shell();
+    s.channel.result({ verb: 'install', ok: false, error, exitCode: 1 });
+    expect(s.frames).toEqual([{ t: 'result', verb: 'install', ok: false, error, exitCode: 1 }]);
+  });
+
+  it.each([
+    [[], 'terum-skills'], [[''], 'terum-skills'], [['--frames'], '--frames'], [['--frames', 'team'], '--frames'],
+    [['install', '-x'], 'install'], [['team', 'join', 'acme'], 'team join'], [['team', '--flag', 'join'], 'team'],
+    [['unknown', 'verb'], 'unknown'], [['team'], 'team'], [['team', 'remove', '--', '-x'], 'team remove'],
+  ])('names the attempted verb for %j', (operands, expected) => {
+    expect(attemptedVerb(operands as string[])).toBe(expected);
   });
 });

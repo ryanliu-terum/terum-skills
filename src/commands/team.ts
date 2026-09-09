@@ -10,7 +10,7 @@ import { exists, mkdirPrivate } from '../lib/fs.js';
 import { defaultHookOptions, HookOptions, offerHook } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, normalizeRemote, remoteName, remoteToGitUrl, stripRemoteCredentials } from '../lib/remote.js';
-import { Result, failure, success } from '../lib/result.js';
+import { fromError, CancelledError, Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
 import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
@@ -118,7 +118,7 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
       }
     }
     const question = args.archiveOnly ? `Archive ${targetHandle}? (y/N)` : `Revoke GitHub access for @${login} and archive ${targetHandle}? (y/N)`;
-    if (!(await io.confirm(question))) throw new Error('Team removal was cancelled.');
+    if (!(await io.confirm(question))) throw new CancelledError('Team removal was cancelled.');
     const repo = openTeamRepo(clone, binding.remote, runner);
     await repo.safeWrite((tree) => archiveMutation(tree, targetHandle, revoking ? login : undefined), { action: 'team-remove', handle: binding.handle, targetHandle, message: `${binding.handle}: remove ${targetHandle}` });
     if (ownerRepo !== null && !args.archiveOnly) {
@@ -140,7 +140,7 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
     }
     io.print(`${args.archiveOnly ? 'Archived' : 'Removed'} ${targetHandle} from ${teamName}.${args.archiveOnly ? ' Access remains managed on the host.' : ''}`);
     return success({ team: teamName, handle: targetHandle, archiveOnly: Boolean(args.archiveOnly) });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 /** gh --paginate --slurp returns an array of response pages; accept one-page fixture output too. */
@@ -294,7 +294,7 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
     await offerHookAfterDurableWork(io, args, store.root);
     return success({ team: name, remote });
   } catch (error) {
-    return failure(error instanceof Error ? error.message : String(error));
+    return fromError(error);
   }
 }
 
@@ -375,7 +375,7 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     await offerHookAfterDurableWork(io, args, store.root);
     return success({ team, handle: identity.handle, rejoined, roster });
   } catch (error) {
-    return failure(error instanceof Error ? error.message : String(error));
+    return fromError(error);
   }
 }
 
@@ -490,7 +490,7 @@ export function credentialNotice(remote: string): string {
 async function acceptOrDirect(ownerRepo: string, io: Prompter, runner: Runner, gh: GhState): Promise<void> {
   if (!gh.authenticated) {
     io.print(`Accept the invitation at https://github.com/${ownerRepo}/invitations before continuing.`);
-    if (!(await io.confirm('Continue after accepting the invitation?'))) throw new Error('Invitation acceptance was declined.');
+    if (!(await io.confirm('Continue after accepting the invitation?'))) throw new CancelledError('Invitation acceptance was declined.');
     return;
   }
   const invitations = await runner.run('gh', ['api', 'user/repository_invitations']);

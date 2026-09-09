@@ -4,7 +4,7 @@ import { basename, resolve } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { assessHygiene, formatHygieneFindings, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { Prompter } from '../lib/prompt.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, failure, Result, success } from '../lib/result.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { readTeam } from '../lib/skills.js';
 
@@ -48,5 +48,5 @@ export async function run(args: ValidateArgs, io: Prompter): Promise<Result<Vali
     const warnings = assessment.warnings.length;
     io.print(`${name}: hygiene passed${warnings ? ` (${warnings} warning${warnings === 1 ? '' : 's'})` : ''}.`);
     return success({ name, findings: 0, warnings });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }

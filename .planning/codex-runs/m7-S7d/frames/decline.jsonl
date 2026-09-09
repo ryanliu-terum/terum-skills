@@ -1,0 +1,4 @@
+{"t":"hello","protocol":1,"version":"0.1.6","verbs":["login","setup","team create","team join","team remove","team leave","team workflow-update","invite","ls","status","publish","validate","eval","connect","install","uninstall-skill","uninstall","sync","search","update"],"features":{"favorites":false,"follow":false,"roles":false,"lastSeen":false,"installScope":false,"inviteScoping":false,"disablePerMachine":false,"projectMembers":false,"liftOnCards":false,"runEvalInApp":false,"perCase":false,"progress":false}}
+{"t":"print","level":"info","line":"Will add:\nlicense: UNLICENSED\nmetadata.id: e68b911c-c02b-480e-95a7-dba87f2a1f20\nmetadata.author: Seed <seed@example.com>\nmetadata.terum-category: misc (no category was set; edit SKILL.md any time)"}
+{"t":"ask","id":"q1","kind":"confirm","question":"Connect cancel-example?"}
+{"t":"result","verb":"connect","ok":false,"exitCode":1,"error":"Connect was declined.","declined":true}

@@ -4,11 +4,11 @@
 
 This is the Prompter serialised (`src/lib/prompt.ts`): the CLI already funnels every question it asks a human through one interface, and frame mode is a second implementation of that interface (`src/lib/frames.ts`). Verbs do not know which one they have. The desktop app's `src/backend/tauri/` speaks this protocol; so can a script.
 
-The flag is position-independent (`--frames status` and `status --frames` are the same) and is removed before the verb's own options are parsed.
+The flag is position-independent before the first `--` (`--frames status` and `status --frames` are the same) and is removed before the verb's own options are parsed.
 
 ## Frames the CLI writes (stdout)
 
-One per line, in this order: `hello` once, then any number of `print` and `ask`, then exactly one `result`.
+One per line, in this order: `hello` once, then any number of `print` and `ask`, then exactly one `result`, including on a usage error.
 
 | Frame | Shape | Meaning |
 |---|---|---|
@@ -16,7 +16,7 @@ One per line, in this order: `hello` once, then any number of `print` and `ask`,
 | `print` | `{"t":"print","level":"info"\|"warn"\|"error","line":"..."}` | Text the verb would have printed. Render it where the verb's output belongs. |
 | `ask` | `{"t":"ask","id":"q1","kind":"confirm"\|"text"\|"select","question":"...","default":"...","choices":[...]}` | The verb is blocked until an `answer` with the same `id` arrives. `default` appears only for `text` when the verb offers one; `choices` only for `select`. |
 | `progress` | `{"t":"progress","step":"...","current":n,"total":n}` | Reserved. No verb emits progress today (`features.progress` is `false`); the shape is fixed so a shell can render it when one does. |
-| `result` | `{"t":"result","verb":"install","ok":true,"exitCode":0,"value":{...}}` | Always last. `verb` is the invoked verb. `value` is the verb's own result object when it has one. On failure: `ok:false`, `exitCode:1`, `error` is the one-line message, and `declined:true` when the failure is the person saying no (`"Connect was declined."` and the other decline messages) rather than something breaking. After `result` the CLI stops reading stdin and exits. |
+| `result` | `{"t":"result","verb":"install","ok":true,"exitCode":0,"value":{...}}` | Always last. `verb` is the invoked verb. `value` is the verb's own result object when it has one. On failure: `ok:false`, `exitCode:1`, `error` is the one-line message, and `declined:true` when set by the CLI's typed decline (the person said no) rather than by matching the error text. After `result` the CLI stops reading stdin and exits. |
 
 The process exit code matches `result.exitCode`. The failure line is also written to stderr, exactly as without the flag, so a shell that only watches the exit code and stderr still works.
 

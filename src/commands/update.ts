@@ -2,7 +2,7 @@ import { ConfigStore, createConfigStore } from '../lib/config.js';
 import type { Launch } from '../lib/launch.js';
 import { packageVersion } from '../lib/package.js';
 import type { Prompter } from '../lib/prompt.js';
-import { failure, Result, success } from '../lib/result.js';
+import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { createReleaseState, describeUpdate, maintainReleaseState, ProbePolicy, probePolicy, ReleaseStateStore } from '../lib/update.js';
 
@@ -33,7 +33,7 @@ export async function run(args: UpdateArgs, io: Prompter): Promise<Result<void>>
     else lines.push(...advice(launch));
     for (const line of lines) io.print(line);
     return success(undefined);
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { return fromError(error); }
 }
 
 function advice(launch: Launch): string[] {

@@ -7,8 +7,9 @@ import { cliRun } from '../run';
 import { fakeBridge, STATE } from './fake-bridge';
 
 const directory = resolve('../.planning/codex-runs/m7-S7g/frames');
+const s7dDirectory = resolve('../.planning/codex-runs/m7-S7d/frames');
 function recorded(name: string) {
-  return readFileSync(resolve(directory, name + '.jsonl'), 'utf8').trim().split('\n');
+  return readFileSync(resolve(name === 'usage-error' || name === 'decline' ? s7dDirectory : directory, name + '.jsonl'), 'utf8').trim().split('\n');
 }
 // S7f's recording predates the S7k status payload (no ledger, identity or tools): the older schema the served surface must refuse.
 function olderStatus() {
@@ -88,4 +89,20 @@ it('replays S7g local frames through settings: the real placement path, name, 12
   expect(row?.health).toBe('up-to-date');expect(row?.placement.team).toBe('acme');
   expect(result).toMatchObject({ok:true,value:{PLACEMENTS:[[row?.path,'deploy-check','Global',row?.placement.version.slice(0,12),'—','up to date']],PLACEMENTS_N:1,PINNED_N:1}});
   expect(result.value?.SHARED).toEqual([['22222222-2222-4222-8222-222222222222',expect.stringContaining('/skills/tdd'),'acme','—']]);
+});
+it.each([
+  ['usage-error', false, "error: unknown option '-x'"],
+  ['decline', true, 'Connect was declined.'],
+])('replays the rebuilt CLI %s result without inferring cancellation', async (name, cancelled, error) => {
+  const f = replay(recorded(name));
+  const run = cliRun(f.bridge, Promise.resolve(STATE), [name], { map: value => value });
+  expect(await run.done).toEqual({ ok: false, error, ...(cancelled ? { cancelled: true } : {}) });
+  const frames = []; for await (const frame of run.frames) frames.push(frame);
+  expect(frames.at(-1)).toEqual({ t: 'result', ok: false, error, ...(cancelled ? { declined: true } : {}) });
+});
+it('replays the rebuilt ls recording through the read consumer', async () => {
+  const f = replay(recorded('ls'));
+  const result = await read(cliRun(f.bridge, Promise.resolve(STATE), ['ls'], { map: value => value }));
+  expect(result.ok).toBe(true);
+  expect(result.value).toBeDefined();
 });
