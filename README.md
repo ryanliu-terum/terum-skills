@@ -66,6 +66,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `invite <github-user>…` | Grant repo access and print the join line |
 | | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
 | | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
+| | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
 | Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
 | | `install <ref>` / `uninstall-skill <ref>` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists) |
 | | `sync` | Pull, finish pending installs, mirror connected edits, refresh placed copies |

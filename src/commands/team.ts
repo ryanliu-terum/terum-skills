@@ -412,6 +412,8 @@ export function joinMutation(tree: MutableTree, identity: Identity, boundHandle:
     // A reclaim or rejoin that left the login blank keeps the one on file: an empty answer is "no change", not "none".
     github: identity.github || existing?.github || '',
     bio: existing?.bio ?? '',
+    ...(existing?.role === undefined ? {} : { role: existing.role }),
+    ...(existing?.projects === undefined ? {} : { projects: existing.projects }),
     installed: existing?.installed ?? [],
     declined: existing?.declined ?? [],
   };

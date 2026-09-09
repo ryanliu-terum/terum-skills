@@ -21,6 +21,7 @@ const asking = (async (_args: unknown, io: Prompter) => {
 }) as never;
 
 const INVOCATIONS: Record<string, string[]> = {
+  app: ['app'], profile: ['profile', '--role', 'Platform'], decline: ['decline', 'ref'],
   login: ['login'], setup: ['setup'], 'team create': ['team', 'create', 'x'], 'team join': ['team', 'join', 'o/r'], 'team remove': ['team', 'remove', 'h'], 'team leave': ['team', 'leave', 'n'], 'team workflow-update': ['team', 'workflow-update'],
   invite: ['invite', 'u'], ls: ['ls'], status: ['status'], publish: ['publish', 'ref'], validate: ['validate', 'x'], eval: ['eval', 'x'], connect: ['connect'], install: ['install', 'ref'], 'uninstall-skill': ['uninstall-skill', 'ref'], uninstall: ['uninstall'], sync: ['sync'], search: ['search', 't'], update: ['update'],
 };
@@ -48,7 +49,7 @@ function harness(verbs: CliVerbs) {
 }
 
 describe('frame mode through commander — every public verb', () => {
-  const verbs: CliVerbs = { login: asking, team: asking, setup: asking, connect: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, receiptCheck: asking, update: asking };
+  const verbs: CliVerbs = { app: asking, profile: asking, decline: asking, login: asking, team: asking, setup: asking, connect: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, receiptCheck: asking, update: asking };
 
   it('FRAME_VERBS names only registered commands, and every one is covered here', () => {
     const program = buildProgram(async () => undefined, verbs, {});

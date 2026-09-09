@@ -171,3 +171,9 @@ it('issue 5 connect authorizes owned skills and names connect in a non-owned ref
   expect(() => guard(tree({ 'skills/x/SKILL.md': [skill('Other <other@x.test>'), skill(ME)] }), context))
     .toThrow('Write guard refused skills/x/SKILL.md for connect by me');
 });
+
+it.each(['profile', 'decline'] as const)('row b grants %s only the caller people path', action => {
+  expect(() => guard(tree({ 'people/me.json': ['{}', '{"role":"Platform"}'] }), { action, handle: 'me' })).not.toThrow();
+  refuse(tree({ 'people/other.json': ['{}', '{}'] }), { action, handle: 'me' }, 'people/other.json');
+  refuse(tree({ 'team.json': [team(), team({ global: [ID] })] }), { action, handle: 'me' }, 'team.json');
+});

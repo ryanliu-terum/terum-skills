@@ -1246,3 +1246,15 @@ it('exports the unchanged normalized-grant approval predicate', () => {
   expect(approved(emptyConfig(), 'id', allowedTools([]))).toBe(true);
   expect(approved(config, 'id', allowedTools({ invalid: true }))).toBe(false);
 });
+
+it.each(['install', 'adopt', 'decline'] as const)('preserves role/projects byte-identically through %s', async operation => {
+  const prepared = await orphanedPlacement();
+  const metadata = { role: 'Platform', projects: ['terum', 'second'] };
+  await pushFromSeed(prepared.fixture.seed, 'people/seed.json', JSON.stringify(person('seed', metadata)) + '\n');
+  const result = operation === 'install'
+    ? await install({ ref: 'sample', config: prepared.store, home: prepared.home }, new ScriptedPrompter())
+    : await run({ config: prepared.store }, new ScriptedPrompter([], [operation === 'adopt'], true));
+  expect(result.ok).toBe(true);
+  const after = JSON.parse(await git(['show', 'main:people/seed.json'], prepared.fixture.bare)) as typeof metadata;
+  expect(JSON.stringify({ role: after.role, projects: after.projects })).toBe(JSON.stringify(metadata));
+});

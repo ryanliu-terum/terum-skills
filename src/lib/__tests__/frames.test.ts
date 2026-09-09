@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { buildProgram } from '../../cli.js';
+import type { Command } from 'commander';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { FRAME_FEATURES, FRAME_PROTOCOL, FRAME_VERBS, frameChannel, attemptedVerb, type Frame } from '../frames.js';
@@ -29,6 +32,7 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
     s.channel.hello('0.1.5');
     expect(s.frames).toEqual([{ t: 'hello', protocol: FRAME_PROTOCOL, version: '0.1.5', verbs: [...FRAME_VERBS], features: FRAME_FEATURES }]);
     expect(FRAME_FEATURES).toEqual({
+      memberRole: true,
       favorites: false, follow: false, roles: false, lastSeen: false, installScope: false, inviteScoping: false,
       disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: false, perCase: false, progress: false,
     });
@@ -149,4 +153,23 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
   ])('names the attempted verb for %j', (operands, expected) => {
     expect(attemptedVerb(operands as string[])).toBe(expected);
   });
+});
+
+// ls member/project are selectors of the public ls verb; team is a verb group.
+it('CP-19: the hello inventory and public commander verbs agree in both directions', () => {
+  const program = buildProgram(async () => {});
+  function inventory(command: Command, prefix = ''): string[] {
+    return command.commands.filter(child => !(child as Command & { _hidden?: boolean })._hidden).flatMap(child => {
+      const name = `${prefix}${child.name()}`;
+      const hasAction = Boolean((child as Command & { _actionHandler?: unknown })._actionHandler);
+      return [...(hasAction ? [name.startsWith('ls ') ? 'ls' : name] : []), ...inventory(child, `${name} `)];
+    });
+  }
+  expect([...FRAME_VERBS].sort()).toEqual([...new Set(inventory(program))].sort());
+});
+it('CP-19: every feature is named in the protocol features sentence', () => {
+  const doc = readFileSync(new URL('../../../docs/frame-protocol.md', import.meta.url), 'utf8');
+  const sentence = doc.split('\n').find(line => line.startsWith('`hello.features` names'));
+  expect(sentence).toBeDefined();
+  for (const key of Object.keys(FRAME_FEATURES)) expect(sentence).toContain(`\`${key}\``);
 });

@@ -59,8 +59,10 @@ export const personSchema = z.object({
   // evidence (§5.4 reclaim). When present it is a real login, because `team remove` puts it in a REST path.
   github: z.union([z.literal(''), githubLoginSchema]),
   bio: z.string(),
+  role: z.string().max(32).optional(),
   installed: z.array(installedSchema),
   declined: z.array(skillIdSchema),
+  projects: z.array(z.string().min(1)).optional(),
 }).passthrough();
 export type Person = z.infer<typeof personSchema>;
 

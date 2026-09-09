@@ -1,0 +1,29 @@
+# m7-S7b: orchestrator's own gates, 2026-09-09 01:56-02:03 UTC, Ryan's Mac (Node 25, Playwright chromium)
+# Codex: gpt-6-astra, high, workspace-write, one pass (codex-prompt.md -> codex-report.json "complete"; four open questions and one
+# deviation ruled in NOTES.md). Self-report (hypothesis): root 75 files / 1227 tests; desktop 55 files / 674 passed + 88 oracle-skipped.
+# Gated on the tree after: the S7b code commit 8b80ed3, the merges of main through S7e (3e7dc44; ls.ts, adapter and its test folded,
+# the catalog's provenance join switched to S7g's ledger id) and S7c (75bfe69; seam and adapter folded), and the frames re-recorded
+# from the merged CLI (ac9a4d0). No src-tauri change, so no cargo step.
+
+full battery (01:56-02:01 UTC, on ac9a4d0)
+root lint         : rc=0
+root typecheck    : rc=0
+root test         : rc=1  2 failed / 1261 passed: runner.test.ts "kills a sleeping git alias and its child" — the known load flake;
+                    cli.test.ts "documents every public command path in a README code span" — S7e's CP-24 gate, red because the
+                    new `profile` and `decline` verbs were not in the root README (a maintainer file Codex may not edit). Maintainer
+                    edit af4072f adds the README row; root re-run: 75 files, 1263 tests passed (both files green).
+root build        : rc=0
+desktop typecheck : rc=0
+desktop lint      : rc=0
+desktop vitest    : rc=0  57 files, 800 tests passed
+desktop build     : rc=0
+e2e routes        : rc=0  91 passed (28.1s)
+export:check      : rc=0  current
+e2e fidelity      : rc=0  88 locked boards passed (36.3s) — the Share and Marketplace boards are pixel-neutral (the mock draws the
+                    fixture's roles and projects; the hidden Teams column keeps its geometry)
+real-data proof   : index.test.ts replays frames/{status,ls,ls-local,ls-member-mira,ls-member-seed,ls-member-ravi,profile,decline}.jsonl
+                    recorded from the rebuilt CLI against the fixture (fixture.sh beside this file; mira role Platform, projects [terum];
+                    `profile --role Platform` and `decline diagnose` were run for real against the fixture's bare remote, then `ls member
+                    seed` recorded the persisted decline): roster members [mira, ravi, seed] with mira's real role and projects, catalog
+                    topRated [deploy-check, tdd, diagnose] by real installs, deploy-check installed via the ledger id, seed's declined
+                    [33333333-…], categories from the skills, no Teddy/SSM/MRF/founder string anywhere in the served catalog.
