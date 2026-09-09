@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
 import { packageVersion } from '../package.js';
-import { describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText } from '../teamRepo.js';
+import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText } from '../teamRepo.js';
 import { createConfigStore } from '../config.js';
 import { run as connect } from '../../commands/connect.js';
 import { ScriptedPrompter } from './fixtures.js';
@@ -528,4 +528,25 @@ it('returns only the completed attempt value after rejection', async () => {
   const result = await openTeamRepo(clone, fixture.bare, runner).safeWrite((tree) => { tree.set('people/me.json', personJson('me')); return attempt++; }, { action: 'join', handle: 'me', backoff: () => 0 });
   expect(attempt).toBe(2);
   expect(result).toEqual({ changed: true, pushedTo: 'main', returned: 1 });
+});
+
+
+it('skillVersions resolves every tree in one child, matching latestTree name by name', async () => {
+  const fixture = await bareTeam();
+  for (const name of ['a', 'b', 'c']) await pushFromSeed(fixture.seed, 'skills/'+name+'/SKILL.md', name);
+  let children = 0;
+  const runner = wrapRunner(systemRunner, async (_command, _args, _options, next) => { children++; return next(); });
+  const versions = await skillVersions(runner, fixture.seed);
+  expect(children).toBe(1); expect(versions.size).toBe(3);
+  for (const [name, hash] of versions) expect(hash).toBe((await git(['rev-parse', 'HEAD:skills/'+name], fixture.seed)).trim());
+  expect(versions.has('missing')).toBe(false);
+});
+it('skillVersions returns an empty map when the valid ref has no skills tree', async () => {
+  const fixture = await bareTeam();
+  await rm(join(fixture.seed, 'skills'), { recursive: true });
+  await git(['add', '--all'], fixture.seed); await git(['commit', '-qm', 'remove skills root'], fixture.seed);
+  expect(await skillVersions(systemRunner, fixture.seed)).toEqual(new Map());
+});
+it('skillVersions preserves requireGitResult failure text', async () => {
+  await expect(skillVersions({ run: async () => ({ code: 1, stdout: '', stderr: 'cannot read objects' }) }, '/clone', 'main')).rejects.toThrow('git ls-tree main:skills failed: cannot read objects');
 });

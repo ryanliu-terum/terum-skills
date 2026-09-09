@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { FEATURE_KEYS } from '../types';
+import type { Features } from '../types';
 import { decodeText } from '../../lib/fixture-text';
 import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
@@ -45,6 +47,10 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend {
   }
  }
  const backend:Backend = {
+  async features(){return Object.fromEntries(FEATURE_KEYS.map(key=>[key,true])) as Features;},
+  async windowAction(){return ok(undefined);},
+  async openUrl(url){try{window.open(url,'_blank','noopener');return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:String(error));}},
+  async revealPath(){return ok(undefined);},
   async capabilities(){return {windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
   async surfaces(){return {status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true};},
   async status(){return structuredClone(ok({machine:{...design.MACHINE,hostname:design.MACHINE.name},me:{...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login},teams:mockTeams(),tools:{git:true,gh:true},counts:statusCounts(location.hash,readScenario())}));},

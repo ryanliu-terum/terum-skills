@@ -172,7 +172,7 @@ describe('cliRun — a CLI process as a seam Run<T>', () => {
 describe('createTauriBackend — argv and result mapping per verb', () => {
   const ok = (verb: string, value: unknown) => (_a: readonly string[], emit: (e: LineEvent) => void) => { emit({ kind: 'stdout', line: line({ t: 'result', verb, ok: true, exitCode: 0, value }) }); emit({ kind: 'exit', code: 0 }); };
   it('capabilities: mac-overlay on macOS, every flagged gap false, editor and clipboard true', async () => {
-    const backend = createTauriBackend(fakeBridge(() => undefined).bridge);
+    const backend = createTauriBackend(fakeBridge(ok('status', {})).bridge);
     expect(await backend.capabilities()).toEqual({ windowChrome: 'mac-overlay', disablePerMachine: false, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: false, openInEditor: true, clipboard: true });
   });
   it('install builds the three argv shapes and maps the CLI rows to the seam', async () => {
@@ -198,10 +198,10 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     ]);
   });
   it('search maps CLI hits to seam hits; read models the CLI lacks fail naming GAPS.md; a read that asks is refused', async () => {
-    const hits = [{ team: 't', id: 'i', name: 'deploy-check', author: 'ryan', category: 'ops', installs: 3, latest: 'abc', endorsed: 'x', unresolved: false }];
+    const hits = [{ description: 'Deploy safely', grants: null, grantsHash: null, updated: '—', team: 't', id: 'i', name: 'deploy-check', author: 'ryan', category: 'ops', installs: 3, latest: 'abc', endorsed: 'x', unresolved: false }];
     const backend = createTauriBackend(fakeBridge(ok('search', hits)).bridge);
-    expect(await backend.search({ q: 'deploy' })).toEqual({ ok: true, value: [{ kind: 'skill', ref: 't/deploy-check', name: 'deploy-check', description: '', team: 't', category: 'ops', author: 'ryan', installs: 3, latest: 'abc', endorsed: 'x', unresolved: false }] });
-    expect(await backend.library({ scope: 'Global' })).toEqual({ ok: false, error: expect.stringContaining('GAPS.md') });
+    expect(await backend.search({ q: 'deploy' })).toEqual({ ok: true, value: [{ kind: 'skill', ref: 't/deploy-check', name: 'deploy-check', description: 'Deploy safely', team: 't', category: 'ops', author: 'ryan', installs: 3, latest: 'abc', endorsed: 'x', unresolved: false }] });
+    expect(await backend.catalog()).toEqual({ ok: false, error: expect.stringContaining('GAPS.md') });
     const asking = createTauriBackend(fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'ask', id: 'q1', kind: 'confirm', question: 'Really?' }) }); }).bridge);
     expect(await asking.search({ q: 'x' })).toEqual({ ok: false, error: expect.stringContaining('asked "Really?" during a read-only call') });
   });

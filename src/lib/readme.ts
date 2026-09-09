@@ -43,6 +43,20 @@ export function installCounts(people: readonly Person[]): Map<string, number> {
   return installs;
 }
 
+export interface Installer { handle: string; displayName: string; scope: Person['installed'][number]['scope']; since: string; }
+
+/** One entry per install record, including archived members; counts still dedupe by person. */
+export function installersById(people: readonly Person[]): Map<string, Installer[]> {
+  const installers = new Map<string, Installer[]>();
+  for (const person of people) for (const item of person.installed) {
+    const rows = installers.get(item.id) ?? [];
+    rows.push({ handle: person.handle, displayName: person.display_name, scope: item.scope, since: item.since });
+    installers.set(item.id, rows);
+  }
+  for (const rows of installers.values()) rows.sort((a, b) => a.since < b.since ? -1 : a.since > b.since ? 1 : a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0);
+  return installers;
+}
+
 export function skillEndorsement(team: EndorsementTeam, id: string): string {
   const projects = Object.entries(team.projects).filter(([, project]) => project.skills.includes(id)).map(([name]) => name).sort();
   return team.global.includes(id) ? 'global' : projects.length ? `project: ${projects.join(', ')}` : '—';
@@ -120,6 +134,13 @@ export async function latestTree(runner: Runner, clone: string, name: string): P
   const result = await runner.run('git', ['rev-parse', `HEAD:skills/${name}`], { cwd: clone });
   if (result.code !== 0) throw new Error(`Could not resolve the latest version of ${name}: ${(result.stderr || result.stdout).trim()}`);
   return result.stdout.trim();
+}
+
+/** Last committed change; a successful empty log means this folder has no history. */
+export async function latestChange(runner: Runner, clone: string, name: string): Promise<string> {
+  const result = await runner.run('git', ['log', '-1', '--format=%cI', '--', `skills/${name}`], { cwd: clone });
+  if (result.code !== 0) throw new Error(`Could not read the latest change of ${name}: ${(result.stderr || result.stdout).trim()}`);
+  return result.stdout.trim() || '—';
 }
 
 /** Read one clone without pulling or mutating it; used by the hidden workflow command and ls. */

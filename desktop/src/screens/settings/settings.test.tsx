@@ -49,7 +49,7 @@ it('persists each inbox kind independently',async()=>{open('#/settings/inbox');c
 it('writes k without deriving a new statistic',async()=>{open('#/settings/evals');fireEvent.click(await screen.findByRole('combobox',{name:'Repetitions per case'}));const option=await screen.findByRole('option',{name:'10'});fireEvent.pointerDown(option,{pointerType:'mouse'});fireEvent.click(option);expect(backend.prefs.get('eval:k','')).toBe('10');});
 it('runs Sync now with an empty argument',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));await waitFor(()=>expect(sync).toHaveBeenCalledWith({}));});
 it('opens the exact update command',async()=>{const editor=vi.spyOn(backend,'openInEditor');open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('npx -y terum-skills@latest update'));});
-it('opens the local storage path in Finder',async()=>{const editor=vi.spyOn(backend,'openInEditor');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Show in Finder'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('~/.terum/skills'));});
+it('opens the local storage path in Finder',async()=>{const editor=vi.spyOn(backend,'revealPath');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Show in Finder'}));await waitFor(()=>expect(editor).toHaveBeenCalledWith('~/.terum/skills'));});
 it('declines machine removal and leaves the screen intact',async()=>{const uninstall=vi.spyOn(backend,'uninstallMachine');open('#/settings/advanced');fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));expect(await screen.findByRole('alert')).toHaveTextContent('Remove was declined.');expect(uninstall).toHaveBeenCalledWith({});expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('heading',{name:'Advanced'})).toBeInTheDocument();});
 it('does not change a toggle when its preference write fails',async()=>{open('#/settings/sync');const control=await screen.findByRole('switch',{name:'Sync at session start'});vi.spyOn(backend.prefs,'set').mockImplementation(()=>{throw new Error('Storage denied.');});fireEvent.click(control);expect(await screen.findByRole('alert')).toHaveTextContent('Storage denied.');expect(control).toHaveAttribute('aria-checked','true');});
 it('surfaces failed editor results',async()=>{vi.spyOn(backend,'openInEditor').mockResolvedValue({ok:false,error:'Editor unavailable.'});open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));expect(await screen.findByRole('alert')).toHaveTextContent('Editor unavailable.');});
@@ -89,7 +89,6 @@ it('serves Settings alongside the status error and discloses absent stamps and u
 });
 it('shows tool presence without claiming an authenticated GitHub account',async()=>{
  open('#/settings/account');
- expect(await screen.findByText('git present')).toBeInTheDocument();
- expect(screen.getByText('gh present')).toBeInTheDocument();
+ expect(await screen.findByText('git present · gh present')).toBeInTheDocument();
  expect(screen.queryByText(/Signed in as/)).toBeNull();
 });

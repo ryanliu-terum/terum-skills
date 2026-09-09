@@ -5,7 +5,10 @@ export type AskKind='confirm'|'text'|'select';
 export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string}
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
-export interface Capabilities {windowChrome:'mac-overlay'|'drawn-controls'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
+export interface Capabilities {windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole'] as const;
+export type FeatureKey = typeof FEATURE_KEYS[number];
+export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean}
 export interface ReadOptions {signal?:AbortSignal}
 export type Theme='dark'|'light'|'system';
@@ -13,25 +16,28 @@ export type Scope=string;
 export type TokenKey=keyof Design['TOKENS'];
 export type IndicatorKey='update'|'local'|'broken';
 export interface ReceiptSummary {w:number;l:number;t:number;n:number;lift:number;verdict:'PASS'|'NEUTRAL'|'FAIL';partial:[number,number]|null;signP:string}
-export interface SkillCard {project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:boolean;wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
+export interface SkillCard {updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:boolean;wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
 export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
 export interface ReportNumbers {holes:number;nRounds:number;triggerTotal:number;precisionObserved?:string}
 export interface EvalEstimate {cases:number;k:number;arms:number;runs:number;minutes:number;dollars:number;model:string}
-export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'> & SkillCard & {skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null})[];skillMd:{frontmatter:string;body:SkillMdBlock[]};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers;scoreFractions:{routesExpected:number;roi:[number,number]|null;quality:[number,number]|null};method:string};
+export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'> & SkillCard & {repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null;quality:[number,number]|null};method:string};
 export type InboxKind='share'|'update'|'alert'|'eval'|'review'|'author'|'team';
 export type InboxItem=Omit<Design['INBOX'][number],'kind'> & {id:string;skillRef:string;kind:InboxKind;summary:ReceiptSummary|null;incumbentLift:[number,string]|null;reportNumbers?:ReportNumbers};
 export type Person=Design['ROSTER'][number] & {lastPublish:string;skills:string[];adoption:number;publishLine:string;teamsLine:string;buckets:[string,string[]][];placeNote:string;onDisk:[number,number]};
 export type Project=Design['PROJECTS'][number] & {memberHandles:string[];memberInitials:string[];skillsIn:string[]};
-export interface Catalog {skills:SkillCard[];extras:SkillCard[];people:Person[];projects:Project[];categories:Design['CATEGORIES'];categoryRemaining:Record<string,number>;topRated:string[];peopleByAdoption:string[];projectsByMembers:string[];categorySkills:Record<string,string[]>;filterDefault:Design['FILTER_DEFAULT'];filterCount:number;verdictCounts:Record<'PASS'|'NEUTRAL'|'FAIL'|'Not evaluated',number>;catalogN:number;teamN:number;bulkInstall:Record<string,{total:number;asking:number}>}
+export interface Catalog {repository:string|null;skills:SkillCard[];extras:SkillCard[];people:Person[];projects:Project[];categories:Design['CATEGORIES'];categoryRemaining:Record<string,number>;topRated:string[];peopleByAdoption:string[];projectsByMembers:string[];categorySkills:Record<string,string[]>;filterDefault:Design['FILTER_DEFAULT'];filterCount:number;verdictCounts:Record<'PASS'|'NEUTRAL'|'FAIL'|'Not evaluated',number>;catalogN:number;teamN:number;bulkInstall:Record<string,{total:number;asking:number}>}
 export type Member=Design['ROSTER'][number] & {status:string;projects:string[];lastSeen:string;lastPublish:string};
 export interface Roster {members:Member[];invited:Design['INVITED'];member:Record<string,{status:string;projects:string[];lastSeen:string}>;byAdoption:string[]}
-export interface Library {skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string}
+export interface Library {skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;provenance?:string|null;projects?:readonly {name:string;skills:readonly string[];remotes:readonly string[];[key:string]:unknown}[];problems?:readonly {source:string;message:string}[]}
+/** attention = failingEvals + updatesAvailable + notEvaluated; counts.Alerts = attention, counts.Updates = updatesAvailable. Absent CLI counters are omitted. */
+export type CloneState = {state:'absent'} | {state:'incomplete';reason:'not-a-repository'|'no-team-json'|'unverifiable';error?:string} | {state:'foreign'|'ok';origin:string};
 export interface TeamStatus {
  name:string;key:string;remote:string|null;handle:string;clone:string|null;members:number|null;skills:number|null;
  last_sync:string|null;stamp:string|null;policy:{publish:string;license:string}|null;categories:string[]|null;
  pending:{op:'install'|'uninstall';id:string;scope:{kind:'global'}|{kind:'project';project:string};version:string|null;started:string}[];
  joinCommand:string|null;joinBlock:readonly string[]|null;
+ cloneState?:CloneState|null;readable?:boolean|null;
 }
 export type Machine=Design['MACHINE'] & {hostname:string};
 export type Identity=Design['ME'] & {initials:string;footerLabel:string};

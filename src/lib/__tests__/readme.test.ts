@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyReadme, generateReadme, ReadmeData } from '../readme.js';
+import { applyReadme, generateReadme, ReadmeData, installCounts, installersById, latestChange } from '../readme.js';
 
 const ID_A = '11111111-1111-4111-8111-111111111111';
 const ID_B = '22222222-2222-4222-8222-222222222222';
@@ -130,4 +130,26 @@ describe('README generator (§9)', () => {
     expect(applyReadme(once, generateReadme(hostile))).toBe(once);
     expect(once).toContain('\n\nFooter\n');
   });
+});
+
+
+it('lists every install record oldest first, including archived members and two scopes, but counts each person once', () => {
+  const people = [{ ...data.people[0]!, installed: [
+    { id: ID_A, version: null, scope: { kind: 'global' as const }, since: '2026-09-04' },
+    { id: ID_A, version: null, scope: { kind: 'project' as const, project: 'app' }, since: '2026-09-01' },
+  ] }, data.people[1]!];
+  expect(installCounts(people).get(ID_A)).toBe(2);
+  expect(installersById(people).get(ID_A)).toEqual([
+    { handle: 'amy', displayName: 'Amy', scope: { kind: 'project', project: 'app' }, since: '2026-09-01' },
+    { handle: 'amy', displayName: 'Amy', scope: { kind: 'global' }, since: '2026-09-04' },
+    { handle: 'bea', displayName: 'Bea', scope: { kind: 'global' }, since: '2026-09-04' },
+  ]);
+});
+it.each([['2026-09-04T10:22:33-07:00\n', '2026-09-04T10:22:33-07:00'], ['', '—']])('latestChange returns a committed date or an empty-history dash', async (stdout, expected) => {
+  const calls: unknown[] = [];
+  expect(await latestChange({ run: async (...args) => { calls.push(args); return { code: 0, stdout, stderr: '' }; } }, '/clone', 'sample')).toBe(expected);
+  expect(calls).toEqual([['git', ['log', '-1', '--format=%cI', '--', 'skills/sample'], { cwd: '/clone' }]]);
+});
+it('latestChange surfaces git failure so the inventory can report the row', async () => {
+  await expect(latestChange({ run: async () => ({ code: 1, stdout: '', stderr: 'broken history' }) }, '/clone', 'sample')).rejects.toThrow('broken history');
 });
