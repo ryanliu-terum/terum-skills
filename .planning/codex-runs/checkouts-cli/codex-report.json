@@ -1,0 +1,69 @@
+{
+  "status": "complete",
+  "summary": "Implemented checkout registration, automatic registration after successful writes, and multi-root local discovery with labels, counts, and typed rejection reasons. Updated pickers, frame capabilities, documentation, and regression coverage. All 1,298 tests pass; lint, typecheck, and build pass.",
+  "filesChanged": [
+    {"path":"src/cli.ts","change":"modified","why":"Wire checkout add, remove, and list."},
+    {"path":"src/commands/checkout.ts","change":"added","why":"Implement team-independent registry commands."},
+    {"path":"src/lib/checkouts.ts","change":"added","why":"Share registration, canonicalization, and containment logic."},
+    {"path":"src/lib/schema.ts","change":"modified","why":"Add optional checkouts array."},
+    {"path":"src/lib/local-skills.ts","change":"modified","why":"Discover multiple roots, reuse repository walking, precompute ledgers, and calculate counts."},
+    {"path":"src/commands/ls.ts","change":"modified","why":"Expose registered and detected sections with labels, counts, root states, and typed reasons."},
+    {"path":"src/commands/connect.ts","change":"modified","why":"Register connected checkouts atomically and disambiguate picker choices."},
+    {"path":"src/commands/publish.ts","change":"modified","why":"Register successful checkout writes and discover registered roots in recovery guidance."},
+    {"path":"src/lib/frames.ts","change":"modified","why":"Advertise checkout verbs and capability."},
+    {"path":"docs/frame-protocol.md","change":"modified","why":"Document checkout capability and cwd read semantics."},
+    {"path":"README.md","change":"modified","why":"Document registry commands and folder-based Library."},
+    {"path":".claude/skills/terum-skills/SKILL.md","change":"modified","why":"Document checkout invocation and handoff behavior in the canonical bundled skill."},
+    {"path":".planning/specs/2026-09-02-phase-1-build.md","change":"modified","why":"Add rev 16, registry schema, and section contract."},
+    {"path":".planning/specs/m7-S7f.md","change":"modified","why":"Clarify Library rows and team-independent reads."},
+    {"path":"src/commands/__tests__/checkout.test.ts","change":"added","why":"Cover registration, refusal, realpaths, removal, listing, and formatting preservation."},
+    {"path":"src/commands/__tests__/connect.test.ts","change":"modified","why":"Cover automatic registration and duplicate picker labels."},
+    {"path":"src/commands/__tests__/publish.test.ts","change":"modified","why":"Cover successful registration and declined-publish behavior."},
+    {"path":"src/commands/__tests__/ls.test.ts","change":"modified","why":"Cover multi-root sections, typed counts, detected ledger roots, and read immutability."},
+    {"path":"src/commands/__tests__/setup.test.ts","change":"modified","why":"Verify canonical registry paths during successive connections."},
+    {"path":"src/commands/__tests__/uninstallMachine.test.ts","change":"modified","why":"Verify registry-only config remains removable."},
+    {"path":"src/lib/__tests__/local-skills.test.ts","change":"modified","why":"Cover root ordering, deduplication, and absent registered roots."},
+    {"path":"src/lib/__tests__/schema.test.ts","change":"modified","why":"Verify optional checkout arrays and scalar rejection."},
+    {"path":"src/lib/__tests__/frames.test.ts","change":"modified","why":"Assert checkout capability explicitly."},
+    {"path":"src/__tests__/frames-cli.test.ts","change":"modified","why":"Exercise all three checkout verbs through commander and frames."}
+  ],
+  "gates": {
+    "lint":{"ran":true,"passed":true,"output":"npm run lint: exit 0; 0 errors or warnings.","preExistingFailures":""},
+    "typecheck":{"ran":true,"passed":true,"output":"npm run typecheck: exit 0; 0 errors. npm run build also exited 0 and bundled the canonical skill byte-for-byte.","preExistingFailures":""},
+    "test":{"ran":true,"passed":true,"output":"1298 passed, 0 failed; 76 test files passed. Ran the full suite with --configLoader native.","preExistingFailures":"Default Vitest loader failed before implementation with EPERM writing node_modules/.vite-temp through the external node_modules symlink."}
+  },
+  "openQuestions": [
+    {
+      "question":"Should tracked rows rejected as non-skill filesystem shapes count? F2 excludes those shapes, but §6 explicitly counts every row.",
+      "specSection":"F2 and §6 count rule",
+      "conservativeChoice":"Implemented the explicit rows-plus-frontmatter-rejections formula and preserved every existing tracked row."
+    }
+  ],
+  "deviations": [
+    {"what":"Used Vitest's native configuration loader.","why":"The default loader writes outside the writable worktree through the node_modules symlink; the native loader runs the same complete suite."},
+    {"what":"Validation used the available Node v25.8.2 runtime.","why":"The environment did not provide Node 22 as its active runtime."},
+    {"what":"Some requested negative tests already passed before implementation.","why":"Declined publish already avoided registration, and uninstallMachine already allowed registry-only config removal. Those regression assertions were retained."}
+  ],
+  "invariantsTouched": [
+    {"number":1,"howSatisfied":"Added filesystem-only registry operations without network clients or subprocesses."},
+    {"number":2,"howSatisfied":"Preserved existing safeWrite paths; registration changes only local config."},
+    {"number":3,"howSatisfied":"Preserved team-write guards."},
+    {"number":4,"howSatisfied":"Registration grants neither connect consent nor tool approval."},
+    {"number":5,"howSatisfied":"Removal preserves placements and files; ledger evidence remains authoritative."},
+    {"number":6,"howSatisfied":"Discovery scans explicit Claude Code roots without adding placement or agent autodetection paths."},
+    {"number":8,"howSatisfied":"Preserved frontmatter inspection and exposed its existing typed rejection codes."}
+  ],
+  "testsModified": [
+    {"path":"src/lib/__tests__/local-skills.test.ts","whatChanged":"Added required booleans to existing expected roots and appended registry tests.","justification":"Existing discovery assertions remain exact."},
+    {"path":"src/commands/__tests__/ls.test.ts","whatChanged":"Updated exact headers, count lines, and reason/detail expectations; added registry tests.","justification":"Matches the specified output and wire contract without weakening assertions."},
+    {"path":"src/commands/__tests__/connect.test.ts","whatChanged":"Updated Global picker labels and added registration and collision tests.","justification":"Matches section-label qualification and verifies uniqueness."},
+    {"path":"src/commands/__tests__/publish.test.ts","whatChanged":"Updated Global recovery label and added registration tests.","justification":"Matches registered-root discovery and successful-write semantics."},
+    {"path":"src/commands/__tests__/setup.test.ts","whatChanged":"Updated the second connected source's exact path to its realpath and asserted registry membership.","justification":"The first connection registers the canonical root used by subsequent picker scans."},
+    {"path":"src/commands/__tests__/uninstallMachine.test.ts","whatChanged":"Added registry-only cleanup regression.","justification":"Confirms existing teardown behavior satisfies §10."},
+    {"path":"src/lib/__tests__/schema.test.ts","whatChanged":"Added checkout schema assertions.","justification":"Verifies backward compatibility and type rejection."},
+    {"path":"src/lib/__tests__/frames.test.ts","whatChanged":"Added checkouts to the exact feature expectation and an explicit assertion.","justification":"Verifies the new advertised capability."},
+    {"path":"src/__tests__/frames-cli.test.ts","whatChanged":"Added checkout invocations and injected command stub.","justification":"Extends existing round-trip coverage to every new public verb."}
+  ],
+  "bugLogsCreated": [],
+  "leastConfidentClaim": "Counting tracked non-skill shapes matches the intended product behavior: the explicit §6 formula includes them, while F2's prose suggests exclusion."
+}

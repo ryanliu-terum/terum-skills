@@ -245,3 +245,12 @@ it.each([false, true])('discloses the app and evals before consent, removing onl
     expect(result.ok && result.value.kept).toContain(evals);
   } else expect(await readFile(join(bundle, 'terum'), 'utf8')).toBe('bundle');
 });
+
+
+it('removes a config whose only remaining content is the machine checkout registry', async () => {
+  const { root, store, hook } = await minimal();
+  await store.update(c => { c.checkouts = [join(root, 'checkout')]; });
+  const result = await run({ config: store, hook, wrapper: wrapperFor(join(root, 'home')) }, new ScriptedPrompter([], [true]));
+  expect(result).toMatchObject({ ok: true, value: { configRemoved: true } });
+  await gone(join(store.root, 'config.json'));
+});

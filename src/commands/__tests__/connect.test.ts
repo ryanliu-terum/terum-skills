@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { access, mkdir, readdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
+import { access, realpath, mkdir, readdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { reconcileShared, run } from '../connect.js';
@@ -746,9 +746,9 @@ describe('locked multi-connect', () => {
     const cwd = join(fixture.root, 'project'); const other = join(cwd, '.claude', 'skills', 'sample');
     await mkdir(other, { recursive: true }); await mkdir(join(cwd, '.git'));
     await writeFile(join(other, 'SKILL.md'), original);
-    const io = new ScriptedPrompter(['Connect sample (global)', 'Connect sample (project)', 'Done'], [true], true);
+    const io = new ScriptedPrompter(['Connect sample (Global)', 'Connect sample (project)', 'Done'], [true], true);
     expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { shared: [{ name: 'sample' }], refused: [{ name: 'sample', reason: 'Skill name sample already exists in team team; choose a unique name.' }] } });
-    expect(io.offered).toEqual([['Connect sample (global)', 'Connect sample (project)', 'Skip'], ['Connect sample (project)', 'Done'], ['Connect sample (project)', 'Done']]);
+    expect(io.offered).toEqual([['Connect sample (Global)', 'Connect sample (project)', 'Skip'], ['Connect sample (project)', 'Done'], ['Connect sample (project)', 'Done']]);
     expect(await readFile(join(other, 'SKILL.md'), 'utf8')).toBe(original);
     expect(io.asked).toEqual([menu, 'Connect sample?', menu, menu]);
   });
@@ -931,9 +931,9 @@ describe('project connect discovery', () => {
     const { fixture, home, store, source, original } = await pickerFixture(); const cwd = join(fixture.root, 'project');
     const projectSource = join(cwd, '.claude', 'skills', 'sample'); await mkdir(projectSource, { recursive: true }); await mkdir(join(cwd, '.git'));
     const projectBytes = original.replace('stock source', 'project source'); await writeFile(join(projectSource, 'SKILL.md'), projectBytes);
-    const io = new ScriptedPrompter([`Connect sample (${scope})`, 'Done'], [true], true);
+    const io = new ScriptedPrompter([`Connect sample (${scope === 'global' ? 'Global' : scope})`, 'Done'], [true], true);
     expect(await run({ home, cwd, config: store }, io)).toMatchObject({ ok: true, value: { kind: 'batch', shared: [{ name: 'sample' }] } });
-    expect(io.offered).toEqual([['Connect sample (global)', 'Connect sample (project)', 'Skip'], [`Connect sample (${scope === 'global' ? 'project' : 'global'})`, 'Done']]);
+    expect(io.offered).toEqual([['Connect sample (Global)', 'Connect sample (project)', 'Skip'], [`Connect sample (${scope === 'global' ? 'project' : 'Global'})`, 'Done']]);
     const selected = scope === 'global' ? source : projectSource;
     expect(Object.values((await store.read()).shared)).toEqual([expect.objectContaining({ source: selected })]);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(await readFile(join(selected, 'SKILL.md'), 'utf8'));
@@ -1229,4 +1229,38 @@ it('adopts an existing identity only with matching name and consent, preserving 
   expect(await readFile(join(repoSource,'SKILL.md'),'utf8')).toBe(original);
   expect(calls.some(call=>/^(push|commit|add) /.test(call))).toBe(false);
  }
+});
+
+
+it('registers the connected source repository once across two connections', async () => {
+  const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
+  await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+  await store.update(c => { c.display_name = 'Me'; c.email = 'me@example.com'; c.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  const root = join(await realpath(fixture.root), 'checkout'); await mkdir(join(root, '.git'), { recursive: true });
+  for (const name of ['first', 'second']) {
+    const source = join(root, '.claude', 'skills', name); await mkdir(source, { recursive: true });
+    await writeFile(join(source, 'SKILL.md'), `---\nname: ${name}\ndescription: x\n---\n`);
+    const io = new ScriptedPrompter([], [true]);
+    expect((await run({ path: source, home: fixture.root, config: store }, io)).ok).toBe(true);
+    expect((await store.read()).checkouts).toEqual([root]);
+    expect(io.lines.filter(line => line.startsWith('Registered '))).toEqual(name === 'first' ? [`Registered ${root} in your library.`] : []);
+  }
+});
+
+
+it.each([false, true])('offers duplicate skills in registered roots without map collisions (same basename: %s)', async sameLabel => {
+  const { fixture, home, store } = await pickerFixture();
+  const roots = [join(fixture.root, 'one', 'app'), join(fixture.root, 'two', sameLabel ? 'app' : 'other')];
+  for (const root of roots) {
+    const source = join(root, '.claude', 'skills', 'duplicate'); await mkdir(source, { recursive: true });
+    await writeFile(join(source, 'SKILL.md'), '---\nname: duplicate\ndescription: x\n---\n');
+  }
+  await store.update(c => { c.checkouts = roots; });
+  const io = new ScriptedPrompter(['Skip'], [], true);
+  expect((await run({ home, config: store }, io)).ok).toBe(true);
+  expect(io.offered).toEqual([[
+    'Connect sample',
+    ...roots.map((root, index) => `Connect duplicate (${sameLabel ? `app: ${join(root, '.claude', 'skills', 'duplicate')}` : index === 0 ? 'app' : 'other'})`),
+    'Skip',
+  ]]);
 });

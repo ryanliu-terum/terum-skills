@@ -93,6 +93,7 @@ const teamsSchema = z.preprocess((value) => {
 /** Machine-wide: whether this person opted into the desktop app (decision walk D4, 2026-09-08). Absent = never asked. */
 export const appChoiceSchema = z.object({ choice: z.enum(['opted-in', 'declined']), at: z.string() }).passthrough();
 export const configSchema = z.object({
+  checkouts: z.array(z.string()).optional(),
   app: appChoiceSchema.optional(),
   default_handle: handleSchema.optional(),
   email: emailSchema.optional(),
