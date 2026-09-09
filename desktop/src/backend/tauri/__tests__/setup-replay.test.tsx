@@ -29,6 +29,29 @@ it('replays the real setup recording through launch routing, the ask dialog, and
  expect(await screen.findByRole('alert')).toHaveTextContent('Input ended before "Use this identity?" was answered.');
  expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe('');expect(screen.getByText('Checking GitHub access').parentElement).toHaveAttribute('data-state','done');
 });
+it('replays the real offline setup join: the human answers each ask, the card settles finished, the target is consumed once',async()=>{
+ // Recorded from the rebuilt CLI against the fixture (fixture.sh): identity confirmed, the invitation left blank, the hook and skill offers declined.
+ const lines=recorded('setup-join'),segments:string[][]=[[]];
+ for(const line of lines){segments[segments.length-1]!.push(line);if((JSON.parse(line) as {t:string}).t==='ask')segments.push([]);}
+ const target='/fixture/team.git';let next=1;
+ const fake=fakeBridge((args,emit)=>{const selected=args[0]==='setup'?segments[0]!:recorded(args[0]==='ls'?'ls-local':'status');for(const line of selected)emit({kind:'stdout',line});},{...STATE,target});
+ const original=fake.bridge.write;
+ fake.bridge.write=async(id,line)=>{await original(id,line);for(const tail of segments[next++]??[])fake.emit({kind:'stdout',line:tail});};
+ const backend={...createTauriBackend(fake.bridge),prefs:browserPrefs()};
+ location.hash='#/';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
+ for(const [question,button] of [['Use this identity?','Confirm'],['session-start hook','Cancel'],['/terum-skills Claude Code skill','Cancel']] as const){
+  const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent(question);
+  fireEvent.click(within(dialog).getByRole('button',{name:button}));
+  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ }
+ expect(fake.writes.map(write=>(JSON.parse(write) as {value:unknown}).value)).toEqual([true,false,false]);
+ await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('Setup finished.'));
+ expect(screen.queryByRole('alert')).toBeNull();
+ expect(screen.getByText('Configuring the team').parentElement).toHaveAttribute('data-state','done');
+ expect(screen.getByText('Offering the session hook and Claude Code skill').parentElement).toHaveTextContent('Skipped');
+ expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe(STATE.writtenAt);
+ expect(fake.spawns.filter(spawn=>spawn.args[0]==='setup')).toHaveLength(1);
+});
 it.each(['#/inbox','#/inbox/missing','#/onboarding/welcome'])('hides an unserved real surface at %s',async route=>{
  const fake=fakeBridge((args,emit)=>{for(const line of recorded(args[0]==='ls'?'ls-local':'status'))emit({kind:'stdout',line});});
  const backend={...createTauriBackend(fake.bridge),prefs:browserPrefs()};

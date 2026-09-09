@@ -6,4 +6,5 @@
 {"t":"print","level":"info","line":"GitHub: gh is installed but logged out; you will be asked to accept the invitation in your browser."}
 {"t":"print","level":"info","line":"GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again."}
 {"t":"print","level":"info","line":"Identity: @seed — Seed <seed@example.com> (GitHub: seed)"}
+{"t":"ask","id":"q1","kind":"confirm","question":"Use this identity?"}
 {"t":"result","verb":"setup","ok":false,"exitCode":1,"error":"Input ended before \"Use this identity?\" was answered.","value":{"role":"joiner","team":"","remote":"","steps":{"welcome":"printed","app":"skipped","github":"done"}}}
