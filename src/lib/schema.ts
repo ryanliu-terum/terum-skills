@@ -92,6 +92,12 @@ const teamsSchema = z.preprocess((value) => {
 }, z.record(z.string(), teamConfigSchema));
 /** Machine-wide: whether this person opted into the desktop app (decision walk D4, 2026-09-08). Absent = never asked. */
 export const appChoiceSchema = z.object({ choice: z.enum(['opted-in', 'declined']), at: z.string() }).passthrough();
+export const destinationSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('global') }),
+  z.object({ kind: z.literal('checkout'), root: z.string().min(1) }),
+]);
+export type Destination = z.infer<typeof destinationSchema>;
+
 export const configSchema = z.object({
   checkouts: z.array(z.string()).optional(),
   app: appChoiceSchema.optional(),
@@ -102,7 +108,7 @@ export const configSchema = z.object({
   teams: teamsSchema,
   shared: z.record(z.string(), z.object({ source: z.string(), team: z.string(), baseline: z.string().optional() }).passthrough()),
   approvals: z.record(z.string(), z.object({ grants: z.string(), approved_at: z.string() }).passthrough()),
-  pending: z.array(z.object({ op: z.enum(['install', 'uninstall']), id: skillIdSchema, team: z.string(), scope: scopeSchema, started: z.string() }).passthrough()),
+  pending: z.array(z.object({ op: z.enum(['install', 'uninstall']), id: skillIdSchema, team: z.string(), scope: scopeSchema, destination: destinationSchema.optional(), started: z.string() }).passthrough()),
   placements: z.record(z.string(), z.object({ id: skillIdSchema, team: z.string(), version: z.string().length(40).nullable(), scope: scopeSchema, placed_at: z.string(), fingerprint: z.string() }).passthrough()),
 }).passthrough();
 export type Config = z.infer<typeof configSchema>;

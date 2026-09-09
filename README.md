@@ -69,7 +69,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
 | | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
 | Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
-| | `install <ref>` / `uninstall-skill <ref>` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists) |
+| | `install <ref> [--into global\|<checkout root>]` / `uninstall-skill <ref> [--from global\|<checkout root>]` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists) |
 | | `sync` | Pull, finish pending installs, mirror connected edits, refresh placed copies |
 | | `publish <skill>` | Endorse a skill for the team: a PR (default policy) or a direct commit |
 | Evals | `validate <path\|name>` | Deterministic safety and formatting checks, no model |
@@ -89,7 +89,7 @@ For a program driving the CLI (the desktop app, a script), `--frames` turns any 
 
 **Ownership is metadata.** Only the author named in a skill's `metadata.author` may change its folder; only you may write your people file; endorsed lists change through `publish` PRs. A pre-push guard enforces all of this, and every write goes through one `safeWrite` path that fetches, resets to `origin/main`, re-applies the change, and pushes, so two members writing at once never produce a merge conflict in generated files.
 
-**Placement is a plain copy.** `install` copies the skill into `~/.claude/skills/<name>` (or a project's `.claude/skills/`), records a per-file fingerprint, and `sync` refreshes it when the store changes. Hand-edited placed copies are moved to `~/.terum/skills/quarantine/`, never silently overwritten. `sync --prune` empties the quarantine.
+**Placement is a plain copy.** `install --into global` copies the skill into `~/.claude/skills/<name>`; `--into <checkout root>` chooses and registers a checkout’s `.claude/skills/`. `uninstall-skill --from global` or `--from <checkout root>` names the copy to remove. Each copy has a per-file fingerprint, and `sync` refreshes Global and registered checkouts from anywhere when the store changes. Hand-edited placed copies are moved to `~/.terum/skills/quarantine/`, never silently overwritten. `sync --prune` empties the quarantine.
 
 **Connecting is consent.** `connect` shows the fields it will add to your SKILL.md (license, id, author, category) and asks y/N before writing anything. After that, `sync` mirrors your edits into the repo. If the repo copy and your source diverge, `sync` prints the remedy (`connect --keep-source <id>` or `--keep-repo <id>`) and does nothing until you choose. Skills containing hooks or plugin definitions need `--allow-privileged`.
 

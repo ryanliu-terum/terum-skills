@@ -21,7 +21,7 @@ export interface TeamStatus {
   team: string; handle: string; repository: string | null; clone: CloneState; readable: boolean;
   members: RosterEntry[]; memberCount: number | null; unreadableMembers: number | null;
   sharedSkills: number | null; unreadableSkills: number | null;
-  pending: { op: 'install' | 'uninstall'; id: string; scope: Config['pending'][number]['scope']; version: string | null; started: string }[];
+  pending: { op: 'install' | 'uninstall'; id: string; scope: Config['pending'][number]['scope']; version: string | null; destination: NonNullable<Config['pending'][number]['destination']> | null; started: string }[];
   syncedAt: string | null; policy: { publish: 'pr' | 'push'; skill_license: string } | null; categories: string[] | null;
   clonePath: string | null; joinCommand: string | null; joinBlock: readonly string[] | null;
   membership: 'active' | 'inactive' | 'missing' | null; stale: boolean;
@@ -65,7 +65,7 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
       const detail: TeamStatus = {
         team, handle: binding.handle, repository: null, clone: { state: 'incomplete', reason: 'unverifiable' }, readable: false,
         members: [], memberCount: null, unreadableMembers: null, sharedSkills: null, unreadableSkills: null, membership: null, stale: false,
-        pending: config.pending.filter(e => e.team === team).map(e => ({ op: e.op, id: e.id, scope: e.scope.kind === 'global' ? { kind: 'global' } : { kind: 'project', project: e.scope.project }, version: typeof e.version === 'string' ? e.version : null, started: e.started })),
+        pending: config.pending.filter(e => e.team === team).map(e => ({ op: e.op, id: e.id, scope: e.scope.kind === 'global' ? { kind: 'global' } : { kind: 'project', project: e.scope.project }, version: typeof e.version === 'string' ? e.version : null, destination: e.destination ?? null, started: e.started })),
         syncedAt: null, policy: null, categories: null, clonePath: null, joinCommand: null, joinBlock: null,
       };
       teams.push(detail);

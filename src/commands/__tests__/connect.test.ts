@@ -385,7 +385,7 @@ describe('connect (§5.3)', () => {
     expect(await git(['show', 'main:skills/renamed/SKILL.md'], fixture.bare)).toContain(`id: ${id}`);
     expect((await store.read()).shared[id!]!.baseline).toBe(await canonicalDigest(renamed));
     // The installer's next sync re-places under the new name and drops the old placement.
-    expect((await sync({ config: secondStore }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await sync({ config: secondStore, home }, new ScriptedPrompter())).ok).toBe(true);
     expect(await readFile(join(home, '.claude', 'skills', 'renamed', 'SKILL.md'), 'utf8')).toContain('name: renamed');
     await expect(readFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     expect(Object.keys((await secondStore.read()).placements)).toEqual([join(home, '.claude', 'skills', 'renamed')]);

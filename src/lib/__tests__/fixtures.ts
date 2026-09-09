@@ -26,6 +26,7 @@ export function wrapperFor(home: string): { skillsRoot: string; source: string }
 export class ScriptedPrompter implements Prompter {
   readonly lines: string[] = [];
   readonly asked: string[] = [];
+  readonly offeredDefaults: (string | undefined)[] = [];
   readonly offered: (readonly string[])[] = [];
   constructor(private readonly answers: string[] = [], private readonly confirms: boolean[] = [], readonly interactive = false) {}
   private next(question: string): string {
@@ -41,7 +42,7 @@ export class ScriptedPrompter implements Prompter {
     return answer;
   }
   async text(question: string, defaultValue?: string): Promise<string> { return this.next(question) || (defaultValue ?? ''); }
-  async select(question: string, choices: readonly string[]): Promise<string> { this.offered.push([...choices]); return this.next(question) || choices[0] || ''; }
+  async select(question: string, choices: readonly string[], defaultChoice?: string): Promise<string> { this.offered.push([...choices]); this.offeredDefaults.push(defaultChoice); return this.next(question) || defaultChoice || choices[0] || ''; }
   print(line: string): void { this.lines.push(line); }
   askedAbout(fragment: string): boolean { return this.asked.some((question) => question.includes(fragment)); }
   countAsked(fragment: string): number { return this.asked.filter((question) => question.includes(fragment)).length; }

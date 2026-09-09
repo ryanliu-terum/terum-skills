@@ -9,7 +9,8 @@ import { mkdirPrivate } from '../lib/fs.js';
 import { acquireTeamLock, lockPath, stampIsFresh, stampPath, TeamLockOptions } from '../lib/hook.js';
 import { inspect, lockTarget, place, quarantineDrift, remove, snapshotIfPresent } from '../lib/placer.js';
 import { NonInteractivePrompter, Prompter, PromptClosedError } from '../lib/prompt.js';
-import { normalizeRemote } from '../lib/remote.js';
+import { checkoutPath, writableCheckout } from '../lib/checkouts.js';
+import { AGENT_PATHS, checkoutRootOf } from '../lib/placer/agent-paths.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { allowedTools, parseJson, personSchema, sameScope } from '../lib/schema.js';
@@ -18,12 +19,12 @@ import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fing
 import { CloneBusy, openTeamRepo, refreshClone, RemoteAccessError, treeText } from '../lib/teamRepo.js';
 import { materializeVersion } from '../lib/version.js';
 import { reconcileShared } from './connect.js';
-import { installOne, skillAtSource } from './install.js';
+import { assertCheckoutFolder, installOne, placementHome, resolveDestination, samePending, skillAtSource } from './install.js';
 import { uninstallOne } from './uninstall.js';
 
 export interface SyncArgs extends WithForm {
   launch?: Launch; noUpdateCheck?: boolean; probe?: ProbePolicy; upstream?: string; state?: ReleaseStateStore;
-  hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string;
+  hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string; home?: string;
   /** Test knob: the clone lock's stale window for refreshClone. */
   lockStale?: number;
   /** Test knobs for the §8 rate limit (hook mode only) and the team mutex (every mode, R4). */
@@ -94,6 +95,12 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
   try {
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
+    const home = args.home ?? placementHome(store);
+    const unregistered = new Set<string>();
+    const eligible = async (path: string) => {
+      if (await placementEligible(path, (await store.read()).checkouts ?? [], home)) return true;
+      unregistered.add(path); return false;
+    };
     const interactive = !args.hook && io.interactive && 'confirm' in io;
     const notice = (line: string) => { notices.push(line); if (!args.hook) io.print(line); };
     const verdict = (line: string) => { if (!args.hook && !args.prune) (io as { print(line: string): void }).print(line); };
@@ -107,7 +114,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
       print: notice,
       confirm: (question) => ('confirm' in io ? io.confirm(question) : Promise.resolve(false)),
       text: (question, defaultValue) => ('text' in io ? io.text(question, defaultValue) : Promise.reject(new Error('sync --hook cannot prompt'))),
-      select: (question, choices) => ('select' in io ? io.select(question, choices) : Promise.reject(new Error('sync --hook cannot prompt'))),
+      select: (question, choices, defaultChoice) => ('select' in io ? io.select(question, choices, defaultChoice) : Promise.reject(new Error('sync --hook cannot prompt'))),
     };
     if (args.prune) {
       if (!interactive) throw new Error('sync prune needs an interactive terminal.');
@@ -163,10 +170,21 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
           // An uninstall replay works from the placement ledger and the people file alone, so it is
           // never gated on the clone: gating it wedged the entry (and the people-file record) forever
           // once the author deleted the skill upstream. Only the install path needs the record.
+          if (!pending.destination) {
+            const cwdRoot = await writableCheckout(args.cwd, home, store.root);
+            const roots = await Promise.all(((await store.read()).checkouts ?? []).map(checkoutPath));
+            const destination = cwdRoot && roots.includes(await checkoutPath(cwdRoot)) ? { kind: 'checkout' as const, root: await checkoutPath(cwdRoot) } : { kind: 'global' as const };
+            await store.update(fresh => { const entry = fresh.pending.find(entry => samePending(entry, pending)); if (entry) entry.destination = destination; });
+            pending.destination = destination;
+          }
           if (pending.op === 'uninstall') {
-            const result = await uninstallOne({ team, id: pending.id, scope: pending.scope, store, runner, cwd: args.cwd }, childIo);
+            const result = await uninstallOne({ team, id: pending.id, scope: pending.scope, destination: pending.destination, store, runner, cwd: args.cwd, home }, childIo);
             removed.set(team, (removed.get(team) ?? 0) + result.removed);
             changed = true; continue;
+          }
+          if (pending.destination.kind === 'checkout') {
+            try { await assertCheckoutFolder(pending.destination.root); }
+            catch { defer(team, `${pending.id.slice(0, 8)} needs its checkout ${pending.destination.root}`); notice(`Deferred pending install: ${pending.id.slice(0, 8)} needs its checkout ${pending.destination.root}`); continue; }
           }
           const skill = await findSkill(clone, team, pending.id);
           if (!skill) { defer(team, `${pending.id.slice(0, 8)} is no longer in ${team}`); continue; }
@@ -174,13 +192,13 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
           const source = version ? await materializeVersion(store, team, clone, skill.name, version, runner) : skill.directory;
           const placedSkill = await skillAtSource(source, skill);
           if (!approved((await store.read()), skill.id, placedSkill.grants) && !interactive) { defer(team, skill.name); continue; }
-          const result = await installOne({ team, id: pending.id, scope: pending.scope, version, store, runner, cwd: args.cwd }, childIo);
+          const result = await installOne({ team, id: pending.id, scope: pending.scope, destination: pending.destination, version, store, runner, cwd: args.cwd, home }, childIo);
           recordPlacement(team, result.path, config.placements[result.path] ? 'updated' : 'placed');
           placed++; changed = true;
         } catch (error) {
           if (error instanceof PromptClosedError) throw error; // the channel is gone, not this entry
           const message = error instanceof Error ? error.message : String(error);
-          defer(team, pending.scope.kind === 'project' && message.includes('no matching project context') ? `${pending.id.slice(0, 8)} needs a checkout for project ${pending.scope.project}` : pending.id.slice(0, 8));
+          defer(team, pending.id.slice(0, 8));
           notice(`Deferred pending ${pending.op} for ${pending.id.slice(0, 8)}: ${message}`);
         }
       }
@@ -203,10 +221,9 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
       try {
         if (skipped.has(entry.team)) continue;
         const clone = store.teamClone(entry.team);
-        const projectRoot = entry.scope.kind === 'project' ? await matchingProjectRoot(clone, entry.scope.project, runner, args.cwd) : undefined;
-        // Project placement is worktree-local. An unrelated session never even inspects another
-        // checkout's placement, so it cannot quarantine or overwrite it.
-        if (entry.scope.kind === 'project' && !projectRoot) continue;
+        if (!(await eligible(path))) continue;
+        const checkout = checkoutRootOf(path);
+        const projectRoot = checkout && await checkoutPath(checkout) !== await checkoutPath(home) ? checkout : undefined;
         const binding = (await store.read()).teams[entry.team];
         const person = binding?.handle ? await actorPerson(store, entry.team, binding.handle) : undefined;
         if (person && !person.installed.some((item) => item.id === entry.id && sameScope(item.scope, entry.scope)) && !currentConfig.pending.some((pending) => pending.id === entry.id && pending.team === entry.team && sameScope(pending.scope, entry.scope))) continue;
@@ -252,6 +269,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
         // The target lock is taken before anything about the destination is decided and held across
         // the collision check, the quarantine move and the placement — install's shape — so the
         // ownership reading that authorizes a destructive `replace` cannot go stale under it.
+        if (projectRoot) await assertCheckoutFolder(projectRoot);
         const release = await lockTarget(root, skill.name);
         try {
           // After an upstream rename the destination is not the ledger key: `replace` is authorized by
@@ -307,9 +325,10 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
         if (await (io as Prompter).confirm(`Install ${candidates.length} newly endorsed skill(s) from ${team}?`)) {
           // One candidate that cannot be placed (a foreign folder at its target, a busy lock) is
           // deferred by name; the others still land, and the orphan pass and the stamps still run.
+          const destination = await resolveDestination(store, await readTeam(store.teamClone(team)), undefined, childIo, true, { runner, home, cwd: args.cwd });
           for (const skill of candidates) {
             try {
-              const result = await installOne({ team, id: skill.id, store, runner, cwd: args.cwd }, childIo);
+              const result = await installOne({ team, destination, id: skill.id, store, runner, cwd: args.cwd, home }, childIo);
               recordPlacement(team, result.path, config.placements[result.path] ? 'updated' : 'placed');
               placed++; changed = true;
             }
@@ -323,15 +342,19 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
     }
     await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, defer, notice, new Set(skipped.keys()), (team, path, kind) => {
       recordPlacement(team, path, kind); changed = true;
-    });
+    }, eligible);
+    if (unregistered.size) {
+      const roots = [...new Set([...unregistered].map(path => checkoutRootOf(path) ?? dirname(path)))].sort();
+      notice(`Skipped ${unregistered.size} placements under folders not in your library: ${roots.join(', ')}`);
+    }
     if (args.hook && placed) (io as { print(line: string): void }).print('{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}');
     // §8: the stamp means "this team is fully synced". A failed run throws past this line; a team this
     // run skipped, or left work undone in (a deferral, a blocked placement a later run can still clear), keeps its old stamp, so
     // the next session retries instead of rate-limiting the gap into an hour of silence. Only the
     // teams this run walked are stamped — a team bound meanwhile was never refreshed — and only when
     // the final ledger holds no pending work for them: an install recorded after this team's replay
-    // is work this run never saw. A project placement outside its checkout is not undone work: that
-    // placement belongs to another session.
+    // is work this run never saw. Unregistered placements are skipped by consent, not undone work,
+    // and do not block the stamp.
     const final = await store.read();
     teams = [];
     for (const team of Object.keys(config.teams)) {
@@ -364,13 +387,14 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
 export function approved(config: Awaited<ReturnType<ConfigStore['read']>>, id: string, grants: ReturnType<typeof allowedTools>): boolean {
   return grants.ok && (grants.normalized === 'none' || config.approvals[id]?.grants === grants.hash);
 }
-async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, defer: (team: string, label: string) => void, notice: (line: string) => void, skipTeams: ReadonlySet<string>, record: (team: string, path: string, kind: 'adopted' | 'declined') => void): Promise<void> {
+async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, defer: (team: string, label: string) => void, notice: (line: string) => void, skipTeams: ReadonlySet<string>, record: (team: string, path: string, kind: 'adopted' | 'declined') => void, eligible: (path: string) => Promise<boolean>): Promise<void> {
   const config = await store.read();
   for (const [path, placement] of Object.entries(config.placements)) {
     // A team this run skipped is left alone here too: a clone another process holds may be
     // mid-write, so its roster is not evidence of an orphan and a decline written against it would
     // be wrong; and a §8 rate-limited hook run defers nothing, so it stays a silent no-op.
     if (skipTeams.has(placement.team)) continue;
+    if (!(await eligible(path))) continue;
     if (config.pending.some((entry) => entry.id === placement.id && entry.team === placement.team && sameScope(entry.scope, placement.scope))) continue;
     const binding = config.teams[placement.team];
     if (!binding?.handle) continue;
@@ -413,14 +437,11 @@ async function actorPerson(store: ConfigStore, team: string, handle: string) {
 }
 async function writeStamp(store: ConfigStore, team: string): Promise<void> { await mkdirPrivate(dirname(stampPath(store.root, team))); await writeFile(stampPath(store.root, team), new Date().toISOString(), 'utf8'); }
 
-async function matchingProjectRoot(clone: string, project: string, runner: Runner, cwd?: string): Promise<string | undefined> {
-  const root = await runner.run('git', ['rev-parse', '--show-toplevel'], cwd ? { cwd } : undefined);
-  if (root.code !== 0 || !root.stdout.trim()) return undefined;
-  const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: root.stdout.trim() });
-  if (origin.code !== 0) return undefined;
-  const projects = (await readTeam(clone)).projects;
-  const listed = Object.hasOwn(projects, project) ? projects[project] : undefined;
-  return listed?.remotes.some((remote) => normalizeRemote(remote) === normalizeRemote(origin.stdout.trim())) ? root.stdout.trim() : undefined;
+/** Shared consent boundary for refresh and orphan reconciliation. */
+async function placementEligible(path: string, checkouts: readonly string[], home: string): Promise<boolean> {
+  if (await checkoutPath(dirname(path)) === await checkoutPath(AGENT_PATHS['claude-code'].global(home))) return true;
+  const root = checkoutRootOf(path);
+  return root !== undefined && (await Promise.all(checkouts.map(checkoutPath))).includes(await checkoutPath(root));
 }
 
 /** The only destructive operation: named entries immediately under our quarantine root. */

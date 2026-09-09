@@ -163,6 +163,13 @@ describe('terminalPrompter behaviour', () => {
     expect(out().match(/Enter a number from 1 to 2\./g)).toHaveLength(3);
   });
 
+  it('select accepts Enter as the supplied default without reordering choices', async () => {
+    const { io, out } = channel(['']);
+    expect(await io.select('Install to', ['Global', 'Checkout'], 'Checkout')).toBe('Checkout');
+    expect(out()).toContain('1. Global');
+    expect(out()).toContain('2. Checkout');
+  });
+
   it('print writes one line to the output stream', () => {
     const { io, out } = channel([]);
     io.print('hello');

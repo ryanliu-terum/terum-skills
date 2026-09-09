@@ -1,4 +1,4 @@
-import { join, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 
 /**
  * Our deliberately small agent path table. Derived from iflytek/skillhub
@@ -25,3 +25,8 @@ export function isSkillsRoot(root: string): boolean {
   return Object.values(AGENT_PATHS).some((agent) => resolved.endsWith(`${sep}${agent.global('')}`));
 }
 
+
+/** Checkout holding a direct native placement; callers distinguish the home root. */
+export function checkoutRootOf(path: string): string | undefined {
+  return isSkillsRoot(dirname(path)) ? dirname(dirname(dirname(path))) : undefined;
+}
