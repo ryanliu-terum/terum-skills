@@ -88,8 +88,8 @@ export async function collectIdentity(io: Prompter, existing: Config, runner: Ru
   const githubKnown = suggested !== '' || existing.github === '';
   if (githubKnown && handleKnown?.success && nameDefault && emailDefault) {
     const known: Identity = { handle: handleKnown.data, displayName: nameDefault, email: emailDefault, github: suggested };
-    io.print(`Identity: @${known.handle} — ${known.displayName} <${known.email}>${known.github ? ` (GitHub: ${known.github})` : ' (no GitHub login)'}`);
-    if (await io.confirm('Use this identity?')) return known;
+    const identityLine = `Identity: @${known.handle} — ${known.displayName} <${known.email}>${known.github ? ` (GitHub: ${known.github})` : ' (no GitHub login)'}`;
+    if (await io.confirm('Use this identity?', { detail: [identityLine] })) return known;
   }
   // Enter takes the suggestion, so `-` is the way to say "none" once one is offered.
   const github = await askUntilValid(io, suggested ? 'GitHub login (- for none)' : 'GitHub login', suggested, (value) => {

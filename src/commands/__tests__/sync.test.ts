@@ -702,7 +702,8 @@ describe('sync --hook (§3, §6)', () => {
     await pushFromSeed(accepted.fixture.seed, 'skills/sample/SKILL.md', toolSkill('added', ['Bash(ls)', 'Read(*)']));
     const approved = new ScriptedPrompter([], [true], true);
     expect(await run({ config: accepted.store }, approved)).toMatchObject({ ok: true, value: { placed: 1, deferred: [] } });
-    expect(approved.lines.join('\n')).toContain('allowed-tools changed');
+    expect(approved.lines.join('\n')).not.toContain('allowed-tools changed');
+    expect(approved.details['Approve updated tools for sample?']).toEqual(['allowed-tools changed for sample:', 'Bash(ls)', 'Read(*)']);
     expect(await readFile(join(accepted.home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: added');
     expect((await accepted.store.read()).approvals[ID]!.grants).not.toBe(accepted.oldApproval);
 
@@ -1257,4 +1258,14 @@ it.each(['install', 'adopt', 'decline'] as const)('preserves role/projects byte-
   expect(result.ok).toBe(true);
   const after = JSON.parse(await git(['show', 'main:people/seed.json'], prepared.fixture.bare)) as typeof metadata;
   expect(JSON.stringify({ role: after.role, projects: after.projects })).toBe(JSON.stringify(metadata));
+});
+
+it('forwards allowed-tools decision detail through the endorsed batch child prompter', async () => {
+  const { fixture, store } = await configuredSkill();
+  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('endorsed', ['Bash(ls)', 'Read(*)']));
+  await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+  const io = new ScriptedPrompter([], [true, true], true);
+  expect(await run({ config: store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { placed: 1 } });
+  expect(io.details['Approve these tools for sample?']).toEqual(['sample requests allowed-tools:', 'Bash(ls)', 'Read(*)']);
+  expect(io.lines.join('\n')).not.toContain('sample requests allowed-tools:');
 });

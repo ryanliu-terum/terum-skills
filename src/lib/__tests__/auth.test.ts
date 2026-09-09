@@ -168,7 +168,8 @@ describe('one-line identity confirmation (acceptance A2, 2026-09-06)', () => {
     const identity = await collectIdentity(io, known, noGhRunner);
     expect(identity).toEqual({ handle: 'me', displayName: 'Me', email: 'me@x.test', github: 'octocat' });
     expect(io.asked).toEqual(['Use this identity?']);
-    expect(io.lines).toEqual(['Identity: @me — Me <me@x.test> (GitHub: octocat)']);
+    expect(io.lines).toEqual([]);
+    expect(io.details['Use this identity?']).toEqual(['Identity: @me — Me <me@x.test> (GitHub: octocat)']);
   });
 
   it('n re-asks every value with the same defaults, so one field can change without retyping the rest', async () => {
@@ -210,7 +211,8 @@ describe('one-line identity confirmation (acceptance A2, 2026-09-06)', () => {
     const io = new ScriptedPrompter(['', 'Me', 'me@x.test'], [false]);
     const identity = await collectIdentity(io, known, noGhRunner, { fixedHandle: 'bound' });
     expect(identity.handle).toBe('bound');
-    expect(io.lines[0]).toBe('Identity: @bound — Me <me@x.test> (GitHub: octocat)');
+    expect(io.lines).toEqual([]);
+    expect(io.details['Use this identity?']).toEqual(['Identity: @bound — Me <me@x.test> (GitHub: octocat)']);
     expect(io.asked).toEqual(['Use this identity?', 'GitHub login (- for none)', 'Your name', 'Your email']);
   });
 
@@ -218,7 +220,8 @@ describe('one-line identity confirmation (acceptance A2, 2026-09-06)', () => {
     const io = new ScriptedPrompter([], [true]);
     const identity = await collectIdentity(io, { ...known, github: '' }, noGhRunner);
     expect(identity.github).toBe('');
-    expect(io.lines).toEqual(['Identity: @me — Me <me@x.test> (no GitHub login)']);
+    expect(io.lines).toEqual([]);
+    expect(io.details['Use this identity?']).toEqual(['Identity: @me — Me <me@x.test> (no GitHub login)']);
   });
 });
 

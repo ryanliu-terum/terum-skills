@@ -18,7 +18,7 @@ export type AskKind = 'confirm' | 'text' | 'select';
 /** First line of every frame-mode run: what this CLI is and what it can honour, so a shell never hard-codes it. */
 export interface HelloFrame { t: 'hello'; protocol: typeof FRAME_PROTOCOL; version: string | null; verbs: readonly string[]; features: Readonly<Record<string, boolean>>; }
 export interface PrintFrame { t: 'print'; level: FrameLevel; line: string; }
-export interface AskFrame { t: 'ask'; id: string; kind: AskKind; question: string; default?: string; choices?: readonly string[]; }
+export interface AskFrame { t: 'ask'; id: string; kind: AskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[]; }
 /** Reserved: no verb emits progress yet (the CLI has no progress events); the shape is fixed so a shell can render it when one does. */
 export interface ProgressFrame { t: 'progress'; step: string; current?: number; total?: number; }
 export interface ResultFrame { t: 'result'; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; value?: unknown; }
@@ -140,29 +140,30 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
     ask.resolve(frame.value);
   }, (line) => diagnostic(`frames: ignored malformed line ${JSON.stringify(line.length > 200 ? `${line.slice(0, 200)}…` : line)}`), () => { closed = true; failPending(); });
 
-  const ask = (kind: AskKind, question: string, extra: Pick<AskFrame, 'default' | 'choices'> = {}): Promise<string | number | boolean> => {
+  const ask = (kind: AskKind, question: string, extra: Pick<AskFrame, 'default' | 'choices' | 'detail'> = {}): Promise<string | number | boolean> => {
     if (closed) return Promise.reject(new PromptClosedError(question, closedReason));
     const id = `q${++sequence}`;
     return new Promise((resolve, reject) => {
       pending.set(id, { question, resolve, reject });
-      writeFrame(output, { t: 'ask', id, kind, question, ...extra });
+      const { detail, ...rest } = extra;
+      writeFrame(output, { t: 'ask', id, kind, question, ...rest, ...(detail?.length ? { detail } : {}) });
     });
   };
 
   const io: Prompter = {
     interactive: true,
     channel: 'frames',
-    async confirm(question) {
-      const answer = await ask('confirm', question);
+    async confirm(question, options) {
+      const answer = await ask('confirm', question, options?.detail?.length ? { detail: options.detail } : {});
       return typeof answer === 'boolean' ? answer : /^(y|yes|true)$/i.test(String(answer).trim());
     },
-    async text(question, defaultValue) {
-      const answer = String(await ask('text', question, defaultValue === undefined || defaultValue === '' ? {} : { default: defaultValue })).trim();
+    async text(question, defaultValue, options) {
+      const answer = String(await ask('text', question, { ...(defaultValue === undefined || defaultValue === '' ? {} : { default: defaultValue }), ...(options?.detail?.length ? { detail: options.detail } : {}) })).trim();
       return answer || defaultValue || '';
     },
-    async select(question, choices) {
+    async select(question, choices, options) {
       for (let attempt = 0; attempt < MAX_SELECT_ATTEMPTS; attempt++) {
-        const answer = await ask('select', question, { choices });
+        const answer = await ask('select', question, { choices, ...(options?.detail?.length ? { detail: options.detail } : {}) });
         const index = typeof answer === 'number' ? answer : /^\d+$/.test(String(answer).trim()) ? Number(String(answer).trim()) : NaN;
         const picked = Number.isInteger(index) && index >= 1 && index <= choices.length ? choices[index - 1] : choices.find((choice) => choice === String(answer));
         if (picked !== undefined) return picked;
