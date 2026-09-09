@@ -471,7 +471,9 @@ function countsPhrase(counts: PlacementCounts, shared: SharedCounts): string {
 function unique(labels: string[]): string[] { return [...new Set(labels)]; }
 function incompleteClauses(team: Extract<TeamOutcome, { state: 'incomplete' }>, includeTail: boolean): string[] {
   const clauses: string[] = [];
-  if (team.review.length) clauses.push(`${team.review.length} skills need review (${unique(team.review).join(', ')})`);
+  // One skill can be deferred twice in a run (pending replay, then the placement loop): count the deduped names the list shows.
+  const review = unique(team.review);
+  if (review.length) clauses.push(`${review.length} skills need review (${review.join(', ')})`);
   if (team.blocked.length) clauses.push(`${plural(team.blocked.length, 'placement')} blocked (${unique(team.blocked).join(', ')})`);
   if (!team.review.length && !team.blocked.length && team.pendingLeft === 0) clauses.push(`${team.team} has unfinished work (endorsed batch skipped)`);
   if (team.pendingLeft) clauses.push(`${team.team} still has ${plural(team.pendingLeft, 'pending install')}; run sync again`);

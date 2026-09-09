@@ -881,6 +881,18 @@ describe('sync --hook (§3, §6)', () => {
     expect(ttyIo.lines.join('\n')).toContain('1 skills need review');
   });
 
+  it('a skill deferred by both the pending replay and the placement loop is counted once for review', async () => {
+    const { fixture, store } = await configuredToolSkill();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('widened', ['Bash(*)']));
+    await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'global' }, started: '2026-09-08T00:00:00Z' }); });
+    const io = new ScriptedPrompter([], [], false);
+    // The defer mechanics stay untouched (both deferrals still mark the team incomplete)...
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { deferred: ['sample', 'sample'], teams: [{ state: 'incomplete' }] } });
+    // ...but the user-facing count matches the deduped name list.
+    expect(io.lines.join('\n')).toContain('1 skills need review (sample)');
+    expect(io.lines.join('\n')).not.toContain('2 skills need review');
+  });
+
   it('ends a shared-source divergence with the incomplete verdict after its remedy line', async () => {
     const { fixture, store, source } = await sharedSyncFixture();
     await writeFile(join(source, 'SKILL.md'), (await readFile(join(source, 'SKILL.md'), 'utf8')).replace('description: shared source', 'description: local'));

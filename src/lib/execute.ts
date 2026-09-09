@@ -55,5 +55,6 @@ function isHookSync(value: unknown): value is SyncResult {
 
 function writeHookNotices(value: SyncResult, sink: ExecuteSink): void {
   for (const notice of value.notices) sink.stderr(notice);
-  if (value.deferred.length) sink.stderr(`${value.deferred.length} skills need review — run \`${invocation(sink.form, 'sync')}\``);
+  // One skill can be deferred twice in a run (pending replay, then the placement loop): count skills, not deferrals.
+  if (value.deferred.length) sink.stderr(`${new Set(value.deferred).size} skills need review — run \`${invocation(sink.form, 'sync')}\``);
 }
