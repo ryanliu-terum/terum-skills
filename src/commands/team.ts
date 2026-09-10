@@ -12,6 +12,7 @@ import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, normalizeRemote, remoteName, remoteToGitUrl, stripRemoteCredentials } from '../lib/remote.js';
 import { fromError, CancelledError, Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
+import { adminLogins, paginatedItems } from '../lib/collaborators.js';
 import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
 import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 import { endorsedCandidates, readTeam, readRoster, RosterEntry } from '../lib/skills.js';
@@ -108,10 +109,9 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
       if (admin.code !== 0) { const why = await explainGhFailure(runner); if (why) throw new Error(why); }
       if (admin.code !== 0 || admin.stdout.trim() !== 'true') throw new Error('Team removal requires GitHub repository admin permission.');
       if (!args.archiveOnly) {
-        const admins = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators?permission=admin`, '--paginate', '--slurp']);
-        if (admins.code !== 0) throw new Error(`Could not list repository admins: ${(admins.stderr || admins.stdout).trim()}`);
-        const adminLogins = paginatedItems<{ login?: string }>(admins.stdout).map((member) => member.login?.toLowerCase()).filter((value): value is string => Boolean(value));
-        if (adminLogins.length <= 1 && adminLogins.includes(login.toLowerCase())) throw new Error(`Refusing to remove ${targetHandle}: they are the last remaining admin.`);
+        const admins = await adminLogins(runner, ownerRepo);
+        if (admins === null) throw new Error('Could not list repository admins.');
+        if (admins.length <= 1 && admins.includes(login.toLowerCase())) throw new Error(`Refusing to remove ${targetHandle}: they are the last remaining admin.`);
         const collaborators = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators`, '--paginate', '--slurp']);
         if (collaborators.code !== 0) throw new Error(`Could not list repository collaborators: ${(collaborators.stderr || collaborators.stdout).trim()}`);
         collaborator = paginatedItems<{ login?: string }>(collaborators.stdout).some((member) => member.login?.toLowerCase() === login.toLowerCase());
@@ -144,13 +144,6 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
     io.print(`${args.archiveOnly ? 'Archived' : 'Removed'} ${targetHandle} from ${teamName}.${args.archiveOnly ? ' Access remains managed on the host.' : ''}`);
     return success({ team: teamName, handle: targetHandle, archiveOnly: Boolean(args.archiveOnly) });
   } catch (error) { return fromError(error); }
-}
-
-/** gh --paginate --slurp returns an array of response pages; accept one-page fixture output too. */
-function paginatedItems<T>(source: string): T[] {
-  const parsed = JSON.parse(source || '[]') as unknown;
-  if (!Array.isArray(parsed)) throw new Error('GitHub returned an invalid paginated response.');
-  return parsed.flatMap((page) => Array.isArray(page) ? page : [page]) as T[];
 }
 
 /**

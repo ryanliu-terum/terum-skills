@@ -92,7 +92,18 @@ it('readRoster checks filename identity before archives, reports bad files, and 
   await writeFile(join(seed, 'people', 'old.json'), JSON.stringify(person('new')));
   await writeFile(join(seed, 'people', 'broken.json'), '{');
   const result = await readRoster(seed);
-  expect(result.roster).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => ({ handle, displayName: handle, role: null, projects: [] })));
+  expect(result.roster).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => ({ handle, displayName: handle, role: null, projects: [], admin: null })));
   expect(result.problems.map((problem) => problem.file)).toEqual(['people/broken.json', 'people/old.json']);
   expect(result.problems.every((problem) => problem.message.length > 0)).toBe(true);
+});
+
+it('readRoster joins admin logins case-insensitively and keeps admin null without a login or a lookup', async () => {
+  const { seed } = await bareTeam();
+  await writeFile(join(seed, 'team.json'), JSON.stringify({ ...TEAM_JSON, archived: ['seed'] }));
+  for (const handle of ['a', 'b']) await writeFile(join(seed, 'people', `${handle}.json`), JSON.stringify(person(handle, { github: handle.toUpperCase() })));
+  await writeFile(join(seed, 'people', 'c.json'), JSON.stringify(person('c', { github: '' })));
+  const joined = await readRoster(seed, { adminLogins: ['a'] });
+  expect(joined.roster.map((entry) => [entry.handle, entry.admin])).toEqual([['a', true], ['b', false], ['c', null]]);
+  const unknown = await readRoster(seed, { adminLogins: null });
+  expect(unknown.roster.every((entry) => entry.admin === null)).toBe(true);
 });

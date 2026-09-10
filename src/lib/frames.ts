@@ -38,8 +38,8 @@ export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 
  */
 export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   checkouts: true,
-  memberRole: true, localIdentity: true,
-  favorites: false, follow: false, roles: false, lastSeen: false, installScope: true, inviteScoping: false,
+  memberRole: true, localIdentity: true, roles: true,
+  favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
   disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: false,
 });
 

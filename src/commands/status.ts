@@ -12,6 +12,7 @@ import { Prompter } from '../lib/prompt.js';
 import { githubOwnerRepo, normalizeRemote, repositoryUrl } from '../lib/remote.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
+import { adminLogins } from '../lib/collaborators.js';
 import { readRoster, readTeam, RosterEntry, SkillProblem, skillRecords } from '../lib/skills.js';
 import { packageVersion } from '../lib/package.js';
 import { CloneState, describeClone } from '../lib/teamRepo.js';
@@ -93,7 +94,10 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
           }
         } else {
           io.print('  From the local clone; GitHub access is not checked.');
-          const { roster, problems } = await readRoster(clone);
+          // Best-effort host truth for the member permission chip: null (unknown) when gh is absent
+          // or the lookup fails — status stays an offline-tolerant read and never throws for it.
+          const admins = tools.gh && ownerRepo !== null ? await adminLogins(runner, ownerRepo) : null;
+          const { roster, problems } = await readRoster(clone, { adminLogins: admins });
           detail.members = roster;
           detail.memberCount = roster.length;
           detail.unreadableMembers = problems.length;

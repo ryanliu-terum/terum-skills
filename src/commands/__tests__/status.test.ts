@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { stampPath } from '../../lib/hook.js';
-import { bareTeam, cloneWithIdentity, git, mappedRunner, person, ScriptedPrompter, TEAM_JSON, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, ScriptedPrompter, TEAM_JSON, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { slackBlock } from '../invite.js';
 import { run, StatusArgs } from '../status.js';
 
@@ -225,4 +225,23 @@ it('carries an explicit null version for an unpinned pending operation', async (
   const { result } = await query(f);
   expect(JSON.parse(JSON.stringify(result.value)).teams[0].pending[0].version).toBeNull();
   expect(JSON.parse(JSON.stringify(result.value)).teams[0].pending[0].destination).toBeNull();
+});
+
+it('joins host admin permission onto each member when gh answers, and keeps it null otherwise', async () => {
+  const f = await fixture(['a', 'seed']);
+  const admins = { code: 0, stdout: JSON.stringify([[{ login: 'SEED' }], [{ login: 'outsider' }]]), stderr: '' };
+  const withGh = mappedRunner(REMOTE, f.bare, fakeGh('seed', { 'api repos/acme/team/collaborators?permission=admin --paginate --slurp': admins }));
+  const answered = await run({ config: f.store, runner: withGh }, new ScriptedPrompter());
+  expect(answered.value?.teams[0]?.members).toMatchObject([{ handle: 'a', admin: false }, { handle: 'seed', admin: true }]);
+  expect(withGh.calls.some(call => call.command === 'gh' && call.args.join(' ').includes('collaborators?permission=admin'))).toBe(true);
+  // gh installed but the lookup fails (offline / unauthorized): status still succeeds, admin unknown.
+  const failing = mappedRunner(REMOTE, f.bare, fakeGh('seed'));
+  const offline = await run({ config: f.store, runner: failing }, new ScriptedPrompter());
+  expect(offline.ok).toBe(true);
+  expect(offline.value?.teams[0]?.members.map(member => member.admin)).toEqual([null, null]);
+  // No gh at all: the lookup is never attempted.
+  const absent = await run({ config: f.store, runner: f.runner }, new ScriptedPrompter());
+  expect(absent.ok).toBe(true);
+  expect(absent.value?.teams[0]?.members.map(member => member.admin)).toEqual([null, null]);
+  expect(f.runner.calls.filter(call => call.command === 'gh').map(call => call.args)).toEqual([['--version']]);
 });

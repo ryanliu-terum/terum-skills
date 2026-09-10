@@ -290,7 +290,9 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   const roster = await backend.roster();
   expect(roster.ok).toBe(true);
   expect(roster.value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
-  expect(roster.value?.members[0]).toMatchObject({ name: 'Mira Chen', role: 'Platform', projects: ['terum'], joined: '—', lastSeen: '—', status: 'active' });
+  // The 0.1.6 recording carries no per-member `admin`, so the permission status is 'unknown'; its
+  // hello frame likewise predates the roles flag flipping true, so the replayed feature map says false.
+  expect(roster.value?.members[0]).toMatchObject({ name: 'Mira Chen', role: 'Platform', projects: ['terum'], joined: '—', lastSeen: '—', status: 'unknown' });
 
   expect(await backend.features()).toMatchObject({ memberRole: true, roles: false, follow: false });
   const catalog = await backend.catalog();
@@ -307,6 +309,17 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   expect(catalog.value.verdictCounts).toEqual({ PASS: null, NEUTRAL: null, FAIL: null, 'Not evaluated': null });
   expect(JSON.stringify(catalog)).not.toMatch(/Teddy|SSM|MRF|founder/);
   expect(f.spawns.some(spawn => JSON.stringify(spawn.args) === JSON.stringify(['ls', 'member', '--team', 'acme', '--', 'ravi']))).toBe(true);
+});
+it('maps per-member admin to the permission status: true → admin, false → member, absent → unknown', async () => {
+  const backend = createTauriBackend(peopleReplay((frame, name) => {
+    if (frame.t === 'result' && name === 'status') {
+      const value = frame.value as { teams: { members: Record<string, unknown>[] }[] };
+      value.teams[0]!.members[0]!.admin = true;
+      value.teams[0]!.members[1]!.admin = false;
+    }
+  }).bridge);
+  const roster = await backend.roster();
+  expect(roster.value?.members.map(member => [member.handle, member.status])).toEqual([['mira', 'admin'], ['ravi', 'member'], ['seed', 'unknown']]);
 });
 it('S7b maps both recorded write results and emits clone invalidation only', async () => {
   const backend = createTauriBackend(peopleReplay().bridge), changed: string[] = [];
