@@ -117,8 +117,8 @@ it('serves scoped folder titles and best-effort team enrichment',async()=>{
  const backend=createTauriBackend(s7gReplay().bridge);
  const global=await backend.library({scope:{kind:'global'},team:'acme'});
  const project=await backend.library({scope:{kind:'checkout',root:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'},team:'acme'});
- expect(global).toMatchObject({ok:true,value:{title:'1 skill · 1 shared with acme',team:{kind:'ok',team:'acme'},overview:{skills_note:'—',installs:'2',evaluated:'—',attention:'—'}}});
- expect(project).toMatchObject({ok:true,value:{title:'0 skills',team:{kind:'ok',team:'acme'},overview:{skills_note:'—',installs:'0',evaluated:'—',attention:'—'}}});
+ expect(global).toMatchObject({ok:true,value:{title:'1 skill · 1 shared with acme',team:{kind:'ok',team:'acme'},overview:{skills_note:'1 shared with acme',installs:'2',evaluated:'—',attention:'0'}}});
+ expect(project).toMatchObject({ok:true,value:{title:'0 skills',team:{kind:'ok',team:'acme'},overview:{skills_note:'',installs:'0',evaluated:'—',attention:'0'}}});
 });
 it('serves no default eval k from the real backend',async()=>{
  expect(await createTauriBackend(inventoryReplay(recorded).bridge).settings()).toMatchObject({ok:true,value:{K:null}});

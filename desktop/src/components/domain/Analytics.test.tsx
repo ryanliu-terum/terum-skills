@@ -4,8 +4,23 @@ import { design } from '../../backend/mock/data';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Providers } from '../../app/providers';
 import { Analytics } from './Analytics';
+import { overviewCopy } from '../../lib/overview-copy';
 
 afterEach(cleanup);
+
+it('renders the meter and provenance when populated, then only the supplied copy when empty (B1)',()=>{
+ const overview={...design.LIBRARY_OVERVIEW,meter:{pass_:1,neutral:1,fail:1,total:4}},provenance='test-model · test-cli · k=3';
+ const {container,rerender}=render(<Providers><Analytics overview={overview} provenance={provenance}/></Providers>);
+ expect(container.querySelectorAll('.analytics-meter span')).toHaveLength(4);
+ expect(screen.getByText(overview.meter_text)).toBeVisible();expect(screen.getByText(provenance)).toBeVisible();
+ const empty={...overview,evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:overviewCopy.evaluated};
+ rerender(<Providers><Analytics overview={empty} provenance={provenance}/></Providers>);
+ expect(screen.getByText('Nothing evaluated yet')).toBeVisible();
+ expect(container.querySelector('.analytics-meter')).toBeNull();expect(screen.queryByText(provenance)).not.toBeInTheDocument();
+ rerender(<Providers><Analytics overview={{...empty,meter_text:''}} provenance={provenance}/></Providers>);
+ expect(screen.queryByText('Nothing evaluated yet')).not.toBeInTheDocument();
+ expect(container.querySelector('.analytics-meter')).toBeNull();expect(screen.queryByText(provenance)).not.toBeInTheDocument();
+});
 
 it('renders population notes without a sparkline or delta arrows (RM-16)', () => {
   const { container } = render(<Providers><Analytics overview={design.LIBRARY_OVERVIEW}/></Providers>);

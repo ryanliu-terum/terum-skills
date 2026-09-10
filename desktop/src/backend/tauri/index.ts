@@ -528,9 +528,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const features = {localIdentity:hello?.features.localIdentity??false};
       const enrichment = await libraryTeam(team, options);
       const directory = await home(), root = rootOf(section, directory);
-      const skills:SkillCard[] = [], seen=new Set<string>();let joined=0;
+      const skills:SkillCard[] = [], seen=new Set<string>();let joined=0,updatesAvailable=0;
       for (const row of section.rows) {
         if(seen.has(row.path))continue;seen.add(row.path);
+        if(row.health==='update-available'||row.health==='both')updatesAvailable++;
         const skill = enrichment.team.kind==='ok' ? joinedSkill(row,enrichment.inventory!,enrichment.team.team,features) : undefined;
         if(skill && enrichment.team.kind==='ok') {joined++;skills.push({...inventoryCard(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.team.team,features,directory,enrichment.selected?.handle??'',enrichment.selected?.placements??[]),path:row.path});}
         else skills.push(localCard(row,section,directory));
@@ -540,14 +541,17 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         skills.push(notOfferedCard(entry,section,directory));
       }
       const n=skills.length; // the grid itself — title, tile and placeholder never count a card the grid does not draw
+      const broken=skills.filter(card=>card.flags.includes('broken')).length,attention_lines:string[]=[];
+      if(updatesAvailable>0)attention_lines.push(`${plural(updatesAvailable,'update')} available`);
+      if(broken>0)attention_lines.push(`${broken} broken`);
       const value:Library={root,team:enrichment.team,scanned:scannedRoots(local.value,directory),skills,problems:enrichment.inventory?.problems??[],provenance:null,
         // The ViewHeader title beside this subtitle is already root.label (LibraryScreen.tsx:30), so the
         // subtitle prints the count alone, in the board's shape ("15 skills") and the shape the mock and
         // the search placeholder already use (.planning/specs/desktop-scoped-stats-and-collapse.md:29).
         // plural() is the very helper that placeholder calls, so the two strings cannot drift apart again.
-        // The team limb stays: `joined` is a fact this screen carries nowhere else.
+        // The team limb keeps the shared count beside the root's total.
         title:plural(n,'skill')+(enrichment.team.kind==='ok'&&joined>0?` · ${joined} shared with ${enrichment.team.team}`:''),
-        overview:{skills:String(n),skills_note:'—',evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:'',installs:String(skills.reduce((sum,row)=>sum+row.installsN,0)),installs_note:'—',attention:'—',attention_lines:[],attention_link:'',zero:overviewCopy}};
+        overview:{skills:String(n),skills_note:enrichment.team.kind==='ok'&&joined>0?`${joined} shared with ${enrichment.team.team}`:'',evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:overviewCopy.evaluated,installs:String(skills.reduce((sum,row)=>sum+row.installsN,0)),installs_note:'',attention:String(updatesAvailable+broken),attention_lines,attention_link:'',zero:overviewCopy}};
       return {ok:true,value};
     },
     async localSkill({path},options) {

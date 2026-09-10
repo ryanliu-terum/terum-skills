@@ -30,7 +30,7 @@ it('draws no scan-coverage row, a count-based search label, no empty anchor and 
  expect(screen.queryByRole('link',{name:'Open alerts'})).toBeNull();
  expect(document.querySelector('.analytics-meter')).toBeNull();
  const tile=screen.getByText('Evaluated').closest('.stat-tile');
- expect(tile).toHaveTextContent('—');expect(tile?.children).toHaveLength(2);
+ expect(tile).toHaveTextContent('—');expect(tile).toHaveTextContent(overviewCopy.evaluated);expect(tile?.children).toHaveLength(3);
 });
 it('renders the four zero captions for an empty recording (L7)',async()=>{
  open({local:value=>{const global=value.local[0]!;global.rows=[];global.counts={skillFolders:0,connectable:0};}});
