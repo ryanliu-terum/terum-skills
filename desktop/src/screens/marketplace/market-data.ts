@@ -7,6 +7,13 @@ export function rawGrants(skill: Card): string[] {
   return skill.grants.filter((grant: unknown): grant is string => typeof grant === 'string');
 }
 
+/**
+ * Badge count for the marketplace filters. `raw` is the committed `active` search param, which the
+ * filter popover writes in lockstep with the facet params (serializeFacets in market-facets.ts
+ * derives it from the committed selection via activeFacetCount) — no longer a dead placeholder.
+ * `fallback` covers the popover-open-but-uncommitted state, whose default selection has 4 active
+ * facets, keeping the drawn default board intact.
+ */
 export function activeFacets(raw: string | null | undefined, fallback: number): number {
   if (raw == null) return fallback;
   const value = Number(raw);

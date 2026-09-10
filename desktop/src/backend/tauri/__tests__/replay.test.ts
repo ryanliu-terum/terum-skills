@@ -69,13 +69,13 @@ function inventoryReplay() {
 it('replays the rebuilt fixture through Global and checkout scopes and Skill detail',async()=>{
   const backend=createTauriBackend(inventoryReplay().bridge);
   const library=await backend.library({scope:{kind:'global'},team:'acme'});
-  expect(library).toMatchObject({ok:true,value:{title:'1 skill folder in Global · 1 shared with acme',root:{id:'global',kind:'global',count:undefined},team:{kind:'ok',team:'acme'},skills:expect.arrayContaining([expect.objectContaining({name:'deploy-check',desc:'a deploy needs a pre-flight checklist.',normalizedGrants:'none',installed:true,installsN:2})])}});
+  expect(library).toMatchObject({ok:true,value:{title:'1 skill folder in Global · 1 shared with acme',root:{id:'global',kind:'global',count:undefined},team:{kind:'ok',team:'acme'},skills:expect.arrayContaining([expect.objectContaining({name:'deploy-check',desc:'Use this skill when a deploy needs a pre-flight checklist.',normalizedGrants:'none',installed:'placed',installsN:2})])}});
   const detail=await backend.skill({ref:'deploy-check'});if(!detail.ok)throw new Error(detail.error);
   const resultFrame=recorded('ls').map(line=>JSON.parse(line) as {t:string;value?:{skills:{name:string;updated:string;grantsHash:string}[]}}).find(frame=>frame.t==='result');
   const row=resultFrame?.value?.skills.find(row=>row.name==='deploy-check');
   expect(detail.value.updated).toBe(row?.updated);expect(detail.value.updated).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   expect(detail.value.grantsHash).toBe(row?.grantsHash);
-  expect(detail.value).toMatchObject({desc:'a deploy needs a pre-flight checklist.',grants:['none'],users:[['seed','S','Global · since 2026-08-20T00:00:00Z'],['mira','MC','Global · since 2026-08-25T00:00:00Z']],skillMd:{markdown:'# deploy-check\n\nUse this skill when a deploy needs a pre-flight checklist.\n\n1. Step one.\n2. Step two.\n'},receipt:null,lines:null,favorites:null});
+  expect(detail.value).toMatchObject({desc:'Use this skill when a deploy needs a pre-flight checklist.',grants:['none'],users:[['seed','S','Global · since 2026-08-20T00:00:00Z'],['mira','MC','Global · since 2026-08-25T00:00:00Z']],skillMd:{markdown:'# deploy-check\n\nUse this skill when a deploy needs a pre-flight checklist.\n\n1. Step one.\n2. Step two.\n'},receipt:null,lines:null,favorites:null});
   const project=await backend.library({scope:{kind:'checkout',root:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'},team:'acme'});expect(project).toMatchObject({ok:true,value:{title:'0 skill folders in seed',skills:[],root:{id:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed',kind:'checkout'}}});
   expect(await backend.library({scope:{kind:'global'},team:'acme'})).toMatchObject({ok:true,value:{skills:[{name:'deploy-check'}]}});
   const member=recorded('ls-member-mira').map(line=>JSON.parse(line) as {t:string;value?:unknown}).find(frame=>frame.t==='result');

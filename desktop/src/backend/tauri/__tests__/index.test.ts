@@ -232,9 +232,9 @@ it('preserves a future stamp and null fields from an unreadable clone',async()=>
 
 const lsRow = { id: 'id-a', name: 'a', description: 'Live description', author: 'Mira Chen <mira@example.com>', category: 'ops', installs: 1, latest: 'abcd1234', endorsement: 'global', unresolved: false, grants: 'Bash\nRead', grantsHash: 'sha256:real', updated: '2026-08-20T00:00:00Z', body: '# Live body\n', installedBy: [{ handle: 'mira', displayName: 'Mira Chen', scope: {kind:'global'}, since: '2026-08-01' }, { handle: 'mira', displayName: 'Mira Chen', scope: {kind:'project',project:'ops'}, since: '2026-08-02' }] };
 const lsValue = { roster: [{handle:'mira',active:true}], skills: [lsRow], projects: [{ name:'ops',skills:['id-a'],remotes:[],description:'Hand maintained' },{name:'empty',skills:[],remotes:[]}], problems: [] };
-function inventoryBridge(overrides: { row?: Partial<typeof lsRow>; validation?: unknown; validateOk?: boolean; teams?: string[]; local?: unknown } = {}) {
+function inventoryBridge(overrides: { row?: Partial<typeof lsRow>; validation?: unknown; validateOk?: boolean; teams?: string[]; local?: unknown; ledger?: { id: string; team: string }[] } = {}) {
   return fakeBridge((args, emit) => {
-    const value = args[0] === 'status' ? {version:'0.1.6',teams:(overrides.teams??['acme']).map(team=>({team,handle:'mira',repository:'https://github.com/acme/team',readable:true,sharedSkills:3,memberCount:1}))} : args[0] === 'validate' ? overrides.validation??{name:'a',findings:0,warnings:0} : args.includes('--local') ? overrides.local??{roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[{name:'a',path:'/home/.claude/skills/a',state:'prose is not provenance',tracked:true,shared:[],placement:{id:'id-a',team:'acme',version:'a'.repeat(40)},health:'up-to-date'}],notOffered:[],problems:[]}]} : {...lsValue,skills:[{...lsRow,...overrides.row}]};
+    const value = args[0] === 'status' ? {version:'0.1.6',teams:(overrides.teams??['acme']).map(team=>({team,handle:'mira',repository:'https://github.com/acme/team',readable:true,sharedSkills:3,memberCount:1})),...(overrides.ledger?{ledger:{placements:overrides.ledger}}:{})} : args[0] === 'validate' ? overrides.validation??{name:'a',findings:0,warnings:0} : args.includes('--local') ? overrides.local??{roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[{name:'a',path:'/home/.claude/skills/a',state:'prose is not provenance',tracked:true,shared:[],placement:{id:'id-a',team:'acme',version:'a'.repeat(40)},health:'up-to-date'}],notOffered:[],problems:[]}]} : {...lsValue,skills:[{...lsRow,...overrides.row}]};
     const ok = args[0]!=='validate'||overrides.validateOk!==false;
     emit({kind:'stdout',line:JSON.stringify({t:'result',verb:args[0],ok,exitCode:ok?0:1,value,...(ok?{}:{error:'Validation failed'})})});
   });
@@ -243,7 +243,7 @@ it.each(['global','checkout','trailing'] as const)('maps the %s library from loc
   const local={roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[{name:'a',path:'/home/.claude/skills/a',state:'prose is not provenance',tracked:true,shared:[],placement:{id:'id-a',team:'acme',version:'a'.repeat(40)},health:'up-to-date'}],notOffered:[],problems:[]},{root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[],problems:[]}]};
   const scope=mode==='global'?{kind:'global' as const}:{kind:'checkout' as const,root:'/work/ops'+(mode==='trailing'?'/':'')};
   const f=inventoryBridge({local});const result=await createTauriBackend(f.bridge).library({scope,team:'acme'});
-  expect(result).toMatchObject({ok:true,value:{title:mode==='global'?'1 skill folder in Global · 1 shared with acme':'0 skill folders in ops',root:{id:mode==='global'?'global':'/work/ops',kind:scope.kind,label:mode==='global'?'Global':'ops',count:undefined},team:{kind:'ok',team:'acme'},skills:mode==='global'?[{name:'a',desc:'Live description',project:'Global',installs:'1 install',installsN:1,installed:true,placed:true,path:'/home/.claude/skills/a',updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}]:[],overview:{skills:mode==='global'?'1':'0',installs:mode==='global'?'1':'0',evaluated:'—',attention:'—',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:'—',installs_note:'—'},provenance:null}});
+  expect(result).toMatchObject({ok:true,value:{title:mode==='global'?'1 skill folder in Global · 1 shared with acme':'0 skill folders in ops',root:{id:mode==='global'?'global':'/work/ops',kind:scope.kind,label:mode==='global'?'Global':'ops',count:undefined},team:{kind:'ok',team:'acme'},skills:mode==='global'?[{name:'a',desc:'Live description',project:'Global',installs:'1 install',installsN:1,installed:'placed',placed:true,path:'/home/.claude/skills/a',updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}]:[],overview:{skills:mode==='global'?'1':'0',installs:mode==='global'?'1':'0',evaluated:'—',attention:'—',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:'—',installs_note:'—'},provenance:null}});
   expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status','--team','acme'],['ls','--team','acme']]);
 });
 it('maps the detail body, grants and all install records without fabricating missing values',async()=>{
@@ -258,8 +258,20 @@ it('retains null grants/body/date and marks unresolved skills broken, with a fai
 it('shows unjoined folders locally without inferring team membership from name or prose',async()=>{
   for(const state of ['untracked locally','placement recorded from other @abc','connected source for acme; endorsed (global)']){
     const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state,tracked:state!=='untracked locally',shared:state.startsWith('connected')?[{id:'id-a',team:'acme'}]:[],placement:state.includes('other')?{id:'id-a',team:'other',version:null}:null,health:'unknown'}],notOffered:[],problems:[]}]}});
-    expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'},team:'acme'})).toMatchObject({ok:true,value:{skills:[{name:'a',project:'Global',path:'/skills/a',installed:true,placed:state.includes('other'),connectedSources:state.startsWith('connected')?['/skills/a']:[]}],title:'1 skill folder in Global'}});
+    expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'},team:'acme'})).toMatchObject({ok:true,value:{skills:[{name:'a',project:'Global',path:'/skills/a',installed:'placed',placed:state.includes('other'),connectedSources:state.startsWith('connected')?['/skills/a']:[]}],title:'1 skill folder in Global'}});
   }
+});
+it('serves the truthful install tri-state from the scan, the status ledger and the people file',async()=>{
+  const empty={roster:[],skills:[],problems:[],local:[]};
+  // The people file says this user (handle mira) installed it, but nothing is on this machine.
+  const recorded=await createTauriBackend(inventoryBridge({local:empty}).bridge).skill({ref:'a',team:'acme'});
+  expect(recorded).toMatchObject({ok:true,value:{installed:'recorded',placed:false,onDiskOnly:false}});
+  // A placement in the unfiltered status ledger counts as placed even when the scan cannot see it (project scope, unregistered checkout).
+  const placed=await createTauriBackend(inventoryBridge({local:empty,ledger:[{id:'id-a',team:'acme'}]}).bridge).skill({ref:'a',team:'acme'});
+  expect(placed).toMatchObject({ok:true,value:{installed:'placed',placed:true,unidentifiedLocal:null}});
+  // Another team's ledger placement is not this install; another user's people-file record is not this user's.
+  const absent=await createTauriBackend(inventoryBridge({local:empty,ledger:[{id:'id-a',team:'other'}],row:{installedBy:[{handle:'seed',displayName:'Seed',scope:{kind:'global' as const},since:'2026-08-01'}]}}).bridge).skill({ref:'a',team:'acme'});
+  expect(absent).toMatchObject({ok:true,value:{installed:'absent',placed:false}});
 });
 it('keeps Library local on ambiguous teams while team detail reports the typed failure',async()=>{
  const f=inventoryBridge({teams:['one','two']}),backend=createTauriBackend(f.bridge);
@@ -298,8 +310,8 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   const catalog = await backend.catalog();
   if (!catalog.ok) throw new Error(catalog.error);
   expect(catalog.value.topRated).toEqual(['deploy-check', 'tdd', 'diagnose']);
-  expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject({ installed: true, installsN: 2 });
-  expect(catalog.value.skills.find(skill => skill.name === 'tdd')).toMatchObject({ installed: false, installsN: 1 });
+  expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject({ installed: 'placed', installsN: 2 });
+  expect(catalog.value.skills.find(skill => skill.name === 'tdd')).toMatchObject({ installed: 'absent', installsN: 1 });
   expect(catalog.value.people[0]).toMatchObject({ handle: 'mira', role: 'Platform', projects: ['terum'], skills: ['deploy-check'], declined: [], installable: [], onDisk: [0, 0], adoption: 2 });
   expect(catalog.value.people.map(person => person.handle)).toEqual(['mira', 'ravi', 'seed']);
   expect(catalog.value.people.find(person => person.handle === 'seed')?.declined).toEqual(['33333333-3333-4333-8333-333333333333']);
@@ -381,7 +393,7 @@ it.each(healthCases)('maps local health %s onto the drawn placement state withou
 });
 it('joins Skill provenance by ledger team and id (a relocated folder), never by name or prose',async()=>{
   const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'relocated',path:'/skills/relocated',state:'arbitrary prose',tracked:true,shared:[{id:'shared-id',team:'other'}],placement:{id:'id-a',team:'acme',version:'1234567890abcdef'.repeat(2)+'12345678'},health:'up-to-date'}],notOffered:[],problems:[]}]};
-  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'acme/a'})).toMatchObject({ok:true,value:{installed:true,path:'/skills/relocated',version:'1234567890ab',version_full:'1234567890abcdef'.repeat(2)+'12345678'}});
+  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'acme/a'})).toMatchObject({ok:true,value:{installed:'placed',path:'/skills/relocated',version:'1234567890ab',version_full:'1234567890abcdef'.repeat(2)+'12345678'}});
 });
 it('keeps a null tracking version and a missing placement folder honest',async()=>{
  const f=statusReplay(false,(frame,verb)=>{
@@ -393,7 +405,7 @@ it('keeps a null tracking version and a missing placement folder honest',async()
  expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'11111111-1111-4111-8111-111111111111','Global',null,'2026-09-01T00:00:00Z','folder missing']]);
  expect(settings.value?.PINNED_N).toBe(0);
  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'unrelated',tracked:true,shared:[],placement:{id:'id-a',team:'acme',version:null},health:'unknown',problem:'symbolic link'}],notOffered:[],problems:[]}]};
- expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a'})).toMatchObject({ok:true,value:{installed:true,version:'—',version_full:null}});
+ expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a'})).toMatchObject({ok:true,value:{installed:'placed',version:'—',version_full:null}});
 });
 it('rejects undeclared local row keys and missing typed provenance',async()=>{
   for(const extra of [{sharedState:'in-sync'}, {placement:undefined}]) {
@@ -429,7 +441,7 @@ it.each(['on-disk-only','placed','placed-problem','project'])('derives installed
  const result=await backend.library({scope:mode==='project'?{kind:'checkout',root:'/work/project'}:{kind:'global'}});
  expect(result.ok).toBe(true);
  const skill=result.value?.skills[0];
- expect(skill).toMatchObject({name:'deploy-check',installed:true,placed:mode.startsWith('placed'),onDiskOnly:!mode.startsWith('placed')});
+ expect(skill).toMatchObject({name:'deploy-check',installed:'placed',placed:mode.startsWith('placed'),onDiskOnly:!mode.startsWith('placed')});
  expect(skill?.paths[0]?.[1]).toBe(mode==='project'?'project':'global');
  if(mode==='placed-problem')expect(skill).toMatchObject({flags:['broken'],flagText:{broken:'SKILL.md missing'}});
  const detail=await backend.skill({ref:'deploy-check'});
@@ -446,24 +458,35 @@ it('keeps local rows closed while accepting the three declared additive keys',as
 it.each(['missing-id','old-cli'])('does not infer presence by name with %s',async mode=>{
  const present=await createTauriBackend(installedReplay().bridge).library({scope:{kind:'global'}});
  expect(present.value?.skills[0]).toMatchObject({onDiskOnly:true});
+ // The recorded status still carries the S7b ledger placement; this scenario is a machine whose
+ // ledger records nothing, so strip it — otherwise the ledger truthfully answers 'placed'.
  const f=installedReplay('on-disk-only','none',frame=>{
   if(frame.t==='hello'&&mode==='old-cli')delete (frame.features as Record<string,unknown>).localIdentity;
   if(frame.t==='result'&&mode==='missing-id')delete (frame.value as {local:{rows:Record<string,unknown>[]}[]}).local[0]!.rows[0]!.skillId;
+ },frame=>{
+  if(frame.t==='result')(frame.value as {ledger:{placements:unknown[]}}).ledger.placements=[];
  });
- expect((await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).value?.skills).toMatchObject([{name:'deploy-check',project:'Global',installed:true,placed:false,onDiskOnly:true}]);
- expect((await createTauriBackend(f.bridge).skill({ref:'deploy-check'})).value?.installed).toBe(false);
+ expect((await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).value?.skills).toMatchObject([{name:'deploy-check',project:'Global',installed:'placed',placed:false,onDiskOnly:true}]);
+ // The folder cannot be identified, so it is not presence; the people file still records this viewer's install.
+ expect((await createTauriBackend(f.bridge).skill({ref:'deploy-check'})).value?.installed).toBe('recorded');
 });
 // A CLI without `localIdentity` cannot identify a folder, so a same-named one leaves presence
 // unknown — never "absent", and never an Install that would collide with it.
 it('reports an unidentifiable same-named folder as unknown rather than absent',async()=>{
+ // Ledger stripped: this scenario is a machine whose ledger records nothing — with the recorded
+ // S7b placement left in, the ledger would truthfully answer 'placed' and there would be no ambiguity.
  const old=installedReplay('on-disk-only','none',frame=>{
   if(frame.t==='hello')delete (frame.features as Record<string,unknown>).localIdentity;
+ },frame=>{
+  if(frame.t==='result')(frame.value as {ledger:{placements:unknown[]}}).ledger.placements=[];
  });
  const unknown=await createTauriBackend(old.bridge).skill({ref:'deploy-check'});
- expect(unknown.value).toMatchObject({installed:false,unidentifiedLocal:{path:'/Users/teddy/.claude/skills/deploy-check',pathLabel:'~/.claude/skills/deploy-check'}});
+ // The viewer's people file records this install, so the tri-state is 'recorded' — but the unidentified
+ // same-named folder still renders "Install state unknown" and suppresses Install (SkillScreen precedence).
+ expect(unknown.value).toMatchObject({installed:'recorded',unidentifiedLocal:{path:'/Users/teddy/.claude/skills/deploy-check',pathLabel:'~/.claude/skills/deploy-check'}});
  // With the feature present the same scan is proof, so the skill reads installed and unambiguous.
  const current=await createTauriBackend(installedReplay().bridge).skill({ref:'deploy-check'});
- expect(current.value).toMatchObject({installed:true,unidentifiedLocal:null});
+ expect(current.value).toMatchObject({installed:'placed',unidentifiedLocal:null});
 });
 // A connected source carries {id,team} on every CLI that reaches the app, so it proves presence
 // without `skillId` — the clause an old CLI otherwise had no way to satisfy.
@@ -476,7 +499,7 @@ it('accepts a connected source as identity on a CLI without localIdentity',async
   }
  });
  const detail=await createTauriBackend(shared.bridge).skill({ref:'deploy-check'});
- expect(detail.value).toMatchObject({installed:true,placed:false,onDiskOnly:true,unidentifiedLocal:null,connectedSources:['/Users/teddy/.claude/skills/deploy-check']});
+ expect(detail.value).toMatchObject({installed:'placed',placed:false,onDiskOnly:true,unidentifiedLocal:null,connectedSources:['/Users/teddy/.claude/skills/deploy-check']});
 });
 it('copies recorded member installs rather than authored skills',async()=>{
  const none=await createTauriBackend(installedReplay('on-disk-only','none').bridge).catalog();
@@ -493,7 +516,7 @@ it('retains every id occurrence while preferring a placed path and version over 
   local[0]!.rows=[{...present,path:'/Users/teddy/.claude/skills/relocated',name:'relocated',placed:true,tracked:true,shared:[],connected:false,placement:{id:present.skillId,team:'acme',version:'b'.repeat(40)},health:'up-to-date'}];
  });
  const detail=await createTauriBackend(f.bridge).skill({ref:'deploy-check'});
- expect(detail.value).toMatchObject({installed:true,placed:true,onDiskOnly:false,path:'/Users/teddy/.claude/skills/relocated',version:'bbbbbbbbbbbb',connectedSources:['/work/project/.claude/skills/deploy-check'],pathLabel:'~/.claude/skills/relocated',paths:[['~/.claude/skills/relocated','global'],['/work/project/.claude/skills/deploy-check','project']]});
+ expect(detail.value).toMatchObject({installed:'placed',placed:true,onDiskOnly:false,path:'/Users/teddy/.claude/skills/relocated',version:'bbbbbbbbbbbb',connectedSources:['/work/project/.claude/skills/deploy-check'],pathLabel:'~/.claude/skills/relocated',paths:[['~/.claude/skills/relocated','global'],['/work/project/.claude/skills/deploy-check','project']]});
 });
 
 // Sidebar counts describe scanned rows, independently of the placement ledger.
@@ -631,5 +654,5 @@ it('never claims zero installs for a placed row whose team could not be read',as
 it.each([false,true])('registration %s never changes connected, placed, or local flags',async registered=>{
  const local={roster:[],skills:[],problems:[],local:[{root:'/repo/.claude/skills',repoRoot:'/repo',scope:'project',registered,detected:!registered,rows:[{name:'local',path:'/repo/.claude/skills/local',state:'local',tracked:false,shared:[],placement:null,health:'untracked'}],problems:[]}]};
  const result=await createTauriBackend(inventoryBridge({local,teams:[]}).bridge).library({scope:{kind:'checkout',root:'/repo'}});
- expect(result.value?.skills).toMatchObject([{installed:true,placed:false,onDiskOnly:true,connectedSources:[],flags:['local'],flagText:{local:'Local · not shared with a team'}}]);
+ expect(result.value?.skills).toMatchObject([{installed:'placed',placed:false,onDiskOnly:true,connectedSources:[],flags:['local'],flagText:{local:'Local · not shared with a team'}}]);
 });
