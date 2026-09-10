@@ -43,6 +43,15 @@ impl CStringArray {
     ptrs.push(std::ptr::null_mut());
     CStringArray { _owned: owned, ptrs }
   }
+
+  /// Borrow the NUL-terminated pointer array. Taking `&self` (rather than reaching for `.ptrs`
+  /// at the call site) is load-bearing: under Rust 2021 disjoint closure captures, `move ||`
+  /// that names only `argv.ptrs` captures that `Vec<*mut c_char>` field alone — which is neither
+  /// `Send`/`Sync` (the unsafe impls below are on the struct, not the field) nor keeps `_owned`
+  /// alive, leaving the pointers dangling. Going through a method captures the whole struct.
+  fn as_ptr(&self) -> *const *mut libc::c_char {
+    self.ptrs.as_ptr()
+  }
 }
 
 /// The symbol is private API: resolve it at runtime so a macOS release that ever drops it
@@ -103,8 +112,8 @@ pub fn disclaim_tcc_responsibility(command: &mut Command) {
           program_c.as_ptr(),
           std::ptr::null(),
           &attr,
-          argv.ptrs.as_ptr(),
-          envp.ptrs.as_ptr(),
+          argv.as_ptr(),
+          envp.as_ptr(),
         );
       }
       libc::posix_spawnattr_destroy(&mut attr);
