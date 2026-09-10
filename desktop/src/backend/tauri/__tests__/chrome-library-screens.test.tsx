@@ -21,10 +21,10 @@ function open(options:ReplayOptions={},route='#/library/global'){
  return {fake,backend};
 }
 
-it('renders honest scan coverage, a count-based search label, no empty anchor and no evaluation meter on the real adapter (L2, L3, L5, L8)',async()=>{
+it('draws no scan-coverage row, a count-based search label, no empty anchor and no evaluation meter on the real adapter (L2, L3, L8)',async()=>{
  open({local:underHome});await screen.findByTestId('skill-card-deploy-check');
  expect(screen.getByRole('textbox',{name:'Search 1 skill'})).toHaveAttribute('placeholder','Search 1 skill');
- expect(screen.getByText('Scanned: ~/.claude/skills, ~/code/seed')).toBeVisible();
+ expect(screen.queryByText(/^Scanned: /)).toBeNull();
  for(const link of document.querySelectorAll('.analytics-row a'))expect(link.textContent?.trim()).not.toBe('');
  for(const link of document.querySelectorAll('a'))expect(link).toHaveAccessibleName();
  expect(screen.queryByRole('link',{name:'Open alerts'})).toBeNull();
