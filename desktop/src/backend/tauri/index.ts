@@ -221,6 +221,14 @@ function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, lo
   return { scanned: (local.local ?? []).map(section => section.scope === 'global' ? '~/.claude/skills' : section.repoRoot ?? section.root), repository: team.repository ?? null, skills: skills.filter(skill => !query || `${skill.name} ${skill.desc}`.toLowerCase().includes(query.toLowerCase())), extras: [], people, projects, categories: Object.entries(categorySkills).map(([name, rows]) => [name, 'tag', rows.length]), categoryRemaining: {}, topRated: [...skills].sort((a, b) => b.installsN - a.installsN).map(skill => skill.name), peopleByAdoption: [...people].sort((a, b) => b.adoption - a.adoption).map(person => person.handle), projectsByMembers: [...projects].sort((a, b) => b.members - a.members).map(project => project.name), categorySkills, filterDefault: { verdicts: [], lift_min: 0, tokens_max: 0, installs_min: 0 }, filterCount: skills.length, verdictCounts: { PASS: null, NEUTRAL: null, FAIL: null, 'Not evaluated': null }, catalogN: skills.length, teamN: people.length, bulkInstall: {} };
 }
 
+/**
+ * How long a read verb's answer is shared across callers (BUGS.md L18/M24). One Library render used to spawn six CLI
+ * processes (three `status`, two `ls --local`, one `ls --team`); every read now goes through one process per argv per
+ * window. The window is short and cleared early on any mutation the app makes and whenever the window regains focus,
+ * so a change made in a terminal shows on the next look.
+ */
+export const READ_CACHE_TTL_MS = 15_000;
+
 export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   // Share in-flight reads and cache success; a terminal launch can repair a missing or broken file.
   let hello: Extract<CliFrame, { t: 'hello' }> | null = null;
@@ -270,7 +278,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const fail = (error: string) => result<never>({ ok: false, error });
   const gap = (what: string) => fail(`${what} is not available from terum-skills yet: the CLI has no verb that returns it (desktop/GAPS.md). The terminal has everything the app shows here.`);
   const listeners = new Set<(source: ChangeSource) => void>();
-  const notify = (...sources: ChangeSource[]) => { for (const source of sources) for (const listener of listeners) listener(source); };
+  const reads = new Map<string, { promise: Promise<{ result: Result<unknown>; lines: string[] }>; at: number }>();
+  const clearReads = () => { reads.clear(); };
+  if (typeof window !== 'undefined') window.addEventListener('focus', clearReads);
+  const notify = (...sources: ChangeSource[]) => { if (sources.length === 0) return; clearReads(); for (const source of sources) for (const listener of listeners) listener(source); };
   const cwd = () => backend.prefs.get<string>('workspace', '') || undefined;
 
   function run<TIn, TOut>(argv: readonly string[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut, touches: ChangeSource[] = ['config', 'placed']): Run<TOut> {
@@ -292,10 +303,45 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     };
   }
 
+  /** One CLI process per read argv per READ_CACHE_TTL_MS; failures and questions are never kept. Signal-free: a caller's abort must not kill a process other callers share. */
+  function sharedRead(argv: readonly string[]): Promise<{ result: Result<unknown>; lines: string[] }> {
+    const key = argv.join('\u0000');
+    const now = Date.now();
+    const hit = reads.get(key);
+    if (hit && now - hit.at < READ_CACHE_TTL_MS) return hit.promise;
+    const lines: string[] = [];
+    const promise = read(run(argv, z.unknown(), value => value, []), undefined, lines).then(result => ({ result, lines }));
+    const entry = { promise, at: now };
+    reads.set(key, entry);
+    void promise.then(({ result }) => { if (!result.ok && reads.get(key) === entry) reads.delete(key); }, () => { if (reads.get(key) === entry) reads.delete(key); });
+    return promise;
+  }
+  /** A read verb through the shared cache, parsed for this caller. Aborting returns Cancelled for this caller only. */
+  async function cached<TIn>(argv: readonly string[], schema: z.ZodType<TIn>, options?: ReadOptions, lines?: string[]): Promise<Result<TIn>> {
+    const signal = options?.signal;
+    if (signal?.aborted) return { ok: false, error: 'Cancelled.' };
+    const shared = sharedRead(argv);
+    let onAbort: (() => void) | undefined;
+    const outcome = signal
+      ? await Promise.race([shared, new Promise<null>(resolve => { onAbort = () => resolve(null); signal.addEventListener('abort', onAbort, { once: true }); })]).finally(() => { if (onAbort) signal.removeEventListener('abort', onAbort); })
+      : await shared;
+    if (outcome === null) return { ok: false, error: 'Cancelled.' };
+    if (lines) lines.push(...outcome.lines);
+    const raw = outcome.result;
+    if (raw.ok) {
+      try { return { ok: true, value: schema.parse(raw.value) }; }
+      catch (error) { return { ok: false, error: `terum-skills answered, but the desktop app could not read the result: ${error instanceof Error ? error.message : String(error)}` }; }
+    }
+    let value: TIn | undefined;
+    if (raw.value !== undefined) { try { value = schema.parse(raw.value); } catch { value = undefined; } }
+    const failure: Result<TIn> = { ok: false, error: raw.error, ...(raw.refused ? { refused: true } : {}), ...(raw.cancelled ? { cancelled: true } : {}), ...(raw.reason ? { reason: raw.reason } : {}) };
+    return value === undefined ? failure : { ...failure, value };
+  }
+
   async function readModels<T>(options:ReadOptions|undefined, map:(value:CliStatus,local:CliLocal|null,platform:string)=>T):Promise<Result<T>> {
     const [status,local,platform]=await Promise.all([
-      read(run(['status'],cliStatus,value=>value,[]),options),
-      read(run(['ls','--local'],cliLocal,value=>value,[]),options),
+      cached(['status'], cliStatus, options),
+      cached(['ls','--local'], cliLocal, options),
       bridge.hostPlatform().then(value=>({ok:true as const,value})).catch((error:unknown)=>({ok:false as const,error:error instanceof Error?error.message:String(error),value:''})),
     ]);
     if (status.value===undefined) return result({ok:false,error:status.ok?'Status returned no data.':status.error});
@@ -311,7 +357,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   }
 
   async function inventoryTeam(team: string | undefined, options?: ReadOptions): Promise<Result<InventoryTeam>> {
-    const status = await read(run(['status', ...(team ? ['--team', team] : [])], cliStatusTeams, value => value, []), options);
+    const status = await cached(['status', ...(team ? ['--team', team] : [])], cliStatusTeams, options);
     if (!status.ok) return { ok: false, error: status.error };
     if (!team && status.value.teams.length !== 1) return teamSelectionFailure(status.value.teams);
     const selected = team ? status.value.teams.find(value => value.team === team) : status.value.teams.length === 1 ? status.value.teams[0] : undefined;
@@ -322,22 +368,22 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   async function libraryTeam(team:string|undefined,options?:ReadOptions):Promise<{team:LibraryTeam;inventory?:Inventory;selected?:InventoryTeam}> {
     const selected=await inventoryTeam(team,options);
     if(!selected.ok)return {team:selected.reason==='no-team'?{kind:'none'}:{kind:'unreadable',message:selected.error}};
-    const inventory=await read(run(['ls','--team',selected.value.team],cliLs,value=>value,[]),options);
+    const inventory=await cached(['ls','--team',selected.value.team], cliLs, options);
     if(!inventory.ok)return {team:{kind:'unreadable',message:inventory.error}};
     return {team:{kind:'ok',team:selected.value.team},selected:selected.value,inventory:inventory.value};
   }
   async function peopleInventory(options?: ReadOptions) {
-    const status = await read(run(['status'], cliStatus, value => value, []), options);
+    const status = await cached(['status'], cliStatus, options);
     if (!status.ok) return status;
     if (status.value.teams.length !== 1) return teamSelectionFailure(status.value.teams);
     const team = status.value.teams[0]!;
     if (!team.readable) return { ok: false as const, error: `Team ${team.team} could not be read.` };
-    const inventory = await read(run(['ls', '--team', team.team], cliLs, value => value, []), options);
+    const inventory = await cached(['ls', '--team', team.team], cliLs, options);
     return inventory.ok ? { ok: true as const, value: { team, inventory: inventory.value } } : inventory;
   }
   async function readEvalReport(ref:string,team:string|undefined,options?:ReadOptions) {
     const lines:string[]=[];
-    const report=await read(run(['eval-report',...(team?['--team',team]:[]),'--',ref],cliEvalReport,value=>value,[]),options,lines);
+    const report=await cached(['eval-report',...(team?['--team',team]:[]),'--',ref],cliEvalReport,options,lines);
     return {report,lines};
   }
   const backend: Backend = {
@@ -350,6 +396,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       await launchListenerReady;
       stateOnce = undefined;
       generation++;
+      clearReads();
       return backend.launchContext();
     },
     onLaunchRequest(listener) {
@@ -361,7 +408,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return () => { disposed = true; unlisten?.(); };
     },
     async features(): Promise<Features> {
-      if (!hello) await (featuresOnce ??= read(run(['status'], z.unknown(), value => value, [])).then(() => undefined));
+      if (!hello) await (featuresOnce ??= cached(['status'], z.unknown()).then(() => undefined));
       return Object.fromEntries(FEATURE_KEYS.map(key => [key, hello?.features[key] ?? false])) as Features;
     },
     async capabilities(): Promise<Capabilities> {
@@ -376,7 +423,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     settings: (_, options) => readModels(options, (value, local, platform) => settingsModel(value, local, statusModel(value, local, platform))),
     onboarding: async () => gap('Onboarding data'),
     async library({ scope, team }, options) {
-      const local = await read(run(['ls', '--local'], cliLs, value => value, []), options);
+      const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return fail(local.error);
       const section = local.value.local?.find(section => scope.kind==='global' ? section.scope==='global' : section.scope==='project' && normalizePath(section.repoRoot??section.root)===normalizePath(scope.root));
       if (!section) return fail('No such checkout: '+(scope.kind==='checkout'?scope.root:'global')+' · Register it under Settings ▸ This machine ▸ Checkouts.');
@@ -401,7 +448,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return {ok:true,value};
     },
     async localSkill({path},options) {
-      const local=await read(run(['ls','--local'],cliLs,value=>value,[]),options);
+      const local=await cached(['ls','--local'], cliLs, options);
       if(!local.ok)return fail(local.error);
       const directory=await home(),features={localIdentity:hello?.features.localIdentity??false};
       for(const section of local.value.local??[]) {
@@ -430,12 +477,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const name = parts.length === 2 ? parts[1]! : ref;
       const selected = await inventoryTeam(explicitTeam, options);
       if (!selected.ok) return { ok: false, error: selected.error, ...(selected.reason ? { reason: selected.reason } : {}) };
-      const inventory = await read(run(['ls', '--team', selected.value.team], cliLs, value => value, []), options);
+      const inventory = await cached(['ls', '--team', selected.value.team], cliLs, options);
       if (!inventory.ok) return fail(inventory.error);
       const matches = inventory.value.skills.filter(row => row.name === name || row.id.startsWith(name));
       const row = inventory.value.skills.find(row => row.name === name) ?? (matches.length === 1 ? matches[0] : undefined);
       if (!row) return fail(`No unambiguous skill ${name} in team ${selected.value.team}.`);
-      const local = await read(run(['ls', '--local'], cliLs, value => value, []), options);
+      const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return fail(local.error);
       const validation = await backend.validate({ ref: row.name, team: selected.value.team }, options);
       // A hygiene failure has a parsed value; an unreadable/cancelled validation is a read failure.
@@ -464,11 +511,11 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const data = await peopleInventory(options);
       if (!data.ok) return {ok:false,error:data.error,...(data.reason?{reason:data.reason}:{})};
       const { team, inventory } = data.value;
-      const local = await read(run(['ls', '--local'], cliLs, value => value, []), options);
+      const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return fail(local.error);
       const people: Person[] = [];
       for (const member of rosterModel(team).members) {
-        const detail = await read(run(['ls', 'member', '--team', team.team, '--', member.handle], cliLs, value => value, []), options);
+        const detail = await cached(['ls', 'member', '--team', team.team, '--', member.handle], cliLs, options);
         if (!detail.ok) return fail(detail.error);
         if (!detail.value.member) return fail(`No member data for ${member.handle}.`);
         const authored = detail.value.skills;
@@ -499,7 +546,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
     eval: (args: EvalArgs) => run(['eval', ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,commit:value.commit }), ['clone']),
-    validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? read(run(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, (value): ValidateResult => value, []), options).then(result) : fail('validate needs a skill name or a folder.'),
+    validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? cached<ValidateResult>(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, options).then(result) : fail('validate needs a skill name or a folder.'),
     update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
     diagnostics: () => run(['status'], z.unknown(), () => undefined, []),
     async windowAction(action) { try { const window = getCurrentWindow(); if (action === 'toggle-maximize') await window.toggleMaximize(); else await window.startDragging(); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
