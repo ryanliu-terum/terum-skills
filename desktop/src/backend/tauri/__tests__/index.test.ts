@@ -293,7 +293,9 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   expect(roster.value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
   // The 0.1.6 recording carries no per-member `admin`, so the permission status is 'unknown'; its
   // hello frame likewise predates the roles flag flipping true, so the replayed feature map says false.
-  expect(roster.value?.members[0]).toMatchObject({ name: 'Mira Chen', role: 'Platform', projects: ['terum'], joined: '—', lastSeen: '—', status: 'unknown' });
+  expect(roster.value?.members[0]).toMatchObject({ name: 'Mira Chen', role: 'Platform', projects: ['terum'], joined: null, lastSeen: '—', status: 'unknown' });
+  // The CLI reports neither invitations nor join dates: both are null, never an invented empty list or dash.
+  expect(roster.value?.invited).toBeNull();
 
   expect(await backend.features()).toMatchObject({ memberRole: true, roles: false, follow: false });
   const catalog = await backend.catalog();

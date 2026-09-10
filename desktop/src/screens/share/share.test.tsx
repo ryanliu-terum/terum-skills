@@ -76,6 +76,20 @@ it('invite from status copies the supplied join command',async()=>{const copy=vi
 it('invite from status exposes partial outcomes through the mock URL',async()=>{open('#/share?dialog=invite&__mock=partial');fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value:'sortiz, bad'}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(within(screen.getByRole('dialog')).getByRole('status')).toHaveTextContent('Invited @sortiz.'));const dialog=screen.getByRole('dialog');expect(dialog).toHaveTextContent('@bad: Could not invite @bad');expect(within(dialog).getByRole('alert')).toBeInTheDocument();});
 it('invite from status shows a success notice on the page',async()=>{open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(await screen.findByRole('status')).toHaveTextContent('Invited @sortiz.');});
 
+it('omits the invitations clause and dashes Joined when the CLI serves neither',async()=>{
+ const roster=await backend.roster();if(!roster.ok)throw new Error(roster.error);
+ vi.spyOn(backend,'roster').mockResolvedValue({...roster,value:{...roster.value,invited:null,members:roster.value.members.map(member=>({...member,joined:null}))}});
+ open('#/share');await screen.findByTestId('member-row-0');
+ expect(screen.getByText('12 members')).toBeInTheDocument();
+ expect(screen.queryByText(/invitation/)).toBeNull();
+ expect(screen.queryByTestId('invited-row')).toBeNull();
+ expect(within(screen.getByTestId('member-row-0')).getAllByRole('cell')[2]).toHaveTextContent('—');
+});
+it('keeps the mock invitation clause and joined dates when they are served',async()=>{
+ open('#/share');await screen.findByTestId('member-row-0');
+ expect(screen.getByText('12 members · 1 invitation')).toBeInTheDocument();
+ expect(within(screen.getByTestId('member-row-0')).getAllByRole('cell')[2]).toHaveTextContent(design.ROSTER[0]!.joined);
+});
 it('shows a failed removal on its row and clears it when the next removal succeeds',async()=>{
  const team=vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
  open('#/share');await screen.findByTestId('member-row-1');
