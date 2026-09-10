@@ -40,6 +40,9 @@ export const execCommand: Exec = (command, args, options = {}) => {
         env: { ...process.env, ...(inherit ? {} : { GIT_TERMINAL_PROMPT: '0' }), ...options.env },
         stdio: inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
         detached: grouped,
+        // Windows: when this CLI runs under the desktop app it has no console, and a piped git/gh child would
+        // otherwise be given a fresh console window of its own. Inherited runs (gh auth login) keep the terminal.
+        windowsHide: !inherit,
       });
       const out: Buffer[] = []; const err: Buffer[] = [];
       let bytes = 0; let expired = false;

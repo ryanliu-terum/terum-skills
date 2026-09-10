@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -44,6 +46,11 @@ enum LineEvent {
   Error { message: String },
 }
 
+/// `CREATE_NO_WINDOW` (winbase.h): start the console child without a console window. Named here rather than
+/// pulled from windows-sys so the shell keeps its dependency list.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 fn event_name(id: &str) -> String {
   format!("cli:{id}")
 }
@@ -61,6 +68,11 @@ fn cli_spawn(app: AppHandle, bridge: State<'_, Bridge>, id: String, node: String
   command.arg(&entry).arg("--frames").args(&args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
   #[cfg(unix)]
   command.process_group(0);
+  // Windows: this shell is a GUI-subsystem process, so every console child it starts would get its own console
+  // window (a bare node.exe window flashing on each interaction) unless the spawn says CREATE_NO_WINDOW. Stdio is
+  // piped, so the child needs no console at all.
+  #[cfg(windows)]
+  command.creation_flags(CREATE_NO_WINDOW);
   match cwd.as_deref().filter(|dir| !dir.is_empty()) {
     Some(dir) => { command.current_dir(dir); }
     // No cwd from the webview means the child would inherit the app's LaunchServices cwd, `/`.
