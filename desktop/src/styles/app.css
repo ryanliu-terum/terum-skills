@@ -68,11 +68,15 @@ button.icon-button:hover {background:var(--tk-bg3);color:var(--tk-text1);}
 .topbar-right {display:flex;align-items:center;justify-content:flex-end;gap:4px;width:240px;padding:0 12px;height:40px;flex-shrink:0;box-sizing:border-box;}
 .bell-button {width:28px;height:28px;border-radius:6px;}
 .sidebar {display:flex;flex-direction:column;width:240px;box-sizing:border-box;flex-shrink:0;}
-.sidebar-inner {display:flex;flex-direction:column;gap:16px;flex-grow:1;min-height:0;padding:4px 8px 0 8px;box-sizing:border-box;}
-.nav-group {display:flex;flex-direction:column;gap:1px;}
+/* Sidebar spacing adopted from the realistic mock build (Teddy, 2026-09-10): 34px rows, 4px inside a group,
+   26px between groups, 28px above the first group, and 56px more above Team. Pinned by
+   src/styles/__tests__/app-css.test.ts and e2e/routes/sidebar-spacing.spec.ts. */
+.sidebar-inner {display:flex;flex-direction:column;gap:26px;flex-grow:1;min-height:0;padding:28px 8px 0 8px;box-sizing:border-box;}
+.sidebar-inner>.nav-group:nth-child(2) {margin-top:56px;}
+.nav-group {display:flex;flex-direction:column;gap:4px;}
 .section-header {display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 4px 0 8px;color:var(--tk-text3);font-size:12px;font-weight:510;box-sizing:border-box;}
 .section-header>div:first-child {display:flex;align-items:center;gap:4px;}
-.nav-row {display:flex;align-items:center;justify-content:space-between;gap:8px;height:28px;padding:0 8px;border-radius:4px;font-size:13px;font-weight:500;box-sizing:border-box;}
+.nav-row {display:flex;align-items:center;justify-content:space-between;gap:8px;height:34px;padding:0 8px;border-radius:4px;font-size:13px;font-weight:500;box-sizing:border-box;}
 .nav-label {display:flex;align-items:center;gap:8px;flex-grow:1;min-width:0;}
 .nav-label>span,.footer-lines>span {white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .nav-count {font-size:12px;font-weight:400;font-variant-numeric:tabular-nums;}

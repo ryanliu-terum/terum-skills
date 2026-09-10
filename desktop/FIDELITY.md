@@ -4,84 +4,84 @@ One row per in-scope board (91: every canvas board except the nine *States/*Hove
 
 | Board | route+state | status | tolerance | note |
 |---|---|---|---|---|
-| Main | `#/frame` | locked | 0 | the bare shell (Global selected, empty panel); exact: 0 differing pixels |
-| Light | `#/frame?theme=light` | locked | 0 | exact: 0 differing pixels |
-| Library | `#/library/global` | in-progress | 0.0030 | hover: the update flag of the card at HOVER_INDEX (the card whose flags contain 'update'); its tooltip shows; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
-| LibraryLight | `#/library/global?theme=light` | in-progress | 0.0030 | same hover as Library; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
-| LibraryEmpty | `#/library/global?__mock=empty` | in-progress | 0.0020 | sidebar Global count 0; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
-| LibraryNoResults | `#/library/global?q=deploy%20prod` | in-progress | 0.0020 | DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
-| LibraryLoading | `#/library/global?__mock=loading` | in-progress | 0.0020 | sidebar counts hidden; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
-| LibraryCollapsed | `#/library/global?overview=0` | in-progress | 0.0030 | overview hidden; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| Main | `#/frame` | in-progress | 0 | the bare shell (Global selected, empty panel); exact: 0 differing pixels; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| Light | `#/frame?theme=light` | in-progress | 0 | exact: 0 differing pixels; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| Library | `#/library/global` | in-progress | 0.0030 | hover: the update flag of the card at HOVER_INDEX (the card whose flags contain 'update'); its tooltip shows; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| LibraryLight | `#/library/global?theme=light` | in-progress | 0.0030 | same hover as Library; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| LibraryEmpty | `#/library/global?__mock=empty` | in-progress | 0.0020 | sidebar Global count 0; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| LibraryNoResults | `#/library/global?q=deploy%20prod` | in-progress | 0.0020 | DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| LibraryLoading | `#/library/global?__mock=loading` | in-progress | 0.0020 | sidebar counts hidden; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| LibraryCollapsed | `#/library/global?overview=0` | in-progress | 0.0030 | overview hidden; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
 | LibrarySidebarHidden | `#/library/global?sidebar=hidden` | in-progress | 0.0030 | D9: sidebar hidden (240 → 0), reopen button in the top bar; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
-| LibraryProjectsCollapsed | `#/library/global?projects=collapsed` | in-progress | 0.0030 | D9: Projects chevron-right, project rows folded; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
-| LibraryInboxCollapsed | `#/library/global?inbox=collapsed` | in-progress | 0.0030 | D9: Inbox chevron-right, Pushes / Updates / Alerts folded; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
-| LibraryError | `#/library/global?__mock=error` | in-progress | 0.0020 | sidebar counts hidden; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
-| SkillDetail | `#/skill/deploy-check` | locked | 0.0030 |  |
-| SkillDetailLight | `#/skill/deploy-check?theme=light` | locked | 0.0030 |  |
-| SkillDetailRailClosed | `#/skill/deploy-check?tab=evals&rail=closed` | locked | 0.0030 |  |
-| SkillDetailUsesHover | `#/skill/deploy-check` | locked | 0.0030 | hover: the '12 teammates use this' facepile; its popover shows |
-| SkillDetailEvals | `#/skill/deploy-check?tab=evals` | locked | 0.0030 |  |
-| SkillDetailEvalsReport | `#/skill/deploy-check?tab=evals` | locked | 0.0025 | viewport 1440x1900 (the window stretched) |
-| SkillDetailQuality | `#/skill/deploy-check?tab=quality` | locked | 0.0030 |  |
-| SkillDetailActivity | `#/skill/deploy-check?tab=activity` | locked | 0.0030 |  |
-| SkillDetailFiles | `#/skill/deploy-check?menu=files` | locked | 0.0030 | the SKILL.md tab's file menu open |
-| SkillDetailNoReceipt | `#/skill/onboarding-tour?tab=evals` | locked | 0.0030 |  |
-| SkillDetailPartial | `#/skill/migration-guard?tab=evals` | locked | 0.0030 |  |
-| SkillDetailDisabled | `#/skill/deploy-check?__mock=disabled` | locked | 0.0030 | status switch off |
-| SkillDetailNotInstalled | `#/skill/deploy-check?__mock=not-installed` | locked | 0.0030 | reached from Marketplace: crumb root Marketplace, sidebar Marketplace selected |
-| SkillDetailInstall | `#/skill/deploy-check?__mock=not-installed&dialog=install` | locked | 0.0035 |  |
-| SkillDetailInstallLight | `#/skill/deploy-check?__mock=not-installed&dialog=install&theme=light` | locked | 0.0035 | the 88th board, locked 2026-09-08 after the other 87 (63 differing pixels, 0.00005) |
-| SkillDetailRemove | `#/skill/deploy-check?dialog=remove` | locked | 0.0035 |  |
-| SkillDetailRunEval | `#/skill/deploy-check?tab=evals&dialog=run-eval` | locked | 0.0035 |  |
-| SkillDetailLoading | `#/skill/deploy-check?__mock=loading` | locked | 0.0020 |  |
-| SkillDetailError | `#/skill/deploy-check?__mock=error` | locked | 0.0020 |  |
-| Inbox | `#/inbox` | locked | 0.0030 | first item selected (alert-missing-incident-triage) |
-| InboxLight | `#/inbox?theme=light` | locked | 0.0030 |  |
-| InboxUpdate | `#/inbox/update-pr-review` | locked | 0.0030 |  |
-| InboxAlert | `#/inbox/alert-offtarget-deploy-check` | locked | 0.0030 |  |
-| InboxEval | `#/inbox/eval-deploy-check` | locked | 0.0030 |  |
-| InboxLoading | `#/inbox?__mock=loading` | locked | 0.0020 |  |
-| InboxEmpty | `#/inbox?__mock=empty` | locked | 0.0020 |  |
-| InboxError | `#/inbox?__mock=error` | locked | 0.0020 |  |
-| Marketplace | `#/marketplace` | locked | 0.0030 |  |
-| MarketplaceFilters | `#/marketplace?filters=open` | locked | 0.0030 | filters popover open, 4 facets active |
-| MarketplaceLight | `#/marketplace?theme=light` | locked | 0.0030 |  |
-| MarketplaceLoading | `#/marketplace?__mock=loading` | locked | 0.0020 | oracle re-shot 2026-09-08 (fallback-font shell), locked in the maintainers' own run |
-| MarketplaceNoResults | `#/marketplace?q=deploy%20prod&active=2` | locked | 0.0020 | '2 filters on' |
-| MarketplaceError | `#/marketplace?__mock=error` | in-progress | 0.0020 | DEVIATES from the locked canvas since 2026-09-09: interim honest error copy (see Deliberate deviations below); awaiting Teddy's final copy + canvas redraw + re-lock |
-| MarketplaceFull | `#/marketplace` | locked | 0.0025 | viewport 1440x1080 |
-| MarketplaceProject | `#/marketplace/projects/terum` | locked | 0.0030 |  |
-| MarketplaceProjectNotInstalled | `#/marketplace/projects/docs` | in-progress | 0.0030 | DEVIATES from the locked canvas since 2026-09-09: the card's Install button and the marketplace install overlay were removed (see Deliberate deviations below); awaiting canvas redraw + re-lock (+528 px against the maintainers' own oracle run) |
-| MarketplaceProjectInstall | `#/marketplace/projects/docs?dialog=install` | in-progress | 0.0035 | DEVIATES from the locked canvas since 2026-09-09: the card's Install button and the marketplace install overlay were removed (see Deliberate deviations below); awaiting canvas redraw + re-lock (+138 px against the maintainers' own oracle run) |
-| MarketplacePerson | `#/marketplace/people/ryan` | locked | 0.0030 |  |
-| MarketplacePersonNotInstalled | `#/marketplace/people/lena` | in-progress | 0.0030 | DEVIATES from the locked canvas since 2026-09-09: the card's Install button and the marketplace install overlay were removed (see Deliberate deviations below); awaiting canvas redraw + re-lock (+528 px against the maintainers' own oracle run) |
-| MarketplaceSkills | `#/marketplace/skills` | in-progress | 0.0030 | DEVIATES from the locked canvas since 2026-09-09: the card's Install button and the marketplace install overlay were removed (see Deliberate deviations below); awaiting canvas redraw + re-lock (+352 px against the maintainers' own oracle run) |
-| MarketplaceProjects | `#/marketplace/projects` | locked | 0.0030 |  |
-| MarketplacePeople | `#/marketplace/people` | locked | 0.0030 |  |
-| MarketplaceCategories | `#/marketplace/categories` | locked | 0.0030 |  |
-| MarketplaceCategory | `#/marketplace/categories/infra` | in-progress | 0.0030 | DEVIATES from the locked canvas since 2026-09-09: the card's Install button and the marketplace install overlay were removed (see Deliberate deviations below); awaiting canvas redraw + re-lock (+176 px against the maintainers' own oracle run) |
-| Share | `#/share` | locked | 0.0030 | hover: member row index 5 (the sixth row) |
-| ShareInvite | `#/share?dialog=invite` | locked | 0.0035 |  |
-| ShareLight | `#/share?theme=light` | locked | 0.0030 | same hover as Share |
-| ShareLoading | `#/share?__mock=loading` | locked | 0.0020 |  |
-| ShareEmpty | `#/share?__mock=empty` | locked | 0.0020 | a team of one |
-| ShareError | `#/share?__mock=error` | locked | 0.0020 |  |
-| Settings | `#/settings/account` | locked | 0.0030 |  |
-| SettingsTeams | `#/settings/teams` | locked | 0.0025 | viewport 1440x1000 |
-| SettingsMachine | `#/settings/machine` | locked | 0.0025 | viewport 1440x1340; hover: placement row index 1 |
-| SettingsSync | `#/settings/sync` | locked | 0.0030 |  |
-| SettingsUpdates | `#/settings/updates` | locked | 0.0030 |  |
-| SettingsInbox | `#/settings/inbox` | locked | 0.0025 | viewport 1440x960 |
-| SettingsEvals | `#/settings/evals` | locked | 0.0030 |  |
-| SettingsSharing | `#/settings/sharing` | locked | 0.0030 |  |
-| SettingsAppearance | `#/settings/appearance` | locked | 0.0030 |  |
-| SettingsAdvanced | `#/settings/advanced` | locked | 0.0030 |  |
-| SettingsAbout | `#/settings/about` | locked | 0.0030 |  |
-| SettingsLight | `#/settings/account?theme=light` | locked | 0.0030 |  |
-| SettingsLoading | `#/settings/account?__mock=loading` | locked | 0.0020 |  |
-| SettingsError | `#/settings/account?__mock=error` | locked | 0.0020 |  |
-| SettingsLeave | `#/settings/teams?dialog=leave` | locked | 0.0035 | viewport 1440x1000; Leave button pressed |
-| SettingsPrune | `#/settings/machine?dialog=prune` | locked | 0.0035 | viewport 1440x1340; Prune button pressed |
+| LibraryProjectsCollapsed | `#/library/global?projects=collapsed` | in-progress | 0.0030 | D9: Projects chevron-right, project rows folded; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| LibraryInboxCollapsed | `#/library/global?inbox=collapsed` | in-progress | 0.0030 | D9: Inbox chevron-right, Pushes / Updates / Alerts folded; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| LibraryError | `#/library/global?__mock=error` | in-progress | 0.0020 | sidebar counts hidden; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetail | `#/skill/deploy-check` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailLight | `#/skill/deploy-check?theme=light` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailRailClosed | `#/skill/deploy-check?tab=evals&rail=closed` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailUsesHover | `#/skill/deploy-check` | in-progress | 0.0030 | hover: the '12 teammates use this' facepile; its popover shows; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailEvals | `#/skill/deploy-check?tab=evals` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailEvalsReport | `#/skill/deploy-check?tab=evals` | in-progress | 0.0025 | viewport 1440x1900 (the window stretched); sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailQuality | `#/skill/deploy-check?tab=quality` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailActivity | `#/skill/deploy-check?tab=activity` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailFiles | `#/skill/deploy-check?menu=files` | in-progress | 0.0030 | the SKILL.md tab's file menu open; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailNoReceipt | `#/skill/onboarding-tour?tab=evals` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailPartial | `#/skill/migration-guard?tab=evals` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailDisabled | `#/skill/deploy-check?__mock=disabled` | in-progress | 0.0030 | status switch off; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailNotInstalled | `#/skill/deploy-check?__mock=not-installed` | in-progress | 0.0030 | reached from Marketplace: crumb root Marketplace, sidebar Marketplace selected; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailInstall | `#/skill/deploy-check?__mock=not-installed&dialog=install` | in-progress | 0.0035 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailInstallLight | `#/skill/deploy-check?__mock=not-installed&dialog=install&theme=light` | in-progress | 0.0035 | the 88th board, locked 2026-09-08 after the other 87 (63 differing pixels, 0.00005); sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailRemove | `#/skill/deploy-check?dialog=remove` | in-progress | 0.0035 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailRunEval | `#/skill/deploy-check?tab=evals&dialog=run-eval` | in-progress | 0.0035 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailLoading | `#/skill/deploy-check?__mock=loading` | in-progress | 0.0020 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SkillDetailError | `#/skill/deploy-check?__mock=error` | in-progress | 0.0020 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| Inbox | `#/inbox` | in-progress | 0.0030 | first item selected (alert-missing-incident-triage); sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| InboxLight | `#/inbox?theme=light` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| InboxUpdate | `#/inbox/update-pr-review` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| InboxAlert | `#/inbox/alert-offtarget-deploy-check` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| InboxEval | `#/inbox/eval-deploy-check` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| InboxLoading | `#/inbox?__mock=loading` | in-progress | 0.0020 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| InboxEmpty | `#/inbox?__mock=empty` | in-progress | 0.0020 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| InboxError | `#/inbox?__mock=error` | in-progress | 0.0020 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| Marketplace | `#/marketplace` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceFilters | `#/marketplace?filters=open` | in-progress | 0.0030 | filters popover open, 4 facets active; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceLight | `#/marketplace?theme=light` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceLoading | `#/marketplace?__mock=loading` | in-progress | 0.0020 | oracle re-shot 2026-09-08 (fallback-font shell), locked in the maintainers' own run; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceNoResults | `#/marketplace?q=deploy%20prod&active=2` | in-progress | 0.0020 | '2 filters on'; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceError | `#/marketplace?__mock=error` | in-progress | 0.0020 | DEVIATES from the locked canvas since 2026-09-09: interim honest error copy (see Deliberate deviations below); awaiting Teddy's final copy + canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceFull | `#/marketplace` | in-progress | 0.0025 | viewport 1440x1080; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceProject | `#/marketplace/projects/terum` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceProjectNotInstalled | `#/marketplace/projects/docs` | in-progress | 0.0030 | DEVIATES from the locked canvas since 2026-09-09: the card's Install button and the marketplace install overlay were removed (see Deliberate deviations below); awaiting canvas redraw + re-lock (+528 px against the maintainers' own oracle run); sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceProjectInstall | `#/marketplace/projects/docs?dialog=install` | in-progress | 0.0035 | DEVIATES from the locked canvas since 2026-09-09: the card's Install button and the marketplace install overlay were removed (see Deliberate deviations below); awaiting canvas redraw + re-lock (+138 px against the maintainers' own oracle run); sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplacePerson | `#/marketplace/people/ryan` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplacePersonNotInstalled | `#/marketplace/people/lena` | in-progress | 0.0030 | DEVIATES from the locked canvas since 2026-09-09: the card's Install button and the marketplace install overlay were removed (see Deliberate deviations below); awaiting canvas redraw + re-lock (+528 px against the maintainers' own oracle run); sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceSkills | `#/marketplace/skills` | in-progress | 0.0030 | DEVIATES from the locked canvas since 2026-09-09: the card's Install button and the marketplace install overlay were removed (see Deliberate deviations below); awaiting canvas redraw + re-lock (+352 px against the maintainers' own oracle run); sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceProjects | `#/marketplace/projects` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplacePeople | `#/marketplace/people` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceCategories | `#/marketplace/categories` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| MarketplaceCategory | `#/marketplace/categories/infra` | in-progress | 0.0030 | DEVIATES from the locked canvas since 2026-09-09: the card's Install button and the marketplace install overlay were removed (see Deliberate deviations below); awaiting canvas redraw + re-lock (+176 px against the maintainers' own oracle run); sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| Share | `#/share` | in-progress | 0.0030 | hover: member row index 5 (the sixth row); sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| ShareInvite | `#/share?dialog=invite` | in-progress | 0.0035 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| ShareLight | `#/share?theme=light` | in-progress | 0.0030 | same hover as Share; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| ShareLoading | `#/share?__mock=loading` | in-progress | 0.0020 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| ShareEmpty | `#/share?__mock=empty` | in-progress | 0.0020 | a team of one; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| ShareError | `#/share?__mock=error` | in-progress | 0.0020 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| Settings | `#/settings/account` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsTeams | `#/settings/teams` | in-progress | 0.0025 | viewport 1440x1000; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsMachine | `#/settings/machine` | in-progress | 0.0025 | viewport 1440x1340; hover: placement row index 1; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsSync | `#/settings/sync` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsUpdates | `#/settings/updates` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsInbox | `#/settings/inbox` | in-progress | 0.0025 | viewport 1440x960; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsEvals | `#/settings/evals` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsSharing | `#/settings/sharing` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsAppearance | `#/settings/appearance` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsAdvanced | `#/settings/advanced` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsAbout | `#/settings/about` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsLight | `#/settings/account?theme=light` | in-progress | 0.0030 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsLoading | `#/settings/account?__mock=loading` | in-progress | 0.0020 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsError | `#/settings/account?__mock=error` | in-progress | 0.0020 | sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsLeave | `#/settings/teams?dialog=leave` | in-progress | 0.0035 | viewport 1440x1000; Leave button pressed; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
+| SettingsPrune | `#/settings/machine?dialog=prune` | in-progress | 0.0035 | viewport 1440x1340; Prune button pressed; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
 | OnboardingBoot | `#/onboarding/boot` | locked | 0.0030 |  |
 | OnboardingWelcome | `#/onboarding/welcome` | locked | 0.0030 |  |
 | OnboardingStyle | `#/onboarding/style` | locked | 0.0030 | System picked |
@@ -92,7 +92,7 @@ One row per in-scope board (91: every canvas board except the nine *States/*Hove
 | OnboardingMore | `#/onboarding/basics?tab=more` | locked | 0.0030 |  |
 | OnboardingTeam | `#/onboarding/team` | locked | 0.0030 |  |
 | OnboardingFeedback | `#/onboarding/feedback` | locked | 0.0030 |  |
-| OnboardingDone | `#/onboarding/done` | in-progress | 0.0030 | over the live Library; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| OnboardingDone | `#/onboarding/done` | in-progress | 0.0030 | over the live Library; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock; sidebar spacing adopted from the realistic mock (Teddy 2026-09-10); awaiting canvas patch + re-render |
 | OnboardingLight | `#/onboarding/style?theme=light` | locked | 0.0030 | Light picked (the picked card is the current theme) |
 | OnboardingError | `#/onboarding/boot?__mock=error` | locked | 0.0020 | the first sync failed |
 
@@ -120,3 +120,4 @@ A locked board asserts the app matches the canvas; when the app deliberately mov
 - 2026-09-09 — **The card's Install button and the marketplace install overlay removed; install and uninstall live in the card's ⋯ menu** (Ryan, 2026-09-09, in session). `SkillCard` no longer draws a footer `Install` button and `market-components` no longer draws its `.market-card-install` overlay; both are now one state-dependent `Install…` / `Uninstall…` row in the card's ⋯ menu, beside the new `Move to…` and `Publish to team…` rows. Because the marketplace wrapper hid the card's own button with `visibility:hidden` while it still occupied the footer row, removing it also shifts the flag icons on any board that draws an uninstalled card. Affected rows, all flipped to `in-progress`: MarketplaceProjectNotInstalled, MarketplaceProjectInstall, MarketplacePersonNotInstalled, MarketplaceSkills, MarketplaceCategory. The Library rows already deviate for the Connect CTA and their fixture cards are all installed, so this change moves none of them further (measured: 0 px against the same oracle). Boards whose cards are all installed — Marketplace, MarketplaceLight, MarketplaceFull, MarketplaceProject, MarketplacePerson — are unchanged and stay locked. The five rows re-lock only after the canvas is redrawn and its oracles re-rendered through the established procedure; they join the same queue as the Connect CTA redraw below.
 - 2026-09-10 — **Library Connect CTA removed; empty-state primary is Add project** (ratified override, ajay 2026-09-10, `.planning/specs/2026-09-10-library-mirror-id-sync.md`, overriding Terum 52d76c00/85c4ebd2 — Ryan to review). The header `Connect` button and the Library empty state's `Connect` primary are gone from `LibraryScreen`; the empty state's primary is now `Add project` (the native chooser + `checkout add` flow from #102), with `Open marketplace` as secondary. Affected rows, all flipped to `in-progress`: Library, LibraryLight, LibraryEmpty, LibraryNoResults, LibraryLoading, LibraryCollapsed, LibrarySidebarHidden, LibraryProjectsCollapsed, LibraryInboxCollapsed, LibraryError, OnboardingDone (it renders over the live Library). The canvas boards still draw the Connect CTA, so a re-render of the existing `.dc.html` files cannot re-lock these rows — the canvas needs the redraw first (same queue as the relabel item; spec sub-question 3). Connect itself remains drawn and real in Settings ▸ Sharing and the onboarding wizard's connect step; those boards are unchanged.
 - 2026-09-10 — **Real-adapter Library subtitle now prints the count alone** (Bugs.pdf W-07 "Unnecessary text", Teddy 2026-09-10). `library()` on the real adapter returned `"N skill folders in <root.label>"` beside a `ViewHeader` title that is already `root.label`, so a checkout header read `teniroo · 32 skill folders in teniroo`; no board draws that shape. It now returns `"N skills"` (`plural(n,'skill')`, the same helper as the search placeholder) plus the ` · N shared with <team>` limb, matching the canvas, the mock (`library_title`) and `.planning/specs/desktop-scoped-stats-and-collapse.md:29`. Mock output is unchanged, so no board moved. The header `meta` slot (path · GitHub state, added deliberately by `dc74a85`) is kept and is not drawn by the canvas's `view_header`; it is part of why the Library rows and OnboardingDone stay `in-progress` until the canvas is redrawn.
+- 2026-09-10 — **Sidebar spacing adopted from the realistic mock** (Teddy, 2026-09-10: "adopt the spacing of the realistic mock to the application"; oracle `~/Projects/SSM/review/2026-09-09-mock-idealized/terum-skills-mock-realistic.html`). Five values in `src/styles/app.css`: `.nav-row` height 28 → 34px, `.nav-group` gap 1 → 4px, `.sidebar-inner` gap 16 → 26px and top padding 4 → 28px, and `margin-top:56px` on the Team group (`.sidebar-inner>.nav-group:nth-child(2)`). Every board that draws the sidebar moves: the 62 rows above flipped from `locked` to `in-progress` (Main and Light, the two exact rows, included) and the 16 rows already `in-progress` gained the same note; the 13 boards without a sidebar (LibrarySidebarHidden and the twelve Onboarding wizard boards) are unaffected. The canvas half is `.planning/codex-runs/sidebar-spacing/patch_ap.py` (adds `SIDEBAR_ROW_H, SIDEBAR_GROUP_GAP, SIDEBAR_STACK_GAP, SIDEBAR_TOP_PAD, TEAM_GROUP_GAP = 34, 4, 26, 28, 56` to `build.py`; `ROW_H` untouched so Settings nav and the exported `design.json` do not change). The rows re-lock only after the patch is applied, `build.py` re-run and the oracles re-rendered on the maintainer's Mac via `render-mac.mjs` ("Oracle provenance"), then `npx playwright test e2e/fidelity` passes.
