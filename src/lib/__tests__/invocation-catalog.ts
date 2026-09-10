@@ -652,9 +652,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/app.ts",
-    "line": 165,
+    "line": 166,
     "policy": "prose",
-    "pattern": "if (/release not found|Not Found \\(HTTP 404\\)|no assets match/i.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;"
+    "pattern": "if (RELEASE_ASSETS_MISSING.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;"
   },
   {
     "file": "src/lib/teamRepo.ts",

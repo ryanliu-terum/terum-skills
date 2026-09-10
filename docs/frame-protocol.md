@@ -69,7 +69,9 @@ A second-team binding refused before any side effect:
 
 Protocol stays 1. `hello.features.localIdentity` advertises the additive `ls --local` identity fields: every row and `notOffered` entry carries `skillId` (UUID or null), and every row carries independent `placed` and `connected` booleans. The app declares these keys optional while keeping local rows strict, so older CLIs remain readable; presence joins require the feature. `ls member` adds `member.installed` records (`id`, `scope`, `since`), and `connect` may return `adopted: true` after consent to record an existing identity. These are additive result fields. `ls --local` additionally carries `remote` on every section (`{url, slug}` or `null`, where `slug` is owner/repo on GitHub and null on every other host); the app declares it optional so an older CLI reads as "not connected".
 
-`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `checkouts`, `projects`, and `refresh`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh (null when gh is absent or offline). `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `projects` is true and means the `project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from registering a local checkout folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs.
+`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `checkouts`, `projects`, `refresh`, and `appUpdate`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh (null when gh is absent or offline). `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `projects` is true and means the `project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from registering a local checkout folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs.
+
+`appUpdate` is true and means the `app-update` verb exists: a shell may check for, download and install a newer desktop app. A CLI that omits the key cannot, and a shell must render the honest read-only state instead of trying.
 
 `hello.protocol` is `1`. `install`, `sync`, and `uninstall-skill` carry `detail` on their confirmation asks. `detail` is an additive optional field: protocol stays 1. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.
 
@@ -97,3 +99,33 @@ commit in it is discarded by the reset. `result.value` is:
 
 Exit code is 0 whenever the query ran: a per-team failure is reported in its row, never as a process failure.
 Over frames the verb emits only `hello` and `result`.
+
+### App updates
+
+`app-update --check` (the default) reads the cached release advertisement and local staged/installed versions without network calls or writes. `--check --force` probes release tags under the same GitHub-team policy as `update`. Checks always succeed, reporting probe failures as data.
+
+`app-update --stage [--release <version>]` downloads the selected release through `gh`, verifies its published SHA-256, and stages it without installing. The default release is this CLI's version. An advertised tag with missing release assets returns `ok: true, notPublished: true, staged: false`; the shell stays quiet and retries on the next launch.
+
+`app-update --apply [--release <version>]` hands a staged install to a detached process. The public result values are:
+
+```ts
+export interface AppUpdateCheck {
+  mode: 'check'; platform: AppPlatform; supported: boolean;
+  cliVersion: string | null; latest: string | null; latestAt: string | null;
+  probe: 'ok' | 'skipped' | 'cached' | 'failed'; probeError: string | null;
+  staged: string | null; installed: string[];
+  lastApply: AppUpdateMarker | null; ppid: number;
+}
+export interface AppUpdateStage {
+  mode: 'stage'; version: string; platform: AppPlatform;
+  staged: boolean; notPublished: boolean; alreadyStaged: boolean;
+  asset: string; bytes: number; path: string | null;
+}
+export interface AppUpdateApply { mode: 'apply'; version: string; platform: AppPlatform; awaitPid: number | null; handedOff: true }
+```
+
+`AppPlatform` is the existing desktop platform name. `lastApply` has `{schema:1, version:string, phase:'waiting'|'installing'|'launched'|'failed', at:string, error:string|null}`. `ppid` is the CLI's parent process ID, available for verifying the app handoff.
+
+`app-update --apply` returns as soon as the background installer process exists. The shell must then quit; it is the shell's job to quit and the CLI never kills it. `--apply` watches the CLI's parent process only in frame mode, where that parent is the shell itself; from a terminal it installs immediately.
+
+On macOS, quit the running app before applying from a terminal: `open` without `-n` would otherwise bring the old instance to front. On Windows, the silent installer handles an existing running copy. The hidden detached install leg never uses `--frames`; it records its phases in `run/app-update.json`, never rewrites `run/app.json`, and does not update the CLI.

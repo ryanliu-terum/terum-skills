@@ -5,10 +5,12 @@ import { activeSetupSession, existingSetupSession, setupSession, useBackend } fr
 import type { LaunchContext } from '../backend/types';
 import { useUrlState } from './url-state';
 import { decide, needsLaunchStatus } from './launch-decision';
+import { useAppUpdateCheck } from './useAppUpdateCheck';
 
 export function LaunchCoordinator() {
  const backend = useBackend(), client = useQueryClient(), navigate = useNavigate(), { mock } = useUrlState();
  const openBoot = useEffectEvent(() => navigate('/onboarding/boot', { replace: true }));
+ useAppUpdateCheck();
  useEffect(() => {
   let disposed = false;
   let lastSeen: string | null | undefined;
