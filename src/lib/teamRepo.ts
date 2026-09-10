@@ -462,13 +462,19 @@ export async function describeClone(root: string, normalized: string, runner: Ru
 
 /** The per-clone writer lock's path — the one safeWrite holds; `team leave` takes it before removing the clone. */
 /**
+ * Cross-batch contract C1: the optional trailing options `refreshClone` accepts. `lockWaitMs`/`onWaiting` bound
+ * and report the wait for the per-clone writer lock; `deadlineMs` bounds the fetch. A field a caller does not
+ * use is accepted and ignored. Never change the positional parameters.
+ */
+export interface RefreshOptions { lockWaitMs?: number; onWaiting?: (info: { label: string; elapsedMs: number }) => void; deadlineMs?: number }
+/**
  * Bring a clone to `origin/main` the way safeWrite does — fetch, then hard reset. The clone is
  * disposable state (§4.2), so a local `main` that drifted (a process killed between safeWrite's
  * commit and its reset) heals here instead of wedging every later verb behind a fast-forward
  * failure. Verb preflights (`publish`, `sync`) share this; `pull --ff-only` is never the right
  * refresh for a clone we own (D5b, 2026-09-05 close-out walk).
  */
-export async function refreshClone(runner: Runner, clone: string, options: { label?: string; env?: NodeJS.ProcessEnv; lockStale?: number } = {}): Promise<void> {
+export async function refreshClone(runner: Runner, clone: string, options: { label?: string; env?: NodeJS.ProcessEnv; lockStale?: number } & RefreshOptions = {}): Promise<void> {
   // Under the same writer lock safeWrite and `team leave` hold: a hard reset while another process
   // sits between its commit and its push would rewind that commit, and its `push HEAD` would then
   // report "everything up-to-date" for a write that never left the machine. The lock is re-checked
@@ -477,7 +483,8 @@ export async function refreshClone(runner: Runner, clone: string, options: { lab
   await withCloneLock(clone, async (assertHeld) => {
     for (const args of [['fetch', 'origin'], ['reset', '--hard', 'origin/main']]) {
       assertHeld();
-      const result = await runner.run('git', args, { cwd: clone, env: options.env });
+      // A hung fetch must not hold a child slot or the writer lock; the local reset needs no deadline.
+      const result = await runner.run('git', args, { cwd: clone, env: options.env, ...(args[0] === 'fetch' ? { deadlineMs: options.deadlineMs } : {}) });
       if (result.code !== 0) {
         const stderr = (result.stderr || result.stdout).trim();
         const message = `Could not refresh ${options.label ?? clone}: ${stderr}`;

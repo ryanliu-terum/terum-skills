@@ -29,7 +29,7 @@ export interface CancelFrame { t: 'cancel'; }
 export type InboundFrame = AnswerFrame | CancelFrame;
 
 /** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed). */
-export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'project create', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline'] as const;
+export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'project create', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline', 'refresh'] as const;
 
 /**
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
@@ -41,6 +41,7 @@ export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   memberRole: true, localIdentity: true, roles: true,
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
   disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: false,
+  refresh: true,
 });
 
 export const COMMANDER_NON_ERRORS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);

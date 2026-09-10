@@ -28,6 +28,7 @@ import { run as runValidate } from './commands/validate.js';
 import { run as runEvalReport } from './commands/evalReport.js';
 import { run as runEval } from './commands/eval.js';
 import { run as runReceiptCheck } from './commands/receiptCheck.js';
+import { run as runRefresh } from './commands/refresh.js';
 import { Prompter } from './lib/prompt.js';
 import { failure, Result } from './lib/result.js';
 
@@ -36,10 +37,10 @@ import { failure, Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
-export interface CliVerbs { checkout?: typeof runCheckout; project?: typeof runProject; profile?: typeof profile; decline?: typeof decline; app?: typeof runApp; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; connect?: typeof connect; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; receiptCheck?: typeof runReceiptCheck; }
+export interface CliVerbs { checkout?: typeof runCheckout; project?: typeof runProject; profile?: typeof profile; decline?: typeof decline; app?: typeof runApp; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; connect?: typeof connect; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; receiptCheck?: typeof runReceiptCheck; refresh?: typeof runRefresh; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean } = {}): Command {
-  const active: Required<CliVerbs> = { checkout: verbs.checkout ?? runCheckout, project: verbs.project ?? runProject, profile: verbs.profile ?? profile, decline: verbs.decline ?? decline, app: verbs.app ?? runApp, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, connect: verbs.connect ?? connect, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport, receiptCheck: verbs.receiptCheck ?? runReceiptCheck };
+  const active: Required<CliVerbs> = { checkout: verbs.checkout ?? runCheckout, project: verbs.project ?? runProject, profile: verbs.profile ?? profile, decline: verbs.decline ?? decline, app: verbs.app ?? runApp, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, connect: verbs.connect ?? connect, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport, receiptCheck: verbs.receiptCheck ?? runReceiptCheck, refresh: verbs.refresh ?? runRefresh };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
@@ -170,5 +171,9 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     });
   program.command('decline <ref>').description('Decline a skill you have not installed').addOption(new Option('--team <team>').hideHelp())
     .action(async (ref: string, options: { team?: string }) => execute(io => active.decline({ ref, ...options, form: context.form }, io), { verb: 'decline', notices: true }));
+  program.command('refresh')
+    .description('Fetch each team clone to origin/main and nothing else: no placement, no prompts, no push, and no sync stamp')
+    .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
+    .action(async (options: { team?: string }) => execute((io) => active.refresh({ ...options, form: context.form }, io), { verb: 'refresh', notices: true }));
   return program;
 }
