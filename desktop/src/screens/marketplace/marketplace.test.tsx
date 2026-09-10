@@ -20,6 +20,18 @@ it('renders the Docs asking count and exact raw grants', async () => { open('#/m
 it('renders Ryan buckets in the supplied order', async () => { open('#/marketplace/people/ryan'); await screen.findByRole('heading', { name: 'Ryan Liu' }); const buckets = design.DERIVED.personBuckets.ryan; expect(screen.getAllByRole('region').map(el => el.getAttribute('aria-label'))).toEqual(buckets.map(([bucket]) => bucket)); expect(names('skill-card-')).toEqual(buckets.flatMap(([, skills]) => skills)); });
 it('renders Lena placement note', async () => { open('#/marketplace/people/lena'); expect(await screen.findByText('Placed when you sync in Docs')).toBeInTheDocument(); });
 it('renders all seventeen catalog cards in topRated order', async () => { open('#/marketplace/skills'); await screen.findByRole('heading', { name: 'Top rated' }); expect(names('skill-card-')).toEqual(design.DERIVED.topRated); expect(names('skill-card-')).toHaveLength(17); });
+it('toggles the sort button between the drawn ranking and Name, reordering the list A–Z and back', async () => {
+  open('#/marketplace/skills');
+  await screen.findByRole('heading', { name: 'Top rated' });
+  fireEvent.click(screen.getByRole('button', { name: 'Most installed' }));
+  await waitFor(() => expect(location.hash).toContain('sort=name'));
+  expect(names('skill-card-')).toEqual([...design.DERIVED.topRated].sort((a, b) => a.localeCompare(b)));
+  const byName = screen.getByRole('button', { name: 'Name' });
+  expect(byName).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(byName);
+  await waitFor(() => expect(names('skill-card-')).toEqual(design.DERIVED.topRated));
+  expect(screen.getByRole('button', { name: 'Most installed' })).toBeInTheDocument();
+});
 it('renders projects in projectsByMembers order', async () => { open('#/marketplace/projects'); await screen.findByRole('heading', { name: 'Teams / Projects' }); const expected = design.DERIVED.projectsByMembers.map(name => design.PROJECTS.find(p => p.name === name)?.key); expect(names('project-card-')).toEqual(expected); });
 it('renders all twelve people in rosterByAdoption order', async () => { open('#/marketplace/people'); await screen.findByRole('heading', { name: 'People' }); expect(names('person-card-')).toEqual(design.DERIVED.rosterByAdoption); expect(names('person-card-')).toHaveLength(12); });
 it('renders ten category rows with supplied remaining counts', async () => { open('#/marketplace/categories'); await screen.findByRole('heading', { name: 'Browse by category' }); expect(names('category-row-')).toEqual(design.CATEGORIES.map(c => c[0])); for(const [category] of design.CATEGORIES){expect(design.DERIVED.categoryRemaining[category as keyof typeof design.DERIVED.categoryRemaining]).toBe(0);const row=screen.getByTestId('category-row-'+category);expect(within(row).queryByText(/\+\d+ more/)).toBeNull();expect(row.lastElementChild?.previousElementSibling).toHaveTextContent(design.DERIVED.categorySkills[category as keyof typeof design.DERIVED.categorySkills].join(' · '));} });
