@@ -108,6 +108,57 @@ it('hides Add when the CLI reports no project verb', async () => {
   await screen.findByRole('heading', { name: 'Teams / Projects' });
   expect(screen.queryByRole('button', { name: 'Add' })).toBeNull();
 });
+it('sorts the Add skills picker into endorse, share and already-in-project', async () => {
+  open('#/marketplace/projects/terum?dialog=add-skills');
+  const dialog = await screen.findByRole('dialog');
+  // Terum's 8 skills are all on this machine; of the other 7 local folders, api-docs and
+  // handoff-note are the two the team repo has never seen.
+  expect(await within(dialog).findByText('5 in the team · 2 not shared yet')).toBeInTheDocument();
+  expect(within(dialog).getAllByRole('button', { name: 'Add' })).toHaveLength(5);
+  expect(within(dialog).getAllByRole('button', { name: 'Share, then add' })).toHaveLength(2);
+  expect(within(dialog).getAllByText('In this project')).toHaveLength(design.DERIVED.skillsIn.Terum.length);
+  const rows = within(dialog).getAllByRole('listitem').map(row => row.textContent ?? '');
+  expect(rows.findIndex(row => row.startsWith('api-docs'))).toBeGreaterThan(rows.findIndex(row => row.startsWith('csv-profiler')));
+});
+it('endorses a team skill into the project and reports the pull request', async () => {
+  const publish = vi.spyOn(pickBackend(), 'publish');
+  open('#/marketplace/projects/mrf?dialog=add-skills');
+  const dialog = await screen.findByRole('dialog');
+  const row = (await within(dialog).findAllByRole('listitem')).find(item => item.textContent?.startsWith('release-notes'))!;
+  fireEvent.click(within(row).getByRole('button', { name: 'Add' }));
+  await waitFor(() => expect(publish).toHaveBeenCalledWith({ ref: 'release-notes', project: 'mrf' }));
+  expect(await within(row).findByRole('button', { name: 'Endorsement opened' })).toBeInTheDocument();
+});
+it('shares an unshared skill first, then endorses it', async () => {
+  const backend = pickBackend(), connect = vi.spyOn(backend, 'connect'), publish = vi.spyOn(backend, 'publish');
+  open('#/marketplace/projects/ssm?dialog=add-skills');
+  const dialog = await screen.findByRole('dialog');
+  const row = (await within(dialog).findAllByRole('listitem')).find(item => item.textContent?.startsWith('api-docs'))!;
+  expect(within(row).getByText(/not shared with the team yet/)).toBeInTheDocument();
+  fireEvent.click(within(row).getByRole('button', { name: 'Share, then add' }));
+  const ask = await screen.findByRole('dialog', { name: 'Connect api-docs?' });
+  fireEvent.click(within(ask).getByRole('button', { name: 'Yes' }));
+  await waitFor(() => expect(connect).toHaveBeenCalledWith({ path: '~/.claude/skills/api-docs' }));
+  await waitFor(() => expect(publish).toHaveBeenCalledWith({ ref: 'api-docs', project: 'ssm' }));
+});
+it('leaves a declined share unendorsed', async () => {
+  const backend = pickBackend(), publish = vi.spyOn(backend, 'publish');
+  open('#/marketplace/projects/docs?dialog=add-skills');
+  const dialog = await screen.findByRole('dialog');
+  const row = (await within(dialog).findAllByRole('listitem')).find(item => item.textContent?.startsWith('handoff-note'))!;
+  fireEvent.click(within(row).getByRole('button', { name: 'Share, then add' }));
+  const ask = await screen.findByRole('dialog', { name: 'Connect handoff-note?' });
+  fireEvent.click(within(ask).getByRole('button', { name: 'No' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Connect handoff-note?' })).toBeNull());
+  expect(publish).not.toHaveBeenCalled();
+});
+it('hides Add skills when the CLI reports no project verb', async () => {
+  const backend = pickBackend(), features = await backend.features();
+  vi.spyOn(backend, 'features').mockResolvedValue({ ...features, projects: false });
+  open('#/marketplace/projects/terum');
+  await screen.findByRole('heading', { name: 'Terum' });
+  expect(screen.queryByRole('button', { name: 'Add skills' })).toBeNull();
+});
 it('persists Follow and re-renders Following', async () => { open('#/marketplace/people/ryan'); fireEvent.click(await screen.findByRole('button', { name: 'Follow ryan' })); expect(screen.getByRole('button', { name: 'Unfollow ryan' })).toHaveTextContent('Following'); expect(pickBackend().prefs.get('following:ryan', false)).toBe(true); fireEvent.click(screen.getByRole('button', { name: 'Unfollow ryan' })); expect(screen.getByRole('button', { name: 'Follow ryan' })).toHaveTextContent('Follow'); });
 it('handles failed Follow preferences without changing following state', async () => { open('#/marketplace/people/ryan'); await screen.findByRole('button', { name: 'Follow ryan' }); vi.spyOn(pickBackend().prefs, 'set').mockImplementation(() => { throw new Error('Preferences unavailable.'); }); fireEvent.click(screen.getByRole('button', { name: 'Follow ryan' })); expect(await screen.findByRole('alert')).toHaveTextContent('Preferences unavailable.'); expect(screen.getByRole('button', { name: 'Follow ryan' })).toHaveAttribute('aria-pressed', 'false'); });
 it('opens project install from its primary and closes after successful run', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/projects/docs'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); const consent = await screen.findByRole('dialog', { name: 'Approve these tools for docs?' }); fireEvent.click(within(consent).getByRole('button', { name: 'Yes' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs' }); expect(location.hash).toBe('#/marketplace/projects/docs'); });
