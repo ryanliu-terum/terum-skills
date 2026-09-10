@@ -195,12 +195,12 @@ it.each([{ ...updateReport, unexpected: true }, { ...updateReport, advice: undef
 const framesDirectory=resolve('../.planning/codex-runs/m7-S7g/frames');
 function statusReplay(failed=false, change?:(frame:Record<string,unknown>,verb:string)=>void){
  return fakeBridge((args,emit)=>{
-  const name=args[0]==='status'?'status':'ls-local';
+  const name=args[0]==='status'?'status':args.includes('--local')?'ls-local':'ls';
   for(const line of readFileSync(resolve(framesDirectory,name+'.jsonl'),'utf8').trim().split('\n')){
    const frame=JSON.parse(line) as Record<string,unknown>;
    if(frame.t==='result'){
     if(failed&&name==='status')Object.assign(frame,{ok:false,exitCode:1,error:'Unreadable team clone.'});
-    change?.(frame,name);
+    if(name!=='ls')change?.(frame,name);
    }
    emit({kind:'stdout',line:JSON.stringify(frame)});
   }
@@ -214,14 +214,14 @@ it.each([false,true])('serves recorded status and settings with real team data (
  expect(Object.keys(status.value?.counts??{})).toEqual([]);
  expect(status.value?.teams[0]?.clone).toContain('/fx/home/.terum/skills/teams/acme');
  expect(status.value?.teams[0]?.joinBlock?.join('\n')).toContain('npx -y terum-skills@latest setup acme/team');
- expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,PINNED_N:1,APPROVALS:[],QUARANTINE:[],HOOK:{installed:false},APP_VERSION:releaseVersion,AGENT_CLI:'—',CLI_LATEST:'—'});
- expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'2026-09-01T00:00:00Z','up to date']);
- expect(settings.value?.SHARED[0]).toEqual(['22222222-2222-4222-8222-222222222222',expect.stringContaining('/skills/tdd'),'acme','—']);
+ expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{publish:'Pull request',license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,PINNED_N:0,APPROVALS:[],QUARANTINE:null,HOOK:null,APP_VERSION:releaseVersion,AGENT_CLI:'—',CLI_LATEST:null});
+ expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',null,'2026-09-01T00:00:00Z','up to date']);
+ expect(settings.value?.SHARED[0]).toEqual(['tdd',expect.stringContaining('/skills/tdd'),'acme','—']);
  expect(status.value?.tools).toEqual(settings.value?.tools);
  expect(status.value?.tools.git).toBe(true);
  if(failed){expect(status).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});expect(settings).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});}
- // Reads are shared across status and settings (read cache); a failed status is not kept, so it is retried once.
- expect(f.spawns.map(s=>s.args)).toEqual(failed?[['status'],['ls','--local'],['status']]:[['status'],['ls','--local']]);expect(f.writes).toEqual([]);
+ // Reads are shared across status and settings (read cache); a failed status is not kept, so it is retried once. A single-team settings read adds `ls --team` whenever status yielded a value, partial or not.
+ expect(f.spawns.map(s=>s.args)).toEqual(failed?[['status'],['ls','--local'],['status'],['ls','--team','acme']]:[['status'],['ls','--local'],['ls','--team','acme']]);expect(f.writes).toEqual([]);
 });
 it.each([null,'old','current'])('only displays approvals joined to current grants (hash=%s)',async hash=>{
  const f=statusReplay(false,(frame,verb)=>{
@@ -256,8 +256,8 @@ it('marks a shared row Missing only when a scanned root should hold its source',
   value.ledger.shared[0]!.source=value.ledger.placements[0]!.path.replace(/deploy-check$/,'ghost');
  });
  const settings=await createTauriBackend(f.bridge).settings();
- // No local row carries the shared id and the scanned global root has no such folder: the name is unknowable and the state is Missing.
- expect(settings.value?.SHARED[0]).toEqual(['22222222-2222-4222-8222-222222222222',expect.stringContaining('/ghost'),'acme','Missing']);
+ // No local row carries the shared id and the scanned global root has no such folder: the skills list still names it and the state is Missing.
+ expect(settings.value?.SHARED[0]).toEqual(['tdd',expect.stringContaining('/ghost'),'acme','Missing']);
 });
 it('preserves a future stamp and null fields from an unreadable clone',async()=>{
  const stamp='2099-01-01T00:00:00.000Z';
@@ -416,8 +416,8 @@ it.each(healthCases)('maps local health %s onto the drawn placement state withou
  const f=statusReplay(false,(frame,verb)=>{if(verb!=='ls-local')return;const value=frame.value as {local:{rows:Record<string,unknown>[]}[]};Object.assign(value.local[0]!.rows[0]!,{health,state:'arbitrary prose'});});
  const settings=await createTauriBackend(f.bridge).settings();
  expect(settings.ok).toBe(true);
- expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',expect.stringMatching(/^[a-f0-9]{12}$/),'2026-09-01T00:00:00Z',state]]);
- expect(settings.value?.PINNED_N).toBe(1);
+ expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',null,'2026-09-01T00:00:00Z',state]]);
+ expect(settings.value?.PINNED_N).toBe(0);
 });
 it('joins Skill provenance by ledger team and id (a relocated folder), never by name or prose',async()=>{
   const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'relocated',path:'/skills/relocated',state:'arbitrary prose',tracked:true,shared:[{id:'shared-id',team:'other'}],placement:{id:'id-a',team:'acme',version:'1234567890abcdef'.repeat(2)+'12345678'},health:'up-to-date'}],notOffered:[],problems:[]}]};

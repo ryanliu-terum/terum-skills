@@ -122,3 +122,7 @@ it('drops a removal error on navigating away from Share',async()=>{
  await screen.findByTestId('member-row-1');
  expect(screen.queryByRole('alert')).toBeNull();
 });
+it('keeps mock founder role suffixes',async()=>{
+ open('#/share');const row=await screen.findByTestId('member-row-0');
+ expect(within(row).getByText('ryan · founder')).toBeVisible();
+});

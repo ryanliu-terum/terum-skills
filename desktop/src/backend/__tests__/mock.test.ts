@@ -17,7 +17,7 @@ it.each([
  const b=createMockBackend();const onboarding=await b.onboarding();
  location.hash='#/frame?__mock=error';
  const reads={library:()=>b.library({scope:{kind:'global'}}),skill:()=>b.skill({ref:'deploy-check'}),inbox:()=>b.inbox(),marketplace:()=>b.catalog(),share:()=>b.roster(),settings:()=>b.settings(),onboarding:()=>b.onboarding()};
- expect(await reads[family]()).toEqual({ok:false,error,...(family==='onboarding'&&onboarding.ok?{value:onboarding.value}:{})});
+ expect(await reads[family]()).toEqual({ok:false,error,...(family==='settings'?{reason:'invalid-config'}:{}),...(family==='onboarding'&&onboarding.ok?{value:onboarding.value}:{})});
  if(family==='marketplace')expect(await b.search({q:'deploy'})).toEqual({ok:false,error});
  if(family==='settings')expect(await b.update()).toEqual({ok:false,error});
  if(family==='onboarding')expect(await b.sync({}).done).toEqual({ok:false,error});
@@ -103,7 +103,7 @@ it('returns CLI fixture versions and the complete update report', async () => {
 });
 it('keeps a declined prune on the success path and emits the CLI line', async()=>{
  const run=createMockBackend().sync({prune:true});
- expect(await answerAll(run,()=>false)).toEqual({ok:true,value:{placed:[],removed:[]}});
+ expect(await answerAll(run,()=>false)).toEqual({ok:true,value:{placed:0,deferred:[],notices:[],changed:false,teams:[]}});
  const frames=[];for await(const frame of run.frames)frames.push(frame);
  expect(frames).toContainEqual({t:'print',line:'Prune cancelled; nothing deleted.'});
  expect(frames.at(-1)).toEqual({t:'result',ok:true});
@@ -143,4 +143,9 @@ it('records a mock quit request and closes the window',async()=>{
  const backend=createMockBackend(),close=vi.spyOn(window,'close').mockImplementation(()=>{});
  expect(backend.quitRequested).toBe(false);await backend.quit();
  expect(backend.quitRequested).toBe(true);expect(close).toHaveBeenCalledOnce();
+});
+
+it('returns the count-based sync outcome from the fixture names',async()=>{
+ const b=createMockBackend();
+ expect(await b.sync({team:'terum'}).done).toEqual({ok:true,value:{placed:design.SKILLS.length,deferred:[],notices:[],changed:true,teams:[{team:'terum',state:'synced'}]}});
 });

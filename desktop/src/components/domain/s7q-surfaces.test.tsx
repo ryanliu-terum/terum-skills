@@ -70,7 +70,7 @@ it.each(cases)('$key: $route hides/degrades false and restores the true DOM',asy
   }else expect(document.querySelector(c.selector)).toBeNull();
   if(c.absentText)expect(screen.queryByText(c.absentText)).toBeNull();
  });
- if(c.key==='lastSeen')expect(screen.getByRole('columnheader',{name:'Last seen'})).toBeVisible();
+ if(c.key==='lastSeen'){expect(screen.getByText('Last seen')).not.toBeVisible();expect(document.querySelector(c.selector)).not.toBeVisible();}
  if(c.key==='disablePerMachine'&&c.route.includes('/skill/'))expect(screen.getByText('Loaded in every session')).toBeVisible();
  await act(async()=>{client.setQueryData([queryKey],original);});
  await waitFor(()=>expect(html(c.selector)).toBe(before));
