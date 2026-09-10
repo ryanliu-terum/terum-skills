@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Menu as BaseMenu } from '@base-ui/react/menu';
 import { useBackend, useFeatures } from '../../backend';
 import type { Member, Roster, TeamStatus } from '../../backend/types';
 import { useUrlState } from '../../app/url-state';
@@ -60,10 +59,13 @@ function MembersHead(){const features=useFeatures();return <div role="row" class
 function sub(m:{name:string;handle:string;role:string},memberRole:boolean|undefined){return [m.handle===m.name?'':m.handle,memberRole?m.role:''].filter(Boolean).join(' · ');}
 function MemberRow({member:m,index}:{member:Member;index:number}){
   const backend=useBackend(), action=useWorkflow(), features=useFeatures();
-  const saved=features?.roles?backend.prefs.get('role:'+m.handle,m.status):m.status, status=saved==='admin'||saved==='member'?saved:m.status;
+  // Read-only permission chip: `m.status` is host truth from the CLI ('admin' | 'member' | 'unknown').
+  // There is no CLI write path for granting admin, so no menu — and 'unknown' (gh unavailable) renders
+  // '—', never a defaulted Member. Removal stays available as its own control beside the chip.
+  const status=m.status==='admin'||m.status==='member'?m.status:null;
   return <div role="row" className="member-row" data-testid={'member-row-'+index}>
     <div role="cell" className="member-name"><Avatar initials={m.initials} size={28}/><div className="member-identity"><span>{m.name}</span><span>{sub(m,features?.memberRole)}</span></div></div>
-    <div role="cell">{features?.roles?<BaseMenu.Root><BaseMenu.Trigger aria-label={'Role for '+m.handle} className={'member-role '+status}>{status==='admin'?'Admin':'Member'}<Icon name="chevron-down" size={10} stroke="2.5"/></BaseMenu.Trigger><BaseMenu.Portal><BaseMenu.Positioner align="start" sideOffset={4}><BaseMenu.Popup className="floating-panel" style={{width:200}}>{['Admin','Member'].map(label=><BaseMenu.Item key={label} className="menu-item" onClick={()=>action.pref('role:'+m.handle,label.toLowerCase())}><span style={{width:14}}>{status===label.toLowerCase()&&<Icon name="check" size={14} stroke="2"/>}</span>{label}</BaseMenu.Item>)}<BaseMenu.Separator style={{height:1,margin:'3px 0',background:'var(--tk-border1)'}}/><BaseMenu.Item className="menu-item" style={{color:'var(--tk-bad)'}} onClick={()=>void action.run(()=>backend.team({kind:'remove',handle:m.handle}))}><span style={{width:14}}/>Remove from team</BaseMenu.Item></BaseMenu.Popup></BaseMenu.Positioner></BaseMenu.Portal></BaseMenu.Root>:<Button onClick={()=>void action.run(()=>backend.team({kind:'remove',handle:m.handle}))}>Remove from team</Button>}{action.error&&<span role="alert" className="member-error">{action.error}</span>}</div>
+    <div role="cell">{features?.roles?status?<span className={'member-role '+status}>{status==='admin'?'Admin':'Member'}</span>:'—':null}<IconButton label="Remove from team" icon="x" size={20} iconSize={14} onClick={()=>void action.run(()=>backend.team({kind:'remove',handle:m.handle}))}/>{action.error&&<span role="alert" className="member-error">{action.error}</span>}</div>
     <div role="cell">{m.joined}</div><div role="cell" style={{visibility:features?.memberRole?'visible':'hidden'}}>{features?.memberRole?m.projects.map(project=><Chip key={project}>{project}</Chip>):'—'}</div><div role="cell">{features?.lastSeen?m.lastSeen:'—'}</div>
   </div>;
 }

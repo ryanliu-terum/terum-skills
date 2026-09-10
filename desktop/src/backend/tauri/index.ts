@@ -25,7 +25,7 @@ import { abbreviateHome } from '../paths';
 // The CLI's result shapes, as of terum-skills 0.1.5 (src/commands/*.ts). Validated loosely: only the fields the seam reads.
 const cliProfile = z.object({ handle: z.string(), changed: z.array(z.string()) });
 const cliDecline = z.object({ handle: z.string(), id: z.string(), declined: z.literal(true) });
-const memberMetadata = { role: z.string().nullish().transform(value => value ?? null), projects: z.array(z.string()).nullish().transform(value => value ?? []) };
+const memberMetadata = { role: z.string().nullish().transform(value => value ?? null), projects: z.array(z.string()).nullish().transform(value => value ?? []), admin: z.boolean().nullish().transform(v => v ?? null) };
 const cliLogin = z.object({ updated: z.array(z.object({ key: z.string(), value: z.string() })), notice: z.string().nullish() });
 const cliInstalled = z.array(z.object({ id: z.string(), team: z.string() }).passthrough());
 const cliUninstalled = z.array(z.object({ id: z.string(), team: z.string(), removed: z.number() }).passthrough());
@@ -204,8 +204,9 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
  };
 }
 
-function rosterModel(team: CliStatus['teams'][number], inventory: Inventory): Roster {
-  const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? '', projects: member.projects ?? [], followers: null, joined: '—', last_publish: '—', lastPublish: '—', lastSeen: '—', status: inventory.roster.find(row => row.handle === member.handle)?.active ? 'active' : 'inactive' }));
+// `status` is the permission chip: host truth from the CLI's per-member `admin` (gh collaborator permission); 'unknown' when gh could not answer — never a defaulted 'member'.
+function rosterModel(team: CliStatus['teams'][number]): Roster {
+  const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? '', projects: member.projects ?? [], followers: null, joined: '—', last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
   return { members, invited: [], member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] };
 }
 function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, people: Person[], features: Pick<Features, 'localIdentity'>, home: string, query?: string): Catalog {
@@ -456,8 +457,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async roster(_, options) {
       const data = await peopleInventory(options);
       if (!data.ok) return {ok:false,error:data.error,...(data.reason?{reason:data.reason}:{})};
-      const { team, inventory } = data.value;
-      return { ok: true, value: rosterModel(team, inventory) };
+      const { team } = data.value;
+      return { ok: true, value: rosterModel(team) };
     },
     async catalog(query, options) {
       const data = await peopleInventory(options);
@@ -466,7 +467,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const local = await read(run(['ls', '--local'], cliLs, value => value, []), options);
       if (!local.ok) return fail(local.error);
       const people: Person[] = [];
-      for (const member of rosterModel(team, inventory).members) {
+      for (const member of rosterModel(team).members) {
         const detail = await read(run(['ls', 'member', '--team', team.team, '--', member.handle], cliLs, value => value, []), options);
         if (!detail.ok) return fail(detail.error);
         if (!detail.value.member) return fail(`No member data for ${member.handle}.`);

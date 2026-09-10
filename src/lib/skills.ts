@@ -66,11 +66,13 @@ export async function endorsedCandidates(clone: string, team: string, handle: st
 export async function readTeam(clone: string): Promise<Team> { return parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json'); }
 export async function readPerson(clone: string, handle: string): Promise<Person> { return parseJson(personSchema, await readFile(join(clone, 'people', `${handle}.json`), 'utf8'), `people/${handle}.json`); }
 
-export interface RosterEntry { handle: string; displayName: string; role: string | null; projects: readonly string[]; }
+/** `admin` is host truth (GitHub collaborator permission), joined on the person's github login; null when the lookup was unavailable or the person declares no login. */
+export interface RosterEntry { handle: string; displayName: string; role: string | null; projects: readonly string[]; admin: boolean | null; }
 
-/** Active roster with filename-checked identities; one bad people file never hides the others. */
-export async function readRoster(clone: string): Promise<{ roster: RosterEntry[]; problems: { file: string; message: string }[] }> {
+/** Active roster with filename-checked identities; one bad people file never hides the others. `options.adminLogins` (lowercased GitHub logins with host admin permission, or null when unknown) decides each entry's `admin`. */
+export async function readRoster(clone: string, options: { adminLogins?: readonly string[] | null } = {}): Promise<{ roster: RosterEntry[]; problems: { file: string; message: string }[] }> {
   const team = await readTeam(clone);
+  const adminLogins = options.adminLogins ?? null;
   const files = (await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).sort();
   const roster: RosterEntry[] = [];
   const problems: { file: string; message: string }[] = [];
@@ -79,7 +81,8 @@ export async function readRoster(clone: string): Promise<{ roster: RosterEntry[]
       const handle = file.slice(0, -5);
       const person = await readPerson(clone, handle);
       if (person.handle !== handle) throw new Error(`Declared handle ${person.handle} does not match filename ${file}.`);
-      if (!team.archived.includes(handle)) roster.push({ handle, displayName: person.display_name, role: person.role ?? null, projects: person.projects ?? [] });
+      const github = person.github.trim().toLowerCase();
+      if (!team.archived.includes(handle)) roster.push({ handle, displayName: person.display_name, role: person.role ?? null, projects: person.projects ?? [], admin: adminLogins === null || github === '' ? null : adminLogins.includes(github) });
     } catch (error) { problems.push({ file: `people/${file}`, message: error instanceof Error ? error.message : String(error) }); }
   }
   roster.sort((a, b) => a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0);
