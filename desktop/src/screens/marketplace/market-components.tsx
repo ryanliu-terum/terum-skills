@@ -20,8 +20,7 @@ export function CardRow({ names, catalog, cols = 3 }: { names: string[]; catalog
 function MarketplaceSkillCard({ skill }: { skill: Card }) {
   // Install lives in the card's ⋯ menu on every surface (Ryan, 2026-09-09): the menu is the only
   // home for install and uninstall, so this family no longer draws an install button of its own.
-  return <div className="market-card-wrap"><SkillCard skill={skill}/></div>;
-}
+  return <div className="market-card-wrap"><SkillCard skill={skill}/></div>;}
 export function Mark({ name, small = false }: { name: string; small?: boolean }) { return <span className={'market-mark' + (small ? ' small' : '')}><Icon name={iconName(name)} size={small ? 15 : 16}/></span>; }
 function FollowControl({ person, compact = false }: { person: Person; compact?: boolean }) {
   const backend = useBackend(), [following, setFollowing] = useState(() => backend.prefs.get('following:' + person.handle, false)), [error, setError] = useState<string | null>(null);

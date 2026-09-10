@@ -20,6 +20,7 @@ import { SHORTCUTS } from '../../lib/shortcuts';
 import { abbreviateHome, stripRemote } from '../paths';
 import { scannedRoots } from './scanned-roots';
 import { overviewCopy } from '../../lib/overview-copy';
+import { bodyExcerpt } from '../../lib/body-excerpt';
 
 /**
  * The real adapter: every long verb is one `terum-skills --frames <verb>` process (run.ts). What the CLI has
@@ -60,10 +61,12 @@ const cliLs = z.object({
   roster: z.array(z.object({ handle: z.string(), active: z.boolean(), ...memberMetadata })), skills: z.array(cliLsSkill), problems: z.array(z.object({ source: z.string(), message: z.string() })), projects: z.array(cliProject).optional(), member: z.object({ installed: z.array(z.object({ id: z.string(), scope: cliScope, since: z.string() })).optional(), handle: z.string(), declined: z.array(z.string()), ...memberMetadata }).optional(),
   local: z.array(cliLocalSection).optional(),
 });
-const cliStatusTeams = z.object({ version: z.string().nullable(), teams: z.array(z.object({ team: z.string(), handle: z.string(), repository: z.string().nullable(), readable: z.boolean(), sharedSkills: z.number().nullable(), memberCount: z.number().nullable(), members: z.array(z.object({ handle: z.string(), displayName: z.string() })).optional() })) });
+const cliStatusTeams = z.object({ version: z.string().nullable(), teams: z.array(z.object({ team: z.string(), handle: z.string(), repository: z.string().nullable(), readable: z.boolean(), sharedSkills: z.number().nullable(), memberCount: z.number().nullable(), members: z.array(z.object({ handle: z.string(), displayName: z.string() })).optional() })), ledger: z.object({ placements: z.array(z.object({ id: z.string(), team: z.string() }).passthrough()) }).nullish() });
 type Inventory = z.infer<typeof cliLs>;
 type InventorySkill = z.infer<typeof cliLsSkill>;
 type InventoryTeam = z.infer<typeof cliStatusTeams>['teams'][number];
+/** The unfiltered status ledger's placements: a fallback presence source that still sees project-scope placements `ls --local` cannot scan (no registered checkout). */
+type LedgerPlacements = readonly { id: string; team: string }[];
 
 type LocalSection=z.infer<typeof cliLocalSection>;
 type LocalRow=z.infer<typeof cliLocalRow>;
@@ -109,8 +112,7 @@ function localCard(row:LocalRow,section:LocalSection,home:string):SkillCard {
   // it says why. A placed row only reaches here when its team could not be read (the screen says so
   // above the grid), and there 0 would be a claim we cannot back, so it stays a dash.
   // The identity line names the root the folder lives in, never the word 'local'.
-  return {teamed:false,path:row.path,name:row.name,desc:row.description??'',project:labelOf(section),category:'—',installs:local?'0 installs':'—',installsN:0,installed:true,placed,onDiskOnly:!placed,teamState:placed?'unknown':row.connected||row.shared.length?'shared':'unshared',paths:[[abbreviateHome(row.path,home),section.scope]],connectedSources:row.connected||row.shared.length?[row.path]:[],flags:row.problem!==undefined?['broken']:local?['local']:[],flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local · not shared with a team'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:null,summary:null,favorite:false,favorites:null,enabled:true,updated:null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};
-}
+  return {teamed:false,path:row.path,name:row.name,desc:row.description??'',project:labelOf(section),category:'—',installs:local?'0 installs':'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:placed?'unknown':row.connected||row.shared.length?'shared':'unshared',paths:[[abbreviateHome(row.path,home),section.scope]],connectedSources:row.connected||row.shared.length?[row.path]:[],flags:row.problem!==undefined?['broken']:local?['local']:[],flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local · not shared with a team'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:null,summary:null,favorite:false,favorites:null,enabled:true,updated:null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};}
 function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):SkillCard {
   return localCard({name:entry.name,path:entry.path,state:'',tracked:false,shared:[],placement:null,health:'unknown',description:entry.description,characters:entry.characters,problem:'Not connectable · '+(entry.detail??entry.reason)},section,home);
 }
@@ -154,13 +156,21 @@ function unidentifiedLocal(local: Inventory, name: string, features: Pick<Featur
   const row = localRows(local).find(row => row.name === name && row.placement === null && row.shared.length === 0);
   return row ? { path: row.path, pathLabel: abbreviateHome(row.path, home) } : null;
 }
-function inventoryCard(row: InventorySkill, local: Inventory, team: string, features: Pick<Features, 'localIdentity'>, home: string): SkillCard {
+// Tri-state install truth from BOTH ledgers and the people file: identified on-disk provenance
+// (`ls --local`), then — only for a skill the scan shows nothing for — the unfiltered status
+// placements (which still see e.g. a project-scope placement in an unregistered checkout the scan
+// never visits), then this user's people-file record. When the scan does cover the skill its richer
+// verdict (placed / connected / on-disk-only, or the old-CLI unidentified ambiguity) wins over the
+// ledger. 'recorded' = the people file says this user installed it, but nothing is on this machine.
+function inventoryCard(row: InventorySkill, local: Inventory, team: string, features: Pick<Features, 'localIdentity'>, home: string, handle: string, ledger: LedgerPlacements): SkillCard {
   const rows = onDisk(local, team, row.id, features);
   const placements = rows.filter(r => r.placement?.id === row.id && r.placement.team === team);
-  const placed = placements.length > 0, installed = rows.length > 0;
+  const present = rows.length > 0;
+  const ledgerPlaced = !present && ledger.some(placement => placement.id === row.id && placement.team === team);
+  const placed = placements.length > 0 || ledgerPlaced;
+  const installed: SkillCard['installed'] = present || ledgerPlaced ? 'placed' : handle !== '' && row.installedBy.some(person => person.handle === handle) ? 'recorded' : 'absent';
   const problem = placements.find(r => r.problem !== undefined || r.health === 'unknown' || r.health === 'gone-from-repo');
-  return { teamed:true, path:null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: installed && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [r.repoRoot] : []), connectedSources: rows.filter(r => r.shared.length > 0).map(r => r.path), desc: row.description, grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: problem || row.unresolved ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };
-}
+  return { teamed:true, path:null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [r.repoRoot] : []), connectedSources: rows.filter(r => r.shared.length > 0).map(r => r.path), desc: bodyExcerpt(row.body) ?? row.description, grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: problem || row.unresolved ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
 /** `owner/repo` as the team remote spells it (case kept; any host); null when the team has no remote. */
 function repoSlug(remote: string | null | undefined): string | null {
@@ -169,8 +179,8 @@ function repoSlug(remote: string | null | undefined): string | null {
 function detailVersionFields(repo: string | null, name: string, version: string | null): Pick<SkillDetail, 'version' | 'version_full' | 'shareCommand'> {
   return { version: version?.slice(0, 12) ?? '—', version_full: version, shareCommand: repo ? `npx -y terum-skills@latest install ${repo}/${name}${version ? '@' + version.slice(0, 12) : ''}` : '—' };
 }
-function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryTeam, validation: Result<ValidateResult>, inventory: Inventory, features: Pick<Features, 'localIdentity'>, home: string): SkillDetail {
-  const card = inventoryCard(row, local, team.team, features, home), rows = onDisk(local, team.team, row.id, features), placed = rows.find(r => r.placement?.id === row.id && r.placement.team === team.team);
+function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryTeam, placements: LedgerPlacements, validation: Result<ValidateResult>, inventory: Inventory, features: Pick<Features, 'localIdentity'>, home: string): SkillDetail {
+  const card = inventoryCard(row, local, team.team, features, home, team.handle, placements), rows = onDisk(local, team.team, row.id, features), placed = rows.find(r => r.placement?.id === row.id && r.placement.team === team.team);
   const path = placed?.path ?? rows[0]?.path ?? null;
   const name = row.author.replace(/\s*<[^>]*>$/, '');
   const installers = row.installedBy;
@@ -182,8 +192,8 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
   const installScopes: [string, string][] = [['Global', 'every session · ~/.claude/skills'], ...projects.map((section): [string, string] => [section.label!, `project · ${abbreviateHome(section.repoRoot ?? section.root, home)}`])];
   // Captions stay display-only; removal needs the original absolute destination.
   const installScopePaths = Object.fromEntries(projects.flatMap(section => section.repoRoot && projects.filter(other => other.label === section.label).length === 1 ? [[section.label!, section.repoRoot]] : []));
-  return { ...card, team: team.team, installScopes, installScopePaths, projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: typeof row.body === 'string' ? row.body.replace(/\n$/, '').split('\n').length : null, skillRef: `${team.team}/${row.name}`, root: 'Global', desc_long: row.description, files: null, size_bytes: '—', ...detailVersionFields(repo, row.name, version), scope: placed?.scope === 'global' ? 'Global' : placed?.label ?? placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
-    unidentifiedLocal: card.installed ? null : unidentifiedLocal(local, row.name, features, home), viewerHandle: team.handle,
+  return { ...card, team: team.team, installScopes, installScopePaths, projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: typeof row.body === 'string' ? row.body.replace(/\n$/, '').split('\n').length : null, skillRef: `${team.team}/${row.name}`, root: 'Global', desc_long: bodyExcerpt(row.body) ?? row.description, files: null, size_bytes: '—', ...detailVersionFields(repo, row.name, version), scope: placed?.scope === 'global' ? 'Global' : placed?.label ?? placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
+    unidentifiedLocal: card.installed === 'placed' ? null : unidentifiedLocal(local, row.name, features, home), viewerHandle: team.handle,
     used_by: [...new Map(installers.map(person => [person.handle, initials(person.displayName)])).values()], users: installers.map(person => [person.handle, initials(person.displayName), `${person.scope.kind === 'global' ? 'Global' : person.scope.project}${person.since ? ` · since ${person.since.slice(0, 10)}` : ''}`]),
     author: { name, handle, role: '', initials: initials(name) }, repo, repoPath: `skills/${row.name}`, path, pathLabel: path === null ? '—' : abbreviateHome(path, home), grants_approved: '', versions:null,latestState:'none',invalidReceiptFile:null,localRuns:[],evalReportError:null, receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: null, hygieneStatus: validation.value === undefined ? null : validation.ok && validation.value.findings === 0 ? 'pass' : 'fail', hygieneWhen: null,
     skillMd: { frontmatter: '', body: [], markdown: row.body ?? null }, evalEstimate: null, evalEstimateText: '', evalEstimateTip: '', evalCommand: `npx -y terum-skills@latest eval ${row.name}`, incumbentLift: null, reportNumbers: null, scoreFractions: { routesExpected: null, roi: null, quality: null }, method: '',
@@ -271,8 +281,8 @@ function rosterModel(team: CliStatus['teams'][number]): Roster {
   const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? null, projects: member.projects ?? [], followers: null, joined: null, last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
   return { members, invited: null, member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] };
 }
-function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, people: Person[], features: Pick<Features, 'localIdentity'>, home: string, query?: string): Catalog {
-  const skills = inventory.skills.map(row => inventoryCard(row, local, team.team, features, home));
+function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, placements: LedgerPlacements, people: Person[], features: Pick<Features, 'localIdentity'>, home: string, query?: string): Catalog {
+  const skills = inventory.skills.map(row => inventoryCard(row, local, team.team, features, home, team.handle, placements));
   const categorySkills: Record<string, string[]> = {};
   for (const skill of skills) (categorySkills[skill.category] ??= []).push(skill.name);
   const projects = (inventory.projects ?? []).map(project => {
@@ -432,16 +442,16 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       : {ok:false,error:`This machine is configured for teams ${teams.map(team=>team.team).join(', ')}; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.`,reason:'ambiguous-team'};
   }
 
-  async function inventoryTeam(team: string | undefined, options?: ReadOptions): Promise<Result<InventoryTeam>> {
+  async function inventoryTeam(team: string | undefined, options?: ReadOptions): Promise<Result<InventoryTeam & { placements: LedgerPlacements }>> {
     const status = await cached(['status', ...(team ? ['--team', team] : [])], cliStatusTeams, options);
     if (!status.ok) return { ok: false, error: status.error };
     if (!team && status.value.teams.length !== 1) return teamSelectionFailure(status.value.teams);
     const selected = team ? status.value.teams.find(value => value.team === team) : status.value.teams.length === 1 ? status.value.teams[0] : undefined;
     if (!selected) return { ok: false, error: 'Select a team explicitly to read its skills.', reason: 'ambiguous-team' };
     if (!selected.readable) return fail(`Team ${selected.team} could not be read.`);
-    return { ok: true, value: selected };
+    return { ok: true, value: { ...selected, placements: status.value.ledger?.placements ?? [] } };
   }
-  async function libraryTeam(team:string|undefined,options?:ReadOptions):Promise<{team:LibraryTeam;inventory?:Inventory;selected?:InventoryTeam}> {
+  async function libraryTeam(team:string|undefined,options?:ReadOptions):Promise<{team:LibraryTeam;inventory?:Inventory;selected?:InventoryTeam & {placements:LedgerPlacements}}> {
     const selected=await inventoryTeam(team,options);
     if(!selected.ok)return {team:selected.reason==='no-team'?{kind:'none'}:{kind:'unreadable',message:selected.error}};
     const inventory=await cached(['ls','--team',selected.value.team], cliLs, options);
@@ -455,7 +465,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     const team = status.value.teams[0]!;
     if (!team.readable) return { ok: false as const, error: `Team ${team.team} could not be read.` };
     const inventory = await cached(['ls', '--team', team.team], cliLs, options);
-    return inventory.ok ? { ok: true as const, value: { team, inventory: inventory.value } } : inventory;
+    return inventory.ok ? { ok: true as const, value: { team, inventory: inventory.value, placements: status.value.ledger.placements } } : inventory;
   }
   async function readEvalReport(ref:string,team:string|undefined,options?:ReadOptions) {
     const lines:string[]=[];
@@ -521,7 +531,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       for (const row of section.rows) {
         if(seen.has(row.path))continue;seen.add(row.path);
         const skill = enrichment.team.kind==='ok' ? joinedSkill(row,enrichment.inventory!,enrichment.team.team,features) : undefined;
-        if(skill && enrichment.team.kind==='ok') {joined++;skills.push({...inventoryCard(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.team.team,features,directory),path:row.path});}
+        if(skill && enrichment.team.kind==='ok') {joined++;skills.push({...inventoryCard(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.team.team,features,directory,enrichment.selected?.handle??'',enrichment.selected?.placements??[]),path:row.path});}
         else skills.push(localCard(row,section,directory));
       }
       for(const entry of section.notOffered??[]) {
@@ -548,7 +558,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
           const team=enrichment.selected.team;
           const validation=await backend.validate({ref:skill.name,team},options);
           if(!validation.ok&&validation.value===undefined)return fail(validation.error);
-          const detail=inventoryDetail(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.selected,validation,enrichment.inventory,features,directory);
+          const detail=inventoryDetail(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.selected,enrichment.selected.placements,validation,enrichment.inventory,features,directory);
           const report=await backend.evalReport({ref:skill.name,team},options);
           return {ok:true,value:report.ok?{...detail,...report.value}:{...detail,evalReportError:report.error}};
         }
@@ -582,7 +592,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const validation = await backend.validate({ ref: row.name, team: selected.value.team }, options);
       // A hygiene failure has a parsed value; an unreadable/cancelled validation is a read failure.
       if (!validation.ok && validation.value === undefined) return { ok: false, error: validation.error, reason: 'unreadable' };
-      const detail = inventoryDetail(row, local.value, selected.value, validation, inventory.value, { localIdentity: hello?.features.localIdentity ?? false }, await home());
+      const detail = inventoryDetail(row, local.value, selected.value, selected.value.placements, validation, inventory.value, { localIdentity: hello?.features.localIdentity ?? false }, await home());
       const report = await backend.evalReport({ref:row.name,team:selected.value.team},options);
       const merged = report.ok ? {...detail, ...report.value} : {...detail, evalReportError: report.error};
       const placementVersion = onDisk(local.value, selected.value.team, row.id, {localIdentity: hello?.features.localIdentity ?? false}).find(item => item.placement?.id === row.id && item.placement.team === selected.value.team)?.placement?.version;
@@ -608,7 +618,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async catalog(query, options) {
       const data = await peopleInventory(options);
       if (!data.ok) return {ok:false,error:data.error,...(data.reason?{reason:data.reason}:{})};
-      const { team, inventory } = data.value;
+      const { team, inventory, placements } = data.value;
       const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return fail(local.error);
       const people: Person[] = [];
@@ -625,7 +635,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         const disk: Person['onDisk'] = [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length];
         people.push({ ...member, joined: member.joined ?? '—', role: detail.value.member.role, lastPublish, last_publish: lastPublish, organization: null, declined: detail.value.member.declined, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: names.length ? [['Authored', names]] : [], placeNote: personPlaceNote(disk), onDisk: disk });
       }
-      return { ok: true, value: catalogModel(team, inventory, local.value, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
+      return { ok: true, value: catalogModel(team, inventory, local.value, placements, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
     },
     search: (args: SearchArgs, options?: ReadOptions) => read(run(['search', '--', args.q], cliSearch, (hits): SearchHit[] => hits.map((hit) => ({ kind: 'skill', ref: hit.team === undefined ? hit.name : `${hit.team}/${hit.name}`, name: hit.name, description: hit.description, team: hit.team ?? null, category: hit.category ?? null, author: hit.author ?? null, installs: hit.installs ?? null, latest: hit.latest ?? null, endorsed: hit.endorsed ?? null, unresolved: hit.unresolved ?? null })), []), options).then(result),
     // Long verbs: one process each, questions become dialogs, the CLI's own decline messages come back as `ok:false`.

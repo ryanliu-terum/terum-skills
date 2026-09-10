@@ -123,9 +123,37 @@ it('keeps the marketplace skill link and install button destinations distinct',a
  expect(within(card).getAllByRole('link')).toHaveLength(1);
  expect(within(card).getByRole('link',{name:'a11y-audit'})).toHaveAttribute('href','#/skill/a11y-audit?root=marketplace');
  fireEvent.click(within(card).getByRole('button',{name:'More actions for a11y-audit'}));
- fireEvent.click(await screen.findByRole('menuitem',{name:'Install…'}));
+ fireEvent.click(await screen.findByRole('menuitem',{name:'Install…'})); // No `__mock=not-installed`: scenarios are a fixture affordance and must never ride along on a real navigation.
  await waitFor(()=>expect(location.hash).toBe('#/skill/a11y-audit?dialog=install&root=marketplace'));
  expect(await screen.findByRole('dialog',{name:'Install a11y-audit'})).toBeVisible();
+});
+it('stretches the card title link over the card so a body click opens the SKILL.md detail',async()=>{
+ open('#/library/global');
+ const card=await screen.findByTestId('skill-card-deploy-check');
+ const link=within(card).getByRole('link',{name:'deploy-check'});
+ expect(link).toHaveAttribute('href','#/skill/deploy-check');
+ fireEvent.click(link);
+ await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check'));
+ expect(await screen.findByTestId('frontmatter')).toBeInTheDocument();
+ expect(screen.getByRole('tab',{name:'SKILL.md'})).toHaveAttribute('aria-selected','true');
+});
+it('shows the truthful recorded state as Reinstall, never plain Install',async()=>{
+ const backend=createMockBackend();const library=await backend.library({scope:{kind:'global'}});if(!library.ok)throw new Error(library.error);
+ vi.spyOn(backend,'library').mockResolvedValue({...library,value:{...library.value,skills:library.value.skills.map(s=>s.name==='deploy-check'?{...s,installed:'recorded' as const,placed:false,onDiskOnly:false}:s)}});
+ const detail=await backend.skill({ref:'deploy-check'});if(!detail.ok)throw new Error(detail.error);
+ vi.spyOn(backend,'skill').mockResolvedValue({...detail,value:{...detail.value,installed:'recorded' as const,placed:false,onDiskOnly:false}});
+ openWith('#/library/global',backend);
+ const card=await screen.findByTestId('skill-card-deploy-check');
+ // #131 moved install out of the card footer into the ⋯ menu, so the recorded state states itself there.
+ expect(within(card).queryByRole('switch')).toBeNull();
+ expect(within(card).queryByText('Install')).toBeNull();
+ fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));
+ const row=await screen.findByRole('menuitem',{name:/^Reinstall…/});
+ expect(row).toHaveAttribute('title','Installed · not on this machine.');
+ expect(row).toHaveTextContent('Installed · not on this machine.');
+ fireEvent.click(row);
+ await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check?dialog=install'));
+ expect(await screen.findByRole('dialog')).toBeInTheDocument();
 });
 
 it('keeps install and uninstall in the card menu alone, with no button of their own',async()=>{

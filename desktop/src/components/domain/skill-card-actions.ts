@@ -38,6 +38,10 @@ function moveAction(skill:SkillCard,at:At):CardAction {
 function placeAction(skill:SkillCard,at:At):CardAction {
  if(skill.placed)return {key:'place',label:'Uninstall…',to:at('dialog=remove'),reason:null};
  if(skill.onDiskOnly)return {key:'place',label:'Install…',to:null,reason:'A copy already sits on this machine that Terum did not place. Connect it to manage it here.'};
+ // The people file records this user installing it but nothing is on this machine (#129's tri-state,
+ // ryanliu 2026-09-09). The card's footer button and the marketplace overlay carried that sentence
+ // before this branch removed both, so the menu row states it instead of offering a bare Install.
+ if(skill.installed==='recorded')return {key:'place',label:'Reinstall…',to:at('dialog=install'),reason:'Installed · not on this machine.'};
  return {key:'place',label:'Install…',to:at('dialog=install'),reason:null};
 }
 /** Publish endorses the skill into team.json; it throws on anything the team repo does not hold,
