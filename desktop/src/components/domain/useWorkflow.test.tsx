@@ -29,6 +29,15 @@ it('keeps an actual failure in the popup error state even when its message says 
   expect(result.current.action.notice).toBeNull();
 });
 
+it('clear dismisses a shown failure without starting a new action',async()=>{
+ const {result}=renderHook(()=>({action:useWorkflow()}),{wrapper});
+ await act(()=>result.current.action.run(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'}))));
+ expect(result.current.action.error).toBe('Team removal requires GitHub repository admin permission.');
+ act(()=>result.current.action.clear());
+ expect(result.current.action.error).toBeNull();
+ expect(result.current.action.notice).toBeNull();
+ expect(result.current.action.busy).toBe(false);
+});
 it('closes a refused workflow quietly and retains the CLI notice',async()=>{
  const success=vi.fn();
  const {result}=renderHook(()=>({action:useWorkflow(),location:useLocation()}),{wrapper});
