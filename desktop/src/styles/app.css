@@ -105,7 +105,9 @@ button.icon-button:hover {background:var(--tk-bg3);color:var(--tk-text1);}
 .button[data-kind="danger"]:active,.button[data-kind="danger"][data-state="pressed"] {border-color:var(--tk-bad);}
 .button:disabled,[data-disabled] {opacity:.5;cursor:default;}
 button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[role="radio"]:focus-visible,[role="checkbox"]:focus-visible,[role="slider"]:focus-visible {outline:2px solid var(--tk-accent);outline-offset:2px;}
-.chip {display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:4px;background:var(--tk-bg3);color:var(--tk-text3);font-size:11px;font-weight:500;white-space:nowrap;box-sizing:border-box;}
+.chip {min-width:0;max-width:100%;display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:4px;background:var(--tk-bg3);color:var(--tk-text3);font-size:11px;font-weight:500;white-space:nowrap;box-sizing:border-box;}
+.chip-label{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:20px}
+.chip-label>svg{vertical-align:middle}
 .tooltip {padding:7px 8px;border-radius:6px;background:var(--tk-tooltipbg);color:var(--tk-tooltipfg);font-size:12px;line-height:16px;white-space:nowrap;box-shadow:var(--tk-shadowlow);border:1px solid var(--tk-tooltipborder);}
 .floating-panel {padding:4px;border:1px solid var(--tk-border2);border-radius:8px;background:var(--tk-modal);color:var(--tk-text1);box-shadow:var(--tk-shadowhigh);}
 .menu-item {display:flex;align-items:center;gap:8px;min-height:28px;padding:0 8px;border-radius:4px;font-size:13px;outline:none;}
