@@ -1,5 +1,5 @@
 import type { Design } from '../fixtures/schema';
-export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library'|'not-found'|'unreadable';value?:T};
+export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library'|'not-found'|'unreadable'|'invalid-config';value?:T};
 export interface LaunchContext { writtenAt: string; target?: string; intent?: 'setup' }
 export class PromptCancelledError extends Error { readonly cancelled = true as const; }
 export interface AskOptions {detail?:readonly string[]}
@@ -44,7 +44,7 @@ export type Person=Omit<Design['ROSTER'][number], 'followers'|'role'> & {role:st
 export type Project=Omit<Design['PROJECTS'][number], 'evaluated'|'favorites'|'admin'|'updated'> & {admin:Design['PROJECTS'][number]['admin']|null;updated:string|null;evaluated:number|null;favorites:number|null;memberHandles:string[];memberInitials:string[];skillsIn:string[]};
 export interface Catalog {scanned:string[]|null;repository:string|null;skills:SkillCard[];extras:SkillCard[];people:Person[];projects:Project[];categories:Design['CATEGORIES'];categoryRemaining:Record<string,number>;topRated:string[];peopleByAdoption:string[];projectsByMembers:string[];categorySkills:Record<string,string[]>;filterDefault:Design['FILTER_DEFAULT'];filterCount:number;verdictCounts:Record<'PASS'|'NEUTRAL'|'FAIL'|'Not evaluated',number|null>;catalogN:number;teamN:number;bulkInstall:Record<string,{total:number;asking:number}>}
 export type Member=Omit<Design['ROSTER'][number], 'followers'|'role'> & {role:string|null;followers:number|null;status:string;projects:string[];lastSeen:string;lastPublish:string};
-export interface Roster {members:Member[];invited:Design['INVITED'];member:Record<string,{status:string;projects:string[];lastSeen:string}>;byAdoption:string[]}
+export interface Roster {members:Member[];invited:Design['INVITED']|null;member:Record<string,{status:string;projects:string[];lastSeen:string}>;byAdoption:string[]}
 /** `slug` is owner/repo on GitHub and null on every other host; `remote` is null when the folder has no origin at all. */
 export interface RootRemote {url:string;slug:string|null}
 export interface Root {id:string;kind:'global'|'checkout';label:string;root:string;rootState?:'scanned'|'absent'|'unreadable'|undefined;registered:boolean;detected:boolean;count?:string|undefined;remote?:RootRemote|null|undefined}
@@ -80,14 +80,14 @@ export interface InstalledResult {id:string;name:string;scope:Scope}
 export interface UninstallArgs {from?:string;team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
 export interface UninstalledResult {id:string;name:string}
 export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
-export interface ConnectArgs {path?:string;home?:string;cwd?:string;team?:string;keepSource?:boolean;keepRepo?:boolean;relocate?:boolean;forget?:boolean;allowPrivileged?:boolean}
+export interface ConnectArgs {path?:string;home?:string;cwd?:string;team?:string;keepSource?:string;keepRepo?:string;relocate?:string;forget?:string;allowPrivileged?:boolean}
 export interface ConnectResult {id:string;name:string;reconciled?:boolean;adopted?:boolean}
 export interface ConnectBatch {kind:'batch';shared:ConnectResult[];declined:string[];refused:{name:string;reason:string}[]}
 export type ConnectOutcome=ConnectResult|ConnectBatch;
 export interface PublishArgs {team?:string;ref:string;message?:string}
 export interface PublishResult {name:string;version:string|null;changed:boolean}
 export interface SyncArgs {team?:string;prune?:boolean;hook?:boolean}
-export interface SyncResult {placed:string[];removed:string[]}
+export interface SyncResult {placed:number;deferred:string[];notices:string[];changed:boolean;teams:{team:string;state:string;message?:string}[]}
 export interface InviteArgs {team?:string;logins:string[];scope?:Scope;role?:string}
 export interface InviteResult {invited:string[];already:string[];failed:{login:string;error:string}[]}
 export interface TeamArgs {kind:'create'|'join'|'remove'|'leave';name?:string;team?:string;remote?:string;handle?:string}
@@ -105,7 +105,8 @@ export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value
 export type Subscription=()=>void;
 export type ChangeSource='config'|'clone'|'placed'|'stamp';
 
-export type Settings = Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'QUARANTINE'|'LOCAL_UNSHARED'|'HOOK'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'STORAGE'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'CLI_LATEST'|'FOLLOWING'|'INVITE_TIP'|'JOIN_BLOCK_NOTE' > & {
+export type Settings = Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'LOCAL_UNSHARED'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'FOLLOWING'|'INVITE_TIP'|'JOIN_BLOCK_NOTE' > & {
+HOOK:Design['HOOK']|null;QUARANTINE:Design['QUARANTINE']|null;CLI_LATEST:string|null;STORAGE:Omit<Design['STORAGE'],'cache_n'|'evals_n'>&{cache_n:number|null;evals_n:number|null};
 // mock-only: the drawn specimen login (design INVITEE); the real adapter never sets it
 INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{publish:string|null;license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED:[string,string,string,string][];SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};

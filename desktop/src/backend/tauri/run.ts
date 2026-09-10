@@ -32,7 +32,9 @@ export interface CliRunOptions<TIn, TOut> {
  * frames, forward answers, and settle `done` from the `result` frame. Frames are buffered so a consumer that
  * subscribes late still sees every one (same contract as the mock's createRun).
  */
-export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null>, argv: readonly string[], options: CliRunOptions<TIn, TOut>): Run<TOut> {
+export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null>, argv: readonly (string | Promise<string>)[], options: CliRunOptions<TIn, TOut>): Run<TOut> {
+  // Attach rejection handling immediately; path expansion can fail before launch state resolves.
+  const argumentsReady = Promise.all(argv).then(value=>({ok:true as const,value}), (error:unknown)=>({ok:false as const,error:error instanceof Error?error.message:String(error)}));
   const id = nextId();
   const buffer: Frame[] = [];
   const readers = new Set<() => void>();
@@ -156,10 +158,13 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
     const resolved = await state.catch((error: unknown) => { finish({ ok: false, error: error instanceof Error ? error.message : String(error) }); return null; });
     if (finished) return;
     if (!resolved) { finish({ ok: false, error: NO_STATE }); return; }
+    const argumentsResult = await argumentsReady;
+    if (finished) return;
+    if (!argumentsResult.ok) { finish({ok:false,error:argumentsResult.error}); return; }
     started = true;
     spawnSettled = (async () => {
       try {
-        unlisten = await bridge.spawn(id, resolved, argv, options.cwd, onEvent);
+        unlisten = await bridge.spawn(id, resolved, argumentsResult.value, options.cwd, onEvent);
         // A short-lived child can exit (or be cancelled) before spawn returns the listener.
         if (cleanupRequested) cleanup();
       } catch (error) {
