@@ -94,8 +94,9 @@ export interface ConnectArgs {path?:string;home?:string;cwd?:string;team?:string
 export interface ConnectResult {id:string;name:string;reconciled?:boolean;adopted?:boolean}
 export interface ConnectBatch {kind:'batch';shared:ConnectResult[];declined:string[];refused:{name:string;reason:string}[]}
 export type ConnectOutcome=ConnectResult|ConnectBatch;
-export interface PublishArgs {team?:string;ref:string;message?:string}
-export interface PublishResult {name:string;version:string|null;changed:boolean}
+export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string}
+/** `prUrl` is set only under `policy.publish: 'pr'`, where team.json does not change until that pull request merges. */
+export interface PublishResult {name:string;version:string|null;changed:boolean;prUrl:string|null}
 export interface SyncArgs {team?:string;prune?:boolean;hook?:boolean}
 export interface SyncResult {placed:number;deferred:string[];notices:string[];changed:boolean;teams:{team:string;state:string;message?:string}[]}
 export interface InviteArgs {team?:string;logins:string[];scope?:Scope;role?:string}

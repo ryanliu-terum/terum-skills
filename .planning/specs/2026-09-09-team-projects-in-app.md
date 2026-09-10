@@ -1,6 +1,6 @@
 # terum-skills — team projects, created and filled from the app (spec)
 
-**Status:** Milestone A BUILT (2026-09-09) on `feat/team-projects`, worktree `/Users/ryanliu/Documents/Terum/skill-management-software-wt-projects`, base `origin/main` @ `2731fce`. Milestone B (§4) is not started. §7 records the defaults taken; they are still cheap to veto.
+**Status:** BUILT (2026-09-09/10), worktree `/Users/ryanliu/Documents/Terum/skill-management-software-wt-projects`, base `origin/main` @ `2731fce`. Milestone A (§3) on `feat/team-projects`; Milestone B (§4) on `feat/team-projects-add-skills`, stacked on A. §7 records the defaults taken; they are still cheap to veto.
 **Parent:** `.planning/specs/2026-09-02-phase-1-build.md` (rev 14, rev-15 note) — §6.0 write guard table (rows a–f), §6 `publish`, §5.2 automatic placement. Where this document restates the parent it is verbatim; where it adds, the reading chosen is stated, not left to the implementer.
 **Base:** `origin/main` @ `2731fce`. The primary checkout is on `feat/frame-mode`, which carries no `desktop/`; implementation belongs in a worktree off `origin/main`.
 **Trigger:** Ryan, 2026-09-09 — "Can't create a new team project. should be an add button. then a popup with fields: name of the team project (required), link to github repo (optional). should create a project card. once clicked on the project cards, should be an 'add skills' button that suggests options from your local skills into the project skills."
@@ -154,6 +154,8 @@ An older CLI reports the key absent → `features.projects === false` → the ap
 | already in the team **and** already in `projects[<name>].skills` | *In this project* — not selectable | nothing |
 | already in the team, not endorsed here | *Add* | `publish --project <name>` |
 | not in the team repo at all | *Share, then add* | `connect <path>` → then `publish --project <name>` |
+
+"In the team" is decided by **joining the local folder's name against `catalog.skills`**, because that is exactly how `publish` itself resolves a ref (`findSkill(clone, team, reference.name)`); the flat store gives the team one `skills/<name>/`, so name is identity on both sides. The two runs are sequential, never nested: `useWorkflow` holds one action at a time and ignores a `run` started from inside another's success callback, so the endorsement waits for the share and only starts if it landed. A declined share closes the dialog (the app's existing convention for a cancelled run) and leaves the skill exactly where it was.
 
 The third row's label is not cosmetic: sharing publishes the skill's **content** to the team repo under the author's name, which is a bigger act than endorsing, and the user must see that before pressing it. The picker shows the count of each kind in its header.
 
