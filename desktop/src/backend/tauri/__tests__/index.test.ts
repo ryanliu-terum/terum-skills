@@ -63,6 +63,19 @@ it.each(teamCases)('orders %s as verb, flags, separator, positionals', async (_n
   expect(f.spawns.map(s => s.args)).toEqual([argv]);
 });
 
+it('passes the stored eval defaults as flags and omits the unset or sentinel ones', async () => {
+  const f = replay(undefined, false);
+  const b = createTauriBackend(f.bridge);
+  b.prefs.set('eval:k', '10'); b.prefs.set('eval:model', 'sonnet'); b.prefs.set('eval:judge', 'sonnet');
+  await b.eval({ ref: 'a', commit: true, team: 'acme' }).done;
+  b.prefs.set('eval:k', '—'); // The Settings '—' choice means "pass nothing", exactly like an unset pref.
+  await b.eval({ ref: 'a' }).done;
+  expect(f.spawns.map(s => s.args)).toEqual([
+    ['eval', '--k', '10', '--model', 'sonnet', '--judge-model', 'sonnet', '--commit', '--team', 'acme', '--', 'a'],
+    ['eval', '--model', 'sonnet', '--judge-model', 'sonnet', '--', 'a'],
+  ]);
+});
+
 it('accepts bare connect with no value in its successful frame', async () => {
   const f = replay(undefined);
   expect(await createTauriBackend(f.bridge).connect({}).done).toEqual({ ok: true, value: undefined });
@@ -219,6 +232,32 @@ it.each([null,'old','current'])('only displays approvals joined to current grant
  const result=await createTauriBackend(f.bridge).settings();
  expect(result.ok).toBe(true);
  expect(result.value?.APPROVALS).toEqual(hash==='current'?[['deploy-check',['Bash','Read'],'2026-09-01']]:[]);
+});
+it('joins shared ledger rows to scanned local rows and lists connectable unshared folders',async()=>{
+ const f=statusReplay(false,(frame,verb)=>{
+  if(verb!=='ls-local')return;
+  const value=frame.value as {local:{scope:string;root:string;rows:Record<string,unknown>[]}[]};
+  const global=value.local.find(section=>section.scope==='global')!;
+  global.rows.push(
+   {name:'tdd',path:global.root+'/tdd',state:'',tracked:true,shared:[{id:'22222222-2222-4222-8222-222222222222',team:'acme'}],placement:null,health:'unknown'},
+   {name:'api-docs',path:global.root+'/api-docs',state:'',tracked:false,shared:[],placement:null,health:'untracked'},
+  );
+ });
+ const settings=await createTauriBackend(f.bridge).settings();
+ expect(settings.ok).toBe(true);
+ expect(settings.value?.SHARED[0]).toEqual(['tdd',expect.stringContaining('/skills/tdd'),'acme','Present']);
+ // deploy-check is placed and tdd is shared; only the untracked candidate is offered for sharing.
+ expect(settings.value?.LOCAL_UNSHARED).toEqual(['api-docs']);
+});
+it('marks a shared row Missing only when a scanned root should hold its source',async()=>{
+ const f=statusReplay(false,(frame,verb)=>{
+  if(verb!=='status')return;
+  const value=frame.value as {ledger:{placements:{path:string}[];shared:{id:string;source:string}[]}};
+  value.ledger.shared[0]!.source=value.ledger.placements[0]!.path.replace(/deploy-check$/,'ghost');
+ });
+ const settings=await createTauriBackend(f.bridge).settings();
+ // No local row carries the shared id and the scanned global root has no such folder: the skills list still names it and the state is Missing.
+ expect(settings.value?.SHARED[0]).toEqual(['tdd',expect.stringContaining('/ghost'),'acme','Missing']);
 });
 it('preserves a future stamp and null fields from an unreadable clone',async()=>{
  const stamp='2099-01-01T00:00:00.000Z';

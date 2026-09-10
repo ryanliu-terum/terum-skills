@@ -17,14 +17,14 @@ it('serves only reported Settings, status and roster data from the 0.1.7 recordi
  expect(f.spawns.some(spawn=>spawn.args.join(' ')==='ls --team acme')).toBe(true);
 });
 
-it('lists only unplaced unconnected authoring folders, and joins shared names and health',async()=>{
+it('lists only unplaced unconnected authoring folders, and joins shared names and presence',async()=>{
  const backend=createTauriBackend(shareSettingsReplay((frame,name)=>{
   if(frame.t!=='result'||name!=='ls-local')return;
   const value=frame.value as LocalValue, row=value.local[0]!.rows[0]!;
   value.skills.push({id:'22222222-2222-4222-8222-222222222222',name:'local-tdd',grantsHash:null,grants:null});
   value.local[0]!.rows.push({...row,name:'scratch',path:'/Users/teddy/.claude/skills/scratch',placement:null,placed:false}, {...row,name:'connected',path:'/connected',placement:null,connected:true}, {...row,name:'shared',path:'/Users/teddy/code/seed/skills/tdd',placement:null,shared:[{id:'shared',team:'acme'}],health:'local-changed'});
  }).bridge);
- expect(await backend.settings()).toMatchObject({ok:true,value:{LOCAL_UNSHARED:['scratch'],SHARED:[['local-tdd','~/code/seed/skills/tdd','acme','edited locally']]}});
+ expect(await backend.settings()).toMatchObject({ok:true,value:{LOCAL_UNSHARED:['scratch'],SHARED:[['shared','~/code/seed/skills/tdd','acme','Present']]}});
 });
 
 it.each([['tracked',true,false,0],['pinned',false,false,1],['missing row',true,true,1]] as const)('counts %s copies without mistaking a placed SHA for a pin',async(_name,tracked,missing,pinned)=>{
