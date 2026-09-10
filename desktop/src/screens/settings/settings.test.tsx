@@ -302,6 +302,24 @@ it('routes About Check to the Updates dialog with verbatim advice and preserves 
  const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('pre')?.textContent).toBe(report.value.advice.join('\n')));
  expect(location.hash).toContain('/settings/updates?dialog=update&__mock=empty');
 });
+it('names the known latest CLI release on About',async()=>{
+ open('#/settings/about');expect(await screen.findByText(`${design.CLI_LATEST} available`)).toBeInTheDocument();
+});
+it('omits the "available" clause when the latest CLI release is unknown',async()=>{
+ const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,CLI_LATEST:'—'}});
+ open('#/settings/about');await screen.findByText('terum-skills CLI');
+ expect(screen.queryByText(/available/)).toBeNull();expect(screen.queryByText(/—\s*available/)).toBeNull();
+});
+it('derives the About latest from the update check the Updates section already fetched',async()=>{
+ const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,CLI_LATEST:'—'}});
+ const report=await backend.update();if(!report.ok)throw new Error(report.error);
+ vi.spyOn(backend,'update').mockResolvedValue({ok:true,value:{...report.value,latest:'9.9.9'}});
+ open('#/settings/updates');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));
+ fireEvent.click(within(screen.getByRole('navigation',{name:'Settings sections'})).getByRole('link',{name:'About'}));
+ expect(await screen.findByText('9.9.9 available')).toBeInTheDocument();
+});
 it('copies the sign-out command from its terminal instructions',async()=>{
  const copy=vi.spyOn(backend,'copyToClipboard').mockResolvedValue({ok:true,value:undefined}),editor=vi.spyOn(backend,'openInEditor');
  open('#/settings/account');fireEvent.click(await screen.findByRole('button',{name:'Sign out'}));
