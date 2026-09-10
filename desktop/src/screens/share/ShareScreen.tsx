@@ -61,7 +61,7 @@ export function ShareScreen() {
 function teamSelectionMessage(teams:TeamStatus[]){return teams.length===0?'No team is configured on this machine.':`Choose a team first: this machine has ${teams.map(team=>team.name).join(' and ')}. terum-skills invites one team at a time.`;}
 function MembersHead(){const features=useFeatures();return <div role="row" className="members-head"><div role="columnheader" className="member-name">Name<Icon name="chevron-down" size={12} stroke="2"/></div>{['Status','Joined','Teams','Last seen'].map(label=><div role="columnheader" key={label} style={label==='Teams'&&!features?.memberRole?{visibility:'hidden'}:undefined}>{label}</div>)}</div>;}
 // The identity sub-line: the handle (dropped when it just repeats the display name) and the role, without dangling separators around missing data.
-function sub(m:{name:string;handle:string;role:string},memberRole:boolean|undefined){return [m.handle===m.name?'':m.handle,memberRole?m.role:''].filter(Boolean).join(' · ');}
+function sub(m:{name:string;handle:string;role:string|null},memberRole:boolean|undefined){return [m.handle===m.name?'':m.handle,memberRole?m.role:''].filter(Boolean).join(' · ');}
 function MemberRow({member:m,index,error,onRemove}:{member:Member;index:number;error:string|null;onRemove:()=>void}){
   const features=useFeatures();
   // Read-only permission chip: `m.status` is host truth from the CLI ('admin' | 'member' | 'unknown').

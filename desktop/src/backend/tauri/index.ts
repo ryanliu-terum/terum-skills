@@ -14,6 +14,8 @@ import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { prepareRun } from './prepare-run';
 import { cliEvalReport, mapEvalReport } from './eval-report';
+import { relativeTime } from '../../lib/relative-time';
+import { personPlaceNote } from '../../screens/marketplace/market-data';
 import { abbreviateHome, stripRemote } from '../paths';
 import { scannedRoots } from './scanned-roots';
 import { overviewCopy } from '../../lib/overview-copy';
@@ -133,6 +135,10 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
   return { path:null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: installed && !placed, paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [r.repoRoot] : []), connectedSources: rows.filter(r => r.shared.length > 0).map(r => r.path), desc: row.description, grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: problem || row.unresolved ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };
 }
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
+/** `owner/repo` as the team remote spells it (case kept; any host); null when the team has no remote. */
+function repoSlug(remote: string | null | undefined): string | null {
+  return remote ? stripRemote(remote.trim()).replace(/^github\.com\//, '') : null;
+}
 function detailVersionFields(repo: string | null, name: string, version: string | null): Pick<SkillDetail, 'version' | 'version_full' | 'shareCommand'> {
   return { version: version?.slice(0, 12) ?? '—', version_full: version, shareCommand: repo ? `npx -y terum-skills@latest install ${repo}/${name}${version ? '@' + version.slice(0, 12) : ''}` : '—' };
 }
@@ -141,7 +147,7 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
   const path = placed?.path ?? rows[0]?.path ?? null;
   const name = row.author.replace(/\s*<[^>]*>$/, '');
   const installers = row.installedBy;
-  const repo = team.repository ? stripRemote(team.repository.trim()).replace(/^github\.com\//, '') : null;
+  const repo = repoSlug(team.repository);
   const version = placed?.placement?.version ?? (row.latest === '—' ? null : row.latest || null);
   const emailHandle = row.author.match(/<([^@<>]+)@[^>]+>$/)?.[1];
   const handle = team.members?.find(member => member.displayName === name)?.handle ?? team.members?.find(member => member.handle === emailHandle)?.handle ?? '';
@@ -218,9 +224,12 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
  };
 }
 
+function newestUpdated(skills: InventorySkill[]): InventorySkill | undefined {
+  return skills.filter(skill => /^\d{4}-\d{2}-\d{2}T/.test(skill.updated) && Number.isFinite(Date.parse(skill.updated))).sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated))[0];
+}
 // `status` is the permission chip: host truth from the CLI's per-member `admin` (gh collaborator permission); 'unknown' when gh could not answer — never a defaulted 'member'.
 function rosterModel(team: CliStatus['teams'][number]): Roster {
-  const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? '', projects: member.projects ?? [], followers: null, joined: '—', last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
+  const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? null, projects: member.projects ?? [], followers: null, joined: '—', last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
   return { members, invited: [], member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] };
 }
 function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, people: Person[], features: Pick<Features, 'localIdentity'>, home: string, query?: string): Catalog {
@@ -230,9 +239,13 @@ function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, lo
   const projects = (inventory.projects ?? []).map(project => {
     const rows = inventory.skills.filter(skill => project.skills.includes(skill.id));
     const members = people.filter(person => person.projects.includes(project.name));
-    return { name: project.name, key: project.name, ico: 'folder', desc: project.description ?? '', skills: project.skills.length, members: members.length, remote: project.remotes[0] ?? '—', installed: project.skills.length > 0 && rows.length === project.skills.length && rows.every(row => onDisk(local, team.team, row.id, features).some(r => r.scope === 'project' && r.placement?.id === row.id && r.placement.team === team.team)), favorites: null, updated: '—', path: null, admin: { handle: '', name: '—', role: '', initials: '' }, evaluated: null, memberHandles: members.map(member => member.handle), memberInitials: members.map(member => member.initials), skillsIn: rows.map(row => row.name) };
+    const updated = newestUpdated(rows);
+    const placement = project.skills.length > 0 ? local.local?.find(section => section.scope === 'project' && section.repoRoot && project.skills.every(id => section.rows.some(row => row.placement?.id === id && row.placement.team === team.team))) : undefined;
+    return { name: project.name, key: project.name, ico: 'folder', desc: project.description ?? '', skills: project.skills.length, members: members.length, remote: project.remotes[0] ?? '—', installed: project.skills.length > 0 && rows.length === project.skills.length && rows.every(row => onDisk(local, team.team, row.id, features).some(r => r.scope === 'project' && r.placement?.id === row.id && r.placement.team === team.team)), favorites: null, updated: updated ? relativeTime(updated.updated) : null, path: placement?.repoRoot ?? null, admin: null, evaluated: null, memberHandles: members.map(member => member.handle), memberInitials: members.map(member => member.initials), skillsIn: rows.map(row => row.name) };
   });
-  return { scanned: scannedRoots(local, home), repository: team.repository ?? null, skills: skills.filter(skill => !query || `${skill.name} ${skill.desc}`.toLowerCase().includes(query.toLowerCase())), extras: [], people, projects, categories: Object.entries(categorySkills).map(([name, rows]) => [name, 'tag', rows.length]), categoryRemaining: {}, topRated: [...skills].sort((a, b) => b.installsN - a.installsN).map(skill => skill.name), peopleByAdoption: [...people].sort((a, b) => b.adoption - a.adoption).map(person => person.handle), projectsByMembers: [...projects].sort((a, b) => b.members - a.members).map(project => project.name), categorySkills, filterDefault: { verdicts: [], lift_min: 0, tokens_max: 0, installs_min: 0 }, filterCount: skills.length, verdictCounts: { PASS: null, NEUTRAL: null, FAIL: null, 'Not evaluated': null }, catalogN: skills.length, teamN: people.length, bulkInstall: {} };
+  const verdictCounts = { PASS: 0, NEUTRAL: 0, FAIL: 0, 'Not evaluated': 0 };
+  for (const skill of skills) verdictCounts[skill.summary?.verdict ?? 'Not evaluated']++;
+  return { scanned: scannedRoots(local, home), repository: repoSlug(team.repository), skills: skills.filter(skill => !query || `${skill.name} ${skill.desc}`.toLowerCase().includes(query.toLowerCase())), extras: [], people, projects, categories: Object.entries(categorySkills).map(([name, rows]) => [name, 'tag', rows.length]), categoryRemaining: {}, topRated: [...skills].sort((a, b) => b.installsN - a.installsN).map(skill => skill.name), peopleByAdoption: [...people].sort((a, b) => b.adoption - a.adoption).map(person => person.handle), projectsByMembers: [...projects].sort((a, b) => b.members - a.members).map(project => project.name), categorySkills, filterDefault: { verdicts: [], lift_min: 0, tokens_max: 0, installs_min: 0 }, filterCount: skills.length, verdictCounts, catalogN: skills.length, teamN: people.length, bulkInstall: Object.fromEntries(projects.map(project => [project.key, { total: project.skills, asking: skills.filter(skill => project.skillsIn.includes(skill.name) && skill.normalizedGrants !== null && skill.normalizedGrants !== 'none').length }])) };
 }
 
 /**
@@ -539,7 +552,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         const names = authored.map(skill => skill.name);
         const installedIds = new Set((detail.value.member.installed ?? []).map(item => item.id));
         const installable = inventory.skills.filter(skill => installedIds.has(skill.id));
-        people.push({ ...member, organization: team.team, declined: detail.value.member.declined, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: '—', teamsLine: member.projects.join(' · '), buckets: names.length ? [['Authored', names]] : [], placeNote: '—', onDisk: [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length] });
+        const latest = newestUpdated(authored);
+        const lastPublish = latest ? `${relativeTime(latest.updated)} · ${latest.name}` : '—';
+        const disk: Person['onDisk'] = [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length];
+        people.push({ ...member, role: detail.value.member.role, lastPublish, last_publish: lastPublish, organization: null, declined: detail.value.member.declined, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: names.length ? [['Authored', names]] : [], placeNote: personPlaceNote(disk), onDisk: disk });
       }
       return { ok: true, value: catalogModel(team, inventory, local.value, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
     },
