@@ -116,7 +116,8 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
           if (omitted.length) io.print(`Skipped ${omitted.length} local folders that cannot be connected. Run \`${invocation(args.form, 'ls --local')}\` for paths and reasons.`);
           if (!candidates.length) {
             io.print(`No local candidates to connect under ${roots.map((root) => printable(root.root)).join(' or ')}. Skills elsewhere can be connected by passing their folder path.`);
-            return success(undefined);
+            // An empty batch, not undefined: callers (the desktop app included) can tell "nothing to connect" from a skipped or declined run.
+            return success(batch);
           }
           if (!io.interactive) {
             for (const inventory of inventories) {

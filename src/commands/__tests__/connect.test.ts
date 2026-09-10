@@ -884,7 +884,7 @@ describe('issue 9 connect picker', () => {
     const { fixture, store } = await pickerFixture(); const home = join(fixture.root, 'empty-home');
     await store.update((config) => { delete config.email; delete config.display_name; });
     const io = new NonInteractivePrompter();
-    expect(await run({ home, config: store }, io)).toEqual({ ok: true, value: undefined });
+    expect(await run({ home, config: store }, io)).toEqual({ ok: true, value: { kind: 'batch', shared: [], declined: [], refused: [] } });
     expect(io.lines).toEqual([`No local candidates to connect under ${join(home, '.claude', 'skills')}. Skills elsewhere can be connected by passing their folder path.`]);
     expect(io.asked).toEqual([]);
   });
@@ -905,7 +905,7 @@ describe('issue 9 connect picker', () => {
     const { home, store, source } = await pickerFixture();
     await mkdir(join(source, 'hooks'));
     const ordinary = new ScriptedPrompter([], [], true);
-    expect(await run({ home, config: store }, ordinary)).toEqual({ ok: true, value: undefined });
+    expect(await run({ home, config: store }, ordinary)).toEqual({ ok: true, value: { kind: 'batch', shared: [], declined: [], refused: [] } });
     expect(ordinary.lines[0]).toBe('Skipped 1 local folders that cannot be connected. Run `npx -y terum-skills@latest ls --local` for paths and reasons.');
     const optedIn = new ScriptedPrompter(['Skip'], [], true);
     expect(await run({ home, config: store, allowPrivileged: true }, optedIn)).toEqual({ ok: true, value: undefined });
@@ -968,7 +968,7 @@ describe('project connect discovery', () => {
   it('names both roots when there are no candidates', async () => {
     const { fixture, store } = await pickerFixture(); const home = join(fixture.root, 'empty-home'); const cwd = join(fixture.root, 'project');
     await mkdir(join(cwd, '.git'), { recursive: true }); const io = new NonInteractivePrompter();
-    expect(await run({ home, cwd, config: store }, io)).toEqual({ ok: true, value: undefined });
+    expect(await run({ home, cwd, config: store }, io)).toEqual({ ok: true, value: { kind: 'batch', shared: [], declined: [], refused: [] } });
     expect(io.lines).toEqual([`No local candidates to connect under ${join(home, '.claude', 'skills')} or ${join(cwd, '.claude', 'skills')}. Skills elsewhere can be connected by passing their folder path.`]);
   });
 
