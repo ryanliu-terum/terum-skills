@@ -4,9 +4,11 @@ import type { SkillCard } from '../../backend/types';
  *  cannot run instead, so the menu keeps a fixed shape and the card says why (Ryan, 2026-09-09). */
 export interface CardAction { key:'open'|'run-eval'|'move'|'place'|'publish'; label:string; to:string|null; reason:string|null }
 
-/** The detail route for a card: a local folder is addressed by path, a team skill by name. */
-export function detailPath(skill:Pick<SkillCard,'project'|'path'|'name'>):string {
- return skill.project==='local'&&skill.path?'/skill/local?path='+encodeURIComponent(skill.path):'/skill/'+encodeURIComponent(skill.name);
+/** Every way into the detail page goes through here, so a folder that belongs to no team is
+ *  addressed by path and a team skill by name. Never read `project` for this — it carries the root
+ *  a folder lives in ('Global' or a checkout's basename), which does not distinguish the two. */
+export function detailPath(skill:Pick<SkillCard,'teamed'|'path'|'name'>):string {
+ return !skill.teamed&&skill.path?'/skill/local?path='+encodeURIComponent(skill.path):'/skill/'+encodeURIComponent(skill.name);
 }
 function withParams(base:string,params:string[]):string {
  const query=params.filter(Boolean).join('&');
@@ -16,7 +18,7 @@ function withParams(base:string,params:string[]):string {
 /** Every state-changing action a card offers, in menu order. `origin` is the `root=marketplace`
  *  crumb the detail page reads back, or '' from the library. */
 export function cardActions(skill:SkillCard,{origin='',runEvalInApp=false}:{origin?:string;runEvalInApp?:boolean}={}):CardAction[] {
- const base=detailPath(skill),at=(...params:string[])=>withParams(base,[...params,origin]);
+ const base=detailPath(skill),ridesOrigin=skill.teamed||!skill.path,at=(...params:string[])=>withParams(base,[...params,ridesOrigin?origin:'']);
  const actions:CardAction[]=[{key:'open',label:'Open',to:at(),reason:null}];
  if(runEvalInApp)actions.push({key:'run-eval',label:'Run eval',to:at('tab=evals','dialog=run-eval'),reason:null});
  actions.push(moveAction(skill,at),placeAction(skill,at),publishAction(skill,at));

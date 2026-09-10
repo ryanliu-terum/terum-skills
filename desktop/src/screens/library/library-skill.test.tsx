@@ -152,13 +152,60 @@ it('requires a checkout root before calling library',async()=>{
  expect(await screen.findByRole('alert')).toHaveTextContent('No checkout selected.');expect(library).not.toHaveBeenCalled();
  await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));
 });
+// `project` carries the root a folder lives in ('Global', or a checkout's basename) and says
+// nothing about team membership, so these fixtures keep a realistic root label: a card that
+// routes by path only because the test typed the word 'local' into `project` would pass even
+// after the adapter stopped emitting it, which is how the route broke in the first place.
 it('opens a local card and its Open menu by folder path',async()=>{
  const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
- const path='/a folder/.claude/skills/deploy-check';result.value.skills=[{...result.value.skills[0]!,name:'deploy-check',project:'local',path}];
+ const path='/a folder/.claude/skills/deploy-check';result.value.skills=[{...result.value.skills[0]!,name:'deploy-check',project:'Global',teamed:false,path}];
  vi.spyOn(backend,'library').mockResolvedValue(result);openWith('#/library/global',backend);
  const card=await screen.findByTestId('skill-card-deploy-check');expect(within(card).getByRole('link')).toHaveAttribute('href','#/skill/local?path='+encodeURIComponent(path));
  fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));fireEvent.click(await screen.findByRole('menuitem',{name:'Open'}));
  await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent(path)));
+});
+it.each([['Run eval','&tab=evals&dialog=run-eval'],['Uninstall…','&dialog=remove'],['Move to…','&dialog=move']])('routes %s on a local card by path, not by name',async(item,query)=>{
+ const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
+ const path='/a folder/.claude/skills/deploy-check';
+ result.value.skills=[{...result.value.skills[0]!,name:'deploy-check',project:'Global',teamed:false,placed:true,path}];
+ vi.spyOn(backend,'library').mockResolvedValue(result);openWith('#/library/global',backend);
+ const card=await screen.findByTestId('skill-card-deploy-check');
+ fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));
+ fireEvent.click(await screen.findByRole('menuitem',{name:item}));
+ await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent(path)+query));
+});
+it('sends a team card by name and keeps the marketplace origin',async()=>{
+ const backend=createMockBackend();openWith('#/marketplace',backend);
+ const card=await screen.findByTestId('skill-card-deploy-check');
+ expect(within(card).getByRole('link')).toHaveAttribute('href','#/skill/deploy-check?root=marketplace');
+});
+// The old screen answered every name-route failure with "listed in your people file but its
+// folder is missing", and offered Sync and Remove. A name the team does not share is now reported
+// as not-found, where both halves of that sentence would be false and both buttons wrong, so
+// neither may come back on this branch.
+it('never claims a missing folder or offers Sync/Remove when a name is not in the team',async()=>{
+ const backend=createMockBackend(),error='No unambiguous skill diagnose in team acme.';
+ vi.spyOn(backend,'skill').mockResolvedValue({ok:false,error,reason:'not-found' as const});
+ openWith('#/skill/diagnose',backend);
+ expect(await screen.findByText("Couldn't find diagnose")).toBeVisible();
+ expect(screen.getByRole('alert')).toHaveTextContent(error);
+ expect(screen.queryByText(/listed in your people file/)).toBeNull();
+ expect(screen.queryByText(/folder is missing from this machine/)).toBeNull();
+ expect(screen.queryByRole('button',{name:'Sync now'})).toBeNull();
+ expect(screen.queryByRole('button',{name:/^Remove/})).toBeNull();
+ const panel=document.querySelector('.centered-state')!;
+ expect(within(panel as HTMLElement).getByRole('button',{name:'Back to library'})).toBeVisible();
+ expect(within(panel as HTMLElement).getByRole('button',{name:'Open marketplace'})).toBeVisible();
+});
+it('reports an unreadable name-route failure with the CLI message and can retry',async()=>{
+ const backend=createMockBackend(),error='fatal: could not read the team clone';
+ vi.spyOn(backend,'skill').mockResolvedValue({ok:false,error,reason:'unreadable' as const});
+ openWith('#/skill/deploy-check',backend);
+ expect(await screen.findByText("Couldn't read deploy-check")).toBeVisible();
+ expect(screen.getByRole('alert')).toHaveTextContent(error);
+ expect(screen.queryByText(/listed in your people file/)).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Try again'}));
+ await waitFor(()=>expect(backend.skill).toHaveBeenCalledTimes(2));
 });
 it.each([true,false])('keeps a local error honest and never offers checkout removal (typed=%s)',async typed=>{
  const backend=createMockBackend(),error='Raw CLI failure for /tmp/a';

@@ -3,19 +3,25 @@ import { cardActions, detailPath } from './skill-card-actions';
 import type { SkillCard, TeamState } from '../../backend/types';
 
 function card(over:Partial<SkillCard>={}):SkillCard {
- return {path:null,updated:null,grants:null,normalizedGrants:null,grantsHash:null,project:'Terum',category:'infra',name:'deploy-check',desc:'',size:'2k',installs:'3 installs',favorite:false,flags:[],flagText:{},enabled:true,installed:true,placed:true,onDiskOnly:false,teamState:'endorsed',paths:[],wlt:null,summary:null,installsN:3,tokensK:2,indicators:{} as SkillCard['indicators'],...over};
+ return {teamed:true,path:null,updated:null,grants:null,normalizedGrants:null,grantsHash:null,project:'Terum',category:'infra',name:'deploy-check',desc:'',size:'2k',installs:'3 installs',favorite:false,flags:[],flagText:{},enabled:true,installed:true,placed:true,onDiskOnly:false,teamState:'endorsed',paths:[],wlt:null,summary:null,installsN:3,tokensK:2,indicators:{} as SkillCard['indicators'],...over};
 }
 function find(skill:SkillCard,key:string){const action=cardActions(skill).find(a=>a.key===key);if(!action)throw new Error('no action '+key);return action;}
 
 it('addresses a team skill by name and a local folder by path', () => {
  expect(detailPath(card())).toBe('/skill/deploy-check');
- expect(detailPath(card({project:'local',path:'~/.claude/skills/notes'}))).toBe('/skill/local?path=' + encodeURIComponent('~/.claude/skills/notes'));
+ expect(detailPath(card({teamed:false,path:'~/.claude/skills/notes'}))).toBe('/skill/local?path=' + encodeURIComponent('~/.claude/skills/notes'));
 });
 
 it('carries the marketplace origin into every row it links to', () => {
  const rows=cardActions(card({placed:false,installed:false,teamState:'endorsed'}),{origin:'root=marketplace'});
  expect(rows.find(a=>a.key==='open')?.to).toBe('/skill/deploy-check?root=marketplace');
  expect(rows.find(a=>a.key==='place')?.to).toBe('/skill/deploy-check?dialog=install&root=marketplace');
+});
+
+it('keeps the marketplace origin off the local-folder route, which has no marketplace', () => {
+ const rows=cardActions(card({teamed:false,path:'~/.claude/skills/notes',placed:true}),{origin:'root=marketplace'});
+ expect(rows.find(a=>a.key==='open')?.to).toBe('/skill/local?path=' + encodeURIComponent('~/.claude/skills/notes'));
+ expect(rows.find(a=>a.key==='place')?.to).toBe('/skill/local?path=' + encodeURIComponent('~/.claude/skills/notes') + '&dialog=remove');
 });
 
 it('offers Run eval only when the feature is on', () => {
