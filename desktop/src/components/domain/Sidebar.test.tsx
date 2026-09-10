@@ -6,6 +6,7 @@ import { BackendContext } from '../../backend';
 import { createMockBackend } from '../../backend/mock';
 import { createTauriBackend } from '../../backend/tauri';
 import { fakeBridge } from '../../backend/tauri/__tests__/fake-bridge';
+import type { Surfaces } from '../../backend/types';
 import { createRun } from '../../backend/mock/run';
 import { Sidebar } from './Sidebar';
 import { Shell } from './Shell';
@@ -156,4 +157,57 @@ it('reports a chooser failure below the Add row without calling checkout add',as
  fireEvent.click(await screen.findByRole('button',{name:'Add project'}));
  expect(await screen.findByRole('alert')).toHaveTextContent('No folder chooser on this shell');
  expect(add).not.toHaveBeenCalled();
+});
+
+// sidebar-spacing (Teddy, 2026-09-10): app.css puts the 56px Team margin on
+// `.sidebar-inner>.nav-group:nth-child(2)`. These pin the DOM shape that makes that selector name the Team group —
+// and only the Team group — in every state the sidebar can reach.
+function groupsOf(container:HTMLElement){return [...container.querySelectorAll('.sidebar-inner > .nav-group')];}
+
+const surfaceCases:{label:string;of:(base:Surfaces)=>Surfaces|undefined}[]=[
+ {label:'surfaces are still loading',of:()=>undefined},
+ {label:'every surface is available',of:base=>base},
+ {label:'the Inbox surface is unavailable',of:base=>({...base,inbox:false})},
+ {label:'the Projects surface is unavailable',of:base=>({...base,library:false})},
+ {label:'only the Marketplace row is available',of:base=>({...base,roster:false})},
+ {label:'only the Share row is available',of:base=>({...base,catalog:false})},
+];
+
+it.each(surfaceCases)('renders the Team group as the second .nav-group when $label',async({of})=>{
+ const surfaces=of(await createMockBackend().surfaces());
+ const {container}=render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={surfaces}/></HashRouter></QueryClientProvider></BackendContext>);
+ const groups=groupsOf(container);
+ expect(groups).toHaveLength(2);
+ expect(groups[0]).toHaveTextContent('Library');
+ expect(groups[1]).toHaveTextContent('Team');
+ expect(groups[1]?.previousElementSibling).toBe(groups[0]);
+});
+
+it('renders no second .nav-group when neither Team surface is available, so nothing takes the 56px margin',async()=>{
+ const surfaces={...await createMockBackend().surfaces(),catalog:false,roster:false};
+ const {container}=render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={surfaces}/></HashRouter></QueryClientProvider></BackendContext>);
+ const groups=groupsOf(container);
+ expect(groups).toHaveLength(1);
+ expect(groups[0]).toHaveTextContent('Library');
+ expect(screen.queryByRole('link',{name:'Marketplace'})).toBeNull();
+ expect(screen.queryByRole('link',{name:'Share'})).toBeNull();
+});
+
+it('keeps the Inbox rows inside the Library group, so folding Inbox never changes the group count',async()=>{
+ const surfaces=await createMockBackend().surfaces();
+ for(const collapsed of [[],['inbox'],['projects'],['inbox','projects']]){
+  const {container,unmount}=render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={surfaces} collapsedSections={collapsed}/></HashRouter></QueryClientProvider></BackendContext>);
+  expect(groupsOf(container),collapsed.join('+')||'nothing collapsed').toHaveLength(2);
+  expect(groupsOf(container)[1]).toHaveTextContent('Team');
+  unmount();
+ }
+});
+
+it('keeps the Team group second on the real adapter, where a bare CLI answers no features',async()=>{
+ const backend=createTauriBackend(fakeBridge(()=>undefined).bridge);
+ const {container}=render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><BackendContext value={backend}><HashRouter><Shell/></HashRouter></BackendContext></QueryClientProvider>);
+ await waitFor(()=>expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(4));
+ const groups=groupsOf(container);
+ expect(groups).toHaveLength(2);
+ expect(groups[1]).toHaveTextContent('Team');
 });
