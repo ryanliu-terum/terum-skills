@@ -39,15 +39,16 @@ it('renders recorded markdown and validation, omitting unknown counts and fabric
   expect(screen.queryByText(/184 lines/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Favorite skill' })).toBeNull();
   fireEvent.click(screen.getByRole('tab', { name: 'Quality' }));
-  expect(await screen.findByText('Hygiene checks · pass on connect')).toBeVisible();
+  expect(await screen.findByText('Hygiene checks · passed on connect · free, no model calls')).toBeVisible();
   expect(screen.queryByText(/12 days ago/)).toBeNull();
-  expect(screen.getByText('none')).toBeVisible();
+  expect(screen.queryByText('none')).toBeNull();
+  expect(screen.getByText('No tool grants requested')).toBeVisible();
   expect(f.spawns.find(spawn => spawn.args[0] === 'validate')?.args).toEqual(['validate', '--team', 'acme', '--', 'deploy-check']);
 });
 it('omits the missing-project crumb instead of drawing a dash segment', async () => {
   open('#/skill/diagnose');
   await waitFor(() => expect(document.querySelector('.detail-crumbs')).toHaveTextContent('diagnose'));
-  expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/debugging/diagnose');
+  expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/acme/debugging/diagnose');
 });
 it('omits the unknown quarantine size instead of a dangling dash clause', async () => {
   open('#/settings/sync');

@@ -16,6 +16,6 @@ export function abbreviateHome(text: string, home: string): string {
   return text.replace(new RegExp('(^|[\\s"\'`(=:\\[])' + escaped + '(?=$|[\\\\/\\s"\'`),;:\\]\\}])', 'g'), '$1~');
 }
 
-function stripRemote(remote: string, protocol: RegExp): string {
+export function stripRemote(remote: string, protocol: RegExp = /^[a-z][a-z0-9+.-]*:\/\//): string {
   return remote.replace(/^git@github\.com:/, 'github.com/').replace(/^ssh:\/\/git@/, '').replace(protocol, '').replace(/\.git\/?$/, '').replace(/\/$/, '');
 }
