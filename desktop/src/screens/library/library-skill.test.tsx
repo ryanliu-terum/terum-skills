@@ -223,7 +223,8 @@ it('never claims a missing folder or offers Sync/Remove when a name is not in th
  expect(screen.queryByRole('button',{name:/^Remove/})).toBeNull();
  const panel=document.querySelector('.centered-state')!;
  expect(within(panel as HTMLElement).getByRole('button',{name:'Back to library'})).toBeVisible();
- expect(within(panel as HTMLElement).getByRole('button',{name:'Open marketplace'})).toBeVisible();
+ expect(within(panel as HTMLElement).getByRole('button',{name:'Search the marketplace'})).toBeVisible();
+ expect(within(panel as HTMLElement).queryByRole('button',{name:'Open marketplace'})).toBeNull();
 });
 it('reports an unreadable name-route failure with the CLI message and can retry',async()=>{
  const backend=createMockBackend(),error='fatal: could not read the team clone';
@@ -247,11 +248,13 @@ it.each([true,false])('keeps a local error honest and never offers checkout remo
  expect(screen.queryByRole('button',{name:'Try again'})!==null).toBe(!typed);
  if(!typed){fireEvent.click(screen.getByRole('button',{name:'Try again'}));await waitFor(()=>expect(backend.localSkill).toHaveBeenCalledTimes(2));}
 });
-it('selects the longest registered checkout for local details and uses its label in crumbs',async()=>{
- const backend=createMockBackend(),status=await backend.status();if(!status.ok)throw new Error(status.error);
- vi.spyOn(backend,'status').mockResolvedValue({ok:true,value:{...status.value,roots:['/repo','/repo/nested'].map(root=>({id:root,root,label:root==='/repo'?'Outer':'Inner',kind:'checkout',registered:true,detected:false}))}});
- openWith('#/skill/local?path='+encodeURIComponent('/repo/nested/.claude/skills/deploy-check'),backend);
- await screen.findByRole('heading',{name:'deploy-check'});expect(screen.getByRole('link',{name:'Inner'})).toHaveAttribute('aria-current','page');expect(screen.getByRole('link',{name:'Outer'})).not.toHaveAttribute('aria-current');expect(document.querySelector('.detail-crumbs')).toHaveTextContent('Inner');
+it('names the checkout a local folder was resolved in, from the backend',async()=>{
+ const backend=createMockBackend();
+ openWith('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check'),backend);
+ await screen.findByRole('heading',{name:'deploy-check'});
+ expect(screen.getByRole('link',{name:/^SSM/})).toHaveAttribute('aria-current','page');
+ expect(screen.getByRole('link',{name:/^Global/})).not.toHaveAttribute('aria-current');
+ expect(document.querySelector('.detail-crumbs')).toHaveTextContent('SSM');
 });
 
 it.each(['none-with-skills','none-empty','unreadable'] as const)('shows the appropriate Library board for %s',async mode=>{
@@ -306,4 +309,105 @@ it('preserves the mock breadcrumb and fixture hygiene caption',async()=>{
  expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/terum/infra/deploy-check');
  fireEvent.click(screen.getByRole('tab',{name:'Quality'}));
  expect(screen.getByText('Hygiene checks · passed on connect, 12 days ago · free, no model calls')).toBeVisible();
+});
+
+const terumOrigin='root=%2FUsers%2Fyou%2Fcode%2Fterum';
+it.each([['Open',''],['Run eval','tab=evals&dialog=run-eval&'],['Uninstall…','dialog=remove&'],['Move to…','dialog=move&']])('carries the checkout root from a project card into its %s menu row',async(label,query)=>{
+ open('#/library/checkout?'+terumOrigin);
+ const card=await screen.findByTestId('skill-card-deploy-check');
+ expect(within(card).getAllByRole('link')).toHaveLength(1);
+ expect(within(card).getByRole('link')).toHaveAttribute('href','#/skill/deploy-check?'+terumOrigin);
+ fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));
+ fireEvent.click(await screen.findByRole('menuitem',{name:label}));
+ await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check?'+query+terumOrigin));
+});
+it('keeps Global-library and marketplace card links exactly as they were',async()=>{
+ open('#/library/global');
+ expect(within(await screen.findByTestId('skill-card-deploy-check')).getByRole('link')).toHaveAttribute('href','#/skill/deploy-check');
+ cleanup();open('#/marketplace/people/lena');
+ expect(within(await screen.findByTestId('skill-card-a11y-audit')).getByRole('link')).toHaveAttribute('href','#/skill/a11y-audit?root=marketplace');
+});
+it('names the project in the crumb, the sidebar and the back arrow of a scoped page',async()=>{
+ open('#/skill/deploy-check?'+terumOrigin);
+ await screen.findByRole('heading',{name:'deploy-check'});
+ expect(document.querySelector('.detail-crumbs')?.textContent).toMatch(/^Terum\//);
+ expect(screen.getByRole('link',{name:/^Terum/})).toHaveAttribute('aria-current','page');
+ expect(screen.getByRole('link',{name:/^Global/})).not.toHaveAttribute('aria-current');
+ fireEvent.click(screen.getByRole('button',{name:'Back to library'}));
+ await waitFor(()=>expect(location.hash).toBe('#/library/checkout?'+terumOrigin));
+});
+it('says Remove from the project, not from Global, on a scoped page',async()=>{
+ open('#/skill/deploy-check?'+terumOrigin+'&dialog=remove');
+ const dialog=await screen.findByRole('dialog',{name:'Remove deploy-check?'});
+ expect(dialog).toHaveTextContent('Remove from Terum.');
+ expect(screen.getByRole('button',{name:'Remove from Terum',hidden:true})).toBeInTheDocument();
+});
+it('keeps the Marketplace crumb and back arrow on the not-installed board',async()=>{
+ open('#/skill/deploy-check?__mock=not-installed');
+ await screen.findByRole('heading',{name:'deploy-check'});
+ expect(document.querySelector('.detail-crumbs')?.textContent).toMatch(/^Marketplace\//);
+ expect(screen.getByRole('link',{name:/^Marketplace/})).toHaveAttribute('aria-current','page');
+ fireEvent.click(screen.getByRole('button',{name:'Back to library'}));
+ await waitFor(()=>expect(location.hash).toBe('#/marketplace'));
+});
+it.each(['','&'+terumOrigin])('preselects Global in the install dialog whatever the origin (%s)',async origin=>{
+ open('#/skill/deploy-check?__mock=not-installed&dialog=install'+origin);
+ const dialog=await screen.findByRole('dialog');
+ expect(within(dialog).getAllByRole('radio')).toHaveLength(4);
+ expect(within(dialog).getByRole('radio',{name:/Global.*every session.*~\/.claude\/skills/})).toBeChecked();
+});
+it.each([true,false])('follows a moved copy from a scoped page and stays put from an unscoped one (scoped=%s)',async scoped=>{
+ const backend=createMockBackend();
+ vi.spyOn(backend,'install').mockImplementation(()=>createRun(async()=>({ok:true,value:[]})));
+ const uninstall=vi.spyOn(backend,'uninstallSkill').mockImplementation(()=>createRun(async()=>({ok:true,value:[]})));
+ openWith('#/skill/deploy-check?dialog=move'+(scoped?'&'+terumOrigin:''),backend);
+ const dialog=await screen.findByRole('dialog');
+ fireEvent.click(within(dialog).getByRole('radio',{name:/SSM/}));
+ fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
+ await waitFor(()=>expect(uninstall).toHaveBeenCalledWith(expect.objectContaining({from:scoped?'/Users/you/code/terum':'global'})));
+ await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check'+(scoped?'?root=%2FUsers%2Fyou%2Fcode%2Fssm':'')));
+});
+it('leaves a cancelled move on the page it started from',async()=>{
+ const backend=createMockBackend();
+ vi.spyOn(backend,'install').mockImplementation(()=>createRun(async()=>({ok:false,cancelled:true,error:'Declined.'})));
+ const uninstall=vi.spyOn(backend,'uninstallSkill');
+ openWith('#/skill/deploy-check?'+terumOrigin+'&dialog=move',backend);
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Move'}));
+ expect(await screen.findByText('Move cancelled; nothing was changed.')).toBeVisible();
+ expect(location.hash).toBe('#/skill/deploy-check?'+terumOrigin);
+ expect(uninstall).not.toHaveBeenCalled();
+});
+it('keeps preference keys on the skill, not on the route segment',async()=>{
+ open('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check'));
+ fireEvent.click(await screen.findByRole('switch',{name:'Enable skill'}));
+ expect(localStorage.getItem('terum-skills-app:pref:enabled:deploy-check')).toBe('false');
+ expect(localStorage.getItem('terum-skills-app:pref:enabled:local')).toBeNull();
+});
+it('keeps checkout selection and back navigation on a scoped page whose read failed',async()=>{
+ const backend=createMockBackend();
+ vi.spyOn(backend,'skill').mockResolvedValue({ok:false,error:"EACCES: permission denied, scandir '~/.terum/skills'",reason:'unreadable'});
+ openWith('#/skill/deploy-check?'+terumOrigin,backend);
+ await screen.findByText("Couldn't read deploy-check");
+ // §4.8(e)'s exact expression falls back to Global without a detail; §7.4 test 43's Terum crumb conflicts with it.
+ expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/deploy-check');
+ expect(screen.getByRole('link',{name:/^Terum/})).toHaveAttribute('aria-current','page');
+ fireEvent.click(screen.getByRole('button',{name:'Back to library'}));
+ await waitFor(()=>expect(location.hash).toBe('#/library/checkout?'+terumOrigin));
+});
+it('resets an action error when navigating to another origin of the same skill',async()=>{
+ const backend=createMockBackend();vi.spyOn(backend,'openInEditor').mockResolvedValue({ok:false,error:'Editor refused first root'});
+ openWith('#/skill/deploy-check?'+terumOrigin,backend);
+ fireEvent.click(await screen.findByRole('button',{name:'Edit'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('Editor refused first root');
+ location.hash='#/skill/deploy-check?root=%2FUsers%2Fyou%2Fcode%2Fssm';fireEvent(window,new HashChangeEvent('hashchange'));
+ expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeVisible();
+ expect(screen.queryByRole('alert')).toBeNull();
+ expect(document.querySelector('.detail-crumbs')?.textContent).toMatch(/^SSM\//);
+});
+it('maps the reachable global root URL to a global scope',async()=>{
+ const backend=createMockBackend(),skill=vi.spyOn(backend,'skill');
+ openWith('#/skill/deploy-check?root=global',backend);
+ await screen.findByRole('heading',{name:'deploy-check'});
+ expect(skill).toHaveBeenCalledWith({ref:'deploy-check',at:{kind:'global'}},expect.objectContaining({signal:expect.any(AbortSignal)}));
+ expect(screen.getByRole('link',{name:/^Global/})).toHaveAttribute('aria-current','page');
 });

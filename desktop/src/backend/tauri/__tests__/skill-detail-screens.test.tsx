@@ -1,8 +1,10 @@
 import { afterEach,expect,it,vi } from 'vitest';
-import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
+import { act,cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import { QueryClient,QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext } from '../../index';
+import { EvalRunProvider } from '../../../app/EvalRunProvider';
+import { createRun } from '../../mock/run';
 import { App } from '../../../app/App';
 import { useUiStore } from '../../../app/store';
 import { createTauriBackend } from '../index';
@@ -20,7 +22,7 @@ function open(route:string,amend?:AmendResult,launch:'fresh'|'consumed'='fresh')
   if(launch==='consumed')backend.prefs.set('launch:consumedWrittenAt',STATE.writtenAt);
   const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
   location.hash=route;
-  render(<BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><App/></Tooltip.Provider></QueryClientProvider></BackendContext>);
+  render(<BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><EvalRunProvider><App/></EvalRunProvider></Tooltip.Provider></QueryClientProvider></BackendContext>);
   return {f,backend,client};
 }
 
@@ -59,15 +61,16 @@ it('shows the global install destination and full team-version prefix for an unp
   expect(screen.queryByRole('button',{name:'Open in editor'})).toBeNull();
   expect(screen.queryByRole('button',{name:'Manage with Terum…'})).toBeNull();
 });
-it('renders a not-found board with the raw error and no Remove action',async()=>{
+it('renders a not-found board that offers the library first and the marketplace second',async()=>{
   open('#/skill/nope');
   expect(await screen.findByText("Couldn't find nope")).toBeVisible();
-  expect(screen.getByText('No skill named nope is shared in this team.')).toBeVisible();
-  expect(screen.getByRole('alert')).toHaveTextContent('No unambiguous skill nope in team acme.');
+  expect(screen.getByText('No team skill and no folder terum-skills can open carry this name. It may have been renamed, be a symlink, or live in a checkout that is not registered.')).toBeVisible();
+  expect(screen.getByRole('alert')).toHaveTextContent('No skill named nope is shared in team acme, and no readable folder of that name is in your Library roots.');
   expect(screen.queryByRole('button',{name:/Remove/})).toBeNull();
   expect(screen.getAllByRole('button',{name:'Back to library'})).toHaveLength(2);
-  fireEvent.click(screen.getByRole('button',{name:'Open marketplace'}));
-  await waitFor(()=>expect(location.hash).toBe('#/marketplace'));
+  expect(screen.queryByRole('button',{name:'Open marketplace'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Search the marketplace'}));
+  await waitFor(()=>expect(location.hash).toBe('#/marketplace?q=nope'));
 });
 it('renders an unreadable board and refetches from Try again',async()=>{
   let fail=true;
@@ -191,4 +194,98 @@ it('renders a team SKILL.md through the drawn Markdown vocabulary',async()=>{
   expect(document.querySelectorAll('.md-doc a')).toHaveLength(0);
   expect(document.querySelectorAll('.md-doc img')).toHaveLength(0);
   expect(document.querySelector('.skill-md-meta')).toHaveTextContent('17 lines');
+});
+const uncRoot=String.raw`\\wsl.localhost\Ubuntu\home\teniroo`,uncPath=uncRoot+String.raw`\.claude\skills\adopt-agent-tooling`;
+function localFolder(root=uncRoot,invalid=false):AmendResult{return (name,value)=>{
+ if(name!=='ls-local')return;
+ const sections=value.local as Record<string,unknown>[];
+ const separator=root===uncRoot?String.raw`\\`.slice(0,1):'/';
+ const folder=root+separator+'.claude'+separator+'skills',path=folder+separator+'adopt-agent-tooling';
+ Object.assign(sections[1]!,{root:folder,repoRoot:root,label:'teniroo',rootState:'scanned',registered:false,detected:true,rows:invalid?[]:[{name:'adopt-agent-tooling',path,state:'untracked locally',tracked:false,shared:[],placement:null,health:'untracked'}],notOffered:invalid?[{name:'adopt-agent-tooling',path,reason:'invalid-yaml'}]:[]});
+};}
+it.each([['UNC',uncRoot,uncPath],['POSIX','/home/teniroo','/home/teniroo/.claude/skills/adopt-agent-tooling']] as const)('names the checkout in the crumb and the sidebar when a %s payload holds the folder',async(_label,root,path)=>{
+ open('#/skill/local?path='+encodeURIComponent(path),localFolder(root));
+ await screen.findByRole('heading',{name:'adopt-agent-tooling'});
+ expect(document.querySelector('.detail-crumbs')?.textContent).toBe('teniroo/adopt-agent-tooling');
+ expect(screen.getByRole('link',{name:/^teniroo/})).toHaveAttribute('aria-current','page');
+ expect(screen.getByRole('link',{name:/^Global/})).not.toHaveAttribute('aria-current');
+});
+it('opens a folder the CLI could not parse, by path, and still names its checkout',async()=>{
+ open('#/skill/local?path='+encodeURIComponent(uncPath),localFolder(uncRoot,true));
+ await screen.findByRole('heading',{name:'adopt-agent-tooling'});
+ expect(document.querySelector('.detail-crumbs')?.textContent).toBe('teniroo/adopt-agent-tooling');
+ expect(screen.getByRole('link',{name:/^teniroo/})).toHaveAttribute('aria-current','page');
+ expect(screen.getByText('Not connectable · invalid-yaml')).toBeVisible();
+});
+it('sends the folder, not the route segment, to validate',async()=>{
+ const {backend,client}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',localFolder());
+ await screen.findByRole('heading',{name:'adopt-agent-tooling'});
+ const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'adopt-agent-tooling',findings:0,warnings:0}}),invalidate=vi.spyOn(client,'invalidateQueries');
+ fireEvent.click(screen.getByRole('button',{name:'Validate'}));
+ expect(await screen.findByText('hygiene passed')).toBeVisible();
+ expect(validate).toHaveBeenCalledExactlyOnceWith({ref:uncPath});
+ expect(invalidate).toHaveBeenCalledWith({queryKey:['skill','local:'+uncPath]});
+});
+it('sends the skill name, not the route segment, to eval',async()=>{
+ const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=evals&dialog=run-eval',localFolder());
+ const dialog=await screen.findByRole('dialog');
+ const evaluate=vi.spyOn(backend,'eval').mockImplementation(()=>createRun(async()=>({ok:false,error:'Eval failed for this test.'})));
+ fireEvent.click(within(dialog).getByRole('button',{name:'Run eval'}));
+ await waitFor(()=>expect(evaluate).toHaveBeenCalledExactlyOnceWith({ref:'adopt-agent-tooling',commit:true}));
+ await waitFor(()=>expect(new URLSearchParams(location.hash.split('?')[1]).has('dialog')).toBe(false));
+ // Successful runs dismiss themselves; retain a failed run to exercise the host's URL dismissal.
+ await screen.findByText('Eval failed for this test.');
+ await act(async()=>{location.hash+='&dialog=run-eval';fireEvent(window,new PopStateEvent('popstate'));});
+ const running=await screen.findByRole('dialog');
+ fireEvent.click(await within(running).findByRole('button',{name:'Close'}));
+ await waitFor(()=>expect(new URLSearchParams(location.hash.split('?')[1]).has('dialog')).toBe(false));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+});
+const seedRoot='/Users/teddy/code/seed',seedOrigin='root='+encodeURIComponent(seedRoot);
+function projectCopy(both=false,duplicateLabel=false):AmendResult{return (name,value)=>{
+ if(name!=='ls-local')return;
+ const sections=value.local as {root:string;repoRoot?:string;label:string;rootState:string;rows:Record<string,unknown>[]}[];
+ const project=sections[1]!;
+ project.rootState='scanned';project.rows=sections[0]!.rows.map(row=>({...row,path:project.root+'/'+row.name}));
+ if(!both)sections[0]!.rows=[];
+ if(duplicateLabel)sections.push({...project,root:'/another/seed/.claude/skills',repoRoot:'/another/seed',rows:[]});
+};}
+it('returns to the checkout library from a scoped page and from its error board',async()=>{
+ open('#/skill/deploy-check?'+seedOrigin,projectCopy());
+ await screen.findByRole('heading',{name:'deploy-check'});
+ fireEvent.click(screen.getByRole('button',{name:'Back to library'}));
+ await waitFor(()=>expect(location.hash).toBe('#/library/checkout?'+seedOrigin));
+ cleanup();open('#/skill/nope?'+seedOrigin,projectCopy());
+ await screen.findByText("Couldn't find nope");
+ fireEvent.click(within(document.querySelector('.centered-state') as HTMLElement).getByRole('button',{name:'Back to library'}));
+ await waitFor(()=>expect(location.hash).toBe('#/library/checkout?'+seedOrigin));
+});
+it('renders the ambiguous board when two team ids share a prefix',async()=>{
+ open('#/skill/ab',(name,value)=>{if(name==='ls'){const skills=value.skills as Record<string,unknown>[];skills[0]!.id='ab-one';skills[1]!.id='ab-two';}});
+ expect(await screen.findByText('More than one skill matches')).toBeVisible();
+ expect(screen.getByText('This reference is the start of more than one skill ID in your team. Open the one you want from the marketplace, where each skill has its own page.')).toBeVisible();
+ expect(screen.getByRole('alert')).toHaveTextContent('2 team skills in acme have an ID starting with ab; open the one you want from the marketplace.');
+ const panel=document.querySelector('.centered-state') as HTMLElement;
+ expect(within(panel).getAllByRole('button')[0]).toHaveTextContent('Open marketplace');
+ fireEvent.click(within(panel).getByRole('button',{name:'Open marketplace'}));
+ await waitFor(()=>expect(location.hash).toBe('#/marketplace'));
+});
+it.each([false,true])('removes the copy in the root the URL named (both roots and duplicate labels=%s)',async both=>{
+ const {f}=open('#/skill/deploy-check?'+seedOrigin+'&dialog=remove',projectCopy(both,both));
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Remove'}));
+ await waitFor(()=>expect(f.spawns.find(spawn=>spawn.args[0]==='uninstall-skill')?.args).toEqual(['uninstall-skill','--team','acme','--from',seedRoot,'--','deploy-check']));
+ await waitFor(()=>expect(location.hash).toBe('#/library/checkout?'+seedOrigin));
+});
+it('keeps the by-path remove argv unchanged',async()=>{
+ const {f}=open('#/skill/local?path='+encodeURIComponent(seedRoot+'/.claude/skills/deploy-check')+'&dialog=remove',projectCopy());
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Remove'}));
+ await waitFor(()=>expect(f.spawns.find(spawn=>spawn.args[0]==='uninstall-skill')?.args).toEqual(['uninstall-skill','--team','acme','--','deploy-check']));
+});
+it('validates the team name on a qualified name route, not its placed folder or qualified ref',async()=>{
+ const {backend}=open('#/skill/acme%2Fdeploy-check?'+seedOrigin+'&tab=quality',projectCopy());
+ await screen.findByRole('heading',{name:'deploy-check'});
+ const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'deploy-check',findings:0,warnings:0}});
+ fireEvent.click(screen.getByRole('button',{name:'Validate'}));
+ await waitFor(()=>expect(validate).toHaveBeenCalledWith({ref:'deploy-check',team:'acme'}));
+ expect(validate.mock.calls.every(([args])=>args.ref==='deploy-check')).toBe(true);
 });

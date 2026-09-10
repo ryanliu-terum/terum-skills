@@ -136,3 +136,12 @@ test('person Follow toggles without navigating',async({page})=>{
  await expect(card.getByRole('button',{name:'Unfollow ryan',exact:true})).toHaveAttribute('aria-pressed','true');
  expect(errors).toEqual([]);
 });
+
+test('project card click keeps the checkout root, crumb and sidebar',async({page})=>{
+ const errors=await openCards(page,'#/library/checkout?root=%2FUsers%2Fyou%2Fcode%2Fterum');
+ await clickBody(page,page.getByTestId('skill-card-deploy-check').locator('.skill-card-desc'));
+ await expect(page).toHaveURL(/#\/skill\/deploy-check\?root=%2FUsers%2Fyou%2Fcode%2Fterum$/);
+ await expect(page.getByRole('link',{name:/^Terum/})).toHaveAttribute('aria-current','page');
+ await expect(page.locator('.detail-crumbs')).toContainText('Terum');
+ expect(errors).toEqual([]);
+});

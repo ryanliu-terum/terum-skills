@@ -1,5 +1,5 @@
 import type { Design } from '../fixtures/schema';
-export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library'|'not-found'|'unreadable'|'invalid-config';value?:T};
+export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library'|'not-found'|'ambiguous-ref'|'unreadable'|'invalid-config';value?:T};
 export interface LaunchContext { writtenAt: string; target?: string; intent?: 'setup' }
 export class PromptCancelledError extends Error { readonly cancelled = true as const; }
 export interface AskOptions {detail?:readonly string[]}
@@ -39,6 +39,12 @@ export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'
  /** A same-named local folder the driving CLI is too old to identify: presence is unknown, so the
   *  page must not claim "Not installed" nor offer an Install that would collide with it. */
  unidentifiedLocal:{path:string;pathLabel:string}|null;
+ /** The Library root this detail describes, as the backend resolved it: `id` is the sidebar's root
+  *  id — the literal 'Global', or a checkout's repo root — and `label` is the crumb's first part.
+  *  Null when the read was not anchored to one root (a bare-name deep link answered machine-wide,
+  *  or the marketplace), and the screen then falls back to `root`. A page must never derive this
+  *  from a path: root membership is the backend's to decide (desktop/AGENTS.md invariant 1). */
+ owningRoot:{id:string;label:string}|null;
  /** The viewer's own handle in this team, so the page describes the viewer's install as theirs
   *  instead of a teammate's. Null when the detail is not team-scoped, as for a local folder that
   *  belongs to no team and therefore has no per-team handle to compare against.

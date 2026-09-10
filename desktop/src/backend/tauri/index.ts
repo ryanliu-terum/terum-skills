@@ -9,7 +9,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
-import type { Root, LibraryTeam, IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
+import type { Root, LibraryScope, LibraryTeam, IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { prepareRun } from './prepare-run';
@@ -22,6 +22,7 @@ import { scannedRoots } from './scanned-roots';
 import { cliRefresh, createRefreshPolicy } from './refresh';
 import { overviewCopy } from '../../lib/overview-copy';
 import { bodyExcerpt } from '../../lib/body-excerpt';
+import { isUnderRoot, samePath } from '../../lib/skill-path';
 
 /**
  * The real adapter: every long verb is one `terum-skills --frames <verb>` process (run.ts). What the CLI has
@@ -90,6 +91,20 @@ function rootOf(section:LocalSection,home=''):Root {
   const global=section.scope==='global',repoRoot=section.repoRoot??section.root;
   return {id:global?'global':repoRoot,kind:global?'global':'checkout',label:labelOf(section),root:global?(home?abbreviateHome(section.root,home):'~/.claude/skills'):repoRoot,rootState:section.rootState,registered:section.registered??false,detected:section.detected??false,count:section.counts?String(visibleSkillFolders(section)):undefined,remote:section.remote??null};
 }
+/** The root a detail was resolved in, in the sidebar's own terms. The checkout id comes from rootOf
+ *  so it is byte-identical to the id Sidebar.tsx compares against; the global root uses the literal
+ *  'Global' because Sidebar.tsx:31 matches that, not rootOf's lowercase 'global'. */
+function owningRootOf(section:LocalSection):{id:string;label:string}{
+  return section.scope==='global'?{id:'Global',label:'Global'}:{id:rootOf(section).id,label:labelOf(section)};
+}
+/** The one `ls --local` section a scoped read is anchored to. The comparison is separator- and
+ *  trailing-separator-insensitive because the value arrives from a URL, and library() uses the same
+ *  predicate, so any root that opens a checkout Library also opens a scoped detail. */
+function sectionFor(local:Inventory,at:LibraryScope):LocalSection|undefined{
+  return (local.local??[]).find(section=>at.kind==='global'?section.scope==='global':section.scope==='project'&&samePath(section.repoRoot??section.root,at.root));
+}
+/** Presence evidence narrowed to one root. Destinations are NOT narrowed — see inventoryDetail. */
+function restrictLocal(local:Inventory,section:LocalSection):Inventory{return {...local,local:[section]};}
 // D2: only these frontmatter failures still describe folders holding SKILL.md. 'managed-wrapper' is
 // deliberately absent: the bundled /terum-skills skill is counted as a folder by the CLI, but it is
 // our own placed component, so the Library neither draws it as a card nor counts it anywhere.
@@ -120,7 +135,7 @@ function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):Skill
 }
 function localDetail(card:SkillCard,section:LocalSection,path:string,home:string):SkillDetail {
   const pathLabel=abbreviateHome(path,home);
-  return {...card,desc_long:card.desc,size_bytes:'—',team:null,skillRef:'local:'+path,root:'Global',installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,hygieneStatus:null,hygieneWhen:null,path,pathLabel,repo:null,repoPath:pathLabel,version:'—',version_full:null,scope:section.scope==='global'?'Global':labelOf(section),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:null,grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:'',body:[],markdown:null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest connect '+pathLabel,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},method:'',versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[],unidentifiedLocal:null,viewerHandle:null};
+  return {...card,desc_long:card.desc,size_bytes:'—',team:null,skillRef:'local:'+path,root:'Global',owningRoot:owningRootOf(section),installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,hygieneStatus:null,hygieneWhen:null,path,pathLabel,repo:null,repoPath:pathLabel,version:'—',version_full:null,scope:section.scope==='global'?'Global':labelOf(section),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:null,grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:'',body:[],markdown:null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest connect '+pathLabel,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},method:'',versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[],unidentifiedLocal:null,viewerHandle:null};
 }
 /** A bare name that is not in the team may still name a folder on this machine — one nobody has
  *  shared, or one whose frontmatter the CLI could not parse. Deep links, bookmarks and hand-typed
@@ -181,20 +196,29 @@ function repoSlug(remote: string | null | undefined): string | null {
 function detailVersionFields(repo: string | null, name: string, version: string | null): Pick<SkillDetail, 'version' | 'version_full' | 'shareCommand'> {
   return { version: version?.slice(0, 12) ?? '—', version_full: version, shareCommand: repo ? `npx -y terum-skills@latest install ${repo}/${name}${version ? '@' + version.slice(0, 12) : ''}` : '—' };
 }
-function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryTeam, placements: LedgerPlacements, validation: Result<ValidateResult>, inventory: Inventory, features: Pick<Features, 'localIdentity'>, home: string): SkillDetail {
-  const card = inventoryCard(row, local, team.team, features, home, team.handle, placements), rows = onDisk(local, team.team, row.id, features), placed = rows.find(r => r.placement?.id === row.id && r.placement.team === team.team);
-  const path = placed?.path ?? rows[0]?.path ?? null;
+/** `local` is the presence evidence — restricted to one section for a scoped read. `scopes` is the
+ *  full machine inventory the install destinations come from, so restricting presence never
+ *  truncates the Install-to list. `at` names the root a scoped read was anchored to: non-null means
+ *  the answer describes exactly that root, so the two root-blind fallbacks (the unfiltered status
+ *  ledger and this user's people file) are not consulted — neither records WHICH root. */
+function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryTeam, placements: LedgerPlacements, validation: Result<ValidateResult>, inventory: Inventory, features: Pick<Features, 'localIdentity'>, home: string, scopes: Inventory = local, at: {id:string;label:string} | null = null): SkillDetail {
+  const card = inventoryCard(row, local, team.team, features, home, at ? '' : team.handle, at ? [] : placements), rows = onDisk(local, team.team, row.id, features);
+  // Global first by rule, not by the CLI's emission order: a read that names no root answers with
+  // the Global copy (the documented bare-name rule at :124-128), and a scoped read has one section.
+  const ordered = [...rows].sort((a, b) => Number(b.scope === 'global') - Number(a.scope === 'global'));
+  const placed = ordered.find(r => r.placement?.id === row.id && r.placement.team === team.team);
+  const path = placed?.path ?? ordered[0]?.path ?? null;
   const name = row.author.replace(/\s*<[^>]*>$/, '');
   const installers = row.installedBy;
   const repo = repoSlug(team.repository);
   const version = placed?.placement?.version ?? (row.latest === '—' ? null : row.latest || null);
   const emailHandle = row.author.match(/<([^@<>]+)@[^>]+>$/)?.[1];
   const handle = team.members?.find(member => member.displayName === name)?.handle ?? team.members?.find(member => member.handle === emailHandle)?.handle ?? '';
-  const projects = (local.local ?? []).filter(section => section.scope === 'project' && section.rootState !== 'absent' && section.label);
+  const projects = (scopes.local ?? []).filter(section => section.scope === 'project' && section.rootState !== 'absent' && section.label);
   const installScopes: [string, string][] = [['Global', 'every session · ~/.claude/skills'], ...projects.map((section): [string, string] => [section.label!, `project · ${abbreviateHome(section.repoRoot ?? section.root, home)}`])];
   // Captions stay display-only; removal needs the original absolute destination.
   const installScopePaths = Object.fromEntries(projects.flatMap(section => section.repoRoot && projects.filter(other => other.label === section.label).length === 1 ? [[section.label!, section.repoRoot]] : []));
-  return { ...card, team: team.team, installScopes, installScopePaths, projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: typeof row.body === 'string' ? row.body.replace(/\n$/, '').split('\n').length : null, skillRef: `${team.team}/${row.name}`, root: 'Global', desc_long: bodyExcerpt(row.body) ?? row.description, files: null, size_bytes: '—', ...detailVersionFields(repo, row.name, version), scope: placed?.scope === 'global' ? 'Global' : placed?.label ?? placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
+  return { ...card, team: team.team, installScopes, installScopePaths, projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: typeof row.body === 'string' ? row.body.replace(/\n$/, '').split('\n').length : null, skillRef: `${team.team}/${row.name}`, root: 'Global', owningRoot: at, desc_long: bodyExcerpt(row.body) ?? row.description, files: null, size_bytes: '—', ...detailVersionFields(repo, row.name, version), scope: placed?.scope === 'global' ? 'Global' : placed?.label ?? placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
     unidentifiedLocal: card.installed === 'placed' ? null : unidentifiedLocal(local, row.name, features, home), viewerHandle: team.handle,
     used_by: [...new Map(installers.map(person => [person.handle, initials(person.displayName)])).values()], users: installers.map(person => [person.handle, initials(person.displayName), `${person.scope.kind === 'global' ? 'Global' : person.scope.project}${person.since ? ` · since ${person.since.slice(0, 10)}` : ''}`]),
     author: { name, handle, role: '', initials: initials(name) }, repo, repoPath: `skills/${row.name}`, path, pathLabel: path === null ? '—' : abbreviateHome(path, home), grants_approved: '', versions:null,latestState:'none',invalidReceiptFile:null,localRuns:[],evalReportError:null, receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: null, hygieneStatus: validation.value === undefined ? null : validation.ok && validation.value.findings === 0 ? 'pass' : 'fail', hygieneWhen: null,
@@ -260,7 +284,7 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
   // for a CLI health computed against the share baseline; `health` describes placements only.
   SHARED:value.ledger.shared.map(item=>{
    const row=rows.find(row=>row.shared.some(source=>source.id===item.id&&source.team===item.team))??rows.find(row=>normalizePath(row.path)===normalizePath(item.source));
-   const scanned=local?.local.some(section=>(section.rootState??'scanned')==='scanned'&&normalizePath(item.source).startsWith(normalizePath(section.root)+'/'))??false;
+   const scanned=local?.local.some(section=>(section.rootState??'scanned')==='scanned'&&isUnderRoot(item.source,section.root))??false;
    return [row?.name??local?.skills.find(skill=>skill.id===item.id)?.name??item.id,abbreviateHome(item.source,home),item.team,row!==undefined?'Present':scanned?'Missing':'—'];
   }),
   QUARANTINE:null,HOOK:null,
@@ -550,7 +574,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async library({ scope, team }, options) {
       const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return fail(local.error);
-      const section = local.value.local?.find(section => scope.kind==='global' ? section.scope==='global' : section.scope==='project' && normalizePath(section.repoRoot??section.root)===normalizePath(scope.root));
+      const section = local.value.local?.find(section => scope.kind==='global' ? section.scope==='global' : section.scope==='project' && samePath(section.repoRoot??section.root,scope.root));
       if (!section) return fail('No such checkout: '+(scope.kind==='checkout'?scope.root:'global')+' · Register it under Settings ▸ This machine ▸ Checkouts.');
       const features = {localIdentity:hello?.features.localIdentity??false};
       const enrichment = await libraryTeam(team, options);
@@ -586,8 +610,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       if(!local.ok)return fail(local.error);
       const directory=await home(),features={localIdentity:hello?.features.localIdentity??false};
       for(const section of local.value.local??[]) {
-        const row=section.rows.find(row=>normalizePath(row.path)===normalizePath(path));
-        const entry=row?undefined:section.notOffered?.find(entry=>countable(entry)&&normalizePath(entry.path)===normalizePath(path));
+        const row=section.rows.find(row=>samePath(row.path,path));
+        const entry=row?undefined:section.notOffered?.find(entry=>countable(entry)&&samePath(entry.path,path));
         if(!row&&!entry)continue;
         const enrichment=await libraryTeam(undefined,options);
         const skill=row&&enrichment.team.kind==='ok'?joinedSkill(row,enrichment.inventory!,enrichment.team.team,features):undefined;
@@ -595,7 +619,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
           const team=enrichment.selected.team;
           const validation=await backend.validate({ref:skill.name,team},options);
           if(!validation.ok&&validation.value===undefined)return fail(validation.error);
-          const detail=inventoryDetail(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.selected,enrichment.selected.placements,validation,enrichment.inventory,features,directory);
+          const detail=inventoryDetail(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.selected,enrichment.selected.placements,validation,enrichment.inventory,features,directory,local.value,owningRootOf(section));
           const report=await backend.evalReport({ref:skill.name,team},options);
           return {ok:true,value:report.ok?{...detail,...report.value}:{...detail,evalReportError:report.error}};
         }
@@ -606,7 +630,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     },
     checkouts:{add:path=>run(['checkout','add','--',path],cliCheckoutAdded,v=>v,['config']),remove:path=>run(['checkout','remove','--',path],cliCheckoutRemoved,v=>v,['config'])},
     projects:{create:({name,remote})=>run(['project','create',...(remote?['--remote',remote]:[]),'--',name],cliProjectCreated,v=>v,['clone'])},
-    async skill({ ref, team }, options) {
+    async skill({ ref, team, at }, options) {
       const parts = ref.split('/');
       const explicitTeam = team ?? (parts.length === 2 ? parts[0] : undefined);
       const name = parts.length === 2 ? parts[1]! : ref;
@@ -618,22 +642,32 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const row = inventory.value.skills.find(row => row.name === name) ?? (matches.length === 1 ? matches[0] : undefined);
       const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return { ok: false, error: local.error, reason: 'unreadable' };
+      const features = { localIdentity: hello?.features.localIdentity ?? false };
+      // A root the scan does not report (a stale bookmark, a forgotten checkout, a hand-typed URL)
+      // is ignored rather than answered with a fabricated absence: the machine-wide answer is what
+      // an unscoped URL gives today, and it never claims a root it did not resolve.
+      const section = at === undefined ? undefined : sectionFor(local.value, at);
+      const presence = section ? restrictLocal(local.value, section) : local.value;
+      const owning = section ? owningRootOf(section) : null;
       if (!row) {
         // A bare name the team does not offer may still name a folder on this machine — one nobody
         // shared, or one whose frontmatter the CLI could not parse. Deep links and bookmarks arrive
         // as a bare name with no path, so the local roots answer before the name is reported
-        // unknown. An ambiguous team prefix is a team-side ambiguity and is reported as such.
-        const onThisMachine = matches.length === 0 ? localDetailByName(local.value, name, await home()) : undefined;
+        // unknown. A scoped read searches only the root it names. An ambiguous team prefix is a
+        // team-side ambiguity and is reported as such, with the count and the way out.
+        const onThisMachine = matches.length === 0 ? localDetailByName(presence, name, await home()) : undefined;
         if (onThisMachine) return { ok: true, value: onThisMachine };
-        return { ok: false, error: `No unambiguous skill ${name} in team ${selected.value.team}.`, reason: matches.length === 0 ? 'not-found' : 'unreadable' };
+        if (matches.length === 0) return { ok: false, reason: 'not-found', error: `No skill named ${name} is shared in team ${selected.value.team}, and no readable folder of that name is in your Library roots.` };
+        return { ok: false, reason: 'ambiguous-ref', error: `${matches.length} team skills in ${selected.value.team} have an ID starting with ${name}; open the one you want from the marketplace.` };
       }
       const validation = await backend.validate({ ref: row.name, team: selected.value.team }, options);
       // A hygiene failure has a parsed value; an unreadable/cancelled validation is a read failure.
       if (!validation.ok && validation.value === undefined) return { ok: false, error: validation.error, reason: 'unreadable' };
-      const detail = inventoryDetail(row, local.value, selected.value, selected.value.placements, validation, inventory.value, { localIdentity: hello?.features.localIdentity ?? false }, await home());
+      const detail = inventoryDetail(row, presence, selected.value, selected.value.placements, validation, inventory.value, features, await home(), local.value, owning);
       const report = await backend.evalReport({ref:row.name,team:selected.value.team},options);
       const merged = report.ok ? {...detail, ...report.value} : {...detail, evalReportError: report.error};
-      const placementVersion = onDisk(local.value, selected.value.team, row.id, {localIdentity: hello?.features.localIdentity ?? false}).find(item => item.placement?.id === row.id && item.placement.team === selected.value.team)?.placement?.version;
+      // The version names the copy this page describes, so a scoped read reads the scoped placement.
+      const placementVersion = onDisk(presence, selected.value.team, row.id, features).find(item => item.placement?.id === row.id && item.placement.team === selected.value.team)?.placement?.version;
       const version = placementVersion ?? merged.versions?.teamCurrent ?? detail.version_full;
       return {ok:true,value:{...merged,...detailVersionFields(detail.repo, row.name, version)}};
     },

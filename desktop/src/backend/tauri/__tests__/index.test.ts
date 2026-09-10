@@ -272,6 +272,20 @@ it('marks a shared row Missing only when a scanned root should hold its source',
  // No local row carries the shared id and the scanned global root has no such folder: the skills list still names it and the state is Missing.
  expect(settings.value?.SHARED[0]).toEqual(['tdd',expect.stringContaining('/ghost'),'acme','Missing']);
 });
+it('marks a shared row Missing on a Windows-shaped payload too',async()=>{
+ const root=String.raw`C:\Users\t\.claude\skills`;
+ const f=statusReplay(false,(frame,verb)=>{
+  if(verb==='status'){
+   const value=frame.value as {ledger:{shared:{source:string}[]}};
+   value.ledger.shared[0]!.source=root+String.raw`\ghost`;
+  }
+  if(verb==='ls-local'){
+   const value=frame.value as {local:{scope:string;root:string}[]};
+   value.local.find(section=>section.scope==='global')!.root=root;
+  }
+ });
+ expect((await createTauriBackend(f.bridge).settings()).value?.SHARED[0]).toEqual(['tdd',expect.stringContaining(String.raw`\ghost`),'acme','Missing']);
+});
 it('preserves a future stamp and null fields from an unreadable clone',async()=>{
  const stamp='2099-01-01T00:00:00.000Z';
  const f=statusReplay(true,(frame,verb)=>{
@@ -313,6 +327,11 @@ it('retains null grants/body/date and marks unresolved skills broken, with a fai
 // would be a claim about a file that is sitting right there.
 function unsharedLocal(sections:unknown[]) {return {roster:[],skills:[],problems:[],local:sections};}
 function unsharedRow(name:string,path:string) {return {name,path,state:'untracked locally',tracked:false,shared:[],placement:null,health:'unknown'};}
+function placedRow(name:string,path:string,version:string){return {name,path,state:'placement recorded from acme',tracked:true,shared:[],placement:{id:'id-a',team:'acme',version},health:'up-to-date'};}
+function twoCopies(globalPath='/home/.claude/skills/a',projectRoot='/work/ops'){return {roster:[],skills:[],problems:[],local:[
+ {root:'/home/.claude/skills',scope:'global',rows:[placedRow('a',globalPath,'a'.repeat(40))],notOffered:[],problems:[]},
+ {root:projectRoot+'/.claude/skills',repoRoot:projectRoot,scope:'project',label:'ops',rootState:'scanned',registered:true,detected:false,rows:[placedRow('a',projectRoot+'/.claude/skills/a','b'.repeat(40))],notOffered:[],problems:[]},
+]};}
 it('resolves a name the team does not share against the folder on this machine',async()=>{
   const local=unsharedLocal([{root:'/home/.claude/skills',scope:'global',rows:[unsharedRow('diagnose','/home/.claude/skills/diagnose')],notOffered:[],problems:[]}]);
   const f=inventoryBridge({local});
@@ -333,7 +352,7 @@ it('prefers Global over a checkout when a bare name carries no root',async()=>{
 });
 it('reports a name that is neither in the team nor on this machine as unknown, not unreadable',async()=>{
   const local=unsharedLocal([{root:'/home/.claude/skills',scope:'global',rows:[],notOffered:[],problems:[]}]);
-  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'nowhere',team:'acme'})).toEqual({ok:false,reason:'not-found',error:'No unambiguous skill nowhere in team acme.'});
+  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'nowhere',team:'acme'})).toEqual({ok:false,reason:'not-found',error:'No skill named nowhere is shared in team acme, and no readable folder of that name is in your Library roots.'});
 });
 it('still reports an ambiguous team id prefix as ambiguous rather than searching local roots',async()=>{
   const f=fakeBridge((args,emit)=>{
@@ -342,7 +361,7 @@ it('still reports an ambiguous team id prefix as ambiguous rather than searching
       :{...lsValue,skills:[{...lsRow,name:'first',id:'ab-one'},{...lsRow,name:'second',id:'ab-two'}]};
     emit({kind:'stdout',line:JSON.stringify({t:'result',verb:args[0],ok:true,exitCode:0,value})});
   });
-  expect(await createTauriBackend(f.bridge).skill({ref:'ab',team:'acme'})).toEqual({ok:false,error:'No unambiguous skill ab in team acme.',reason:'unreadable'});
+  expect(await createTauriBackend(f.bridge).skill({ref:'ab',team:'acme'})).toEqual({ok:false,error:'2 team skills in acme have an ID starting with ab; open the one you want from the marketplace.',reason:'ambiguous-ref'});
 });
 it('shows unjoined folders locally without inferring team membership from name or prose',async()=>{
   for(const state of ['untracked locally','placement recorded from other @abc','connected source for acme; endorsed (global)']){
@@ -804,4 +823,92 @@ it.each([[0,'0 skills'],[1,'1 skill'],[2,'2 skills']] as const)('prints %i folde
  const mockTitle=(await createMockBackend().library({scope:{kind:'global'}})).value?.title;
  expect(mockTitle).toBe('15 skills');
  expect(result.value?.title).toMatch(/^\d+ skills?$/);
+});
+it('describes the copy in the root the reader named, not the first one the CLI listed',async()=>{
+ const backend=createTauriBackend(inventoryBridge({local:twoCopies()}).bridge);
+ expect(await backend.skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toMatchObject({ok:true,value:{scope:'ops',path:'/work/ops/.claude/skills/a',owningRoot:{id:'/work/ops',label:'ops'},version_full:'b'.repeat(40)}});
+});
+it('keeps the machine-wide answer, and Global, for a read with no root',async()=>{
+ expect(await createTauriBackend(inventoryBridge({local:twoCopies()}).bridge).skill({ref:'a',team:'acme'})).toMatchObject({ok:true,value:{scope:'Global',path:'/home/.claude/skills/a',owningRoot:null,root:'Global'}});
+});
+it('prefers Global by rule, not by the order the CLI emitted its sections',async()=>{
+ const local=twoCopies();local.local.reverse();
+ expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a',team:'acme'})).toMatchObject({ok:true,value:{scope:'Global',path:'/home/.claude/skills/a'}});
+});
+it('lists every project as an install destination even when presence is scoped',async()=>{
+ const backend=createTauriBackend(inventoryBridge({local:twoCopies()}).bridge);
+ const expected={ok:true,value:{installScopes:[['Global','every session · ~/.claude/skills'],['ops','project · /work/ops']],installScopePaths:{ops:'/work/ops'}}};
+ expect(await backend.skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toMatchObject(expected);
+ expect(await backend.localSkill({path:'/home/.claude/skills/a'})).toMatchObject(expected);
+});
+it('reports a scoped read as absent when that root holds no copy, borrowing neither the ledger nor the people file',async()=>{
+ const local=twoCopies();local.local[1]!.rows=[];
+ const backend=createTauriBackend(inventoryBridge({local,ledger:[{id:'id-a',team:'acme'}]}).bridge);
+ expect(await backend.skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toMatchObject({ok:true,value:{installed:'absent',placed:false,path:null,owningRoot:{id:'/work/ops',label:'ops'}}});
+ expect(await backend.skill({ref:'a',team:'acme'})).toMatchObject({ok:true,value:{installed:'placed'}});
+});
+it.each([
+ ['Windows separators',String.raw`C:\Users\t\Projects\terum`],
+ ['a WSL UNC root',String.raw`\\wsl.localhost\Ubuntu\home\teniroo\Projects\terum`],
+])('resolves a scoped read on %s',async(_label,root)=>{
+ const local=twoCopies(undefined,root),section=local.local[1]!;
+ section.root=root+String.raw`\.claude\skills`;section.rows[0]!.path=section.root+String.raw`\a`;
+ expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a',team:'acme',at:{kind:'checkout',root}})).toMatchObject({ok:true,value:{scope:'ops',path:section.rows[0]!.path,owningRoot:{id:root,label:'ops'},version_full:'b'.repeat(40)}});
+});
+it('resolves a scoped read whose URL root carries a trailing separator the payload does not',async()=>{
+ expect(await createTauriBackend(inventoryBridge({local:twoCopies()}).bridge).skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops/'}})).toMatchObject({ok:true,value:{scope:'ops',owningRoot:{id:'/work/ops',label:'ops'}}});
+});
+it('resolves a project section that reports no repoRoot',async()=>{
+ const local=twoCopies();delete local.local[1]!.repoRoot;
+ expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops/.claude/skills'}})).toMatchObject({ok:true,value:{scope:'ops',owningRoot:{id:'/work/ops/.claude/skills',label:'ops'}}});
+});
+it('resolves a scoped read for a checkout the CLI only detected, never registered',async()=>{
+ const local=twoCopies();Object.assign(local.local[1]!,{registered:false,detected:true});
+ expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toMatchObject({ok:true,value:{scope:'ops',owningRoot:{id:'/work/ops',label:'ops'}}});
+});
+it.each(['/gone','/WORK/ops'])('answers machine-wide, and names no root, when the requested root %s is not in the scan',async root=>{
+ expect(await createTauriBackend(inventoryBridge({local:twoCopies()}).bridge).skill({ref:'a',team:'acme',at:{kind:'checkout',root}})).toMatchObject({ok:true,value:{scope:'Global',path:'/home/.claude/skills/a',owningRoot:null}});
+});
+it('maps a global scope to the global section',async()=>{
+ expect(await createTauriBackend(inventoryBridge({local:twoCopies()}).bridge).skill({ref:'a',team:'acme',at:{kind:'global'}})).toMatchObject({ok:true,value:{scope:'Global',owningRoot:{id:'Global',label:'Global'}}});
+});
+function localFallbackCopies(){return unsharedLocal([
+ {root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[unsharedRow('shared-name','/work/ops/.claude/skills/shared-name')],notOffered:[{name:'codex-implement',path:'/work/ops/.claude/skills/codex-implement',reason:'invalid-yaml'}],problems:[]},
+ {root:'/home/.claude/skills',scope:'global',rows:[unsharedRow('shared-name','/home/.claude/skills/shared-name')],notOffered:[],problems:[]},
+]);}
+it('names the owning root on a by-path local detail and on the bare-name fallback',async()=>{
+ const backend=createTauriBackend(inventoryBridge({local:localFallbackCopies()}).bridge);
+ expect(await backend.localSkill({path:'/work/ops/.claude/skills/codex-implement'})).toMatchObject({ok:true,value:{owningRoot:{id:'/work/ops',label:'ops'}}});
+ expect(await backend.skill({ref:'shared-name',team:'acme'})).toMatchObject({ok:true,value:{owningRoot:{id:'Global',label:'Global'}}});
+});
+it('scopes a bare-name local fallback to the root it was given',async()=>{
+ expect(await createTauriBackend(inventoryBridge({local:localFallbackCopies()}).bridge).skill({ref:'shared-name',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toMatchObject({ok:true,value:{path:'/work/ops/.claude/skills/shared-name',owningRoot:{id:'/work/ops',label:'ops'}}});
+});
+it('does not name a folder in another root as the unidentified local copy of a scoped read',async()=>{
+ const local=unsharedLocal([{root:'/home/.claude/skills',scope:'global',rows:[unsharedRow('a','/home/.claude/skills/a')],problems:[]},{root:'/work/ops/.claude/skills',repoRoot:'/work/ops',label:'ops',scope:'project',rows:[],problems:[]}]);
+ const backend=createTauriBackend(inventoryBridge({local}).bridge);
+ expect(await backend.skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toMatchObject({ok:true,value:{unidentifiedLocal:null}});
+ expect(await backend.skill({ref:'a',team:'acme'})).toMatchObject({ok:true,value:{unidentifiedLocal:{path:'/home/.claude/skills/a'}}});
+});
+it('resolves a local path whose URL spelling differs only by separators from the payload',async()=>{
+ expect(await createTauriBackend(inventoryBridge().bridge).localSkill({path:String.raw`\home\.claude\skills\a`})).toMatchObject({ok:true,value:{path:'/home/.claude/skills/a',owningRoot:{id:'Global',label:'Global'}}});
+});
+it('keeps a failed ls --local unreadable even when a root was named',async()=>{
+ const error='EACCES: permission denied, scandir /work/ops';
+ const f=fakeBridge((args,emit)=>{
+  const local=args.includes('--local');
+  const value=args[0]==='status'?{version:'0.1.6',teams:[{team:'acme',handle:'mira',repository:null,readable:true,sharedSkills:1,memberCount:1}]}:lsValue;
+  emit({kind:'stdout',line:JSON.stringify({t:'result',verb:args[0],ok:!local,exitCode:local?1:0,...(local?{error}:{value})})});
+ });
+ expect(await createTauriBackend(f.bridge).skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toEqual({ok:false,reason:'unreadable',error});
+});
+it('keeps the machine-wide ledger fallback when an older scan has no local key',async()=>{
+ const backend=createTauriBackend(inventoryBridge({local:{roster:[],skills:[],problems:[]},ledger:[{id:'id-a',team:'acme'}]}).bridge);
+ expect(await backend.skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toMatchObject({ok:true,value:{installed:'placed',owningRoot:null,path:null}});
+});
+it('keeps a payload root id verbatim when its trailing separator differs from the URL',async()=>{
+ const local=twoCopies();local.local[1]!.repoRoot='/work/ops/';
+ const backend=createTauriBackend(inventoryBridge({local}).bridge);
+ expect(await backend.skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toMatchObject({ok:true,value:{owningRoot:{id:'/work/ops/',label:'ops'}}});
+ expect(await backend.library({scope:{kind:'checkout',root:String.raw`\work\ops`},team:'acme'})).toMatchObject({ok:true,value:{root:{id:'/work/ops/'},skills:[{name:'a'}]}});
 });

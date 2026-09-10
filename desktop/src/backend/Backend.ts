@@ -21,7 +21,10 @@ export interface Backend {
   checkouts: { add(path:string):Run<CheckoutAdded>; remove(path:string):Run<CheckoutRemoved> };
   /** Team projects (team.json), not the local checkout folders above: `create` names one and commits it to the team's main. */
   projects: { create(args:{name:string;remote?:string}):Run<ProjectCreated> };
-  skill(q: { ref: string; team?: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
+  /** `at` restricts the answer to one Library root: presence, path, scope and version describe the
+   *  copy in that root, while the install destinations still list every root on the machine.
+   *  Omitted keeps the machine-wide answer a deep link, a bookmark or the marketplace needs. */
+  skill(q: { ref: string; team?: string; at?: LibraryScope }, options?: ReadOptions): Promise<Result<SkillDetail>>;
   evalReport(q: { ref: string; team?: string }, options?: ReadOptions): Promise<Result<EvalReportModel>>;
   receipts(q: { skillId: string; version: string }, options?: ReadOptions): Promise<Result<Receipt | null>>;
   inbox(q?: undefined, options?: ReadOptions): Promise<Result<InboxItem[]>>;
