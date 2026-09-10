@@ -11,6 +11,7 @@ function flattenLine(line: string): string {
   return line
     .replace(/^(?:>\s*)+/, '')
     .replace(LIST_MARKER, '')
+    .replace(/^#{1,6}\s+/, '')
     .replace(/`([^`]*)`/g, '$1')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\*\*/g, '')
@@ -22,8 +23,8 @@ export function bodyExcerpt(body: string | null): string | null {
   const lines = body.replace(/\r\n/g, '\n').split('\n');
   let start = 0;
   while (start < lines.length && lines[start]!.trim() === '') start++;
-  // A leading H1 is the skill's title, not its summary.
-  if (start < lines.length && /^#\s/.test(lines[start]!.trim())) {
+  // Leading headings are titles or section labels, not the summary.
+  while (start < lines.length && /^#{1,6}\s/.test(lines[start]!.trim())) {
     start++;
     while (start < lines.length && lines[start]!.trim() === '') start++;
   }
