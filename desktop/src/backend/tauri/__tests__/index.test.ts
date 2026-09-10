@@ -306,8 +306,8 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   expect(catalog.value.people.find(person => person.handle === 'seed')?.declined).toEqual(['33333333-3333-4333-8333-333333333333']);
   expect(catalog.value.categories).toEqual([['ops', 'tag', 1], ['debugging', 'tag', 1], ['engineering', 'tag', 1]]);
   expect(catalog.value.projects[0]).toMatchObject({ name: 'terum', skillsIn: ['tdd'], memberHandles: ['mira'], evaluated: null });
-  expect(catalog.value.bulkInstall).toEqual({});
-  expect(catalog.value.verdictCounts).toEqual({ PASS: null, NEUTRAL: null, FAIL: null, 'Not evaluated': null });
+  expect(catalog.value.bulkInstall).toEqual({ terum: { total: 1, asking: 0 } });
+  expect(catalog.value.verdictCounts).toEqual({ PASS: 0, NEUTRAL: 0, FAIL: 0, 'Not evaluated': 3 });
   expect(JSON.stringify(catalog)).not.toMatch(/Teddy|SSM|MRF|founder/);
   expect(f.spawns.some(spawn => JSON.stringify(spawn.args) === JSON.stringify(['ls', 'member', '--team', 'acme', '--', 'ravi']))).toBe(true);
 });
@@ -337,7 +337,7 @@ it('S7b tolerates absent metadata but rejects malformed values and failed member
       for (const member of value.teams[0]!.members) { delete member.role; delete member.projects; }
     }
   }).bridge);
-  expect((await backend.roster()).value?.members[0]).toMatchObject({ role: '', projects: [] });
+  expect((await backend.roster()).value?.members[0]).toMatchObject({ role: null, projects: [] });
   const failed = createTauriBackend(peopleReplay((frame, name) => {
     if (frame.t === 'result' && name === 'ls-member-ravi') Object.assign(frame, { ok: false, exitCode: 1, error: 'Unreadable member.' });
   }).bridge);

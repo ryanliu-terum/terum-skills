@@ -1,6 +1,7 @@
 /** GitHub remotes only; unsupported hosts have no external link. */
 export function githubUrl(remote: string): string | null {
-  const path = stripRemote(remote, /^https?:\/\//);
+  const stripped = stripRemote(remote, /^https?:\/\//);
+  const path = /^[^/.]+\/[^/]+$/.test(stripped) ? `github.com/${stripped}` : stripped;
   return /^github\.com\/[^/]+\/[^/]+$/.test(path) ? `https://${path}` : null;
 }
 /** Compare repository spellings, including setup's GitHub org/repo shorthand. */

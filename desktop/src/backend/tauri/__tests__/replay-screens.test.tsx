@@ -8,16 +8,12 @@ import { BackendContext } from '../../index';
 import { App } from '../../../app/App';
 import { useUiStore } from '../../../app/store';
 import { createTauriBackend } from '../index';
-import { fakeBridge } from './fake-bridge';
+import { inventoryReplay, marketplaceRecorded } from './inventory-replay';
 
 afterEach(() => { cleanup(); location.hash = ''; localStorage.clear(); });
-function open(route: string) {
+function open(route: string, marketplace = false) {
   useUiStore.setState({ railOpen: true, overviewHidden: false });
-  const f = fakeBridge((args, emit) => {
-    const name = args[0] === 'ls' ? args.includes('--local') ? 'ls-local' : args[1] === 'project' ? 'ls-project-terum' : 'ls' : args[0] === 'validate' ? 'validate-deploy-check' : args[0]!;
-    const lines = readFileSync(resolve('../.planning/codex-runs/m7-S7g/frames', name + '.jsonl'), 'utf8').trim().split('\n');
-    for (const line of lines) emit({ kind: 'stdout', line });
-  });
+  const f = inventoryReplay(marketplace ? marketplaceRecorded : name => readFileSync(resolve('../.planning/codex-runs/m7-S7g/frames', name + '.jsonl'), 'utf8').trim().split('\n'));
   location.hash = route;
   render(<BackendContext value={createTauriBackend(f.bridge)}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Tooltip.Provider><App/></Tooltip.Provider></QueryClientProvider></BackendContext>);
   return f;
@@ -69,4 +65,48 @@ it('renders the real machine placement table from typed provenance, in the board
   expect(row).not.toHaveTextContent('tracking');expect(row).not.toHaveTextContent('In sync');
   expect(screen.getByText(/1 placed · — global · 1 pinned/)).toBeVisible();
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('renders recorded people without dangling separators and with authored publish lines', async () => {
+  open('#/marketplace/people', true);
+  const mira = await screen.findByTestId('person-card-mira');
+  expect(mira).toHaveTextContent('Published deploy-check');
+  expect(mira).not.toHaveTextContent('· mira');
+  expect(mira.querySelector('.market-person-ident')?.textContent).toBe('Mira Chenmira');
+});
+it('omits unknown project descriptions, admins and evaluation chips', async () => {
+  open('#/marketplace/projects', true);
+  const project = await screen.findByTestId('project-card-terum');
+  expect(project.querySelector('.market-project-desc')).toBeNull();
+  expect(project.querySelector('.market-project-foot')).toBeNull();
+  expect(project).not.toHaveTextContent('evaluated');
+  expect(project).toHaveTextContent('1 skill');
+});
+it('renders the real project repo with no Admin or Evaluated rail rows', async () => {
+  open('#/marketplace/projects/terum', true);
+  expect(await screen.findByRole('link', { name: 'acme/team' })).toBeVisible();
+  const rail = document.querySelector('.market-rail');
+  expect(rail).not.toHaveTextContent('Evaluated');
+  expect(rail).not.toHaveTextContent('Admin');
+  expect(document.querySelector('.market-project-heading > span')).toBeNull();
+});
+it('renders a missing project as Not found with a way back', async () => {
+  open('#/marketplace/projects/nope', true);
+  expect(await screen.findByText('Not found')).toBeVisible();
+  expect(screen.getByText('No project named nope.')).toBeVisible();
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Back to marketplace' }));
+  await waitFor(() => expect(location.hash).toBe('#/marketplace'));
+});
+it('renders the actual unevaluated card count in filters', async () => {
+  open('#/marketplace/skills?filters=open', true);
+  expect(await screen.findByTestId('verdict-count-Not evaluated')).toHaveTextContent('Not evaluated3');
+});
+it('shows no fake tool grants in the real project install preview', async () => {
+  open('#/marketplace/projects/terum?dialog=install', true);
+  const dialog = await screen.findByRole('dialog');
+  expect(dialog).toHaveTextContent('0 of 1 ask');
+  expect(dialog).toHaveTextContent("Adds the project's 1 skill");
+  expect(within(dialog).queryByText('none')).toBeNull();
+  expect(within(dialog).getByRole('button', { name: 'Install 1 skill' })).toBeVisible();
 });

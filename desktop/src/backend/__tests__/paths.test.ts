@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { abbreviateHome, repoIdentity } from '../paths';
+import { abbreviateHome, repoIdentity, githubUrl } from '../paths';
 
 it.each([
   ["Invalid /Users/teddy/.terum/skills/config.json", '/Users/teddy', 'Invalid ~/.terum/skills/config.json'],
@@ -21,3 +21,10 @@ it.each([
  [' ssh://git@github.com/Acme/Team.git/ ','github.com/acme/team'],
  ['/srv/x/team.git','/srv/x/team'], ['file:///srv/x/team.git','/srv/x/team'],
 ])('normalizes repository identity: %s',(remote,expected)=>{expect(repoIdentity(remote)).toBe(expected);});
+
+it.each(['acme/team', 'acme/team.git'])('links owner/repo shorthand %s', remote => {
+  expect(githubUrl(remote)).toBe('https://github.com/acme/team');
+});
+it.each(['gitlab.com/acme/team', '/srv/team', 'not a remote'])('does not link unsupported repository %s', remote => {
+  expect(githubUrl(remote)).toBeNull();
+});
