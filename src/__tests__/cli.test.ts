@@ -169,6 +169,22 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(help).toContain('Deterministic and offline');
   });
 
+  it('wires project create with its optional remote and team selection', async () => {
+    const calls: unknown[] = [];
+    const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
+      project: async (args) => { calls.push(args); return success({ team: 't', name: args.name ?? '', remotes: args.remote ? [args.remote] : [], skills: 0 }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['project', 'create', 'Payments', '--remote', 'https://github.com/a/p'], { from: 'user' });
+    await program.parseAsync(['project', 'create', '--team', 't'], { from: 'user' });
+    expect(calls).toEqual([
+      { kind: 'create', name: 'Payments', remote: 'https://github.com/a/p' },
+      { kind: 'create', name: undefined, team: 't' },
+    ]);
+    expect(program.helpInformation()).toContain('project');
+  });
+
   it('wires workflow-update as print-only and keeps receipt-check hidden like readme', async () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {

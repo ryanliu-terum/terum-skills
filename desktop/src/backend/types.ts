@@ -9,7 +9,7 @@ export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly 
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;evalCommitChoice:boolean;openInEditor:boolean;clipboard:boolean}
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','checkouts'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','checkouts','projects'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {checkouts:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean}
@@ -61,6 +61,8 @@ export interface Root {id:string;kind:'global'|'checkout';label:string;root:stri
 export type LibraryScope={kind:'global'}|{kind:'checkout';root:string};
 export type LibraryTeam={kind:'ok';team:string}|{kind:'none'}|{kind:'unreadable';message:string};
 export interface CheckoutAdded {path:string;registered:boolean}
+/** `project create`: the team project as team.json now holds it. A new project is always born with no skills. */
+export interface ProjectCreated {team:string;name:string;remotes:string[];skills:number}
 export interface CheckoutRemoved {path:string;placementsRemaining:number}
 export interface Library {scanned:string[]|null;skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;provenance?:string|null;root:Root;team:LibraryTeam;problems?:readonly {source:string;message:string}[]}
 /** attention = failingEvals + updatesAvailable + notEvaluated; counts.Alerts = attention, counts.Updates = updatesAvailable. Absent CLI counters are omitted. */
@@ -94,8 +96,9 @@ export interface ConnectArgs {path?:string;home?:string;cwd?:string;team?:string
 export interface ConnectResult {id:string;name:string;reconciled?:boolean;adopted?:boolean}
 export interface ConnectBatch {kind:'batch';shared:ConnectResult[];declined:string[];refused:{name:string;reason:string}[]}
 export type ConnectOutcome=ConnectResult|ConnectBatch;
-export interface PublishArgs {team?:string;ref:string;message?:string}
-export interface PublishResult {name:string;version:string|null;changed:boolean}
+export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string}
+/** `prUrl` is set only under `policy.publish: 'pr'`, where team.json does not change until that pull request merges. */
+export interface PublishResult {name:string;version:string|null;changed:boolean;prUrl:string|null}
 export interface SyncArgs {team?:string;prune?:boolean;hook?:boolean}
 export interface SyncResult {placed:number;deferred:string[];notices:string[];changed:boolean;teams:{team:string;state:string;message?:string}[]}
 export interface InviteArgs {team?:string;logins:string[];scope?:Scope;role?:string}

@@ -7,11 +7,17 @@ import { App } from '../../../app/App';
 import { useUiStore } from '../../../app/store';
 import { createTauriBackend } from '../index';
 import { detailReplay,type AmendResult } from './skill-detail-replay';
+import { STATE } from './fake-bridge';
 
 afterEach(()=>{cleanup();location.hash='';localStorage.clear();vi.restoreAllMocks();});
-function open(route:string,amend?:AmendResult) {
+function open(route:string,amend?:AmendResult,launch:'fresh'|'consumed'='fresh') {
   useUiStore.setState({railOpen:true,overviewHidden:false});
   const f=detailReplay(amend),backend=createTauriBackend(f.bridge);
+  // LaunchCoordinator sends an *unconsumed* launch request to onboarding when the machine has no
+  // team, replacing whatever route was asked for. A screen reached by in-app navigation has already
+  // consumed that request, so a test serving no teams says 'consumed' rather than racing the
+  // redirect for its assertions.
+  if(launch==='consumed')backend.prefs.set('launch:consumedWrittenAt',STATE.writtenAt);
   const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
   location.hash=route;
   render(<BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><App/></Tooltip.Provider></QueryClientProvider></BackendContext>);
@@ -78,7 +84,7 @@ it('renders an unreadable board and refetches from Try again',async()=>{
   expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeVisible();
 });
 it('renders the no-team board when status serves no teams, with no missing-folder story and no Remove',async()=>{
-  open('#/skill/deploy-check',(name,value)=>{if(name==='status')value.teams=[];});
+  open('#/skill/deploy-check',(name,value)=>{if(name==='status')value.teams=[];},'consumed');
   expect(await screen.findByText('No team on this machine')).toBeVisible();
   expect(screen.getByText('Create a team or join the one you were invited to. Setup runs here in the app.')).toBeVisible();
   expect(screen.queryByText(/listed in your people file/)).toBeNull();
