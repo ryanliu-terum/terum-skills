@@ -75,3 +75,47 @@ it('invite from status reports null join commands in the form and copy action',a
 it('invite from status copies the supplied join command',async()=>{const copy=vi.spyOn(backend,'copyToClipboard');const settings=vi.spyOn(backend,'settings');open('#/share?__mock=empty');fireEvent.click(await screen.findByRole('button',{name:'Copy join block'}));await waitFor(()=>expect(copy).toHaveBeenCalledWith('npx -y terum-skills@latest setup terum/team-skills'));expect(settings).toHaveBeenCalled();});
 it('invite from status exposes partial outcomes through the mock URL',async()=>{open('#/share?dialog=invite&__mock=partial');fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value:'sortiz, bad'}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(within(screen.getByRole('dialog')).getByRole('status')).toHaveTextContent('Invited @sortiz.'));const dialog=screen.getByRole('dialog');expect(dialog).toHaveTextContent('@bad: Could not invite @bad');expect(within(dialog).getByRole('alert')).toBeInTheDocument();});
 it('invite from status shows a success notice on the page',async()=>{open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(await screen.findByRole('status')).toHaveTextContent('Invited @sortiz.');});
+
+it('shows a failed removal on its row and clears it when the next removal succeeds',async()=>{
+ const team=vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
+ open('#/share');await screen.findByTestId('member-row-1');
+ fireEvent.click(within(screen.getByTestId('member-row-1')).getByRole('button',{name:'Remove from team'}));
+ const alert=await screen.findByRole('alert');
+ expect(alert).toHaveTextContent('Team removal requires GitHub repository admin permission.');
+ expect(screen.getByTestId('member-row-1')).toContainElement(alert);
+ team.mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'Terum',kind:'remove'}})));
+ fireEvent.click(within(screen.getByTestId('member-row-2')).getByRole('button',{name:'Remove from team'}));
+ await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
+ expect(team).toHaveBeenCalledTimes(2);
+ expect(team).toHaveBeenLastCalledWith({kind:'remove',handle:design.ROSTER[2]!.handle});
+});
+it('moves the removal error to the row that failed last, never stacking two',async()=>{
+ vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
+ open('#/share');await screen.findByTestId('member-row-1');
+ fireEvent.click(within(screen.getByTestId('member-row-1')).getByRole('button',{name:'Remove from team'}));
+ await screen.findByRole('alert');
+ fireEvent.click(within(screen.getByTestId('member-row-3')).getByRole('button',{name:'Remove from team'}));
+ await waitFor(()=>expect(within(screen.getByTestId('member-row-3')).getByRole('alert')).toBeVisible());
+ expect(screen.getAllByRole('alert')).toHaveLength(1);
+ expect(within(screen.getByTestId('member-row-1')).queryByRole('alert')).toBeNull();
+});
+it('dismisses a removal error when the invite dialog opens',async()=>{
+ vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
+ open('#/share');await screen.findByTestId('member-row-1');
+ fireEvent.click(within(screen.getByTestId('member-row-1')).getByRole('button',{name:'Remove from team'}));
+ await screen.findByRole('alert');
+ fireEvent.click(screen.getByRole('button',{name:'Invite'}));
+ await screen.findByRole('dialog');
+ expect(screen.queryByRole('alert')).toBeNull();
+});
+it('drops a removal error on navigating away from Share',async()=>{
+ vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
+ open('#/share');await screen.findByTestId('member-row-1');
+ fireEvent.click(within(screen.getByTestId('member-row-1')).getByRole('button',{name:'Remove from team'}));
+ await screen.findByRole('alert');
+ fireEvent.click(screen.getByRole('link',{name:'Marketplace'}));
+ await waitFor(()=>expect(location.hash).toBe('#/marketplace'));
+ fireEvent.click(screen.getByRole('link',{name:'Share'}));
+ await screen.findByTestId('member-row-1');
+ expect(screen.queryByRole('alert')).toBeNull();
+});
