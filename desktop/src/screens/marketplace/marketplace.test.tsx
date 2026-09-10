@@ -58,6 +58,56 @@ it('applies hero search only on Enter and preserves URL state', async () => { op
 it('applies project search and preserves rail state', async () => { open('#/marketplace/projects/terum?rail=closed'); const input = await screen.findByRole('textbox', { name: "Search Terum's 8 skills" }); fireEvent.change(input, { target: { value: 'deploy-check' } }); fireEvent.keyDown(input, { key: 'Enter' }); await waitFor(() => expect(names('skill-card-')).toEqual(['deploy-check'])); expect(screen.getByTestId('skill-card-deploy-check').closest('.market-grid')).toHaveAttribute('data-columns', '3'); });
 it('toggles the filter popover with URL state', async () => { open('#/marketplace'); await screen.findByRole('region', { name: 'Top rated' }); fireEvent.click(screen.getByRole('button', { name: 'Filter marketplace' })); expect(await screen.findByRole('region', { name: 'Marketplace filters' })).toBeInTheDocument(); expect(location.hash).toContain('filters=open'); fireEvent.click(screen.getByRole('button', { name: 'Filter marketplace' })); await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull()); });
 it.each([['Top rated', 'skills'], ['Teams / Projects', 'projects'], ['People', 'people'], ['Browse by category', 'categories']])('navigates %s pager to the expanded list', async (title, path) => { open('#/marketplace'); fireEvent.click(await screen.findByRole('button', { name: 'View all ' + title })); await waitFor(() => expect(location.hash).toBe('#/marketplace/' + path)); });
+it('creates a team project from the Add button and lands on its card', async () => {
+  const create = vi.spyOn(pickBackend().projects, 'create');
+  open('#/marketplace/projects');
+  fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Payments' } });
+  fireEvent.change(within(dialog).getByRole('textbox', { name: 'GitHub repository' }), { target: { value: 'https://github.com/acme/payments' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+  await waitFor(() => expect(create).toHaveBeenCalledWith({ name: 'Payments', remote: 'https://github.com/acme/payments' }));
+  await waitFor(() => expect(location.hash).toBe('#/marketplace/projects/Payments'));
+  expect(await screen.findByRole('heading', { name: 'Payments' })).toBeInTheDocument();
+  expect(screen.getByText('No skills yet')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Install 0 skills/ })).toBeNull();
+});
+it('omits the repository from the call when the field is left empty', async () => {
+  const create = vi.spyOn(pickBackend().projects, 'create');
+  open('#/marketplace/projects?dialog=new-project');
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Platform' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+  await waitFor(() => expect(create).toHaveBeenCalledWith({ name: 'Platform' }));
+});
+it('refuses a name an existing card already carries, before calling the CLI', async () => {
+  const create = vi.spyOn(pickBackend().projects, 'create');
+  open('#/marketplace/projects?dialog=new-project');
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'terum' } });
+  expect(await within(dialog).findByText('This team already has a project named Terum.')).toBeInTheDocument();
+  expect(within(dialog).getByRole('button', { name: 'Create project' })).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+  expect(create).not.toHaveBeenCalled();
+});
+it('shows the CLI refusal in the dialog and keeps what was typed', async () => {
+  const backend = pickBackend();
+  vi.spyOn(backend.projects, 'create').mockReturnValue(createRun(async () => ({ ok: false, error: 'a project name is 1-64 characters: letters, digits, spaces, dot, underscore, or hyphen, and cannot start with a dot or a space' })));
+  open('#/marketplace/projects?dialog=new-project');
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Billing' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+  expect(await within(dialog).findByText(/a project name is 1-64 characters/)).toBeInTheDocument();
+  expect(within(dialog).getByRole('textbox', { name: 'Project name' })).toHaveValue('Billing');
+  expect(location.hash).toBe('#/marketplace/projects?dialog=new-project');
+});
+it('hides Add when the CLI reports no project verb', async () => {
+  const backend = pickBackend(), features = await backend.features();
+  vi.spyOn(backend, 'features').mockResolvedValue({ ...features, projects: false });
+  open('#/marketplace/projects');
+  await screen.findByRole('heading', { name: 'Teams / Projects' });
+  expect(screen.queryByRole('button', { name: 'Add' })).toBeNull();
+});
 it('persists Follow and re-renders Following', async () => { open('#/marketplace/people/ryan'); fireEvent.click(await screen.findByRole('button', { name: 'Follow ryan' })); expect(screen.getByRole('button', { name: 'Unfollow ryan' })).toHaveTextContent('Following'); expect(pickBackend().prefs.get('following:ryan', false)).toBe(true); fireEvent.click(screen.getByRole('button', { name: 'Unfollow ryan' })); expect(screen.getByRole('button', { name: 'Follow ryan' })).toHaveTextContent('Follow'); });
 it('handles failed Follow preferences without changing following state', async () => { open('#/marketplace/people/ryan'); await screen.findByRole('button', { name: 'Follow ryan' }); vi.spyOn(pickBackend().prefs, 'set').mockImplementation(() => { throw new Error('Preferences unavailable.'); }); fireEvent.click(screen.getByRole('button', { name: 'Follow ryan' })); expect(await screen.findByRole('alert')).toHaveTextContent('Preferences unavailable.'); expect(screen.getByRole('button', { name: 'Follow ryan' })).toHaveAttribute('aria-pressed', 'false'); });
 it('opens project install from its primary and closes after successful run', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/projects/docs'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); const consent = await screen.findByRole('dialog', { name: 'Approve these tools for docs?' }); fireEvent.click(within(consent).getByRole('button', { name: 'Yes' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs' }); expect(location.hash).toBe('#/marketplace/projects/docs'); });

@@ -3,11 +3,11 @@ import { handleSchema, parseJson, parseSkillFrontmatter, personSchema, Team, tea
 import { canonicalSkillDigest } from './skills.js';
 
 /**
- * §6.0 write guard — the authorization model. A diff may touch only the rows a–h below, and
+ * §6.0 write guard — the authorization model. A diff may touch only the rows a–i below, and
  * nothing else is writable. It runs inside the safeWrite loop against the tree the mutation
  * actually produced; teamRepo additionally proves the staged diff equals that tree's changes.
  */
-export type GuardAction = 'connect' | 'sync' | 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'eval' | 'eval-assets' | 'profile' | 'decline';
+export type GuardAction = 'connect' | 'sync' | 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'eval' | 'eval-assets' | 'profile' | 'decline' | 'project';
 
 export interface GuardContext {
   action: GuardAction;
@@ -174,6 +174,7 @@ function guardTeam(tree: GuardTree, context: GuardContext): void {
   if (context.action === 'publish' && onlySkillListsChanged(before, after)) return; // row c
   if (context.action === 'team-remove' && context.targetHandle && context.targetHandle !== context.handle && archivedAppendedOnly(before, after, context.targetHandle)) return; // row d
   if (context.action === 'join' && archivedRemovedOnly(before, after, context.handle)) return; // row e
+  if (context.action === 'project' && oneEmptyProjectAdded(before, after)) return; // row i
   throw new GuardError(`Write guard refused team.json for ${context.action} by ${context.handle}`);
 }
 
@@ -192,7 +193,7 @@ function sameExcept(before: Team, after: Team, permitted: readonly string[]): bo
   return same(scrub(before), scrub(after));
 }
 
-/** Row c: `global` and `projects[].skills` only — project keys, remotes, and every other field are untouchable. */
+/** Row c: `global` and `projects[].skills` only — project keys, remotes, and every other field are untouchable (row i creates a key; nothing edits one). */
 function onlySkillListsChanged(before: Team, after: Team): boolean {
   if (!sameExcept(before, after, ['global', 'projects'])) return false;
   const withoutSkills = (team: Team) => Object.fromEntries(Object.entries(team.projects).map(([key, project]) => {
@@ -201,6 +202,23 @@ function onlySkillListsChanged(before: Team, after: Team): boolean {
     return [key, rest];
   }));
   return same(withoutSkills(before), withoutSkills(after));
+}
+
+/**
+ * Row i: exactly one new project key, born empty — `{ remotes: [] | [one], skills: [] }`. Every
+ * pre-existing project and every other team.json field is byte-identical, so a create can never
+ * carry an endorsement, a rename (an add plus a removal), or a second project. The record schema is
+ * `.passthrough()`, so an unknown extra field is refused here rather than admitted by the parse.
+ */
+function oneEmptyProjectAdded(before: Team, after: Team): boolean {
+  if (!sameExcept(before, after, ['projects'])) return false;
+  const beforeKeys = Object.keys(before.projects);
+  const added = Object.keys(after.projects).filter((key) => !Object.hasOwn(before.projects, key));
+  if (added.length !== 1 || Object.keys(after.projects).length !== beforeKeys.length + 1) return false;
+  if (beforeKeys.some((key) => !same(before.projects[key], after.projects[key]))) return false;
+  const born = after.projects[added[0]!]!;
+  if (!same(born.skills, []) || born.remotes.length > 1) return false;
+  return same(Object.keys(born).sort(), ['remotes', 'skills']);
 }
 
 /** Row d: `archived` becomes exactly `before.archived + [target]`; a handle already archived cannot be appended again. */
