@@ -11,7 +11,7 @@ import { ICON_PATHS } from '../../components/ui/icon-paths';
 import type { IconName } from '../../components/ui/icon-paths';
 import { Button } from '../../components/ui/Button';
 import { Chip } from '../../components/ui/Chip';
-import { activeFacets, personStatus, plural, pluralWord } from './market-data';
+import { personStatus, plural, pluralWord } from './market-data';
 import { Filters } from './market-filters';
 const CATEGORY_ICONS: Record<string, IconName> = {infra:'box',docs:'book-open',review:'eye',ops:'terminal',testing:'flask',data:'database',git:'git-commit',onboarding:'users',research:'search',security:'shield'};
 function iconName(name: string): IconName { return CATEGORY_ICONS[name] ?? (Object.hasOwn(ICON_PATHS,name)?name as IconName:'tag'); }
@@ -39,9 +39,10 @@ export function Section({ title, subtitle, path, action, children }: PropsWithCh
 export function MarketSearch({ placeholder = 'Search skills, people and projects', hero = false, catalog }: { placeholder?: string; hero?: boolean; catalog?: Catalog }) {
   const [params, setParams] = useSearchParams(), q = params.get('q') ?? '', [draft, setDraft] = useState(q), [lastQ, setLastQ] = useState(q);
   if (lastQ !== q) { setLastQ(q); setDraft(q); }
-  const open = params.get('filters') === 'open'; const rawActive = params.get('active'); const active = activeFacets(rawActive, open ? 4 : 0);
+  // The filter button was removed from the search bar (Ryan, 2026-09-10); the drawer itself, its facets and every committed-facet URL param stay live, so ?filters=open still opens it.
+  const open = params.get('filters') === 'open';
   function change(key: string, value?: string) { const next = new URLSearchParams(params); if (value) next.set(key, value); else next.delete(key); setParams(next); }
-  return <div className={'market-search' + (hero ? ' hero' : '')}><Icon name="search" size={16} color={token('text3')}/><input aria-label={placeholder} placeholder={placeholder} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') change('q', draft); }}/>{q && <IconButton icon="x" size={20} iconSize={14} label="Clear search field" onClick={() => change('q')}/>}<span className="market-filter-button"><IconButton icon="filter" label="Filter marketplace" pressed={open} onClick={() => change('filters', open ? undefined : 'open')}/>{active > 0 && <span>{active}</span>}</span>{open && catalog && <Filters catalog={catalog} onClose={() => change('filters')}/>}</div>;
+  return <div className={'market-search' + (hero ? ' hero' : '')}><Icon name="search" size={16} color={token('text3')}/><input aria-label={placeholder} placeholder={placeholder} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') change('q', draft); }}/>{q && <IconButton icon="x" size={20} iconSize={14} label="Clear search field" onClick={() => change('q')}/>}{open && catalog && <Filters catalog={catalog} onClose={() => change('filters')}/>}</div>;
 }
 export function Crumbs({ parts, railOpen, onToggle }: { parts: string[]; railOpen?: boolean; onToggle?: () => void }) { const navigate = useNavigate(); return <div className="market-crumbs" data-rail-open={railOpen}><div><IconButton icon="arrow-left" size={28} label="Back to marketplace" onClick={() => navigate('/marketplace')}/><div>{parts.map((part, i) => <Fragment key={i}>{i > 0 && <span className="market-crumb-separator">/</span>}<span className={i === parts.length - 1 ? 'current' : ''}>{part}</span></Fragment>)}</div></div>{onToggle && <IconButton icon="panel-right" size={28} label={railOpen ? 'Close details rail' : 'Open details rail'} onClick={onToggle}/>}</div>; }
 
