@@ -63,6 +63,19 @@ it.each(teamCases)('orders %s as verb, flags, separator, positionals', async (_n
   expect(f.spawns.map(s => s.args)).toEqual([argv]);
 });
 
+it('passes the stored eval defaults as flags and omits the unset or sentinel ones', async () => {
+  const f = replay(undefined, false);
+  const b = createTauriBackend(f.bridge);
+  b.prefs.set('eval:k', '10'); b.prefs.set('eval:model', 'sonnet'); b.prefs.set('eval:judge', 'sonnet');
+  await b.eval({ ref: 'a', commit: true, team: 'acme' }).done;
+  b.prefs.set('eval:k', '—'); // The Settings '—' choice means "pass nothing", exactly like an unset pref.
+  await b.eval({ ref: 'a' }).done;
+  expect(f.spawns.map(s => s.args)).toEqual([
+    ['eval', '--k', '10', '--model', 'sonnet', '--judge-model', 'sonnet', '--commit', '--team', 'acme', '--', 'a'],
+    ['eval', '--model', 'sonnet', '--judge-model', 'sonnet', '--', 'a'],
+  ]);
+});
+
 it('accepts bare connect with no value in its successful frame', async () => {
   const f = replay(undefined);
   expect(await createTauriBackend(f.bridge).connect({}).done).toEqual({ ok: true, value: undefined });
