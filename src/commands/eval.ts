@@ -6,6 +6,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { reconcileShared } from './connect.js';
+import { newestReceiptAt } from './receiptCheck.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
@@ -22,7 +23,7 @@ import { type Runner, systemRunner } from '../lib/runner.js';
 import { parseSkillFrontmatter } from '../lib/schema.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { findSkill, readTeam, skillRecords } from '../lib/skills.js';
-import { openTeamRepo, refreshClone, treeText, lockWait } from '../lib/teamRepo.js';
+import { openTeamRepo, refreshClone, treeText, lockWait, skillVersions } from '../lib/teamRepo.js';
 import { materializeVersion, resolveVersion } from '../lib/version.js';
 
 export interface EvalArgs extends WithForm {
@@ -471,4 +472,42 @@ async function latestReceiptedTree(clone: string, skillId: string, candidateTree
     }
   }
   return latest?.tree;
+}
+
+export interface PendingEval { id: string; name: string; version: string }
+/**
+ * Why `pending` is empty matters to the caller: an empty batch because the team shares nothing, because the
+ * version reader failed, and because every skill is already receipted are three different sentences to a person.
+ */
+export interface PendingEvalScan {
+  pending: PendingEval[];
+  /** Shared skills the team has at all. Zero means there is nothing to evaluate, not that everything is receipted. */
+  shared: number;
+  /** Of those, the ones whose current version resolved, so their receipts could actually be looked for. */
+  considered: number;
+  /** Set when the version reader itself failed, so not one skill could be checked. */
+  versionProblem?: string;
+}
+
+/**
+ * Read-only, offline selector for setup's batch: current shared skill versions with no receipt.
+ * An unresolved version or invalid newest receipt is reported and excluded, never automatically rerun.
+ */
+export async function skillsWithoutReceipt(clone: string, team: string, runner: Runner, report: (line: string) => void): Promise<PendingEvalScan> {
+  const records = await skillRecords(clone, team, { onProblem: ({ name, message }) => report(`${name}: ${message}`) });
+  let versionProblem: string | undefined;
+  const versions = await skillVersions(runner, clone).catch((error: unknown) => { versionProblem = error instanceof Error ? error.message : String(error); return new Map<string, string>(); });
+  const pending: PendingEval[] = [];
+  let considered = 0;
+  for (const record of records) {
+    const version = versions.get(record.name);
+    if (version === undefined) { report(`${record.name}: could not resolve the current version${versionProblem === undefined ? ': absent from HEAD:skills' : `: ${versionProblem}`}`); continue; }
+    considered += 1;
+    try {
+      if (await newestReceiptAt(join(clone, 'evals', record.id, version)) === undefined) pending.push({ id: record.id, name: record.name, version });
+    } catch (error) {
+      report(`${record.name}: the newest receipt for the current version is invalid (${error instanceof Error ? error.message : String(error)}); evaluate it on its own when you have time.`);
+    }
+  }
+  return { pending, shared: records.length, considered, ...(versionProblem === undefined ? {} : { versionProblem }) };
 }

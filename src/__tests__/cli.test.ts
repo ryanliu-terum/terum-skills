@@ -66,14 +66,19 @@ describe('CLI wiring (§3: commander wiring only)', () => {
   it.each([[['--app'],true],[['--no-app'],false],[[],undefined]] as const)('forwards setup desktop choice %j as %s',async(flags,app)=>{
     const {program,calls}=harness();
     await program.parseAsync(['setup',...flags],{from:'user'});
-    expect(calls).toStrictEqual([{verb:'setup',form:undefined,target:undefined,cwd:process.cwd(),app}]);
+    // --no-discover/--no-evals are lone negated options, so commander defaults both to true and setup
+    // forwards them on every run; --app stays undefined because --app/--no-app are a pair.
+    expect(calls).toStrictEqual([{verb:'setup',form:undefined,target:undefined,cwd:process.cwd(),app,discover:true,evals:true}]);
   });
 
   it('passes an optional setup target through unchanged', async () => {
     const { program, calls } = harness();
     await program.parseAsync(['setup'], { from: 'user' });
     await program.parseAsync(['setup', 'acme/team'], { from: 'user' });
-    expect(calls).toEqual([{ verb: 'setup', cwd: process.cwd(), target: undefined }, { verb: 'setup', cwd: process.cwd(), target: 'acme/team' }]);
+    expect(calls).toEqual([
+      { verb: 'setup', cwd: process.cwd(), target: undefined, discover: true, evals: true },
+      { verb: 'setup', cwd: process.cwd(), target: 'acme/team', discover: true, evals: true },
+    ]);
   });
 
   it('routes a failing Result to execute, and login takes no team or remote (rev 9, Decision 4)', async () => {

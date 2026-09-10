@@ -65,7 +65,9 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .description('Onboarding wizard: on a new machine, asks whether to create a team or join one; re-run to resume your team; pass <org>/<repo> or a remote URL to join directly (one team per machine: leave the current team first)')
     .option('--app', 'open the desktop app (the default wherever one exists)')
     .option('--no-app', 'keep setup in the terminal; do not open the desktop app')
-    .action(async (target: string | undefined, options: { app?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
+    .option('--no-discover', 'do not offer to look for skill folders on this machine')
+    .option('--no-evals', 'do not offer to evaluate the shared skills that have no receipt')
+    .action(async (target: string | undefined, options: { app?: boolean; discover?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, discover: options.discover, evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
   const checkout = program.command('checkout').description('Register, forget, or list the checkout folders this machine scans');
   checkout.command('add [path]').description('Register a folder in your library')
@@ -74,6 +76,13 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .action(async (path: string) => execute(io => active.checkout({ form: context.form, kind: 'remove', path, cwd: process.cwd() }, io), { verb: 'checkout remove', notices: true }));
   checkout.command('list').description('List registered checkout folders')
     .action(async () => execute(io => active.checkout({ form: context.form, kind: 'list' }, io), { verb: 'checkout list', notices: true }));
+
+  checkout.command('discover').description('Look for folders on this machine that hold Claude Code skills; --register adds the ones that are not in your library yet')
+    .option('--under <dir>', 'folder to look under; repeat for more (default: your home folder)', (value: string, previous: string[] = []) => [...previous, value])
+    .option('--depth <n>', 'how many folder levels below each root to look (default 4)', Number)
+    .option('--budget-ms <n>', 'how long to look, in milliseconds (default 20000)', Number)
+    .option('--register', 'register every folder found that is not already in your library')
+    .action(async (options: { under?: string[]; depth?: number; budgetMs?: number; register?: boolean }) => execute(io => active.checkout({ form: context.form, kind: 'discover', ...options, cwd: process.cwd() }, io), { verb: 'checkout discover', notices: true }));
 
   const project = program.command('project').description('Create the team projects that place skills inside a repository checkout');
   project.command('create [name]').description('Create a team project: a name, its repository, and the skills it places')

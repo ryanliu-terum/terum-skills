@@ -36,7 +36,7 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
       memberRole: true, localIdentity: true, checkouts: true, projects: true, roles: true,
       favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
       disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: true,
-      refresh: true, appUpdate: true,
+      refresh: true, discover: true, appUpdate: true,
     });
   });
 
@@ -227,6 +227,15 @@ it('carries uninstall disclosure in exactly one ask frame with no preceding prin
 });
 
 
+it('progress frames carry the step and only the numbers the verb knows', () => {
+  const s = shell(); s.channel.io.progress?.({ step: 'evals', current: 2, total: 5 }); s.channel.io.progress?.({ step: 'discover', current: 7 });
+  expect(s.frames).toEqual([{ t: 'progress', step: 'evals', current: 2, total: 5 }, { t: 'progress', step: 'discover', current: 7 }]);
+  s.channel.result({ verb: 'setup', ok: true, exitCode: 0 });
+});
+it('progress after the result frame is dropped', () => {
+  const s = shell(); s.channel.result({ verb: 'setup', ok: true, exitCode: 0 }); s.channel.io.progress?.({ step: 'evals', current: 1 });
+  expect(s.frames).toEqual([{ t: 'result', verb: 'setup', ok: true, exitCode: 0 }]);
+});
 describe('W-02 progress channel', () => {
   it('writes one progress frame per progress() call, omitting absent counters', () => {
     const s = shell(); s.channel.io.progress?.({ step: 'Placing x' }); s.channel.io.progress?.({ step: 'Placing x', current: 2, total: 4 });

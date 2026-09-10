@@ -39,6 +39,8 @@ it('keeps errors without value when the failing value cannot be parsed', async (
 });
 
 const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = [
+  ['checkout discover', b => b.checkouts.discover({under:['-x','/two'],register:true}).done, ['checkout','discover','--register','--under=-x','--under=/two']],
+  ['bare checkout discover', b => b.checkouts.discover({}).done, ['checkout','discover']],
   ['profile', b => b.profile({ name: 'A B', bio: '', role: 'Platform', projects: ['terum', 'second'] }).done, ['profile', '--name', 'A B', '--bio', '', '--role', 'Platform', '--project', 'terum', '--project', 'second']],
   ['decline', b => b.decline({ ref: '-x' }).done, ['decline', '--', '-x']],
   ['leading-dash install', b => b.install({ ref: '-x', team: 'acme' }).done, ['install', '--team', 'acme', '--into', 'global', '--', '-x']],
@@ -958,4 +960,9 @@ describe('W-02 catalog scheduling',()=>{
  it('only roster asks status for permissions',async()=>{
   const f=catalogBurst(1);const backend=createTauriBackend(f.bridge);await backend.roster();await backend.catalog();expect(f.spawns.filter(s=>s.args[0]==='status').map(s=>s.args)).toEqual([['status','--permissions'],['status']]);
  });
+});
+it('reads the discover result and rejects a malformed one',async()=>{
+ const value={candidates:[{path:'/a',skillFolders:2,registered:false,repoRoot:true}],scanned:5,truncated:false,problems:[]};
+ expect(await createTauriBackend(replay(value).bridge).checkouts.discover({}).done).toEqual({ok:true,value});
+ expect(await createTauriBackend(replay({candidates:'no'}).bridge).checkouts.discover({}).done).toMatchObject({ok:false,error:expect.stringContaining('could not read the result')});
 });

@@ -21,7 +21,7 @@ const asking = (async (_args: unknown, io: Prompter) => {
 }) as never;
 
 const INVOCATIONS: Record<string, string[]> = {
-  'checkout add': ['checkout', 'add'], 'checkout remove': ['checkout', 'remove', '/checkout'], 'checkout list': ['checkout', 'list'],
+  'checkout add': ['checkout', 'add'], 'checkout remove': ['checkout', 'remove', '/checkout'], 'checkout list': ['checkout', 'list'], 'checkout discover': ['checkout', 'discover'],
   'project create': ['project', 'create', 'Payments'],
   'app-update': ['app-update', '--check'],
   app: ['app'], profile: ['profile', '--role', 'Platform'], decline: ['decline', 'ref'],
