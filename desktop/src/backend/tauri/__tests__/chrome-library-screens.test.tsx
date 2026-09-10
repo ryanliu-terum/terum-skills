@@ -70,3 +70,48 @@ it.each([true,false])('keeps the mock meter and gates its attention link on inbo
  if(inbox)expect(await screen.findByRole('link',{name:'Open alerts'})).toBeVisible();else await waitFor(()=>expect(screen.queryByRole('link',{name:'Open alerts'})).toBeNull());
  expect(screen.getByRole('textbox',{name:'Search 15 skills'})).toBeVisible();
 });
+
+function uncCheckout(){
+ const UNC=String.raw`\\wsl.localhost\Ubuntu\home\teniroo`;
+ const SKILLS=UNC+String.raw`\.claude\skills`;
+ const row=(name:string)=>({name,path:SKILLS+'\\'+name,state:'untracked locally',tracked:false,shared:[],placement:null,health:'untracked'});
+ const fake=chromeLibraryReplay({local:value=>{
+  const project=value.local[1]!;
+  project.root=SKILLS;project.repoRoot=UNC;
+  project.rows=[row('alpha'),row('beta')];
+  project.notOffered=[{name:'gamma',path:SKILLS+'\\gamma',reason:'name-mismatch',detail:'SKILL.md name not-gamma does not equal folder gamma'}];
+ }});
+ const backend=createTauriBackend({...fake.bridge,homeDirectory:async()=>String.raw`C:\Users\teddy`,hostPlatform:async()=>'windows'});
+ return {UNC,backend};
+}
+it('prints the count alone beside a UNC checkout title, and keeps the path and GitHub state in the meta slot (W-07)',async()=>{
+ const {UNC,backend}=uncCheckout();
+ mount('#/library/checkout?root='+encodeURIComponent(UNC),backend);
+ await screen.findByTestId('skill-card-alpha');
+ const group=document.querySelector('.board-view-header > div') as HTMLElement;
+ const spans=[...group.children].filter(el=>el.tagName==='SPAN').map(el=>el.textContent);
+ expect(spans[0]).toBe('teniroo');
+ expect(spans[1]).toBe('3 skills');
+ expect(spans[1]).not.toContain(spans[0]!);
+ expect(spans[2]).toBe(UNC+'·GitHub: not connected');
+ expect(screen.getByRole('textbox',{name:'Search 3 skills'})).toBeVisible();
+ expect(screen.queryByText(/^Scanned: /)).toBeNull();
+});
+it('resolves a UNC checkout route with a trailing backslash',async()=>{
+ const {UNC,backend}=uncCheckout();
+ mount('#/library/checkout?root='+encodeURIComponent(UNC+'\\'),backend);
+ await screen.findByTestId('skill-card-alpha');
+ const spans=[...(document.querySelector('.board-view-header > div') as HTMLElement).children].filter(el=>el.tagName==='SPAN').map(el=>el.textContent);
+ expect(spans).toHaveLength(3);
+ expect(spans[0]).toBe('teniroo');
+ expect(spans[1]).toBe('3 skills');
+ expect(screen.queryByRole('alert')).toBeNull();
+});
+it('draws neither subtitle nor meta while the library read is failing',async()=>{
+ open({localError:"EACCES: permission denied, scandir '\\\\wsl.localhost\\Ubuntu\\home\\teniroo'"});
+ await screen.findByRole('alert');
+ expect(document.querySelector('.board-view-meta')).toBeNull();
+ const spans=[...(document.querySelector('.board-view-header > div') as HTMLElement).children].filter(el=>el.tagName==='SPAN');
+ expect(spans).toHaveLength(1);
+ expect(spans[0]).toHaveTextContent('Global');
+});

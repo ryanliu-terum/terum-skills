@@ -20,7 +20,8 @@ function open(route: string, marketplace = false) {
 }
 it('renders recorded Library cards and the real project registry without favorite controls or sample provenance', async () => {
   open('#/library/global');
-  expect(await screen.findByText('1 skill folder in Global · 1 shared with acme')).toBeVisible();
+  expect(await screen.findByText('1 skill · 1 shared with acme')).toBeVisible();
+  expect(within(document.querySelector('.board-view-header') as HTMLElement).getByText('Global')).toBeVisible();
   const card = screen.getByTestId('skill-card-deploy-check');
   expect(within(card).getByText('Use this skill when a deploy needs a pre-flight checklist.')).toBeVisible();
   expect(within(card).queryByRole('button', { name: 'Favorite deploy-check' })).toBeNull();
@@ -54,7 +55,8 @@ it('shows unknown quarantine contents without a fabricated folder count', async 
 });
 it('preserves the project route key when the displayed title is capitalized', async () => {
   const f = open('#/library/checkout?root='+encodeURIComponent('/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'));
-  expect(await screen.findByText('0 skill folders in seed')).toBeVisible();
+  expect(await screen.findByText('0 skills')).toBeVisible();
+  expect(within(document.querySelector('.board-view-header') as HTMLElement).getByText('seed')).toBeVisible();
   expect(screen.queryAllByTestId(/^skill-card-/)).toHaveLength(0);
   expect(f.spawns.some(spawn => spawn.args[1] === 'project')).toBe(false);
 });

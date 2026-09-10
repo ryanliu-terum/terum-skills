@@ -74,14 +74,14 @@ function s7gReplay() {
 it('replays the rebuilt fixture through Global and checkout scopes and Skill detail',async()=>{
   const backend=createTauriBackend(s7gReplay().bridge);
   const library=await backend.library({scope:{kind:'global'},team:'acme'});
-  expect(library).toMatchObject({ok:true,value:{title:'1 skill folder in Global · 1 shared with acme',root:{id:'global',kind:'global',count:undefined},team:{kind:'ok',team:'acme'},skills:expect.arrayContaining([expect.objectContaining({name:'deploy-check',desc:'Use this skill when a deploy needs a pre-flight checklist.',normalizedGrants:'none',installed:'placed',installsN:2})])}});
+  expect(library).toMatchObject({ok:true,value:{title:'1 skill · 1 shared with acme',root:{id:'global',kind:'global',label:'Global',count:undefined},team:{kind:'ok',team:'acme'},skills:expect.arrayContaining([expect.objectContaining({name:'deploy-check',desc:'Use this skill when a deploy needs a pre-flight checklist.',normalizedGrants:'none',installed:'placed',installsN:2})])}});
   const detail=await backend.skill({ref:'deploy-check'});if(!detail.ok)throw new Error(detail.error);
   const resultFrame=recorded('ls').map(line=>JSON.parse(line) as {t:string;value?:{skills:{name:string;updated:string;grantsHash:string}[]}}).find(frame=>frame.t==='result');
   const row=resultFrame?.value?.skills.find(row=>row.name==='deploy-check');
   expect(detail.value.updated).toBe(row?.updated);expect(detail.value.updated).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   expect(detail.value.grantsHash).toBe(row?.grantsHash);
   expect(detail.value).toMatchObject({desc:'Use this skill when a deploy needs a pre-flight checklist.',grants:[],users:[['seed','S','Global · since 2026-08-20'],['mira','MC','Global · since 2026-08-25']],skillMd:{markdown:'# deploy-check\n\nUse this skill when a deploy needs a pre-flight checklist.\n\n1. Step one.\n2. Step two.\n'},receipt:null,lines:6,favorites:null});
-  const project=await backend.library({scope:{kind:'checkout',root:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'},team:'acme'});expect(project).toMatchObject({ok:true,value:{title:'0 skill folders in seed',skills:[],root:{id:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed',kind:'checkout'}}});
+  const project=await backend.library({scope:{kind:'checkout',root:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'},team:'acme'});expect(project).toMatchObject({ok:true,value:{title:'0 skills',skills:[],root:{id:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed',kind:'checkout',label:'seed'}}});
   expect(await backend.library({scope:{kind:'global'},team:'acme'})).toMatchObject({ok:true,value:{skills:[{name:'deploy-check'}]}});
   const member=recorded('ls-member-mira').map(line=>JSON.parse(line) as {t:string;value?:unknown}).find(frame=>frame.t==='result');
   expect(member?.value).toMatchObject({member:{handle:'mira',declined:[]},projects:[{name:'terum'}]});
@@ -117,8 +117,8 @@ it('serves scoped folder titles and best-effort team enrichment',async()=>{
  const backend=createTauriBackend(s7gReplay().bridge);
  const global=await backend.library({scope:{kind:'global'},team:'acme'});
  const project=await backend.library({scope:{kind:'checkout',root:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'},team:'acme'});
- expect(global).toMatchObject({ok:true,value:{title:'1 skill folder in Global · 1 shared with acme',team:{kind:'ok',team:'acme'},overview:{skills_note:'—',installs:'2',evaluated:'—',attention:'—'}}});
- expect(project).toMatchObject({ok:true,value:{title:'0 skill folders in seed',team:{kind:'ok',team:'acme'},overview:{skills_note:'—',installs:'0',evaluated:'—',attention:'—'}}});
+ expect(global).toMatchObject({ok:true,value:{title:'1 skill · 1 shared with acme',team:{kind:'ok',team:'acme'},overview:{skills_note:'—',installs:'2',evaluated:'—',attention:'—'}}});
+ expect(project).toMatchObject({ok:true,value:{title:'0 skills',team:{kind:'ok',team:'acme'},overview:{skills_note:'—',installs:'0',evaluated:'—',attention:'—'}}});
 });
 it('serves no default eval k from the real backend',async()=>{
  expect(await createTauriBackend(inventoryReplay(recorded).bridge).settings()).toMatchObject({ok:true,value:{K:null}});

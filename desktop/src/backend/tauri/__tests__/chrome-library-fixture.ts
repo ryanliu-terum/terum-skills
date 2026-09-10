@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { fakeBridge } from './fake-bridge';
 
 // The recorded 0.1.7 `ls --local` shape: only the keys a test may rewrite are typed; everything else passes through.
-const section = z.object({root:z.string(),repoRoot:z.string().optional(),scope:z.string(),label:z.string().optional(),rootState:z.string().optional(),counts:z.object({skillFolders:z.number(),connectable:z.number()}).passthrough().optional(),rows:z.array(z.object({}).passthrough())}).passthrough();
+const section = z.object({root:z.string(),repoRoot:z.string().optional(),scope:z.string(),label:z.string().optional(),rootState:z.string().optional(),counts:z.object({skillFolders:z.number(),connectable:z.number()}).passthrough().optional(),notOffered:z.array(z.object({}).passthrough()).optional(),rows:z.array(z.object({}).passthrough())}).passthrough();
 const local = z.object({local:z.array(section)}).passthrough();
 export type LocalRecording = z.infer<typeof local>;
 export interface ReplayOptions {

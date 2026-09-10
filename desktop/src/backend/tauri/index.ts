@@ -15,7 +15,7 @@ import { cliRun } from './run';
 import { prepareRun } from './prepare-run';
 import { cliEvalReport, mapEvalReport } from './eval-report';
 import { relativeTime } from '../../lib/relative-time';
-import { personPlaceNote } from '../../screens/marketplace/market-data';
+import { personPlaceNote, plural } from '../../screens/marketplace/market-data';
 import { SHORTCUTS } from '../../lib/shortcuts';
 import { abbreviateHome, stripRemote } from '../paths';
 import { scannedRoots } from './scanned-roots';
@@ -541,7 +541,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       }
       const n=skills.length; // the grid itself — title, tile and placeholder never count a card the grid does not draw
       const value:Library={root,team:enrichment.team,scanned:scannedRoots(local.value,directory),skills,problems:enrichment.inventory?.problems??[],provenance:null,
-        title:`${n} skill folder${n===1?'':'s'} in ${root.label}`+(enrichment.team.kind==='ok'&&joined>0?` · ${joined} shared with ${enrichment.team.team}`:''),
+        // The ViewHeader title beside this subtitle is already root.label (LibraryScreen.tsx:30), so the
+        // subtitle prints the count alone, in the board's shape ("15 skills") and the shape the mock and
+        // the search placeholder already use (.planning/specs/desktop-scoped-stats-and-collapse.md:29).
+        // plural() is the very helper that placeholder calls, so the two strings cannot drift apart again.
+        // The team limb stays: `joined` is a fact this screen carries nowhere else.
+        title:plural(n,'skill')+(enrichment.team.kind==='ok'&&joined>0?` · ${joined} shared with ${enrichment.team.team}`:''),
         overview:{skills:String(n),skills_note:'—',evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:'',installs:String(skills.reduce((sum,row)=>sum+row.installsN,0)),installs_note:'—',attention:'—',attention_lines:[],attention_link:'',zero:overviewCopy}};
       return {ok:true,value};
     },
