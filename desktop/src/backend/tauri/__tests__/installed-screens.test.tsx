@@ -58,8 +58,12 @@ it('uses the resolved path label in the real Global Remove dialog',async()=>{
 
 // The old-CLI ambiguity must read as unknown on the page, with no Install to collide with the folder.
 it('states an unknown install rather than offering an Install that would collide',async()=>{
+ // Ledger stripped: the unknown-state scenario is a machine whose ledger records nothing — with the
+ // recorded S7b placement left in, the ledger would truthfully answer 'placed' and there is no ambiguity.
  open('none','#/skill/deploy-check','on-disk-only',frame=>{
   if(frame.t==='hello')delete (frame.features as Record<string,unknown>).localIdentity;
+ },frame=>{
+  if(frame.t==='result')(frame.value as {ledger:{placements:unknown[]}}).ledger.placements=[];
  });
  expect(await screen.findByText('Install state unknown')).toBeInTheDocument();
  expect(screen.queryByRole('button',{name:'Install'})).toBeNull();

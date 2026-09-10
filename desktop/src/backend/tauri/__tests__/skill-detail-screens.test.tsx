@@ -20,7 +20,8 @@ function open(route:string,amend?:AmendResult) {
 
 it('renders the recorded detail in the board shapes with one heading and real provenance',async()=>{
   open('#/skill/deploy-check?menu=files');
-  await screen.findByText('Use this skill when a deploy needs a pre-flight checklist.');
+  // Description and SKILL.md body both carry the first body paragraph now that desc derives from the body (re-land of #111).
+  await screen.findAllByText('Use this skill when a deploy needs a pre-flight checklist.');
   expect(document.querySelectorAll('h1')).toHaveLength(1);
   expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/acme/ops/deploy-check');
   // The recording's viewer is `seed`, one of the two installers, so the viewer is named (PR 104).
