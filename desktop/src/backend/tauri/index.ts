@@ -79,12 +79,23 @@ function tokenLabel(characters:number|null):{size:string;tokensK:number}{
 }
 function rootOf(section:LocalSection,home=''):Root {
   const global=section.scope==='global',repoRoot=section.repoRoot??section.root;
-  return {id:global?'global':repoRoot,kind:global?'global':'checkout',label:labelOf(section),root:global?(home?abbreviateHome(section.root,home):'~/.claude/skills'):repoRoot,rootState:section.rootState,registered:section.registered??false,detected:section.detected??false,count:section.counts?String(section.counts.skillFolders):undefined,remote:section.remote??null};
+  return {id:global?'global':repoRoot,kind:global?'global':'checkout',label:labelOf(section),root:global?(home?abbreviateHome(section.root,home):'~/.claude/skills'):repoRoot,rootState:section.rootState,registered:section.registered??false,detected:section.detected??false,count:section.counts?String(visibleSkillFolders(section)):undefined,remote:section.remote??null};
 }
 // D2: only these frontmatter failures still describe folders holding SKILL.md. 'managed-wrapper' is
 // deliberately absent: the bundled /terum-skills skill is counted as a folder by the CLI, but it is
-// our own placed component, so the Library never draws it as a card the user is expected to fix.
+// our own placed component, so the Library neither draws it as a card nor counts it anywhere.
 function countable(entry:NotOffered):boolean{return ['no-frontmatter','invalid-yaml','illegal-name','name-mismatch','description-missing','unsupported-field','malformed-allowed-tools'].includes(entry.reason);}
+// The grid's own arithmetic — rows plus the countable omissions, deduplicated by path exactly as
+// library() draws its cards. Every count the app prints (sidebar, Skills tile, Library title, search
+// placeholder) comes from here, so a folder countable() hides — the managed /terum-skills wrapper —
+// is absent from the numbers too. The CLI's counts.skillFolders keeps counting it, and must: the
+// terminal lists the wrapper under "Cannot be connected", so its total stays true for that output.
+function visibleSkillFolders(section:LocalSection):number{
+  const seen=new Set<string>(section.rows.map(row=>row.path));
+  let n=seen.size;
+  for(const entry of section.notOffered??[])if(countable(entry)&&!seen.has(entry.path)){seen.add(entry.path);n++;}
+  return n;
+}
 function joinedSkill(row:LocalRow,inventory:Inventory,team:string,features:Pick<Features,'localIdentity'>):InventorySkill|undefined {
   return inventory.skills.find(skill=>features.localIdentity&&row.skillId!=null?row.skillId===skill.id:row.placement?.id===skill.id&&row.placement.team===team);
 }
@@ -181,7 +192,7 @@ function statusModel(value:CliStatus, local:CliLocal|null, platform:string):Stat
   machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
   me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:[value.identity?.github,handle,value.identity?.default_handle].find(v=>v)??''},
   teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath??null,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{publish:team.policy.publish==='pr'?'Pull request':'Push',license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
-  counts:local?.local.find(section=>section.scope==='global')?.counts ? {Global:String(local.local.find(section=>section.scope==='global')!.counts!.skillFolders)} : {},tools:value.tools,roots:local===null?[]:local.local.map(section=>rootOf(section)),
+  counts:local?.local.find(section=>section.scope==='global')?.counts ? {Global:String(visibleSkillFolders(local.local.find(section=>section.scope==='global')!))} : {},tools:value.tools,roots:local===null?[]:local.local.map(section=>rootOf(section)),
  };
 }
 // AD-23: the drawn placement states (design fixture PLACEMENTS: 'up to date', 'update available', 'edited locally', 'pinned'); a health the board has no word for is '—'.
@@ -443,7 +454,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         if(!countable(entry)||seen.has(entry.path))continue;seen.add(entry.path);
         skills.push(notOfferedCard(entry,section,directory));
       }
-      const n=section.counts?.skillFolders??skills.length;
+      const n=skills.length; // the grid itself — title, tile and placeholder never count a card the grid does not draw
       const value:Library={root,team:enrichment.team,scanned:scannedRoots(local.value,directory),skills,problems:enrichment.inventory?.problems??[],provenance:null,
         title:`${n} skill folder${n===1?'':'s'} in ${root.label}`+(enrichment.team.kind==='ok'&&joined>0?` · ${joined} shared with ${enrichment.team.team}`:''),
         overview:{skills:String(n),skills_note:'—',evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:'',installs:String(skills.reduce((sum,row)=>sum+row.installsN,0)),installs_note:'—',attention:'—',attention_lines:[],attention_link:'',zero:overviewCopy}};
