@@ -79,6 +79,7 @@ it('keeps the marketplace skill link and install button destinations distinct',a
  expect(install).toHaveClass('card-install');
  fireEvent.click(install);
  await waitFor(()=>expect(location.hash).toBe('#/skill/a11y-audit?dialog=install&root=marketplace'));
+ expect(await screen.findByRole('dialog',{name:'Install a11y-audit'})).toBeVisible();
 });
 
 function openWith(route:string,backend:Backend){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}
