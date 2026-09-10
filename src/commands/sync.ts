@@ -13,8 +13,9 @@ import { checkoutPath, writableCheckout } from '../lib/checkouts.js';
 import { AGENT_PATHS, checkoutRootOf } from '../lib/placer/agent-paths.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { allowedTools, parseJson, personSchema, sameScope } from '../lib/schema.js';
-import { endorsedCandidates, findSkill, readPerson, readTeam, skillRecords } from '../lib/skills.js';
+import { allowedTools, Destination, parseJson, Person, personSchema, sameScope } from '../lib/schema.js';
+import { normalizeRemote } from '../lib/remote.js';
+import { endorsedCandidates, findSkill, readPerson, readTeam, SkillRecord, skillRecords } from '../lib/skills.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { CloneBusy, openTeamRepo, refreshClone, RemoteAccessError, treeText } from '../lib/teamRepo.js';
 import { materializeVersion } from '../lib/version.js';
@@ -339,6 +340,60 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
         }
       }
     }
+    {
+      // Restore pass: the people file records an install this machine's placement ledger no longer
+      // has. Neither existing pass can clear that state — endorsedCandidates excludes everything in
+      // person.installed, and the repair pass walks only existing placements — so a lost ledger
+      // entry was a permanent fixed point. Opt-in batch mirroring the endorsed batch above: one
+      // confirm interactively, deferred by name in hook/non-interactive mode; per-skill tool
+      // consent stays inside installOne. A declined batch records nothing and is offered again
+      // next run — the endorsed batch's own decline idiom.
+      for (const [team, binding] of Object.entries(config.teams)) {
+        if (!binding.handle || skipped.has(team)) continue;
+        try {
+          const clone = store.teamClone(team);
+          const person = await actorPerson(store, team, binding.handle);
+          if (!person) continue;
+          const current = await store.read();
+          const placedIds = new Set(Object.values(current.placements).filter((entry) => entry.team === team).map((entry) => entry.id));
+          const restorable: { entry: Person['installed'][number]; skill: SkillRecord; destination: Destination }[] = [];
+          for (const entry of person.installed) {
+            // Any placement of the id — any scope, any path — counts as present; a pending entry
+            // is the replay loop's work; a decline recorded against the id is respected.
+            if (placedIds.has(entry.id) || restorable.some((item) => item.entry.id === entry.id)) continue;
+            if (current.pending.some((pending) => pending.id === entry.id && pending.team === team)) continue;
+            if (person.declined.includes(entry.id)) continue;
+            const skill = await findSkill(clone, team, entry.id).catch(() => undefined);
+            if (!skill) continue; // gone upstream: nothing a later run could restore (the repair pass's rule)
+            // A project placement is worktree-local; a recorded project install with no matching
+            // checkout here may be satisfied in another checkout or on another machine. Report it,
+            // never guess a path, and never hold the team unsynced over it.
+            const projectRoot = entry.scope.kind === 'project' ? await matchingProjectRoot(clone, entry.scope.project, runner, args.cwd) : undefined;
+            if (entry.scope.kind === 'project' && !projectRoot) {
+              notice(`Skipped restoring ${skill.name}: its recorded project scope (${entry.scope.project}) has no matching checkout here; run sync from that project's checkout.`);
+              continue;
+            }
+            restorable.push({ entry, skill, destination: projectRoot ? { kind: 'checkout', root: projectRoot } : { kind: 'global' } });
+          }
+          if (!restorable.length) continue;
+          if (!interactive) { defer(team, ...restorable.map(({ skill }) => skill.name)); continue; }
+          if (!(await (io as Prompter).confirm(`Restore ${restorable.length} skill(s) recorded as installed but missing on this machine from ${team}?`))) continue;
+          for (const { entry, skill, destination } of restorable) {
+            try {
+              const result = await installOne({ team, id: entry.id, scope: entry.scope, destination, version: entry.version ?? undefined, store, runner, cwd: args.cwd, home }, childIo);
+              recordPlacement(team, result.path, 'placed');
+              placed++; changed = true;
+            } catch (error) {
+              if (error instanceof PromptClosedError) throw error; // the channel is gone, not this entry
+              defer(team, skill.name); notice(`Deferred restore of ${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+        } catch (error) {
+          if (error instanceof PromptClosedError) throw error; // the channel is gone, not this team
+          notice(`Skipping restore pass for ${team}: ${error instanceof Error ? error.message : String(error)}`); defer(team);
+        }
+      }
+    }
     await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, defer, notice, new Set(skipped.keys()), (team, path, kind) => {
       recordPlacement(team, path, kind); changed = true;
     }, eligible);
@@ -441,6 +496,18 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
     }
   }
 }
+/** Git+remote-validated placement resolver for the restore pass (§5.2): the cwd's repository root
+ * counts as the recorded project's checkout only when its origin matches a remote team.json lists. */
+async function matchingProjectRoot(clone: string, project: string, runner: Runner, cwd?: string): Promise<string | undefined> {
+  const root = await runner.run('git', ['rev-parse', '--show-toplevel'], cwd ? { cwd } : undefined);
+  if (root.code !== 0 || !root.stdout.trim()) return undefined;
+  const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: root.stdout.trim() });
+  if (origin.code !== 0) return undefined;
+  const projects = (await readTeam(clone)).projects;
+  const listed = Object.hasOwn(projects, project) ? projects[project] : undefined;
+  return listed?.remotes.some((remote) => normalizeRemote(remote) === normalizeRemote(origin.stdout.trim())) ? root.stdout.trim() : undefined;
+}
+
 async function actorPerson(store: ConfigStore, team: string, handle: string) {
   try { return await readPerson(store.teamClone(team), handle); } catch { return undefined; }
 }
