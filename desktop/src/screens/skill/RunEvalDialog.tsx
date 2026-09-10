@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
-import { useCapabilities } from '../../backend';
+import { useBackend, useCapabilities } from '../../backend';
 import type { SkillDetail } from '../../backend/types';
 import { useEvalRun } from '../../app/eval-run-context';
 import { WorkflowDialog } from '../../components/domain/WorkflowControls';
@@ -10,8 +10,9 @@ import { Button } from '../../components/ui/Button';
 import { Checkbox } from '../../components/ui/Checkbox';
 
 export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boolean;onClose:()=>void}){
- const capabilities=useCapabilities(),evalRun=useEvalRun();
- const [commit,setCommit]=useState(true),[error,setError]=useState<string|null>(null);
+ const capabilities=useCapabilities(),evalRun=useEvalRun(),backend=useBackend();
+ // The checkbox starts from Settings ▸ Evals ▸ Commit receipts; each run may still override it here.
+ const [commit,setCommit]=useState(()=>backend.prefs.get('eval:commit',true)),[error,setError]=useState<string|null>(null);
  const {ref:routeRef}=useParams();
  const ref=routeRef??s.name;
  const active=evalRun.current&&evalRun.current.name===s.name&&(evalRun.current.team??null)===s.team?evalRun.current:null;
