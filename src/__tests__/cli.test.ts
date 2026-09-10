@@ -420,3 +420,31 @@ it('hides team and local-name overrides from help while keeping their parsers', 
   const team = program.commands.find(command => command.name() === 'team')!;
   expect(team.commands.find(command => command.name() === 'join')!.helpInformation()).not.toContain('--as');
 });
+
+describe('app-update commander registration', () => {
+  it('drives app-update through buildProgram and forwards --release, never colliding with the program version option', async () => {
+    for (const [argv, expected] of [
+      [['--stage','--release','0.1.11'], {stage:true,release:'0.1.11'}],
+      [['--check'], {check:true}],
+      [['--check','--force'], {check:true,force:true}],
+      [['--apply','--release','0.1.11'], {apply:true,release:'0.1.11'}],
+      [['--apply-now','--release','0.1.11','--await-pid','42'], {applyNow:true,release:'0.1.11',awaitPid:'42'}],
+    ] as const) {
+      const calls: unknown[] = [], stdout: string[] = [];
+      const program = buildProgram(async invoke => { await invoke(new ScriptedPrompter()); }, {
+        login: async () => failure('unused'), team: async () => failure('unused'),
+        appUpdate: async args => { calls.push(args); return failure('stub'); },
+      });
+      program.configureOutput({writeOut: text => stdout.push(text)});
+      await expect(program.parseAsync(['app-update',...argv],{from:'user'})).resolves.toBe(program);
+      expect(calls).toEqual([{...expected,form:undefined,launch:undefined}]); expect(stdout).toEqual([]);
+    }
+  });
+  it('hides --await-pid and --apply-now from app-update help while keeping their parsers', async () => {
+    const calls: unknown[] = [];
+    const program=buildProgram(async invoke=>{await invoke(new ScriptedPrompter());},{login:async()=>failure('unused'),team:async()=>failure('unused'),appUpdate:async args=>{calls.push(args);return failure('stub');}});
+    const help=program.commands.find(command=>command.name()==='app-update')!.helpInformation();
+    expect(help).toContain('--release');expect(help).toContain('--check');expect(help).not.toContain('--await-pid');expect(help).not.toContain('--apply-now');
+    await program.parseAsync(['app-update','--apply-now','--await-pid','42'],{from:'user'});expect(calls).toEqual([{applyNow:true,awaitPid:'42',form:undefined,launch:undefined}]);
+  });
+});

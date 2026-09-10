@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rename, rm, writeFile, chmod } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { explainGhFailure } from '../lib/auth.js';
 import { createConfigStore, type ConfigStore } from '../lib/config.js';
-import { exists, mkdirPrivate } from '../lib/fs.js';
+import { exists, mkdirPrivate, writeJsonPrivate } from '../lib/fs.js';
 import { invocation, type WithForm } from '../lib/invocation.js';
 import type { Launch } from '../lib/launch.js';
 import { packageVersion } from '../lib/package.js';
@@ -150,7 +150,7 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
   }
 }
 
-async function locateApp(platform: AppPlatform, versionDir: string, localAppData: string | undefined): Promise<string | null> {
+export async function locateApp(platform: AppPlatform, versionDir: string, localAppData: string | undefined): Promise<string | null> {
   if (platform.startsWith('darwin')) {
     const bundle = (await readdir(versionDir).catch(() => [] as string[])).find((name) => name.endsWith('.app'));
     return bundle ? join(versionDir, bundle) : null;
@@ -161,25 +161,22 @@ async function locateApp(platform: AppPlatform, versionDir: string, localAppData
   return (await exists(exe)) ? exe : null;
 }
 
-async function writeState(path: string, state: AppState): Promise<void> {
-  await mkdirPrivate(dirname(path));
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
-  if (process.platform !== 'win32') await chmod(temporary, 0o600);
-  await rename(temporary, path);
-}
+async function writeState(path: string, state: AppState): Promise<void> { await writeJsonPrivate(path, state); }
 
 async function readProcVersion(): Promise<string | null> {
   if (process.platform !== 'linux') return null;
   try { return await readFile('/proc/version', 'utf8'); } catch { return null; }
 }
 
+/** The tag is advertised but its release carries no assets yet: release.yml pushes the tag before it creates the Release. */
+export const RELEASE_ASSETS_MISSING = /release not found|Not Found \(HTTP 404\)|no assets match/i;
+
 /** D7: one sentence per cause, and always the same two next steps. */
-async function explainDownloadFailure(output: string, version: string, asset: string, runner: Runner, form: WithForm['form']): Promise<string> {
+export async function explainDownloadFailure(output: string, version: string, asset: string, runner: Runner, form: WithForm['form']): Promise<string> {
   const text = output.trim();
   const gh = await explainGhFailure(runner);
   if (gh) return `${gh} ${tail(form)}`;
-  if (/release not found|Not Found \(HTTP 404\)|no assets match/i.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;
+  if (RELEASE_ASSETS_MISSING.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;
   if (/dial tcp|no such host|connection refused|network is unreachable|TLS handshake timeout|i\/o timeout|could not resolve/i.test(text)) return `Could not reach GitHub to download the desktop app; you appear to be offline or behind a proxy that blocks github.com. ${tail(form)}`;
   return `Could not download the desktop app: ${text || 'gh reported no detail'}. ${tail(form)}`;
 }

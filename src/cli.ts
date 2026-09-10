@@ -3,6 +3,7 @@ import { run as profile, type ProfileArgs } from './commands/profile.js';
 import { run as decline } from './commands/decline.js';
 import { run as runUpdate } from './commands/update.js';
 import { run as runApp } from './commands/app.js';
+import { run as runAppUpdate } from './commands/appUpdate.js';
 import { packageVersion } from './lib/package.js';
 import { Command, Option } from 'commander';
 import { run as login } from './commands/login.js';
@@ -37,10 +38,10 @@ import { failure, Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
-export interface CliVerbs { checkout?: typeof runCheckout; project?: typeof runProject; profile?: typeof profile; decline?: typeof decline; app?: typeof runApp; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; connect?: typeof connect; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; receiptCheck?: typeof runReceiptCheck; refresh?: typeof runRefresh; }
+export interface CliVerbs { checkout?: typeof runCheckout; project?: typeof runProject; profile?: typeof profile; decline?: typeof decline; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; connect?: typeof connect; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; receiptCheck?: typeof runReceiptCheck; refresh?: typeof runRefresh; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean } = {}): Command {
-  const active: Required<CliVerbs> = { checkout: verbs.checkout ?? runCheckout, project: verbs.project ?? runProject, profile: verbs.profile ?? profile, decline: verbs.decline ?? decline, app: verbs.app ?? runApp, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, connect: verbs.connect ?? connect, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport, receiptCheck: verbs.receiptCheck ?? runReceiptCheck, refresh: verbs.refresh ?? runRefresh };
+  const active: Required<CliVerbs> = { checkout: verbs.checkout ?? runCheckout, project: verbs.project ?? runProject, profile: verbs.profile ?? profile, decline: verbs.decline ?? decline, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, connect: verbs.connect ?? connect, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport, receiptCheck: verbs.receiptCheck ?? runReceiptCheck, refresh: verbs.refresh ?? runRefresh };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
@@ -175,5 +176,15 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .description('Fetch each team clone to origin/main and nothing else: no placement, no prompts, no push, and no sync stamp')
     .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
     .action(async (options: { team?: string }) => execute((io) => active.refresh({ ...options, form: context.form }, io), { verb: 'refresh', notices: true }));
+  program.command('app-update')
+    .description('Check for, download, or install a newer Terum Skills desktop app (reports only, unless --stage or --apply)')
+    .option('--check', 'report what is advertised and what is staged; downloads nothing (default)')
+    .option('--stage', 'download and verify the desktop app for --release; installs nothing')
+    .option('--apply', 'hand the install to a background process and return; the caller must then quit')
+    .option('--release <version>', 'which released version to act on (default: this copy’s version)')
+    .option('--force', 'with --check, ask GitHub now instead of honouring the once-a-day cap')
+    .addOption(new Option('--await-pid <pid>', 'wait for this process to exit before installing').hideHelp())
+    .addOption(new Option('--apply-now', 'the detached install leg; never run this by hand').hideHelp())
+    .action(async (options: { check?: boolean; stage?: boolean; apply?: boolean; release?: string; force?: boolean; awaitPid?: string; applyNow?: boolean }) => execute((io) => active.appUpdate({ ...options, form: context.form, launch: context.launch }, io), { verb: 'app-update', notices: false }));
   return program;
 }

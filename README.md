@@ -79,6 +79,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |
 | Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
 | | `app` | Install and open the desktop app for this CLI version |
+| | `app-update [--check\|--stage\|--apply] [--release <version>]` | Check for, download, or install a newer desktop app; the app drives it from Settings ▸ Updates |
 
 `npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option you are expected to use.
 
@@ -205,7 +206,7 @@ Browser development still uses the mock backend. The app bundle is separate from
 Every app-spawned CLI child, including under `tauri dev`, has piped stderr and
 `TERUM_SKILLS_NO_UPDATE_NOTIFIER=1`; `--frames` forces `noUpdateCheck`, and `update` is registered with
 `notices: false`. Background terminal release notices are therefore suppressed in the app. Explicit update
-checks still return release observations and installation-specific advice; the app has no update channel yet.
+checks still return release observations and installation-specific advice; and `app-update` gives the app its own channel for the app itself — it checks once per launch against the release advertisement the CLI already caches, downloads through `gh release download`, verifies the published SHA-256, and installs only after you press Relaunch. It never updates the CLI.
 
 ## Releasing (maintainers)
 

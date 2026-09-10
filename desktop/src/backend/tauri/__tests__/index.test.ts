@@ -126,7 +126,7 @@ it.each([true, false])('maps every search field including its real description (
 it('serves status, settings, library, skill, update, roster and catalog while the other three surfaces stay typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, checkouts: true });
+  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, checkouts: true, appUpdate: true });
   for (const result of await Promise.all([b.onboarding(), b.inbox()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }

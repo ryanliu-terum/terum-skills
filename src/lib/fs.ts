@@ -1,4 +1,5 @@
-import { access, chmod, lstat, mkdir } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
 export async function exists(path: string): Promise<boolean> {
   try { await access(path); return true; } catch { return false; }
@@ -21,4 +22,13 @@ export async function mkdirPrivate(path: string): Promise<void> {
   // noise. The shape and owner checks above are filesystem facts and hold everywhere (a junction
   // needs no elevation; the uid check self-disables where there is no uid).
   if (process.platform !== 'win32' && (details.mode & 0o077) !== 0) await chmod(path, 0o700);
+}
+
+/** Atomic private JSON write: temp file in the same directory, 0600, then rename. */
+export async function writeJsonPrivate(path: string, value: unknown): Promise<void> {
+  await mkdirPrivate(dirname(path));
+  const temporary = `${path}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  if (process.platform !== 'win32') await chmod(temporary, 0o600);
+  await rename(temporary, path);
 }
