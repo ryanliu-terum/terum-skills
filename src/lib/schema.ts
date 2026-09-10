@@ -14,6 +14,16 @@ export const handleSchema = z
 export const TEAM_NAME_RULE = 'a team name is 1-100 characters: letters, digits, dot, underscore, or hyphen, and cannot start with a dot';
 export const teamNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/, TEAM_NAME_RULE);
 
+/**
+ * A project name is display text, not a path: it appears on cards, in `people[].projects`, and after
+ * `--project`. Spaces are admitted because these are human labels. Stored as typed; collisions are
+ * checked case-insensitively by `project create`, because every reader matches exactly
+ * (`Object.hasOwn(team.projects, name)`), so `Payments` and `payments` would be two cards nobody
+ * could tell apart whose endorsements land in different lists.
+ */
+export const PROJECT_NAME_RULE = 'a project name is 1-64 characters: letters, digits, spaces, dot, underscore, or hyphen, and cannot start with a dot or a space';
+export const projectNameSchema = z.string().trim().pipe(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/, PROJECT_NAME_RULE));
+
 /** §5.3: a skill name is its folder name — 1–64 lowercase alphanumerics or single internal hyphens. The one rule `connect` enforces and the README trusts. */
 export const SKILL_NAME_RULE = 'a skill name is 1–64 lowercase alphanumerics or single hyphens';
 export function isSkillName(value: string): boolean { return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 64; }

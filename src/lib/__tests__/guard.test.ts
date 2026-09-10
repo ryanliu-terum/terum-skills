@@ -96,6 +96,36 @@ describe('rows c, d, e — team.json', () => {
   });
 });
 
+describe('row i — project create adds one key, born empty', () => {
+  const P = { remotes: ['github.com/a/p'], skills: [] };
+  const create: GuardContext = { action: 'project', handle: 'me' };
+
+  it('admits exactly one new empty project, with or without a remote', () => {
+    expect(() => guard(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: [], skills: [] } } })] }), create)).not.toThrow();
+    expect(() => guard(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: ['github.com/a/q'], skills: [] } } })] }), create)).not.toThrow();
+  });
+
+  it('refuses a create that also endorses, edits another project, or renames one', () => {
+    refuse(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: [], skills: [ID] } } })] }), create, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ global: [ID], projects: { p: P, q: { remotes: [], skills: [] } } })] }), create, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ projects: { p: { remotes: ['github.com/a/other'], skills: [] }, q: { remotes: [], skills: [] } } })] }), create, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ projects: { q: { remotes: [], skills: [] } } })] }), create, 'team.json');
+  });
+
+  it('refuses two keys at once, a key with an extra field, and more than one remote', () => {
+    refuse(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: [], skills: [] }, r: { remotes: [], skills: [] } } })] }), create, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: [], skills: [], owner: 'me' } } })] }), create, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: ['github.com/a/q', 'github.com/a/q2'], skills: [] } } })] }), create, 'team.json');
+  });
+
+  it('is the only action that may create a key, and creates nothing on its own', () => {
+    refuse(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: [], skills: [] } } })] }), { action: 'publish', handle: 'me' }, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ global: [ID] })] }), create, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ archived: ['x'] })] }), create, 'team.json');
+    refuse(tree({ 'people/me.json': ['{}', '{"a":1}'] }), create, 'people/me.json');
+  });
+});
+
 describe('row f and everything else', () => {
   it('README is regenerable from any action; any other path is refused', () => {
     expect(() => guard(tree({ 'README.md': ['a', 'b'] }), { action: 'install', handle: 'me' })).not.toThrow();
