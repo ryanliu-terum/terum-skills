@@ -26,7 +26,7 @@ it('renders recorded Library cards and the real project registry without favorit
   open('#/library/global');
   expect(await screen.findByText('1 skill folder in Global · 1 shared with acme')).toBeVisible();
   const card = screen.getByTestId('skill-card-deploy-check');
-  expect(within(card).getByText('a deploy needs a pre-flight checklist.')).toBeVisible();
+  expect(within(card).getByText('Use this skill when a deploy needs a pre-flight checklist.')).toBeVisible();
   expect(within(card).queryByRole('button', { name: 'Favorite deploy-check' })).toBeNull();
   expect(screen.getByRole('link', { name: 'seed' })).toHaveAttribute('href', '#/library/checkout?root='+encodeURIComponent('/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'));
   expect(screen.queryByRole('link', { name: 'SSM' })).toBeNull();
@@ -34,7 +34,8 @@ it('renders recorded Library cards and the real project registry without favorit
 });
 it('renders recorded markdown and validation, omitting unknown counts and fabricated frontmatter', async () => {
   const f = open('#/skill/deploy-check');
-  expect(await screen.findByText('Use this skill when a deploy needs a pre-flight checklist.')).toBeVisible();
+  // The body-derived description now equals the markdown's first paragraph, so the text appears twice.
+  expect((await screen.findAllByText('Use this skill when a deploy needs a pre-flight checklist.'))[0]).toBeVisible();
   expect(screen.queryByTestId('frontmatter')).toBeNull();
   expect(screen.queryByText(/184 lines/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Favorite skill' })).toBeNull();

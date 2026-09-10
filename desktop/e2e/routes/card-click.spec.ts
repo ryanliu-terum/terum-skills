@@ -64,7 +64,7 @@ test('marketplace install button opens the install dialog',async({page})=>{
  const card=page.getByTestId('skill-card-a11y-audit');
  await card.hover();
  await page.locator('.market-card-wrap').filter({has:card}).locator('button.market-card-install').click();
- await expect(page).toHaveURL(/#\/skill\/a11y-audit\?__mock=not-installed&dialog=install&root=marketplace$/);
+ await expect(page).toHaveURL(/#\/skill\/a11y-audit\?dialog=install&root=marketplace$/);
  await expect(page.getByRole('dialog')).toBeVisible();
  expect(errors).toEqual([]);
 });
