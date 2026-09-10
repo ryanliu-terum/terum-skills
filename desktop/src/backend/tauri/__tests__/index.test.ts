@@ -295,6 +295,42 @@ it('retains null grants/body/date and marks unresolved skills broken, with a fai
   const f=inventoryBridge({row:{grants:null,grantsHash:null,body:null,updated:'—',unresolved:true} as unknown as Partial<typeof lsRow>,validation:{name:'a',findings:2,warnings:0},validateOk:false});
   expect(await createTauriBackend(f.bridge).skill({ref:'a',team:'acme'})).toMatchObject({ok:true,value:{normalizedGrants:null,grantsHash:null,skillMd:{markdown:null},updated:null,flags:['broken'],grants:null,hygieneCaption:null,hygieneStatus:'fail'}});
 });
+// A bare name reaches skill() from deep links, bookmarks and hand-typed URLs. When the team has
+// no such skill the name may still be a folder on this machine, and reporting it as unreadable
+// would be a claim about a file that is sitting right there.
+function unsharedLocal(sections:unknown[]) {return {roster:[],skills:[],problems:[],local:sections};}
+function unsharedRow(name:string,path:string) {return {name,path,state:'untracked locally',tracked:false,shared:[],placement:null,health:'unknown'};}
+it('resolves a name the team does not share against the folder on this machine',async()=>{
+  const local=unsharedLocal([{root:'/home/.claude/skills',scope:'global',rows:[unsharedRow('diagnose','/home/.claude/skills/diagnose')],notOffered:[],problems:[]}]);
+  const f=inventoryBridge({local});
+  expect(await createTauriBackend(f.bridge).skill({ref:'diagnose',team:'acme'})).toMatchObject({ok:true,value:{name:'diagnose',team:null,path:'/home/.claude/skills/diagnose',skillRef:'local:/home/.claude/skills/diagnose',project:'Global',teamed:false,placed:false,onDiskOnly:true,installs:'0 installs',flags:['local']}});
+  // No validate or eval-report: there is no team skill to validate, and asking would be a lie.
+  expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--team','acme'],['ls','--local']]);
+});
+it('resolves a name whose frontmatter the CLI could not parse',async()=>{
+  const local=unsharedLocal([{root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[],notOffered:[{name:'codex-implement',path:'/work/ops/.claude/skills/codex-implement',reason:'invalid-yaml'}],problems:[]}]);
+  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'codex-implement',team:'acme'})).toMatchObject({ok:true,value:{name:'codex-implement',team:null,project:'ops',teamed:false,path:'/work/ops/.claude/skills/codex-implement',flags:['broken'],flagText:{broken:'Not connectable · invalid-yaml'}}});
+});
+it('prefers Global over a checkout when a bare name carries no root',async()=>{
+  const local=unsharedLocal([
+    {root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[unsharedRow('shared-name','/work/ops/.claude/skills/shared-name')],notOffered:[],problems:[]},
+    {root:'/home/.claude/skills',scope:'global',rows:[unsharedRow('shared-name','/home/.claude/skills/shared-name')],notOffered:[],problems:[]},
+  ]);
+  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'shared-name',team:'acme'})).toMatchObject({ok:true,value:{path:'/home/.claude/skills/shared-name',scope:'Global'}});
+});
+it('reports a name that is neither in the team nor on this machine as unknown, not unreadable',async()=>{
+  const local=unsharedLocal([{root:'/home/.claude/skills',scope:'global',rows:[],notOffered:[],problems:[]}]);
+  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'nowhere',team:'acme'})).toEqual({ok:false,reason:'not-found',error:'No unambiguous skill nowhere in team acme.'});
+});
+it('still reports an ambiguous team id prefix as ambiguous rather than searching local roots',async()=>{
+  const f=fakeBridge((args,emit)=>{
+    const value=args[0]==='status'?{version:'0.1.6',teams:[{team:'acme',handle:'mira',repository:'https://github.com/acme/team',readable:true,sharedSkills:3,memberCount:1}]}
+      :args.includes('--local')?unsharedLocal([{root:'/home/.claude/skills',scope:'global',rows:[unsharedRow('ab','/home/.claude/skills/ab')],notOffered:[],problems:[]}])
+      :{...lsValue,skills:[{...lsRow,name:'first',id:'ab-one'},{...lsRow,name:'second',id:'ab-two'}]};
+    emit({kind:'stdout',line:JSON.stringify({t:'result',verb:args[0],ok:true,exitCode:0,value})});
+  });
+  expect(await createTauriBackend(f.bridge).skill({ref:'ab',team:'acme'})).toEqual({ok:false,error:'No unambiguous skill ab in team acme.',reason:'unreadable'});
+});
 it('shows unjoined folders locally without inferring team membership from name or prose',async()=>{
   for(const state of ['untracked locally','placement recorded from other @abc','connected source for acme; endorsed (global)']){
     const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state,tracked:state!=='untracked locally',shared:state.startsWith('connected')?[{id:'id-a',team:'acme'}]:[],placement:state.includes('other')?{id:'id-a',team:'other',version:null}:null,health:'unknown'}],notOffered:[],problems:[]}]}});
