@@ -71,7 +71,7 @@ it('accepts bare connect with no value in its successful frame', async () => {
 
 it.each([undefined, false, true])('maps push-policy publish with changed=%s and no invented version', async changed => {
   const f = replay({ name: 'a', branch: null, prUrl: null, changed });
-  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', version: null, changed: changed ?? true } });
+  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', version: null, changed: changed ?? true, prUrl: null } });
 });
 
 it.each([
@@ -79,7 +79,13 @@ it.each([
   [null, 'publish/a', 'publish/a'],
 ])('prefers the PR URL over the branch: %s', async (prUrl, branch, version) => {
   const f = replay({ name: 'a', branch, prUrl, changed: true });
-  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', version, changed: true } });
+  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', version, changed: true, prUrl } });
+});
+
+it('passes --project so the endorsement lands on the project list, not the global one', async () => {
+  const f = replay({ name: 'a', branch: null, prUrl: null, changed: true });
+  await createTauriBackend(f.bridge).publish({ ref: 'a', project: 'Payments' }).done;
+  expect(f.spawns.at(-1)?.args).toEqual(['publish', '--project', 'Payments', '--', 'a']);
 });
 
 it('refuses empty validate targets and uses cwd when ref is empty', async () => {
