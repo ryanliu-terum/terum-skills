@@ -10,6 +10,9 @@ it.each([
   ["'/Users/teddy' (/Users/teddy/a) /Users/teddy/b", '/Users/teddy', "'~' (~/a) ~/b"],
   ['/home/a.b/x /home/axb/x', '/home/a.b', '~/x /home/axb/x'],
   ['/home/a/x', '/', '/home/a/x'],
+  [String.raw`\\wsl.localhost\Ubuntu\home\teniroo`, String.raw`C:\Users\teddy`, String.raw`\\wsl.localhost\Ubuntu\home\teniroo`],
+  [String.raw`\\wsl.localhost\Ubuntu\home\teniroo\.claude\skills`, String.raw`\\wsl.localhost\Ubuntu\home\teniroo`, String.raw`\\wsl.localhost\Ubuntu\home\teniroo\.claude\skills`],
+  [String.raw`open '\\wsl.localhost\Ubuntu\home\teniroo\a'`, String.raw`C:\Users\teniroo`, String.raw`open '\\wsl.localhost\Ubuntu\home\teniroo\a'`],
 ])('abbreviates only known home path tokens: %s', (text, home, expected) => {
   expect(abbreviateHome(text, home)).toBe(expected);
 });
