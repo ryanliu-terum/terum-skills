@@ -39,6 +39,12 @@ it('renders infra skills in categorySkills order', async () => { open('#/marketp
 it.each([['projects/nothing', 'No project named nothing.'], ['people/nobody', 'No teammate named nobody.'], ['categories/nothing', 'No category named nothing.']])('renders unknown %s errors', async (path, error) => { open('#/marketplace/' + path); expect(await screen.findByText('Not found')).toBeInTheDocument(); expect(screen.getByText(error)).toBeInTheDocument(); expect(screen.queryByRole('alert')).toBeNull(); await waitFor(() => expect(document.documentElement.dataset.appReady).toBe('true')); });
 it('marks loading content ready without waiting for the pending backend', async () => { open('#/marketplace?__mock=loading'); expect(screen.getByLabelText('Loading marketplace')).toBeInTheDocument(); await waitFor(() => expect(document.documentElement.dataset.appReady).toBe('true')); });
 it('renders fatal backend errors as an alert', async () => { open('#/marketplace?__mock=error'); expect(await screen.findByRole('alert')).toHaveTextContent('Could not resolve host: github.com'); });
+it('asserts no invented cause on the error board: generic title, the CLI message leads', async () => {
+  open('#/marketplace?__mock=error');
+  await screen.findByText("Couldn't read the marketplace");
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not resolve host: github.com');
+  expect(screen.queryByText(/could not pull/)).toBeNull();
+});
 it('hides project Edit when no checkout path is recorded instead of opening a guessed relative path', async () => {
   const backend = pickBackend(); const before = await backend.catalog(); if (!before.ok) throw new Error(before.error);
   vi.spyOn(backend, 'catalog').mockResolvedValue({ ...before, value: { ...before.value, projects: before.value.projects.map(p => p.key === 'terum' ? { ...p, path: null } : p) } });
@@ -82,7 +88,7 @@ it('keeps backend cancellation out of the error board', async () => {
   await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(trash).not.toBeDisabled());
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.queryByText("Couldn't reach the team repo")).toBeNull();
+  expect(screen.queryByText("Couldn't read the marketplace")).toBeNull();
 });
 
 it('asks once per project run, writes nothing before Yes, and keeps No silent', async () => {
@@ -102,7 +108,7 @@ it('asks once per project run, writes nothing before Yes, and keeps No silent', 
   expect(await backend.catalog()).toEqual(before); expect(seen).not.toHaveBeenCalled();
   fireEvent.click(within(dialog).getByRole('button', { name: 'No' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(screen.queryByRole('alert')).toBeNull(); expect(screen.queryByText("Couldn't reach the team repo")).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull(); expect(screen.queryByText("Couldn't read the marketplace")).toBeNull();
   expect(await backend.catalog()).toEqual(before); expect(seen).not.toHaveBeenCalled();
   const first = remove.mock.results[0]!;
   if (first.type !== 'return') throw new Error('Missing run.');
