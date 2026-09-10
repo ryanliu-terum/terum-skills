@@ -59,23 +59,37 @@ test('flag hover still shows the update tooltip',async({page})=>{
  expect(errors).toEqual([]);
 });
 
-test('marketplace install button opens the install dialog',async({page})=>{
+test('the marketplace card menu opens the install dialog',async({page})=>{
  const errors=await openCards(page,'#/marketplace/skills');
  const card=page.getByTestId('skill-card-a11y-audit');
  await card.hover();
- await page.locator('.market-card-wrap').filter({has:card}).locator('button.market-card-install').click();
+ await expect(page.locator('.market-card-install')).toHaveCount(0);
+ await card.getByRole('button',{name:'More actions for a11y-audit'}).click();
+ await page.getByRole('menuitem',{name:'Install…',exact:true}).click();
  await expect(page).toHaveURL(/#\/skill\/a11y-audit\?dialog=install&root=marketplace$/);
  await expect(page.getByRole('dialog')).toBeVisible();
  expect(errors).toEqual([]);
 });
 
-test('More actions opens Remove',async({page})=>{
+test('More actions opens Uninstall',async({page})=>{
  const errors=await openCards(page,'#/library/global');
  const card=page.getByTestId('skill-card-deploy-check');
  await card.hover();
  await card.getByRole('button',{name:'More actions for deploy-check'}).click();
- await page.getByRole('menuitem',{name:'Remove',exact:true}).click();
+ await page.getByRole('menuitem',{name:'Uninstall…',exact:true}).click();
  await expect(page).toHaveURL(/dialog=remove/);
+ expect(errors).toEqual([]);
+});
+
+test('More actions opens Move, and says why Publish cannot run',async({page})=>{
+ const errors=await openCards(page,'#/library/global');
+ const card=page.getByTestId('skill-card-deploy-check');
+ await card.hover();
+ await card.getByRole('button',{name:'More actions for deploy-check'}).click();
+ await expect(page.getByRole('menuitem',{name:/Publish to team/})).toContainText('Already published to the team.');
+ await page.getByRole('menuitem',{name:/Move to/}).click();
+ await expect(page).toHaveURL(/dialog=move/);
+ await expect(page.getByRole('dialog')).toBeVisible();
  expect(errors).toEqual([]);
 });
 

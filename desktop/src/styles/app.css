@@ -106,6 +106,8 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .floating-panel {padding:4px;border:1px solid var(--tk-border2);border-radius:8px;background:var(--tk-modal);color:var(--tk-text1);box-shadow:var(--tk-shadowhigh);}
 .menu-item {display:flex;align-items:center;gap:8px;min-height:28px;padding:0 8px;border-radius:4px;font-size:13px;outline:none;}
 .menu-item[data-highlighted] {background:var(--tk-bg3);}
+.menu-item[data-disabled] {flex-direction:column;align-items:flex-start;gap:1px;padding-block:4px;color:var(--tk-text4);cursor:default;}
+.menu-item-reason {max-width:260px;font-size:11px;line-height:15px;color:var(--tk-text4);text-wrap:pretty;white-space:normal;}
 .dialog-backdrop {position:absolute;inset:0;background:var(--tk-scrim);}
 .dialog-popup {display:flex;flex-direction:column;gap:12px;width:440px;max-width:calc(100vw - 32px);padding:20px;border-radius:10px;background:var(--tk-modal);border:1px solid var(--tk-border2);box-shadow:var(--tk-shadowhigh);box-sizing:border-box;outline:none;}
 .dialog-title {font-size:15px;font-weight:590;color:var(--tk-text1);}

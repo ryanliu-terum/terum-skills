@@ -5,6 +5,7 @@ import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
 import { BackendContext } from '../../backend';
 import { createMockBackend } from '../../backend/mock';
+import { createRun } from '../../backend/mock/run';
 import type { Backend } from '../../backend/Backend';
 import { design } from '../../backend/mock/data';
 function open(route:string){location.hash=route;return render(<Providers><App/></Providers>);}
@@ -17,6 +18,52 @@ it('renders the eval report',async()=>{open('#/skill/deploy-check?tab=evals');ex
 it('renders all four install scope rows and keeps the Marketplace root after install',async()=>{open('#/skill/deploy-check?__mock=not-installed&dialog=install');const dialog=await screen.findByRole('dialog');expect(within(dialog).getAllByRole('radio')).toHaveLength(4);fireEvent.click(within(dialog).getByRole('button',{name:'Install'}));const approval=await screen.findByRole('dialog',{name:'Approve these tools for deploy-check?'});fireEvent.click(within(approval).getByRole('button',{name:'Yes'}));await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check?root=marketplace'));expect(await screen.findByText('Enabled')).toBeInTheDocument();await waitFor(()=>expect(document.querySelector('.detail-crumbs')).toHaveTextContent('Marketplace'));});
 it('renders the partial banner',async()=>{open('#/skill/migration-guard?tab=evals');expect(await screen.findByText('Partial run · 7 of 9 rounds scored · the verdict is greyed until a complete run lands')).toBeInTheDocument();});
 it('renders the no-receipt eval state',async()=>{open('#/skill/onboarding-tour?tab=evals');expect(await screen.findByText('Not evaluated', {selector:'.state-title'})).toBeInTheDocument();expect(screen.getByText('Never')).toBeInTheDocument();});
+it('moves a placed copy by installing into the destination before removing the old one',async()=>{
+ const backend=createMockBackend();
+ const order:string[]=[];
+ const install=vi.spyOn(backend,'install').mockImplementation(args=>{order.push('install:'+args.scope);return backend.sync({}) as never;});
+ const uninstall=vi.spyOn(backend,'uninstallSkill').mockImplementation(args=>{order.push('uninstall:'+(args.from??'—'));return backend.sync({}) as never;});
+ openWith('#/skill/deploy-check?dialog=move',backend);
+ const dialog=await screen.findByRole('dialog',{name:'Move deploy-check?'});
+ // Global is where this copy sits, so the destinations are the other three scopes.
+ expect(within(dialog).getAllByRole('radio')).toHaveLength(3);
+ expect(dialog.querySelector('.skill-install-scopes')).toHaveTextContent(/Terum.*SSM.*MRF/);
+ expect(dialog.querySelector('.skill-install-scopes')).not.toHaveTextContent('every session');
+ fireEvent.click(within(dialog).getByRole('radio',{name:/SSM/}));
+ fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
+ await waitFor(()=>expect(uninstall).toHaveBeenCalled());
+ expect(install).toHaveBeenCalledWith(expect.objectContaining({ref:'deploy-check',scope:'SSM'}));
+ expect(order).toEqual(['install:SSM','uninstall:global']);
+});
+
+it('leaves the old copy in place when the move cannot place the new one',async()=>{
+ const backend=createMockBackend();
+ vi.spyOn(backend,'install').mockImplementation(()=>createRun(async()=>({ok:false,error:'No such checkout.'})) as never);
+ const uninstall=vi.spyOn(backend,'uninstallSkill');
+ openWith('#/skill/deploy-check?dialog=move',backend);
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Move'}));
+ expect(await screen.findByText('No such checkout.')).toBeInTheDocument();
+ expect(uninstall).not.toHaveBeenCalled();
+});
+
+it('publishes a shared skill and names the pull request the team has to merge',async()=>{
+ const backend=createMockBackend();
+ const detail=await backend.skill({ref:'deploy-check'});
+ if(!detail.ok)throw new Error('fixture detail unavailable');
+ vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...detail.value,teamState:'shared'}});
+ const publish=vi.spyOn(backend,'publish').mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'deploy-check',version:'https://github.com/terum/team-skills/pull/7',changed:true}})) as never);
+ openWith('#/skill/deploy-check?dialog=publish',backend);
+ fireEvent.click(within(await screen.findByRole('dialog',{name:'Publish deploy-check to the team?'})).getByRole('button',{name:'Publish'}));
+ await waitFor(()=>expect(publish).toHaveBeenCalledWith(expect.objectContaining({ref:'deploy-check'})));
+ expect(await screen.findByRole('status')).toHaveTextContent('A pull request is open for the team to merge.');
+});
+
+it('refuses the publish dialog for a skill the team has already endorsed',async()=>{
+ openWith('#/skill/deploy-check?dialog=publish',createMockBackend());
+ expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeInTheDocument();
+ expect(screen.queryByRole('dialog')).toBeNull();
+});
+
 it('removes a skill through the run and returns to Library',async()=>{open('#/skill/deploy-check?dialog=remove');const dialog=await screen.findByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:'Remove'}));await waitFor(()=>expect(location.hash).toBe('#/library/global'));});
 it('closes eval dialog after a successful run',async()=>{open('#/skill/deploy-check?tab=evals&dialog=run-eval');const dialog=await screen.findByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:'Run eval'}));await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check?tab=evals'));});
 it('persists card switches and favorites',async()=>{open('#/library/global');const card=await screen.findByTestId('skill-card-deploy-check');fireEvent.click(within(card).getByRole('switch'));expect(within(card).getByRole('switch')).toHaveAttribute('aria-checked','false');expect(localStorage.getItem('terum-skills-app:pref:enabled:deploy-check')).toBe('false');fireEvent.click(within(card).getByRole('button',{name:'Favorite deploy-check'}));expect(localStorage.getItem('terum-skills-app:pref:favorite:deploy-check')).toBe('false');});
@@ -75,10 +122,8 @@ it('keeps the marketplace skill link and install button destinations distinct',a
  const card=await screen.findByTestId('skill-card-a11y-audit');
  expect(within(card).getAllByRole('link')).toHaveLength(1);
  expect(within(card).getByRole('link',{name:'a11y-audit'})).toHaveAttribute('href','#/skill/a11y-audit?root=marketplace');
- const install=within(card).getByRole('button',{name:'Install'});
- expect(install).toHaveClass('card-install');
- fireEvent.click(install);
- // No `__mock=not-installed`: scenarios are a fixture affordance and must never ride along on a real navigation.
+ fireEvent.click(within(card).getByRole('button',{name:'More actions for a11y-audit'}));
+ fireEvent.click(await screen.findByRole('menuitem',{name:'Install…'})); // No `__mock=not-installed`: scenarios are a fixture affordance and must never ride along on a real navigation.
  await waitFor(()=>expect(location.hash).toBe('#/skill/a11y-audit?dialog=install&root=marketplace'));
  expect(await screen.findByRole('dialog',{name:'Install a11y-audit'})).toBeVisible();
 });
@@ -99,13 +144,24 @@ it('shows the truthful recorded state as Reinstall, never plain Install',async()
  vi.spyOn(backend,'skill').mockResolvedValue({...detail,value:{...detail.value,installed:'recorded' as const,placed:false,onDiskOnly:false}});
  openWith('#/library/global',backend);
  const card=await screen.findByTestId('skill-card-deploy-check');
- const button=within(card).getByRole('button',{name:'Reinstall'});
- expect(button).toHaveAttribute('title','Installed · not on this machine');
+ // #131 moved install out of the card footer into the ⋯ menu, so the recorded state states itself there.
  expect(within(card).queryByRole('switch')).toBeNull();
  expect(within(card).queryByText('Install')).toBeNull();
- fireEvent.click(button);
+ fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));
+ const row=await screen.findByRole('menuitem',{name:/^Reinstall…/});
+ expect(row).toHaveAttribute('title','Installed · not on this machine.');
+ expect(row).toHaveTextContent('Installed · not on this machine.');
+ fireEvent.click(row);
  await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check?dialog=install'));
  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+});
+
+it('keeps install and uninstall in the card menu alone, with no button of their own',async()=>{
+ open('#/marketplace/people/lena');
+ const card=await screen.findByTestId('skill-card-a11y-audit');
+ expect(within(card).queryByRole('button',{name:'Install'})).toBeNull();
+ expect(document.querySelector('.market-card-install')).toBeNull();
+ expect(document.querySelector('.card-install')).toBeNull();
 });
 
 function openWith(route:string,backend:Backend){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}
@@ -136,7 +192,7 @@ it('opens a local card and its Open menu by folder path',async()=>{
  fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));fireEvent.click(await screen.findByRole('menuitem',{name:'Open'}));
  await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent(path)));
 });
-it.each([['Run eval','&tab=evals&dialog=run-eval'],['Remove','&dialog=remove']])('routes %s on a local card by path, not by name',async(item,query)=>{
+it.each([['Run eval','&tab=evals&dialog=run-eval'],['Uninstall…','&dialog=remove'],['Move to…','&dialog=move']])('routes %s on a local card by path, not by name',async(item,query)=>{
  const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
  const path='/a folder/.claude/skills/deploy-check';
  result.value.skills=[{...result.value.skills[0]!,name:'deploy-check',project:'Global',teamed:false,placed:true,path}];

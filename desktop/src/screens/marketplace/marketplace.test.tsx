@@ -284,8 +284,11 @@ it('hides installed skills when committed with the hide switch on', async () => 
 it('installs from a marketplace card via the install dialog without entering a mock scenario', async () => {
   open('#/marketplace/skills');
   await screen.findByRole('heading', { name: 'Top rated' });
-  const wrap = screen.getByTestId('skill-card-a11y-audit').closest('.market-card-wrap') as HTMLElement;
-  fireEvent.click(wrap.querySelector('.market-card-install')!);
+  // #131 removed the wrapper's install overlay; install lives in the card's ⋯ menu on every surface.
+  const card = screen.getByTestId('skill-card-a11y-audit');
+  expect(card.closest('.market-card-wrap')!.querySelector('.market-card-install')).toBeNull();
+  fireEvent.click(within(card).getByRole('button', { name: 'More actions for a11y-audit' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Install…' }));
   await waitFor(() => expect(location.hash).toBe('#/skill/a11y-audit?dialog=install&root=marketplace'));
   expect(location.hash).not.toContain('__mock');
   expect(await screen.findByRole('dialog')).toBeInTheDocument();
