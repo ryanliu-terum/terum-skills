@@ -149,3 +149,24 @@ it('resets a local action error when navigating to another path',async()=>{
  expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeVisible();expect(screen.queryByRole('alert')).toBeNull();
  expect(document.querySelector('.detail-repo')).toHaveTextContent('/second/deploy-check');
 });
+// The Library Connect CTA was removed on 2026-09-10 (ratified override, .planning/specs/
+// 2026-09-10-library-mirror-id-sync.md): global skills auto-share at sync by ID check, and the
+// empty state's primary is the manual project path — the sidebar's native Add project flow (#102).
+it('the empty library offers Add project as its primary and drives the chooser into checkout add',async()=>{
+ const backend=createMockBackend();const pick=vi.spyOn(backend,'pickFolder');const add=vi.spyOn(backend.checkouts,'add');
+ openWith('#/library/global?__mock=empty',backend);
+ await screen.findByText('No skills in your global library');
+ expect(screen.queryByRole('button',{name:'Connect'})).toBeNull();
+ fireEvent.click(screen.getAllByRole('button',{name:'Add project'}).at(-1)!);
+ await waitFor(()=>expect(add).toHaveBeenCalledWith('/Users/you/code/new-project'));
+ expect(pick).toHaveBeenCalledOnce();
+});
+it('the empty library degrades its primary to the marketplace link when the CLI has no checkout add',async()=>{
+ const backend=createMockBackend();const features=await backend.features();
+ vi.spyOn(backend,'features').mockResolvedValue({...features,checkouts:false});
+ openWith('#/library/global?__mock=empty',backend);
+ await screen.findByText('No skills in your global library');
+ expect(screen.queryByRole('button',{name:'Add project'})).toBeNull();
+ fireEvent.click(screen.getAllByRole('button',{name:'Open marketplace'}).at(-1)!);
+ await waitFor(()=>expect(location.hash).toBe('#/marketplace'));
+});

@@ -9,11 +9,12 @@ import { assertNotInsideStateRoot, assertSkillDirectory, inspectSkillSource, pri
 import { registerCheckout, writableCheckout } from '../lib/checkouts.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists } from '../lib/fs.js';
-import { Prompter } from '../lib/prompt.js';
+import { Prompter, PromptClosedError } from '../lib/prompt.js';
 import { fromError, CancelledError, failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
 import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
+import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
 import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedFields, skillRecords } from '../lib/skills.js';
 import { MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
 import { assessHygiene, type HygieneAssessment, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
@@ -53,6 +54,9 @@ interface ConnectContext {
   team: string;
   binding: Awaited<ReturnType<ConfigStore['read']>>['teams'][string];
   io: Prompter;
+  /** Sync's ID-check auto-share pass (spec 2026-09-10-library-mirror-id-sync.md): blanket consent
+   * replaces the per-folder y/N, so no prompt is ever issued — hook mode included. */
+  auto?: boolean;
 }
 
 export function run(args: ConnectArgs & { path: string }, io: Prompter): Promise<Result<ConnectResult | undefined>>;
@@ -198,6 +202,10 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
     const existing = inspection.ok && inspection.id ? records.find(record => record.id === inspection.id) : undefined;
     if (existing) {
       if (existing.name !== name || !inspectSkillSource(raw, name).ok) throw new Error(`This folder's id belongs to ${existing.name} in team ${team}; its name must match before connecting.`);
+      // Auto-share's ID check normally filters known ids before ever reaching here; this is the
+      // refresh race (the id arrived upstream between the filter's read and this preflight).
+      // Known id → no-op is the ratified rule, and adoption is a question, which auto never asks.
+      if (ctx.auto) throw new Error(`${name} already carries the id of ${existing.name} in team ${team}; auto-share leaves it alone.`);
       phase = 'consent'; recoverable = false;
       if (!(await io.confirm(`This folder already carries the id of ${name} in team ${team}. Record it as your connected source on this machine? (y/N)`))) {
         recoverable = true;
@@ -223,10 +231,14 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
     // that has none (every off-the-shelf skill): it is generated, not asked for, and edited any time.
     const categoryLine = declaredCategory(raw) === undefined ? `\nmetadata.terum-category: ${DEFAULT_CATEGORY} (no category was set; edit SKILL.md any time)` : '';
     phase = 'consent'; recoverable = false;
-    io.print(`Will add:\nlicense: ${teamDoc.policy.skill_license}\nmetadata.id: ${id}\nmetadata.author: ${author}${categoryLine}`);
-    if (!(await io.confirm(`Connect ${name}?`))) {
-      recoverable = true;
-      throw new CancelledError('Connect was declined.');
+    // Auto-share runs under the blanket consent the spec ratifies (2026-09-10 override of the
+    // per-folder consent decision, Terum 52d76c00): no per-folder question, no per-folder print.
+    if (!ctx.auto) {
+      io.print(`Will add:\nlicense: ${teamDoc.policy.skill_license}\nmetadata.id: ${id}\nmetadata.author: ${author}${categoryLine}`);
+      if (!(await io.confirm(`Connect ${name}?`))) {
+        recoverable = true;
+        throw new CancelledError('Connect was declined.');
+      }
     }
     phase = 'source-mutated';
     await writeFile(join(source, 'SKILL.md'), updated, 'utf8');
@@ -474,6 +486,49 @@ function phaseAdvice(error: unknown, path: string, team: string, form: Invocatio
 /** The batch summary's one-line reason for a hygiene refusal: `Not connected: <name> (hygiene: …)`. */
 function hygieneReason(refused: HygieneRefused): string {
   return `hygiene: ${refused.assessment.errors.map((finding) => finding.message.replace(/\.$/, '')).join('; ')}`;
+}
+
+export interface AutoShareOutcome { shared: ConnectResult[]; skipped: { name: string; reason: string }[]; }
+/**
+ * Sync's ID-check auto-share pass over the GLOBAL root (`~/.claude/skills`) — the ratified default
+ * (ajay, 2026-09-10, spec .planning/specs/2026-09-10-library-mirror-id-sync.md; overrides per-folder
+ * connect consent, Terum 52d76c00). Project roots stay manual (the app's Add project / bare connect).
+ * Candidates are exactly bare connect's: untracked (no shared entry, no placement), inspection-clean,
+ * privileged excluded. The ID check per candidate:
+ * - no `metadata.id`, or an id this team's repo does not know → connect it through connectOne, which
+ *   stamps license, a freshly minted id (replacing any foreign id — rule 1: foreign uploads as ours)
+ *   and author, then commits to the team repo;
+ * - a known id → no-op: the skill is the team's; content writes stay author-owned (the connected-
+ *   source reconciler) and install tracking is the placement/people-file machinery's job.
+ * A folder the machinery refuses (hygiene, name collision, a half-write) is reported by name and
+ * never blocks the rest. Never prompts, so it runs identically in hook mode.
+ */
+export async function autoShareGlobal(options: { store: ConfigStore; runner: Runner; team: string; home?: string; form?: InvocationForm }, io: Prompter): Promise<AutoShareOutcome> {
+  const { store, runner, team } = options;
+  const outcome: AutoShareOutcome = { shared: [], skipped: [] };
+  const config = await store.read();
+  const binding = config.teams[team];
+  if (!binding?.handle) return outcome;
+  // Auto-share stamps metadata.author from the machine identity; a machine that has not finished
+  // setup has nothing to stamp with, so the pass waits for setup instead of failing every sync.
+  if (!config.email || !config.display_name) return outcome;
+  const home = options.home ?? homedir();
+  const root = AGENT_PATHS['claude-code'].global(home);
+  const inventory = await localSkills(root, config, { scope: 'global', stateRoot: store.root, ledger: await canonicalLedger(config) });
+  const candidates = candidatesOf(inventory); // privileged folders stay excluded, exactly as from bare connect
+  if (!candidates.length) return outcome;
+  const known = new Set((await skillRecords(store.teamClone(team), team)).map((record) => record.id));
+  for (const candidate of candidates) {
+    if (candidate.skillId !== null && known.has(candidate.skillId)) continue; // the ID check's known-id no-op
+    try {
+      outcome.shared.push(await connectOne(resolve(candidate.path), { args: { form: options.form, home }, store, runner, config, team, binding, io, auto: true }));
+    } catch (error) {
+      if (error instanceof PromptClosedError) throw error; // the channel is gone, not this folder
+      const reason = error instanceof ConnectStepError && error.cause instanceof HygieneRefused ? hygieneReason(error.cause) : error instanceof Error ? error.message : String(error);
+      outcome.skipped.push({ name: candidate.name, reason: phaseAdvice(error, candidate.path, team, options.form) ?? reason });
+    }
+  }
+  return outcome;
 }
 
 /** The managed-field refresh as a mutation: re-derived from the fresh pre-image safeWrite hands it, so it can only ever change the managed lines of whatever is actually upstream (and restore a missing category, as injectManagedFields does everywhere). */

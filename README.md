@@ -94,6 +94,8 @@ For a program driving the CLI (the desktop app, a script), `--frames` turns any 
 
 **Connecting is consent.** `connect` shows the fields it will add to your SKILL.md (license, id, author, category) and asks y/N before writing anything. After that, `sync` mirrors your edits into the repo. If the repo copy and your source diverge, `sync` prints the remedy (`connect --keep-source <id>` or `--keep-repo <id>`) and does nothing until you choose. Skills containing hooks or plugin definitions need `--allow-privileged`.
 
+**Global skills auto-share by ID check.** `sync` mirrors `~/.claude/skills` into the team repo by default (ratified 2026-09-10): a new skill folder there with no `metadata.id`, or an id the team repo does not know, is connected automatically — license, a freshly minted id (a foreign id is replaced; the skill uploads as the team's) and your authorship are stamped, and the folder is committed, with one summary line per run. A folder carrying a known team id is left alone: content changes flow only through the author's own connected-source sync, and installs live in your people file. Folders the connect machinery refuses (hygiene, a name collision) are skipped and reported by name. Project checkouts are never auto-shared — add them deliberately (the app's Add project, or `connect <path>`). To opt out, set `"auto_share": false` in `~/.terum/skills/config.json`.
+
 **Nothing runs anywhere but laptops and the git host.** No HTTP client, no daemon, no API key. The CLI talks to git and, for GitHub teams, to `gh`.
 
 ## Evaluating skills

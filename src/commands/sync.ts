@@ -19,7 +19,7 @@ import { endorsedCandidates, findSkill, readPerson, readTeam, SkillRecord, skill
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { CloneBusy, openTeamRepo, refreshClone, RemoteAccessError, treeText } from '../lib/teamRepo.js';
 import { materializeVersion } from '../lib/version.js';
-import { reconcileShared } from './connect.js';
+import { autoShareGlobal, reconcileShared } from './connect.js';
 import { assertCheckoutFolder, installOne, placementHome, resolveDestination, samePending, skillAtSource } from './install.js';
 import { uninstallOne } from './uninstall.js';
 
@@ -201,6 +201,33 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
           const message = error instanceof Error ? error.message : String(error);
           defer(team, pending.id.slice(0, 8));
           notice(`Deferred pending ${pending.op} for ${pending.id.slice(0, 8)}: ${message}`);
+        }
+      }
+    }
+    // Auto-share pass (ratified default, ajay 2026-09-10 — spec .planning/specs/2026-09-10-library-mirror-id-sync.md,
+    // overriding per-folder connect consent 52d76c00 and global-as-placement-target 85c4ebd2): the
+    // GLOBAL root mirrors into the team repo by ID check; project roots stay manual (Add project /
+    // bare connect). It never prompts — hook mode runs it identically — and `auto_share: false` in
+    // config.json disables it. It runs BEFORE reconcileShared (a just-shared skill reconciles as
+    // `unchanged`, its baseline just written) and before the endorsed batch and restore pass; those
+    // passes cannot offer a just-shared skill back (its freshly minted id is neither endorsed nor in
+    // person.installed), and the folders they place are ledger placements, which candidate discovery
+    // excludes — so nothing ping-pongs in either direction. A refused folder (hygiene, name
+    // collision) is reported by name and deferred so the team is not stamped fully synced (the R6
+    // rule reconcileShared follows); a pass failure costs its team a notice, never the sync.
+    if ((await store.read()).auto_share !== false) {
+      for (const [team, binding] of Object.entries(config.teams)) {
+        if (!binding.handle || skipped.has(team)) continue;
+        try {
+          const outcome = await autoShareGlobal({ store, runner, team, home, form: args.form }, childIo);
+          for (const folder of outcome.skipped) { notice(`Skipped auto-share of ${folder.name}: ${folder.reason}`); defer(team, folder.name); }
+          if (outcome.shared.length) {
+            notice(`Auto-shared ${outcome.shared.length} skill(s): ${outcome.shared.map((skill) => skill.name).join(', ')}.`);
+            changed = true;
+          }
+        } catch (error) {
+          if (error instanceof PromptClosedError) throw error; // the channel is gone, not this team
+          notice(`Skipping auto-share for ${team}: ${error instanceof Error ? error.message : String(error)}`); defer(team);
         }
       }
     }

@@ -42,8 +42,10 @@ for(const {scope,route,count} of [
   expect(await grid.evaluate(element=>element.scrollTop)).toBe(0);
   const header=page.locator('.board-view-header');
   const title=header.getByText(scope,{exact:true});
-  const connect=header.getByRole('button',{name:'Connect',exact:true});
-  const titleBefore=await boxOf(title),connectBefore=await boxOf(connect);
+  // The Connect CTA left this header on 2026-09-10 (spec 2026-09-10-library-mirror-id-sync); the
+  // overview toggle is the remaining pinned header control.
+  const overview=header.getByRole('button',{name:/overview/});
+  const titleBefore=await boxOf(title),overviewBefore=await boxOf(overview);
   const last=cards.last();
   const fits=await grid.evaluate(element=>element.scrollHeight===element.clientHeight);
   if(scope==='Terum'&&fits){
@@ -56,7 +58,7 @@ for(const {scope,route,count} of [
   }
   await expect(last).toBeInViewport({ratio:1});
   expect((await boxOf(title)).y).toBe(titleBefore.y);
-  expect((await boxOf(connect)).y).toBe(connectBefore.y);
+  expect((await boxOf(overview)).y).toBe(overviewBefore.y);
   expect(errors).toEqual([]);
  });
 }
