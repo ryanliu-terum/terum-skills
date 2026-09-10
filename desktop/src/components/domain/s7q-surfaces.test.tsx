@@ -70,7 +70,7 @@ it.each(cases)('$key: $route hides/degrades false and restores the true DOM',asy
   }else expect(document.querySelector(c.selector)).toBeNull();
   if(c.absentText)expect(screen.queryByText(c.absentText)).toBeNull();
  });
- if(c.key==='lastSeen')expect(screen.getByRole('columnheader',{name:'Last seen'})).toBeVisible();
+ if(c.key==='lastSeen'){expect(screen.getByText('Last seen')).not.toBeVisible();expect(document.querySelector(c.selector)).not.toBeVisible();}
  if(c.key==='disablePerMachine'&&c.route.includes('/skill/'))expect(screen.getByText('Loaded in every session')).toBeVisible();
  await act(async()=>{client.setQueryData([queryKey],original);});
  await waitFor(()=>expect(html(c.selector)).toBe(before));
@@ -92,45 +92,32 @@ it('opens the project remote, with no hard-coded repository target',async()=>{
  const {backend}=await open('/marketplace/projects/terum');const call=vi.spyOn(backend,'openUrl').mockResolvedValue({ok:true,value:undefined});
  const anchor=document.querySelector<HTMLAnchorElement>('.market-repo a')!;expect(anchor.href).toBe('https://github.com/terum/terum');fireEvent.click(anchor);expect(call).toHaveBeenCalledWith(anchor.href);
 });
-it('Connect opens the bare connect picker through the Prompter',async()=>{
+// The Library Connect CTA and its workflow dialog were removed on 2026-09-10 (ratified override,
+// .planning/specs/2026-09-10-library-mirror-id-sync.md): global skills auto-share at sync by ID
+// check. Connect's remaining app surface is Settings ▸ Sharing's per-folder Share, tested here.
+// The two #109 silent-success regression tests (a bare-picker batch with nothing connected still
+// surfaced its printed lines and a "Nothing was connected." status in the Library workflow dialog)
+// are deleted with the dialog they exercised: Settings ▸ Sharing has no bare picker and no
+// outcome-status surface, so there is nothing left to point them at.
+it('the Library draws no Connect CTA; Settings Sharing hands the named folder to connect through the Prompter',async()=>{
  location.hash='#/library/global';const backend=createMockBackend(),call=vi.spyOn(backend,'connect');
  render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
- fireEvent.click(await screen.findByRole('button',{name:'Connect'}));
- expect(await screen.findByRole('dialog',{name:/Connect a local skill folder/})).toHaveTextContent('Connect a local skill folder');expect(call).toHaveBeenCalledWith({});
+ await screen.findByTestId('skill-card-deploy-check');
+ expect(screen.queryByRole('button',{name:'Connect'})).toBeNull();
+ location.hash='#/settings/sharing';
+ fireEvent.click((await screen.findAllByRole('button',{name:'Share'}))[0]!);
+ expect(await screen.findByRole('dialog',{name:'Connect api-docs?'})).toBeVisible();expect(call).toHaveBeenCalledWith({path:'~/.claude/skills/api-docs'});
 });
 it('renders the recorded gh-login PRINT as a highlighted workflow popup even when no question is asked',async()=>{
  const line='GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again.';
  const recorded=JSON.stringify({t:'print',level:'info',line});
  const f=fakeBridge((_args,emit)=>{emit({kind:'stdout',line:recorded});emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'connect',ok:false,error:'GitHub CLI is logged out.'})});});
  const backend=createMockBackend();backend.connect=createTauriBackend(f.bridge).connect;
- location.hash='#/library/global';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
- fireEvent.click(await screen.findByRole('button',{name:'Connect'}));
+ location.hash='#/settings/sharing';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
+ fireEvent.click((await screen.findAllByRole('button',{name:'Share'}))[0]!);
  const popup=await screen.findByRole('dialog',{name:'Terminal action needed'});expect(within(popup).getByRole('alert')).toHaveTextContent(line);expect(within(popup).getByRole('alert')).toHaveStyle({color:'var(--tk-warn)'});
- const workflow=await screen.findByRole('dialog',{name:'Connect'});
- await waitFor(()=>expect(within(workflow).getByRole('alert')).toHaveTextContent('GitHub CLI is logged out.'));
- expect(screen.queryByText("Couldn't read your library")).toBeNull();
+ await waitFor(()=>expect(document.querySelector('.settings-action-error')).toHaveTextContent('GitHub CLI is logged out.'));
  expect(screen.queryByRole('combobox')).toBeNull();
-});
-it('a connect that succeeds with no candidates still surfaces its printed line and outcome',async()=>{
- const line='No local candidates to connect under /Users/teddy/.claude/skills. Skills elsewhere can be connected by passing their folder path.';
- const f=fakeBridge((_args,emit)=>{emit({kind:'stdout',line:JSON.stringify({t:'print',level:'info',line})});emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'connect',ok:true,value:{kind:'batch',shared:[],declined:[],refused:[]}})});});
- const backend=createMockBackend();backend.connect=createTauriBackend(f.bridge).connect;
- location.hash='#/library/global';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
- fireEvent.click(await screen.findByRole('button',{name:'Connect'}));
- const popup=await screen.findByRole('dialog',{name:'Connect'});
- await waitFor(()=>expect(within(popup).getByRole('status')).toHaveTextContent('Nothing was connected.'));
- expect(popup).toHaveTextContent('No local candidates to connect under ~/.claude/skills. Skills elsewhere can be connected by passing their folder path.');
- expect(within(popup).queryByRole('alert')).toBeNull();
- expect(screen.getByText("15 skills")).toBeInTheDocument();
-});
-it('a connect that succeeds with an undefined value surfaces the same nothing-connected outcome',async()=>{
- const f=fakeBridge((_args,emit)=>{emit({kind:'stdout',line:JSON.stringify({t:'print',level:'info',line:'Nothing connected.'})});emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'connect',ok:true})});});
- const backend=createMockBackend();backend.connect=createTauriBackend(f.bridge).connect;
- location.hash='#/library/global';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
- fireEvent.click(await screen.findByRole('button',{name:'Connect'}));
- const popup=await screen.findByRole('dialog',{name:'Connect'});
- await waitFor(()=>expect(within(popup).getByRole('status')).toHaveTextContent('Nothing was connected.'));
- expect(popup).toHaveTextContent('Nothing connected.');
 });
 it('unknown category icons render the neutral tag without throwing',()=>{const {container}=render(<Mark name="new-category"/>);expect(container.querySelector('svg path')).toHaveAttribute('d','M3 3h7l11 11-7 7L3 10Z');});
 it('Settings and footer consume the same clone-state copy',async()=>{

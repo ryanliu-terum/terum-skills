@@ -1,5 +1,6 @@
 import { useBackend } from '../backend';
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
+import { ThemeOverrideContext, themeOverride } from './theme-override';
 import { useUiStore } from './store';
 import { HashRouter, useLocation, useRoutes, useNavigate } from 'react-router';
 import { useSyncAction } from '../components/domain/useSyncAction';
@@ -7,7 +8,7 @@ import { LaunchCoordinator } from './LaunchCoordinator';
 import { routes } from './routes';
 import { MachineRemovalHost } from './MachineRemovalHost';
 import { EvalRunDialogHost } from './EvalRunDialogHost';
-function RouteView(){const location=useLocation();const setLastRoute=useUiStore(s=>s.setLastRoute);useEffect(()=>setLastRoute(location.pathname+location.search),[location.pathname,location.search,setLastRoute]);return useRoutes(routes);}
+function RouteView(){const location=useLocation(),setOverride=useContext(ThemeOverrideContext);useEffect(()=>{setOverride(themeOverride(location.search));},[location.search,setOverride]);const setLastRoute=useUiStore(s=>s.setLastRoute);useEffect(()=>setLastRoute(location.pathname+location.search),[location.pathname,location.search,setLastRoute]);return useRoutes(routes);}
 function Shortcuts(){
  const navigate=useNavigate(),location=useLocation(),sync=useSyncAction();
  useEffect(()=>{

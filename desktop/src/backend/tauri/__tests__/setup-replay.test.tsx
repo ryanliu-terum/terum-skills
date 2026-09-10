@@ -30,7 +30,7 @@ it('replays the real setup recording through launch routing, the ask dialog, and
  fireEvent.click(within(dialog).getByRole('button',{name:'No'}));
  // This CLI recording is an ordinary stdin-ended failure, not a typed decline. Never infer consent semantics from English.
  expect(await screen.findByRole('alert')).toHaveTextContent('Input ended before "Use this identity?" was answered.');
- expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe('');expect(screen.getByText('Checking GitHub access').parentElement).toHaveAttribute('data-state','done');
+ expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe(STATE.writtenAt);expect(screen.getByText('Checking GitHub access').parentElement).toHaveAttribute('data-state','done');
 });
 it('replays the real offline setup join: the human answers each ask, the card settles finished, the target is consumed once',async()=>{
  // Recorded from the rebuilt CLI against the fixture (fixture.sh): identity confirmed, the invitation left blank, the hook and skill offers declined.
@@ -78,7 +78,7 @@ it('counts the global scan without inferring project counts from ledger placemen
  });
  const backend=createTauriBackend(fake.bridge),status=await backend.status(),settings=await backend.settings();
  expect(status.value?.counts).toEqual({});expect(status.value?.roots).toEqual(expect.arrayContaining([expect.objectContaining({id:'global',count:undefined})]));expect(status.value?.ledger?.placements).toHaveLength(2);
- expect(settings.value?.PLACEMENTS_N).toBe(2);expect(settings.value?.PINNED_N).toBe(1);expect(settings.value?.PLACEMENTS[1]?.[3]).toBeNull();
+ expect(settings.value?.PLACEMENTS_N).toBe(2);expect(settings.value?.PINNED_N).toBe(0);expect(settings.value?.PLACEMENTS[1]?.[3]).toBeNull();
 });
 
 const firstRunDirectory=resolve('../.planning/codex-runs/first-run-in-app/frames');
@@ -110,7 +110,7 @@ it('replays zero-team startup and the no-default Create fork, preserving the rec
  expect(await screen.findByRole('alert')).toHaveTextContent('Input ended before "Team name" was answered.');
  expect(screen.getByRole('heading',{name:"Couldn't finish setup"})).toBeInTheDocument();
  expect(screen.getByRole('button',{name:'Retry'})).toBeInTheDocument();
- expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe('');
+ expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe(STATE.writtenAt);
  expect(fake.spawns.filter(spawn=>spawn.args[0]==='setup').map(spawn=>spawn.args)).toEqual([['setup']]);
 });
 it('replays the target-less Join hand-off and consumes the successful request',async()=>{

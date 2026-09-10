@@ -101,6 +101,9 @@ export type Destination = z.infer<typeof destinationSchema>;
 export const configSchema = z.object({
   checkouts: z.array(z.string()).optional(),
   app: appChoiceSchema.optional(),
+  /** Sync's ID-check auto-share of the global root (`~/.claude/skills`). Absent = on (the ratified
+   * default, ajay 2026-09-10, spec 2026-09-10-library-mirror-id-sync.md); `false` disables the pass. */
+  auto_share: z.boolean().optional(),
   default_handle: handleSchema.optional(),
   email: emailSchema.optional(),
   display_name: z.string().min(1).optional(),

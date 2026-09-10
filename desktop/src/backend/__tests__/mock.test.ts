@@ -17,14 +17,15 @@ it.each([
  const b=createMockBackend();const onboarding=await b.onboarding();
  location.hash='#/frame?__mock=error';
  const reads={library:()=>b.library({scope:{kind:'global'}}),skill:()=>b.skill({ref:'deploy-check'}),inbox:()=>b.inbox(),marketplace:()=>b.catalog(),share:()=>b.roster(),settings:()=>b.settings(),onboarding:()=>b.onboarding()};
- expect(await reads[family]()).toEqual({ok:false,error,...(family==='onboarding'&&onboarding.ok?{value:onboarding.value}:{})});
+ expect(await reads[family]()).toEqual({ok:false,error,...(family==='settings'?{reason:'invalid-config'}:{}),...(family==='onboarding'&&onboarding.ok?{value:onboarding.value}:{})});
  if(family==='marketplace')expect(await b.search({q:'deploy'})).toEqual({ok:false,error});
  if(family==='settings')expect(await b.update()).toEqual({ok:false,error});
  if(family==='onboarding')expect(await b.sync({}).done).toEqual({ok:false,error});
  if(family==='skill')expect(await b.skill({ref:'migration-guard'})).toEqual({ok:false,error:"ENOENT: no such file or directory, open '~/.claude/skills/migration-guard/SKILL.md'"});
 });
 it('returns disabled and not-installed details without changing fixture data',async()=>{const b=createMockBackend();location.hash='#/skill/deploy-check?__mock=disabled';const off=await b.skill({ref:'deploy-check'});expect(off.ok).toBe(true);if(!off.ok)throw new Error(off.error);expect(off.value.enabled).toBe(false);location.hash='#/skill/deploy-check?__mock=not-installed';const absent=await b.skill({ref:'deploy-check'});expect(absent.ok&&absent.value.root).toBe('Marketplace');expect(absent.ok&&absent.value.installed).toBe(false);});
-it('treats any requested skill as not installed under the not-installed scenario',async()=>{const b=createMockBackend();location.hash='#/skill/a11y-audit?__mock=not-installed&dialog=install&root=marketplace';const absent=await b.skill({ref:'a11y-audit'});expect(absent.ok).toBe(true);if(!absent.ok)throw new Error(absent.error);expect(absent.value).toMatchObject({name:'a11y-audit',installed:false,placed:false,onDiskOnly:false,root:'Marketplace',flags:[]});location.hash='#/skill/a11y-audit';const present=await b.skill({ref:'a11y-audit'});expect(present.ok&&present.value.installed).toBe(true);});
+it('keeps a catalog-only skill detail consistent with its marketplace card: not installed, not placed',async()=>{const b=createMockBackend();location.hash='#/skill/a11y-audit?root=marketplace';const detail=await b.skill({ref:'a11y-audit'});expect(detail.ok).toBe(true);if(!detail.ok)throw new Error(detail.error);expect(detail.value).toMatchObject({installed:false,placed:false});const catalog=await b.catalog();expect(catalog.value?.skills.find(s=>s.name==='a11y-audit')).toMatchObject({installed:false});});
+it('treats any requested skill as not installed under the not-installed scenario',async()=>{const b=createMockBackend();location.hash='#/skill/a11y-audit?__mock=not-installed&dialog=install&root=marketplace';const absent=await b.skill({ref:'a11y-audit'});expect(absent.ok).toBe(true);if(!absent.ok)throw new Error(absent.error);expect(absent.value).toMatchObject({name:'a11y-audit',installed:false,placed:false,onDiskOnly:false,root:'Marketplace',flags:[]});location.hash='#/skill/a11y-audit';const catalogOnly=await b.skill({ref:'a11y-audit'});expect(catalogOnly.ok&&catalogOnly.value.installed).toBe(false);location.hash='#/skill/deploy-check';const present=await b.skill({ref:'deploy-check'});expect(present.ok&&present.value.installed).toBe(true);});
 it('honours latency, slow, and deliberately pending loading reads',async()=>{vi.useFakeTimers();const b=createMockBackend({latencyMs:50});const resolved=vi.fn();void b.inbox().then(resolved);await vi.advanceTimersByTimeAsync(49);expect(resolved).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(resolved).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=slow';const slow=vi.fn();void b.inbox().then(slow);await vi.advanceTimersByTimeAsync(1999);expect(slow).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(slow).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=loading';const loading=vi.fn();void b.inbox().then(loading);await vi.advanceTimersByTimeAsync(10000);expect(loading).not.toHaveBeenCalled();});
 it('models connect selection, a declined skill, an accepted skill and Done',async()=>{const run=createMockBackend().connect({});let selected=0;const result=await answerAll(run,frame=>frame.kind==='select'?(selected++===0?'api-docs':selected===2?'handoff-note':'Done'):frame.question==='Connect handoff-note?');expect(result).toEqual({ok:true,value:{kind:'batch',shared:[{id:'handoff-note',name:'handoff-note'}],declined:['api-docs'],refused:[]}});});
 it('returns the required decline for Skip and a single result for path connect',async()=>{const b=createMockBackend();expect(await answerAll(b.connect({}),()=> 'Skip')).toEqual({ok:false,error:'Connect was declined.',cancelled:true});expect(await answerAll(b.connect({path:'/skills/api-docs'}),()=>true)).toEqual({ok:true,value:{id:'api-docs',name:'api-docs'}});});
@@ -102,7 +103,7 @@ it('returns CLI fixture versions and the complete update report', async () => {
 });
 it('keeps a declined prune on the success path and emits the CLI line', async()=>{
  const run=createMockBackend().sync({prune:true});
- expect(await answerAll(run,()=>false)).toEqual({ok:true,value:{placed:[],removed:[]}});
+ expect(await answerAll(run,()=>false)).toEqual({ok:true,value:{placed:0,deferred:[],notices:[],changed:false,teams:[]}});
  const frames=[];for await(const frame of run.frames)frames.push(frame);
  expect(frames).toContainEqual({t:'print',line:'Prune cancelled; nothing deleted.'});
  expect(frames.at(-1)).toEqual({t:'result',ok:true});
@@ -142,4 +143,9 @@ it('records a mock quit request and closes the window',async()=>{
  const backend=createMockBackend(),close=vi.spyOn(window,'close').mockImplementation(()=>{});
  expect(backend.quitRequested).toBe(false);await backend.quit();
  expect(backend.quitRequested).toBe(true);expect(close).toHaveBeenCalledOnce();
+});
+
+it('returns the count-based sync outcome from the fixture names',async()=>{
+ const b=createMockBackend();
+ expect(await b.sync({team:'terum'}).done).toEqual({ok:true,value:{placed:design.SKILLS.length,deferred:[],notices:[],changed:true,teams:[{team:'terum',state:'synced'}]}});
 });

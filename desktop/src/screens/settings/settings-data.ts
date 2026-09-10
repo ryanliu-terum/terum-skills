@@ -10,7 +10,7 @@ export const inboxLabels:Record<string,string>={share:'Shared with you',update:'
 export const settingsRows = z.object({
  PLACEMENTS:z.array(z.tuple([z.string(),z.string(),z.string(),z.string().nullable(),z.string(),z.string()])),
  APPROVALS:z.array(z.tuple([z.string(),z.array(z.string()),z.string()])),
- QUARANTINE:z.array(z.tuple([z.string(),z.string(),z.string(),z.string()])),
+ QUARANTINE:z.array(z.tuple([z.string(),z.string(),z.string(),z.string()])).nullable(),
  SHARED:z.array(z.tuple([z.string(),z.string(),z.string(),z.string()])),
  SHORTCUTS:z.array(z.tuple([z.string(),z.string()])),
 });

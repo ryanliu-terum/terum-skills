@@ -78,7 +78,8 @@ it('keeps the marketplace skill link and install button destinations distinct',a
  const install=within(card).getByRole('button',{name:'Install'});
  expect(install).toHaveClass('card-install');
  fireEvent.click(install);
- await waitFor(()=>expect(location.hash).toBe('#/skill/a11y-audit?__mock=not-installed&dialog=install&root=marketplace'));
+ await waitFor(()=>expect(location.hash).toBe('#/skill/a11y-audit?dialog=install&root=marketplace'));
+ expect(await screen.findByRole('dialog',{name:'Install a11y-audit'})).toBeVisible();
 });
 
 function openWith(route:string,backend:Backend){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}
@@ -147,4 +148,33 @@ it('resets a local action error when navigating to another path',async()=>{
  location.hash='#/skill/local?path=%2Fsecond%2Fdeploy-check';fireEvent(window,new HashChangeEvent('hashchange'));
  expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeVisible();expect(screen.queryByRole('alert')).toBeNull();
  expect(document.querySelector('.detail-repo')).toHaveTextContent('/second/deploy-check');
+});
+// The Library Connect CTA was removed on 2026-09-10 (ratified override, .planning/specs/
+// 2026-09-10-library-mirror-id-sync.md): global skills auto-share at sync by ID check, and the
+// empty state's primary is the manual project path — the sidebar's native Add project flow (#102).
+it('the empty library offers Add project as its primary and drives the chooser into checkout add',async()=>{
+ const backend=createMockBackend();const pick=vi.spyOn(backend,'pickFolder');const add=vi.spyOn(backend.checkouts,'add');
+ openWith('#/library/global?__mock=empty',backend);
+ await screen.findByText('No skills in your global library');
+ expect(screen.queryByRole('button',{name:'Connect'})).toBeNull();
+ fireEvent.click(screen.getAllByRole('button',{name:'Add project'}).at(-1)!);
+ await waitFor(()=>expect(add).toHaveBeenCalledWith('/Users/you/code/new-project'));
+ expect(pick).toHaveBeenCalledOnce();
+});
+it('the empty library degrades its primary to the marketplace link when the CLI has no checkout add',async()=>{
+ const backend=createMockBackend();const features=await backend.features();
+ vi.spyOn(backend,'features').mockResolvedValue({...features,checkouts:false});
+ openWith('#/library/global?__mock=empty',backend);
+ await screen.findByText('No skills in your global library');
+ expect(screen.queryByRole('button',{name:'Add project'})).toBeNull();
+ fireEvent.click(screen.getAllByRole('button',{name:'Open marketplace'}).at(-1)!);
+ await waitFor(()=>expect(location.hash).toBe('#/marketplace'));
+});
+
+it('preserves the mock breadcrumb and fixture hygiene caption',async()=>{
+ open('#/skill/deploy-check');
+ await screen.findByRole('heading',{name:'deploy-check'});
+ expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/terum/infra/deploy-check');
+ fireEvent.click(screen.getByRole('tab',{name:'Quality'}));
+ expect(screen.getByText('Hygiene checks · passed on connect, 12 days ago · free, no model calls')).toBeVisible();
 });

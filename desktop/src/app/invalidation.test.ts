@@ -11,9 +11,9 @@ import { affects } from './invalidation';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-const keys = ['status', 'settings', 'onboarding', 'library', 'skill', 'receipts', 'inbox', 'catalog', 'roster', 'update', 'capabilities', 'surfaces'];
+const keys = ['status', 'settings', 'onboarding', 'library', 'skill', 'receipts', 'inbox', 'catalog', 'roster', 'update', 'capabilities', 'features', 'surfaces'];
 const cases: [ChangeSource, string[]][] = [
-  ['config', ['status', 'settings', 'onboarding', 'library', 'skill', 'catalog']],
+  ['config', ['status', 'settings', 'onboarding', 'library', 'skill', 'catalog', 'features', 'capabilities']],
   ['clone', ['library', 'skill', 'catalog', 'roster', 'inbox', 'receipts', 'status']],
   ['placed', ['library', 'skill', 'settings', 'status', 'catalog']],
   ['stamp', ['status', 'settings', 'inbox']],
@@ -30,7 +30,7 @@ it.each(cases)('invalidates exactly the read-model prefixes affected by %s', (so
 
 it('uses the focus lifecycle policy and invalidates mapped queries after a settled run, unsubscribing on unmount', async () => {
   const f = fakeBridge((_args, emit) => {
-    emit({ kind: 'stdout', line: JSON.stringify({ t: 'result', verb: 'sync', ok: true, exitCode: 0, value: { placed: 1, deferred: [] } }) });
+    emit({ kind: 'stdout', line: JSON.stringify({ t: 'result', verb: 'sync', ok: true, exitCode: 0, value: { placed: 1, deferred: [], notices: [], changed: true, teams: [] } }) });
   });
   const backend = createTauriBackend(f.bridge);
   vi.spyOn(backendModule, 'pickBackend').mockReturnValue(backend);
