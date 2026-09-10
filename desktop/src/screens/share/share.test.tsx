@@ -114,7 +114,10 @@ it('drops a removal error on navigating away from Share',async()=>{
  fireEvent.click(within(screen.getByTestId('member-row-1')).getByRole('button',{name:'Remove from team'}));
  await screen.findByRole('alert');
  fireEvent.click(screen.getByRole('link',{name:'Marketplace'}));
- await waitFor(()=>expect(location.hash).toBe('#/marketplace'));
+ // Wait for Marketplace content, not the hash: the click sets location.hash synchronously while
+ // HashRouter processes the hashchange task later, so a hash wait can pass before ShareScreen
+ // unmounts — and clicking Share again then coalesces both navigations into staying on Share.
+ await screen.findByRole('heading',{name:'Browse by category'});
  fireEvent.click(screen.getByRole('link',{name:'Share'}));
  await screen.findByTestId('member-row-1');
  expect(screen.queryByRole('alert')).toBeNull();
