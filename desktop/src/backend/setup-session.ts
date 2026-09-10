@@ -75,8 +75,9 @@ export function setupSession(backend: Backend, launch: LaunchContext): SetupSess
    askHuman = ask;
    // React remounts share an attempt; only explicit Retry starts another operation.
    return running ??= (async () => {
-    await backend.prefs.ready;
+    let result: Result<SetupResult>;
     try {
+     await backend.prefs.ready;
      let driven: Result<SetupResult> | null = null;
      const target = launch.target;
      if (target) {
@@ -96,14 +97,13 @@ export function setupSession(backend: Backend, launch: LaunchContext): SetupSess
       }).finally(() => { rejectPrompt = null; }),
        line => update({ lines: [...current.lines, line], activeStep: printedSetupStep(line) ?? current.activeStep }), progress => update({ progress }), question => update({ activeStep: askedSetupStep(question.question) ?? current.activeStep }));
      }
-     const result: Result<SetupResult> = stopped ? { ok: false, error: 'Setup was cancelled.', cancelled: true } : driven;
-     if ((result.ok || result.cancelled || result.refused) && !launch.writtenAt.startsWith('manual:')) {
-      backend.prefs.set('launch:consumedWrittenAt', launch.writtenAt);
-      try { await backend.prefs.flush?.(); }
+     result = stopped ? { ok: false, error: 'Setup was cancelled.', cancelled: true } : driven;
+    } catch (error) { result = { ok:false, error:error instanceof Error ? error.message : String(error) }; }
+    if (!launch.writtenAt.startsWith('manual:')) {
+      try { backend.prefs.set('launch:consumedWrittenAt', launch.writtenAt); await backend.prefs.flush?.(); }
       catch (error) { update({ persistenceError: error instanceof Error ? error.message : String(error) }); }
-     }
-     update({ result, outcome: result.ok ? result.value.role === 'joiner' && result.value.team === '' ? 'handoff' : 'finished' : result.cancelled ? 'cancelled' : result.refused ? 'refused' : 'failed' });
-    } catch (error) { update({ outcome: 'failed', result: { ok:false, error:error instanceof Error ? error.message : String(error) } }); }
+    }
+    update({ result, outcome: result.ok ? result.value.role === 'joiner' && result.value.team === '' ? 'handoff' : 'finished' : result.cancelled ? 'cancelled' : result.refused ? 'refused' : 'failed' });
    })();
   },
  };

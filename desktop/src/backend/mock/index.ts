@@ -3,6 +3,7 @@ import { browserPrefs } from '../prefs';
 import { FEATURE_KEYS } from '../types';
 import type { ChangeSource, Features, Identity, Library, Root } from '../types';
 import { decodeText } from '../../lib/fixture-text';
+import { overviewCopy } from '../../lib/overview-copy';
 import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
 import type { ConnectBatch, ConnectOutcome, InviteResult, Result, Roster, Run, SearchHit, SkillCard } from '../types';
@@ -44,7 +45,7 @@ const fatal=decodeText(design.ONBOARD_FETCH_ERROR);
 const errors={status:"Could not read ~/.terum/skills/config.json.",library:"EACCES: permission denied, scandir '~/.terum/skills'",settings:"Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)",inbox:fatal,marketplace:"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com",share:"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'",skill:(ref:string)=>`ENOENT: no such file or directory, open '~/.claude/skills/${ref}/SKILL.md'`,onboarding:design.ONBOARD_FETCH_ERROR.replaceAll("&#39;", "'")};
 const ok=<T>(value:T):Result<T>=>({ok:true,value});
 const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeText(error),'')});
-const zeroCopy=design.LIBRARY_OVERVIEW.zero;
+const zeroCopy=overviewCopy;
 const zeroOverview={skills:'0',skills_note:zeroCopy.skills,evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:zeroCopy.evaluated,installs:'0',installs_note:zeroCopy.installs,attention:'0',attention_lines:[zeroCopy.attention],attention_link:design.LIBRARY_OVERVIEW.attention_link,zero:zeroCopy};
 function removalState<T extends SkillCard>(skill:T):T { return removed.has(skill.name)?{...skill,installed:false,placed:false,onDiskOnly:false,paths:[]}:skill; }
 export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readonly quitRequested:boolean} {
