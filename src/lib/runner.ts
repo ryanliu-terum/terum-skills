@@ -2,7 +2,15 @@ import { spawn } from 'node:child_process';
 import { platform } from 'node:os';
 
 export interface CommandResult { code: number; stdout: string; stderr: string; }
-export interface RunOptions { cwd?: string; env?: NodeJS.ProcessEnv; stdio?: 'inherit'; deadlineMs?: number; maxOutputBytes?: number; }
+export interface RunOptions {
+  cwd?: string; env?: NodeJS.ProcessEnv; stdio?: 'inherit'; deadlineMs?: number; maxOutputBytes?: number;
+  /**
+   * Start the process and return once it is running, without waiting for it to exit or reading its output
+   * (`code` 0, empty streams). For GUI processes the CLI opens and leaves behind: the desktop app on Windows,
+   * where there is no `open` to hand it to. Spawn failures (ENOENT) still reject.
+   */
+  detach?: boolean;
+}
 
 /** The product shells out to exactly two tools (AGENTS.md invariant 1). Injectable so tests never spawn the real `gh`. */
 export interface Runner {
@@ -18,6 +26,11 @@ export const systemRunner: Runner = { run: (command, args, options) => execComma
  */
 export type Exec = (command: string, args: readonly string[], options?: RunOptions) => Promise<CommandResult>;
 export const execCommand: Exec = (command, args, options = {}) => {
+    if (options.detach) return new Promise((resolve, reject) => {
+      const child = spawn(command, [...args], { cwd: options.cwd, env: { ...process.env, ...options.env }, stdio: 'ignore', detached: true, windowsHide: false });
+      child.once('error', reject);
+      child.once('spawn', () => { child.removeListener('error', reject); child.unref(); resolve({ code: 0, stdout: '', stderr: '' }); });
+    });
     return new Promise((resolve, reject) => {
       const inherit = options.stdio === 'inherit';
       const grouped = options.deadlineMs !== undefined && platform() !== 'win32';

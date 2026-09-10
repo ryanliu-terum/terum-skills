@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { systemRunner } from '../runner.js';
+import { execCommand, systemRunner } from '../runner.js';
 import { temporaryDirectory } from './fixtures.js';
 
 describe('systemRunner', () => {
@@ -78,5 +78,17 @@ describe('bounded runner calls', () => {
     expect(result.code).toBe(0);
     expect(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(8);
     expect(result.stdout + result.stderr).not.toBe('');
+  });
+});
+
+describe('detached launches (the desktop app on Windows, D8)', () => {
+  it('resolves as soon as the process has started instead of waiting for it to exit', async () => {
+    const started = Date.now();
+    const result = await execCommand(process.execPath, ['-e', 'setTimeout(() => {}, 4000)'], { detach: true });
+    expect(result).toEqual({ code: 0, stdout: '', stderr: '' });
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+  it('still rejects with ENOENT when the executable does not exist', async () => {
+    await expect(execCommand('terum-skills-no-such-binary', [], { detach: true })).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

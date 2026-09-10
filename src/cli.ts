@@ -60,8 +60,8 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program
     .command('setup [target]')
     .description('Onboarding wizard: on a new machine, asks whether to create a team or join one; re-run to resume your team; pass <org>/<repo> or a remote URL to join directly (one team per machine: leave the current team first)')
-    .option('--app', 'open the desktop app without asking')
-    .option('--no-app', 'never ask about the desktop app')
+    .option('--app', 'open the desktop app (the default wherever one exists)')
+    .option('--no-app', 'keep setup in the terminal; do not open the desktop app')
     .action(async (target: string | undefined, options: { app?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
   const checkout = program.command('checkout').description('Register, forget, or list the checkout folders this machine scans');
