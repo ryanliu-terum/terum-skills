@@ -175,3 +175,20 @@ it('keeps the drawn empty state exactly when there is no history at all',async()
   expect(screen.getByText('Run an eval to score this skill against a baseline with no skill.')).toBeVisible();
   expect(screen.queryByText('History')).toBeNull();expect(document.querySelector('.evals-body')).toBeNull();
 });
+it('renders a team SKILL.md through the drawn Markdown vocabulary',async()=>{
+  open('#/skill/deploy-check',(name,value)=>{
+    if(name==='ls')(value.skills as Record<string,unknown>[])[0]!.body=
+      '\n# deploy-check\n\n## When to use\n\nBefore a **deploy**, see [docs](https://x.dev/a).\n\n---\n\n1. one\n2. two\n\n```bash\nverify.sh\n```\n\n![shot](https://evil.example/p.png)\n';
+  });
+  await screen.findByRole('heading',{name:'deploy-check'});
+  // The leading H1 is stripped (it matches the name) and a document H1 would become h2.md-h1 anyway.
+  expect(document.querySelectorAll('h1')).toHaveLength(1);
+  expect(document.querySelector('.md-doc .md-h1')).toBeNull();
+  expect(document.querySelector('.md-doc > h2')).toHaveClass('md-h2');
+  expect(document.querySelector('.md-doc ol')).toHaveClass('md-list');
+  expect(document.querySelector('.md-doc pre')).toHaveClass('md-code');
+  expect(document.querySelector('.md-doc hr')).toHaveClass('md-hr');
+  expect(document.querySelectorAll('.md-doc a')).toHaveLength(0);
+  expect(document.querySelectorAll('.md-doc img')).toHaveLength(0);
+  expect(document.querySelector('.skill-md-meta')).toHaveTextContent('17 lines');
+});

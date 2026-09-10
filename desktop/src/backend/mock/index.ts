@@ -11,6 +11,7 @@ import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData } from '.
 import { cli, library_title, roster_by_adoption, statusLines } from './derive';
 import { onboardingData } from './onboarding';
 import { readScenario } from './scenario';
+import { RAW_MD } from './raw-md';
 import { statusCounts } from './status-counts';
 import { createRun } from './run';
 import type { RunContext } from './run';
@@ -115,6 +116,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   skill:({ref})=>read('skill',scenario=>{if(scenario==='not-installed'&&ref==='deploy-check')return ok(removalState(detailOf(design.DETAIL_NOT_INSTALLED)));const result=skillByRef(ref);
    if(result.ok&&scenario==='invalid-newest')Object.assign(result.value,{latestState:'invalid',receipt:null,summary:null,reportNumbers:null,invalidReceiptFile:`evals/deploy-check/${design.DETAIL.version_full}/20260829T221500Z.json`});
    if(result.ok&&scenario==='version-mismatch')result.value.versions={placed:'a1b2c3d4'+'0'.repeat(32),teamCurrent:'5f0e12ab9c3d'+'0'.repeat(28),evaluated:'5f0e12ab9c3d'+'0'.repeat(28)};
+   if(result.ok&&scenario==='raw-md')result.value.skillMd={frontmatter:'',body:[],markdown:RAW_MD};
    return result.ok?ok(removalState(withInstall({...result.value,...(scenario==='not-installed'?{installed:'absent' as const,placed:false,onDiskOnly:false,root:'Marketplace' as const,flags:[]}:{}),...(scenario==='on-disk-only'&&ref==='deploy-check'?{installed:'placed' as const,placed:false,onDiskOnly:true,path:'~/.claude/skills/deploy-check',pathLabel:'~/.claude/skills/deploy-check',paths:[['~/.claude/skills/deploy-check','global']] as [string,string][]}:{}),enabled:scenario==='disabled'?false:backend.prefs.get('enabled:'+ref,result.value.enabled),favorite:backend.prefs.get('favorite:'+ref,result.value.favorite)}))):result;},ref),
   evalReport:async({ref})=>{const detail=await backend.skill({ref});if(!detail.ok)return detail;const {receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt}=detail.value;return ok({receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt});},
   receipts:({skillId,version})=>read('library',()=>{const detail=skillByRef(skillId);if(!detail.ok)return fail(detail.error);return ok(detail.value.version===version?detail.value.receipt??null:null);}),
