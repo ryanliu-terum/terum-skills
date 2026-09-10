@@ -16,6 +16,7 @@ import { prepareRun } from './prepare-run';
 import { cliEvalReport, mapEvalReport } from './eval-report';
 import { relativeTime } from '../../lib/relative-time';
 import { personPlaceNote } from '../../screens/marketplace/market-data';
+import { SHORTCUTS } from '../../lib/shortcuts';
 import { abbreviateHome, stripRemote } from '../paths';
 import { scannedRoots } from './scanned-roots';
 import { overviewCopy } from '../../lib/overview-copy';
@@ -38,7 +39,7 @@ const cliMachine = z.object({ teams: z.array(z.string()), removedPlacements: z.n
 const cliConnectResult = z.object({ id: z.string(), name: z.string(), reconciled: z.boolean().optional(), adopted: z.boolean().optional() }).passthrough();
 const cliConnect = z.union([z.object({ kind: z.literal('batch'), shared: z.array(cliConnectResult), declined: z.array(z.string()), refused: z.array(z.object({ name: z.string(), reason: z.string() })) }).passthrough(), cliConnectResult]).optional();
 const cliPublish = z.object({ name: z.string(), branch: z.string().nullable(), prUrl: z.string().nullable(), changed: z.boolean().optional() }).passthrough();
-const cliSync = z.object({ placed: z.number(), deferred: z.array(z.string()) }).passthrough();
+const cliSync = z.object({ placed: z.number(), deferred: z.array(z.string()), notices: z.array(z.string()), changed: z.boolean(), teams: z.array(z.object({ team: z.string(), state: z.string(), message: z.string().optional() })) });
 const cliInvite = z.object({ team: z.string(), invited: z.array(z.string()), already: z.array(z.string()).default([]), failed: z.array(z.object({ login: z.string(), error: z.string() })).default([]) }).passthrough();
 const cliTeam = z.object({ team: z.string() }).passthrough();
 const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(), steps: z.partialRecord(z.enum(SETUP_STEP_KEYS), z.enum(['done','skipped','printed'])).nullish().transform(value => value ?? null) });
@@ -182,7 +183,7 @@ const cliStatus = z.object({
  teams:z.array(z.object({
   team:z.string(),handle:z.string(),repository:z.string().nullable(),
   clone:z.discriminatedUnion('state',[
-   z.object({state:z.literal('ok')}),z.object({state:z.literal('absent')}),
+   z.object({state:z.literal('ok'),origin:z.string().optional()}),z.object({state:z.literal('absent')}),
    z.object({state:z.literal('foreign'),origin:z.string()}),
    z.object({state:z.literal('incomplete'),reason:z.string(),error:z.string().optional()}),
   ]),readable:z.boolean(),
@@ -202,20 +203,20 @@ const cliLocal=z.object({local:z.array(cliLocalSection),skills:z.array(z.object(
 type CliStatus=z.infer<typeof cliStatus>;
 type CliLocal=z.infer<typeof cliLocal>;
 
-function statusModel(value:CliStatus, local:CliLocal|null, platform:string):StatusResult {
+function statusModel(value:CliStatus, local:CliLocal|null, platform:string, features:Pick<Features, 'localIdentity'>,home:string):StatusResult {
  const name=value.identity?.display_name??'';
  const handle=value.teams[0]?.handle??''; // one team per machine — legacy 2+ shows a hint, not a projection
  return {
   ledger:value.ledger??null,
   machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
   me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:[value.identity?.github,handle,value.identity?.default_handle].find(v=>v)??''},
-  teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath??null,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{publish:team.policy.publish==='pr'?'Pull request':'Push',license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
+  teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath===null?null:abbreviateHome(team.clonePath,home),cloneState:team.clone.state==='ok'?team.clone.origin===undefined?null:{state:'ok',origin:team.clone.origin}:team.clone.state==='incomplete'?{state:'incomplete',...(team.clone.error===undefined?{}:{error:team.clone.error}),reason:team.clone.reason==='not-a-repository'||team.clone.reason==='no-team-json'?team.clone.reason:'unverifiable'}:team.clone,readable:team.readable,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{publish:team.policy.publish==='pr'?'Pull request':'Push',license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
   counts:local?.local.find(section=>section.scope==='global')?.counts ? {Global:String(visibleSkillFolders(local.local.find(section=>section.scope==='global')!))} : {},tools:value.tools,roots:local===null?[]:local.local.map(section=>rootOf(section)),
  };
 }
 // AD-23: the drawn placement states (design fixture PLACEMENTS: 'up to date', 'update available', 'edited locally', 'pinned'); a health the board has no word for is '—'.
 const PLACEMENT_STATE:Record<z.infer<typeof cliLocalHealth>,string>={'up-to-date':'up to date','update-available':'update available','local-changed':'edited locally',both:'edited locally · update available','gone-from-repo':'removed from the team',unknown:'—',untracked:'—'};
-function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult):Settings {
+function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult,home:string):Settings {
  const rows=local?.local.flatMap(root=>root.rows)??[];
  const policy=status.teams.length===1?status.teams[0]?.policy??null:null; // one team per machine — legacy 2+ shows a hint, not a projection
  return {
@@ -223,14 +224,14 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
   INVITE_TIP:"GitHub emails the invitation; the block runs the joiner&#39;s wizard",
   JOIN_BLOCK_NOTE:"GitHub emails the invitation. The block runs the joiner&#39;s wizard: with gh signed in it accepts the pending invitation, otherwise it asks them to accept it in the browser, and git must have access to this repository.",
   TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams.length===1?status.teams[0]?.categories??null:null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'}, // one team per machine — legacy 2+ shows a hint, not a projection
-  PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [p.path,row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,p.version?.slice(0,12)??null,p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
+  PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [abbreviateHome(p.path,home),row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,row?.tracked===true?null:p.version?.slice(0,12)??null,p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
-  SHARED:value.ledger.shared.map(item=>[item.id,item.source,item.team,'—']),
-  QUARANTINE:[],LOCAL_UNSHARED:[],HOOK:{installed:false,file:'',timeout:0},
+  SHARED:value.ledger.shared.map(item=>{const row=rows.find(row=>row.path===item.source);return [local?.skills.find(skill=>skill.id===item.id)?.name??item.id,abbreviateHome(item.source,home),item.team,row?PLACEMENT_STATE[row.health]:'—'];}),
+  QUARANTINE:null,LOCAL_UNSHARED:rows.filter(row=>row.connected!==true&&row.shared.length===0&&row.placement===null).map(row=>row.name),HOOK:null,
   APP_VERSION:import.meta.env.VITE_APP_VERSION,AGENT_CLI:'—',AGENT_CLI_AUTH:'unknown',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
-  STORAGE:{cache:'—',cache_n:0,evals:'—',evals_n:0,quarantine:'—'},PINNED_N:value.ledger.placements.filter(p=>p.version!==null).length,
-  CLI_VERSION:value.version??'—',CLI_LATEST:'—',FOLLOWING:[],SHARED_SPECIMEN:null,
-  SETTINGS_NAV:[],SHORTCUTS:[],INBOX_KIND_TEXT:{share:'Shared with you',update:'Update',alert:'Alert',eval:'Eval finished',review:'Review request',author:'Your skill',team:'Team'},THEME_OPTIONS:['System','Light','Dark'],
+  STORAGE:{cache:'—',cache_n:null,evals:'—',evals_n:null,quarantine:'—'},PINNED_N:value.ledger.placements.filter(p=>{const row=rows.find(row=>row.path===p.path);return row?row.tracked===false:p.version!==null;}).length,
+  CLI_VERSION:value.version??'—',CLI_LATEST:null,FOLLOWING:[],SHARED_SPECIMEN:null,
+  SETTINGS_NAV:[],SHORTCUTS:SHORTCUTS.map(pair=>[...pair]),INBOX_KIND_TEXT:{share:'Shared with you',update:'Update',alert:'Alert',eval:'Eval finished',review:'Review request',author:'Your skill',team:'Team'},THEME_OPTIONS:['System','Light','Dark'],
   syncNote:'The recorded timestamp is shown without clock-skew correction. No sync recorded on this machine does not mean never synced: leaving a team removes its stamp. Work left undone beside an old timestamp means run sync, not an error.',
  };
 }
@@ -241,7 +242,7 @@ function newestUpdated(skills: InventorySkill[]): InventorySkill | undefined {
 // `status` is the permission chip: host truth from the CLI's per-member `admin` (gh collaborator permission); 'unknown' when gh could not answer — never a defaulted 'member'.
 function rosterModel(team: CliStatus['teams'][number]): Roster {
   const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? null, projects: member.projects ?? [], followers: null, joined: '—', last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
-  return { members, invited: [], member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] };
+  return { members, invited: null, member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] };
 }
 function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, people: Person[], features: Pick<Features, 'localIdentity'>, home: string, query?: string): Catalog {
   const skills = inventory.skills.map(row => inventoryCard(row, local, team.team, features, home));
@@ -266,6 +267,11 @@ function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, lo
  * so a change made in a terminal shows on the next look.
  */
 export const READ_CACHE_TTL_MS = 15_000;
+/** The Settings error board branches on this: a config.json the CLI refused to parse is repairable in place; anything else is a read failure. */
+function readReason(error: string): 'invalid-config' | 'unreadable' {
+  return error.includes('Invalid') && error.includes('config.json') ? 'invalid-config' : 'unreadable';
+}
+
 
 export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   // Share in-flight reads and cache success; a terminal launch can repair a missing or broken file.
@@ -322,7 +328,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const notify = (...sources: ChangeSource[]) => { if (sources.length === 0) return; clearReads(); for (const source of sources) for (const listener of listeners) listener(source); };
   const cwd = () => backend.prefs.get<string>('workspace', '') || undefined;
 
-  function run<TIn, TOut>(argv: readonly string[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut, touches: ChangeSource[] = ['config', 'placed']): Run<TOut> {
+  function run<TIn, TOut>(argv: readonly (string | Promise<string>)[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut, touches: ChangeSource[] = ['config', 'placed']): Run<TOut> {
     const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), onHello, map: (value) => map(schema.parse(value)), onSettled: (result) => { if (argv[0] === 'setup' || argv[0] === 'team' || argv[0] === 'uninstall') notify('config', 'clone', 'placed'); else if (result.ok || result.value !== undefined) notify(...touches); } });
     return {
       done: job.done.then(result),
@@ -376,16 +382,18 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     return value === undefined ? failure : { ...failure, value };
   }
 
-  async function readModels<T>(options:ReadOptions|undefined, map:(value:CliStatus,local:CliLocal|null,platform:string)=>T):Promise<Result<T>> {
+  async function readModels<T>(options:ReadOptions|undefined, map:(value:CliStatus,local:CliLocal|null,platform:string,home:string)=>T):Promise<Result<T>> {
     const [status,local,platform]=await Promise.all([
       cached(['status'], cliStatus, options),
       cached(['ls','--local'], cliLocal, options),
       bridge.hostPlatform().then(value=>({ok:true as const,value})).catch((error:unknown)=>({ok:false as const,error:error instanceof Error?error.message:String(error),value:''})),
     ]);
-    if (status.value===undefined) return result({ok:false,error:status.ok?'Status returned no data.':status.error});
-    const value=map(status.value,local.ok?local.value:null,platform.value);
+    // A caller's abort is not a read failure: no reason, no home lookup, nothing else touched.
+    if (status.value===undefined&&options?.signal?.aborted) return {ok:false,error:'Cancelled.'};
+    if (status.value===undefined) return result({ok:false,error:status.ok?'Status returned no data.':status.error,...(!status.ok&&status.refused?{refused:true}:{}),...(!status.ok&&status.cancelled?{cancelled:true}:{}),reason:status.ok?'unreadable':readReason(status.error)});
+    const value=map(status.value,local.ok?local.value:null,platform.value,await home());
     const errors=[status,local,platform].flatMap(outcome=>outcome.ok?[]:[outcome.error]);
-    return result(errors.length?{ok:false,error:errors.join('\n'),value}:{ok:true,value});
+    return result(errors.length?{ok:false,error:errors.join('\n'),value,reason:status.ok?'unreadable':readReason(status.error)}:{ok:true,value});
   }
 
   function teamSelectionFailure(teams:readonly {team:string}[]):Result<never> {
@@ -433,6 +441,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async refreshLaunch() {
       await launchListenerReady;
       stateOnce = undefined;
+      if (hello === null) { featuresOnce = undefined; hello = null; }
       generation++;
       clearReads();
       return backend.launchContext();
@@ -457,8 +466,18 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, checkouts:true };
     },
     // Status and Settings are offline reads; the remaining surfaces retain their explicit gaps.
-    status: (_, options) => readModels(options, (value, local, platform) => statusModel(value, local, platform)),
-    settings: (_, options) => readModels(options, (value, local, platform) => settingsModel(value, local, statusModel(value, local, platform))),
+    status: (_, options) => readModels(options, (value, local, platform, home) => statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }, home)),
+    async settings(_, options) {
+      const models = await readModels(options, (value, local, platform, home) => settingsModel(value, local, statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }, home), home));
+      const team = models.value?.TEAMS.length === 1 ? models.value.TEAMS[0] : undefined;
+      if (!team || !models.value) return models;
+      const inventory = await cached(['ls', '--team', team.key], cliLs, options);
+      if (!inventory.ok) return result({ ok:false, error:[...(models.ok?[]:[models.error]),inventory.error].join('\n'), reason:models.ok?'unreadable':models.reason??'unreadable', value:models.value });
+      // Some CLI versions omit skill summaries from ls --local; the team inventory still reports their names.
+      models.value.SHARED = models.value.SHARED.map(([name,source,team,state])=>[inventory.value.skills.find(skill=>skill.id===name)?.name??name,source,team,state]);
+      models.value.TEAM_POLICY.projects = inventory.value.projects?.map(project => project.name) ?? null;
+      return models;
+    },
     onboarding: async () => gap('Onboarding data'),
     async library({ scope, team }, options) {
       const local = await cached(['ls', '--local'], cliLs, options);
@@ -590,12 +609,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     uninstallSkill: (args: UninstallArgs) => run(['uninstall-skill', ...(args.team ? ['--team', args.team] : []), ...(args.from ? ['--from', args.from] : []), '--', ...(args.kind === 'member' && args.member ? ['member', args.member] : args.kind === 'project' && args.project ? ['project', args.project] : [args.ref])], cliUninstalled, (removed): UninstalledResult[] => removed.map((item) => ({ id: item.id, name: item.id }))),
     quit: () => bridge.quit(),
     uninstallMachine: () => run(['uninstall'], cliMachine, (value): MachineUninstallResult => ({ removed: value.teams, removedPlacements: value.removedPlacements, hookRemoved: value.hookRemoved, wrapperRemoved: value.wrapperRemoved, configRemoved: value.configRemoved, kept: value.kept, record: value.record, advice: value.advice })),
-    connect: (args: ConnectArgs) => run<z.infer<typeof cliConnect>, ConnectOutcome | undefined>(['connect', ...(args.team ? ['--team', args.team] : []), ...(args.allowPrivileged ? ['--allow-privileged'] : []), ...(args.path ? ['--', args.path] : [])], cliConnect, (value) => value as ConnectOutcome | undefined, ['config', 'clone']),
+    connect: (args: ConnectArgs) => run<z.infer<typeof cliConnect>, ConnectOutcome | undefined>(['connect', ...(args.team ? ['--team', args.team] : []), ...(args.allowPrivileged ? ['--allow-privileged'] : []), ...(['keepSource','keepRepo','relocate','forget'] as const).flatMap(key=>args[key]===undefined?[]:[{keepSource:'--keep-source',keepRepo:'--keep-repo',relocate:'--relocate',forget:'--forget'}[key],args[key]]), ...(args.path === undefined ? [] : ['--', localPath(args.path)])], cliConnect, (value) => value as ConnectOutcome | undefined, ['config', 'clone']),
     profile: args => run(['profile', ...(args.name === undefined ? [] : ['--name', args.name]), ...(args.bio === undefined ? [] : ['--bio', args.bio]), ...(args.role === undefined ? [] : ['--role', args.role]), ...(args.projects ?? []).flatMap(project => ['--project', project])], cliProfile, value => value, ['clone']),
     decline: args => run(['decline', '--', args.ref], cliDecline, value => ({ id: value.id }), ['clone']),
     publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, version: value.prUrl ?? value.branch ?? null, changed: value.changed ?? true }), ['clone']),
     // Never `--hook` from the app: its stdout is the reload directive (frame mode refuses it anyway).
-    sync: (args: SyncArgs) => run(['sync', ...(args.prune ? ['--prune'] : []), ...(args.team ? ['--team', args.team] : [])], cliSync, (value): SyncResult => ({ placed: value.deferred.length || value.placed ? [] : [], removed: [] }), ['clone', 'placed', 'stamp']),
+    sync: (args: SyncArgs) => run(['sync', ...(args.prune ? ['--prune'] : []), ...(args.team ? ['--team', args.team] : [])], cliSync, (value): SyncResult => ({ placed:value.placed,deferred:value.deferred,notices:value.notices,changed:value.changed,teams:value.teams.map(team=>({team:team.team,state:team.state,...(team.message===undefined?{}:{message:team.message})})) }), ['clone', 'placed', 'stamp']),
     invite: (args: InviteArgs) => run(['invite', ...(args.team ? ['--team', args.team] : []), ...(args.logins.length ? ['--', ...args.logins] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited], already: [...value.already], failed: value.failed.map(f => ({ login: f.login, error: f.error })) }), ['clone']),
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
