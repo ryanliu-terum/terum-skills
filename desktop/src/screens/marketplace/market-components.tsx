@@ -18,10 +18,9 @@ function iconName(name: string): IconName { return CATEGORY_ICONS[name] ?? (Obje
 export function CardRow({ names, catalog, cols = 3 }: { names: string[]; catalog: Catalog; cols?: number }) { const available = [...catalog.skills, ...catalog.extras]; return <div className="market-grid" data-columns={cols} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>{names.map(name => { const skill = available.find(s => s.name === name); if (!skill) throw new Error(`Catalog is missing skill ${name}.`); return <MarketplaceSkillCard key={name} skill={skill}/>; })}</div>; }
 
 function MarketplaceSkillCard({ skill }: { skill: Card }) {
-  const navigate = useNavigate();
-  // The shared card has no install-hint slot. Keep its layout and reserve that button's space,
-  // then supply the board's icon + label in this family wrapper (footer top = 13 + 50 + 8 + 32 + 8).
-  return <div className="market-card-wrap"><SkillCard skill={skill}/>{!skill.installed && <button className="market-card-install" type="button" onClick={() => navigate('/skill/' + encodeURIComponent(skill.name) + '?dialog=install&root=marketplace')}><Icon name="arrow-down-to-line" size={14} stroke="1.75"/><span>Install</span></button>}</div>;
+  // Install lives in the card's ⋯ menu on every surface (Ryan, 2026-09-09): the menu is the only
+  // home for install and uninstall, so this family no longer draws an install button of its own.
+  return <div className="market-card-wrap"><SkillCard skill={skill}/></div>;
 }
 export function Mark({ name, small = false }: { name: string; small?: boolean }) { return <span className={'market-mark' + (small ? ' small' : '')}><Icon name={iconName(name)} size={small ? 15 : 16}/></span>; }
 function FollowControl({ person, compact = false }: { person: Person; compact?: boolean }) {
