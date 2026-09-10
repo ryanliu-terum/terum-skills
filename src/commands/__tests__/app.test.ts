@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { ScriptedPrompter, ghOnlyRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { assetSuffix, detectPlatform } from '../../lib/platform.js';
-import type { CommandResult, Exec } from '../../lib/runner.js';
+import type { CommandResult, Exec, RunOptions } from '../../lib/runner.js';
 import { APP_REPOSITORY, readAppState, run } from '../app.js';
 
 const ok: CommandResult = { code: 0, stdout: '', stderr: '' };
@@ -152,8 +152,8 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
   ] as const)('Windows %s: runs the per-user installer silently, then launches the installed exe (built blind, D8)', async (arch, platform, suffix) => {
     const root = await temporaryDirectory();
     const localAppData = join(root, 'LocalAppData');
-    const calls: { command: string; args: readonly string[] }[] = [];
-    const exec: Exec = async (command, args) => { calls.push({ command, args }); if (command.endsWith('-setup.exe')) await mkdir(join(localAppData, 'Terum Skills'), { recursive: true }).then(() => writeFile(join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe'), '')); return ok; };
+    const calls: { command: string; args: readonly string[]; options?: RunOptions }[] = [];
+    const exec: Exec = async (command, args, options) => { calls.push({ command, args, options }); if (command.endsWith('-setup.exe')) await mkdir(join(localAppData, 'Terum Skills'), { recursive: true }).then(() => writeFile(join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe'), '')); return ok; };
     const runner = ghOnlyRunner(async (args) => {
       if (args[0] === '--version') return { code: 0, stdout: 'gh version 2.0.0', stderr: '' };
       if (args.join(' ') === 'auth status') return ok;
@@ -164,6 +164,9 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     expect(result).toMatchObject({ ok: true, value: { platform, action: 'installed-and-launched', appPath: join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe') } });
     expect(calls.map((call) => [call.command.endsWith(suffix) ? 'installer' : call.command, [...call.args]])).toEqual([['installer', ['/S']], [join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe'), []]]);
     expect(runner.calls.some((call) => call.args.includes(`terum-skills-desktop_${V}_${suffix}`))).toBe(true);
+    // The installer is awaited (it must finish); the app itself is a GUI process the CLI must not wait for.
+    expect(calls[0]?.options?.detach).toBeUndefined();
+    expect(calls[1]?.options).toMatchObject({ detach: true });
   });
 });
 
