@@ -19,6 +19,7 @@ import { personPlaceNote, plural } from '../../screens/marketplace/market-data';
 import { SHORTCUTS } from '../../lib/shortcuts';
 import { abbreviateHome, stripRemote } from '../paths';
 import { scannedRoots } from './scanned-roots';
+import { cliRefresh, createRefreshPolicy } from './refresh';
 import { overviewCopy } from '../../lib/overview-copy';
 import { bodyExcerpt } from '../../lib/body-excerpt';
 
@@ -309,13 +310,19 @@ export const READ_CACHE_TTL_MS = 15_000;
 function readReason(error: string): 'invalid-config' | 'unreadable' {
   return error.includes('Invalid') && error.includes('config.json') ? 'invalid-config' : 'unreadable';
 }
+/** One app window, one adapter. A second instance (tests construct many) retires the first instance's window
+ *  listeners, so a retired backend can never spawn a CLI child on a later focus event. */
+let retireWindowListeners: (() => void) | undefined;
 
 
 export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   // Share in-flight reads and cache success; a terminal launch can repair a missing or broken file.
   let hello: Extract<CliFrame, { t: 'hello' }> | null = null;
   let featuresOnce: Promise<void> | undefined;
-  const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { hello = frame; };
+  // The launch refresh: the FIRST hello is where this adapter learns whether the CLI has `refresh` at all. Later
+  // hellos are not triggers — every verb that produces one (sync, eval, publish, install, connect) already
+  // fetched. Scheduled as a microtask so it never re-enters run()/cwd() from inside the frame loop.
+  const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { const first = hello === null; hello = frame; if (first && frame.features.refresh === true) void Promise.resolve().then(() => { refreshPolicy.trigger(); }); };
   let stateOnce: Promise<AppState | null> | undefined;
   let inFlight: Promise<AppState | null> | undefined;
   let generation = 0;
@@ -364,8 +371,26 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const listeners = new Set<(source: ChangeSource) => void>();
   const reads = new Map<string, { promise: Promise<{ result: Result<unknown>; lines: string[] }>; at: number }>();
   const clearReads = () => { reads.clear(); };
-  if (typeof window !== 'undefined') window.addEventListener('focus', clearReads);
   const notify = (...sources: ChangeSource[]) => { if (sources.length === 0) return; clearReads(); for (const source of sources) for (const listener of listeners) listener(source); };
+  // W-08: reads never fetch (src/cli.ts eval-report, docs/frame-protocol.md), so a teammate's committed receipt
+  // reaches this machine only when something runs `refresh`. Reads are invalidated only when a clone moved, and
+  // only after the reads already in flight have settled: notify('clone') re-spawns seven query prefixes and the
+  // shell caps concurrent CLI children at eight (src-tauri/src/lib.rs).
+  const refreshPolicy = createRefreshPolicy({
+    supported: () => hello?.features.refresh === true,
+    run: () => read(run(['refresh'], cliRefresh, value => value, [])),
+    onChanged: async () => { await Promise.allSettled([...reads.values()].map(entry => entry.promise)); notify('clone'); },
+  });
+  const onWindowFocus = () => { clearReads(); refreshPolicy.trigger(); };
+  retireWindowListeners?.();
+  let retired = false; let unlistenNativeFocus: (() => void) | undefined;
+  if (typeof window !== 'undefined') window.addEventListener('focus', onWindowFocus);
+  // The shell's own focus event is authoritative: a WebView may not deliver a DOM `focus` to the page when the
+  // app is re-activated. Outside the Tauri shell (browser dev, vitest) getCurrentWindow() throws or its IPC
+  // rejects, and the DOM listener above is then the only trigger — which is correct there.
+  try { void getCurrentWindow().onFocusChanged(({ payload }) => { if (payload && !retired) onWindowFocus(); }).then(stop => { if (retired) stop(); else unlistenNativeFocus = stop; }, () => undefined); }
+  catch { /* Not inside the Tauri shell: there is no window event to subscribe to, and nothing to clean up. */ }
+  retireWindowListeners = () => { retired = true; if (typeof window !== 'undefined') window.removeEventListener('focus', onWindowFocus); unlistenNativeFocus?.(); };
   const cwd = () => backend.prefs.get<string>('workspace', '') || undefined;
 
   function run<TIn, TOut>(argv: readonly (string | Promise<string>)[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut, touches: ChangeSource[] = ['config', 'placed']): Run<TOut> {
@@ -485,6 +510,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       if (hello === null) { featuresOnce = undefined; hello = null; }
       generation++;
       clearReads();
+      // A relaunch is a terminal action landing: the throttle must not hide what it just changed.
+      refreshPolicy.reset();
       return backend.launchContext();
     },
     onLaunchRequest(listener) {

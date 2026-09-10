@@ -154,3 +154,24 @@ it.each(['global','project'])('passes the selected %s copy to Remove',async scop
   fireEvent.click(within(dialog).getByRole('button',{name:'Remove'}));
   await waitFor(()=>expect(f.spawns.find(spawn=>spawn.args[0]==='uninstall-skill')?.args).toEqual(['uninstall-skill','--team','acme','--from',scope==='global'?'global':'/Users/teddy/code/seed','--','deploy-check']));
 });
+
+it('shows teammates\' committed runs when this version has no receipt of its own',async()=>{
+  open('#/skill/deploy-check?tab=evals',(name,value)=>{
+    if(name==='eval-report-deploy-check')value.history=[
+      {version:'a'.repeat(40),run_id:'20260910T060851Z',timestamp:'2026-09-10T06:08:51Z',runner_handle:'ajayw36',comparison:null,verdict:'NEUTRAL',execution_status:'complete'},
+      {version:'b'.repeat(40),run_id:'20260910T053814Z',timestamp:'2026-09-10T05:38:14Z',runner_handle:'ryanliu-terum',comparison:null,verdict:'NEUTRAL',execution_status:'complete'},
+    ];
+  });
+  expect(await screen.findByText('No receipt for this version',{selector:'.state-title'})).toBeVisible();
+  expect(screen.getByText('This version has not been evaluated. Older runs for earlier versions are listed in History; they are never compared or merged with this version.')).toBeVisible();
+  expect(screen.getByText('History')).toBeVisible();
+  expect(screen.getByText(/ajayw36/)).toBeVisible();expect(screen.getByText(/ryanliu-terum/)).toBeVisible();
+  expect(screen.queryByText('Not evaluated',{selector:'.state-title'})).toBeNull();expect(document.querySelectorAll('[data-showing]')).toHaveLength(0);
+  expect(document.querySelector('.history-figure')).toBeNull();expect(document.querySelector('.history-rail .row-strip')).toBeNull();
+});
+it('keeps the drawn empty state exactly when there is no history at all',async()=>{
+  open('#/skill/deploy-check?tab=evals');
+  expect(await screen.findByText('Not evaluated',{selector:'.state-title'})).toBeVisible();
+  expect(screen.getByText('Run an eval to score this skill against a baseline with no skill.')).toBeVisible();
+  expect(screen.queryByText('History')).toBeNull();expect(document.querySelector('.evals-body')).toBeNull();
+});

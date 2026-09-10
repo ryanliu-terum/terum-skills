@@ -6,6 +6,7 @@ Nothing else in `src/` may import `@tauri-apps/*`; this directory is the whole n
 - `bridge.ts`: the shell's five commands (`cli_spawn`, `cli_write`, `cli_kill`, `read_app_state`, `host_platform`, all in `src-tauri/src/lib.rs`) behind a `Bridge` interface, so the adapter is unit-tested with a fake.
 - `frames.ts`: the CLI's frame protocol as read here (`terum-skills docs/frame-protocol.md`, protocol 1). The CLI owns its wire shapes; the seam owns `../types`; `run.ts` maps one to the other.
 - `run.ts`: one `terum-skills --frames <verb>` process as a seam `Run<T>`: buffered frames, answers forwarded to stdin, `done` settled from the `result` frame, cancel = cancel frame then kill.
+- `refresh.ts`: the background clone refresh (W-08). `createRefreshPolicy()` runs the CLI's `refresh` verb once at launch and on window focus, throttled to one run a minute, single-flight, and invalidates reads through `notify('clone')` only when a clone actually moved. No timer, no seam method, no mock counterpart.
 - `index.ts`: `createTauriBackend()`. Every long verb is a process. Read models the CLI has no verb for return `ok:false` naming `GAPS.md`, so the drawn error boards render and nothing is invented.
 
 How the adapter finds the CLI: `~/.terum/skills/run/app.json` (`{schema:1, node, entry, version}`), written by `terum-skills app` on every launch (decision walk 2026-09-08, D1). Without it every call fails with one sentence telling the person to run `terum-skills app` once.
