@@ -78,7 +78,7 @@ it('counts the global scan without inferring project counts from ledger placemen
  });
  const backend=createTauriBackend(fake.bridge),status=await backend.status(),settings=await backend.settings();
  expect(status.value?.counts).toEqual({});expect(status.value?.roots).toEqual(expect.arrayContaining([expect.objectContaining({id:'global',count:undefined})]));expect(status.value?.ledger?.placements).toHaveLength(2);
- expect(settings.value?.PLACEMENTS_N).toBe(2);expect(settings.value?.PINNED_N).toBe(1);expect(settings.value?.PLACEMENTS[1]?.[3]).toBeNull();
+ expect(settings.value?.PLACEMENTS_N).toBe(2);expect(settings.value?.PINNED_N).toBe(0);expect(settings.value?.PLACEMENTS[1]?.[3]).toBeNull();
 });
 
 const firstRunDirectory=resolve('../.planning/codex-runs/first-run-in-app/frames');

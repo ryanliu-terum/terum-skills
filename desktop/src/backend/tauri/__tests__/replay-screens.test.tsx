@@ -46,9 +46,9 @@ it('omits the missing-project crumb instead of drawing a dash segment', async ()
   await waitFor(() => expect(document.querySelector('.detail-crumbs')).toHaveTextContent('diagnose'));
   expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/acme/debugging/diagnose');
 });
-it('omits the unknown quarantine size instead of a dangling dash clause', async () => {
+it('shows unknown quarantine contents without a fabricated folder count', async () => {
   open('#/settings/sync');
-  expect(await screen.findByText(/0 folders\. Only prune deletes here/)).toBeVisible();
+  expect(await screen.findByText('Quarantine contents are not reported by this terum-skills version.')).toBeVisible();
   expect(screen.queryByText(/folders · —/)).toBeNull();
 });
 it('preserves the project route key when the displayed title is capitalized', async () => {
@@ -62,8 +62,8 @@ it('renders the real machine placement table from typed provenance, in the board
   open('#/settings/machine');
   const row=await screen.findByTestId('placement-row-0');
   expect(row).toHaveTextContent('deploy-check');expect(row).toHaveTextContent('up to date');
-  expect(row).not.toHaveTextContent('tracking');expect(row).not.toHaveTextContent('In sync');
-  expect(screen.getByText(/1 placed · — global · 1 pinned/)).toBeVisible();
+  expect(row).toHaveTextContent('tracking');expect(row).not.toHaveTextContent('In sync');
+  expect(screen.getByText(/1 placed · — global · 0 pinned/)).toBeVisible();
   expect(screen.queryByRole('alert')).toBeNull();
 });
 

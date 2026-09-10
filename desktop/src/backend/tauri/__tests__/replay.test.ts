@@ -87,13 +87,13 @@ it('replays the rebuilt fixture through Global and checkout scopes and Skill det
   expect(member?.value).toMatchObject({member:{handle:'mira',declined:[]},projects:[{name:'terum'}]});
 });
 
-it('replays S7g local frames through settings: the real placement path, name, 12-character version and drawn state',async()=>{
+it('replays S7g local frames through settings: the real placement path, name, tracking version and drawn state',async()=>{
   const result=await createTauriBackend(inventoryReplay(recorded).bridge).settings();
   const frame=recorded('ls-local').map(line=>JSON.parse(line) as {t:string;value?:{local:{rows:{name:string;path:string;health:string;placement:{id:string;team:string;version:string}}[]}[]}}).find(frame=>frame.t==='result');
   const row=frame?.value?.local.flatMap(section=>section.rows).find(row=>row.name==='deploy-check');
   expect(row?.health).toBe('up-to-date');expect(row?.placement.team).toBe('acme');
-  expect(result).toMatchObject({ok:true,value:{PLACEMENTS:[[row?.path,'deploy-check','Global',row?.placement.version.slice(0,12),'2026-09-01T00:00:00Z','up to date']],PLACEMENTS_N:1,PINNED_N:1}});
-  expect(result.value?.SHARED).toEqual([['22222222-2222-4222-8222-222222222222',expect.stringContaining('/skills/tdd'),'acme','—']]);
+  expect(result).toMatchObject({ok:true,value:{PLACEMENTS:[[row?.path,'deploy-check','Global',null,'2026-09-01T00:00:00Z','up to date']],PLACEMENTS_N:1,PINNED_N:0}});
+  expect(result.value?.SHARED).toEqual([['tdd',expect.stringContaining('/skills/tdd'),'acme','—']]);
 });
 it.each([
   ['usage-error', false, "error: unknown option '-x'"],
