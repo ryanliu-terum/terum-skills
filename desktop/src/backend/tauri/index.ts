@@ -215,7 +215,7 @@ function statusModel(value:CliStatus, local:CliLocal|null, platform:string):Stat
 }
 // AD-23: the drawn placement states (design fixture PLACEMENTS: 'up to date', 'update available', 'edited locally', 'pinned'); a health the board has no word for is '—'.
 const PLACEMENT_STATE:Record<z.infer<typeof cliLocalHealth>,string>={'up-to-date':'up to date','update-available':'update available','local-changed':'edited locally',both:'edited locally · update available','gone-from-repo':'removed from the team',unknown:'—',untracked:'—'};
-function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult):Settings {
+function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult, home:string):Settings {
  const rows=local?.local.flatMap(root=>root.rows)??[];
  const policy=status.teams.length===1?status.teams[0]?.policy??null:null; // one team per machine — legacy 2+ shows a hint, not a projection
  return {
@@ -225,10 +225,21 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
   TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams.length===1?status.teams[0]?.categories??null:null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'}, // one team per machine — legacy 2+ shows a hint, not a projection
   PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [p.path,row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,p.version?.slice(0,12)??null,p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
-  SHARED:value.ledger.shared.map(item=>[item.id,item.source,item.team,'—']),
+  // Sharing rows join the ledger's shared record to its scanned local row: the title is the skill name
+  // (the raw id only when no scanned folder matches), and the state claims only what the scan can back —
+  // Present when the connected source is on disk, Missing when a scanned root no longer holds it, '—'
+  // when the source lives outside every scanned root. Sync words (In sync / Local edit / Diverged) wait
+  // for a CLI health computed against the share baseline; `health` describes placements only.
+  SHARED:value.ledger.shared.map(item=>{
+   const row=rows.find(row=>row.shared.some(source=>source.id===item.id&&source.team===item.team))??rows.find(row=>normalizePath(row.path)===normalizePath(item.source));
+   const scanned=local?.local.some(section=>(section.rootState??'scanned')==='scanned'&&normalizePath(item.source).startsWith(normalizePath(section.root)+'/'))??false;
+   return [row?.name??item.id,abbreviateHome(item.source,home),item.team,row!==undefined?'Present':scanned?'Missing':'—'];
+  }),
   // HOOK: the CLI does not report the session hook's state yet (S7l ships the real toggle); the Sync
   // section renders a read-only row and never reads `installed`, so this stays a typed placeholder.
-  QUARANTINE:[],LOCAL_UNSHARED:[],HOOK:{installed:false,file:'',timeout:0},
+  QUARANTINE:[],HOOK:{installed:false,file:'',timeout:0},
+  // Connectable global folders the ledger has no shared record for; the Sharing screen offers Share on each.
+  LOCAL_UNSHARED:local?.local.filter(section=>section.scope==='global').flatMap(section=>section.rows.filter(row=>row.shared.length===0&&row.placement===null&&row.problem===undefined).map(row=>row.name))??[],
   APP_VERSION:import.meta.env.VITE_APP_VERSION,AGENT_CLI:'—',AGENT_CLI_AUTH:'unknown',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
   STORAGE:{cache:'—',cache_n:0,evals:'—',evals_n:0,quarantine:'—'},PINNED_N:value.ledger.placements.filter(p=>p.version!==null).length,
   CLI_VERSION:value.version??'—',CLI_LATEST:'—',FOLLOWING:[],SHARED_SPECIMEN:null,
@@ -380,14 +391,15 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     return value === undefined ? failure : { ...failure, value };
   }
 
-  async function readModels<T>(options:ReadOptions|undefined, map:(value:CliStatus,local:CliLocal|null,platform:string)=>T):Promise<Result<T>> {
-    const [status,local,platform]=await Promise.all([
+  async function readModels<T>(options:ReadOptions|undefined, map:(value:CliStatus,local:CliLocal|null,platform:string,home:string)=>T):Promise<Result<T>> {
+    const [status,local,platform,directory]=await Promise.all([
       cached(['status'], cliStatus, options),
       cached(['ls','--local'], cliLocal, options),
       bridge.hostPlatform().then(value=>({ok:true as const,value})).catch((error:unknown)=>({ok:false as const,error:error instanceof Error?error.message:String(error),value:''})),
+      home(),
     ]);
     if (status.value===undefined) return result({ok:false,error:status.ok?'Status returned no data.':status.error});
-    const value=map(status.value,local.ok?local.value:null,platform.value);
+    const value=map(status.value,local.ok?local.value:null,platform.value,directory);
     const errors=[status,local,platform].flatMap(outcome=>outcome.ok?[]:[outcome.error]);
     return result(errors.length?{ok:false,error:errors.join('\n'),value}:{ok:true,value});
   }
@@ -462,7 +474,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     },
     // Status and Settings are offline reads; the remaining surfaces retain their explicit gaps.
     status: (_, options) => readModels(options, (value, local, platform) => statusModel(value, local, platform)),
-    settings: (_, options) => readModels(options, (value, local, platform) => settingsModel(value, local, statusModel(value, local, platform))),
+    settings: (_, options) => readModels(options, (value, local, platform, directory) => settingsModel(value, local, statusModel(value, local, platform), directory)),
     onboarding: async () => gap('Onboarding data'),
     async library({ scope, team }, options) {
       const local = await cached(['ls', '--local'], cliLs, options);
