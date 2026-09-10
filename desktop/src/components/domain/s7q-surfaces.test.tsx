@@ -96,7 +96,7 @@ it('Connect opens the bare connect picker through the Prompter',async()=>{
  location.hash='#/library/global';const backend=createMockBackend(),call=vi.spyOn(backend,'connect');
  render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
  fireEvent.click(await screen.findByRole('button',{name:'Connect'}));
- expect(await screen.findByRole('dialog')).toHaveTextContent('Connect a local skill folder');expect(call).toHaveBeenCalledWith({});
+ expect(await screen.findByRole('dialog',{name:/Connect a local skill folder/})).toHaveTextContent('Connect a local skill folder');expect(call).toHaveBeenCalledWith({});
 });
 it('renders the recorded gh-login PRINT as a highlighted workflow popup even when no question is asked',async()=>{
  const line='GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again.';
@@ -105,8 +105,32 @@ it('renders the recorded gh-login PRINT as a highlighted workflow popup even whe
  const backend=createMockBackend();backend.connect=createTauriBackend(f.bridge).connect;
  location.hash='#/library/global';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
  fireEvent.click(await screen.findByRole('button',{name:'Connect'}));
- const popup=await screen.findByRole('dialog');expect(within(popup).getByRole('alert')).toHaveTextContent(line);expect(within(popup).getByRole('alert')).toHaveStyle({color:'var(--tk-warn)'});
+ const popup=await screen.findByRole('dialog',{name:'Terminal action needed'});expect(within(popup).getByRole('alert')).toHaveTextContent(line);expect(within(popup).getByRole('alert')).toHaveStyle({color:'var(--tk-warn)'});
+ const workflow=await screen.findByRole('dialog',{name:'Connect'});
+ await waitFor(()=>expect(within(workflow).getByRole('alert')).toHaveTextContent('GitHub CLI is logged out.'));
+ expect(screen.queryByText("Couldn't read your library")).toBeNull();
  expect(screen.queryByRole('combobox')).toBeNull();
+});
+it('a connect that succeeds with no candidates still surfaces its printed line and outcome',async()=>{
+ const line='No local candidates to connect under /Users/teddy/.claude/skills. Skills elsewhere can be connected by passing their folder path.';
+ const f=fakeBridge((_args,emit)=>{emit({kind:'stdout',line:JSON.stringify({t:'print',level:'info',line})});emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'connect',ok:true,value:{kind:'batch',shared:[],declined:[],refused:[]}})});});
+ const backend=createMockBackend();backend.connect=createTauriBackend(f.bridge).connect;
+ location.hash='#/library/global';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
+ fireEvent.click(await screen.findByRole('button',{name:'Connect'}));
+ const popup=await screen.findByRole('dialog',{name:'Connect'});
+ await waitFor(()=>expect(within(popup).getByRole('status')).toHaveTextContent('Nothing was connected.'));
+ expect(popup).toHaveTextContent('No local candidates to connect under ~/.claude/skills. Skills elsewhere can be connected by passing their folder path.');
+ expect(within(popup).queryByRole('alert')).toBeNull();
+ expect(screen.getByText("15 skills")).toBeInTheDocument();
+});
+it('a connect that succeeds with an undefined value surfaces the same nothing-connected outcome',async()=>{
+ const f=fakeBridge((_args,emit)=>{emit({kind:'stdout',line:JSON.stringify({t:'print',level:'info',line:'Nothing connected.'})});emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'connect',ok:true})});});
+ const backend=createMockBackend();backend.connect=createTauriBackend(f.bridge).connect;
+ location.hash='#/library/global';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
+ fireEvent.click(await screen.findByRole('button',{name:'Connect'}));
+ const popup=await screen.findByRole('dialog',{name:'Connect'});
+ await waitFor(()=>expect(within(popup).getByRole('status')).toHaveTextContent('Nothing was connected.'));
+ expect(popup).toHaveTextContent('Nothing connected.');
 });
 it('unknown category icons render the neutral tag without throwing',()=>{const {container}=render(<Mark name="new-category"/>);expect(container.querySelector('svg path')).toHaveAttribute('d','M3 3h7l11 11-7 7L3 10Z');});
 it('Settings and footer consume the same clone-state copy',async()=>{
