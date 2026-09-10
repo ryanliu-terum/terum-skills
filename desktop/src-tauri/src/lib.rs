@@ -5,6 +5,9 @@
 //! Sleep/resume is not handled; window destruction and application exit terminate every child.
 //! Frame parsing stays in TypeScript (desktop/src/backend/tauri/); Rust never interprets a line.
 
+#[cfg(target_os = "macos")]
+mod disclaim;
+
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
@@ -58,14 +61,23 @@ fn cli_spawn(app: AppHandle, bridge: State<'_, Bridge>, id: String, node: String
   command.arg(&entry).arg("--frames").args(&args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
   #[cfg(unix)]
   command.process_group(0);
-  if let Some(dir) = cwd.as_deref().filter(|dir| !dir.is_empty()) {
-    command.current_dir(dir);
+  match cwd.as_deref().filter(|dir| !dir.is_empty()) {
+    Some(dir) => { command.current_dir(dir); }
+    // No cwd from the webview means the child would inherit the app's LaunchServices cwd, `/`.
+    // Broad startup work (an eval agent's `find`, npm probes) walking an unexpected root is what
+    // strays into TCC-protected dirs — pin the spawn to a sane directory instead.
+    None => { if let Some(dir) = default_spawn_dir() { command.current_dir(dir); } }
   }
   // D4: replay the recorded launch PATH; older state files inherit the shell process environment.
   if let Some(path) = path.filter(|path| !path.is_empty()) {
     command.env("PATH", path);
   }
   command.env("TERUM_SKILLS_NO_UPDATE_NOTIFIER", "1");
+  // Break TCC responsibility inheritance: the Node child (and every eval agent under it) must be
+  // its own responsible process, never the "Terum Skills" bundle. Must be the last change to
+  // `command` before spawn — it snapshots the final argv/env. See disclaim.rs.
+  #[cfg(target_os = "macos")]
+  disclaim::disclaim_tcc_responsibility(&mut command);
   let mut child = command.spawn().map_err(|e| format!("could not start {node}: {e}"))?;
   let stdout = child.stdout.take().ok_or("no stdout")?;
   let stderr = child.stderr.take().ok_or("no stderr")?;
@@ -109,6 +121,15 @@ fn cli_spawn(app: AppHandle, bridge: State<'_, Bridge>, id: String, node: String
     }
   });
   Ok(())
+}
+
+/// Where a cwd-less spawn lands: the CLI's own store root `~/.terum/skills` when it exists
+/// (the same root `read_app_state` reads), else the home directory — never `/`.
+fn default_spawn_dir() -> Option<std::path::PathBuf> {
+  let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+  let home = std::path::PathBuf::from(home);
+  let store = home.join(".terum").join("skills");
+  if store.is_dir() { Some(store) } else if home.is_dir() { Some(home) } else { None }
 }
 
 /// Write one line (an `answer` or `cancel` frame, already serialised) to the child's stdin.

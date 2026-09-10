@@ -193,7 +193,10 @@ async function askJson(prompt: string, options: AskJsonOptions = {}): Promise<Re
     '--max-turns', '1', '--disallowedTools', '*',
     '--setting-sources', 'project', '--strict-mcp-config',
     '--model', options.model ?? DEFAULT_MODEL,
-  ], { timeoutMs: options.timeoutMs ?? 120_000 });
+    // TCC hygiene: under the desktop app an inherited cwd is `/`, and agent startup work
+    // scanning an unexpected root walks into macOS-protected dirs. Pin every spawn, like
+    // runCase pins the sandbox; tool-free calls get the tmpdir.
+  ], { cwd: tmpdir(), timeoutMs: options.timeoutMs ?? 120_000 });
   if (outcome.timedOut) throw new AgentRunError(`model call timed out after ${options.timeoutMs ?? 120_000}ms`);
   if (outcome.code !== 0) throw new AgentRunError(`model call failed (rc=${outcome.code}): ${outcome.stderr.slice(-2000)}`);
   let text = outcome.stdout;
@@ -221,7 +224,8 @@ export const systemAgent: AgentApi = { runAgent, askJson };
 export async function preflight(model: string = DEFAULT_MODEL): Promise<Result<{ ccVersion: string }>> {
   let version: SpawnOutcome;
   try {
-    version = await spawnCollect(['--version'], { timeoutMs: 15_000 });
+    // cwd pinned for the same TCC reason as askJson: never probe from an inherited `/`.
+    version = await spawnCollect(['--version'], { cwd: tmpdir(), timeoutMs: 15_000 });
   } catch (error) {
     return failure(`\`${agentCmd()}\` is not runnable (${error instanceof Error ? error.message : String(error)}) — is Claude Code installed and on PATH?`);
   }

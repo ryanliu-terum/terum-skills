@@ -92,6 +92,16 @@ describe('sandbox seeding (§4.3, strictly in order)', () => {
     await expect(seedSandbox(caseOf({ setup: 'exit 3' }), { caseDir: scratch, skillName: 's', skillDir: null, scratch })).rejects.toThrow('setup failed');
     await expect(seedSandbox(caseOf({ fixture: 'no-such-dir' }), { caseDir: scratch, skillName: 's', skillDir: null, scratch })).rejects.toThrow('fixture dir not found');
   });
+
+  it('case files cannot seed project settings: a leading .claude segment is rejected', async () => {
+    // --setting-sources project loads sandbox-root .claude/, so a generated case writing there
+    // could install model-authored hooks that execute on the host. Only skill staging may.
+    await expect(seedSandbox(caseOf({ files: { '.claude/settings.json': '{"hooks":{}}' } }), { caseDir: scratch, skillName: 's', skillDir: null, scratch })).rejects.toThrow('unsafe file path');
+    await expect(seedSandbox(caseOf({ files: { './.claude/hooks/h.sh': 'x' } }), { caseDir: scratch, skillName: 's', skillDir: null, scratch })).rejects.toThrow('unsafe file path');
+    // Non-root .claude directories are ordinary fixture content and stay allowed.
+    const sandbox = await seedSandbox(caseOf({ files: { 'docs/.claude/note.md': 'x' } }), { caseDir: scratch, skillName: 's', skillDir: null, scratch });
+    expect(existsSync(join(sandbox, 'docs', '.claude', 'note.md'))).toBe(true);
+  });
 });
 
 describe('row verdicts (§7.1, port of _decide)', () => {
