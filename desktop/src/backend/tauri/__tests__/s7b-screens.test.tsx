@@ -64,7 +64,7 @@ it('renders a person heading without a duplicate handle or a dangling role separ
   await screen.findByRole('heading', { name: 'ravi' });
   const heading = document.querySelector('.market-person-heading') as HTMLElement;
   expect(within(heading).getAllByText('ravi')).toHaveLength(1);
-  expect(heading.querySelector('.board-small')?.textContent).toBe('acme');
+  expect(heading.querySelector('.board-small')).toBeNull();
 });
 it('keeps a person card identity clean when the member has no role', async () => {
   open('#/marketplace/people');
@@ -82,12 +82,12 @@ it('serves Marketplace people with real labels, installs and projects, and no fo
   expect(screen.queryByRole('button', { name: /Follow/ })).toBeNull();
   expect(screen.queryByText('Teddy Zhang')).toBeNull();
 });
-it('opens a real project install dialog without inventing an unavailable bulk grant preview', async () => {
+it('opens a real project install dialog with counts from its skill tool grants', async () => {
   open('#/marketplace/projects/terum?dialog=install');
   const dialog = await screen.findByRole('dialog');
   expect(dialog).toHaveTextContent('Install project terum');
-  expect(within(dialog).getByRole('button', { name: 'Install 1 skills' })).toBeVisible();
-  expect(within(dialog).queryByText(/Tool grants to approve/)).toBeNull();
+  expect(within(dialog).getByRole('button', { name: 'Install 1 skill' })).toBeVisible();
+  expect(within(dialog).getByText('Tool grants to approve · 0 of 1 ask')).toBeVisible();
 });
 
 function openShare(route: string, invite?: {frame: object}, options: {joinBlock?: boolean} = {}) {

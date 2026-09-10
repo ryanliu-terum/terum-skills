@@ -126,13 +126,14 @@ it('sends a team card by name and keeps the marketplace origin',async()=>{
  expect(within(card).getByRole('link')).toHaveAttribute('href','#/skill/deploy-check?root=marketplace');
 });
 // The old screen answered every name-route failure with "listed in your people file but its
-// folder is missing", and offered Sync and Remove. For a folder that is simply not a team skill
-// both halves were false and both buttons were wrong, so neither may come back.
+// folder is missing", and offered Sync and Remove. A name the team does not share is now reported
+// as not-found, where both halves of that sentence would be false and both buttons wrong, so
+// neither may come back on this branch.
 it('never claims a missing folder or offers Sync/Remove when a name is not in the team',async()=>{
- const backend=createMockBackend(),error='No skill diagnose in team acme, and no folder named diagnose in your Library roots.';
- vi.spyOn(backend,'skill').mockResolvedValue({ok:false,error,reason:'not-in-team' as const});
+ const backend=createMockBackend(),error='No unambiguous skill diagnose in team acme.';
+ vi.spyOn(backend,'skill').mockResolvedValue({ok:false,error,reason:'not-found' as const});
  openWith('#/skill/diagnose',backend);
- expect(await screen.findByText('diagnose is not in your team')).toBeVisible();
+ expect(await screen.findByText("Couldn't find diagnose")).toBeVisible();
  expect(screen.getByRole('alert')).toHaveTextContent(error);
  expect(screen.queryByText(/listed in your people file/)).toBeNull();
  expect(screen.queryByText(/folder is missing from this machine/)).toBeNull();
@@ -140,11 +141,11 @@ it('never claims a missing folder or offers Sync/Remove when a name is not in th
  expect(screen.queryByRole('button',{name:/^Remove/})).toBeNull();
  const panel=document.querySelector('.centered-state')!;
  expect(within(panel as HTMLElement).getByRole('button',{name:'Back to library'})).toBeVisible();
- expect(within(panel as HTMLElement).getByRole('button',{name:'Search the marketplace'})).toBeVisible();
+ expect(within(panel as HTMLElement).getByRole('button',{name:'Open marketplace'})).toBeVisible();
 });
-it('falls back to the raw CLI message for an untyped name-route failure',async()=>{
+it('reports an unreadable name-route failure with the CLI message and can retry',async()=>{
  const backend=createMockBackend(),error='fatal: could not read the team clone';
- vi.spyOn(backend,'skill').mockResolvedValue({ok:false,error});
+ vi.spyOn(backend,'skill').mockResolvedValue({ok:false,error,reason:'unreadable' as const});
  openWith('#/skill/deploy-check',backend);
  expect(await screen.findByText("Couldn't read deploy-check")).toBeVisible();
  expect(screen.getByRole('alert')).toHaveTextContent(error);
@@ -194,4 +195,33 @@ it('resets a local action error when navigating to another path',async()=>{
  location.hash='#/skill/local?path=%2Fsecond%2Fdeploy-check';fireEvent(window,new HashChangeEvent('hashchange'));
  expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeVisible();expect(screen.queryByRole('alert')).toBeNull();
  expect(document.querySelector('.detail-repo')).toHaveTextContent('/second/deploy-check');
+});
+// The Library Connect CTA was removed on 2026-09-10 (ratified override, .planning/specs/
+// 2026-09-10-library-mirror-id-sync.md): global skills auto-share at sync by ID check, and the
+// empty state's primary is the manual project path — the sidebar's native Add project flow (#102).
+it('the empty library offers Add project as its primary and drives the chooser into checkout add',async()=>{
+ const backend=createMockBackend();const pick=vi.spyOn(backend,'pickFolder');const add=vi.spyOn(backend.checkouts,'add');
+ openWith('#/library/global?__mock=empty',backend);
+ await screen.findByText('No skills in your global library');
+ expect(screen.queryByRole('button',{name:'Connect'})).toBeNull();
+ fireEvent.click(screen.getAllByRole('button',{name:'Add project'}).at(-1)!);
+ await waitFor(()=>expect(add).toHaveBeenCalledWith('/Users/you/code/new-project'));
+ expect(pick).toHaveBeenCalledOnce();
+});
+it('the empty library degrades its primary to the marketplace link when the CLI has no checkout add',async()=>{
+ const backend=createMockBackend();const features=await backend.features();
+ vi.spyOn(backend,'features').mockResolvedValue({...features,checkouts:false});
+ openWith('#/library/global?__mock=empty',backend);
+ await screen.findByText('No skills in your global library');
+ expect(screen.queryByRole('button',{name:'Add project'})).toBeNull();
+ fireEvent.click(screen.getAllByRole('button',{name:'Open marketplace'}).at(-1)!);
+ await waitFor(()=>expect(location.hash).toBe('#/marketplace'));
+});
+
+it('preserves the mock breadcrumb and fixture hygiene caption',async()=>{
+ open('#/skill/deploy-check');
+ await screen.findByRole('heading',{name:'deploy-check'});
+ expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/terum/infra/deploy-check');
+ fireEvent.click(screen.getByRole('tab',{name:'Quality'}));
+ expect(screen.getByText('Hygiene checks · passed on connect, 12 days ago · free, no model calls')).toBeVisible();
 });

@@ -1053,6 +1053,159 @@ describe('sync restore pass (recorded installed, missing placement)', () => {
   });
 });
 
+describe('sync auto-share pass (ID check, spec 2026-09-10-library-mirror-id-sync)', () => {
+  const FOREIGN_ID = '33333333-3333-4333-8333-333333333333';
+  const candidateMd = (name: string, body: string, id?: string) => `---\nname: ${name}\ndescription: ${body}\n${id ? `metadata:\n  id: ${id}\n` : ''}---\n${body}\n`;
+  /** A joined team WITH a machine identity (auto-share stamps metadata.author) and a real global root. */
+  async function autoShareFixture() {
+    const fixture = await bareTeam();
+    const store = createConfigStore(join(fixture.root, 'home', '.terum', 'skills'));
+    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const globalRoot = join(fixture.root, 'home', '.claude', 'skills');
+    await mkdir(globalRoot, { recursive: true });
+    const candidate = async (name: string, body: string, id?: string) => { await mkdir(join(globalRoot, name), { recursive: true }); await writeFile(join(globalRoot, name, 'SKILL.md'), candidateMd(name, body, id)); };
+    return { fixture, store, clone, globalRoot, candidate };
+  }
+
+  it('uploads an id-less global candidate with no per-folder ask, stamps the managed fields, and never re-offers it', async () => {
+    const f = await autoShareFixture();
+    await f.candidate('fresh', 'fresh body');
+    const io = new ScriptedPrompter([], [], true); // an unanswered ask would throw: the pass must not ask
+    expect(await run({ config: f.store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { changed: true, deferred: [], teams: [{ team: 'team', state: 'complete' }] } });
+    expect(io.asked).toEqual([]);
+    expect(io.lines).toContain('Auto-shared 1 skill(s): fresh.');
+    const stamped = await readFile(join(f.globalRoot, 'fresh', 'SKILL.md'), 'utf8');
+    expect(stamped).toContain('license: UNLICENSED');
+    expect(stamped).toContain('author: Me <me@example.com>');
+    const id = /id: ([0-9a-f-]{36})/.exec(stamped)?.[1];
+    expect(id).toBeTruthy();
+    expect((await f.store.read()).shared[id!]).toMatchObject({ team: 'team', source: join(f.globalRoot, 'fresh') });
+    expect(await git(['show', 'main:skills/fresh/SKILL.md'], f.fixture.bare)).toContain('description: fresh body');
+    await expect(access(stampPath(f.store.root, 'team'))).resolves.toBeUndefined();
+    // The connected source is tracked now, so the next run has nothing to share and asks nothing.
+    const again = new ScriptedPrompter([], [], true);
+    expect(await run({ config: f.store, noUpdateCheck: true }, again)).toMatchObject({ ok: true, value: { teams: [{ team: 'team', state: 'complete' }] } });
+    expect(again.asked).toEqual([]);
+    expect(again.lines.filter((line) => line.startsWith('Auto-shared'))).toEqual([]);
+    expect(Object.keys((await f.store.read()).shared)).toEqual([id]);
+  });
+
+  it('re-stamps a foreign/unknown id with a freshly minted one and uploads the skill as ours', async () => {
+    const f = await autoShareFixture();
+    await f.candidate('imported', 'vendored elsewhere', FOREIGN_ID);
+    const io = new ScriptedPrompter([], [], true);
+    expect(await run({ config: f.store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { changed: true, teams: [{ team: 'team', state: 'complete' }] } });
+    expect(io.lines).toContain('Auto-shared 1 skill(s): imported.');
+    const stamped = await readFile(join(f.globalRoot, 'imported', 'SKILL.md'), 'utf8');
+    const id = /id: ([0-9a-f-]{36})/.exec(stamped)?.[1];
+    expect(id).toBeTruthy();
+    expect(id).not.toBe(FOREIGN_ID);
+    expect((await f.store.read()).shared[id!]).toMatchObject({ team: 'team' });
+    expect(await git(['show', 'main:skills/imported/SKILL.md'], f.fixture.bare)).toContain(`id: ${id}`);
+  });
+
+  it('leaves a known-id folder alone: no upload, no content push, no ledger entry (author-only writes stay untouched)', async () => {
+    const f = await autoShareFixture();
+    await pushFromSeed(f.fixture.seed, 'skills/sample/SKILL.md', skill('old'));
+    await f.candidate('sample', 'local edits by a non-author', ID);
+    const io = new ScriptedPrompter([], [], true);
+    expect(await run({ config: f.store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { changed: false, deferred: [], teams: [{ team: 'team', state: 'complete' }] } });
+    expect(io.asked).toEqual([]);
+    expect(io.lines.filter((line) => line.includes('uto-share'))).toEqual([]);
+    expect((await f.store.read()).shared).toEqual({});
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], f.fixture.bare)).toContain('description: old');
+    expect(await readFile(join(f.globalRoot, 'sample', 'SKILL.md'), 'utf8')).toContain('local edits by a non-author');
+    await expect(access(stampPath(f.store.root, 'team'))).resolves.toBeUndefined();
+  });
+
+  it('excludes a privileged folder silently, exactly as bare connect does', async () => {
+    const f = await autoShareFixture();
+    await f.candidate('hooky', 'carries hooks');
+    await mkdir(join(f.globalRoot, 'hooky', 'hooks'), { recursive: true });
+    const io = new ScriptedPrompter([], [], true);
+    expect(await run({ config: f.store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { changed: false, deferred: [], teams: [{ team: 'team', state: 'complete' }] } });
+    expect(io.lines.filter((line) => line.includes('uto-share'))).toEqual([]);
+    expect((await f.store.read()).shared).toEqual({});
+    await expect(access(stampPath(f.store.root, 'team'))).resolves.toBeUndefined();
+  });
+
+  it('reports a refused folder by name, still shares the rest, and withholds the stamp for review', async () => {
+    const f = await autoShareFixture();
+    await pushFromSeed(f.fixture.seed, 'skills/sample/SKILL.md', skill('old'));
+    await f.candidate('sample', 'id-less folder colliding with a team name'); // no id → upload path → name collision refusal
+    await f.candidate('fresh', 'fresh body');
+    const io = new ScriptedPrompter([], [], true);
+    const result = await run({ config: f.store, noUpdateCheck: true }, io);
+    expect(result).toMatchObject({ ok: true, value: { deferred: ['sample'], teams: [{ team: 'team', state: 'incomplete', review: ['sample'] }] } });
+    expect(io.lines).toContain('Skipped auto-share of sample: Skill name sample already exists in team team; choose a unique name.');
+    expect(io.lines).toContain('Auto-shared 1 skill(s): fresh.');
+    expect(Object.values((await f.store.read()).shared)).toMatchObject([{ team: 'team', source: join(f.globalRoot, 'fresh') }]);
+    expect(await git(['show', 'main:skills/sample/SKILL.md'], f.fixture.bare)).toContain('description: old');
+    await expect(access(stampPath(f.store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('auto_share: false disables the pass and the team still stamps', async () => {
+    const f = await autoShareFixture();
+    await f.store.update((config) => { config.auto_share = false; });
+    await f.candidate('fresh', 'fresh body');
+    const io = new ScriptedPrompter([], [], true);
+    expect(await run({ config: f.store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { changed: false, deferred: [], teams: [{ team: 'team', state: 'complete' }] } });
+    expect(io.asked).toEqual([]);
+    expect(io.lines.filter((line) => line.includes('uto-share'))).toEqual([]);
+    expect((await f.store.read()).shared).toEqual({});
+    expect(await readFile(join(f.globalRoot, 'fresh', 'SKILL.md'), 'utf8')).toBe(candidateMd('fresh', 'fresh body'));
+    await expect(access(stampPath(f.store.root, 'team'))).resolves.toBeUndefined();
+  });
+
+  it('hook mode runs the pass terminal-less: no prompt, the summary on notices, stdout silent', async () => {
+    const f = await autoShareFixture();
+    await f.candidate('fresh', 'fresh body');
+    const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    const result = await run({ hook: true, config: f.store }, io);
+    expect(result).toMatchObject({ ok: true, value: { changed: true, deferred: [], notices: expect.arrayContaining(['Auto-shared 1 skill(s): fresh.']) } });
+    expect(io.lines).toEqual([]); // nothing placed, so stdout carries nothing at all
+    expect(Object.values((await f.store.read()).shared)).toMatchObject([{ team: 'team', source: join(f.globalRoot, 'fresh') }]);
+    expect(await git(['show', 'main:skills/fresh/SKILL.md'], f.fixture.bare)).toContain('description: fresh body');
+    await expect(access(stampPath(f.store.root, 'team'))).resolves.toBeUndefined();
+  });
+
+  it('coexists with the endorsed batch: a batch-placed skill is never auto-shared and a just-shared skill is never offered back', async () => {
+    const f = await autoShareFixture();
+    await pushFromSeed(f.fixture.seed, 'skills/sample/SKILL.md', skill('old'));
+    await pushFromSeed(f.fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    await f.candidate('fresh', 'fresh body');
+    const io = new ScriptedPrompter([''], [true], true);
+    expect(await run({ config: f.store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { placed: 1, teams: [{ team: 'team', state: 'complete' }] } });
+    expect(io.asked.filter((question) => question.includes('fresh'))).toEqual([]); // the shared skill was never a question
+    expect(io.lines).toContain('Auto-shared 1 skill(s): fresh.');
+    // Steady state: the endorsed placement is ledger-tracked, the shared source is connected — nothing moves, nothing asks.
+    const again = new ScriptedPrompter([], [], true);
+    expect(await run({ config: f.store, noUpdateCheck: true }, again)).toMatchObject({ ok: true, value: { placed: 0, changed: false, teams: [{ team: 'team', state: 'complete' }] } });
+    expect(again.asked).toEqual([]);
+    expect(again.lines.filter((line) => line.startsWith('Auto-shared'))).toEqual([]);
+    expect(Object.keys((await f.store.read()).shared)).toHaveLength(1);
+  });
+
+  it('coexists with the restore pass: a restored placement is never auto-shared on the next run', async () => {
+    const f = await autoShareFixture();
+    await pushFromSeed(f.fixture.seed, 'skills/sample/SKILL.md', skill('old'));
+    await pushFromSeed(f.fixture.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [{ id: ID, version: null, scope: { kind: 'global' }, since: '2026-09-04' }] }), null, 2)}\n`);
+    await f.candidate('fresh', 'fresh body');
+    const io = new ScriptedPrompter([], [true], true);
+    expect(await run({ config: f.store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { placed: 1, teams: [{ team: 'team', state: 'complete' }] } });
+    expect(io.asked).toEqual(['Restore 1 skill(s) recorded as installed but missing on this machine from team?']);
+    expect(io.lines).toContain('Auto-shared 1 skill(s): fresh.');
+    expect(await readFile(join(f.globalRoot, 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
+    // The restored copy is a ledger placement, so the next run's candidate discovery excludes it.
+    const again = new ScriptedPrompter([], [], true);
+    expect(await run({ config: f.store, noUpdateCheck: true }, again)).toMatchObject({ ok: true, value: { placed: 0, changed: false, teams: [{ team: 'team', state: 'complete' }] } });
+    expect(again.asked).toEqual([]);
+    expect(again.lines.filter((line) => line.startsWith('Auto-shared'))).toEqual([]);
+    expect(Object.keys((await f.store.read()).shared)).toHaveLength(1);
+  });
+});
+
 async function orphanedPlacement(installed = false) {
   const prepared = await configuredSkill();
   const home = join(prepared.fixture.root, 'home');

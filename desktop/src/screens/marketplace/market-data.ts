@@ -1,10 +1,17 @@
 import type { Person, SkillCard as Card } from '../../backend/types';
-export function plural(n: number, word: string, words = word + 's') { return `${n} ${n === 1 ? word : words}`; }
+export function plural(n: number, word: string, words = word + 's') { return `${n} ${pluralWord(n, word, words)}`; }
+/** The word alone. A JSX child written `{n}{' ' + pluralWord(n, w)}` keeps the board's `{n} word` text-node split, which subpixel text rendering is sensitive to. */
+export function pluralWord(n: number, word: string, words = word + 's') { return n === 1 ? word : words; }
+export function personPlaceNote([placed, total]: Person['onDisk']): string {
+ if (placed > 0 && total > placed) return `${placed} of ${total} on this machine · install places the other ${total - placed}`;
+ if (placed === 0 && total > 0) return `Install places ${plural(total, 'skill')} on this machine`;
+ return '';
+}
 export function rawGrants(skill: Card): string[] {
   // Catalog preserves raw fields at runtime, but SkillCard's public type omits grants. Validate before rendering them.
-  if (!('grants' in skill)) return [];
+  if (!('grants' in skill) || skill.grants === null) return [];
   if (!Array.isArray(skill.grants) || !skill.grants.every((grant: unknown) => typeof grant === 'string')) throw new Error(`Catalog ${skill.name}.grants must contain strings.`);
-  return skill.grants.filter((grant: unknown): grant is string => typeof grant === 'string');
+  return skill.grants.filter((grant: unknown): grant is string => typeof grant === 'string' && grant !== 'none');
 }
 
 export function activeFacets(raw: string | null | undefined, fallback: number): number {

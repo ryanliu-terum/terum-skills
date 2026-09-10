@@ -28,7 +28,7 @@ it('renders Leave and asks the CLI confirmation',async()=>{const leave=vi.spyOn(
  "Consent you gave for skills' tool permissions may need to be given again for a new team",
  `Your people file in the team repo stays: you remain a member (an admin archives that with team remove ${design.ME.handle}), and setup brings this machine back`,
 ]);fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));const prompt=await screen.findByRole('dialog',{name:`Leave terum? This removes ${design.PLACEMENTS_N} placed skill(s) from this machine.`});fireEvent.click(within(prompt).getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledWith({kind:'leave',name:'terum'});expect(location.hash).toBe('#/settings/teams');});
-it('renders every prune path and preanswers Delete N quarantined items',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/machine?dialog=prune');const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Delete 2 quarantined folders?');for(const [when,name] of design.QUARANTINE)expect(dialog).toHaveTextContent(`quarantine/${when}/${name}`);fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(sync).toHaveBeenCalledWith({prune:true});expect(location.hash).toBe('#/settings/machine');});
+it('renders every prune path and asks the CLI before deleting',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/machine?dialog=prune');const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Delete 2 quarantined folders?');for(const [when,name] of design.QUARANTINE)expect(dialog).toHaveTextContent(`quarantine/${when}/${name}`);fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('heading',{name:'Delete 2 quarantined item(s)?'})).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(sync).toHaveBeenCalledWith({prune:true});expect(location.hash).toBe('#/settings/machine');});
 it('keeps failed prune open',async()=>{vi.spyOn(backend,'sync').mockImplementation(()=>createRun(async()=>({ok:false,error:'Prune failed.'})));open('#/settings/machine?dialog=prune');fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('alert')).toHaveTextContent('Prune failed.');expect(screen.getByRole('dialog')).toBeInTheDocument();});
 it('renders the CLI config error line with hidden counts',async()=>{open('#/settings/account?__mock=error');expect(await screen.findByRole('alert')).toHaveTextContent("Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)");expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
 it('commits the loading skeleton with hidden sidebar counts',async()=>{open('#/settings/account?__mock=loading');expect(screen.getByTestId('settings-skeleton')).toBeInTheDocument();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
@@ -347,4 +347,21 @@ it('adds a detected checkout and reports one action error',async()=>{
  open('#/settings/machine?__mock=detected-root');await screen.findByText('Checkouts');
  fireEvent.click(within(screen.getByText('/Users/you/code/ssm').closest('.setting-row')!).getByRole('button',{name:'Add'}));
  expect(add).toHaveBeenCalledWith('/Users/you/code/ssm');expect(await screen.findByRole('alert')).toHaveTextContent('Registration denied');expect(screen.getAllByRole('alert')).toHaveLength(1);
+});
+it('keeps the populated mock hook, quarantine, eval defaults and available version copy',async()=>{
+ open('#/settings/sync');await screen.findByRole('switch',{name:'Sync at session start'});
+ expect(screen.getByText('~/.claude/settings.json').closest('.setting-row')).toHaveTextContent('Installed in ~/.claude/settings.json');
+ expect(screen.getByText(/2 folders · 60 KB/)).toBeVisible();cleanup();
+ open('#/settings/evals');expect(await screen.findByText(/k = 3 gates/)).toBeVisible();cleanup();
+ open('#/settings/updates');expect(await screen.findByText('0.1.2 installed · 0.1.3 available')).toBeVisible();
+});
+it('draws an empty quarantine and still lets its CLI confirmation determine the actual count',async()=>{
+ const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,QUARANTINE:[]}});
+ open('#/settings/machine');expect(await screen.findByText('Quarantine is empty.')).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'Prune…'}));
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Delete'}));
+ expect(await screen.findByRole('heading',{name:'Delete 2 quarantined item(s)?'})).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'No'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
 });

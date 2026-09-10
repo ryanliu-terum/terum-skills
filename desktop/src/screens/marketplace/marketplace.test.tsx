@@ -24,7 +24,7 @@ it('renders projects in projectsByMembers order', async () => { open('#/marketpl
 it('renders all twelve people in rosterByAdoption order', async () => { open('#/marketplace/people'); await screen.findByRole('heading', { name: 'People' }); expect(names('person-card-')).toEqual(design.DERIVED.rosterByAdoption); expect(names('person-card-')).toHaveLength(12); });
 it('renders ten category rows with supplied remaining counts', async () => { open('#/marketplace/categories'); await screen.findByRole('heading', { name: 'Browse by category' }); expect(names('category-row-')).toEqual(design.CATEGORIES.map(c => c[0])); for(const [category] of design.CATEGORIES){expect(design.DERIVED.categoryRemaining[category as keyof typeof design.DERIVED.categoryRemaining]).toBe(0);const row=screen.getByTestId('category-row-'+category);expect(within(row).queryByText(/\+\d+ more/)).toBeNull();expect(row.lastElementChild?.previousElementSibling).toHaveTextContent(design.DERIVED.categorySkills[category as keyof typeof design.DERIVED.categorySkills].join(' · '));} });
 it('renders infra skills in categorySkills order', async () => { open('#/marketplace/categories/infra'); await screen.findByRole('heading', { name: 'infra' }); expect(names('skill-card-')).toEqual(design.DERIVED.categorySkills.infra); });
-it.each([['projects/nothing', 'No project named nothing.'], ['people/nobody', 'No teammate named nobody.'], ['categories/nothing', 'No category named nothing.']])('renders unknown %s errors', async (path, error) => { open('#/marketplace/' + path); expect(await screen.findByRole('alert')).toHaveTextContent(error); await waitFor(() => expect(document.documentElement.dataset.appReady).toBe('true')); });
+it.each([['projects/nothing', 'No project named nothing.'], ['people/nobody', 'No teammate named nobody.'], ['categories/nothing', 'No category named nothing.']])('renders unknown %s errors', async (path, error) => { open('#/marketplace/' + path); expect(await screen.findByText('Not found')).toBeInTheDocument(); expect(screen.getByText(error)).toBeInTheDocument(); expect(screen.queryByRole('alert')).toBeNull(); await waitFor(() => expect(document.documentElement.dataset.appReady).toBe('true')); });
 it('marks loading content ready without waiting for the pending backend', async () => { open('#/marketplace?__mock=loading'); expect(screen.getByLabelText('Loading marketplace')).toBeInTheDocument(); await waitFor(() => expect(document.documentElement.dataset.appReady).toBe('true')); });
 it('renders fatal backend errors as an alert', async () => { open('#/marketplace?__mock=error'); expect(await screen.findByRole('alert')).toHaveTextContent('Could not resolve host: github.com'); });
 it('keeps the home populated for the empty scenario', async () => { open('#/marketplace?__mock=empty'); await screen.findByRole('region', { name: 'Top rated' }); expect(names('skill-card-')).toEqual(design.DERIVED.topRated.slice(0, 3)); expect(await screen.findByRole('link', { name: 'Global 15' })).toBeInTheDocument(); for (const name of ['Pushes 3', 'Updates 3', 'Alerts 8']) expect(screen.getByRole('link', { name })).toBeInTheDocument(); });
@@ -34,9 +34,9 @@ it('toggles the filter popover with URL state', async () => { open('#/marketplac
 it.each([['Top rated', 'skills'], ['Teams / Projects', 'projects'], ['People', 'people'], ['Browse by category', 'categories']])('navigates %s pager to the expanded list', async (title, path) => { open('#/marketplace'); fireEvent.click(await screen.findByRole('button', { name: 'View all ' + title })); await waitFor(() => expect(location.hash).toBe('#/marketplace/' + path)); });
 it('persists Follow and re-renders Following', async () => { open('#/marketplace/people/ryan'); fireEvent.click(await screen.findByRole('button', { name: 'Follow ryan' })); expect(screen.getByRole('button', { name: 'Unfollow ryan' })).toHaveTextContent('Following'); expect(pickBackend().prefs.get('following:ryan', false)).toBe(true); fireEvent.click(screen.getByRole('button', { name: 'Unfollow ryan' })); expect(screen.getByRole('button', { name: 'Follow ryan' })).toHaveTextContent('Follow'); });
 it('handles failed Follow preferences without changing following state', async () => { open('#/marketplace/people/ryan'); await screen.findByRole('button', { name: 'Follow ryan' }); vi.spyOn(pickBackend().prefs, 'set').mockImplementation(() => { throw new Error('Preferences unavailable.'); }); fireEvent.click(screen.getByRole('button', { name: 'Follow ryan' })); expect(await screen.findByRole('alert')).toHaveTextContent('Preferences unavailable.'); expect(screen.getByRole('button', { name: 'Follow ryan' })).toHaveAttribute('aria-pressed', 'false'); });
-it('opens project install from its primary and closes after successful run', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/projects/docs'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs' }); expect(location.hash).toBe('#/marketplace/projects/docs'); });
+it('opens project install from its primary and closes after successful run', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/projects/docs'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); const consent = await screen.findByRole('dialog', { name: 'Approve these tools for docs?' }); fireEvent.click(within(consent).getByRole('button', { name: 'Yes' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs' }); expect(location.hash).toBe('#/marketplace/projects/docs'); });
 it('cancels the bulk dialog without invoking install', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/projects/docs?dialog=install&rail=closed'); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(location.hash).toBe('#/marketplace/projects/docs?rail=closed'); expect(install).not.toHaveBeenCalled(); });
-it('installs a person through the member verb without navigation', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/people/lena'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); await waitFor(() => expect(install).toHaveBeenCalledWith({ ref: 'lena', kind: 'member', member: 'lena' })); expect(location.hash).toBe('#/marketplace/people/lena'); });
+it('installs a person through the member verb without navigation', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/people/lena'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); await waitFor(() => expect(install).toHaveBeenCalledWith({ ref: 'lena', kind: 'member', member: 'lena' })); const consent = await screen.findByRole('dialog', { name: 'Approve these tools for lena?' }); fireEvent.click(within(consent).getByRole('button', { name: 'Yes' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(location.hash).toBe('#/marketplace/people/lena'); });
 it('uses status identity and the installed list for own-handle removal', async () => {
   const backend = pickBackend(), status = await backend.status(), catalog = await backend.catalog();
   if (!status.ok || !catalog.ok) throw new Error('Fixture unavailable.');
@@ -129,4 +129,36 @@ it('keeps one person link and follows without leaving the people list', async ()
   fireEvent.click(within(card).getByRole('button', { name: 'Follow ryan' }));
   expect(within(card).getByRole('button', { name: 'Unfollow ryan' })).toHaveAttribute('aria-pressed', 'true');
   expect(location.hash).toBe('#/marketplace/people');
+});
+
+it('preserves the mock role line and project description/admin foot', async () => {
+  open('#/marketplace/people');
+  expect(await screen.findByText('founder · ryan')).toBeVisible();
+  cleanup();
+  open('#/marketplace/projects');
+  const card = await screen.findByTestId('project-card-terum');
+  const project = design.PROJECTS.find(p => p.key === 'terum')!;
+  expect(card.querySelector('.market-project-desc')?.textContent).toBe(project.desc);
+  expect(card.querySelector('.market-project-foot')).toHaveTextContent(project.admin.name);
+  expect(card.querySelector('.market-project-foot')).toHaveTextContent(`admin · updated ${project.updated}`);
+});
+it('asks every bulk-install tool question and treats declined consent as cancellation', async () => {
+  const answers: unknown[] = [];
+  vi.spyOn(pickBackend(), 'install').mockImplementation(() => createRun(async ctx => {
+    const first = await ctx.ask('confirm', 'Approve these tools for one?'); answers.push(first);
+    if (!first) return { ok: false, cancelled: true, error: 'Declined.' };
+    const second = await ctx.ask('confirm', 'Approve these tools for two?'); answers.push(second);
+    return second ? { ok: true, value: [] } : { ok: false, cancelled: true, error: 'Declined.' };
+  }));
+  open('#/marketplace/people/lena');
+  fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' }));
+  const first = await screen.findByRole('dialog', { name: 'Approve these tools for one?' });
+  expect(answers).toEqual([]);
+  fireEvent.click(within(first).getByRole('button', { name: 'Yes' }));
+  const second = await screen.findByRole('dialog', { name: 'Approve these tools for two?' });
+  expect(answers).toEqual([true]);
+  fireEvent.click(within(second).getByRole('button', { name: 'No' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(answers).toEqual([true, false]);
+  expect(screen.queryByRole('alert')).toBeNull();
 });
