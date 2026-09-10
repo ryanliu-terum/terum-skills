@@ -5,7 +5,7 @@ import { normalizeRemote } from '../lib/remote.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { parseJson, PROJECT_NAME_RULE, projectNameSchema, Team, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { openTeamRepo, refreshClone, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
+import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { teamForReference } from './install.js';
 
 export interface ProjectArgs extends WithForm {
@@ -40,7 +40,7 @@ export async function run(args: ProjectArgs, io: Prompter): Promise<Result<Proje
     if (!binding.handle) throw new Error(`Team ${team} has no joined handle.`);
     const clone = store.teamClone(team);
     // The clone is where the collision check reads from, so it is refreshed before anything is asked.
-    await refreshClone(runner, clone, { label: team });
+    await refreshClone(runner, clone, { label: team, ...lockWait(io) });
 
     const typed = args.name ?? (io.interactive ? await io.text('Project name?') : undefined);
     if (typed === undefined || typed.trim() === '') throw new Error('Specify a project name.');
@@ -67,6 +67,7 @@ export async function run(args: ProjectArgs, io: Prompter): Promise<Result<Proje
       handle: binding.handle,
       message: `${binding.handle}: create project ${name}`,
       ...args.safeWrite,
+      ...lockWait(io),
     });
     // The mutation either writes or throws, so an unchanged tree here is a bug, not a no-op create.
     if (!written.changed) throw new Error(`Nothing was written for project ${name}; rerun the command.`);

@@ -16,7 +16,7 @@ import { isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../li
 import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
 import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
 import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedFields, skillRecords } from '../lib/skills.js';
-import { MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
+import { MutableTree, openTeamRepo, treeText, lockWait } from '../lib/teamRepo.js';
 import { assessHygiene, type HygieneAssessment, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 
 export interface ConnectArgs extends WithForm {
@@ -195,7 +195,7 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
     const repo = openTeamRepo(clone, binding.remote, runner);
     // Connect refreshes before changing the user's source so an upstream collision is a no-write refusal;
     // the mutation-time assertion below still protects a race after this preflight.
-    await repo.safeWrite(() => undefined, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}` });
+    await repo.safeWrite(() => undefined, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}`, ...lockWait(io) });
     const records = await skillRecords(clone, team);
     phase = 'validate'; recoverable = true;
     const inspection = inspectSkillSource(raw);
@@ -249,7 +249,7 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
       // authoritative for the repo-wide name invariant.
       if (tree.paths(`skills/${name}/`).length) throw new Error(`Skill name ${name} already exists in team ${team}; choose a unique name.`);
       mirrorToTree(tree, `skills/${name}`, candidate.files);
-    }, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}` });
+    }, { action: 'connect', handle: binding.handle, author, message: `${binding.handle}: connect ${name}`, ...lockWait(io) });
     phase = 'pushed';
     const baseline = await canonicalDigest(source);
     const root = await writableCheckout(dirname(source), args.home ?? homedir(), store.root);
@@ -361,7 +361,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
     const refreshRepo = async (): Promise<void> => {
       if (repairedRepo === repoContents) return;
       if (!binding?.handle) throw new Error(`Team ${tracked.team} has no joined handle.`);
-      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => refreshManagedFieldsInTree(tree, `skills/${record!.name}/SKILL.md`, { license: team.license, id, author }), { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: `${binding.handle}: update ${record!.name}` });
+      await openTeamRepo(clone, binding.remote, runner).safeWrite((tree) => refreshManagedFieldsInTree(tree, `skills/${record!.name}/SKILL.md`, { license: team.license, id, author }), { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: `${binding.handle}: update ${record!.name}`, ...lockWait(io) });
     };
       if (sourceDigest === baseline && repoDigest === baseline) {
         await refreshRepo();
@@ -380,7 +380,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
           for (const path of tree.paths(`skills/${record!.name}/`)) tree.remove(path);
         }
         mirrorToTree(tree, `skills/${targetName}`, candidate.files);
-      }, { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: targetName === record!.name ? `${binding.handle}: update ${record.name}` : `${binding.handle}: rename ${record.name} to ${targetName}` });
+      }, { action: 'sync', handle: binding.handle, author, previousAuthor: record!.frontmatter.metadata.author, message: targetName === record!.name ? `${binding.handle}: update ${record.name}` : `${binding.handle}: rename ${record.name} to ${targetName}`, ...lockWait(io) });
       reportHygieneWarnings((line) => io.print(line), assessment);
       if (targetName !== record.name) io.print(`Renamed connected skill ${record.name} to ${targetName}.`);
       await store.update((next) => { if (next.shared[id]) next.shared[id].baseline = sourceDigest; });
@@ -439,9 +439,9 @@ async function resolveDivergence(store: ConfigStore, runner: Runner, teamOverrid
     reportHygieneWarnings((line) => io.print(line), assessHygiene(record.name, candidate, team.license, allowPrivileged || (await scanSkillFolder(record.directory)).privileged));
     if (repairedSource !== sourceContents) await writeFile(sourceSkill, repairedSource, 'utf8');
     if (repairedRepo !== repoContents) {
-      await repo.safeWrite((tree) => refreshManagedFieldsInTree(tree, `skills/${record.name}/SKILL.md`, { license: team.license, id, author }), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
+      await repo.safeWrite((tree) => refreshManagedFieldsInTree(tree, `skills/${record.name}/SKILL.md`, { license: team.license, id, author }), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}`, ...lockWait(io) });
     }
-    await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, candidate.files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}` });
+    await repo.safeWrite((tree) => mirrorToTree(tree, `skills/${record.name}`, candidate.files), { action: 'sync', handle: binding.handle, author, previousAuthor: record.frontmatter.metadata.author, message: `${binding.handle}: update ${record.name}`, ...lockWait(io) });
     const digest = await canonicalDigest(tracked.source);
     await store.update((fresh) => { fresh.shared[id]!.baseline = digest; });
   } else {

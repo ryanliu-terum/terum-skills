@@ -59,6 +59,17 @@ async function sharedSyncFixture() {
 }
 
 describe('sync --hook (§3, §6)', () => {
+  it('keeps hook lock waiting silent even when called with an interactive prompter', async () => {
+    const { store, clone } = await configuredSkill();
+    const release = await holdCloneLock(clone);
+    const io = new ScriptedPrompter([], [], true);
+    try {
+      const result = await run({ hook: true, config: store, lockWaitMs: 1_500 }, io);
+      expect(result).toMatchObject({ ok: true, value: { notices: [expect.stringMatching(/write lock on team/)] } });
+      expect(io.lines).toEqual([]); expect(io.asked).toEqual([]);
+    } finally { await release(); }
+  });
+
   it('is callable with the print-only prompter and has silent empty output', async () => {
     expectTypeOf(run).toBeFunction();
     const io: NonInteractivePrompter = { interactive: false, print: () => undefined };
@@ -236,7 +247,7 @@ describe('sync --hook (§3, §6)', () => {
     try {
       // Interactive with nothing scripted: any pass that reached a prompt for the busy team would close the channel and fail the run.
       const io = new ScriptedPrompter([], [], true);
-      expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [], notices: [expect.stringMatching(/write lock on team/)] } });
+      expect(await run({ config: store, lockWaitMs: 250 }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [], notices: [expect.stringMatching(/write lock on team/)] } });
       expect(io.asked).toEqual([]);
       expect(await readFile(join(placedPath, 'SKILL.md'), 'utf8')).toContain('description: hand edit');
       await expect(access(join(store.root, 'quarantine'))).rejects.toMatchObject({ code: 'ENOENT' });

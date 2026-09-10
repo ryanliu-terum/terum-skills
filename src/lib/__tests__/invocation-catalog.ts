@@ -484,9 +484,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/lib/teamRepo.ts",
-    "line": 486,
+    "line": 578,
     "policy": "not-a-hint",
-    "pattern": "if ((error as NodeJS.ErrnoException).code === 'ELOCKED') throw new CloneBusy(`Another terum-skills operation holds the write lock on ${options.label ?? root}; retry when it finishes.`);"
+    "pattern": "if (now() >= deadline) throw new CloneBusy(`Another terum-skills operation holds the write lock on ${options.label ?? root}; retry when it finishes.`);"
   },
   {
     "file": "src/lib/update.ts",
@@ -655,5 +655,17 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 165,
     "policy": "prose",
     "pattern": "if (/release not found|Not Found \\(HTTP 404\\)|no assets match/i.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;"
-  }
+  },
+  {
+    "file": "src/lib/teamRepo.ts",
+    "line": 126,
+    "policy": "not-a-hint",
+    "pattern": "const waitingLine = (info: { label: string; elapsedMs: number }): string => `Waiting for another terum-skills operation on ${info.label} to finish… (${Math.round(info.elapsedMs / 1000)} s)`;"
+  },
+  {
+    "file": "src/lib/teamRepo.ts",
+    "line": 601,
+    "policy": "not-a-hint",
+    "pattern": "throw new CloneBusy(`The write lock on ${label ?? root} is stamped ${Math.round(aheadMs / 1000)} s in this machine's future (${lockPath}), so waiting cannot clear it; remove that directory if no terum-skills command is running.`);"
+  },
 ];

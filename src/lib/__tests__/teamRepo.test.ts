@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process';
-import { access, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
 import { packageVersion } from '../package.js';
-import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText, withCloneLock } from '../teamRepo.js';
+import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText, withCloneLock, cloneLockPath, lockWait } from '../teamRepo.js';
 import { createConfigStore } from '../config.js';
 import { run as connect } from '../../commands/connect.js';
 import { ScriptedPrompter } from './fixtures.js';
@@ -393,6 +393,125 @@ describe('safeWrite (§6.0)', () => {
     expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe((await git(['rev-parse', 'origin/main'], clone)).trim());
     // The next write resets the clone itself and lands.
     expect(await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' })).toEqual({ changed: true, pushedTo: 'main' });
+  });
+
+  it('waits for a holder that releases and acquires as soon as it does, without spending the budget', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const release = await holdCloneLock(clone);
+    let released: Promise<void> | undefined;
+    const releaseOnce = () => released ??= release();
+    const timer = setTimeout(() => void releaseOnce(), 400);
+    const started = Date.now();
+    try {
+      await expect(withCloneLock(clone, async () => 'ran', { label: 'team', lockWaitMs: 30_000 })).resolves.toBe('ran');
+      expect(Date.now() - started).toBeGreaterThanOrEqual(400);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally { clearTimeout(timer); await releaseOnce(); }
+  });
+
+  it('starts the push budget once the lock is held, so a wait longer than the budget still performs the write', async () => {
+    // Real clock on purpose: the fake clock is not forwarded to the lock wait, and that separation is what is pinned.
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const release = await holdCloneLock(clone);
+    let released: Promise<void> | undefined;
+    const releaseOnce = () => released ??= release();
+    const timer = setTimeout(() => void releaseOnce(), 3_500);
+    try {
+      const result = await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', label: 'team', lockWaitMs: 30_000, deadlineMs: 3_000 });
+      expect(result.changed).toBe(true);
+      expect((await git(['show', 'origin/main:people/me.json'], clone)).length).toBeGreaterThan(0);
+    } finally { clearTimeout(timer); await releaseOnce(); }
+  }, 20_000);
+
+  it('a budget that runs out before any push names no remote movement', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    let clock = 0;
+    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', deadlineMs: 0, now: () => clock++, sleep: async () => undefined }))
+      .rejects.toThrow(/ran out of its 0 ms budget before it could attempt a push; nothing was committed or pushed\.$/);
+    expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
+  });
+
+  it('reports the wait through onWaiting after a second, then at most every five', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const release = await holdCloneLock(clone);
+    // Keep the fake clock in the same epoch as the real lock's mtime for the future-skew check.
+    let clock = Date.now();
+    const seen: { label: string; elapsedMs: number }[] = [];
+    try {
+      await expect(withCloneLock(clone, async () => 'ran', { label: 'team', lockWaitMs: 12_000, onWaiting: info => seen.push(info), now: () => clock, sleep: async ms => { clock += ms; } })).rejects.toBeInstanceOf(CloneBusy);
+      expect(seen.length).toBeGreaterThanOrEqual(2);
+      expect(seen[0]!.elapsedMs).toBeGreaterThanOrEqual(1_000);
+      expect(seen[0]!.elapsedMs).toBeLessThan(1_500);
+      for (let i = 1; i < seen.length; i++) expect(seen[i]!.elapsedMs - seen[i - 1]!.elapsedMs).toBeGreaterThanOrEqual(5_000);
+      expect(seen.every(info => info.label === 'team')).toBe(true);
+    } finally { await release(); }
+  });
+
+  it('still fails at the deadline with the unchanged sentence, and the default budget stays under five seconds', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const release = await holdCloneLock(clone);
+    try {
+      let started = Date.now();
+      await expect(withCloneLock(clone, async () => 'ran', { label: 'team', lockWaitMs: 1_500 })).rejects.toEqual(new CloneBusy('Another terum-skills operation holds the write lock on team; retry when it finishes.'));
+      expect(Date.now() - started).toBeGreaterThanOrEqual(1_500);
+      expect(Date.now() - started).toBeLessThan(6_000);
+      started = Date.now();
+      await expect(withCloneLock(clone, async () => 'ran', { label: 'team' })).rejects.toBeInstanceOf(CloneBusy);
+      expect(Date.now() - started).toBeLessThan(8_000);
+    } finally { await release(); }
+  });
+
+  it("refuses a lock stamped in this machine's future at once, naming the directory to remove", async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const path = cloneLockPath(clone), t = Date.now() / 1000 + 600;
+    await mkdir(path); await utimes(path, t, t);
+    const onWaiting = vi.fn(), started = Date.now();
+    try {
+      const error = await withCloneLock(clone, async () => 'ran', { label: 'team', lockWaitMs: 30_000, onWaiting }).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(CloneBusy);
+      expect((error as Error).message).toMatch(/^The write lock on team is stamped /);
+      expect((error as Error).message).toContain(`s in this machine's future (${path}), so waiting cannot clear it; remove that directory if no terum-skills command is running.`);
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(onWaiting).not.toHaveBeenCalled();
+    } finally { await rm(path, { recursive: true }); }
+    await expect(withCloneLock(clone, async () => 'ran', { label: 'team', lockWaitMs: 30_000, onWaiting })).resolves.toBe('ran');
+  });
+
+  it('raises a non-ELOCKED acquisition failure on the first attempt instead of waiting', async () => {
+    const root = await temporaryDirectory();
+    await writeFile(join(root, 'notadir'), '');
+    const started = Date.now();
+    const error = await withCloneLock(join(root, 'notadir', 'clone'), async () => 'ran', { label: 'team', lockWaitMs: 30_000 }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(CloneBusy);
+    expect(['ENOTDIR', 'ENOENT']).toContain((error as NodeJS.ErrnoException).code);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('labels a safeWrite failure when the caller passes one', async () => {
+    const fixture = await bareTeam();
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const release = await holdCloneLock(clone);
+    try {
+      await expect(openTeamRepo(clone, fixture.bare).safeWrite(tree => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', label: 'team', lockWaitMs: 500 })).rejects.toEqual(new CloneBusy('Another terum-skills operation holds the write lock on team; retry when it finishes.'));
+    } finally { await release(); }
+  });
+
+  it('gives a watching person the long budget and a waiting line, and a background caller neither', () => {
+    const print = vi.fn();
+    expect(lockWait({ interactive: false, print })).toEqual({ lockWaitMs: 4_000 });
+    expect(print).not.toHaveBeenCalled();
+    const policy = lockWait({ interactive: true, print });
+    expect(policy.lockWaitMs).toBe(75_000);
+    policy.onWaiting!({ label: 'team', elapsedMs: 6_400 });
+    expect(print).toHaveBeenCalledWith('Waiting for another terum-skills operation on team to finish… (6 s)');
+    expect(lockWait({ interactive: true, print }, 1_234).lockWaitMs).toBe(1_234);
   });
 
   it('contention at acquisition is classified into CloneBusy for safeWrite and withCloneLock alike, never proper-lockfile\'s raw ELOCKED', async () => {

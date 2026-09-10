@@ -12,7 +12,7 @@ import { cancelled, failure, fromError, Result, success } from '../lib/result.js
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, personSchema, sameScope, teamSchema } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam, skillRecords } from '../lib/skills.js';
-import { openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
+import { openTeamRepo, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { parseRef, placementHome, samePending, teamForReference } from './install.js';
 
 export interface UninstallArgs extends WithForm { from?: string; ref?: string; kind?: 'skill' | 'member' | 'project'; member?: string; project?: string; team?: string; config?: ConfigStore; runner?: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>; }
@@ -208,7 +208,7 @@ export async function uninstallMany(input: UninstallInput & { targets: readonly 
       // surviving placement forever.
       for (const target of lastCopies) if (isAuto(target.id) && !installed.some((entry) => entry.id === target.id) && !declined.includes(target.id)) declined.push(target.id);
       tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);
-    }, { action: 'uninstall', handle: teamConfig.handle, message: `${teamConfig.handle}: uninstall ${label}`, ...input.safeWrite });
+    }, { action: 'uninstall', handle: teamConfig.handle, message: `${teamConfig.handle}: uninstall ${label}`, ...input.safeWrite, ...lockWait(io) });
     await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !pendings.some((pending) => samePending(entry, pending))); });
   } catch (error) {
     throw new UninstallInterruptedError(error instanceof Error ? error.message : String(error), results, { cause: error });

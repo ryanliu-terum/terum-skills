@@ -5,7 +5,7 @@ import { fromError, type Result, success } from '../lib/result.js';
 import { type Runner, systemRunner } from '../lib/runner.js';
 import { parseJson, personSchema } from '../lib/schema.js';
 import { findSkill } from '../lib/skills.js';
-import { openTeamRepo, type SafeWriteOptions, treeText } from '../lib/teamRepo.js';
+import { openTeamRepo, type SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
 
 export interface DeclineArgs extends WithForm { ref: string; team?: string; config?: ConfigStore; runner?: Runner; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>; }
@@ -27,7 +27,7 @@ export async function run(args: DeclineArgs, io: Prompter): Promise<Result<Decli
         person.declined.push(skill.id);
         tree.set(path, `${JSON.stringify(person, null, 2)}\n`);
       }
-    }, { action: 'decline', handle: binding.handle, ...args.safeWrite });
+    }, { action: 'decline', handle: binding.handle, ...args.safeWrite, ...lockWait(io) });
     io.print(`Declined ${skill.name} for ${binding.handle}.`);
     return success({ handle: binding.handle, id: skill.id, declined: true });
   } catch (error) { return fromError(error); }

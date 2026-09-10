@@ -9,7 +9,7 @@ import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
 import { fromError, CancelledError, Result, success } from '../lib/result.js';
 import { parseOrExplain, teamNameSchema } from '../lib/schema.js';
-import { withCloneLock } from '../lib/teamRepo.js';
+import { withCloneLock, lockWait } from '../lib/teamRepo.js';
 import { removePlacements } from './uninstall.js';
 
 export interface LeaveArgs extends WithForm { name: string; config?: ConfigStore; hook?: HookOptions; runner?: Runner; }
@@ -60,7 +60,7 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
  * for the whole run: this team's teardown drops its own `shared` records, so a later team's
  * placement at one of those paths would otherwise no longer be recognised as a source.
  */
-export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Prompter, 'print'>, runner: Runner = systemRunner, protectedSources?: readonly string[], onLastTeam?: () => Promise<void>): Promise<{ removedPaths: string[]; cloneRemoved: boolean; kept: string[] }> {
+export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Prompter, 'print' | 'interactive'>, runner: Runner = systemRunner, protectedSources?: readonly string[], onLastTeam?: () => Promise<void>): Promise<{ removedPaths: string[]; cloneRemoved: boolean; kept: string[] }> {
   const releaseTeam = await acquireTeamLock(store.root, name);
   if (!releaseTeam) throw new Error(`Another terum-skills sync holds the session lock on ${name} (${lockPath(store.root, name)}); retry when it finishes, or remove that file if no session is syncing.`);
   const kept: string[] = [];
@@ -111,7 +111,7 @@ export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Pr
         rm(join(store.root, 'cache', name), { recursive: true, force: true }),
         removeRunArtifacts(store.root, name),
       ]);
-    });
+    }, lockWait(io));
     const fresh = await store.update((fresh) => {
       delete fresh.teams[name];
       if (Object.keys(fresh.teams).length === 0) fresh.approvals = {};

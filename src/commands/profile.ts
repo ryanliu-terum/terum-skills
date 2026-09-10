@@ -4,7 +4,7 @@ import type { Prompter } from '../lib/prompt.js';
 import { fromError, type Result, success } from '../lib/result.js';
 import { type Runner, systemRunner } from '../lib/runner.js';
 import { parseJson, personSchema, teamSchema } from '../lib/schema.js';
-import { openTeamRepo, type SafeWriteOptions, treeText } from '../lib/teamRepo.js';
+import { openTeamRepo, type SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 
 export interface ProfileArgs extends WithForm { name?: string; bio?: string; role?: string; projects?: string[]; team?: string; config?: ConfigStore; runner?: Runner; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>; }
 export interface ProfileResult { handle: string; changed: string[]; }
@@ -33,7 +33,7 @@ export async function run(args: ProfileArgs, io: Prompter): Promise<Result<Profi
       const validated = personSchema.parse(person);
       if (changed.length) tree.set(path, `${JSON.stringify(validated, null, 2)}\n`);
       return changed;
-    }, { action: 'profile', handle: binding.handle, ...args.safeWrite });
+    }, { action: 'profile', handle: binding.handle, ...args.safeWrite, ...lockWait(io) });
     if (args.name !== undefined) await store.update(config => { config.display_name = args.name; });
     io.print(outcome.returned.length ? `Updated ${binding.handle}: ${outcome.returned.join(', ')}.` : `No profile changes for ${binding.handle}.`);
     return success({ handle: binding.handle, changed: outcome.returned });

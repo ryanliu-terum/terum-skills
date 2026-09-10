@@ -13,7 +13,7 @@ import { fromError, CancelledError, failure, Result, success } from '../lib/resu
 import { parseJson, parseSkillFrontmatter, Team, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { findSkill, readTeam } from '../lib/skills.js';
-import { openTeamRepo, refreshClone, SafeWriteOptions, shellQuote, treeText } from '../lib/teamRepo.js';
+import { openTeamRepo, refreshClone, SafeWriteOptions, shellQuote, treeText, lockWait } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
 import { sourceFiles } from '../lib/skill-source.js';
 import { assessHygiene, formatHygieneWarnings, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
@@ -51,7 +51,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const binding = config.teams[team]!;
     if (!binding.handle) throw new Error(`Team ${team} has no joined handle.`);
     const clone = store.teamClone(team);
-    await refreshClone(runner, clone, { label: team });
+    await refreshClone(runner, clone, { label: team, ...lockWait(io) });
 
     const teamJson = await readTeam(clone);
     const record = await findSkill(clone, team, reference.name);
@@ -118,6 +118,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       message: `${binding.handle}: publish ${record.name}`,
       ...(destination !== null ? { branch: destination } : {}),
       ...args.safeWrite,
+      ...lockWait(io),
     });
     if (!written.changed) return alreadyEndorsed(base, scopeLabel, io);
     reportHygieneWarnings((line) => { if (!preflightWarnings.has(line)) io.print(line); }, written.returned);

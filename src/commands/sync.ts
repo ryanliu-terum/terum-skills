@@ -17,7 +17,7 @@ import { allowedTools, Destination, parseJson, Person, personSchema, sameScope }
 import { normalizeRemote } from '../lib/remote.js';
 import { endorsedCandidates, findSkill, readPerson, readTeam, SkillRecord, skillRecords } from '../lib/skills.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
-import { CloneBusy, openTeamRepo, refreshClone, RemoteAccessError, treeText } from '../lib/teamRepo.js';
+import { CloneBusy, openTeamRepo, refreshClone, RemoteAccessError, treeText, LOCK_WAIT_MS, LockWaitOptions, lockWait } from '../lib/teamRepo.js';
 import { materializeVersion } from '../lib/version.js';
 import { autoShareGlobal, reconcileShared } from './connect.js';
 import { assertCheckoutFolder, installOne, placementHome, resolveDestination, samePending, skillAtSource } from './install.js';
@@ -28,6 +28,8 @@ export interface SyncArgs extends WithForm {
   hook?: boolean; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string; home?: string;
   /** Test knob: the clone lock's stale window for refreshClone. */
   lockStale?: number;
+  /** Test knob: the clone lock's wait budget. Production takes it from the Prompter (teamRepo lockWait). */
+  lockWaitMs?: number;
   /** Test knobs for the §8 rate limit (hook mode only) and the team mutex (every mode, R4). */
   now?: () => number; lock?: TeamLockOptions;
 }
@@ -111,12 +113,16 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
     // reconciliation) prints through this channel: in hook mode the lines ride SyncResult.notices to
     // stderr (§8), so stdout carries the reload directive alone; interactively they print as before.
     const childIo: Prompter = {
-      interactive: 'confirm' in io ? io.interactive : false,
+      interactive: !args.hook && 'confirm' in io ? io.interactive : false,
       print: notice,
       confirm: (question, options) => ('confirm' in io ? io.confirm(question, options) : Promise.resolve(false)),
       text: (question, defaultValue, options) => ('text' in io ? io.text(question, defaultValue, options) : Promise.reject(new Error('sync --hook cannot prompt'))),
       select: (question, choices, defaultChoice, options) => ('select' in io ? io.select(question, choices, defaultChoice, options) : Promise.reject(new Error('sync --hook cannot prompt'))),
     };
+    // `sync --hook` keeps the short budget and says nothing: its stdout is Claude Code's reload
+    // directive (:431), and it runs under the hook's own 60-second timeout (lib/hook.ts:13). Every
+    // other sync is a person waiting, and its waiting line rides `notices` like every other message.
+    const lockWaiting = args.hook ? { lockWaitMs: args.lockWaitMs ?? LOCK_WAIT_MS } : lockWait(childIo, args.lockWaitMs);
     if (args.prune) {
       if (!interactive) throw new Error('sync prune needs an interactive terminal.');
       const result = await prune(store, io as Prompter);
@@ -152,7 +158,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
         notice(`Skipping ${team}: ${detail}`); skipped.set(team, { reason: 'error', detail }); continue;
       }
       try {
-        await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {}, lockStale: args.lockStale });
+        await refreshClone(runner, clone, { label: team, env: args.hook ? { GIT_TERMINAL_PROMPT: '0' } : {}, lockStale: args.lockStale, ...lockWaiting });
       } catch (error) {
         if (error instanceof RemoteAccessError) {
           notice(`Skipping ${team}: could not fetch ${error.origin}: ${error.stderr}\n${error.explanation}`);
@@ -423,7 +429,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
     }
     await reconcileOrphans(store, runner, interactive ? io as Prompter : undefined, defer, notice, new Set(skipped.keys()), (team, path, kind) => {
       recordPlacement(team, path, kind); changed = true;
-    }, eligible);
+    }, eligible, lockWaiting);
     if (unregistered.size) {
       const roots = [...new Set([...unregistered].map(path => checkoutRootOf(path) ?? dirname(path)))].sort();
       notice(`Skipped ${unregistered.size} placements under folders not in your library: ${roots.join(', ')}`);
@@ -468,7 +474,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
 export function approved(config: Awaited<ReturnType<ConfigStore['read']>>, id: string, grants: ReturnType<typeof allowedTools>): boolean {
   return grants.ok && (grants.normalized === 'none' || config.approvals[id]?.grants === grants.hash);
 }
-async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, defer: (team: string, label: string) => void, notice: (line: string) => void, skipTeams: ReadonlySet<string>, record: (team: string, path: string, kind: 'adopted' | 'declined') => void, eligible: (path: string) => Promise<boolean>): Promise<void> {
+async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter | undefined, defer: (team: string, label: string) => void, notice: (line: string) => void, skipTeams: ReadonlySet<string>, record: (team: string, path: string, kind: 'adopted' | 'declined') => void, eligible: (path: string) => Promise<boolean>, lockWaiting: LockWaitOptions): Promise<void> {
   const config = await store.read();
   for (const [path, placement] of Object.entries(config.placements)) {
     // A team this run skipped is left alone here too: a clone another process holds may be
@@ -501,7 +507,7 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
             fresh.installed.push({ id: placement.id, version: placement.version, scope: placement.scope, since: new Date().toISOString().slice(0, 10) });
             tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
           }
-        }, { action: 'install', handle: binding.handle, message: `${binding.handle}: adopt ${placement.id.slice(0, 8)}` });
+        }, { action: 'install', handle: binding.handle, message: `${binding.handle}: adopt ${placement.id.slice(0, 8)}`, ...lockWaiting });
         notice(`Adopted orphaned placement at ${path}.`);
         record(placement.team, path, 'adopted');
       } else {
@@ -512,7 +518,7 @@ async function reconcileOrphans(store: ConfigStore, runner: Runner, io: Prompter
           const fresh = parseJson(personSchema, treeText(raw), personPath);
           if (!fresh.declined.includes(placement.id)) fresh.declined.push(placement.id);
           tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
-        }, { action: 'uninstall', handle: binding.handle, message: `${binding.handle}: decline ${placement.id.slice(0, 8)}` });
+        }, { action: 'uninstall', handle: binding.handle, message: `${binding.handle}: decline ${placement.id.slice(0, 8)}`, ...lockWaiting });
         notice(`Declined orphaned placement at ${path}.`);
         record(placement.team, path, 'declined');
       }

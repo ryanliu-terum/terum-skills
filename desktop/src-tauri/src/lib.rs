@@ -51,6 +51,12 @@ enum LineEvent {
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// How long every admitted child is given to act on its `cancel` frame before it is terminated. A CLI
+/// that is terminated runs no cleanup — on Windows there is no signal to catch — so this is the only
+/// chance a write in flight gets to release the clone's writer lock. Bounded: it delays app quit by
+/// at most this much, and only while a child is live.
+const CANCEL_GRACE_MS: u64 = 400;
+
 fn event_name(id: &str) -> String {
   format!("cli:{id}")
 }
@@ -153,8 +159,30 @@ fn cli_write(bridge: State<'_, Bridge>, id: String, line: String) -> Result<(), 
   stdin.write_all(line.as_bytes()).and_then(|_| stdin.write_all(b"\n")).and_then(|_| stdin.flush()).map_err(|e| e.to_string())
 }
 
-/// Allow stdin-close cancellation 1,500 ms, then terminate the Unix process group.
-/// Windows falls back to Child::kill: it does not terminate descendant processes.
+/// The descendant-kill argv for a Windows child tree. Split out from the spawn so it is unit-testable on any host.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))] // the Windows kill path and the test below are its only callers
+fn taskkill_args(pid: u32) -> [String; 4] {
+  ["/PID".to_string(), pid.to_string(), "/T".to_string(), "/F".to_string()]
+}
+
+/// Windows has no process group to signal: `Child::kill` is TerminateProcess on the direct child alone,
+/// so an eval's `claude.exe` grandchildren outlive it and keep spending the user's account. `taskkill /T`
+/// walks the tree. Run before `Child::kill`, while the tree is still rooted at a live pid; the open Child
+/// handle keeps that pid reserved, so this can never reach an unrelated process. A missing or refusing
+/// taskkill.exe is not fatal — the `Child::kill` that follows is exactly today's behaviour, and there is
+/// no channel here to report on.
+#[cfg(windows)]
+fn kill_tree(pid: u32) {
+  let _ = Command::new("taskkill")
+    .args(taskkill_args(pid))
+    .creation_flags(CREATE_NO_WINDOW)
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .status();
+}
+
+/// Allow protocol cancellation 1,500 ms, then terminate the Unix process group or Windows child tree.
 #[tauri::command]
 fn cli_kill(bridge: State<'_, Bridge>, id: String) -> Result<(), String> {
   let handle = bridge.children.lock().map_err(|e| e.to_string())?.get(&id).cloned().ok_or("no such process")?;
@@ -166,7 +194,13 @@ fn cli_kill(bridge: State<'_, Bridge>, id: String) -> Result<(), String> {
   loop {
     {
       let mut guard = handle.lock().map_err(|e| e.to_string())?;
-      if guard.child.try_wait().map_err(|e| e.to_string())?.is_some() { return Ok(()); }
+      if guard.child.try_wait().map_err(|e| e.to_string())?.is_some() {
+        // The leader stopped on its own, but on Windows nothing re-parents or terminates what it
+        // spawned. Sweep the tree while its pid is still reserved by the handle we hold.
+        #[cfg(windows)]
+        kill_tree(guard.child.id());
+        return Ok(());
+      }
     }
     if Instant::now() >= deadline { break; }
     std::thread::sleep(Duration::from_millis(25));
@@ -183,15 +217,31 @@ fn cli_kill(bridge: State<'_, Bridge>, id: String) -> Result<(), String> {
   }
   #[cfg(windows)]
   {
-    let _ = handle.lock().map_err(|e| e.to_string())?.child.kill();
+    let mut guard = handle.lock().map_err(|e| e.to_string())?;
+    kill_tree(guard.child.id());
+    let _ = guard.child.kill();
   }
   Ok(())
 }
 
 /// Stop all admitted children while holding admission closed. Unix descendants share the group.
+/// Every child is asked to stop through the protocol first: a terminated CLI runs no cleanup, so on
+/// Windows a write in flight would leave the clone's writer lock directory behind for up to a minute.
+/// Closing stdin is not a substitute — src/lib/frames.ts fails pending questions on end-of-input and
+/// never calls the cancellation hook, so a verb that asks nothing (eval) would keep running.
 fn kill_all(bridge: &Bridge) {
   if let Ok(mut children) = bridge.children.lock() {
     if children.is_empty() { return; }
+    for handle in children.values() {
+      if let Ok(mut guard) = handle.lock() {
+        if let Some(stdin) = guard.stdin.as_mut() {
+          // Best effort: a child whose pipe is already gone is a child that is already stopping.
+          let _ = stdin.write_all(b"{\"t\":\"cancel\"}\n").and_then(|_| stdin.flush());
+        }
+        guard.stdin.take();
+      }
+    }
+    std::thread::sleep(Duration::from_millis(CANCEL_GRACE_MS));
     #[cfg(unix)]
     {
       for handle in children.values() {
@@ -210,7 +260,12 @@ fn kill_all(bridge: &Bridge) {
     }
     #[cfg(windows)]
     for handle in children.values() {
-      if let Ok(mut guard) = handle.lock() { let _ = guard.child.kill(); }
+      if let Ok(mut guard) = handle.lock() {
+        // Descendants outlive the leader here, so sweep the tree even if the leader is already gone;
+        // the open Child handle keeps its pid reserved, so the sweep cannot hit an unrelated process.
+        kill_tree(guard.child.id());
+        let _ = guard.child.kill();
+      }
     }
     children.clear();
   }
@@ -219,6 +274,11 @@ fn kill_all(bridge: &Bridge) {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn taskkill_argv_targets_the_whole_child_tree() {
+    assert_eq!(taskkill_args(1234), ["/PID".to_string(), "1234".to_string(), "/T".to_string(), "/F".to_string()]);
+  }
 
   #[test]
   fn child_cap_rejects_eight_pending_entries_and_frees_removed_slots() {

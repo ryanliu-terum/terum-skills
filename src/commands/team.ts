@@ -1,4 +1,4 @@
-import { shellQuote } from '../lib/teamRepo.js';
+import { shellQuote, lockWait } from '../lib/teamRepo.js';
 import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { randomUUID } from 'node:crypto';
@@ -123,7 +123,7 @@ export async function remove(args: RemoveArgs, io: Prompter): Promise<Result<Rem
     const question = args.archiveOnly ? `Archive ${targetHandle}? (y/N)` : `Revoke GitHub access for @${login} and archive ${targetHandle}? (y/N)`;
     if (!(await io.confirm(question))) throw new CancelledError('Team removal was cancelled.');
     const repo = openTeamRepo(clone, binding.remote, runner);
-    await repo.safeWrite((tree) => archiveMutation(tree, targetHandle, revoking ? login : undefined), { action: 'team-remove', handle: binding.handle, targetHandle, message: `${binding.handle}: remove ${targetHandle}` });
+    await repo.safeWrite((tree) => archiveMutation(tree, targetHandle, revoking ? login : undefined), { action: 'team-remove', handle: binding.handle, targetHandle, message: `${binding.handle}: remove ${targetHandle}`, ...lockWait(io) });
     if (ownerRepo !== null && !args.archiveOnly) {
       try {
         if (collaborator) {
@@ -331,7 +331,7 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     let rejoined = false;
     for (let attempt = 1; ; attempt++) {
       try {
-        await repo.safeWrite((tree) => { rejoined = joinMutation(tree, identity, boundHandle); }, { action: 'join', handle: identity.handle, message: `${identity.handle}: join` });
+        await repo.safeWrite((tree) => { rejoined = joinMutation(tree, identity, boundHandle); }, { action: 'join', handle: identity.handle, message: `${identity.handle}: join`, ...lockWait(io) });
         break;
       } catch (error) {
         if (!(error instanceof HandleCollisionError) || attempt >= MAX_HANDLE_ATTEMPTS) throw error;

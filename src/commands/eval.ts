@@ -22,7 +22,7 @@ import { type Runner, systemRunner } from '../lib/runner.js';
 import { parseSkillFrontmatter } from '../lib/schema.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { findSkill, readTeam, skillRecords } from '../lib/skills.js';
-import { openTeamRepo, refreshClone, treeText } from '../lib/teamRepo.js';
+import { openTeamRepo, refreshClone, treeText, lockWait } from '../lib/teamRepo.js';
 import { materializeVersion, resolveVersion } from '../lib/version.js';
 
 export interface EvalArgs extends WithForm {
@@ -44,6 +44,8 @@ export interface EvalArgs extends WithForm {
   agent?: AgentApi;
   preflight?: (model?: string) => ReturnType<typeof systemPreflight>;
   now?: () => Date;
+  /** Test knob: the clone lock's wait budget. Production takes it from the Prompter (teamRepo lockWait). */
+  lockWaitMs?: number;
 }
 
 export interface EvalResult {
@@ -80,7 +82,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const eligibility = commitEligibility({ ...args, team: teamName }, binding, args.form);
     if (eligibility !== null) return failure(eligibility);
     const clone = store.teamClone(teamName);
-    await refreshClone(runner, clone, { label: teamName });
+    await refreshClone(runner, clone, { label: teamName, ...lockWait(io, args.lockWaitMs) });
     const team = await readTeam(clone);
     let record = await findSkill(clone, teamName, args.ref);
     if (!record) return failure(`No skill named or identified by ${args.ref} exists in team ${teamName}.`);
@@ -194,7 +196,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
                 if (tree.before(path) !== undefined) throw new Error(`${path} already exists upstream; generated eval assets never overwrite committed files. Rerun eval to evaluate the authored assets.`);
                 tree.set(path, content);
               }
-            }, { action: 'eval-assets', handle: binding.handle, message: `${binding.handle}: eval assets ${record.name}` });
+            }, { action: 'eval-assets', handle: binding.handle, message: `${binding.handle}: eval assets ${record.name}`, label: teamName, ...lockWait(io, args.lockWaitMs) });
           }
           // The commit path is the ordinary write path, so it may also have carried the runner's
           // pending source edits — a rename included (review P2). Re-resolve the record by its
@@ -309,7 +311,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const committedPath = receiptPath(record.id, version, runId);
         await openTeamRepo(clone, binding.remote, runner).safeWrite(
           (tree) => tree.set(committedPath, source),
-          { action: 'eval', handle: binding.handle, message: `${binding.handle}: eval ${record.name}` },
+          { action: 'eval', handle: binding.handle, message: `${binding.handle}: eval ${record.name}`, label: teamName, ...lockWait(io, args.lockWaitMs) },
         );
         io.print(`Committed eval receipt ${committedPath}.`);
         return success({ ...value, receiptPath: committedPath, commit: { ok: true, receiptPath: committedPath } });
