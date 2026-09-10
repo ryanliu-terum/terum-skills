@@ -978,6 +978,81 @@ describe('sync --hook (§3, §6)', () => {
   });
 });
 
+describe('sync restore pass (recorded installed, missing placement)', () => {
+  const RESTORE_QUESTION = 'Restore 1 skill(s) recorded as installed but missing on this machine from team?';
+  async function recordedInstallNoPlacement(scope: { kind: 'global' } | { kind: 'project'; project: string } = { kind: 'global' }) {
+    const prepared = await configuredSkill();
+    await pushFromSeed(prepared.fixture.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [{ id: ID, version: null, scope, since: '2026-09-04' }] }), null, 2)}\n`);
+    return prepared;
+  }
+
+  it('re-places a recorded install with no placement on interactive confirmation and updates the ledger', async () => {
+    const { store } = await recordedInstallNoPlacement();
+    const io = new ScriptedPrompter([], [true], true);
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 1, changed: true, deferred: [], teams: [{ team: 'team', state: 'complete', counts: { placed: 1 } }] } });
+    expect(io.asked).toEqual([RESTORE_QUESTION]);
+    const path = join(placementHome(store), '.claude', 'skills', 'sample');
+    expect((await store.read()).placements[path]).toMatchObject({ id: ID, team: 'team', scope: { kind: 'global' } });
+    expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('description: old');
+    await expect(access(stampPath(store.root, 'team'))).resolves.toBeUndefined();
+    // Steady state: the next sync finds the placement and asks nothing.
+    const again = new ScriptedPrompter([], [], true);
+    expect(await run({ config: store }, again)).toMatchObject({ ok: true, value: { placed: 0 } });
+    expect(again.asked).toEqual([]);
+  });
+
+  it('a declined restore places nothing, corrupts nothing, keeps person.installed, and is offered again next run', async () => {
+    const { store, clone } = await recordedInstallNoPlacement();
+    const io = new ScriptedPrompter([], [false], true);
+    expect(await run({ config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, changed: false, deferred: [] } });
+    expect(io.asked).toEqual([RESTORE_QUESTION]);
+    expect((await store.read()).placements).toEqual({});
+    const seedPerson = JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')) as { installed: { id: string }[]; declined: string[] };
+    expect(seedPerson.installed).toEqual([{ id: ID, version: null, scope: { kind: 'global' }, since: '2026-09-04' }]);
+    expect(seedPerson.declined).not.toContain(ID);
+    // Ask-once-per-run: nothing was recorded, so the next interactive sync offers the batch again.
+    const again = new ScriptedPrompter([], [false], true);
+    expect(await run({ config: store }, again)).toMatchObject({ ok: true, value: { placed: 0 } });
+    expect(again.asked).toEqual([RESTORE_QUESTION]);
+  });
+
+  it('defers the restore by name in hook mode without placing, so the stamp is withheld and the next session retries', async () => {
+    const { store } = await recordedInstallNoPlacement();
+    const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
+    expect(await run({ hook: true, config: store }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'] } });
+    expect(io.lines).toEqual([]);
+    expect((await store.read()).placements).toEqual({});
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('skips a project-scope record whose project has no matching checkout here, with a reason, no prompt, and no guessed path', async () => {
+    const prepared = await configuredSkill();
+    await pushFromSeed(prepared.fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: ['https://git.example.com/acme/product.git'], skills: [ID] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    await pushFromSeed(prepared.fixture.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [{ id: ID, version: null, scope: { kind: 'project', project: 'product' }, since: '2026-09-04' }] }), null, 2)}\n`);
+    const outside = await temporaryDirectory();
+    const io = new ScriptedPrompter([], [], true);
+    expect(await run({ config: prepared.store, cwd: outside }, io)).toMatchObject({ ok: true, value: { placed: 0, deferred: [], teams: [{ team: 'team', state: 'complete' }] } });
+    expect(io.asked).toEqual([]);
+    expect(io.lines.filter((line) => line === 'Skipped restoring sample: its recorded project scope (product) has no matching checkout here; run sync from that project\'s checkout.')).toHaveLength(1);
+    expect((await prepared.store.read()).placements).toEqual({});
+    await expect(access(stampPath(prepared.store.root, 'team'))).resolves.toBeUndefined();
+  });
+
+  it('leaves the endorsed batch unchanged: endorsed and restorable skills each get their own batch confirm and both land', async () => {
+    const prepared = await configuredSkill();
+    await pushFromSeed(prepared.fixture.seed, 'skills/second/SKILL.md', skill('second').replace('name: sample', 'name: second').replace(ID, SECOND_ID));
+    await pushFromSeed(prepared.fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [SECOND_ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    await pushFromSeed(prepared.fixture.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [{ id: ID, version: null, scope: { kind: 'global' }, since: '2026-09-04' }] }), null, 2)}\n`);
+    const io = new ScriptedPrompter([], [true, true], true);
+    expect(await run({ config: prepared.store }, io)).toMatchObject({ ok: true, value: { placed: 2, deferred: [], teams: [{ team: 'team', state: 'complete', counts: { placed: 2 } }] } });
+    expect(io.asked).toEqual(['Install 1 newly endorsed skill(s) from team?', RESTORE_QUESTION]);
+    expect(await readFile(join(placementHome(prepared.store), '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: old');
+    expect(await readFile(join(placementHome(prepared.store), '.claude', 'skills', 'second', 'SKILL.md'), 'utf8')).toContain('description: second');
+    const ids = Object.values((await prepared.store.read()).placements).map((entry) => entry.id).sort();
+    expect(ids).toEqual([ID, SECOND_ID]);
+  });
+});
+
 async function orphanedPlacement(installed = false) {
   const prepared = await configuredSkill();
   const home = join(prepared.fixture.root, 'home');
