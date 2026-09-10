@@ -15,8 +15,8 @@ function withParams(base:string,params:string[]):string {
  return query?base+(base.includes('?')?'&':'?')+query:base;
 }
 
-/** Every state-changing action a card offers, in menu order. `origin` is the `root=marketplace`
- *  crumb the detail page reads back, or '' from the library. */
+/** Every state-changing action a card offers, in menu order. `origin` is the origin the detail page
+ *  reads back — `root=marketplace`, or `root=<checkout repo root>` from a project Library — or '' from the Global library. */
 export function cardActions(skill:SkillCard,{origin='',runEvalInApp=false}:{origin?:string;runEvalInApp?:boolean}={}):CardAction[] {
  const base=detailPath(skill),ridesOrigin=skill.teamed||!skill.path,at=(...params:string[])=>withParams(base,[...params,ridesOrigin?origin:'']);
  const actions:CardAction[]=[{key:'open',label:'Open',to:at(),reason:null}];

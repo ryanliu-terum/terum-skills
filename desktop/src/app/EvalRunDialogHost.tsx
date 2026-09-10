@@ -14,7 +14,10 @@ export function EvalRunDialogHost(){
  // Keep the run's dialog usable even if a post-run inventory refresh fails.
  if(current&&query.data?.ok&&snapshot?.skill!==query.data.value)setSnapshot({ref:current.ref,team:current.team,skill:query.data.value});
  const skill=query.data?.ok?query.data.value:snapshot?.ref===current?.ref&&snapshot?.team===current?.team?snapshot?.skill:null;
- const fromUrl=current!==null&&location.pathname==='/skill/'+encodeURIComponent(current.ref)&&params.get('dialog')==='run-eval';
+ // The run's ref is the skill's name now, so a by-path detail page — whose pathname is the literal
+ // /skill/local — is matched by its route rather than by the ref. No wider than before: the ref
+ // used to BE 'local' there, which already matched any /skill/local page.
+ const fromUrl=current!==null&&params.get('dialog')==='run-eval'&&(location.pathname==='/skill/'+encodeURIComponent(current.ref)||location.pathname==='/skill/local');
  function closeUrl(){if(fromUrl)setParams(p=>{p.delete('dialog');return p;},{replace:true});}
  return current&&skill?<RunEvalDialog key={current.startedAt} skill={skill} open={fromUrl} onClose={closeUrl}/>:null;
 }

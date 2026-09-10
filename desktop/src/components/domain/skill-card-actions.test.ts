@@ -64,3 +64,12 @@ it('keeps the same five rows whatever the state, so the menu does not change sha
   expect(cardActions(skill,{runEvalInApp:true}).map(a=>a.key)).toEqual(['open','run-eval','move','place','publish']);
  }
 });
+
+it('rides a checkout origin exactly as it rides the marketplace one',()=>{
+ const origin='root=%2FUsers%2Fyou%2Fcode%2Fterum',rows=cardActions(card(),{origin});
+ expect(rows.find(a=>a.key==='open')?.to).toBe('/skill/deploy-check?'+origin);
+ expect(rows.find(a=>a.key==='place')?.to).toBe('/skill/deploy-check?dialog=remove&'+origin);
+ const local=cardActions(card({teamed:false,path:'~/.claude/skills/notes'}),{origin});
+ expect(local.find(a=>a.key==='open')?.to).toBe('/skill/local?path='+encodeURIComponent('~/.claude/skills/notes'));
+ expect(local.find(a=>a.key==='place')?.to).toBe('/skill/local?path='+encodeURIComponent('~/.claude/skills/notes')+'&dialog=remove');
+});
