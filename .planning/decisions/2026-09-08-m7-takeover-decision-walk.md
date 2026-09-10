@@ -227,6 +227,7 @@ Ratified by Ryan: "Yes, ratify it."
 - **Migration / schema:** none.
 - **Effort / risk / blast radius:** S7w shrinks to RM-24 (driving setup) plus the focus policy; the native half is deferred.
 - **Grounding findings:** lib.rs command list and capabilities read at f8557c4; the sync addendum's "never sync on a timer" rule stands.
+- **Amendment (2026-09-10, W-08, spec `.planning/specs/2026-09-10-w08-refresh-receipts.md`):** (a) the CLI `refresh` verb closes the **remote** staleness case this decision did not consider — a teammate's commit reaches this machine only through a fetch, and the app now runs one on focus, throttled to a minute, never on a timer; (b) the deferred sixth native `stat_state_files()` command stays deferred and its gate is still unmet; (c) `lib.rs` stays at five commands.
 
 ---
 
