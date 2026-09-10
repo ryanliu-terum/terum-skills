@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { roiFractions } from '../score-fractions';
 import type { EvalReportModel, Receipt, ReceiptSummary } from '../types';
 
 const comparison = z.object({ win:z.number(), loss:z.number(), tie:z.number(), net_lift:z.number(), sign_p:z.number() }).passthrough();
@@ -63,6 +64,6 @@ export function mapEvalReport(report:z.infer<typeof cliEvalReport>,lines:readonl
  }
  return {receipt:r?mapReceipt(r):null,summary:s,wlt:s?[s.w,s.l,s.t]:null,incumbentLift:inc?[Math.round(inc.net_lift*100),inc.sign_p.toFixed(3)]:null,
  reportNumbers:s?{holes,nRounds:s.n+holes,triggerTotal:t?t.fp+t.tn:0}:null,
- scoreFractions:{routesExpected:t?t.tp+t.fn:null,roi:null,quality:r?.arm_scores.candidate!=null&&r.arm_scores.baseline!=null?[r.arm_scores.candidate,r.arm_scores.baseline]:null},
+ scoreFractions:{routesExpected:t?t.tp+t.fn:null,roi: roiFractions(r?.efficiency.candidate?.cost_usd, r?.efficiency.baseline?.cost_usd),quality:r?.arm_scores.candidate!=null&&r.arm_scores.baseline!=null?[r.arm_scores.candidate,r.arm_scores.baseline]:null},
  history,versions:report.versions,latestState:report.latestState,invalidReceiptFile:report.latestState==='invalid'?lines.find(line=>line.includes('newest receipt is invalid'))??null:null,localRuns,evalEstimate,evalEstimateText,evalEstimateTip:evalEstimateText};
 }

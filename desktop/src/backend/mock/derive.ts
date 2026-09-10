@@ -1,4 +1,5 @@
 import type { CloneState, Receipt, ReceiptSummary } from '../types';
+import { roiFractions } from '../score-fractions';
 import { design as d } from './fixture';
 type Sample = { wlt?: readonly number[] | null | undefined; cases?: number | undefined; partial?: readonly number[] | null | undefined };
 type Card = (typeof d.CATALOG)[number];
@@ -75,7 +76,7 @@ export function bulk_install(q:Project){return {total:q.skills,asking:skills_in(
 export function person_on_disk(handle:string):[number,number]{const mine=skills_by(handle);return [mine.filter(s=>s.installed!==false).length,mine.length];}
 export function category_remaining(key:string,n:number):number{return n-category_skills(key).length;}
 export function library_title(scope:string):string{const titles:Record<string,string>=d.DERIVED.libraryTitles;return Object.hasOwn(titles,scope)?titles[scope]!:'0 skills';}
-export function score_fractions(rc:Receipt|null):{roi:[number,number]|null;quality:[number,number]|null}{if(!rc)return {roi:null,quality:null};const c=Number.parseFloat(rc.eff.candidate[2]!.replace('$','')),b=Number.parseFloat(rc.eff.baseline[2]!.replace('$','')),max=Math.max(c,b);return {roi:[c/max,b/max],quality:[rc.arm.candidate,rc.arm.baseline]};}
+export function score_fractions(rc:Receipt|null):{roi:[number,number]|null;quality:[number,number]|null}{if(!rc)return {roi:null,quality:null};const c=Number.parseFloat(rc.eff.candidate[2]!.replace('$','')),b=Number.parseFloat(rc.eff.baseline[2]!.replace('$',''));return {roi:roiFractions(c,b),quality:[rc.arm.candidate,rc.arm.baseline]};}
 
 /** Library attention counts only the Global library; Inbox badges are separate fixture counts. */
 export function attentionCounts() {
