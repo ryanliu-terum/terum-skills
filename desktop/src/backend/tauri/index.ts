@@ -226,8 +226,19 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
   TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams.length===1?status.teams[0]?.categories??null:null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'}, // one team per machine — legacy 2+ shows a hint, not a projection
   PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [abbreviateHome(p.path,home),row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,row?.tracked===true?null:p.version?.slice(0,12)??null,p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
-  SHARED:value.ledger.shared.map(item=>{const row=rows.find(row=>row.path===item.source);return [local?.skills.find(skill=>skill.id===item.id)?.name??item.id,abbreviateHome(item.source,home),item.team,row?PLACEMENT_STATE[row.health]:'—'];}),
-  QUARANTINE:null,LOCAL_UNSHARED:rows.filter(row=>row.connected!==true&&row.shared.length===0&&row.placement===null).map(row=>row.name),HOOK:null,
+  // Sharing rows join the ledger's shared record to its scanned local row: the title is the skill name
+  // (the raw id only when no scanned folder matches), and the state claims only what the scan can back —
+  // Present when the connected source is on disk, Missing when a scanned root no longer holds it, '—'
+  // when the source lives outside every scanned root. Sync words (In sync / Local edit / Diverged) wait
+  // for a CLI health computed against the share baseline; `health` describes placements only.
+  SHARED:value.ledger.shared.map(item=>{
+   const row=rows.find(row=>row.shared.some(source=>source.id===item.id&&source.team===item.team))??rows.find(row=>normalizePath(row.path)===normalizePath(item.source));
+   const scanned=local?.local.some(section=>(section.rootState??'scanned')==='scanned'&&normalizePath(item.source).startsWith(normalizePath(section.root)+'/'))??false;
+   return [row?.name??local?.skills.find(skill=>skill.id===item.id)?.name??item.id,abbreviateHome(item.source,home),item.team,row!==undefined?'Present':scanned?'Missing':'—'];
+  }),
+  QUARANTINE:null,HOOK:null,
+  // Connectable global folders the ledger has no shared record for; the Sharing screen offers Share on each.
+  LOCAL_UNSHARED:local?.local.filter(section=>section.scope==='global').flatMap(section=>section.rows.filter(row=>row.connected!==true&&row.shared.length===0&&row.placement===null&&row.problem===undefined).map(row=>row.name))??[],
   APP_VERSION:import.meta.env.VITE_APP_VERSION,AGENT_CLI:'—',AGENT_CLI_AUTH:'unknown',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
   STORAGE:{cache:'—',cache_n:null,evals:'—',evals_n:null,quarantine:'—'},PINNED_N:value.ledger.placements.filter(p=>{const row=rows.find(row=>row.path===p.path);return row?row.tracked===false:p.version!==null;}).length,
   CLI_VERSION:value.version??'—',CLI_LATEST:null,FOLLOWING:[],SHARED_SPECIMEN:null,
@@ -240,8 +251,9 @@ function newestUpdated(skills: InventorySkill[]): InventorySkill | undefined {
   return skills.filter(skill => /^\d{4}-\d{2}-\d{2}T/.test(skill.updated) && Number.isFinite(Date.parse(skill.updated))).sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated))[0];
 }
 // `status` is the permission chip: host truth from the CLI's per-member `admin` (gh collaborator permission); 'unknown' when gh could not answer — never a defaulted 'member'.
+// `invited` and `joined` are null, not [] / '—': this CLI reports neither, and the screen must not assert "0 invitations" or a join date it never read.
 function rosterModel(team: CliStatus['teams'][number]): Roster {
-  const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? null, projects: member.projects ?? [], followers: null, joined: '—', last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
+  const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? null, projects: member.projects ?? [], followers: null, joined: null, last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
   return { members, invited: null, member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] };
 }
 function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, people: Person[], features: Pick<Features, 'localIdentity'>, home: string, query?: string): Catalog {
@@ -310,6 +322,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   };
   let homeOnce: Promise<string> | undefined;
   const home = () => (homeOnce ??= bridge.homeDirectory().catch(() => ''));
+  // App-config-dir storage, with one-time migration from the old webview keys. Hoisted so eval reads the stored defaults.
+  const prefs = nativePrefs();
   async function localPath(path:string):Promise<string> {
     if(path!=='~'&&!path.startsWith('~/'))return path;
     const directory=await home();
@@ -383,15 +397,16 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   }
 
   async function readModels<T>(options:ReadOptions|undefined, map:(value:CliStatus,local:CliLocal|null,platform:string,home:string)=>T):Promise<Result<T>> {
-    const [status,local,platform]=await Promise.all([
+    const [status,local,platform,directory]=await Promise.all([
       cached(['status'], cliStatus, options),
       cached(['ls','--local'], cliLocal, options),
       bridge.hostPlatform().then(value=>({ok:true as const,value})).catch((error:unknown)=>({ok:false as const,error:error instanceof Error?error.message:String(error),value:''})),
+      home(),
     ]);
-    // A caller's abort is not a read failure: no reason, no home lookup, nothing else touched.
+    // A caller's abort is not a read failure: no reason, nothing else touched.
     if (status.value===undefined&&options?.signal?.aborted) return {ok:false,error:'Cancelled.'};
     if (status.value===undefined) return result({ok:false,error:status.ok?'Status returned no data.':status.error,...(!status.ok&&status.refused?{refused:true}:{}),...(!status.ok&&status.cancelled?{cancelled:true}:{}),reason:status.ok?'unreadable':readReason(status.error)});
-    const value=map(status.value,local.ok?local.value:null,platform.value,await home());
+    const value=map(status.value,local.ok?local.value:null,platform.value,directory);
     const errors=[status,local,platform].flatMap(outcome=>outcome.ok?[]:[outcome.error]);
     return result(errors.length?{ok:false,error:errors.join('\n'),value,reason:status.ok?'unreadable':readReason(status.error)}:{ok:true,value});
   }
@@ -585,7 +600,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         const latest = newestUpdated(authored);
         const lastPublish = latest ? `${relativeTime(latest.updated)} · ${latest.name}` : '—';
         const disk: Person['onDisk'] = [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length];
-        people.push({ ...member, role: detail.value.member.role, lastPublish, last_publish: lastPublish, organization: null, declined: detail.value.member.declined, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: names.length ? [['Authored', names]] : [], placeNote: personPlaceNote(disk), onDisk: disk });
+        people.push({ ...member, joined: member.joined ?? '—', role: detail.value.member.role, lastPublish, last_publish: lastPublish, organization: null, declined: detail.value.member.declined, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: names.length ? [['Authored', names]] : [], placeNote: personPlaceNote(disk), onDisk: disk });
       }
       return { ok: true, value: catalogModel(team, inventory, local.value, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
     },
@@ -618,7 +633,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     invite: (args: InviteArgs) => run(['invite', ...(args.team ? ['--team', args.team] : []), ...(args.logins.length ? ['--', ...args.logins] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited], already: [...value.already], failed: value.failed.map(f => ({ login: f.login, error: f.error })) }), ['clone']),
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
-    eval: (args: EvalArgs) => run(['eval', ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,commit:value.commit }), ['clone']),
+    // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes"); an unset pref (or the k '—' sentinel) passes nothing and the CLI keeps no defaults of its own.
+    eval: (args: EvalArgs) => { const k = prefs.get('eval:k', ''), model = prefs.get('eval:model', ''), judge = prefs.get('eval:judge', ''); return run(['eval', ...(k && k !== '—' ? ['--k', k] : []), ...(model ? ['--model', model] : []), ...(judge ? ['--judge-model', judge] : []), ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,commit:value.commit }), ['clone']); },
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? cached<ValidateResult>(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, options).then(result) : fail('validate needs a skill name or a folder.'),
     update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
     diagnostics: () => run(['status'], z.unknown(), () => undefined, []),
@@ -629,8 +645,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async openInEditor(path) { try { await openPath(await localPath(path)); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyToClipboard(text) { try { await writeText(text); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyImage(png) { try { await writeImage(await Image.fromBytes(new Uint8Array(await png.arrayBuffer()))); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
-    // App-config-dir storage, with one-time migration from the old webview keys.
-    prefs: nativePrefs(),
+    prefs,
     subscribe(listener): Subscription { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };
   return backend;
