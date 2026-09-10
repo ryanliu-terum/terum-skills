@@ -286,12 +286,15 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     expect(await createTauriBackend(fakeBridge(() => undefined, null).bridge).launchContext()).toBeNull();
   });
   it('install builds the three argv shapes and maps the CLI rows to the seam', async () => {
-    const f = fakeBridge(ok('install', [{ id: 'deploy-check', team: 'terum', path: '/p', version: 'abc' }]));
+    const f = fakeBridge((args,emit) => {
+      if(args[0]==='ls') ok('ls',{roster:[],skills:[],problems:[],local:[{root:'/Projects/SSM/.claude/skills',repoRoot:'/Projects/SSM',scope:'project',label:'SSM',rootState:'scanned',rows:[],notOffered:[],problems:[]}]})(args,emit);
+      else ok('install', [{ id: 'deploy-check', team: 'terum', path: '/p', version: 'abc' }])(args,emit);
+    });
     const backend = createTauriBackend(f.bridge);
     expect(await backend.install({ ref: 'deploy-check', scope: 'SSM', force: true }).done).toEqual({ ok: true, value: [{ id: 'deploy-check', name: 'deploy-check', scope: 'SSM' }] });
     await backend.install({ ref: '', kind: 'member', member: 'ryan' }).done;
     await backend.install({ ref: '', kind: 'project', project: 'ssm' }).done;
-    expect(f.spawns.map((s) => s.args)).toEqual([['install', '--force', '--', 'deploy-check'], ['install', '--', 'member', 'ryan'], ['install', '--', 'project', 'ssm']]);
+    expect(f.spawns.map((s) => s.args)).toEqual([['ls','--local'], ['install', '--force', '--into', '/Projects/SSM', '--', 'deploy-check'], ['install', '--into', 'global', '--', 'member', 'ryan'], ['install', '--into', 'global', '--', 'project', 'ssm']]);
   });
   it('team, sync, connect, validate, search argv; sync never passes --hook', async () => {
     const f = fakeBridge(ok('x', { team: 't', placed: 2, deferred: [], id: 'a', name: 'a', findings: 0, warnings: 1 }));

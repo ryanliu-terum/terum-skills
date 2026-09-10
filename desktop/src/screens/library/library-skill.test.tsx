@@ -170,3 +170,11 @@ it('the empty library degrades its primary to the marketplace link when the CLI 
  fireEvent.click(screen.getAllByRole('button',{name:'Open marketplace'}).at(-1)!);
  await waitFor(()=>expect(location.hash).toBe('#/marketplace'));
 });
+
+it('preserves the mock breadcrumb and fixture hygiene caption',async()=>{
+ open('#/skill/deploy-check');
+ await screen.findByRole('heading',{name:'deploy-check'});
+ expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/terum/infra/deploy-check');
+ fireEvent.click(screen.getByRole('tab',{name:'Quality'}));
+ expect(screen.getByText('Hygiene checks · passed on connect, 12 days ago · free, no model calls')).toBeVisible();
+});

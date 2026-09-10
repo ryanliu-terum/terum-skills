@@ -29,7 +29,7 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  const version=s.versions?.teamCurrent;
  const versionLine=`Evaluates the team's current version${version?' '+version.slice(0,8):''} from the team repo${version&&s.versions?.placed&&s.versions.placed!==version?', not your installed '+s.versions.placed.slice(0,8):''}.`;
  const status=busy?'Running…':active?.state==='stopped'?'Stopped':active?.result?.ok===false?active.result.value?.commit?.ok===false?`Evaluated locally; committing the receipt failed: ${active.result.value.commit.error}`:active.result.error:undefined;
- return <WorkflowDialog title={title} body={versionLine} primary={finished?null:'Run eval'} command={s.evalCommand} close={close} submit={start} busy={busy} error={error} onStop={()=>void evalRun.stop()} dismissKeepsRunning lines={active?.lines??[]} status={status} closeLabel={finished?'Close':'Cancel'}>
+ return <WorkflowDialog title={title} body={versionLine} primary={finished?null:'Run eval'} command={`${s.evalCommand}${(active?.commit??commit)?' --commit':''}`} close={close} submit={start} busy={busy} error={error} onStop={()=>void evalRun.stop()} dismissKeepsRunning lines={active?.lines??[]} status={status} closeLabel={finished?'Close':'Cancel'}>
  <p>{s.evalEstimateText||'No previous run to estimate from. This uses your Claude account and can take a while.'}</p>{capabilities?.evalCommitChoice?<Checkbox label="Commit the receipt to the team" checked={active?.commit??commit} onCheckedChange={setCommit} disabled={active!==null}/>:null}
  </WorkflowDialog>;
 }

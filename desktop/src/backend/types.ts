@@ -1,5 +1,5 @@
 import type { Design } from '../fixtures/schema';
-export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library';value?:T};
+export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library'|'not-found'|'unreadable';value?:T};
 export interface LaunchContext { writtenAt: string; target?: string; intent?: 'setup' }
 export class PromptCancelledError extends Error { readonly cancelled = true as const; }
 export interface AskOptions {detail?:readonly string[]}
@@ -24,7 +24,7 @@ export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
 export interface ReportNumbers {holes:number;nRounds:number;triggerTotal:number;precisionObserved?:string}
 export interface EvalEstimate {cases:number;k:number;arms:number;runs:number;minutes:number;dollars:number;model:string}
-export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'> & SkillCard & {path:string;pathLabel:string;repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null;local?:true})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null;quality:[number,number]|null};method:string;
+export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'|'path'|'files'> & SkillCard & {path:string|null;repoPath:string;files:string[]|null;pathLabel:string;repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];installScopePaths?:Record<string,string>;projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;hygieneStatus:'pass'|'fail'|null;hygieneWhen:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null;local?:true})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null;quality:[number,number]|null};method:string;
  versions:{placed:string|null;teamCurrent:string|null;evaluated:string|null}|null;
  latestState:'ok'|'none'|'invalid';invalidReceiptFile:string|null;evalReportError:string|null;
  /** A same-named local folder the driving CLI is too old to identify: presence is unknown, so the
@@ -77,7 +77,7 @@ export interface IdentityArgs {name?:string;email?:string;defaultHandle?:string}
 export interface IdentityWrite {updated:{key:string;value:string}[];notice:string|null}
 export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}
 export interface InstalledResult {id:string;name:string;scope:Scope}
-export interface UninstallArgs {team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
+export interface UninstallArgs {from?:string;team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
 export interface UninstalledResult {id:string;name:string}
 export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
 export interface ConnectArgs {path?:string;home?:string;cwd?:string;team?:string;keepSource?:boolean;keepRepo?:boolean;relocate?:boolean;forget?:boolean;allowPrivileged?:boolean}
