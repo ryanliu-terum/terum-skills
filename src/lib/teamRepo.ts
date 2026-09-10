@@ -123,7 +123,6 @@ export interface LockWaitOptions {
   sleep?: (milliseconds: number) => Promise<void>;
 }
 
-
 const waitingLine = (info: { label: string; elapsedMs: number }): string => `Waiting for another terum-skills operation on ${info.label} to finish… (${Math.round(info.elapsedMs / 1000)} s)`;
 
 /**
