@@ -126,6 +126,28 @@ it('registers the folder the chooser returns, and leaves the library alone when 
  fireEvent.click(await screen.findByRole('button',{name:'Add project'}));
  await waitFor(()=>expect(add).toHaveBeenCalledWith('/Users/you/code/new-project'));
 });
+it('clears a failed add error when the next sidebar action starts, even a cancelled chooser',async()=>{
+ location.hash='#/library/global?__mock=detected-root';const backend=createMockBackend();
+ vi.spyOn(backend.checkouts,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Cannot register this folder'})));
+ vi.spyOn(backend,'pickFolder').mockResolvedValue({ok:true,value:null});
+ await openSidebar(backend);
+ fireEvent.click(await screen.findByRole('button',{name:'Add SSM to your library'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('Cannot register this folder');
+ fireEvent.click(screen.getByRole('button',{name:'Add project'}));
+ await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
+});
+it('moves the error to the action that failed last, never stacking two',async()=>{
+ location.hash='#/library/global?__mock=detected-root';const backend=createMockBackend();
+ vi.spyOn(backend,'pickFolder').mockResolvedValue({ok:false,error:'No folder chooser on this shell'});
+ vi.spyOn(backend.checkouts,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Cannot register this folder'})));
+ await openSidebar(backend);
+ fireEvent.click(await screen.findByRole('button',{name:'Add project'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('No folder chooser on this shell');
+ fireEvent.click(screen.getByRole('button',{name:'Add SSM to your library'}));
+ await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Cannot register this folder'));
+ expect(screen.getAllByRole('alert')).toHaveLength(1);
+ expect(screen.getByRole('alert').previousElementSibling).toHaveTextContent('SSM');
+});
 it('reports a chooser failure below the Add row without calling checkout add',async()=>{
  const backend=createMockBackend();
  const add=vi.spyOn(backend.checkouts,'add');

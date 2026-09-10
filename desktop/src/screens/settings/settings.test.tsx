@@ -31,6 +31,22 @@ it('renders Leave and asks the CLI confirmation',async()=>{const leave=vi.spyOn(
 it('renders every prune path and asks the CLI before deleting',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/machine?dialog=prune');const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Delete 2 quarantined folders?');for(const [when,name] of design.QUARANTINE)expect(dialog).toHaveTextContent(`quarantine/${when}/${name}`);fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('heading',{name:'Delete 2 quarantined item(s)?'})).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(sync).toHaveBeenCalledWith({prune:true});expect(location.hash).toBe('#/settings/machine');});
 it('keeps failed prune open',async()=>{vi.spyOn(backend,'sync').mockImplementation(()=>createRun(async()=>({ok:false,error:'Prune failed.'})));open('#/settings/machine?dialog=prune');fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('alert')).toHaveTextContent('Prune failed.');expect(screen.getByRole('dialog')).toBeInTheDocument();});
 it('renders the CLI config error line with hidden counts',async()=>{open('#/settings/account?__mock=error');expect(await screen.findByRole('alert')).toHaveTextContent("Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)");expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
+it('diagnoses config.json only when the CLI itself names it, and reveals the file',async()=>{
+ const reveal=vi.spyOn(backend,'revealPath');
+ open('#/settings/account?__mock=error');const alert=await screen.findByRole('alert');
+ expect(alert).toHaveTextContent('Invalid ~/.terum/skills/config.json');
+ expect(screen.getByText(/is not valid JSON/)).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'Show in Finder'}));
+ await waitFor(()=>expect(reveal).toHaveBeenCalledWith('~/.terum/skills/config.json'));
+});
+it('shows the no-team board when the settings read reports no team',async()=>{
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:false,error:'No team is configured on this machine.',reason:'no-team'});
+ open('#/settings/account');await screen.findByText('No team on this machine');
+ expect(screen.queryByText(/Couldn't read your settings/)).toBeNull();
+ expect(document.querySelector('.terminal-hint')).toHaveTextContent('npx -y terum-skills@latest setup');
+ fireEvent.click(screen.getByRole('button',{name:'Start setup'}));
+ await waitFor(()=>expect(location.hash).toBe('#/onboarding/boot?start=1'));
+});
 it('commits the loading skeleton with hidden sidebar counts',async()=>{open('#/settings/account?__mock=loading');expect(screen.getByTestId('settings-skeleton')).toBeInTheDocument();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
 it('changes data-theme from Appearance and updates an existing URL theme',async()=>{open('#/settings/appearance?theme=dark');fireEvent.click(await screen.findByRole('button',{name:'Light'}));await waitFor(()=>expect(document.documentElement.dataset.theme).toBe('light'));expect(useUiStore.getState().theme).toBe('light');expect(location.hash).toContain('theme=light');});
 it('renders the session-start hook read-only until the CLI reports its state',async()=>{open('#/settings/sync');await screen.findByText('Sync at session start');expect(screen.queryByRole('switch',{name:'Sync at session start'})).toBeNull();expect(screen.getByText('Managed by setup')).toBeInTheDocument();expect(screen.getByText(/Setup adds the entry to ~\/\.claude\/settings\.json with your consent/)).toBeInTheDocument();});

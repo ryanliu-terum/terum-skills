@@ -55,7 +55,7 @@ it('renders a reported shared name and abbreviated source',async()=>{
 });
 it('renders generic settings errors without diagnosing invalid JSON',async()=>{
  open('#/settings/account',(frame,name)=>{if(frame.t==='result'&&name==='status'){Object.assign(frame,{ok:false,error:'Permission denied.',exitCode:1});delete frame.value;}});
- expect(await screen.findByText("terum-skills could not read this machine's configuration. Check ~/.terum/skills is readable, then try again.")).toBeVisible();
+ expect(await screen.findByText("terum-skills could not read your settings, so this page shows nothing rather than stale values. The message below is the CLI's own.")).toBeVisible();
  expect(screen.queryByText(/not valid JSON/)).toBeNull();
 });
 it('draws empty placement and shared collections',async()=>{
