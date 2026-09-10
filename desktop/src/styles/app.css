@@ -79,6 +79,7 @@ button.icon-button:hover {background:var(--tk-bg3);color:var(--tk-text1);}
 .shell-link,.shell-link:hover {text-decoration:none;}
 .search-box:hover {color:var(--tk-text3);}
 .footer {display:flex;align-items:center;gap:4px;height:52px;padding:0 8px 0 12px;border-top:1px solid var(--tk-border1);box-sizing:border-box;flex-shrink:0;}
+.footer-identity {display:flex;align-items:center;gap:4px;flex-grow:1;min-width:0;}
 .avatar {display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--tk-brand);color:#fff;font-size:10px;font-weight:590;letter-spacing:.02em;flex-shrink:0;}
 .footer-lines {display:flex;flex-direction:column;gap:1px;flex-grow:1;min-width:0;}
 .footer-login {font-size:13px;font-weight:500;color:var(--tk-text1);}
