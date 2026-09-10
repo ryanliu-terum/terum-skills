@@ -5,11 +5,13 @@
  * `TERUM_SKILLS_AGENT_CMD` (default `claude`) so tests can substitute a stub.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { statSync } from 'node:fs';
 import { writeFile, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
+import { resolveAgentCommand, type AgentCommandEvidence } from './agent-command.js';
 
 export const DEFAULT_MODEL = 'sonnet'; // §16.9 [provisional]
 export const DEFAULT_TIMEOUT_MS = 600_000;
@@ -23,6 +25,11 @@ export const HEADLESS_NOTE =
   'You are running inside an automated, unattended evaluation. No human can answer questions; never stop to ask one — act on your best judgment and complete the task.';
 
 const agentCmd = (): string => process.env['TERUM_SKILLS_AGENT_CMD'] ?? 'claude';
+/** Host facts for the Windows shim resolution; every other platform spawns the name as is. */
+const hostEvidence = (): AgentCommandEvidence => ({
+  platform: process.platform, env: process.env, execPath: process.execPath,
+  isFile: (path) => { try { return statSync(path).isFile(); } catch { return false; } }, // a candidate that does not exist is simply not the binary
+});
 
 export class AgentRunError extends Error {}
 
@@ -119,11 +126,15 @@ function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Re
       process.exit(143);
     });
   }
+  const command = resolveAgentCommand(agentCmd(), args, hostEvidence());
+  if (!command.ok) return Promise.reject(new Error(command.error));
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(agentCmd(), [...args], {
+    const child = spawn(command.value.file, command.value.args, {
       cwd: options.cwd,
       env: { ...process.env, ...options.env },
       stdio: ['ignore', 'pipe', 'pipe'],
+      // Under the desktop app the agent must never flash a console window (matches the CLI runner).
+      windowsHide: true,
     });
     liveChildren.add(child);
     const out: Buffer[] = [];
