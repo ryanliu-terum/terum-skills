@@ -78,8 +78,34 @@ it('keeps the marketplace skill link and install button destinations distinct',a
  const install=within(card).getByRole('button',{name:'Install'});
  expect(install).toHaveClass('card-install');
  fireEvent.click(install);
+ // No `__mock=not-installed`: scenarios are a fixture affordance and must never ride along on a real navigation.
  await waitFor(()=>expect(location.hash).toBe('#/skill/a11y-audit?dialog=install&root=marketplace'));
  expect(await screen.findByRole('dialog',{name:'Install a11y-audit'})).toBeVisible();
+});
+it('stretches the card title link over the card so a body click opens the SKILL.md detail',async()=>{
+ open('#/library/global');
+ const card=await screen.findByTestId('skill-card-deploy-check');
+ const link=within(card).getByRole('link',{name:'deploy-check'});
+ expect(link).toHaveAttribute('href','#/skill/deploy-check');
+ fireEvent.click(link);
+ await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check'));
+ expect(await screen.findByTestId('frontmatter')).toBeInTheDocument();
+ expect(screen.getByRole('tab',{name:'SKILL.md'})).toHaveAttribute('aria-selected','true');
+});
+it('shows the truthful recorded state as Reinstall, never plain Install',async()=>{
+ const backend=createMockBackend();const library=await backend.library({scope:{kind:'global'}});if(!library.ok)throw new Error(library.error);
+ vi.spyOn(backend,'library').mockResolvedValue({...library,value:{...library.value,skills:library.value.skills.map(s=>s.name==='deploy-check'?{...s,installed:'recorded' as const,placed:false,onDiskOnly:false}:s)}});
+ const detail=await backend.skill({ref:'deploy-check'});if(!detail.ok)throw new Error(detail.error);
+ vi.spyOn(backend,'skill').mockResolvedValue({...detail,value:{...detail.value,installed:'recorded' as const,placed:false,onDiskOnly:false}});
+ openWith('#/library/global',backend);
+ const card=await screen.findByTestId('skill-card-deploy-check');
+ const button=within(card).getByRole('button',{name:'Reinstall'});
+ expect(button).toHaveAttribute('title','Installed · not on this machine');
+ expect(within(card).queryByRole('switch')).toBeNull();
+ expect(within(card).queryByText('Install')).toBeNull();
+ fireEvent.click(button);
+ await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check?dialog=install'));
+ expect(await screen.findByRole('dialog')).toBeInTheDocument();
 });
 
 function openWith(route:string,backend:Backend){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}

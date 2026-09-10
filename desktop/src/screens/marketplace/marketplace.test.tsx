@@ -20,6 +20,18 @@ it('renders the Docs asking count and exact raw grants', async () => { open('#/m
 it('renders Ryan buckets in the supplied order', async () => { open('#/marketplace/people/ryan'); await screen.findByRole('heading', { name: 'Ryan Liu' }); const buckets = design.DERIVED.personBuckets.ryan; expect(screen.getAllByRole('region').map(el => el.getAttribute('aria-label'))).toEqual(buckets.map(([bucket]) => bucket)); expect(names('skill-card-')).toEqual(buckets.flatMap(([, skills]) => skills)); });
 it('renders Lena placement note', async () => { open('#/marketplace/people/lena'); expect(await screen.findByText('Placed when you sync in Docs')).toBeInTheDocument(); });
 it('renders all seventeen catalog cards in topRated order', async () => { open('#/marketplace/skills'); await screen.findByRole('heading', { name: 'Top rated' }); expect(names('skill-card-')).toEqual(design.DERIVED.topRated); expect(names('skill-card-')).toHaveLength(17); });
+it('toggles the sort button between the drawn ranking and Name, reordering the list A–Z and back', async () => {
+  open('#/marketplace/skills');
+  await screen.findByRole('heading', { name: 'Top rated' });
+  fireEvent.click(screen.getByRole('button', { name: 'Most installed' }));
+  await waitFor(() => expect(location.hash).toContain('sort=name'));
+  expect(names('skill-card-')).toEqual([...design.DERIVED.topRated].sort((a, b) => a.localeCompare(b)));
+  const byName = screen.getByRole('button', { name: 'Name' });
+  expect(byName).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(byName);
+  await waitFor(() => expect(names('skill-card-')).toEqual(design.DERIVED.topRated));
+  expect(screen.getByRole('button', { name: 'Most installed' })).toBeInTheDocument();
+});
 it('renders projects in projectsByMembers order', async () => { open('#/marketplace/projects'); await screen.findByRole('heading', { name: 'Teams / Projects' }); const expected = design.DERIVED.projectsByMembers.map(name => design.PROJECTS.find(p => p.name === name)?.key); expect(names('project-card-')).toEqual(expected); });
 it('renders all twelve people in rosterByAdoption order', async () => { open('#/marketplace/people'); await screen.findByRole('heading', { name: 'People' }); expect(names('person-card-')).toEqual(design.DERIVED.rosterByAdoption); expect(names('person-card-')).toHaveLength(12); });
 it('renders ten category rows with supplied remaining counts', async () => { open('#/marketplace/categories'); await screen.findByRole('heading', { name: 'Browse by category' }); expect(names('category-row-')).toEqual(design.CATEGORIES.map(c => c[0])); for(const [category] of design.CATEGORIES){expect(design.DERIVED.categoryRemaining[category as keyof typeof design.DERIVED.categoryRemaining]).toBe(0);const row=screen.getByTestId('category-row-'+category);expect(within(row).queryByText(/\+\d+ more/)).toBeNull();expect(row.lastElementChild?.previousElementSibling).toHaveTextContent(design.DERIVED.categorySkills[category as keyof typeof design.DERIVED.categorySkills].join(' · '));} });
@@ -27,6 +39,20 @@ it('renders infra skills in categorySkills order', async () => { open('#/marketp
 it.each([['projects/nothing', 'No project named nothing.'], ['people/nobody', 'No teammate named nobody.'], ['categories/nothing', 'No category named nothing.']])('renders unknown %s errors', async (path, error) => { open('#/marketplace/' + path); expect(await screen.findByText('Not found')).toBeInTheDocument(); expect(screen.getByText(error)).toBeInTheDocument(); expect(screen.queryByRole('alert')).toBeNull(); await waitFor(() => expect(document.documentElement.dataset.appReady).toBe('true')); });
 it('marks loading content ready without waiting for the pending backend', async () => { open('#/marketplace?__mock=loading'); expect(screen.getByLabelText('Loading marketplace')).toBeInTheDocument(); await waitFor(() => expect(document.documentElement.dataset.appReady).toBe('true')); });
 it('renders fatal backend errors as an alert', async () => { open('#/marketplace?__mock=error'); expect(await screen.findByRole('alert')).toHaveTextContent('Could not resolve host: github.com'); });
+it('asserts no invented cause on the error board: generic title, the CLI message leads', async () => {
+  open('#/marketplace?__mock=error');
+  await screen.findByText("Couldn't read the marketplace");
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not resolve host: github.com');
+  expect(screen.queryByText(/could not pull/)).toBeNull();
+});
+it('hides project Edit when no checkout path is recorded instead of opening a guessed relative path', async () => {
+  const backend = pickBackend(); const before = await backend.catalog(); if (!before.ok) throw new Error(before.error);
+  vi.spyOn(backend, 'catalog').mockResolvedValue({ ...before, value: { ...before.value, projects: before.value.projects.map(p => p.key === 'terum' ? { ...p, path: null } : p) } });
+  open('#/marketplace/projects/terum');
+  await screen.findByRole('heading', { name: 'Terum' });
+  expect(await screen.findByRole('button', { name: "Remove Terum's 8 skills from this machine" })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+});
 it('keeps the home populated for the empty scenario', async () => { open('#/marketplace?__mock=empty'); await screen.findByRole('region', { name: 'Top rated' }); expect(names('skill-card-')).toEqual(design.DERIVED.topRated.slice(0, 3)); expect(await screen.findByRole('link', { name: 'Global 15' })).toBeInTheDocument(); for (const name of ['Pushes 3', 'Updates 3', 'Alerts 8']) expect(screen.getByRole('link', { name })).toBeInTheDocument(); });
 it('applies hero search only on Enter and preserves URL state', async () => { open('#/marketplace?theme=light'); const input = await screen.findByRole('textbox', { name: 'Search skills, people and projects' }); fireEvent.change(input, { target: { value: 'deploy prod' } }); expect(location.hash).toBe('#/marketplace?theme=light'); fireEvent.keyDown(input, { key: 'Enter' }); expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument(); expect(location.hash).toContain('theme=light'); expect(location.hash).toContain('q=deploy+prod'); });
 it('applies project search and preserves rail state', async () => { open('#/marketplace/projects/terum?rail=closed'); const input = await screen.findByRole('textbox', { name: "Search Terum's 8 skills" }); fireEvent.change(input, { target: { value: 'deploy-check' } }); fireEvent.keyDown(input, { key: 'Enter' }); await waitFor(() => expect(names('skill-card-')).toEqual(['deploy-check'])); expect(screen.getByTestId('skill-card-deploy-check').closest('.market-grid')).toHaveAttribute('data-columns', '3'); });
@@ -62,7 +88,7 @@ it('keeps backend cancellation out of the error board', async () => {
   await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(trash).not.toBeDisabled());
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.queryByText("Couldn't reach the team repo")).toBeNull();
+  expect(screen.queryByText("Couldn't read the marketplace")).toBeNull();
 });
 
 it('asks once per project run, writes nothing before Yes, and keeps No silent', async () => {
@@ -82,7 +108,7 @@ it('asks once per project run, writes nothing before Yes, and keeps No silent', 
   expect(await backend.catalog()).toEqual(before); expect(seen).not.toHaveBeenCalled();
   fireEvent.click(within(dialog).getByRole('button', { name: 'No' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(screen.queryByRole('alert')).toBeNull(); expect(screen.queryByText("Couldn't reach the team repo")).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull(); expect(screen.queryByText("Couldn't read the marketplace")).toBeNull();
   expect(await backend.catalog()).toEqual(before); expect(seen).not.toHaveBeenCalled();
   const first = remove.mock.results[0]!;
   if (first.type !== 'return') throw new Error('Missing run.');
@@ -99,17 +125,70 @@ it('asks once per project run, writes nothing before Yes, and keeps No silent', 
   const after = await backend.catalog(), library = await backend.library({ scope: { kind: 'global' } });
   if (!after.ok || !library.ok) throw new Error('Fixture unavailable.');
   for (const target of targets) {
-    expect(after.value.skills.find(s => s.name === target.name)).toMatchObject({ installed: false, placed: false, onDiskOnly: false, paths: [] });
+    expect(after.value.skills.find(s => s.name === target.name)).toMatchObject({ installed: 'absent', placed: false, onDiskOnly: false, paths: [] });
     const detail = await backend.skill({ ref: target.name });
-    expect(detail).toMatchObject({ ok: true, value: { installed: false, placed: false, onDiskOnly: false, paths: [] } });
+    expect(detail).toMatchObject({ ok: true, value: { installed: 'absent', placed: false, onDiskOnly: false, paths: [] } });
     const local = library.value.skills.find(s => s.name === target.name);
-    if (local) expect(local).toMatchObject({ installed: false, placed: false, onDiskOnly: false, paths: [] });
+    if (local) expect(local).toMatchObject({ installed: 'absent', placed: false, onDiskOnly: false, paths: [] });
   }
   off();
 });
 it('shows failures from install in the centered error layout', async () => { vi.spyOn(pickBackend(), 'install').mockImplementation(() => { throw new Error('Cannot install project.'); }); open('#/marketplace/projects/docs?dialog=install'); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); expect(await screen.findByRole('alert')).toHaveTextContent('Cannot install project.'); });
 
 it.each(['-1', 'abc', '9'.repeat(400)])('treats invalid active facet count %s as zero', async active => { open('#/marketplace?q=deploy%20prod&active=' + active); expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument(); expect(screen.queryByText(/with .* filters on/)).toBeNull(); });
+
+it('commits a changed facet selection and shrinks the list to the CTA count', async () => {
+  open('#/marketplace/skills?filters=open');
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.change(within(filters).getByLabelText('Installed by · at least'), { target: { value: '12' } });
+  fireEvent.click(within(filters).getByRole('button', { name: 'Show 1 skill' }));
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
+  await waitFor(() => expect(names('skill-card-')).toEqual(['deploy-check']));
+  expect(location.hash).toContain('installs=12');
+  expect(location.hash).toContain('active=4');
+});
+
+it('keeps the list unchanged when the untouched default selection is committed', async () => {
+  open('#/marketplace/skills?filters=open');
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.click(within(filters).getByRole('button', { name: `Show ${design.DERIVED.filterCount} skills` }));
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
+  expect(location.hash).toContain('active=4');
+  expect(names('skill-card-')).toEqual(design.DERIVED.topRated);
+});
+
+it('clears committed facets and restores the full list', async () => {
+  open('#/marketplace/skills?filters=open');
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.change(within(filters).getByLabelText('Installed by · at least'), { target: { value: '12' } });
+  fireEvent.click(within(filters).getByRole('button', { name: 'Show 1 skill' }));
+  await waitFor(() => expect(names('skill-card-')).toEqual(['deploy-check']));
+  fireEvent.click(screen.getByRole('button', { name: 'Filter marketplace' }));
+  const reopened = await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.click(within(reopened).getByRole('button', { name: 'Clear' }));
+  await waitFor(() => expect(names('skill-card-')).toEqual(design.DERIVED.topRated));
+  expect(within(reopened).getByRole('button', { name: `Show ${design.CATALOG.length} skills` })).toBeInTheDocument();
+  expect(location.hash).toContain('active=0');
+  expect(location.hash).not.toContain('installs=');
+});
+
+it('hides installed skills when committed with the hide switch on', async () => {
+  open('#/marketplace/skills?filters=open');
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.click(within(filters).getByRole('switch'));
+  fireEvent.click(within(filters).getByRole('button', { name: 'Show 2 skills' }));
+  await waitFor(() => expect(names('skill-card-')).toEqual(['a11y-audit', 'secret-scan']));
+});
+
+it('installs from a marketplace card via the install dialog without entering a mock scenario', async () => {
+  open('#/marketplace/skills');
+  await screen.findByRole('heading', { name: 'Top rated' });
+  const wrap = screen.getByTestId('skill-card-a11y-audit').closest('.market-card-wrap') as HTMLElement;
+  fireEvent.click(wrap.querySelector('.market-card-install')!);
+  await waitFor(() => expect(location.hash).toBe('#/skill/a11y-audit?dialog=install&root=marketplace'));
+  expect(location.hash).not.toContain('__mock');
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+});
 
 it('uses status Global and checkout root counts on the empty scenario', async () => {
   const source = pickBackend();
