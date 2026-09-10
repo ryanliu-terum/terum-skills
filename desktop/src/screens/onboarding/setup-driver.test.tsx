@@ -41,9 +41,9 @@ it('uses four result-driven rows without inventing a progress counter',async()=>
  expect(screen.queryByLabelText('Onboarding progress')).toBeNull();expect(screen.getByRole('progressbar',{name:'Setup progress'})).not.toHaveAttribute('aria-valuenow');expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuemax');
  expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
 });
-it('keeps an ordinary setup failure unconsumed and renders the CLI line as an error',async()=>{
+it('consumes an ordinary setup failure and renders the CLI line as an error',async()=>{
  const b=backend();vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:false,error:'Could not read the team.'})));
- open(b);expect(await screen.findByRole('alert')).toHaveTextContent('Could not read the team.');expect(b.prefs.get('launch:consumedWrittenAt','')).toBe('');
+ open(b);expect(await screen.findByRole('alert')).toHaveTextContent('Could not read the team.');expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
 });
 it('boots a zero-team machine from an unconsumed target-less context',async()=>{
  const b=backend(),base=await b.status(),ctx={writtenAt:launch.writtenAt};

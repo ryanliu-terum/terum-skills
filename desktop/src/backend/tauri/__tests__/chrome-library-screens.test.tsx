@@ -1,0 +1,72 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { BackendContext } from '../../index';
+import type { Backend } from '../../Backend';
+import { createMockBackend } from '../../mock';
+import { App } from '../../../app/App';
+import { Providers } from '../../../app/providers';
+import { useUiStore } from '../../../app/store';
+import { overviewCopy } from '../../../lib/overview-copy';
+import { createTauriBackend } from '../index';
+import { chromeLibraryReplay, underHome } from './chrome-library-fixture';
+import type { ReplayOptions } from './chrome-library-fixture';
+
+afterEach(()=>{cleanup();location.hash='';localStorage.clear();vi.restoreAllMocks();});
+function mount(route:string,backend:Backend){
+ useUiStore.setState({railOpen:true,overviewHidden:false});location.hash=route;
+ render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
+}
+function open(options:ReplayOptions={},route='#/library/global'){
+ const fake=chromeLibraryReplay(options),backend=createTauriBackend(fake.bridge);mount(route,backend);
+ return {fake,backend};
+}
+
+it('renders honest scan coverage, a count-based search label, no empty anchor and no evaluation meter on the real adapter (L2, L3, L5, L8)',async()=>{
+ open({local:underHome});await screen.findByTestId('skill-card-deploy-check');
+ expect(screen.getByRole('textbox',{name:'Search 1 skill'})).toHaveAttribute('placeholder','Search 1 skill');
+ expect(screen.getByText('Scanned: ~/.claude/skills, ~/code/seed')).toBeVisible();
+ for(const link of document.querySelectorAll('.analytics-row a'))expect(link.textContent?.trim()).not.toBe('');
+ for(const link of document.querySelectorAll('a'))expect(link).toHaveAccessibleName();
+ expect(screen.queryByRole('link',{name:'Open alerts'})).toBeNull();
+ expect(document.querySelector('.analytics-meter')).toBeNull();
+ const tile=screen.getByText('Evaluated').closest('.stat-tile');
+ expect(tile).toHaveTextContent('—');expect(tile?.children).toHaveLength(2);
+});
+it('renders the four zero captions for an empty recording (L7)',async()=>{
+ open({local:value=>{const global=value.local[0]!;global.rows=[];global.counts={skillFolders:0,connectable:0};}});
+ await screen.findByText('No skills in your global library');
+ for(const caption of Object.values(overviewCopy))expect(screen.getByText(caption)).toBeVisible();
+ expect(screen.queryByRole('alert')).toBeNull();
+});
+it('keeps the card grid and draws no chrome alert when only the status read fails (C6)',async()=>{
+ open({statusError:'Status unavailable.'});
+ await screen.findByTestId('skill-card-deploy-check');
+ expect(screen.queryByRole('alert')).toBeNull();
+ expect(screen.queryByText('Status unavailable.')).toBeNull();
+});
+it('renders exactly one alert, the screen board, when the library read fails (C6)',async()=>{
+ open({localError:'Library unavailable.'});
+ expect(await screen.findByRole('alert')).toHaveTextContent('Library unavailable.');
+ expect(screen.getAllByRole('alert')).toHaveLength(1);
+});
+it('renders exactly one alert on the mock error scenario (C6)',async()=>{
+ mount('#/library/global?__mock=error',createMockBackend());
+ expect(await screen.findByRole('alert')).toHaveTextContent("EACCES: permission denied, scandir '~/.terum/skills'");
+ expect(screen.getAllByRole('alert')).toHaveLength(1);
+});
+it('keeps a reveal failure under the header without replacing the query error (L13)',async()=>{
+ const {backend}=open({localError:'Library unavailable.'});
+ vi.spyOn(backend,'revealPath').mockResolvedValue({ok:false,error:'Finder unavailable.'});
+ await screen.findByRole('alert');fireEvent.click(screen.getByRole('button',{name:'Show in Finder'}));
+ expect(await screen.findByText('Finder unavailable.')).toBeVisible();
+ expect(screen.getByRole('alert')).toHaveTextContent('Library unavailable.');
+ fireEvent.click(screen.getByRole('button',{name:'Try again'}));
+ await waitFor(()=>expect(screen.queryByText('Finder unavailable.')).toBeNull());
+});
+it.each([true,false])('keeps the mock meter and gates its attention link on inbox=%s (L4)',async inbox=>{
+ const backend=createMockBackend(),surfaces=await backend.surfaces();vi.spyOn(backend,'surfaces').mockResolvedValue({...surfaces,inbox});
+ mount('#/library/global',backend);await screen.findByTestId('skill-card-deploy-check');
+ expect(document.querySelector('.analytics-meter')).not.toBeNull();
+ if(inbox)expect(await screen.findByRole('link',{name:'Open alerts'})).toBeVisible();else await waitFor(()=>expect(screen.queryByRole('link',{name:'Open alerts'})).toBeNull());
+ expect(screen.getByRole('textbox',{name:'Search 15 skills'})).toBeVisible();
+});
