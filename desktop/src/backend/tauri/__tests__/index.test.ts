@@ -600,11 +600,30 @@ it('deduplicates by path and includes only the D2 countable frontmatter reasons'
  const entry=(reason:string)=>({name:reason,path:'/skills/'+reason,reason});
  // The bundled /terum-skills wrapper is a folder the CLI counts and the Library never draws.
  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:8,connectable:0},rows:[],problems:[],notOffered:[...drawn.map(entry),entry('managed-wrapper'),entry('invalid-yaml'),...['symlink','inside-state-root','unreadable','other'].map(entry)]}]};
- const result=await createTauriBackend(inventoryBridge({local,teams:[]}).bridge).library({scope:{kind:'global'}});
+ const backend=createTauriBackend(inventoryBridge({local,teams:[]}).bridge);
+ const result=await backend.library({scope:{kind:'global'}});
  expect(result.value?.skills.map(s=>s.name)).toEqual(drawn);
- // Eight folders on disk, seven cards: the count is the CLI's, not the grid's.
- expect(result.value?.title).toBe('8 skill folders in Global');
- expect(result.value?.root.count).toBe('8');
+ // Eight folders on disk, seven cards: every number follows the grid, not the CLI's folder count.
+ expect(result.value?.title).toBe('7 skill folders in Global');
+ expect(result.value?.root.count).toBe('7');
+ expect(result.value?.overview.skills).toBe('7');
+});
+
+it('keeps the sidebar Global count in step with the grid when a managed wrapper is hidden',async()=>{
+ const entry=(reason:string)=>({name:reason,path:'/skills/'+reason,reason});
+ const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:3,connectable:1},rows:[{name:'handoff',path:'/skills/handoff',state:'untracked locally',tracked:false,shared:[],placement:null,health:'untracked'}],problems:[],notOffered:[entry('name-mismatch'),entry('managed-wrapper')]}]};
+ const f=fakeBridge((args,emit)=>{
+  const value=args[0]==='status'?{version:'0.1.10',teams:[],identity:null,ledger:{placements:[],approvals:[],shared:[]},tools:{git:true,gh:true}}:local;
+  emit({kind:'stdout',line:JSON.stringify({t:'result',verb:args[0],ok:true,exitCode:0,value})});
+ });
+ const backend=createTauriBackend(f.bridge);
+ const status=await backend.status();
+ expect(status.value?.counts).toEqual({Global:'2'});
+ expect(status.value?.roots).toMatchObject([{id:'global',count:'2'}]);
+ const library=await backend.library({scope:{kind:'global'}});
+ expect(library.value?.skills.map(s=>s.name)).toEqual(['handoff','name-mismatch']);
+ expect(library.value?.title).toBe('2 skill folders in Global');
+ expect(library.value?.overview.skills).toBe('2');
 });
 
 it('fills a local card from the row the CLI now supplies, and estimates tokens with a tilde',async()=>{
