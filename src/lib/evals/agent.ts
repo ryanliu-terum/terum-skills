@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
+import { onShutdown, runShutdownHooks } from '../shutdown.js';
 import { resolveAgentCommand, type AgentCommandEvidence } from './agent-command.js';
 
 export const DEFAULT_MODEL = 'sonnet'; // §16.9 [provisional]
@@ -120,8 +121,11 @@ let terminationHandlerInstalled = false;
 function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Record<string, string>; timeoutMs: number }): Promise<SpawnOutcome> {
   if (!terminationHandlerInstalled) {
     terminationHandlerInstalled = true;
+    // One implementation, two entry points: a POSIX SIGTERM (the shell's process-group kill) and the
+    // frame-mode cancel in src/index.ts, which on Windows is the only one that can arrive.
+    onShutdown(() => { for (const child of liveChildren) child.kill('SIGKILL'); });
     process.once('SIGTERM', () => {
-      for (const child of liveChildren) child.kill('SIGKILL');
+      runShutdownHooks();
       // eslint-disable-next-line no-restricted-properties -- C6: the agent trust boundary must kill children before terminating the leader.
       process.exit(143);
     });
@@ -188,6 +192,9 @@ function run(task: string, cwd: string, options: RunAgentOptions): Promise<Spawn
     '--max-turns', String(options.maxTurns ?? 25),
     '--permission-mode', 'acceptEdits',
     '--allowedTools', AGENT_TOOLS,
+    // Also the only thing keeping an eval out of its own way: the user's ~/.claude/settings.json is
+    // where this product installs its SessionStart hook, and loading it here would make every agent
+    // spawn start a sync that takes the very clone lock this run is holding (W-06). Do not drop it.
     // §7.3 contamination control by construction: the sandbox is the entire project scope.
     '--setting-sources', 'project',
     '--strict-mcp-config',

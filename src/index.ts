@@ -12,6 +12,7 @@ import { CommanderError } from 'commander';
 import { buildProgram } from './cli.js';
 import { createExecute } from './lib/execute.js';
 import { terminalPrompter } from './lib/prompt.js';
+import { runShutdownHooks } from './lib/shutdown.js';
 import { FRAMES_FLAG, frameChannel, attemptedVerb, COMMANDER_NON_ERRORS, type ResultOutcome } from './lib/frames.js';
 
 // A reader that closes early (`terum-skills ls | head -5`) surfaces as an asynchronous 'error' on
@@ -43,8 +44,11 @@ const separator = process.argv.indexOf('--');
 const prefixEnd = separator === -1 ? process.argv.length : separator;
 const frames = process.argv.slice(0, prefixEnd).includes(FRAMES_FLAG);
 const argv = process.argv.filter((argument, index) => index >= prefixEnd || argument !== FRAMES_FLAG);
-// A verb that never asks (eval) would otherwise keep running after cancel.
-const channel = frames ? frameChannel({ onCancel: () => { process.kill(process.pid, 'SIGTERM'); }, input: process.stdin, output: process.stdout, diagnostic: (line) => { process.stderr.write(`${line}\n`); } }) : undefined;
+// A verb that never asks (eval) would otherwise keep running after cancel. Exit, never self-signal:
+// on Windows process.kill(self) is TerminateProcess, which runs no 'exit' handler, so the clone's
+// writer lock would be left behind for up to a minute. process.exit runs the hooks' children-killing
+// and then lets signal-exit release every lock this process holds.
+const channel = frames ? frameChannel({ onCancel: () => { runShutdownHooks(); process.exit(143); }, input: process.stdin, output: process.stdout, diagnostic: (line) => { process.stderr.write(`${line}\n`); } }) : undefined;
 let reported = false;
 const report = (outcome: ResultOutcome) => {
   if (!channel || reported) return;

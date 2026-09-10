@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { chmod, lstat, mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, realpath, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { packageVersion } from './package.js';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,8 +15,11 @@ import { regenerateReadmeInTree } from './readme.js';
  * fetch → hard-reset to origin/main → re-run the PURE mutation on the tree it is handed → guard
  * the result → write and stage exactly the paths it changed → prove the staged diff equals those
  * paths → commit → push to refs/heads/<branch> only → on a lost race retry with full-jitter
- * backoff until a 30-second deadline. A `finally` step resets the clone to origin/main and removes
- * the untracked paths this operation created, whether the loop succeeded, failed, or threw.
+ * backoff until a 30-second deadline. Waiting for the clone's writer lock is bounded separately by
+ * `lockWaitMs` (`acquireCloneLock`): the 30-second budget starts once the lock is held, so a long
+ * wait can never spend the push loop's time before the first attempt. A `finally` step resets the
+ * clone to origin/main and removes the untracked paths this operation created, whether the loop
+ * succeeded, failed, or threw.
  */
 export interface MutableTree extends GuardTree {
   set(path: string, content: string | Buffer): void;
@@ -39,6 +42,11 @@ export interface SafeWriteOptions extends GuardContext {
   sleep?: (milliseconds: number) => Promise<void>;
   /** Test knob: the lock's stale window in ms (proper-lockfile floors it at 2000 and checks the lock every half window). */
   lockStale?: number;
+  /** What a lock failure names. Absent means the clone path, which is what every caller but eval wants. */
+  label?: string;
+  /** How long to wait for the clone lock, and what to say while waiting (lib/teamRepo.ts lockWait). */
+  lockWaitMs?: number;
+  onWaiting?: (info: { label: string; elapsedMs: number }) => void;
 }
 
 export interface SafeWriteResult<R = void> { changed: boolean; pushedTo: string; returned: R; }
@@ -81,6 +89,52 @@ const STALE_LEASE = /stale info|incorrect old value|remote ref updated since che
 const REF_LOCK = /cannot lock ref|failed to lock/i;
 const lostLock = (root: string): string => `Lost the safeWrite lock on ${root} to another process; nothing was pushed — retry the command.`;
 
+/** How long a caller waits for another process's clone lock before failing: today's ladder, for anything nobody is watching. */
+export const LOCK_WAIT_MS = 4_000;
+/**
+ * A person is on the other end (a TTY, or a program over frames): outwait any legitimate holder — a
+ * safeWrite holds this lock across its whole 30-second deadline loop — and any lock a hard-killed
+ * holder left behind, which proper-lockfile clears only after its 60-second stale window.
+ */
+export const INTERACTIVE_LOCK_WAIT_MS = 75_000;
+/** Poll cadence while waiting, plus full jitter, so two waiters that arrived together stop colliding on the same tick. */
+const WAIT_POLL_MS = 250;
+const WAIT_POLL_JITTER_MS = 150;
+/** Nothing is said for the first second: a lock that frees within a poll or two is not worth a line. */
+const WAIT_NOTICE_AFTER_MS = 1_000;
+/** Then at most one line every five seconds, so a 75-second wait is a handful of lines, not seventy-five. */
+const WAIT_NOTICE_INTERVAL_MS = 5_000;
+/**
+ * Staleness is a bare mtime compare against the wall clock (node_modules/proper-lockfile/lib/lockfile.js:84-86),
+ * so a lock stamped further than this into this machine's future never goes stale and no wait can clear it: a
+ * clock that jumped back, or a store on a mount with a clock of its own. Same tolerance, for the same reason,
+ * as the sync stamp's (lib/hook.ts:151).
+ */
+const LOCK_FUTURE_SKEW_MS = 60_000;
+
+/** What a caller may say about waiting for the clone lock. Accepted by refreshClone, withCloneLock and safeWrite alike. */
+export interface LockWaitOptions {
+  /** Milliseconds to wait for the lock before failing. Default: LOCK_WAIT_MS. */
+  lockWaitMs?: number;
+  /** Called while waiting: after the first second, then at most every five. The caller turns it into one printed line. */
+  onWaiting?: (info: { label: string; elapsedMs: number }) => void;
+  /** Test knobs for the wait loop only (the same convention SafeWriteOptions uses for its push loop). */
+  now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
+}
+
+const waitingLine = (info: { label: string; elapsedMs: number }): string => `Waiting for another terum-skills operation on ${info.label} to finish… (${Math.round(info.elapsedMs / 1000)} s)`;
+
+/**
+ * The one lock-wait policy. A person on the other end (a TTY, or a shell over frames) outwaits the
+ * holder and is told that it is waiting; anything else — the session hook, a piped script — keeps the
+ * short budget and stays silent, because there is nobody to read the line and a script wants to fail fast.
+ */
+export function lockWait(io: { readonly interactive: boolean; print(line: string): void }, waitMs?: number): { lockWaitMs: number; onWaiting?: (info: { label: string; elapsedMs: number }) => void } {
+  if (!io.interactive) return { lockWaitMs: waitMs ?? LOCK_WAIT_MS };
+  return { lockWaitMs: waitMs ?? INTERACTIVE_LOCK_WAIT_MS, onWaiting: (info) => io.print(waitingLine(info)) };
+}
+
 type Git = (args: readonly string[]) => Promise<CommandResult>;
 
 export function openTeamRepo(root: string, remote: string, runner: Runner = systemRunner): TeamRepo {
@@ -102,7 +156,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
   const realRoot = await realpath(root);
 
   const now = options.now ?? Date.now;
-  const deadline = now() + (options.deadlineMs ?? DEFAULT_DEADLINE_MS);
+  const budgetMs = options.deadlineMs ?? DEFAULT_DEADLINE_MS;
   const branch = options.branch ?? 'main';
   const created = new Set<string>();
   let attempt = 0;
@@ -112,7 +166,11 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
   // A lock lost after the stale window (another process took it) is recorded and aborts the attempt
   // before anything is pushed, instead of two writers reset-and-committing over one working tree.
   let compromised = false;
-  const release = await acquireCloneLock(root, { lockStale: options.lockStale, onCompromised: () => { compromised = true; } });
+  const release = await acquireCloneLock(root, { lockStale: options.lockStale, label: options.label, lockWaitMs: options.lockWaitMs, onWaiting: options.onWaiting, onCompromised: () => { compromised = true; } });
+  // The push budget starts now, with the lock held: the wait above has its own bound (`lockWaitMs`),
+  // and charging it here made a long wait fail the write it had just won the lock for.
+  const deadline = now() + budgetMs;
+  let pushed = false;
   try {
     while (now() <= deadline) {
       if (compromised) throw new Error(lostLock(root));
@@ -159,6 +217,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       }
       await requireGit(['commit', '-q', '-m', options.message ?? `${options.handle}: ${options.action}`]);
       if (compromised) throw new Error(lostLock(root));
+      pushed = true;
       const outcome = await push(git, branch);
       if (outcome.ok) return { changed: true, pushedTo: outcome.pushedTo, returned };
       if (!outcome.retryable) {
@@ -169,6 +228,9 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       if (now() >= deadline) break;
       await (options.sleep ?? wait)((options.backoff ?? defaultBackoff)(attempt++));
     }
+    // Name only what was measured: a budget that ran out before any push (a zero budget, a clock jump)
+    // saw no remote movement, so it must not claim one.
+    if (!pushed) throw new SafeWriteExhausted(`safeWrite ran out of its ${budgetMs} ms budget before it could attempt a push; nothing was committed or pushed.`);
     throw new SafeWriteExhausted(`safeWrite deadline exhausted after ${attempt + 1} attempt(s); the remote kept moving ahead: ${lastError.trim()}`);
   } finally {
     // Cleanup can never change the outcome: the next safeWrite fetches and hard-resets anyway. A
@@ -496,7 +558,7 @@ export async function refreshClone(runner: Runner, clone: string, options: { lab
         throw new Error(message);
       }
     }
-  }, options);
+  }, { lockStale: options.lockStale, label: options.label, lockWaitMs: options.lockWaitMs, onWaiting: options.onWaiting });
 }
 
 export function cloneLockPath(root: string): string {
@@ -504,18 +566,56 @@ export function cloneLockPath(root: string): string {
 }
 
 /**
- * The one acquisition of the per-clone writer lock: a second process waits briefly, then fails
- * rather than racing. proper-lockfile reports that contention as ELOCKED, and every acquisition
- * site classifies it into the same CloneBusy message here — the contract the CloneBusy class
- * promises — so no caller leaks the raw "Lock file is already being held".
+ * The one acquisition of the per-clone writer lock. A second process waits for `lockWaitMs` — long
+ * enough for a person to keep their run, short enough for a session hook to stay a fast no-op — and
+ * then fails rather than racing. proper-lockfile reports contention as ELOCKED, and every acquisition
+ * site classifies it into the same CloneBusy message here — the contract the CloneBusy class promises
+ * — so no caller leaks the raw "Lock file is already being held". `retries: 0` moves the waiting into
+ * the loop below, where it can be reported; it does not weaken the stale reclaim, which
+ * proper-lockfile performs inside a single attempt (lockfile.js:56-81).
  */
-async function acquireCloneLock(root: string, options: { lockStale?: number; label?: string; onCompromised: () => void }): Promise<() => Promise<void>> {
-  try {
-    return await lockfile.lock(root, { lockfilePath: cloneLockPath(root), realpath: false, stale: options.lockStale ?? 60_000, retries: { retries: 10, minTimeout: 50, maxTimeout: 500 }, onCompromised: options.onCompromised });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ELOCKED') throw new CloneBusy(`Another terum-skills operation holds the write lock on ${options.label ?? root}; retry when it finishes.`);
-    throw error;
+async function acquireCloneLock(root: string, options: { lockStale?: number; label?: string; onCompromised: () => void } & LockWaitOptions): Promise<() => Promise<void>> {
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? wait;
+  const started = now();
+  const deadline = started + (options.lockWaitMs ?? LOCK_WAIT_MS);
+  let announced: number | undefined;
+  let stamped = false;
+  for (;;) {
+    try {
+      return await lockfile.lock(root, { lockfilePath: cloneLockPath(root), realpath: false, stale: options.lockStale ?? 60_000, retries: 0, onCompromised: options.onCompromised });
+    } catch (error) {
+      // Only contention waits. EACCES on the store, ENOTDIR from a path that is not a directory, a
+      // read-only volume: each is what it says it is, and is raised on the first attempt exactly as before.
+      if ((error as NodeJS.ErrnoException).code !== 'ELOCKED') throw error;
+      if (!stamped) { stamped = true; await refuseUnusableLock(root, options.label); }
+      const elapsed = now() - started;
+      if (now() >= deadline) throw new CloneBusy(`Another terum-skills operation holds the write lock on ${options.label ?? root}; retry when it finishes.`);
+      if (options.onWaiting && elapsed >= WAIT_NOTICE_AFTER_MS && (announced === undefined || elapsed - announced >= WAIT_NOTICE_INTERVAL_MS)) {
+        announced = elapsed;
+        options.onWaiting({ label: options.label ?? root, elapsedMs: elapsed });
+      }
+      await sleep(WAIT_POLL_MS + Math.floor(Math.random() * WAIT_POLL_JITTER_MS));
+    }
   }
+}
+
+/**
+ * A lock whose mtime is in this machine's future is not held, it is unusable: proper-lockfile will
+ * never call it stale, so waiting cannot clear it and the only remedy is removing the directory. Say
+ * that, once, instead of spending the whole budget on it. Everything in the sentence is measured.
+ */
+async function refuseUnusableLock(root: string, label: string | undefined): Promise<void> {
+  const lockPath = cloneLockPath(root);
+  let aheadMs: number;
+  // A lock that vanished between the refusal and this stat, or one this process cannot stat, is not
+  // evidence of anything: fall through and let the ordinary wait decide. Continuing is safe because
+  // the very next acquisition attempt re-tests the real condition. The comparison is against the
+  // wall clock the filesystem stamps, never the injectable poll clock: a test's logical clock says
+  // nothing about when the directory was made.
+  try { aheadMs = (await stat(lockPath)).mtimeMs - Date.now(); } catch { return; }
+  if (aheadMs <= LOCK_FUTURE_SKEW_MS) return;
+  throw new CloneBusy(`The write lock on ${label ?? root} is stamped ${Math.round(aheadMs / 1000)} s in this machine's future (${lockPath}), so waiting cannot clear it; remove that directory if no terum-skills command is running.`);
 }
 
 /**
@@ -524,7 +624,7 @@ async function acquireCloneLock(root: string, options: { lockStale?: number; lab
  * (proper-lockfile's default would crash the CLI): `action` calls `assertHeld` before each step
  * that must not run on a clone another process now owns.
  */
-export async function withCloneLock<T>(root: string, action: (assertHeld: () => void) => Promise<T>, options: { lockStale?: number; label?: string } = {}): Promise<T> {
+export async function withCloneLock<T>(root: string, action: (assertHeld: () => void) => Promise<T>, options: { lockStale?: number; label?: string } & LockWaitOptions = {}): Promise<T> {
   let compromised = false;
   const release = await acquireCloneLock(root, { ...options, onCompromised: () => { compromised = true; } });
   // The same situation as never acquiring it — another process owns this clone now — so it is the

@@ -7,7 +7,7 @@ import { type AgentApi, Transcript } from '../../lib/evals/agent.js';
 import { systemRunner } from '../../lib/runner.js';
 import { success } from '../../lib/result.js';
 import { canonicalDigest } from '../../lib/skills.js';
-import { bareTeam, cloneWithIdentity, git, NonInteractivePrompter, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, holdCloneLock, git, NonInteractivePrompter, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { run } from '../eval.js';
 
@@ -34,6 +34,54 @@ function generationAgent(prompts: string[]): AgentApi {
 }
 
 describe('eval (§6 / IE2)', () => {
+  it('waits out a busy clone, says so, and then runs the eval', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    await pushFromSeed(fixture.seed, 'skills/sample/evals/triggers.yaml', 'should_trigger: [deploy now]\nshould_not_trigger: [chat]\n');
+    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const agent: AgentApi = { runAgent: async (_task, cwd) => transcript(existsSync(join(cwd, '.claude', 'skills', 'sample')) ? ['sample'] : []), askJson: async () => ({ selected: ['sample'] }) };
+    const release = await holdCloneLock(store.teamClone('team'));
+    let released: Promise<void> | undefined;
+    const releaseOnce = () => released ??= release();
+    const timer = setTimeout(() => void releaseOnce(), 2_500);
+    const io = new ScriptedPrompter([], [], true);
+    try {
+      const result = await run({ ref: 'sample', config: store, agent, k: 1, lockWaitMs: 30_000, preflight: async () => success({ ccVersion: 'stub' }) }, io);
+      expect(result.ok).toBe(true);
+      expect(io.lines.some(line => /^Waiting for another terum-skills operation on team to finish… \(\d+ s\)$/.test(line))).toBe(true);
+    } finally { clearTimeout(timer); await releaseOnce(); }
+  });
+
+  it('refuses with the unchanged busy sentence when the wait is exhausted, before anything is paid for', async () => {
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    let preflightCalls = 0, agentCalls = 0;
+    const agent: AgentApi = { runAgent: async () => { agentCalls++; return transcript([]); }, askJson: async () => { agentCalls++; return { selected: [] }; } };
+    const release = await holdCloneLock(store.teamClone('team'));
+    try {
+      const result = await run({ ref: 'sample', config: store, agent, lockWaitMs: 800, preflight: async () => { preflightCalls++; return success({ ccVersion: 'stub' }); } }, new ScriptedPrompter([], [], true));
+      expect(result).toMatchObject({ ok: false, error: 'Another terum-skills operation holds the write lock on team; retry when it finishes.' });
+      expect(preflightCalls).toBe(0); expect(agentCalls).toBe(0);
+    } finally { await release(); }
+  });
+
+  it('keeps the non-interactive budget short', async () => {
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const release = await holdCloneLock(store.teamClone('team'));
+    const io = new ScriptedPrompter(), started = Date.now();
+    try {
+      expect(await run({ ref: 'sample', config: store }, io)).toMatchObject({ ok: false, error: 'Another terum-skills operation holds the write lock on team; retry when it finishes.' });
+      expect(Date.now() - started).toBeLessThan(8_000);
+      expect(io.lines.some(line => line.startsWith('Waiting for another'))).toBe(false);
+    } finally { await release(); }
+  });
+
   it('hard-stops at hygiene before preflight or any agent process', async () => {
     const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('bad\u202Etext'));
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));

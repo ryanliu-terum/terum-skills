@@ -16,7 +16,7 @@ import { fromError, CancelledError, RefusedError, Result, success } from '../lib
 import { Runner, systemRunner } from '../lib/runner.js';
 import { Config, Destination, Team, describeRaw, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
-import { openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
+import { openTeamRepo, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { materializeVersion, resolveVersion } from '../lib/version.js';
 
 export interface InstallArgs extends WithForm {
@@ -154,7 +154,7 @@ export async function installOne(input: { team: string; destination: Destination
     installed.push({ id: skill.id, version: latest, scope, since: new Date().toISOString().slice(0, 10) });
     const declined = person.declined.filter((id) => id !== skill.id);
     tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);
-  }, { action: 'install', handle: binding.handle, message: `${binding.handle}: install ${skill.name}`, ...input.safeWrite });
+  }, { action: 'install', handle: binding.handle, message: `${binding.handle}: install ${skill.name}`, ...input.safeWrite, ...lockWait(io) });
   await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
   return { id: skill.id, team: input.team, path: placed!.path, version: latest };
 }

@@ -45,12 +45,14 @@ it('stops once and retains a Stopped result with Close',async()=>{
  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Stop'}));
  expect(await screen.findByText('Stopped')).toBeVisible();expect(cancel).toHaveBeenCalledTimes(1);
  expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Close'})).toBeVisible();
+ expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Run eval again'})).toBeVisible();
 });
 it('keeps local commit failures and both lines visible, and invalidates skill reads',async()=>{
  const {evalSpy,client}=await open();const invalidate=vi.spyOn(client,'invalidateQueries');
  evalSpy.mockImplementation(()=>createRun(async ctx=>{ctx.print('first line');ctx.print('second line');return {ok:false,error:'push refused',value:{...value,commit:{ok:false,error:'push refused'}}};}));start();
  expect(await screen.findByText('Evaluated locally; committing the receipt failed: push refused')).toBeVisible();
  expect(screen.getByRole('log')).toHaveTextContent('first line second line');
+ expect(screen.queryByRole('button',{name:'Run eval again'})).toBeNull();
  expect(screen.getByRole('button',{name:'Close'})).toBeVisible();
  expect(invalidate).toHaveBeenCalled();expect(invalidate.mock.calls[0]?.[0]?.predicate?.({queryKey:['skill','deploy-check']} as never)).toBe(true);
 });
@@ -106,4 +108,36 @@ it('reopens the running dialog from the Evals tab URL and survives a failed deta
  vi.spyOn(backend,'skill').mockResolvedValue({ok:false,error:'clone unavailable'});
  await act(async()=>{await client.invalidateQueries({queryKey:['skill']});});
  expect(screen.getByRole('dialog')).toHaveTextContent('preflight ok');expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Stop'})).toBeVisible();
+});
+
+it('offers Run eval again after a clone-lock failure and starts a second run',async()=>{
+ const {evalSpy}=await open();
+ evalSpy.mockImplementation(()=>createRun(async()=>({ok:false,error:'Another terum-skills operation holds the write lock on terum-shared-skills; retry when it finishes.'})));start();
+ const message=await screen.findByText('Another terum-skills operation holds the write lock on terum-shared-skills; retry when it finishes.');
+ expect(screen.getByRole('status')).toContainElement(message);
+ const retry=within(screen.getByRole('dialog')).getByRole('button',{name:'Run eval again'});expect(retry).toBeVisible();
+ fireEvent.click(retry);expect(evalSpy).toHaveBeenCalledTimes(2);expect(screen.getByRole('dialog')).toBeVisible();
+});
+it("shows the CLI's waiting line in the run log while it waits",async()=>{
+ const {evalSpy}=await open();
+ const line='Waiting for another terum-skills operation on terum-shared-skills to finish… (6 s)';
+ const run=createRun<EvalResult>(async ctx=>{ctx.print(line);await ctx.sleep(60_000);return {ok:true,value};});runs.push(run);evalSpy.mockReturnValue(run);start();
+ expect(await screen.findByRole('log')).toHaveTextContent(line);
+ expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Stop'})).toBeVisible();expect(screen.queryByRole('button',{name:'Run eval again'})).toBeNull();
+});
+it('offers no retry and no log region before a run starts',async()=>{
+ await open();
+ expect(within(screen.getByRole('dialog')).getAllByRole('button').map(button=>button.textContent)).toEqual(['Cancel','Run eval']);
+ expect(screen.queryByRole('log')).toBeNull();
+});
+it('retries with the displayed commit choice after the dialog remounts',async()=>{
+ const {evalSpy}=await open(true,undefined,false);const {run}=longRun();evalSpy.mockReturnValueOnce(run);
+ fireEvent.click(screen.getByRole('checkbox',{name:'Commit the receipt to the team'}));start();await screen.findByText('preflight ok');
+ await act(async()=>{location.hash='#/library/global';});
+ fireEvent.keyDown(screen.getByRole('dialog'),{key:'Escape'});await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ fireEvent.click(screen.getByRole('button',{name:'Eval running · deploy-check'}));await screen.findByRole('dialog');
+ fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Stop'}));await screen.findByText('Stopped');
+ const checkbox=screen.getByRole('checkbox',{name:'Commit the receipt to the team'});expect(checkbox).toBeChecked();expect(checkbox).toHaveAttribute('aria-disabled','true');fireEvent.click(checkbox);expect(checkbox).toBeChecked();
+ evalSpy.mockImplementation(()=>createRun(async()=>({ok:false,error:'clone busy'})));
+ fireEvent.click(screen.getByRole('button',{name:'Run eval again'}));expect(evalSpy).toHaveBeenLastCalledWith({ref:'deploy-check',commit:true});
 });

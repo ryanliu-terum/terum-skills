@@ -25,7 +25,7 @@ The process exit code matches `result.exitCode`. The failure line is also writte
 | Frame | Shape | Meaning |
 |---|---|---|
 | `answer` | `{"t":"answer","id":"q1","value":...}` | Answers the `ask` with that `id`. For `confirm`: a boolean, or one of `y`, `yes`, `true` (anything else is no). For `text`: a string; empty means take the default. For `select`: the 1-based index as a number, or the exact choice string. An invalid `select` answer gets a `print` warn frame and the same question is asked again with a new `id`, up to three times, then the verb fails. |
-| `cancel` | `{"t":"cancel"}` | Abandons the run. Every pending question fails closed and the bin sends itself SIGTERM. During eval, the CLI kills its live agent children with SIGKILL and exits 143; a terminal `result` frame is not guaranteed after cancellation. |
+| `cancel` | `{"t":"cancel"}` | Abandons the run. Every pending question fails closed and the bin runs its shutdown hooks and exits 143 — killing its live agent children with SIGKILL first, and releasing any file lock it holds. A terminal `result` frame is not guaranteed after cancellation. |
 
 Closing stdin fails pending questions closed; it does not invoke the bin’s cancellation hook. Send `cancel` to stop work that does not ask questions. Malformed lines and answers to unknown ids are reported on stderr and ignored; they never disturb a pending question.
 
