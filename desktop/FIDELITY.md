@@ -6,16 +6,16 @@ One row per in-scope board (91: every canvas board except the nine *States/*Hove
 |---|---|---|---|---|
 | Main | `#/frame` | locked | 0 | the bare shell (Global selected, empty panel); exact: 0 differing pixels |
 | Light | `#/frame?theme=light` | locked | 0 | exact: 0 differing pixels |
-| Library | `#/library/global` | locked | 0.0030 | hover: the update flag of the card at HOVER_INDEX (the card whose flags contain 'update'); its tooltip shows |
-| LibraryLight | `#/library/global?theme=light` | locked | 0.0030 | same hover as Library |
-| LibraryEmpty | `#/library/global?__mock=empty` | locked | 0.0020 | sidebar Global count 0 |
-| LibraryNoResults | `#/library/global?q=deploy%20prod` | locked | 0.0020 |  |
-| LibraryLoading | `#/library/global?__mock=loading` | locked | 0.0020 | sidebar counts hidden |
-| LibraryCollapsed | `#/library/global?overview=0` | locked | 0.0030 | overview hidden |
-| LibrarySidebarHidden | `#/library/global?sidebar=hidden` | locked | 0.0030 | D9: sidebar hidden (240 → 0), reopen button in the top bar |
-| LibraryProjectsCollapsed | `#/library/global?projects=collapsed` | locked | 0.0030 | D9: Projects chevron-right, project rows folded |
-| LibraryInboxCollapsed | `#/library/global?inbox=collapsed` | locked | 0.0030 | D9: Inbox chevron-right, Pushes / Updates / Alerts folded |
-| LibraryError | `#/library/global?__mock=error` | locked | 0.0020 | sidebar counts hidden |
+| Library | `#/library/global` | in-progress | 0.0030 | hover: the update flag of the card at HOVER_INDEX (the card whose flags contain 'update'); its tooltip shows; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| LibraryLight | `#/library/global?theme=light` | in-progress | 0.0030 | same hover as Library; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| LibraryEmpty | `#/library/global?__mock=empty` | in-progress | 0.0020 | sidebar Global count 0; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| LibraryNoResults | `#/library/global?q=deploy%20prod` | in-progress | 0.0020 | DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| LibraryLoading | `#/library/global?__mock=loading` | in-progress | 0.0020 | sidebar counts hidden; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| LibraryCollapsed | `#/library/global?overview=0` | in-progress | 0.0030 | overview hidden; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| LibrarySidebarHidden | `#/library/global?sidebar=hidden` | in-progress | 0.0030 | D9: sidebar hidden (240 → 0), reopen button in the top bar; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| LibraryProjectsCollapsed | `#/library/global?projects=collapsed` | in-progress | 0.0030 | D9: Projects chevron-right, project rows folded; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| LibraryInboxCollapsed | `#/library/global?inbox=collapsed` | in-progress | 0.0030 | D9: Inbox chevron-right, Pushes / Updates / Alerts folded; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
+| LibraryError | `#/library/global?__mock=error` | in-progress | 0.0020 | sidebar counts hidden; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
 | SkillDetail | `#/skill/deploy-check` | locked | 0.0030 |  |
 | SkillDetailLight | `#/skill/deploy-check?theme=light` | locked | 0.0030 |  |
 | SkillDetailRailClosed | `#/skill/deploy-check?tab=evals&rail=closed` | locked | 0.0030 |  |
@@ -92,7 +92,7 @@ One row per in-scope board (91: every canvas board except the nine *States/*Hove
 | OnboardingMore | `#/onboarding/basics?tab=more` | locked | 0.0030 |  |
 | OnboardingTeam | `#/onboarding/team` | locked | 0.0030 |  |
 | OnboardingFeedback | `#/onboarding/feedback` | locked | 0.0030 |  |
-| OnboardingDone | `#/onboarding/done` | locked | 0.0030 | over the live Library |
+| OnboardingDone | `#/onboarding/done` | in-progress | 0.0030 | over the live Library; DEVIATES from the locked canvas since 2026-09-10: Connect CTA removed (see Deliberate deviations below); awaiting canvas redraw + re-lock |
 | OnboardingLight | `#/onboarding/style?theme=light` | locked | 0.0030 | Light picked (the picked card is the current theme) |
 | OnboardingError | `#/onboarding/boot?__mock=error` | locked | 0.0020 | the first sync failed |
 
@@ -105,3 +105,9 @@ The 99 `.shots/*.png` were re-rendered on Ryan's Mac on 2026-09-08 through the c
 ## Oracle defects found while locking (recorded; the oracle was re-shot, never worked around)
 
 - MarketplaceLoading: the oracle PNG's shell text (top-bar placeholder "Search skills, people, projects", the sidebar's "Library" / "Global" labels) was rasterised in a wider fallback sans (DejaVu-like), not Inter: cropped at 2× it is visibly wider than the same strings in `Marketplace.png`, and an exact pixel comparison of the two oracles differs in the sidebar and top-bar bands (x < 200, y < 60: 4,608 + 337 + 1,923 px) where every other loading board's oracle is identical to its family's base board (InboxLoading vs Inbox: first differing column x = 209). The app renders that shell with Inter, byte-identical to the 80 locked boards, so the board sits at 4,259 differing pixels (0.00329) against a `state` allowance of 0.0020 (2,592 px) and cannot lock without substituting the fallback font on one route, loosening a tolerance, or masking — all three forbidden. Resolved 2026-09-08: the oracle was re-rendered alone (no parallel batch), its shell became pixel-identical to `Marketplace.png` and its content region unchanged; the row locked at the next run. Evidence (2× crops of both oracles) is kept with the maintainers’ run records outside this repository.
+
+## Deliberate deviations after lock
+
+A locked board asserts the app matches the canvas; when the app deliberately moves ahead of the canvas, the affected rows drop to `in-progress` (so the gate skips them instead of failing), the deviation is recorded here with its authority, and the rows re-lock only after the canvas is redrawn and its oracles re-rendered through the established procedure (render-mac.mjs on the maintainer's machine, per the oracle-provenance section above).
+
+- 2026-09-10 — **Library Connect CTA removed; empty-state primary is Add project** (ratified override, ajay 2026-09-10, `.planning/specs/2026-09-10-library-mirror-id-sync.md`, overriding Terum 52d76c00/85c4ebd2 — Ryan to review). The header `Connect` button and the Library empty state's `Connect` primary are gone from `LibraryScreen`; the empty state's primary is now `Add project` (the native chooser + `checkout add` flow from #102), with `Open marketplace` as secondary. Affected rows, all flipped to `in-progress`: Library, LibraryLight, LibraryEmpty, LibraryNoResults, LibraryLoading, LibraryCollapsed, LibrarySidebarHidden, LibraryProjectsCollapsed, LibraryInboxCollapsed, LibraryError, OnboardingDone (it renders over the live Library). The canvas boards still draw the Connect CTA, so a re-render of the existing `.dc.html` files cannot re-lock these rows — the canvas needs the redraw first (same queue as the relabel item; spec sub-question 3). Connect itself remains drawn and real in Settings ▸ Sharing and the onboarding wizard's connect step; those boards are unchanged.
