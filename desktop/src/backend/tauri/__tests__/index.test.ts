@@ -8,6 +8,12 @@ import { createTauriBackend } from '../index';
 import { createMockBackend } from '../../mock';
 import { fakeBridge } from './fake-bridge';
 import { installedReplay } from './installed-fixture';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { BackendContext } from '../../index';
+import { SkillCard } from '../../../components/domain/SkillCard';
 
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
 
@@ -746,6 +752,19 @@ it('degrades to a dash when the CLI predates the character count',async()=>{
  const local={roster:[],skills:[],problems:[],local:[{root:'/repo/.claude/skills',repoRoot:'/repo',scope:'project',label:'app',rows:[row],problems:[],notOffered:[]}]};
  const result=await createTauriBackend(inventoryBridge({local,teams:[]}).bridge).library({scope:{kind:'checkout',root:'/repo'}});
  expect(result.value?.skills).toMatchObject([{name:'old',size:'—',tokensK:0,desc:'',installs:'0 installs'}]);
+});
+
+it.each(['rows','notOffered'] as const)('B2 renders known, null and older CLI categories from %s',async source=>{
+ const entries=[{name:'tdd',category:'misc'},{name:'unknown',category:null},{name:'old'}].map(fields=>({path:'/home/.claude/skills/'+fields.name,description:'Test first',characters:120,...fields,...(source==='rows'?{state:'untracked locally',tracked:false,shared:[],placement:null,health:'untracked'}:{reason:'name-mismatch',detail:'The declared name differs from the folder'})}));
+ const local={roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',label:'Global',rows:[],notOffered:[],problems:[],[source]:entries}]};
+ const backend=createTauriBackend(inventoryBridge({local,teams:[]}).bridge),result=await backend.library({scope:{kind:'global'}});
+ expect(result).toMatchObject({ok:true,value:{skills:[{name:'tdd',category:'misc'},{name:'unknown',category:'—'},{name:'old',category:'—'}]}});
+ const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+ try{for(const skill of result.value!.skills){
+  const node=document.createElement('div');
+  node.innerHTML=renderToStaticMarkup(createElement(QueryClientProvider,{client},createElement(BackendContext,{value:backend},createElement(MemoryRouter,null,createElement(SkillCard,{skill})))));
+  expect(node.querySelector('.skill-card-ident span')?.textContent).toBe(skill.name==='tdd'?'Global / misc':'Global / —');
+ }}finally{client.clear();}
 });
 
 it('never claims zero installs for a placed row whose team could not be read',async()=>{

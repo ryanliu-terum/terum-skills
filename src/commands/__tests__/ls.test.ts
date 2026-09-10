@@ -91,6 +91,27 @@ async function localSource(home: string, name: string, raw = `---\nname: ${name}
 }
 const FOOTER = 'Team status is from local clones and may be stale; open endorsement requests are not checked.';
 
+describe.each([false, true])('B2 local category (tracked=%s)', tracked => {
+  it.each([
+    { name:'tdd',raw:'---\nname: tdd\ndescription: Test first\nmetadata:\n  terum-category: misc\n---\n',category:'misc' },
+    { name:'no-category',raw:'---\nname: no-category\ndescription: No category\nmetadata:\n  author: Someone\n---\n',category:null },
+    { name:'no-frontmatter',raw:'# Bare skill\n',category:null,reason:'no-frontmatter' },
+    { name:'invalid-yaml',raw:'---\nname: [\nmetadata:\n  terum-category: misc\n---\n',category:null,reason:'invalid-yaml' },
+    { name:'gsd-x',raw:'---\nname: gsd:x\ndescription: Readable rejection\nmetadata:\n  terum-category: misc\n---\n',category:'misc',reason:'name-mismatch' },
+    { name:'no-description',raw:'---\nname: no-description\nmetadata:\n  terum-category: misc\n---\n',category:'misc',reason:'description-missing' },
+    { name:'unsupported',raw:'---\nname: unsupported\ndescription: Readable rejection\nargument-hint: x\nmetadata:\n  terum-category: misc\n---\n',category:'misc',reason:'unsupported-field' },
+    { name:'Bad',raw:'---\nname: Bad\ndescription: Rejected before parsing\nmetadata:\n  terum-category: misc\n---\n',category:null,reason:'illegal-name' },
+  ])('emits the parsed category or null for $name',async({name,raw,category,reason})=>{
+    const home=await temporaryDirectory(),store=createConfigStore(join(home,'state')),path=await localSource(home,name,raw);
+    if(tracked)await store.update(config=>{config.shared[ID]={source:path,team:'team'};});
+    const result=await run({local:true,home,config:store,runner:{run:async()=>{throw new Error('no commands');}}},new ScriptedPrompter());
+    // Tracked sources may be relocated, so their folder name does not gate parsing.
+    const expected=tracked&&reason==='illegal-name'?'misc':category;
+    const key=tracked||reason===undefined?'rows':'notOffered';
+    expect(result).toMatchObject({ok:true,value:{local:[{[key]:[{name,path,category:expected}]}]}});
+  });
+});
+
 describe('issue 9 local ls', () => {
   it('lists candidates, placements, and rejected paths with zero teams and no questions', async () => {
     const home = await temporaryDirectory(); const store = createConfigStore(join(home, 'state'));
