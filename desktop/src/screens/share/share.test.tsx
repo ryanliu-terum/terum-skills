@@ -19,6 +19,29 @@ it('keeps the invite open and displays a failed result',async()=>{vi.spyOn(backe
 it('opens a prompt dialog for an unexpected invite question',async()=>{vi.spyOn(backend,'invite').mockImplementation(()=>createRun(async ctx=>{const answer=await ctx.ask('confirm','Allow this invitation?');return answer?{ok:true,value:{invited:['sortiz'],already:[],failed:[]}}:{ok:false,error:'Declined.'};}));open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await screen.findByText('Allow this invitation?');fireEvent.click(screen.getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());});
 it('renders the team-of-one state and preserves the board sidebar counts',async()=>{open('#/share?__mock=empty');await screen.findByText('Just you so far');expect(screen.getAllByTestId(/^member-row-/)).toHaveLength(1);expect(screen.queryByTestId('invited-row')).toBeNull();expect(await screen.findByRole('link',{name:'Global 15'})).toBeInTheDocument();for(const name of ['Pushes 3','Updates 3','Alerts 8'])expect(screen.getByRole('link',{name})).toBeInTheDocument();});
 it('renders the exact ENOENT people error',async()=>{open('#/share?__mock=error');expect(await screen.findByRole('alert')).toHaveTextContent("ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'");expect(screen.queryByRole('table')).toBeNull();});
+it('leads the roster failure board with the CLI error, never an invented cause',async()=>{
+ open('#/share?__mock=error');const alert=await screen.findByRole('alert');
+ expect(alert).toHaveTextContent("The message below is the CLI's own.");
+ expect(screen.queryByText(/could not read the people files in the team clone/)).toBeNull();
+ expect(screen.getByRole('button',{name:'Sync now'})).toBeVisible();
+ expect(screen.getByRole('button',{name:'Open settings'})).toBeVisible();
+});
+it('shows the no-team board instead of a read-failure story when the CLI reports no team',async()=>{
+ vi.spyOn(backend,'roster').mockResolvedValue({ok:false,error:'No team is configured on this machine.',reason:'no-team'});
+ open('#/share');await screen.findByText('No team on this machine');
+ expect(screen.getByText('Create a team or join the one you were invited to. Setup runs here in the app.')).toBeVisible();
+ expect(screen.queryByText(/Couldn't read the roster/)).toBeNull();
+ expect(document.querySelector('.terminal-hint')).toHaveTextContent('npx -y terum-skills@latest setup');
+ fireEvent.click(screen.getByRole('button',{name:'Start setup'}));
+ await waitFor(()=>expect(location.hash).toBe('#/onboarding/boot?start=1'));
+});
+it('tells the user to pick a team when the machine is configured for two',async()=>{
+ vi.spyOn(backend,'roster').mockResolvedValue({ok:false,error:'This machine is configured for teams terum, acme; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.',reason:'ambiguous-team'});
+ open('#/share');await screen.findByText('Choose a team');
+ expect(screen.getByRole('alert')).toHaveTextContent('This machine is configured for teams terum, acme');
+ fireEvent.click(screen.getByRole('button',{name:'Open settings'}));
+ await waitFor(()=>expect(location.hash).toBe('#/settings/teams'));
+});
 it('renders thirteen skeletons with settled loading readiness and hidden counts',async()=>{open('#/share?__mock=loading');expect(screen.getAllByTestId('member-skeleton')).toHaveLength(13);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
 it('searches members without changing roster indices',async()=>{open('#/share');await screen.findByTestId('member-row-5');const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');fireEvent.change(screen.getByRole('textbox',{name:'Find members'}),{target:{value:member.handle}});expect(await screen.findByTestId('member-row-5')).toHaveTextContent(member.name);expect(screen.getAllByTestId(/^member-row-/)).toHaveLength(1);});
 it('renders read-only permission chips from roster status, never from prefs',async()=>{const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');backend.prefs.set('role:'+member.handle,design.MEMBER[member.handle]?.[0]==='admin'?'member':'admin');open('#/share');await screen.findByTestId('member-row-5');const row=screen.getByTestId('member-row-5');const chip=row.querySelector('.member-role');expect(chip).toHaveTextContent(design.MEMBER[member.handle]?.[0]==='admin'?'Admin':'Member');expect(chip).toHaveClass(design.MEMBER[member.handle]?.[0]==='admin'?'admin':'member');expect(chip?.tagName).toBe('SPAN');expect(screen.queryByRole('button',{name:'Role for '+member.handle})).toBeNull();expect(screen.queryByRole('menuitem')).toBeNull();});
@@ -76,6 +99,20 @@ it('invite from status copies the supplied join command',async()=>{const copy=vi
 it('invite from status exposes partial outcomes through the mock URL',async()=>{open('#/share?dialog=invite&__mock=partial');fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value:'sortiz, bad'}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(within(screen.getByRole('dialog')).getByRole('status')).toHaveTextContent('Invited @sortiz.'));const dialog=screen.getByRole('dialog');expect(dialog).toHaveTextContent('@bad: Could not invite @bad');expect(within(dialog).getByRole('alert')).toBeInTheDocument();});
 it('invite from status shows a success notice on the page',async()=>{open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(await screen.findByRole('status')).toHaveTextContent('Invited @sortiz.');});
 
+it('omits the invitations clause and dashes Joined when the CLI serves neither',async()=>{
+ const roster=await backend.roster();if(!roster.ok)throw new Error(roster.error);
+ vi.spyOn(backend,'roster').mockResolvedValue({...roster,value:{...roster.value,invited:null,members:roster.value.members.map(member=>({...member,joined:null}))}});
+ open('#/share');await screen.findByTestId('member-row-0');
+ expect(screen.getByText('12 members')).toBeInTheDocument();
+ expect(screen.queryByText(/invitation/)).toBeNull();
+ expect(screen.queryByTestId('invited-row')).toBeNull();
+ expect(within(screen.getByTestId('member-row-0')).getAllByRole('cell')[2]).toHaveTextContent('—');
+});
+it('keeps the mock invitation clause and joined dates when they are served',async()=>{
+ open('#/share');await screen.findByTestId('member-row-0');
+ expect(screen.getByText('12 members · 1 invitation')).toBeInTheDocument();
+ expect(within(screen.getByTestId('member-row-0')).getAllByRole('cell')[2]).toHaveTextContent(design.ROSTER[0]!.joined);
+});
 it('shows a failed removal on its row and clears it when the next removal succeeds',async()=>{
  const team=vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
  open('#/share');await screen.findByTestId('member-row-1');
@@ -121,4 +158,8 @@ it('drops a removal error on navigating away from Share',async()=>{
  fireEvent.click(screen.getByRole('link',{name:'Share'}));
  await screen.findByTestId('member-row-1');
  expect(screen.queryByRole('alert')).toBeNull();
+});
+it('keeps mock founder role suffixes',async()=>{
+ open('#/share');const row=await screen.findByTestId('member-row-0');
+ expect(within(row).getByText('ryan · founder')).toBeVisible();
 });

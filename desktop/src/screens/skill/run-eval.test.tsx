@@ -11,8 +11,9 @@ import { EvalRunProvider } from '../../app/EvalRunProvider';
 const value:EvalResult={name:'deploy-check',runDir:'/tmp/run',executionStatus:'complete',commit:null};
 const runs:Run<EvalResult>[]=[];
 afterEach(async()=>{for(const run of runs.splice(0))await run.cancel();cleanup();location.hash='';localStorage.clear();vi.restoreAllMocks();});
-async function open(choice=true,estimate?:string){
+async function open(choice=true,estimate?:string,commitPref?:boolean){
  const backend=createMockBackend(),caps=await backend.capabilities();
+ if(commitPref!==undefined)backend.prefs.set('eval:commit',commitPref);
  vi.spyOn(backend,'capabilities').mockResolvedValue({...caps,evalCommitChoice:choice});
  if(estimate!==undefined){const detail=await backend.skill({ref:'deploy-check'});if(!detail.ok)throw new Error(detail.error);vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...detail.value,evalEstimateText:estimate}});}
  const evalSpy=vi.spyOn(backend,'eval');
@@ -63,6 +64,12 @@ it.each([true,false])('passes the explicit commit choice %s',async commit=>{
  const {evalSpy}=await open();const {run}=longRun();evalSpy.mockReturnValue(run);
  const checkbox=screen.getByRole('checkbox',{name:'Commit the receipt to the team'});expect(checkbox).toBeChecked();
  if(!commit)fireEvent.click(checkbox);start();expect(evalSpy).toHaveBeenCalledWith({ref:'deploy-check',commit});
+});
+it('seeds the commit checkbox from the eval:commit preference with a per-run override',async()=>{
+ const {evalSpy}=await open(true,undefined,false);const {run}=longRun();evalSpy.mockReturnValue(run);
+ const checkbox=screen.getByRole('checkbox',{name:'Commit the receipt to the team'});expect(checkbox).not.toBeChecked();
+ fireEvent.click(checkbox);expect(checkbox).toBeChecked();
+ start();expect(evalSpy).toHaveBeenCalledWith({ref:'deploy-check',commit:true});
 });
 it('uses the exact honest cost sentence without an estimate',async()=>{
  await open(true,'');expect(screen.getByText('No previous run to estimate from. This uses your Claude account and can take a while.')).toBeVisible();

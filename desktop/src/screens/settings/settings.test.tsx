@@ -28,12 +28,28 @@ it('renders Leave and asks the CLI confirmation',async()=>{const leave=vi.spyOn(
  "Consent you gave for skills' tool permissions may need to be given again for a new team",
  `Your people file in the team repo stays: you remain a member (an admin archives that with team remove ${design.ME.handle}), and setup brings this machine back`,
 ]);fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));const prompt=await screen.findByRole('dialog',{name:`Leave terum? This removes ${design.PLACEMENTS_N} placed skill(s) from this machine.`});fireEvent.click(within(prompt).getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledWith({kind:'leave',name:'terum'});expect(location.hash).toBe('#/settings/teams');});
-it('renders every prune path and preanswers Delete N quarantined items',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/machine?dialog=prune');const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Delete 2 quarantined folders?');for(const [when,name] of design.QUARANTINE)expect(dialog).toHaveTextContent(`quarantine/${when}/${name}`);fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(sync).toHaveBeenCalledWith({prune:true});expect(location.hash).toBe('#/settings/machine');});
+it('renders every prune path and asks the CLI before deleting',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/machine?dialog=prune');const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Delete 2 quarantined folders?');for(const [when,name] of design.QUARANTINE)expect(dialog).toHaveTextContent(`quarantine/${when}/${name}`);fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('heading',{name:'Delete 2 quarantined item(s)?'})).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(sync).toHaveBeenCalledWith({prune:true});expect(location.hash).toBe('#/settings/machine');});
 it('keeps failed prune open',async()=>{vi.spyOn(backend,'sync').mockImplementation(()=>createRun(async()=>({ok:false,error:'Prune failed.'})));open('#/settings/machine?dialog=prune');fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('alert')).toHaveTextContent('Prune failed.');expect(screen.getByRole('dialog')).toBeInTheDocument();});
 it('renders the CLI config error line with hidden counts',async()=>{open('#/settings/account?__mock=error');expect(await screen.findByRole('alert')).toHaveTextContent("Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)");expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
+it('diagnoses config.json only when the CLI itself names it, and reveals the file',async()=>{
+ const reveal=vi.spyOn(backend,'revealPath');
+ open('#/settings/account?__mock=error');const alert=await screen.findByRole('alert');
+ expect(alert).toHaveTextContent('Invalid ~/.terum/skills/config.json');
+ expect(screen.getByText(/is not valid JSON/)).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'Show in Finder'}));
+ await waitFor(()=>expect(reveal).toHaveBeenCalledWith('~/.terum/skills/config.json'));
+});
+it('shows the no-team board when the settings read reports no team',async()=>{
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:false,error:'No team is configured on this machine.',reason:'no-team'});
+ open('#/settings/account');await screen.findByText('No team on this machine');
+ expect(screen.queryByText(/Couldn't read your settings/)).toBeNull();
+ expect(document.querySelector('.terminal-hint')).toHaveTextContent('npx -y terum-skills@latest setup');
+ fireEvent.click(screen.getByRole('button',{name:'Start setup'}));
+ await waitFor(()=>expect(location.hash).toBe('#/onboarding/boot?start=1'));
+});
 it('commits the loading skeleton with hidden sidebar counts',async()=>{open('#/settings/account?__mock=loading');expect(screen.getByTestId('settings-skeleton')).toBeInTheDocument();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
 it('changes data-theme from Appearance and updates an existing URL theme',async()=>{open('#/settings/appearance?theme=dark');fireEvent.click(await screen.findByRole('button',{name:'Light'}));await waitFor(()=>expect(document.documentElement.dataset.theme).toBe('light'));expect(useUiStore.getState().theme).toBe('light');expect(location.hash).toContain('theme=light');});
-it('persists the hook toggle and updates its explanation',async()=>{open('#/settings/sync');fireEvent.click(await screen.findByRole('switch',{name:'Sync at session start'}));expect(backend.prefs.get('sync:hook',true)).toBe(false);expect(screen.getByText(/Not installed. Run sync yourself/)).toBeInTheDocument();});
+it('renders the session-start hook read-only until the CLI reports its state',async()=>{open('#/settings/sync');await screen.findByText('Sync at session start');expect(screen.queryByRole('switch',{name:'Sync at session start'})).toBeNull();expect(screen.getByText('Managed by setup')).toBeInTheDocument();expect(screen.getByText(/Setup adds the entry to ~\/\.claude\/settings\.json with your consent/)).toBeInTheDocument();});
 it('persists each inbox kind independently',async()=>{open('#/settings/inbox');const controls=await screen.findAllByRole('checkbox');expect(controls).toHaveLength(7);fireEvent.click(screen.getByRole('checkbox',{name:'Alert'}));expect(backend.prefs.get('inbox:kind:alert',true)).toBe(false);expect(backend.prefs.get('inbox:kind:share',true)).toBe(true);});
 it('writes k without deriving a new statistic',async()=>{open('#/settings/evals');fireEvent.click(await screen.findByRole('combobox',{name:'Repetitions per case'}));const option=await screen.findByRole('option',{name:'10'});fireEvent.pointerDown(option,{pointerType:'mouse'});fireEvent.click(option);expect(backend.prefs.get('eval:k','')).toBe('10');});
 it('runs Sync now without a team selector through the workflow popup from a user action',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));expect(await screen.findByRole('dialog')).toHaveTextContent('Sync now');await waitFor(()=>expect(sync).toHaveBeenCalledWith({}));});
@@ -104,7 +120,7 @@ it('starts a removal URL only once under StrictMode replay',async()=>{
  await act(async()=>{removal.answer(false);expect(await uninstall.mock.results[0]!.value.done).toMatchObject({ok:false,cancelled:true});});
  expect(removal.current).toBeNull();expect(removal.notice).toBe('Uninstall was cancelled.');
 });
-it('does not change a toggle when its preference write fails',async()=>{open('#/settings/sync');const control=await screen.findByRole('switch',{name:'Sync at session start'});vi.spyOn(backend.prefs,'set').mockImplementation(()=>{throw new Error('Storage denied.');});fireEvent.click(control);expect(await screen.findByRole('alert')).toHaveTextContent('Storage denied.');expect(control).toHaveAttribute('aria-checked','true');});
+it('does not change a toggle when its preference write fails',async()=>{open('#/settings/updates');const control=await screen.findByRole('switch',{name:'Update notices'});vi.spyOn(backend.prefs,'set').mockImplementation(()=>{throw new Error('Storage denied.');});fireEvent.click(control);expect(await screen.findByRole('alert')).toHaveTextContent('Storage denied.');expect(control).toHaveAttribute('aria-checked','true');});
 it('renders the placement hover selector and every raw placement',async()=>{open('#/settings/machine');expect(await screen.findByTestId('placement-row-1')).toHaveTextContent('pr-review');expect(screen.getAllByTestId(/^placement-row-/)).toHaveLength(design.PLACEMENTS.length);});
 it('rejects malformed placement data with its field path',async()=>{const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);settings.value.PLACEMENTS=[['broken']];vi.spyOn(backend,'settings').mockResolvedValue(settings);const consoleError=vi.spyOn(console,'error').mockImplementation(()=>{ /* React reports the intentionally malformed DTO caught by ErrorBoundary. */ });open('#/settings/machine');expect(await screen.findByRole('alert')).toHaveTextContent('PLACEMENTS');expect(consoleError).toHaveBeenCalled();});
 
@@ -302,6 +318,24 @@ it('routes About Check to the Updates dialog with verbatim advice and preserves 
  const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('pre')?.textContent).toBe(report.value.advice.join('\n')));
  expect(location.hash).toContain('/settings/updates?dialog=update&__mock=empty');
 });
+it('names the known latest CLI release on About',async()=>{
+ open('#/settings/about');expect(await screen.findByText(`${design.CLI_LATEST} available`)).toBeInTheDocument();
+});
+it('omits the "available" clause when the latest CLI release is unknown',async()=>{
+ const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,CLI_LATEST:'—'}});
+ open('#/settings/about');await screen.findByText('terum-skills CLI');
+ expect(screen.queryByText(/available/)).toBeNull();expect(screen.queryByText(/—\s*available/)).toBeNull();
+});
+it('derives the About latest from the update check the Updates section already fetched',async()=>{
+ const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,CLI_LATEST:'—'}});
+ const report=await backend.update();if(!report.ok)throw new Error(report.error);
+ vi.spyOn(backend,'update').mockResolvedValue({ok:true,value:{...report.value,latest:'9.9.9'}});
+ open('#/settings/updates');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));
+ fireEvent.click(within(screen.getByRole('navigation',{name:'Settings sections'})).getByRole('link',{name:'About'}));
+ expect(await screen.findByText('9.9.9 available')).toBeInTheDocument();
+});
 it('copies the sign-out command from its terminal instructions',async()=>{
  const copy=vi.spyOn(backend,'copyToClipboard').mockResolvedValue({ok:true,value:undefined}),editor=vi.spyOn(backend,'openInEditor');
  open('#/settings/account');fireEvent.click(await screen.findByRole('button',{name:'Sign out'}));
@@ -347,4 +381,20 @@ it('adds a detected checkout and reports one action error',async()=>{
  open('#/settings/machine?__mock=detected-root');await screen.findByText('Checkouts');
  fireEvent.click(within(screen.getByText('/Users/you/code/ssm').closest('.setting-row')!).getByRole('button',{name:'Add'}));
  expect(add).toHaveBeenCalledWith('/Users/you/code/ssm');expect(await screen.findByRole('alert')).toHaveTextContent('Registration denied');expect(screen.getAllByRole('alert')).toHaveLength(1);
+});
+it('keeps the populated mock quarantine, eval defaults and available version copy',async()=>{
+ open('#/settings/sync');await screen.findByText('Managed by setup');
+ expect(screen.getByText(/2 folders · 60 KB/)).toBeVisible();cleanup();
+ open('#/settings/evals');expect(await screen.findByText(/k = 3 gates/)).toBeVisible();cleanup();
+ open('#/settings/updates');expect(await screen.findByText('0.1.2 installed · 0.1.3 available')).toBeVisible();
+});
+it('draws an empty quarantine and still lets its CLI confirmation determine the actual count',async()=>{
+ const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,QUARANTINE:[]}});
+ open('#/settings/machine');expect(await screen.findByText('Quarantine is empty.')).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'Prune…'}));
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Delete'}));
+ expect(await screen.findByRole('heading',{name:'Delete 2 quarantined item(s)?'})).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'No'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
 });
