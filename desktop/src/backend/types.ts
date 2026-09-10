@@ -19,7 +19,14 @@ export type Scope=string;
 export type TokenKey=keyof Design['TOKENS'];
 export type IndicatorKey='update'|'local'|'broken';
 export interface ReceiptSummary {w:number;l:number;t:number;n:number;lift:number;verdict:'PASS'|'NEUTRAL'|'FAIL';partial:[number,number]|null;signP:string}
-export interface SkillCard {path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:boolean;placed:boolean;onDiskOnly:boolean;paths:[string,string][];projectRoots?:string[];connectedSources?:string[];wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
+/** 'placed': this machine has the skill (a ledger placement — including one only the unfiltered status ledger sees — or an identified on-disk copy). 'recorded': the team people file says this user installed it, but nothing is on this machine — the truthful in-between state (per ryanliu, 2026-09-09). 'absent': neither. The booleans `placed`/`onDiskOnly` keep the finer disk-provenance split (ledger-tracked vs user's own copy) within the 'placed' state. */
+export type InstallState='placed'|'recorded'|'absent';
+/** Which detail backend can describe this card. A team card is addressed by name through
+ *  `skill({ref})`; a folder that belongs to no team exists only on this machine and must be
+ *  addressed by `path` through `localSkill({path})`, because the team inventory has no row for
+ *  it. Never infer this from `project` — that field carries the root a folder lives in ('Global'
+ *  or a checkout's basename), which no longer distinguishes the two. */
+export interface SkillCard {teamed:boolean;path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:InstallState;placed:boolean;onDiskOnly:boolean;paths:[string,string][];projectRoots?:string[];connectedSources?:string[];wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
 export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
 export interface ReportNumbers {holes:number;nRounds:number;triggerTotal:number;precisionObserved?:string}
@@ -43,7 +50,8 @@ export type InboxItem=Omit<Design['INBOX'][number],'kind'> & {id:string;skillRef
 export type Person=Omit<Design['ROSTER'][number], 'followers'|'role'> & {role:string|null;followers:number|null;projects:string[];declined:string[];organization:string|null;lastPublish:string;skills:string[];installable:string[];adoption:number;publishLine:string;teamsLine:string;buckets:[string,string[]][];placeNote:string;onDisk:[number,number]};
 export type Project=Omit<Design['PROJECTS'][number], 'evaluated'|'favorites'|'admin'|'updated'> & {admin:Design['PROJECTS'][number]['admin']|null;updated:string|null;evaluated:number|null;favorites:number|null;memberHandles:string[];memberInitials:string[];skillsIn:string[]};
 export interface Catalog {scanned:string[]|null;repository:string|null;skills:SkillCard[];extras:SkillCard[];people:Person[];projects:Project[];categories:Design['CATEGORIES'];categoryRemaining:Record<string,number>;topRated:string[];peopleByAdoption:string[];projectsByMembers:string[];categorySkills:Record<string,string[]>;filterDefault:Design['FILTER_DEFAULT'];filterCount:number;verdictCounts:Record<'PASS'|'NEUTRAL'|'FAIL'|'Not evaluated',number|null>;catalogN:number;teamN:number;bulkInstall:Record<string,{total:number;asking:number}>}
-export type Member=Omit<Design['ROSTER'][number], 'followers'|'role'> & {role:string|null;followers:number|null;status:string;projects:string[];lastSeen:string;lastPublish:string};
+export type Member=Omit<Design['ROSTER'][number], 'followers'|'role'|'joined'> & {role:string|null;followers:number|null;joined:string|null;status:string;projects:string[];lastSeen:string;lastPublish:string};
+/** `invited` and `joined` are null when the CLI does not report them — the screen omits the claim rather than asserting zero or a date. */
 export interface Roster {members:Member[];invited:Design['INVITED']|null;member:Record<string,{status:string;projects:string[];lastSeen:string}>;byAdoption:string[]}
 /** `slug` is owner/repo on GitHub and null on every other host; `remote` is null when the folder has no origin at all. */
 export interface RootRemote {url:string;slug:string|null}

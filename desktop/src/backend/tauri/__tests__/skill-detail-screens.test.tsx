@@ -20,7 +20,8 @@ function open(route:string,amend?:AmendResult) {
 
 it('renders the recorded detail in the board shapes with one heading and real provenance',async()=>{
   open('#/skill/deploy-check?menu=files');
-  await screen.findByText('Use this skill when a deploy needs a pre-flight checklist.');
+  // Description and SKILL.md body both carry the first body paragraph now that desc derives from the body (re-land of #111).
+  await screen.findAllByText('Use this skill when a deploy needs a pre-flight checklist.');
   expect(document.querySelectorAll('h1')).toHaveLength(1);
   expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/acme/ops/deploy-check');
   // The recording's viewer is `seed`, one of the two installers, so the viewer is named (PR 104).
@@ -75,6 +76,25 @@ it('renders an unreadable board and refetches from Try again',async()=>{
   fail=false;
   fireEvent.click(screen.getByRole('button',{name:'Try again'}));
   expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeVisible();
+});
+it('renders the no-team board when status serves no teams, with no missing-folder story and no Remove',async()=>{
+  open('#/skill/deploy-check',(name,value)=>{if(name==='status')value.teams=[];});
+  expect(await screen.findByText('No team on this machine')).toBeVisible();
+  expect(screen.getByText('Create a team or join the one you were invited to. Setup runs here in the app.')).toBeVisible();
+  expect(screen.queryByText(/listed in your people file/)).toBeNull();
+  expect(screen.queryByRole('button',{name:/Remove/})).toBeNull();
+  expect(document.querySelector('.detail-body .terminal-hint')).toHaveTextContent('npx -y terum-skills@latest setup');
+  fireEvent.click(screen.getByRole('button',{name:'Start setup'}));
+  await waitFor(()=>expect(location.hash).toBe('#/onboarding/boot?start=1'));
+});
+it('tells the user to pick a team when status serves two, with the CLI naming them and no Remove',async()=>{
+  open('#/skill/deploy-check',(name,value)=>{const teams=value.teams as Record<string,unknown>[];if(name==='status')value.teams=[...teams,{...teams[0]!,team:'zeta'}];});
+  expect(await screen.findByText('Choose a team')).toBeVisible();
+  expect(screen.getByRole('alert')).toHaveTextContent('This machine is configured for teams acme, zeta');
+  expect(screen.queryByText(/listed in your people file/)).toBeNull();
+  expect(screen.queryByRole('button',{name:/Remove/})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Open settings'}));
+  await waitFor(()=>expect(location.hash).toBe('#/settings/teams'));
 });
 it.each([[0,'Nobody has installed this yet'],[1,'Installed by you'],[2,'Installed by you and 1 teammate']] as const)('renders the installer count %s as %j (the viewer `seed` is an installer)',async(count,label)=>{
   open('#/skill/deploy-check',(name,value)=>{if(name==='ls')(value.skills as Record<string,unknown>[])[0]!.installs=count;});

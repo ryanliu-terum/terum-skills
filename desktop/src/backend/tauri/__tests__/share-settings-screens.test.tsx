@@ -26,7 +26,7 @@ it('renders members without unknown invitations, roles or Last seen',async()=>{
  expect(within(row).getAllByRole('cell',{hidden:true}).at(-1)).not.toBeVisible();
 });
 it('renders unknown hook and quarantine without switches or prune buttons',async()=>{
- open('#/settings/sync');expect(await screen.findByText('Unknown')).toBeVisible();
+ open('#/settings/sync');expect(await screen.findByText('Managed by setup')).toBeVisible();
  expect(screen.queryByRole('switch')).toBeNull();expect(screen.queryByRole('button',{name:'Prune…'})).toBeNull();
  expect(screen.getByText('Quarantine contents are not reported by this terum-skills version.')).toBeVisible();
 });
@@ -55,7 +55,7 @@ it('renders a reported shared name and abbreviated source',async()=>{
 });
 it('renders generic settings errors without diagnosing invalid JSON',async()=>{
  open('#/settings/account',(frame,name)=>{if(frame.t==='result'&&name==='status'){Object.assign(frame,{ok:false,error:'Permission denied.',exitCode:1});delete frame.value;}});
- expect(await screen.findByText("terum-skills could not read this machine's configuration. Check ~/.terum/skills is readable, then try again.")).toBeVisible();
+ expect(await screen.findByText("terum-skills could not read your settings, so this page shows nothing rather than stale values. The message below is the CLI's own.")).toBeVisible();
  expect(screen.queryByText(/not valid JSON/)).toBeNull();
 });
 it('draws empty placement and shared collections',async()=>{
@@ -70,7 +70,7 @@ it('draws unknown status with a muted alert icon',()=>{
  expect(container.querySelector('svg')?.innerHTML).toBe(ICON_PATHS.alert);
 });
 it('shows sync outcome counts, deferred grants, notices and unsynced teams',async()=>{
- const backend=open('#/settings/sync');await screen.findByText('Unknown');
+ const backend=open('#/settings/sync');await screen.findByText('Managed by setup');
  const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{placed:2,deferred:['a','b'],notices:['Review notice'],changed:true,teams:[{team:'acme',state:'skipped',message:'m'},{team:'other',state:'gone'},{team:'quiet',state:'synced'}]}})}));
  backend.sync=createTauriBackend(f.bridge).sync;
  fireEvent.click(screen.getByRole('button',{name:'Sync now'}));
