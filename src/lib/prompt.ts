@@ -4,6 +4,9 @@ import { stdin as processStdin, stdout as processStdout } from 'node:process';
 /** Lines the person needs in order to answer; a terminal prints them once, immediately before the question; frame mode carries them on the ask frame. */
 export interface AskOptions { detail?: readonly string[]; }
 
+/** A verb's report that a long step has moved on. A terminal ignores it; frame mode writes one `progress` frame. */
+export interface ProgressUpdate { step: string; current?: number; total?: number; }
+
 /**
  * §3 library-first: the ONLY channel a verb uses to talk to a human. Verbs never touch
  * process.stdin / stdout / console; the ESLint rule in eslint.config.js enforces that and
@@ -26,6 +29,11 @@ export interface Prompter {
   text(question: string, defaultValue?: string, options?: AskOptions): Promise<string>;
   select(question: string, choices: readonly string[], defaultChoice?: string, options?: AskOptions): Promise<string>;
   print(line: string): void;
+  /**
+   * Optional: only a channel that can render progress implements it (frame mode does; a terminal does not,
+   * because a verb that wants a person to see progress prints a line). Callers must use `io.progress?.(…)`.
+   */
+  progress?(update: ProgressUpdate): void;
 }
 
 /** §3: `sync --hook` is typed against this — it can print and nothing else. */

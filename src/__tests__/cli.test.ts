@@ -28,6 +28,11 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     return { program, calls, outcomes };
   };
 
+  it.each([false,true])('routes status --permissions into StatusArgs (%s)', async permissions => {
+    const {program,calls}=harness();await program.parseAsync(['status',...(permissions?['--permissions']:[])],{from:'user'});
+    expect(calls).toEqual([{verb:'status',...(permissions?{permissions:true}:{})}]);
+  });
+
   it('wires status, limits selection to --team, and exposes its query semantics in help', async () => {
     const { program, calls } = harness();
     await program.parseAsync(['status'], { from: 'user' });

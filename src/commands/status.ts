@@ -17,7 +17,7 @@ import { readRoster, readTeam, RosterEntry, SkillProblem, skillRecords } from '.
 import { packageVersion } from '../lib/package.js';
 import { CloneState, describeClone } from '../lib/teamRepo.js';
 
-export interface StatusArgs extends WithForm { team?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
+export interface StatusArgs extends WithForm { permissions?: boolean; team?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
 export interface TeamStatus {
   team: string; handle: string; repository: string | null; clone: CloneState; readable: boolean;
   members: RosterEntry[]; memberCount: number | null; unreadableMembers: number | null;
@@ -56,8 +56,9 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
       identity = { default_handle: config.default_handle ?? null, email: config.email ?? null, display_name: config.display_name ?? null, github: config.github ?? null };
     }
     const runner = args.runner ?? systemRunner;
-    tools.git = (await gitState(runner)).installed;
-    tools.gh = (await ghState(runner, { presenceOnly: true })).installed;
+    const [git, gh] = await Promise.all([gitState(runner), ghState(runner, { presenceOnly: true })]);
+    tools.git = git.installed;
+    tools.gh = gh.installed;
     const selected = args.team !== undefined ? [selectTeam(config.teams, args.team, args.form)] : Object.entries(config.teams);
     if (!selected.length) for (const line of getStartedLines(args.form)) io.print(line);
     const lines: string[] = [];
@@ -94,9 +95,10 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
           }
         } else {
           io.print('  From the local clone; GitHub access is not checked.');
-          // Best-effort host truth for the member permission chip: null (unknown) when gh is absent
-          // or the lookup fails — status stays an offline-tolerant read and never throws for it.
-          const admins = tools.gh && ownerRepo !== null ? await adminLogins(runner, ownerRepo) : null;
+          // Best-effort host truth for the member permission chip: null (unknown) when gh is absent, when
+          // the lookup fails, or when --permissions was not passed — status stays an offline-tolerant read
+          // and never throws for it.
+          const admins = args.permissions && tools.gh && ownerRepo !== null ? await adminLogins(runner, ownerRepo) : null;
           const { roster, problems } = await readRoster(clone, { adminLogins: admins });
           detail.members = roster;
           detail.memberCount = roster.length;
