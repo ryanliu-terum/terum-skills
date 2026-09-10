@@ -207,7 +207,8 @@ it.each([false,true])('serves recorded status and settings with real team data (
  expect(status.value?.tools).toEqual(settings.value?.tools);
  expect(status.value?.tools.git).toBe(true);
  if(failed){expect(status).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});expect(settings).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});}
- expect(f.spawns.map(s=>s.args)).toEqual([['status'],['ls','--local'],['status'],['ls','--local']]);expect(f.writes).toEqual([]);
+ // Reads are shared across status and settings (read cache); a failed status is not kept, so it is retried once.
+ expect(f.spawns.map(s=>s.args)).toEqual(failed?[['status'],['ls','--local'],['status']]:[['status'],['ls','--local']]);expect(f.writes).toEqual([]);
 });
 it.each([null,'old','current'])('only displays approvals joined to current grants (hash=%s)',async hash=>{
  const f=statusReplay(false,(frame,verb)=>{
