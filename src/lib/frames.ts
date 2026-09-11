@@ -35,12 +35,18 @@ export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
  * `false` is a drawn control a real shell must hide or grey; flipping one is a product decision, not
  * a frame-mode change.
+ *
+ * `liftOnCards` moved false -> true on 2026-09-10 (Ryan), overriding the D29 display resolution's
+ * "no lift-style decimal appears at card level" for the desktop app's Library and Marketplace cards
+ * only; the rest of D29 stands. The card is backed by `ls`'s `receipt` limb, so the number a card
+ * shows is one receipt's own `candidate-vs-baseline` net lift with its provenance beside it, never a
+ * statistic derived across receipts. See .planning/specs/2026-09-04-eval-engine.md §12.
  */
 export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   checkouts: true, projects: true,
   memberRole: true, localIdentity: true, roles: true,
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
-  disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: true,
+  disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: false, progress: true,
   refresh: true, discover: true, appUpdate: true,
   autoSync: true,
 });
