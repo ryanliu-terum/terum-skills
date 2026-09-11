@@ -41,6 +41,8 @@ BLOCKER-rated findings were refuted 0-3 and are listed at the end for completene
 These change code Codex writes in B3. Resolve all of them before that run.
 
 ### ✦ OF-1 — `assessHygiene`'s signature omits the category list HYG7 needs
+
+> **RESOLVED rev 8 (D28, Ryan 2026-09-11).** The filed question was the smaller half: the whole auto-category build is unowned — `categorize.ts`, `suggestCategory` and `askJson settingSources` do not exist — so B3 ships the precedence without the suggestion limb and the suggestion, HYG7 and hygiene's fifth parameter become batch **B9** after B5. HYG7 is kept, not dropped.
 *r1 #8 BLOCKER (1-2) · r3 #9 BLOCKER→NOTE (1-2) — raised twice, split twice*
 §5.1 step 5 specifies `assessHygiene(name, { files, executable }, policy.skill_license)`, but the
 auto-category sibling (`2026-09-10-auto-category.md` §6) specifies
@@ -50,6 +52,8 @@ says HYG7 **no-ops when the list is absent**. As written, publish silently disab
 If `categories` exists and gates HYG7, the spec's call is wrong and §5.1 step 5 gains the argument.
 
 ### OF-2 — publish writes local bytes before a gate that can still refuse
+
+> **RESOLVED rev 8.** The local write-back is now §5.1 **step 6b**, after every refusal-capable question, and the boundary against a failed `safeWrite` is stated (local first, idempotent on retry). Test added to §14.1.
 *r3 #15 BLOCKER→GAP (3-0) and r3 #19 BLOCKER→DRIFT (3-0) — the same defect, found by two dimensions*
 §5.1 step 5 writes the injected `SKILL.md` back into the local folder and promises "a refused
 publish leaves the folder untouched"; step 6a (D19's regression gate) then asks *"Publish anyway?
@@ -60,6 +64,8 @@ receipt + changed managed fields + a declined confirmation leaves the file byte-
 This one is self-inflicted — D19 (added in r2's adjudication) created it — so it is certainly real.
 
 ### OF-3 — guard row a′ does not actually enforce version immutability
+
+> **RESOLVED rev 8.** Row a′ now requires the whole `skills/<name>/v<N>/` prefix to be absent from the pre-image, not merely each path; many files added together for a new version still pass. Test added to §14.1.
 *r3 #16 BLOCKER→GAP (3-0)*
 Row a′ admits a path when `tree.before(path) === undefined && tree.after(path) !== undefined`, and
 §4.2 claims that "is what makes a version immutable at the authorization layer". It is not: the
@@ -71,6 +77,8 @@ still allowing many files to be added together for a *new* version. Test: adding
 absent file to an existing version is refused.
 
 ### OF-4 — the config preprocess destroys the hashes the migration needs
+
+> **RESOLVED rev 8.** §3.4's claim was simply wrong — `personSchema` is team state and is never parsed through `configSchema`, so no preprocess ever touched it. The preprocess is now scoped to `configSchema` explicitly, and §13 gains an explicit legacy people-file reader that holds the 40-hex values through the re-key and validates the result. Also unblocks B8.
 *r3 #17 BLOCKER (3-0) — the only r3 finding whose severity survived verification unchanged*
 §3.4 requires a read-time preprocess mapping any 40-hex `version` in `personSchema.installed[]` to
 `null`. §13 step 5 requires a 40-hex `installed[].version` to become `'v1'` when it matches the
@@ -82,6 +90,8 @@ hashes until re-keying completes, then validates the layout-3 result; and correc
 **Also blocks B8** (the migration verb) — resolve once, in B3, and B8 inherits it.
 
 ### OF-5 — `saveGeneratedAssets` refuses regeneration
+
+> **RESOLVED rev 8 (D29, Ryan 2026-09-11).** `--gen` is deleted: eval uses the assets that are there and generates only what is missing, per asset. With no way to force generation over existing files, nothing can be overwritten — both refusals become unreachable and go. Regenerating is deleting `evals/cases/` and re-running.
 *r3 #14 DRIFT (unverified — all three verifiers died)*
 §6.3 says `--generate`'s new behaviour is "the first half of the old one and nothing else —
 `saveGeneratedAssets(<the local skill folder>, generated)`, full stop", while D9 explicitly
