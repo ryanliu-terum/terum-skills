@@ -74,7 +74,10 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // generated case sharing the stem would silently evaluate something else (review P2).
     if (args.gen && args.case !== undefined) return failure('--gen cannot be combined with --case: naming a case asserts an authored expectation, and generation would replace the set it selects from.');
     if (args.triggersOnly && args.executionOnly) return failure('--triggers-only and --execution-only cannot be used together.');
-    const k = args.k ?? 3;
+    // Default k=1 (spec rev 18; Ajay, 2026-09-10) — overrides the 2026-09-07 "keep default k=3"
+    // ruling (Terum 5aa9a4b2) on cost: k=3 -> k=1 takes a 3-case run from ~$4.40 to ~$1.50 measured.
+    // A receipt you intend to gate on wants --k 3 or more; §16.6 carries the noise caveat.
+    const k = args.k ?? 1;
     if (!Number.isInteger(k) || k < 1) return failure('--k must be a positive integer.');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
