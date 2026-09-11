@@ -18,6 +18,11 @@ export function Sidebar({selected,counts,machine,me,surfaces,team,roots,collapse
  // route change remounts the Shell, dropping it. `errorAt` routes the one error to the row that owns it.
  const backend=useBackend(),action=useWorkflow(),[errorAt,setErrorAt]=useState<string|null>(null);
  function addCheckout(id:string){setErrorAt(id);void action.run(()=>backend.checkouts.add(id));}
+ // Add project's inverse, in the place the project was added rather than only in Settings. Removal
+ // forgets the path: the root stops being scanned and its skills stop auto-sharing at sync. It does
+ // not touch disk and does not un-share what already reached the team repo — Settings ▸ Checkouts
+ // carries that wording, and re-adding the folder restores the row.
+ function removeCheckout(id:string){setErrorAt(id);void action.run(()=>backend.checkouts.remove(id));}
  async function addProject(){
   setErrorAt('add-project');
   action.clear();
@@ -29,14 +34,25 @@ export function Sidebar({selected,counts,machine,me,surfaces,team,roots,collapse
  }
  return <aside className="sidebar"><nav className="sidebar-inner" aria-label="Main navigation"><div className="nav-group"><SectionHeader label="Library" trailing={<button type="button" className="icon-button" aria-label="Hide sidebar" aria-expanded={true} onClick={onHide} style={{width:20,height:20,color:'var(--tk-text4)'}}><Icon name="panel-left" size={14}/></button>}/>
  <NavRow label="Global" icon="globe" href="#/library/global" selected={selected==='Global'} count={displayedCounts?.Global}/>{surfaces?.library!==false?<><NavRow label="Projects" icon="folder" href="#/marketplace/projects" expandable collapsed={collapsedSections.includes('projects')} onToggle={()=>onToggleSection?.('projects')}/>
- {!collapsedSections.includes('projects')&&<>{checkoutRoots.length?checkoutRoots.map(root=><CheckoutRow key={root.id} root={root} selected={selected===root.id} showCount={displayedCounts!==null} busy={action.busy} error={errorAt===root.id?action.error:null} onAdd={()=>addCheckout(root.id)}/>):<div className="nav-row nav-empty" style={{paddingLeft:32}}><div className="nav-label"><span style={{color:'var(--tk-text4)'}}>0 projects</span></div></div>}<AddProjectRow busy={action.busy} error={errorAt==='add-project'?action.error:null} onChoose={()=>{void addProject();}}/></>}</>:null}
+ {!collapsedSections.includes('projects')&&<>{checkoutRoots.length?checkoutRoots.map(root=><CheckoutRow key={root.id} root={root} selected={selected===root.id} showCount={displayedCounts!==null} busy={action.busy} error={errorAt===root.id?action.error:null} onAdd={()=>addCheckout(root.id)} onRemove={()=>removeCheckout(root.id)}/>):<div className="nav-row nav-empty" style={{paddingLeft:32}}><div className="nav-label"><span style={{color:'var(--tk-text4)'}}>0 projects</span></div></div>}<AddProjectRow busy={action.busy} error={errorAt==='add-project'?action.error:null} onChoose={()=>{void addProject();}}/></>}</>:null}
  {surfaces?.inbox===true?<><NavRow label="Inbox" icon="inbox" href="#/inbox" expandable collapsed={collapsedSections.includes('inbox')} onToggle={()=>onToggleSection?.('inbox')} selected={selected==='Inbox'}/>{!collapsedSections.includes('inbox')&&<><NavRow label="Pushes" icon="arrow-down-to-line" href="#/inbox?tab=pushes" nested count={displayedCounts?.Pushes}/><NavRow label="Updates" icon="refresh" href="#/inbox?tab=updates" nested count={displayedCounts?.Updates}/><NavRow label="Alerts" icon="alert" href="#/inbox?tab=alerts" nested count={displayedCounts?.Alerts}/></>}</>:null}
  </div>{surfaces?.catalog!==false||surfaces?.roster!==false?<div className="nav-group"><SectionHeader label="Team"/>{surfaces?.catalog!==false?<NavRow label="Marketplace" icon="store" href="#/marketplace" selected={selected==='Marketplace'}/>:null}{surfaces?.roster!==false?<NavRow label="Share" icon="users" href="#/share" selected={selected==='Share'}/>:null}</div>:null}</nav><Footer team={team} machine={machine} me={me} settings={selected==='Settings'}/></aside>;
 }
 
-function CheckoutRow({root,selected,showCount,busy,error,onAdd}:{root:Root;selected:boolean;showCount:boolean;busy:boolean;error:string|null;onAdd:()=>void}) {
+/**
+ * A registered row offers Remove, a detected-but-unregistered one offers Add: the two states are
+ * mutually exclusive, so one trailing control covers both and Add project's inverse lives beside it.
+ * Both are guarded by `features.checkouts` for the same reason — an older CLI has neither verb.
+ */
+function CheckoutRow({root,selected,showCount,busy,error,onAdd,onRemove}:{root:Root;selected:boolean;showCount:boolean;busy:boolean;error:string|null;onAdd:()=>void;onRemove:()=>void}) {
  const features=useFeatures();
- return <><NavRow label={root.label} icon="box" href={'#/library/checkout?root='+encodeURIComponent(root.id)} selected={selected} nested count={!showCount?undefined:root.rootState==='absent'||root.rootState==='unreadable'?'—':root.count} trailing={root.detected&&!root.registered&&features?.checkouts?<button type="button" className="icon-button nav-add" aria-label={'Add '+root.label+' to your library'} disabled={busy} onClick={e=>{e.preventDefault();e.stopPropagation();onAdd();}}>+ Add</button>:null}/>{error?<div role="alert">{error}</div>:null}</>;
+ // The row is an anchor, so a trailing control must claim the click before the link navigates.
+ const claim=(run:()=>void)=>(event:{preventDefault:()=>void;stopPropagation:()=>void})=>{event.preventDefault();event.stopPropagation();run();};
+ const trailing=!features?.checkouts?null
+  :root.registered?<button type="button" className="icon-button nav-remove" aria-label={'Remove '+root.label+' from your library'} disabled={busy} onClick={claim(onRemove)}><Icon name="x" size={12} stroke="2"/></button>
+  :root.detected?<button type="button" className="icon-button nav-add" aria-label={'Add '+root.label+' to your library'} disabled={busy} onClick={claim(onAdd)}>+ Add</button>
+  :null;
+ return <><NavRow label={root.label} icon="box" href={'#/library/checkout?root='+encodeURIComponent(root.id)} selected={selected} nested count={!showCount?undefined:root.rootState==='absent'||root.rootState==='unreadable'?'—':root.count} trailing={trailing}/>{error?<div role="alert">{error}</div>:null}</>;
 }
 
 /**

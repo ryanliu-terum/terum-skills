@@ -220,8 +220,10 @@ it('never claims a missing folder or offers Sync/Remove when a name is not in th
  expect(screen.queryByText(/listed in your people file/)).toBeNull();
  expect(screen.queryByText(/folder is missing from this machine/)).toBeNull();
  expect(screen.queryByRole('button',{name:'Sync now'})).toBeNull();
- expect(screen.queryByRole('button',{name:/^Remove/})).toBeNull();
  const panel=document.querySelector('.centered-state')!;
+ // Scoped to the panel: the sidebar legitimately offers "Remove <project> from your library" per
+ // registered checkout, and this assertion is about what the failed skill route offers, not that.
+ expect(within(panel as HTMLElement).queryByRole('button',{name:/^Remove/})).toBeNull();
  expect(within(panel as HTMLElement).getByRole('button',{name:'Back to library'})).toBeVisible();
  expect(within(panel as HTMLElement).getByRole('button',{name:'Open marketplace'})).toBeVisible();
 });
@@ -241,8 +243,10 @@ it.each([true,false])('keeps a local error honest and never offers checkout remo
  const remove=vi.spyOn(backend.checkouts,'remove');openWith('#/skill/local?path=%2Ftmp%2Fa',backend);
  expect(await screen.findByText(typed?'Not in your library':"Couldn't read a")).toBeVisible();
  expect(screen.getByRole('alert')).toHaveTextContent(error);
- expect(screen.queryByRole('button',{name:/Remove|Forget/i})).toBeNull();expect(remove).not.toHaveBeenCalled();
  const board=document.querySelector('.centered-state')??screen.getByText(typed?'Not in your library':"Couldn't read a").parentElement!;
+ // Scoped to the error board for the same reason as above: the sidebar's per-project Remove is a
+ // different surface. The `remove` spy still proves this route never calls checkout removal.
+ expect(within(board as HTMLElement).queryByRole('button',{name:/Remove|Forget/i})).toBeNull();expect(remove).not.toHaveBeenCalled();
  expect(within(board as HTMLElement).getByRole('button',{name:'Back to library'})).toBeVisible();
  expect(screen.queryByRole('button',{name:'Try again'})!==null).toBe(!typed);
  if(!typed){fireEvent.click(screen.getByRole('button',{name:'Try again'}));await waitFor(()=>expect(backend.localSkill).toHaveBeenCalledTimes(2));}

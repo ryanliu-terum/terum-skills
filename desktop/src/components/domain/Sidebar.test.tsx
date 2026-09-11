@@ -95,6 +95,28 @@ it('adds a detected root without navigating and shows errors below its row',asyn
  expect(screen.getByRole('alert').previousElementSibling).toHaveTextContent('SSM');
  expect(location.hash).toBe('#/library/global?__mock=detected-root');
 });
+// Add project's inverse, beside the project it added. Registered and detected are exclusive, so a
+// registered row offers Remove where a detected one offers Add — never both.
+it('removes a registered root from its own row without navigating, and shows errors below it',async()=>{
+ const backend=createMockBackend(),status=await backend.status();if(!status.ok)throw new Error(status.error);
+ vi.spyOn(backend,'status').mockResolvedValue({ok:true,value:{...status.value,roots:[{id:'/a/app',kind:'checkout',root:'/a/app',label:'app',registered:true,detected:false}]}});
+ const remove=vi.spyOn(backend.checkouts,'remove').mockImplementation(()=>createRun(async()=>({ok:false,error:'Cannot forget this folder'})));
+ location.hash='#/library/global';
+ await openSidebar(backend);
+ expect(screen.queryByRole('button',{name:'Add app to your library'})).toBeNull(); // registered: Remove, not Add
+ fireEvent.click(await screen.findByRole('button',{name:'Remove app from your library'}));
+ expect(remove).toHaveBeenCalledWith('/a/app');
+ expect(await screen.findByRole('alert')).toHaveTextContent('Cannot forget this folder');
+ expect(screen.getByRole('alert').previousElementSibling).toHaveTextContent('app');
+ expect(location.hash).toBe('#/library/global'); // the row is a link; the control claims the click
+});
+it('hides Remove when the CLI does not support registration',async()=>{
+ const backend=createMockBackend(),status=await backend.status();if(!status.ok)throw new Error(status.error);
+ vi.spyOn(backend,'status').mockResolvedValue({ok:true,value:{...status.value,roots:[{id:'/a/app',kind:'checkout',root:'/a/app',label:'app',registered:true,detected:false}]}});
+ vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),checkouts:false});
+ await openSidebar(backend);await screen.findByRole('link',{name:'app'});
+ expect(screen.queryByRole('button',{name:'Remove app from your library'})).toBeNull();
+});
 it('hides detected Add when the CLI does not support registration',async()=>{
  location.hash='#/library/global?__mock=detected-root';const backend=createMockBackend();
  vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),checkouts:false});

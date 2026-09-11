@@ -367,8 +367,11 @@ it('lists checkout paths and forgets only the selected root',async()=>{
  open('#/settings/machine');await screen.findByText('Checkouts');
  for(const name of ['terum','ssm','mrf'])expect(screen.getByText('/Users/you/code/'+name)).toBeVisible();
  fireEvent.click(screen.getAllByRole('button',{name:'Remove'})[0]!);await waitFor(()=>expect(remove).toHaveBeenCalledWith('/Users/you/code/terum'));
- expect(screen.getByText(/Registering a folder is not sharing/)).toHaveTextContent('connects nothing and approves no tool grant');
- expect(screen.getByText(/Registering a folder is not sharing/)).toHaveTextContent('Detected · not registered');
+ // The note must state what registering now costs: sync auto-shares a registered root's skills
+ // (autoShareRoots), so the old "registering is not sharing" wording would be a false promise.
+ expect(screen.getByText(/Registering a folder is the consent for it/)).toHaveTextContent('sync auto-shares its untracked skills to the team repo');
+ expect(screen.getByText(/Registering a folder is the consent for it/)).toHaveTextContent('skills already in the team repo stay there');
+ expect(screen.getByText(/Registering a folder is the consent for it/)).toHaveTextContent('Detected · not registered');
 });
 it.each(['click','enter'])('adds a typed checkout by %s and clears the field',async mode=>{
  vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});const add=vi.spyOn(backend.checkouts,'add');
