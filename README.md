@@ -252,13 +252,9 @@ The selection catalog contains the team's endorsed skills plus the candidate ski
 Each case runs in three arms, with `k` repetitions per arm:
 
 \| Arm | What it contains |
-
 \| --- | --- |
-
 \| Baseline | No copy of the skill under test. |
-
 \| Candidate | The version currently being evaluated. |
-
 \| Incumbent | The latest version with a committed receipt. This shows whether a republish improves on what it would replace. |
 
 Every repetition runs `claude -p` in a fresh sandbox with `--setting-sources project`, preventing user-level skills from leaking into the run. The engine checks the resolved skill list and refuses to continue if the tested skill appears in baseline or is missing from candidate.
