@@ -119,21 +119,14 @@ Evaluation has two parts: hygiene and execution.
 #### Hygiene
 Hygiene checks are deterministic and free. They run before skill content reaches the repository through `validate`, `connect`, `sync`, `publish`, `eval`, or team CI.
 
-\| Code | Fails when |
-
-\| --- | --- |
-
-\| `HYG1` | Frontmatter does not parse, the folder name differs from `name`, or `allowed-tools` grants are malformed. |
-
-\| `HYG2` | A text file contains bidirectional or zero-width characters, or a token mixes scripts in a way that resembles a homoglyph attack. |
-
-\| `HYG3` | A file contains a credential pattern or an email address other than the author's own. |
-
-\| `HYG4` | A file has an executable bit or shebang without `--allow-privileged` consent, or uses an extension outside the allowlist. |
-
-\| `HYG5` | The frontmatter license, team policy license, and any bundled `LICENSE` file disagree. |
-
-\| `HYG6` | `description` is empty. A `SKILL.md` longer than 20,000 characters produces a warning but does not block. |
+| Code | Fails when |
+| --- | --- |
+| `HYG1` | Frontmatter does not parse, the folder name differs from `name`, or `allowed-tools` grants are malformed. |
+| `HYG2` | A text file contains bidirectional or zero-width characters, or a token mixes scripts in a way that resembles a homoglyph attack. |
+| `HYG3` | A file contains a credential pattern or an email address other than the author's own. |
+| `HYG4` | A file has an executable bit or shebang without `--allow-privileged` consent, or uses an extension outside the allowlist. |
+| `HYG5` | The frontmatter license, team policy license, and any bundled `LICENSE` file disagree. |
+| `HYG6` | `description` is empty. A `SKILL.md` longer than 20,000 characters produces a warning but does not block. |
 
 #### Execution
 `eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The command reads the team clone and writes only to its local run directory, plus a receipt when you pass `--commit`. It does not modify `skills/`, `people/`, or installed copies of a skill.
