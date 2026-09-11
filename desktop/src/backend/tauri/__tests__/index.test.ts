@@ -1026,3 +1026,15 @@ it.each(['ls', 'ls-local'])('rejects a non-text frontmatter field from %s', asyn
   const result = source === 'ls' ? await backend.skill({ ref: 'deploy-check' }) : await backend.localSkill({ path: '/Users/teddy/.claude/skills/deploy-check' });
   expect(result.ok).toBe(false);
 });
+
+it('populates project remoteSlugs from every remote and drops null-normalized entries', async () => {
+  const f = peopleReplay((frame, name) => {
+    if (name === 'ls' && frame.t === 'result') {
+      const value = frame.value as { projects: { remotes: string[] }[] };
+      value.projects[0]!.remotes = ['https://github.com/team/first.git', 'git@github.com:team/second.git', ''];
+    }
+  });
+  const catalog = await createTauriBackend(f.bridge).catalog();
+  expect(catalog.ok).toBe(true);
+  expect(catalog.value?.projects[0]).toMatchObject({ remote: 'https://github.com/team/first.git', remoteSlugs: ['team/first', 'team/second'] });
+});

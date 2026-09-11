@@ -5,7 +5,7 @@ import { FEATURE_KEYS } from '../types';
 import type { Settings, SyncResult, ChangeSource, Features, Identity, Library, Project, Root, LibraryScope, SkillDetail } from '../types';
 import { decodeText } from '../../lib/fixture-text';
 import { overviewCopy } from '../../lib/overview-copy';
-import { abbreviateHome } from '../paths';
+import { abbreviateHome, stripRemote } from '../paths';
 import type { Backend } from '../Backend';
 import type { ConnectBatch, ConnectOutcome, InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard } from '../types';
 import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData } from './data';
@@ -77,7 +77,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
  const created: {name:string;remote:string|null}[] = [];
  /** Endorsements this session opened, so a project's card reflects what the picker did. */
  const endorsed: {project:string;name:string}[] = [];
- const asProject=(q:{name:string;remote:string|null}):Project=>({name:q.name,key:q.name,ico:'folder',desc:'',skills:0,members:0,remote:q.remote??'—',installed:false,favorites:null,updated:null,path:null,admin:null,evaluated:null,memberHandles:[],memberInitials:[],skillsIn:[]});
+ const asProject=(q:{name:string;remote:string|null}):Project=>({name:q.name,key:q.name,ico:'folder',desc:'',skills:0,members:0,remote:q.remote??'—',remoteSlugs:q.remote?[stripRemote(q.remote).replace(/^github\.com\//, '')]:[],installed:false,favorites:null,updated:null,path:null,admin:null,evaluated:null,memberHandles:[],memberInitials:[],skillsIn:[]});
  // `skillsTotal` is null on the mock: the canvas fixture records who authored a skill and how many installs
  // it has team-wide, but never how many skills a member's own machine holds, so there is no honest number to
  // draw. The real adapter reads each member's self-report from their people file; the column shows '—' here
@@ -118,7 +118,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   onboarding:async()=>{const result=await read('onboarding',()=>ok(onboardingData()));return result.ok?result:{...result,value:onboardingData()};},
   library:({scope})=>read('library',scenario=>{if(scenario==='no-team')return {ok:false,error:'No team is configured on this machine.',reason:'no-team'};const scopes:Record<string,readonly string[]>=design.LIST_OF;const root=mockRoots().find(r=>scope.kind==='global'?r.kind==='global':r.id===scope.root);if(!root)return fail('No such checkout: '+(scope.kind==='checkout'?scope.root:'global'));const canonical=root.label;const skills=scenario==='empty'?[]:canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.project!=='local'&&scopes[skill.name]?.includes(canonical));return ok({scanned:null,root,team:{kind:'ok',team:design.TEAMS[0]!.name},skills:skills.map(s=>removalState(withInstall({...cardOf(s),path:root.kind==='global'?'~/.claude/skills/'+s.name:root.root+'/.claude/skills/'+s.name,...(scenario==='on-disk-only'&&s.name==='deploy-check'?{installed:'placed' as const,placed:false,onDiskOnly:true,paths:[['~/.claude/skills/deploy-check','global']] as [string,string][]}:{}),enabled:backend.prefs.get('enabled:'+s.name,s.enabled??true),favorite:backend.prefs.get('favorite:'+s.name,s.favorite??false)}))),overview:scenario==='empty'?zeroOverview:(Object.hasOwn(design.OVERVIEW_BY_SCOPE,canonical)?(design.OVERVIEW_BY_SCOPE as Record<string,Library['overview']>)[canonical]!:zeroOverview),title:scenario==='empty'?'0 skills':library_title(canonical)});}),
   localSkill:({path})=>read('skill',()=>{const detail=skillByRef(path.split(/[\\/]/).filter(Boolean).at(-1)??'');return detail.ok?ok({...detail.value,team:null,skillRef:'local:'+path,path,pathLabel:path,repoPath:path,owningRoot:mockOwningRoot(path)}):{ok:false,error:path+' is not in any Library root.',reason:'not-in-library'};}),
-  checkouts:{add:path=>long('settings',async ctx=>{ctx.print('Registered '+path);for(const listener of listeners)listener('config');return ok({path,registered:true});}),remove:path=>long('settings',async ctx=>{ctx.print('Forgot '+path);for(const listener of listeners)listener('config');return ok({path,placementsRemaining:0});}),discover:()=>long('settings',async()=>ok({candidates:[],scanned:0,truncated:false,problems:[]}))},
+  checkouts:{add:path=>long('settings',async ctx=>{const roots=mockRoots();const existing=roots.find(root=>root.id===path);const added=backend.prefs.get<Root[]>('registered-checkouts',[]);const label=path.split(/[\\/]/).filter(Boolean).at(-1)??path;backend.prefs.set('registered-checkouts',[...added.filter(root=>root.id!==path),existing?{...existing,registered:true,detected:false}:{id:path,kind:'checkout',label:roots.some(root=>root.label===label)?path:label,root:path,rootState:'scanned',registered:true,detected:false,remote:null}]);ctx.print('Registered '+path);for(const listener of listeners)listener('config');return ok({path,registered:true});}),remove:path=>long('settings',async ctx=>{ctx.print('Forgot '+path);for(const listener of listeners)listener('config');return ok({path,placementsRemaining:0});}),discover:()=>long('settings',async()=>ok({candidates:[],scanned:0,truncated:false,problems:[]}))},
   projects:{create:({name,remote})=>long('marketplace',async ctx=>{if(catalogData().projects.some(p=>p.name.toLowerCase()===name.toLowerCase())||created.some(p=>p.name.toLowerCase()===name.toLowerCase()))return fail(`team already has a project named ${name}.`);created.push({name,remote:remote??null});ctx.print('Created project '+name);for(const listener of listeners)listener('clone');return ok({team:'team',name,remotes:remote?[remote]:[],skills:0});})},
   skill:({ref,at})=>read('skill',scenario=>{if(scenario==='not-installed'&&ref==='deploy-check')return ok(scopedDetail(removalState(detailOf(design.DETAIL_NOT_INSTALLED)),at));const result=skillByRef(ref);
    if(result.ok&&scenario==='invalid-newest')Object.assign(result.value,{latestState:'invalid',receipt:null,summary:null,reportNumbers:null,invalidReceiptFile:`evals/deploy-check/${design.DETAIL.version_full}/20260829T221500Z.json`});
@@ -216,10 +216,12 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
 }
 
 // MRF has no origin, so the header's "GitHub: not connected" state is reachable in the mock too.
-const MOCK_ORIGIN:Record<string,string|null>={Terum:'ryanliu-terum/terum-skills',SSM:'ryanliu-terum/ssm',MRF:null};
+const MOCK_ORIGIN:Record<string,string|null>=Object.fromEntries(design.PROJECTS.map(project=>[project.name,project.name==='MRF'?null:stripRemote(project.remote).replace(/^github\.com\//, '')]));
 function mockRoots():Root[]{const scenario=readScenario();const global:Root={id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,detected:false,count:design.COUNTS.Global,remote:null};
- if(scenario==='no-projects')return [global];
- return [global,...(['Terum','SSM','MRF'] as const).map((name):Root=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:scenario==='missing-root'&&name==='SSM'?'absent':'scanned',registered:!(scenario==='detected-root'&&name==='SSM'),detected:scenario==='detected-root'&&name==='SSM',count:scenario==='missing-root'&&name==='SSM'?undefined:design.COUNTS[name],remote:MOCK_ORIGIN[name]===null?null:{url:'https://github.com/'+MOCK_ORIGIN[name],slug:MOCK_ORIGIN[name]!}}))];}
+ const added=browserPrefs().get<Root[]>('registered-checkouts',[]);
+ if(scenario==='no-projects')return [global,...added];
+ const roots=[global,...(['Terum','SSM','MRF'] as const).map((name):Root=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:scenario==='missing-root'&&name==='SSM'?'absent':'scanned',registered:!(scenario==='detected-root'&&name==='SSM'),detected:scenario==='detected-root'&&name==='SSM',count:scenario==='missing-root'&&name==='SSM'?undefined:design.COUNTS[name],remote:MOCK_ORIGIN[name]===null?null:{url:'https://github.com/'+MOCK_ORIGIN[name],slug:MOCK_ORIGIN[name]!}}))];
+ return [...roots.filter(root=>!added.some(extra=>extra.id===root.id)),...added];}
 /** Which mock Library root holds this folder — the longest match, so a checkout nested inside
  *  another names the inner one, exactly as the CLI's own section assignment would. Null when the
  *  path is under no mock root, and the page then falls back to `root` as it does today. */

@@ -161,9 +161,9 @@ it('hides Add skills when the CLI reports no project verb', async () => {
 });
 it('persists Follow and re-renders Following', async () => { open('#/marketplace/people/ryan'); fireEvent.click(await screen.findByRole('button', { name: 'Follow ryan' })); expect(screen.getByRole('button', { name: 'Unfollow ryan' })).toHaveTextContent('Following'); expect(pickBackend().prefs.get('following:ryan', false)).toBe(true); fireEvent.click(screen.getByRole('button', { name: 'Unfollow ryan' })); expect(screen.getByRole('button', { name: 'Follow ryan' })).toHaveTextContent('Follow'); });
 it('handles failed Follow preferences without changing following state', async () => { open('#/marketplace/people/ryan'); await screen.findByRole('button', { name: 'Follow ryan' }); vi.spyOn(pickBackend().prefs, 'set').mockImplementation(() => { throw new Error('Preferences unavailable.'); }); fireEvent.click(screen.getByRole('button', { name: 'Follow ryan' })); expect(await screen.findByRole('alert')).toHaveTextContent('Preferences unavailable.'); expect(screen.getByRole('button', { name: 'Follow ryan' })).toHaveAttribute('aria-pressed', 'false'); });
-it('opens project install from its primary and closes after successful run', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/projects/docs'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); const consent = await screen.findByRole('dialog', { name: 'Approve these tools for docs?' }); fireEvent.click(within(consent).getByRole('button', { name: 'Yes' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs' }); expect(location.hash).toBe('#/marketplace/projects/docs'); });
+it('opens project install from its primary and closes after successful run', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/projects/docs'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); const consent = await screen.findByRole('dialog', { name: 'Approve these tools for docs?' }); fireEvent.click(within(consent).getByRole('button', { name: 'Yes' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs', scope: 'Global' }); expect(location.hash).toBe('#/marketplace/projects/docs'); });
 it('cancels the bulk dialog without invoking install', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/projects/docs?dialog=install&rail=closed'); const dialog = await screen.findByRole('dialog'); fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(location.hash).toBe('#/marketplace/projects/docs?rail=closed'); expect(install).not.toHaveBeenCalled(); });
-it('installs a person through the member verb without navigation', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/people/lena'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); await waitFor(() => expect(install).toHaveBeenCalledWith({ ref: 'lena', kind: 'member', member: 'lena' })); const consent = await screen.findByRole('dialog', { name: 'Approve these tools for lena?' }); fireEvent.click(within(consent).getByRole('button', { name: 'Yes' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(location.hash).toBe('#/marketplace/people/lena'); });
+it('installs a person through the member verb without navigation', async () => { const install = vi.spyOn(pickBackend(), 'install'); open('#/marketplace/people/lena'); fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' })); const dialog = await screen.findByRole('dialog', { name: "Install lena's skills" }); expect(install).not.toHaveBeenCalled(); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); await waitFor(() => expect(install).toHaveBeenCalledWith({ ref: 'lena', kind: 'member', member: 'lena', scope: 'Global' })); const consent = await screen.findByRole('dialog', { name: 'Approve these tools for lena?' }); fireEvent.click(within(consent).getByRole('button', { name: 'Yes' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(location.hash).toBe('#/marketplace/people/lena'); });
 it('uses status identity and the installed list for own-handle removal', async () => {
   const backend = pickBackend(), status = await backend.status(), catalog = await backend.catalog();
   if (!status.ok || !catalog.ok) throw new Error('Fixture unavailable.');
@@ -336,6 +336,8 @@ it('asks every bulk-install tool question and treats declined consent as cancell
   }));
   open('#/marketplace/people/lena');
   fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' }));
+  const dialog = await screen.findByRole('dialog', { name: "Install lena's skills" });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' }));
   const first = await screen.findByRole('dialog', { name: 'Approve these tools for one?' });
   expect(answers).toEqual([]);
   fireEvent.click(within(first).getByRole('button', { name: 'Yes' }));
@@ -345,4 +347,132 @@ it('asks every bulk-install tool question and treats declined consent as cancell
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(answers).toEqual([true, false]);
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+
+async function destinationFixture(matches = 0) {
+  const backend = pickBackend(), status = await backend.status(), catalog = await backend.catalog();
+  if (!status.ok || !catalog.ok) throw new Error('Fixture unavailable.');
+  const roots = [{ id: '/work/docs', kind: 'checkout' as const, label: 'Docs checkout', root: '~/work/docs', registered: true, detected: false, remote: { url: 'https://github.com/team/docs', slug: 'team/docs' } }, ...(matches > 1 ? [{ id: '/work/docs-two', kind: 'checkout' as const, label: 'Docs second', root: '~/work/docs-two', registered: true, detected: false, remote: { url: 'https://github.com/team/docs', slug: 'team/docs' } }] : [])];
+  const statusSpy = vi.spyOn(backend, 'status').mockResolvedValue({ ...status, value: { ...status.value, roots } });
+  vi.spyOn(backend, 'catalog').mockResolvedValue({ ...catalog, value: { ...catalog.value, projects: catalog.value.projects.map(p => p.key === 'docs' ? { ...p, remoteSlugs: matches ? ['team/docs'] : [] } : p) } });
+  const install = vi.spyOn(backend, 'install').mockImplementation(() => createRun(async () => ({ ok: true, value: [] })));
+  return { backend, status, roots, statusSpy, install };
+}
+it('renders registered destination rows and preselects the sole matching origin', async () => {
+  await destinationFixture(1);
+  open('#/marketplace/projects/docs?dialog=install');
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByText('Install to')).toBeVisible();
+  expect(within(dialog).getByRole('radio', { name: /Global/ })).not.toBeChecked();
+  expect(within(dialog).getByRole('radio', { name: /Docs checkout/ })).toBeChecked();
+  expect(within(dialog).getByText('project · ~/work/docs')).toBeVisible();
+  expect(within(dialog).getByRole('button', { name: 'Add a project folder…' })).toBeVisible();
+  cleanup(); vi.restoreAllMocks();
+  open('#/marketplace/projects/terum?dialog=install');
+  expect(await screen.findByRole('radio', { name: /^Terum/ })).toBeChecked();
+});
+it('passes a changed destination label and resets it after closing the dialog', async () => {
+  const { install } = await destinationFixture();
+  open('#/marketplace/projects/docs?dialog=install');
+  let dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('radio', { name: /Docs checkout/ }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Install 3 skills' }));
+  dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByRole('radio', { name: /Global/ })).toBeChecked();
+  fireEvent.click(within(dialog).getByRole('radio', { name: /Docs checkout/ }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' }));
+  await waitFor(() => expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs', scope: 'Docs checkout' }));
+});
+it('registers the chosen folder, refreshes roots, and selects its returned label', async () => {
+  const { backend, status, roots, statusSpy, install } = await destinationFixture();
+  const pick = vi.spyOn(backend, 'pickFolder').mockResolvedValue({ ok: true, value: '/work/new' });
+  const add = vi.spyOn(backend.checkouts, 'add').mockImplementation(path => createRun(async () => {
+    expect(pick).toHaveBeenCalledTimes(1);
+    statusSpy.mockResolvedValue({ ...status, value: { ...status.value, roots: [...roots, { ...roots[0]!, id: path, root: path, label: 'New checkout' }] } });
+    return { ok: true, value: { path, registered: true } };
+  }));
+  open('#/marketplace/projects/docs?dialog=install');
+  const dialog = await screen.findByRole('dialog');
+  const reads = statusSpy.mock.calls.length;
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Add a project folder…' }));
+  await waitFor(() => expect(within(dialog).getByRole('radio', { name: /New checkout/ })).toBeChecked());
+  expect(add).toHaveBeenCalledWith('/work/new');
+  expect(statusSpy.mock.calls.length).toBeGreaterThan(reads);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' }));
+  await waitFor(() => expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs', scope: 'New checkout' }));
+  cleanup(); vi.restoreAllMocks();
+  open('#/marketplace/projects/docs?dialog=install');
+  const mockDialog = await screen.findByRole('dialog');
+  fireEvent.click(within(mockDialog).getByRole('button', { name: 'Add a project folder…' }));
+  await waitFor(() => expect(within(mockDialog).getByRole('radio', { name: /^new-project/ })).toBeChecked());
+});
+it('leaves the selection intact when the folder chooser is cancelled and installs nothing', async () => {
+  const { backend, install } = await destinationFixture(1);
+  const pick = vi.spyOn(backend, 'pickFolder').mockResolvedValue({ ok: true, value: null });
+  const add = vi.spyOn(backend.checkouts, 'add');
+  open('#/marketplace/projects/docs?dialog=install');
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Add a project folder…' }));
+  await waitFor(() => expect(pick).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Install 3 skills' })).not.toBeDisabled());
+  expect(within(dialog).getByRole('radio', { name: /Docs checkout/ })).toBeChecked();
+  expect(add).not.toHaveBeenCalled(); expect(install).not.toHaveBeenCalled();
+});
+it('shows the CLI add failure in the dialog and preserves the previous selection', async () => {
+  const { backend, install } = await destinationFixture(1);
+  vi.spyOn(backend, 'pickFolder').mockResolvedValue({ ok: true, value: '/work/new' });
+  vi.spyOn(backend.checkouts, 'add').mockImplementation(() => createRun(async () => ({ ok: false, error: 'Not a git checkout: /work/new' })));
+  open('#/marketplace/projects/docs?dialog=install');
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Add a project folder…' }));
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent('Not a git checkout: /work/new');
+  expect(within(dialog).getByRole('radio', { name: /Docs checkout/ })).toBeChecked();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' }));
+  await waitFor(() => expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs', scope: 'Docs checkout' }));
+});
+it('requires an explicit destination when two checkouts match', async () => {
+  const { install } = await destinationFixture(2);
+  open('#/marketplace/projects/docs?dialog=install');
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByRole('button', { name: 'Install 3 skills' })).toBeDisabled();
+  expect(within(dialog).getByText('Two registered folders point at this repository — pick one.')).toBeVisible();
+  for (const radio of within(dialog).getAllByRole('radio')) expect(radio).not.toBeChecked();
+  fireEvent.click(within(dialog).getByRole('radio', { name: /Docs second/ }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' }));
+  await waitFor(() => expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs', scope: 'Docs second' }));
+});
+it('degrades to static Global and passes Global even with matching checkouts', async () => {
+  const { backend, install } = await destinationFixture(2);
+  vi.spyOn(backend, 'features').mockResolvedValue({ ...await backend.features(), installScope: false });
+  open('#/marketplace/projects/docs?dialog=install');
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByText('Global')).toBeVisible();
+  expect(within(dialog).queryByRole('radio')).toBeNull();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' }));
+  await waitFor(() => expect(install).toHaveBeenCalledWith({ ref: 'docs', kind: 'project', project: 'docs', scope: 'Global' }));
+});
+it('hides Add folder without checkout support while retaining destinations', async () => {
+  const { backend } = await destinationFixture();
+  vi.spyOn(backend, 'features').mockResolvedValue({ ...await backend.features(), checkouts: false });
+  open('#/marketplace/projects/docs?dialog=install');
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByRole('radio', { name: /Global/ })).toBeChecked();
+  expect(within(dialog).queryByRole('button', { name: 'Add a project folder…' })).toBeNull();
+});
+it('derives the person grant preview from installable skills including extras', async () => {
+  const { backend } = await destinationFixture();
+  const catalog = await backend.catalog();
+  if (!catalog.ok) throw new Error(catalog.error);
+  const granted = { ...catalog.value.skills[0]!, name: 'extra-granted', grants: ['Read'], normalizedGrants: null };
+  vi.mocked(backend.catalog).mockResolvedValue({ ...catalog, value: { ...catalog.value, extras: [granted], people: catalog.value.people.map(p => p.handle === 'lena' ? { ...p, skills: [], installable: ['extra-granted', 'missing'] } : p) } });
+  open('#/marketplace/people/lena');
+  fireEvent.click(await screen.findByRole('button', { name: 'Install 2 skills' }));
+  const dialog = await screen.findByRole('dialog', { name: "Install lena's skills" });
+  expect(dialog).toHaveTextContent("Adds lena's 2 skills to your people file and places them into the destination you pick below.");
+  expect(dialog).toHaveTextContent('Tool grants to approve · 1 of 2 ask');
+  expect(within(dialog).getByText('extra-granted')).toBeVisible();
+  expect(within(dialog).getByText('Read')).toBeVisible();
+  expect(within(dialog).getByRole('radio', { name: /Global/ })).toBeChecked();
 });

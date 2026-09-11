@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext } from '../../index';
@@ -25,8 +25,11 @@ it('shows the same empty-install status on the page and rail and no bulk button'
 it('uses two recorded install ids for one member install call',async()=>{
  const {backend}=open('installed');const install=vi.spyOn(backend,'install');
  fireEvent.click(await screen.findByRole('button',{name:'Install 2 skills'}));
+ const dialog=await screen.findByRole('dialog',{name:"Install mira's skills"});
+ expect(install).not.toHaveBeenCalled();
+ fireEvent.click(within(dialog).getByRole('button',{name:'Install 2 skills'}));
  await waitFor(()=>expect(install).toHaveBeenCalledTimes(1));
- expect(install).toHaveBeenCalledWith({ref:'mira',kind:'member',member:'mira'});
+ expect(install).toHaveBeenCalledWith({ref:'mira',kind:'member',member:'mira',scope:'Global'});
 });
 
 it.each(['placed','placed-problem'])('shows placement actions and status for %s',async mode=>{
