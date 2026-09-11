@@ -13,9 +13,12 @@ export function paginatedItems<T>(source: string): T[] {
  * callers use it inside offline-tolerant reads (`status`), where "unknown" must stay distinguishable
  * from "not an admin".
  */
+/** Deadline expiry is a non-zero result, which already means unknown. */
+export const ADMIN_LOOKUP_DEADLINE_MS = 10_000;
+
 export async function adminLogins(runner: Runner, ownerRepo: string): Promise<string[] | null> {
   try {
-    const admins = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators?permission=admin`, '--paginate', '--slurp']);
+    const admins = await runner.run('gh', ['api', `repos/${ownerRepo}/collaborators?permission=admin`, '--paginate', '--slurp'], { deadlineMs: ADMIN_LOOKUP_DEADLINE_MS });
     if (admins.code !== 0) return null;
     return paginatedItems<{ login?: string }>(admins.stdout).map((member) => member.login?.toLowerCase()).filter((value): value is string => Boolean(value));
   } catch { return null; }

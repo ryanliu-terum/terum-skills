@@ -20,7 +20,7 @@ import { endorsedCandidates, findSkill, readPerson, readTeam, SkillRecord, skill
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { CloneBusy, openTeamRepo, refreshClone, RemoteAccessError, treeText, LOCK_WAIT_MS, LockWaitOptions, lockWait } from '../lib/teamRepo.js';
 import { materializeVersion } from '../lib/version.js';
-import { autoShareGlobal, reconcileShared } from './connect.js';
+import { autoShareRoots, reconcileShared } from './connect.js';
 import { assertCheckoutFolder, installOne, placementHome, resolveDestination, samePending, skillAtSource } from './install.js';
 import { uninstallOne } from './uninstall.js';
 
@@ -226,8 +226,8 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
       for (const [team, binding] of Object.entries(config.teams)) {
         if (!binding.handle || skipped.has(team)) continue;
         try {
-          const outcome = await autoShareGlobal({ store, runner, team, home, form: args.form }, childIo);
-          for (const folder of outcome.skipped) { notice(`Skipped auto-share of ${folder.name}: ${folder.reason}`); defer(team, folder.name); }
+          const outcome = await autoShareRoots({ store, runner, team, home, form: args.form }, childIo);
+          for (const folder of outcome.skipped) { notice(`Skipped auto-share of ${folder.name} (${folder.root}): ${folder.reason}`); defer(team, folder.name); }
           if (outcome.shared.length) {
             notice(`Auto-shared ${outcome.shared.length} skill(s): ${outcome.shared.map((skill) => skill.name).join(', ')}.`);
             changed = true;

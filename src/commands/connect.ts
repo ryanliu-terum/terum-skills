@@ -4,7 +4,7 @@ import { cp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { canonicalLedger, localRootLabel, candidatesOf, localSkillRoots, localSkills } from '../lib/local-skills.js';
+import { canonicalLedger, localRootLabel, candidatesOf, localSkillRoots, localSkills, type LocalEntry } from '../lib/local-skills.js';
 import { assertNotInsideStateRoot, assertSkillDirectory, inspectSkillSource, printable, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
 import { registerCheckout, writableCheckout } from '../lib/checkouts.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
@@ -14,7 +14,6 @@ import { fromError, CancelledError, failure, Result, success } from '../lib/resu
 import { Runner, systemRunner } from '../lib/runner.js';
 import { isSkillName, teamSchema, parseJson, parseSkillFrontmatter } from '../lib/schema.js';
 import { moveDirectory, moveToQuarantine } from '../lib/placer.js';
-import { AGENT_PATHS } from '../lib/placer/agent-paths.js';
 import { canonicalDigest, DEFAULT_CATEGORY, declaredCategory, injectManagedFields, skillRecords } from '../lib/skills.js';
 import { MutableTree, openTeamRepo, treeText, lockWait } from '../lib/teamRepo.js';
 import { assessHygiene, type HygieneAssessment, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
@@ -488,11 +487,16 @@ function hygieneReason(refused: HygieneRefused): string {
   return `hygiene: ${refused.assessment.errors.map((finding) => finding.message.replace(/\.$/, '')).join('; ')}`;
 }
 
-export interface AutoShareOutcome { shared: ConnectResult[]; skipped: { name: string; reason: string }[]; }
+export interface AutoShareOutcome { shared: ConnectResult[]; skipped: { name: string; root: string; reason: string }[]; }
 /**
- * Sync's ID-check auto-share pass over the GLOBAL root (`~/.claude/skills`) — the ratified default
- * (ajay, 2026-09-10, spec .planning/specs/2026-09-10-library-mirror-id-sync.md; overrides per-folder
- * connect consent, Terum 52d76c00). Project roots stay manual (the app's Add project / bare connect).
+ * Sync's ID-check auto-share pass — the ratified default (ajay, 2026-09-10, spec
+ * .planning/specs/2026-09-10-library-mirror-id-sync.md; overrides per-folder connect consent,
+ * Terum 52d76c00). It runs over the GLOBAL root (`~/.claude/skills`) and over every REGISTERED
+ * checkout's `.claude/skills`, because the spec's model is that an added project's skills "then
+ * sync the same way" as global ones: `checkout add` / the app's Add project IS the consent for
+ * that root, exactly as setup's blanket y/N is for global. A checkout the user never registered
+ * is never scanned — the cwd-detected repo is deliberately excluded (Terum f4a821f1 keeps project
+ * discovery narrow), so merely running sync inside some other repo cannot upload its skills.
  * Candidates are exactly bare connect's: untracked (no shared entry, no placement), inspection-clean,
  * privileged excluded. The ID check per candidate:
  * - no `metadata.id`, or an id this team's repo does not know → connect it through connectOne, which
@@ -501,9 +505,10 @@ export interface AutoShareOutcome { shared: ConnectResult[]; skipped: { name: st
  * - a known id → no-op: the skill is the team's; content writes stay author-owned (the connected-
  *   source reconciler) and install tracking is the placement/people-file machinery's job.
  * A folder the machinery refuses (hygiene, name collision, a half-write) is reported by name and
- * never blocks the rest. Never prompts, so it runs identically in hook mode.
+ * never blocks the rest — nor does one bad root stop the others. Never prompts, so it runs
+ * identically in hook mode.
  */
-export async function autoShareGlobal(options: { store: ConfigStore; runner: Runner; team: string; home?: string; form?: InvocationForm }, io: Prompter): Promise<AutoShareOutcome> {
+export async function autoShareRoots(options: { store: ConfigStore; runner: Runner; team: string; home?: string; form?: InvocationForm }, io: Prompter): Promise<AutoShareOutcome> {
   const { store, runner, team } = options;
   const outcome: AutoShareOutcome = { shared: [], skipped: [] };
   const config = await store.read();
@@ -513,19 +518,34 @@ export async function autoShareGlobal(options: { store: ConfigStore; runner: Run
   // setup has nothing to stamp with, so the pass waits for setup instead of failing every sync.
   if (!config.email || !config.display_name) return outcome;
   const home = options.home ?? homedir();
-  const root = AGENT_PATHS['claude-code'].global(home);
-  const inventory = await localSkills(root, config, { scope: 'global', stateRoot: store.root, ledger: await canonicalLedger(config) });
-  const candidates = candidatesOf(inventory); // privileged folders stay excluded, exactly as from bare connect
-  if (!candidates.length) return outcome;
-  const known = new Set((await skillRecords(store.teamClone(team), team)).map((record) => record.id));
-  for (const candidate of candidates) {
-    if (candidate.skillId !== null && known.has(candidate.skillId)) continue; // the ID check's known-id no-op
+  // cwd is left undefined on purpose: only global plus registered checkouts, never a detected repo.
+  const { roots } = await localSkillRoots(home, undefined, config.checkouts);
+  const ledger = await canonicalLedger(config);
+  let known: Set<string> | undefined;
+  for (const root of roots) {
+    const label = localRootLabel(root);
+    let candidates: LocalEntry[];
     try {
-      outcome.shared.push(await connectOne(resolve(candidate.path), { args: { form: options.form, home }, store, runner, config, team, binding, io, auto: true }));
+      const inventory = await localSkills(root.root, config, { scope: root.scope, stateRoot: store.root, ledger });
+      candidates = candidatesOf(inventory); // privileged folders stay excluded, exactly as from bare connect
     } catch (error) {
-      if (error instanceof PromptClosedError) throw error; // the channel is gone, not this folder
-      const reason = error instanceof ConnectStepError && error.cause instanceof HygieneRefused ? hygieneReason(error.cause) : error instanceof Error ? error.message : String(error);
-      outcome.skipped.push({ name: candidate.name, reason: phaseAdvice(error, candidate.path, team, options.form) ?? reason });
+      // An unreadable root costs its own notice, never the pass: the other roots still share.
+      outcome.skipped.push({ name: label, root: label, reason: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
+    if (!candidates.length) continue;
+    known ??= new Set((await skillRecords(store.teamClone(team), team)).map((record) => record.id));
+    for (const candidate of candidates) {
+      if (candidate.skillId !== null && known.has(candidate.skillId)) continue; // the ID check's known-id no-op
+      try {
+        const connected = await connectOne(resolve(candidate.path), { args: { form: options.form, home }, store, runner, config, team, binding, io, auto: true });
+        known.add(connected.id); // a name reused across roots must not upload twice under two ids
+        outcome.shared.push(connected);
+      } catch (error) {
+        if (error instanceof PromptClosedError) throw error; // the channel is gone, not this folder
+        const reason = error instanceof ConnectStepError && error.cause instanceof HygieneRefused ? hygieneReason(error.cause) : error instanceof Error ? error.message : String(error);
+        outcome.skipped.push({ name: candidate.name, root: label, reason: phaseAdvice(error, candidate.path, team, options.form) ?? reason });
+      }
     }
   }
   return outcome;

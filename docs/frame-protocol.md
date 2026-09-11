@@ -15,7 +15,7 @@ One per line, in this order: `hello` once, then any number of `print` and `ask`,
 | `hello` | `{"t":"hello","protocol":1,"version":"0.1.5","verbs":[...],"features":{...}}` | Always first. `verbs` is every public verb as it may be invoked. `features` maps drawn affordances the desktop design assumes to whether this CLI version supports them; a `false` means hide or grey the control. Read it instead of hard-coding what the CLI can do. |
 | `print` | `{"t":"print","level":"info"\|"warn"\|"error","line":"..."}` | Text the verb would have printed. Render it where the verb's output belongs. |
 | `ask` | `{"t":"ask","id":"q1","kind":"confirm"\|"text"\|"select","question":"...","default":"...","choices":[...],"detail":["..."]}` | The verb is blocked until an `answer` with the same `id` arrives. `default` appears only for `text` when the verb offers one; `choices` only for `select`. `detail` is optional and carries the lines the person needs in order to answer (for example the identity line, or a skill's requested allowed-tools); render it with the question, as the dialog's description, not in the transcript; absent means none. |
-| `progress` | `{"t":"progress","step":"...","current":n,"total":n}` | Reserved. No verb emits progress today (`features.progress` is `false`); the shape is fixed so a shell can render it when one does. |
+| `progress` | `{"t":"progress","step":"...","current":n,"total":n}` | Coarse step reporting for a long verb. `install`, `checkout discover` and `setup`'s `discover` and `evals` steps emit it; every other verb is silent. `step` names the step (`discover`, `evals`, or `install`'s four phases); `current` counts what is done so far and `total` appears only when the verb knows it. `features.progress` is `true`. Never required, never ordered against `ask`; a shell that ignores it is unaffected. |
 | `result` | `{"t":"result","verb":"install","ok":true,"exitCode":0,"value":{...}}` | Always last. `verb` is the invoked verb. `value` is the verb's own result object when it has one. A failing result may also carry `value`, the verb's partial result (for example, `eval` after a completed evaluation whose receipt commit failed). On failure: `ok:false`, `exitCode:1`, `error` is the one-line message, and `declined:true` when set by the CLI's typed decline (the person said no) rather than by matching the error text, and `refused:true` when the CLI refused the operation before any side effect (one team per machine); a refusal is not a decline. After `result` the CLI stops reading stdin and exits. |
 
 The process exit code matches `result.exitCode`. The failure line is also written to stderr, exactly as without the flag, so a shell that only watches the exit code and stderr still works.
@@ -69,7 +69,9 @@ A second-team binding refused before any side effect:
 
 Protocol stays 1. `hello.features.localIdentity` advertises the additive `ls --local` identity fields: every row and `notOffered` entry carries `skillId` (UUID or null), and every row carries independent `placed` and `connected` booleans. The app declares these keys optional while keeping local rows strict, so older CLIs remain readable; presence joins require the feature. `ls member` adds `member.installed` records (`id`, `scope`, `since`), and `connect` may return `adopted: true` after consent to record an existing identity. These are additive result fields. `ls --local` additionally carries `remote` on every section (`{url, slug}` or `null`, where `slug` is owner/repo on GitHub and null on every other host); the app declares it optional so an older CLI reads as "not connected".
 
-`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `checkouts`, `projects`, and `refresh`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh (null when gh is absent or offline). `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `projects` is true and means the `project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from registering a local checkout folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs.
+`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `checkouts`, `projects`, `refresh`, `discover`, and `appUpdate`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh, and only when `status --permissions` is passed (null when the flag is absent, when gh is absent, or when the lookup fails or times out). `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `projects` is true and means the `project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from registering a local checkout folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs. `discover` is true and means the `checkout discover` verb exists and `setup` offers to look for skill folders on this machine; a shell whose CLI reports it false hides the "find skills" control.
+
+`appUpdate` is true and means the `app-update` verb exists: a shell may check for, download and install a newer desktop app. A CLI that omits the key cannot, and a shell must render the honest read-only state instead of trying.
 
 `hello.protocol` is `1`. `install`, `sync`, and `uninstall-skill` carry `detail` on their confirmation asks. `detail` is an additive optional field: protocol stays 1. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.
 
@@ -97,3 +99,35 @@ commit in it is discarded by the reset. `result.value` is:
 
 Exit code is 0 whenever the query ran: a per-team failure is reported in its row, never as a process failure.
 Over frames the verb emits only `hello` and `result`.
+
+`checkout discover [--under <dir>…] [--depth <n>] [--budget-ms <n>] [--register]` looks for folders that hold `.claude/skills`. `result.value` is `{ candidates: { path, skillFolders, registered, repoRoot }[], scanned, truncated, problems: { path, reason }[] }`. It follows no symlinks, probes `.claude` without entering other dot-directories, never descends into `~/.terum`, and never offers the home folder itself. Unreadable folders land in `problems`; a run that hits its time budget sets `truncated`. `--register` adds every candidate that is not registered yet and sets its `registered` to true in the result. While it runs it emits `progress` frames with `step: "discover"` and `current` = folders scanned.
+
+### App updates
+
+`app-update --check` (the default) reads the cached release advertisement and local staged/installed versions without network calls or writes. `--check --force` probes release tags under the same GitHub-team policy as `update`. Checks always succeed, reporting probe failures as data.
+
+`app-update --stage [--release <version>]` downloads the selected release through `gh`, verifies its published SHA-256, and stages it without installing. The default release is this CLI's version. An advertised tag with missing release assets returns `ok: true, notPublished: true, staged: false`; the shell stays quiet and retries on the next launch.
+
+`app-update --apply [--release <version>]` hands a staged install to a detached process. The public result values are:
+
+```ts
+export interface AppUpdateCheck {
+  mode: 'check'; platform: AppPlatform; supported: boolean;
+  cliVersion: string | null; latest: string | null; latestAt: string | null;
+  probe: 'ok' | 'skipped' | 'cached' | 'failed'; probeError: string | null;
+  staged: string | null; installed: string[];
+  lastApply: AppUpdateMarker | null; ppid: number;
+}
+export interface AppUpdateStage {
+  mode: 'stage'; version: string; platform: AppPlatform;
+  staged: boolean; notPublished: boolean; alreadyStaged: boolean;
+  asset: string; bytes: number; path: string | null;
+}
+export interface AppUpdateApply { mode: 'apply'; version: string; platform: AppPlatform; awaitPid: number | null; handedOff: true }
+```
+
+`AppPlatform` is the existing desktop platform name. `lastApply` has `{schema:1, version:string, phase:'waiting'|'installing'|'launched'|'failed', at:string, error:string|null}`. `ppid` is the CLI's parent process ID, available for verifying the app handoff.
+
+`app-update --apply` returns as soon as the background installer process exists. The shell must then quit; it is the shell's job to quit and the CLI never kills it. `--apply` watches the CLI's parent process only in frame mode, where that parent is the shell itself; from a terminal it installs immediately.
+
+On macOS, quit the running app before applying from a terminal: `open` without `-n` would otherwise bring the old instance to front. On Windows, the silent installer handles an existing running copy. The hidden detached install leg never uses `--frames`; it records its phases in `run/app-update.json`, never rewrites `run/app.json`, and does not update the CLI.

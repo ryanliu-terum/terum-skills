@@ -1098,7 +1098,7 @@ describe('HYG6 size warnings', () => {
     const io = new ScriptedPrompter(); const deferred: string[] = [];
     await reconcileShared(store, runner, io, new Set(), (team, label) => { deferred.push(`${team}/${label}`); });
     expect(deferred).toEqual([]);
-    expect(fetches).toBe(4); // Each of the two safeWrites fetches on entry and in finally.
+    expect(fetches).toBe(2); // Each of the two safeWrites fetches on entry; a main push leaves the clone at the pushed commit, so the cleanup fetch is skipped (W-02).
     expect(await readFile(sourceSkill, 'utf8')).toBe(second);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(inspected);
     expect(io.lines.filter((line) => line.startsWith('warning HYG6'))).toHaveLength(1);
@@ -1125,7 +1125,7 @@ describe('HYG6 size warnings', () => {
     });
     const io = new ScriptedPrompter();
     expect(await run({ keepSource: id, config: store, runner }, io)).toMatchObject({ ok: true });
-    expect(fetches).toBe(4);
+    expect(fetches).toBe(2); // Entry fetches only: the cleanup fetch after a main push is skipped (W-02).
     expect(await readFile(sourceSkill, 'utf8')).toBe(second);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], fixture.bare)).toBe(inspected);
     expect(io.lines.filter((line) => line.startsWith('warning HYG6'))).toHaveLength(1);

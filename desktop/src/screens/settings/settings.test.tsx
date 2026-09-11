@@ -398,3 +398,38 @@ it('draws an empty quarantine and still lets its CLI confirmation determine the 
  fireEvent.click(screen.getByRole('button',{name:'No'}));
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
 });
+
+it.each([false,true])('offers Find skills… only when the CLI reports the discover feature (%s)',async discover=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});
+ vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),discover});
+ open('#/settings/machine');await screen.findByText('Checkouts');
+ if(discover)expect(await screen.findByRole('button',{name:'Find skills…'})).toBeVisible();
+ else expect(screen.queryByRole('button',{name:'Find skills…'})).toBeNull();
+});
+it('lists what discover found and adds one candidate',async()=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});
+ vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),discover:true});
+ const discover=vi.spyOn(backend.checkouts,'discover').mockImplementation(()=>createRun(async()=>({ok:true,value:{candidates:[{path:'/found/new',skillFolders:1,registered:false,repoRoot:false},{path:'/found/old',skillFolders:2,registered:true,repoRoot:true}],scanned:9,truncated:false,problems:[]}})));
+ const add=vi.spyOn(backend.checkouts,'add');open('#/settings/machine');fireEvent.click(await screen.findByRole('button',{name:'Find skills…'}));
+ const fresh=(await screen.findByText('/found/new')).closest<HTMLElement>('.setting-row')!,old=screen.getByText('/found/old').closest<HTMLElement>('.setting-row')!;
+ expect(discover).toHaveBeenCalledExactlyOnceWith({register:false});expect(fresh).toHaveTextContent('1 skill folders');expect(old).toHaveTextContent('2 skill folders · already registered');
+ expect(within(old).queryByRole('button',{name:'Add'})).toBeNull();fireEvent.click(within(fresh).getByRole('button',{name:'Add'}));
+ await waitFor(()=>expect(add).toHaveBeenCalledWith('/found/new'));await waitFor(()=>expect(within(fresh).queryByRole('button',{name:'Add'})).toBeNull());
+});
+it('says so when discover finds nothing, stops early, or cannot read a folder',async()=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});
+ vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),discover:true});
+ vi.spyOn(backend.checkouts,'discover').mockImplementation(()=>createRun(async()=>({ok:true,value:{candidates:[],scanned:9,truncated:true,problems:[{path:'/x',reason:'EACCES'}]}})));
+ open('#/settings/machine');fireEvent.click(await screen.findByRole('button',{name:'Find skills…'}));
+ expect(await screen.findByText('No skill folders found. Stopped early; some folders were not looked at. 1 folders could not be read.')).toBeVisible();
+});
+it('reports discovery and registration failures without claiming a folder was added',async()=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});
+ vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),discover:true});
+ vi.spyOn(backend.checkouts,'discover').mockImplementationOnce(()=>createRun(async()=>({ok:false,error:'Search failed.'}))).mockImplementation(()=>createRun(async()=>({ok:true,value:{candidates:[{path:'/found/retry',skillFolders:1,registered:false,repoRoot:false}],scanned:1,truncated:false,problems:[]}})));
+ vi.spyOn(backend.checkouts,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Add failed.'})));
+ open('#/settings/machine');fireEvent.click(await screen.findByRole('button',{name:'Find skills…'}));expect(await screen.findByRole('alert')).toHaveTextContent('Search failed.');
+ fireEvent.click(screen.getByRole('button',{name:'Find skills…'}));const row=(await screen.findByText('/found/retry')).closest<HTMLElement>('.setting-row')!;
+ fireEvent.click(within(row).getByRole('button',{name:'Add'}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Add failed.'));
+ expect(within(row).getByRole('button',{name:'Add'})).toBeVisible();expect(row).not.toHaveTextContent('already registered');
+});

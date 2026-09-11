@@ -66,6 +66,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `invite <github-user>…` | Grant repo access and print the join line |
 | | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
 | | `checkout add [<path>]` / `checkout remove <path>` / `checkout list` | Register, forget, or list the checkout folders this machine scans (`ls --local` also shows the current repository, labelled not registered) |
+| | `checkout discover [--under <dir>…] [--depth <n>] [--budget-ms <n>] [--register]` | Find local folders holding `.claude/skills`; optionally register them. Setup offers this search and opt-in evaluation of shared skills with no current receipt (`--no-discover` / `--no-evals` skip the offers) |
 | | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
 | | `project create [<name>] [--remote <url>]` | Create a team project: a name and the repository its skills place into (the skills themselves are added with `publish --project`) |
 | | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
@@ -79,6 +80,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |
 | Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
 | | `app` | Install and open the desktop app for this CLI version |
+| | `app-update [--check\|--stage\|--apply] [--release <version>]` | Check for, download, or install a newer desktop app; the app drives it from Settings ▸ Updates |
 
 `npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option you are expected to use.
 
@@ -205,7 +207,7 @@ Browser development still uses the mock backend. The app bundle is separate from
 Every app-spawned CLI child, including under `tauri dev`, has piped stderr and
 `TERUM_SKILLS_NO_UPDATE_NOTIFIER=1`; `--frames` forces `noUpdateCheck`, and `update` is registered with
 `notices: false`. Background terminal release notices are therefore suppressed in the app. Explicit update
-checks still return release observations and installation-specific advice; the app has no update channel yet.
+checks still return release observations and installation-specific advice; and `app-update` gives the app its own channel for the app itself — it checks once per launch against the release advertisement the CLI already caches, downloads through `gh release download`, verifies the published SHA-256, and installs only after you press Relaunch. It never updates the CLI.
 
 ## Releasing (maintainers)
 

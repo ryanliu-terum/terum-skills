@@ -1,20 +1,27 @@
 import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { creatorAuthenticationError, detectOrOfferGh, refuseSecondTeam, teamByRemote } from '../lib/auth.js';
+import { registerCheckout } from '../lib/checkouts.js';
 import { COMMUNITY_URL } from '../lib/community.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
+import { discoverSkillRoots } from '../lib/discover.js';
+import { preflight as systemPreflight } from '../lib/evals/agent.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
 import { defaultWrapperOptions, offerWrapper as defaultOfferWrapper, WrapperOptions } from '../lib/wrapper.js';
 import { Prompter } from '../lib/prompt.js';
 import { readRoster } from '../lib/skills.js';
+import { printable } from '../lib/skill-source.js';
 import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { describeClone } from '../lib/teamRepo.js';
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import type { Launch } from '../lib/launch.js';
 import { assetSuffix, detectPlatform, type PlatformEvidence } from '../lib/platform.js';
 import { run as runApp } from './app.js';
+import { run as evalRun, skillsWithoutReceipt, type EvalArgs } from './eval.js';
 import { joinCommand, run as invite } from './invite.js';
 import { ConnectArgs, ConnectOutcome, run as connect } from './connect.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
@@ -26,11 +33,23 @@ export interface SetupVerbs {
   invite: typeof invite;
   offerHook: typeof defaultOfferHook;
   offerWrapper: typeof defaultOfferWrapper;
+  eval: typeof evalRun;
+  /**
+   * The paid agent probe the eval batch runs once. It sits on the verb table, not only on the free-standing
+   * `args.preflight` knob, so a test that stubs `verbs` at all can never spawn the real `claude` by accident.
+   */
+  preflight: typeof systemPreflight;
 }
 export interface SetupArgs extends WithForm {
   target?: string;
   /** Desktop app: `false` (--no-app) keeps setup in the terminal; otherwise, where an app exists, setup opens it without asking. `true` is accepted for compatibility. */
   app?: boolean;
+  /** `false` (--no-discover) skips the offer to look for skill folders on this machine. */
+  discover?: boolean;
+  /** `false` (--no-evals) skips the offer to evaluate every shared skill that has no receipt. */
+  evals?: boolean;
+  /** Test knob for the agent probe; defaults to the real one. Mirrors EvalArgs.preflight. */
+  preflight?: EvalArgs['preflight'];
   /** Test knob for the platform table; defaults to this machine. */
   evidence?: PlatformEvidence;
   launch?: Launch;
@@ -49,7 +68,7 @@ export interface SetupArgs extends WithForm {
   verbs?: Partial<SetupVerbs>;
 }
 export type StepOutcome = 'done' | 'skipped' | 'printed';
-type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'actions' | 'invite' | 'community' | 'hook' | 'wrapper' | 'done';
+type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'actions' | 'invite' | 'discover' | 'evals' | 'community' | 'hook' | 'wrapper' | 'done';
 export interface SetupResult {
   role: 'creator' | 'joiner';
   team: string;
@@ -63,6 +82,26 @@ const WELCOME = [
   "Your team's skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have.",
   'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',
 ];
+
+export const DISCOVER_QUESTION = 'Look for skill folders on this machine and add them to your library?';
+export const DISCOVER_WHERE_QUESTION = 'Look under which folder?';
+export const DISCOVER_START_LINE = 'Looking for skill folders on this machine…';
+/** No estimate is printed: this CLI computes none, and an invented number is forbidden. */
+export function evalsQuestion(count: number): string {
+  return `Evaluate the ${count} shared ${count === 1 ? 'skill' : 'skills'} that ${count === 1 ? 'has' : 'have'} no receipt yet? This runs Claude on each one and commits each receipt to the team repo.`;
+}
+
+/**
+ * A typed `~` reaches this verb literally: the desktop's prompt dialog has no shell in between, and a
+ * terminal only expands a `~` the person did not quote. Pressing Enter is already safe (the default is the
+ * absolute home), so this only rescues a typed answer. `~otheruser` is deliberately left alone — this tool
+ * has no password database to resolve it against, and `resolve` turning it into a folder name is honest.
+ */
+export function expandTilde(answer: string, home: string): string {
+  if (answer === '~') return home;
+  if (answer.startsWith('~/') || answer.startsWith('~\\')) return join(home, answer.slice(2));
+  return answer;
+}
 
 export const ROLE_QUESTION = 'Create a team or join one?';
 export const CREATE_CHOICE = 'Create a new team';
@@ -92,7 +131,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   const role: SetupResult['role'] = args.target === undefined ? 'creator' : 'joiner';
   const store = args.config ?? createConfigStore();
   const runner = args.runner ?? systemRunner;
-  const verbs: SetupVerbs = { team, connect, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, ...args.verbs };
+  const verbs: SetupVerbs = { team, connect, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, eval: evalRun, preflight: systemPreflight, ...args.verbs };
   const steps: SetupResult['steps'] = {};
   let teamName = '';
   let remote = '';
@@ -236,6 +275,92 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     say(`  ${invocation(args.form, 'publish <skill>')} — endorse a skill already connected to the team`);
     say(`  ${invocation(args.form, 'eval <skill>')}             — evaluate a shared skill locally before publishing`);
     say(`  ${invocation(args.form, 'connect')}      — connect your local skills to the team (asks which)`);
+
+    // Discovery is optional, never fatal, and only offered where a person can answer.
+    if (args.quiet || args.discover === false || !io.interactive) steps.discover = 'skipped';
+    else {
+      io.print(DISCOVER_START_LINE);
+      try {
+        if (!(await io.confirm(DISCOVER_QUESTION))) steps.discover = 'skipped';
+        else {
+          const home = args.home ?? homedir();
+          const root = resolve(args.cwd ?? process.cwd(), expandTilde(await io.text(DISCOVER_WHERE_QUESTION, home), home));
+          const config = await store.read();
+          const found = await discoverSkillRoots({
+            under: [root], home, checkouts: config.checkouts ?? [], stateRoot: store.root, config,
+            onProgress: (progress) => io.progress?.({ step: 'discover', current: progress.scanned }),
+          });
+          for (const candidate of found.candidates) io.print(`${printable(candidate.path)} — ${candidate.skillFolders} skill folders${candidate.registered ? ' · already registered' : ''}`);
+          for (const problem of found.problems) io.print(`Could not look in ${printable(problem.path)}: ${printable(problem.reason)}`);
+          if (found.truncated) io.print(`(stopped early; run \`${invocation(args.form, 'checkout discover --budget-ms 60000')}\` to look longer)`);
+          const unregistered = found.candidates.filter((candidate) => !candidate.registered);
+          if (found.candidates.length === 0) io.print(`No skill folders found under ${printable(root)}.`);
+          else if (unregistered.length > 0) {
+            const all = await io.confirm(`Add all ${unregistered.length}?`);
+            for (const candidate of unregistered) {
+              if (!all && !(await io.confirm(`Add ${printable(candidate.path)}?`))) continue;
+              try { await registerCheckout(store, candidate.path, io, { home }); }
+              catch (error) { io.print(`Could not register ${printable(candidate.path)}: ${error instanceof Error ? error.message : String(error)}`); }
+            }
+          }
+          steps.discover = 'done';
+        }
+      } catch (error) {
+        // A wizard that finished every durable step must not fail on an optional search.
+        io.print(`Could not look for skill folders: ${error instanceof Error ? error.message : String(error)}`);
+        steps.discover = 'skipped';
+      }
+    }
+
+    // Default NO; the agent probe runs once, only after the yes, and is reused for the batch.
+    if (args.quiet || args.evals === false || !io.interactive || teamName === '') steps.evals = 'skipped';
+    else {
+      try {
+        const handle = (await store.read()).teams[teamName]?.handle;
+        if (!handle) {
+          io.print('Skipping the eval offer: this machine has no joined handle for the team yet, so a receipt could not be committed.');
+          steps.evals = 'skipped';
+        } else {
+          const scan = await skillsWithoutReceipt(clone, teamName, runner, (line) => io.print(line));
+          const candidates = scan.pending;
+          if (candidates.length === 0) {
+            // An empty batch has four different causes and only one of them means "everything is evaluated".
+            io.print(scan.shared === 0
+              ? 'The team has no shared skills yet; nothing to evaluate.'
+              : scan.versionProblem !== undefined
+                ? 'Could not read the current skill versions, so no shared skill could be checked for a receipt.'
+                : scan.considered === 0
+                  ? 'No shared skill could be checked for a receipt; see the lines above.'
+                  : 'Every shared skill already has an eval receipt for its current version.');
+            steps.evals = 'skipped';
+          } else if (!(await io.confirm(evalsQuestion(candidates.length)))) steps.evals = 'skipped';
+          else {
+            const probe = await (args.preflight ?? verbs.preflight)();
+            if (!probe.ok) {
+              io.print(`Skipping the evals: ${probe.error}`);
+              steps.evals = 'skipped';
+            } else {
+              // One paid agent probe for the whole batch; each run uses the same default model.
+              const reuse: EvalArgs['preflight'] = async () => probe;
+              let evaluated = 0;
+              let failed = 0;
+              for (const [index, candidate] of candidates.entries()) {
+                io.print(`Evaluating ${index + 1} of ${candidates.length} · ${candidate.name}`);
+                io.progress?.({ step: 'evals', current: index + 1, total: candidates.length });
+                const outcome = await verbs.eval({ form: args.form, ref: candidate.name, team: teamName, commit: true, config: store, runner, preflight: reuse }, io);
+                if (outcome.ok) evaluated += 1;
+                else { failed += 1; io.print(outcome.error); }
+              }
+              io.print(`Evaluated ${evaluated} of ${candidates.length}; ${failed} failed.`);
+              steps.evals = 'done';
+            }
+          }
+        }
+      } catch (error) {
+        io.print(`Could not evaluate the shared skills: ${error instanceof Error ? error.message : String(error)}`);
+        steps.evals = 'skipped';
+      }
+    }
 
     const communityUrl = args.communityUrl ?? COMMUNITY_URL;
     if (communityUrl === '' || args.quiet) steps.community = 'skipped';

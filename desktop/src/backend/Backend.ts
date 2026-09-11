@@ -1,4 +1,4 @@
-import type { LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, CheckoutAdded, CheckoutRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, DiscoverArgs, DiscoverResult, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, CheckoutAdded, CheckoutRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   quit(): Promise<void>;
@@ -18,7 +18,8 @@ export interface Backend {
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;
   library(q: { scope: LibraryScope; team?: string }, options?: ReadOptions): Promise<Result<Library>>;
   localSkill(q: { path: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
-  checkouts: { add(path:string):Run<CheckoutAdded>; remove(path:string):Run<CheckoutRemoved> };
+  /** `discover` looks for folders holding `.claude/skills`; it is available only where `features().discover` is true. */
+  checkouts: { add(path:string):Run<CheckoutAdded>; remove(path:string):Run<CheckoutRemoved>; discover(args:DiscoverArgs):Run<DiscoverResult> };
   /** Team projects (team.json), not the local checkout folders above: `create` names one and commits it to the team's main. */
   projects: { create(args:{name:string;remote?:string}):Run<ProjectCreated> };
   /** `at` restricts the answer to one Library root: presence, path, scope and version describe the
@@ -46,6 +47,12 @@ export interface Backend {
   eval(args: EvalArgs): Run<EvalResult>;
   validate(args: ValidateArgs, options?: ReadOptions): Promise<Result<ValidateResult>>;
   update(q?: undefined, options?: ReadOptions): Promise<Result<UpdateAdvice>>;
+  /** The desktop app's own update channel. Rendered only where `surfaces().appUpdate` is true. */
+  appUpdate: {
+    check(q?: { force?: boolean }, options?: ReadOptions): Promise<Result<AppUpdateStatus>>;
+    stage(version: string): Run<AppUpdateStaged>;
+    apply(version: string): Promise<Result<void>>;
+  };
   diagnostics(): Run<void>;
   openInEditor(path: string): Promise<Result<void>>;
   copyToClipboard(text: string): Promise<Result<void>>;

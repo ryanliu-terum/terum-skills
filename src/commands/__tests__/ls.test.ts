@@ -497,3 +497,49 @@ it('detects shared-source and project-placement repositories without cwd or conf
   ] } });
   expect(await readFile(join(config.root, 'config.json'), 'utf8')).toBe(before);
 });
+
+
+describe('W-02 local read stability', () => {
+  it('produces byte-identical output for a root with placements', async () => {
+    const home = await temporaryDirectory(); const store = createConfigStore(join(home, 'state'));
+    // Bound discovery to the fixture home even if an ancestor of the system temp directory is a checkout.
+    await mkdir(join(home, '.git'));
+    const clone = store.teamClone('team');
+    await mkdir(join(clone, 'skills'), { recursive: true });
+    await writeFile(join(clone, 'team.json'), JSON.stringify(TEAM_JSON));
+    for (let i = 0; i < 10; i++) {
+      const name = `skill-${i}`; const id = `33333333-3333-4333-8333-${String(i).padStart(12, '0')}`;
+      const raw = `---\nname: ${name}\ndescription: stable\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nBody\n`;
+      await mkdir(join(clone, 'skills', name)); await writeFile(join(clone, 'skills', name, 'SKILL.md'), raw);
+      if (i < 6) {
+        const path = await localSource(home, name, raw);
+        const fingerprint = (await snapshotSkillDirectory(path)).fingerprint;
+        await store.update(config => { config.placements[path] = { id, team: 'team', version: null, scope: { kind: 'global' }, fingerprint, placed_at: '' }; });
+      }
+    }
+    const io = new ScriptedPrompter(); const result = await run({ local: true, home, config: store }, io);
+    expect(result.ok).toBe(true);
+    expect(JSON.stringify({ value: result.value, lines: io.lines }).replaceAll(home, '<HOME>')).toMatchInlineSnapshot(`"{"value":{"roster":[],"skills":[],"problems":[],"local":[{"root":"<HOME>/.claude/skills","scope":"global","registered":false,"detected":false,"rootState":"scanned","label":"Global","remote":null,"counts":{"skillFolders":6,"connectable":0},"rows":[{"skillId":"33333333-3333-4333-8333-000000000000","placed":true,"connected":false,"name":"skill-0","path":"<HOME>/.claude/skills/skill-0","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000000","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000001","placed":true,"connected":false,"name":"skill-1","path":"<HOME>/.claude/skills/skill-1","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000001","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000002","placed":true,"connected":false,"name":"skill-2","path":"<HOME>/.claude/skills/skill-2","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000002","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000003","placed":true,"connected":false,"name":"skill-3","path":"<HOME>/.claude/skills/skill-3","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000003","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000004","placed":true,"connected":false,"name":"skill-4","path":"<HOME>/.claude/skills/skill-4","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000004","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000005","placed":true,"connected":false,"name":"skill-5","path":"<HOME>/.claude/skills/skill-5","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000005","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180}],"notOffered":[],"problems":[]}]},"lines":["Local Claude Code skills (<HOME>/.claude/skills; global):","  skill-0 — placement recorded from team; path: <HOME>/.claude/skills/skill-0","  skill-1 — placement recorded from team; path: <HOME>/.claude/skills/skill-1","  skill-2 — placement recorded from team; path: <HOME>/.claude/skills/skill-2","  skill-3 — placement recorded from team; path: <HOME>/.claude/skills/skill-3","  skill-4 — placement recorded from team; path: <HOME>/.claude/skills/skill-4","  skill-5 — placement recorded from team; path: <HOME>/.claude/skills/skill-5","  6 skill folders (0 connectable)","Team status is from local clones and may be stale; open endorsement requests are not checked."]}"`);
+  });
+});
+
+
+describe('W-02 local read failure isolation',()=>{
+  it('asks each root for its origin remote once, before the section loop',async()=>{
+    const home=await temporaryDirectory();const store=createConfigStore(join(home,'state'));const roots=[join(home,'a'),join(home,'b')];for(const root of roots){await mkdir(join(root,'.git'),{recursive:true});await localSource(root,'sample');}await store.update(c=>{c.checkouts=roots;});
+    const calls:{args:readonly string[];cwd:string|undefined}[]=[];let release!:()=>void;const both=new Promise<void>(resolve=>{release=resolve;});
+    const runner:Runner={run:async(_command,args,options)=>{calls.push({args,cwd:options?.cwd});if(calls.length===2)release();await both;return {code:0,stdout:'https://github.com/acme/team.git',stderr:''};}};
+    const result=await run({local:true,home,config:store,runner},new ScriptedPrompter());expect(result.ok).toBe(true);expect(calls).toEqual(roots.map(cwd=>({args:['remote','get-url','origin'],cwd})));
+  },5000);
+  it.skipIf(process.platform==='win32'||process.getuid?.()===0)('still yields the other root when one root is unreadable',async()=>{
+    const home=await temporaryDirectory();const store=createConfigStore(join(home,'state'));await localSource(home,'healthy');const repo=join(home,'repo');const path=await localSource(repo,'blocked');await store.update(c=>{c.checkouts=[repo];});const root=join(path,'..');await chmod(root,0);
+    try{const io=new ScriptedPrompter();const result=await run({local:true,home,config:store,runner:ghOnlyRunner(()=>({code:0,stdout:'',stderr:''}))},io);expect(result.value?.local?.[0]?.rows.map(r=>r.name)).toEqual(['healthy']);expect(result.value?.local?.[1]).toMatchObject({rootState:'unreadable',problems:[{reason:expect.stringContaining('EACCES')}]});expect(io.lines.some(l=>l.includes('Could not inspect')&&l.includes('EACCES'))).toBe(true);}finally{await chmod(root,0o700);}
+  });
+  it('reports health unknown for a placed folder whose fingerprint walk throws',async()=>{
+    const home=await temporaryDirectory();const store=createConfigStore(join(home,'state'));const clone=store.teamClone('team');await mkdir(join(clone,'skills'),{recursive:true});await writeFile(join(clone,'team.json'),JSON.stringify(TEAM_JSON));
+    const raw=`---\nname: placed\ndescription: placed\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`;await mkdir(join(clone,'skills/placed'));await writeFile(join(clone,'skills/placed/SKILL.md'),raw);
+    const path=await localSource(home,'placed',raw);await localSource(home,'healthy');const fingerprint=(await snapshotSkillDirectory(path)).fingerprint;await store.update(c=>{c.placements[path]={id:ID,team:'team',version:null,scope:{kind:'global'},fingerprint,placed_at:''};});
+    const original=fs.readdir;const spy=vi.spyOn(fs,'readdir').mockImplementation(async(...args)=>{if(args[0]===path)throw new Error('unreadable walk');return original(...args);});
+    try{const result=await run({local:true,home,config:store},new ScriptedPrompter());expect(result.value?.local?.[0]?.rows.map(r=>[r.name,r.health])).toEqual([['healthy','untracked'],['placed','unknown']]);}finally{spy.mockRestore();}
+  });
+});

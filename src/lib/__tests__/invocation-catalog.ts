@@ -546,7 +546,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/lib/wrapper.ts",
     "line": 24,
     "policy": "not-a-hint",
-    "pattern": "export const BUNDLED_WRAPPER = fileURLToPath(new URL('../claude/skills/terum-skills/SKILL.md', import.meta.url));"
+    "pattern": "export const BUNDLED_WRAPPER = join(packageRoot() ?? fileURLToPath(new URL('../../', import.meta.url)), 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');"
   },
   {
     "file": "src/lib/wrapper.ts",
@@ -652,9 +652,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/app.ts",
-    "line": 165,
+    "line": 166,
     "policy": "prose",
-    "pattern": "if (/release not found|Not Found \\(HTTP 404\\)|no assets match/i.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;"
+    "pattern": "if (RELEASE_ASSETS_MISSING.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;"
   },
   {
     "file": "src/lib/teamRepo.ts",

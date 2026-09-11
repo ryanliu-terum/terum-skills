@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createAppUpdate } from './app-update';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { nativePrefs } from './prefs';
 import { SETUP_STEP_KEYS, FEATURE_KEYS } from '../types';
@@ -20,6 +21,7 @@ import { SHORTCUTS } from '../../lib/shortcuts';
 import { abbreviateHome, stripRemote } from '../paths';
 import { scannedRoots } from './scanned-roots';
 import { cliRefresh, createRefreshPolicy } from './refresh';
+import { BRIDGE_BUSY, mapWithConcurrency } from './concurrency';
 import { overviewCopy } from '../../lib/overview-copy';
 import { bodyExcerpt } from '../../lib/body-excerpt';
 import { isUnderRoot, samePath } from '../../lib/skill-path';
@@ -57,6 +59,7 @@ const cliProject = z.object({ name: z.string(), skills: z.array(z.string()), rem
 const cliLocalHealth = z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']);
 const cliLocalRow = z.object({ name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), shared: z.array(z.strictObject({ id: z.string(), team: z.string() })), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().length(40).nullable() }).nullable(), health: cliLocalHealth, category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional(), connected: z.boolean().optional() }).strict();
 const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), remote:z.object({url:z.string(),slug:z.string().nullable()}).nullish(), registered:z.boolean().optional(), detected:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),category:z.string().nullish().transform(v=>v??null),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null)})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
+const cliDiscover = z.object({candidates:z.array(z.object({path:z.string(),skillFolders:z.number(),registered:z.boolean(),repoRoot:z.boolean()})),scanned:z.number(),truncated:z.boolean(),problems:z.array(z.object({path:z.string(),reason:z.string()}))});
 const cliCheckoutAdded = z.object({path:z.string(),registered:z.boolean()});
 const cliProjectCreated = z.object({team:z.string(),name:z.string(),remotes:z.array(z.string()),skills:z.number()});
 const cliCheckoutRemoved = z.object({path:z.string(),placementsRemaining:z.number()});
@@ -187,7 +190,7 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
   const placed = placements.length > 0 || ledgerPlaced;
   const installed: SkillCard['installed'] = present || ledgerPlaced ? 'placed' : handle !== '' && row.installedBy.some(person => person.handle === handle) ? 'recorded' : 'absent';
   const problem = placements.find(r => r.problem !== undefined || r.health === 'unknown' || r.health === 'gone-from-repo');
-  return { teamed:true, path:null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [r.repoRoot] : []), connectedSources: rows.filter(r => r.shared.length > 0).map(r => r.path), desc: bodyExcerpt(row.body) ?? row.description, grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: problem || row.unresolved ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
+  return { teamed:true, path:null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), connectedSources: rows.filter(r => r.shared.length > 0).map(r => r.path), desc: bodyExcerpt(row.body) ?? row.description, grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: null, summary: null, favorite: false, favorites: null, enabled: true, flags: problem || row.unresolved ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
 /** `owner/repo` as the team remote spells it (case kept; any host); null when the team has no remote. */
 function repoSlug(remote: string | null | undefined): string | null {
@@ -331,10 +334,13 @@ function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, lo
 /**
  * How long a read verb's answer is shared across callers (BUGS.md L18/M24). One Library render used to spawn six CLI
  * processes (three `status`, two `ls --local`, one `ls --team`); every read now goes through one process per argv per
- * window. The window is short and cleared early on any mutation the app makes and whenever the window regains focus,
- * so a change made in a terminal shows on the next look.
+ * window. Mutations clear it outright; focus marks it stale, serving the previously true board while refreshing
+ * in the background. The TTL backs up terminal changes while focused and exceeds the QueryClient's 30 s staleTime,
+ * so a tab switch does not turn into a cold chain (W-02).
  */
-export const READ_CACHE_TTL_MS = 15_000;
+export const READ_CACHE_TTL_MS = 60_000;
+/** Four member reads leave headroom under the bridge cap of eight. */
+const CATALOG_CONCURRENCY = 4;
 /** The Settings error board branches on this: a config.json the CLI refused to parse is repairable in place; anything else is a read failure. */
 function readReason(error: string): 'invalid-config' | 'unreadable' {
   return error.includes('Invalid') && error.includes('config.json') ? 'invalid-config' : 'unreadable';
@@ -398,9 +404,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const fail = (error: string) => result<never>({ ok: false, error });
   const gap = (what: string) => fail(`${what} is not available from terum-skills yet: the CLI has no verb that returns it (desktop/GAPS.md). The terminal has everything the app shows here.`);
   const listeners = new Set<(source: ChangeSource) => void>();
-  const reads = new Map<string, { promise: Promise<{ result: Result<unknown>; lines: string[] }>; at: number }>();
+  const reads = new Map<string, { promise: Promise<{ result: Result<unknown>; lines: string[] }>; at: number; stale: boolean; refreshing: boolean }>();
   const clearReads = () => { reads.clear(); };
-  const notify = (...sources: ChangeSource[]) => { if (sources.length === 0) return; clearReads(); for (const source of sources) for (const listener of listeners) listener(source); };
+  /** Paint a previously true board immediately and replace it if the refresh differs. */
+  const markStale = () => { for (const entry of reads.values()) entry.stale = true; };
+  const broadcast = (...sources: ChangeSource[]) => { for (const source of sources) for (const listener of listeners) listener(source); };
+  const notify = (...sources: ChangeSource[]) => { if (sources.length === 0) return; clearReads(); broadcast(...sources); };
   // W-08: reads never fetch (src/cli.ts eval-report, docs/frame-protocol.md), so a teammate's committed receipt
   // reaches this machine only when something runs `refresh`. Reads are invalidated only when a clone moved, and
   // only after the reads already in flight have settled: notify('clone') re-spawns seven query prefixes and the
@@ -410,7 +419,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     run: () => read(run(['refresh'], cliRefresh, value => value, [])),
     onChanged: async () => { await Promise.allSettled([...reads.values()].map(entry => entry.promise)); notify('clone'); },
   });
-  const onWindowFocus = () => { clearReads(); refreshPolicy.trigger(); };
+  const onWindowFocus = () => { markStale(); refreshPolicy.trigger(); };
   retireWindowListeners?.();
   let retired = false; let unlistenNativeFocus: (() => void) | undefined;
   if (typeof window !== 'undefined') window.addEventListener('focus', onWindowFocus);
@@ -441,18 +450,46 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     };
   }
 
+  /** Query families affected by a refreshed read, without clearing the newly replaced cache. */
+  function sourceOf(argv: readonly string[]): ChangeSource {
+    if (argv[0] === 'status') return 'config';
+    if (argv[0] === 'ls' && argv[1] === '--local') return 'placed';
+    return 'clone';
+  }
   /** One CLI process per read argv per READ_CACHE_TTL_MS; failures and questions are never kept. Signal-free: a caller's abort must not kill a process other callers share. */
   function sharedRead(argv: readonly string[]): Promise<{ result: Result<unknown>; lines: string[] }> {
     const key = argv.join('\u0000');
     const now = Date.now();
     const hit = reads.get(key);
-    if (hit && now - hit.at < READ_CACHE_TTL_MS) return hit.promise;
+    if (hit && now - hit.at < READ_CACHE_TTL_MS) {
+      if (hit.stale && !hit.refreshing) { hit.refreshing = true; void revalidate(key, argv, hit); }
+      return hit.promise;
+    }
+    return start(key, argv, now);
+  }
+  function start(key: string, argv: readonly string[], at: number): Promise<{ result: Result<unknown>; lines: string[] }> {
     const lines: string[] = [];
     const promise = read(run(argv, z.unknown(), value => value, []), undefined, lines).then(result => ({ result, lines }));
-    const entry = { promise, at: now };
+    const entry = { promise, at, stale: false, refreshing: false };
     reads.set(key, entry);
     void promise.then(({ result }) => { if (!result.ok && reads.get(key) === entry) reads.delete(key); }, () => { if (reads.get(key) === entry) reads.delete(key); });
     return promise;
+  }
+  /** Failed refreshes drop the entry and broadcast; identical results reset the clock silently.
+   * Compare only result: print lines are prose and may drift without a data change. */
+  async function revalidate(key: string, argv: readonly string[], entry: { promise: Promise<{ result: Result<unknown>; lines: string[] }>; at: number; stale: boolean; refreshing: boolean }): Promise<void> {
+    const previous = await entry.promise.then(value => value.result, () => undefined);
+    const lines: string[] = [];
+    let next: { result: Result<unknown>; lines: string[] } | undefined;
+    try { next = await read(run(argv, z.unknown(), value => value, []), undefined, lines).then(result => ({ result, lines })); }
+    catch { next = undefined; }
+    if (reads.get(key) !== entry) return;
+    entry.refreshing = false;
+    entry.stale = false;
+    if (next === undefined || !next.result.ok) { reads.delete(key); broadcast(sourceOf(argv)); return; }
+    const changed = previous === undefined || JSON.stringify(previous) !== JSON.stringify(next.result);
+    reads.set(key, { promise: Promise.resolve(next), at: Date.now(), stale: false, refreshing: false });
+    if (changed) broadcast(sourceOf(argv));
   }
   /** A read verb through the shared cache, parsed for this caller. Aborting returns Cancelled for this caller only. */
   async function cached<TIn>(argv: readonly string[], schema: z.ZodType<TIn>, options?: ReadOptions, lines?: string[]): Promise<Result<TIn>> {
@@ -513,8 +550,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     if(!inventory.ok)return {team:{kind:'unreadable',message:inventory.error}};
     return {team:{kind:'ok',team:selected.value.team},selected:selected.value,inventory:inventory.value};
   }
-  async function peopleInventory(options?: ReadOptions) {
-    const status = await cached(['status'], cliStatus, options);
+  async function peopleInventory(options?: ReadOptions, permissions = false) {
+    const status = await cached(['status', ...(permissions ? ['--permissions'] : [])], cliStatus, options);
     if (!status.ok) return status;
     if (status.value.teams.length !== 1) return teamSelectionFailure(status.value.teams);
     const team = status.value.teams[0]!;
@@ -538,7 +575,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       stateOnce = undefined;
       if (hello === null) { featuresOnce = undefined; hello = null; }
       generation++;
-      clearReads();
+      markStale();
       // A relaunch is a terminal action landing: the throttle must not hide what it just changed.
       refreshPolicy.reset();
       return backend.launchContext();
@@ -560,7 +597,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, evalCommitChoice: features.runEvalInApp, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
-      return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, checkouts:true };
+      return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, checkouts:true, appUpdate:true };
     },
     // Status and Settings are offline reads; the remaining surfaces retain their explicit gaps.
     status: (_, options) => readModels(options, (value, local, platform, home) => statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }, home)),
@@ -577,12 +614,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     },
     onboarding: async () => gap('Onboarding data'),
     async library({ scope, team }, options) {
-      const local = await cached(['ls', '--local'], cliLs, options);
+      // Keep local first for recorded spawn order and failure precedence.
+      const [local, enrichment] = await Promise.all([cached(['ls', '--local'], cliLs, options), libraryTeam(team, options)]);
       if (!local.ok) return fail(local.error);
       const section = local.value.local?.find(section => scope.kind==='global' ? section.scope==='global' : section.scope==='project' && samePath(section.repoRoot??section.root,scope.root));
       if (!section) return fail('No such checkout: '+(scope.kind==='checkout'?scope.root:'global')+' · Register it under Settings ▸ This machine ▸ Checkouts.');
       const features = {localIdentity:hello?.features.localIdentity??false};
-      const enrichment = await libraryTeam(team, options);
       const directory = await home(), root = rootOf(section, directory);
       const skills:SkillCard[] = [], seen=new Set<string>();let joined=0,updatesAvailable=0;
       for (const row of section.rows) {
@@ -622,10 +659,9 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         const skill=row&&enrichment.team.kind==='ok'?joinedSkill(row,enrichment.inventory!,enrichment.team.team,features):undefined;
         if(row&&skill&&enrichment.selected&&enrichment.inventory) {
           const team=enrichment.selected.team;
-          const validation=await backend.validate({ref:skill.name,team},options);
+          const [validation,report]=await Promise.all([backend.validate({ref:skill.name,team},options),backend.evalReport({ref:skill.name,team},options)]);
           if(!validation.ok&&validation.value===undefined)return fail(validation.error);
           const detail=inventoryDetail(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.selected,enrichment.selected.placements,validation,enrichment.inventory,features,directory,local.value,owningRootOf(section));
-          const report=await backend.evalReport({ref:skill.name,team},options);
           return {ok:true,value:report.ok?{...detail,...report.value}:{...detail,evalReportError:report.error}};
         }
         const card=row?localCard(row,section,directory):notOfferedCard(entry!,section,directory);
@@ -633,21 +669,20 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       }
       return {ok:false,error:abbreviateHome(path,directory)+' is not in any Library root (Global or a registered checkout), or no longer holds a SKILL.md.',reason:'not-in-library'};
     },
-    checkouts:{add:path=>run(['checkout','add','--',path],cliCheckoutAdded,v=>v,['config']),remove:path=>run(['checkout','remove','--',path],cliCheckoutRemoved,v=>v,['config'])},
+    checkouts:{add:path=>run(['checkout','add','--',path],cliCheckoutAdded,v=>v,['config']),remove:path=>run(['checkout','remove','--',path],cliCheckoutRemoved,v=>v,['config']),discover:args=>run(['checkout','discover',...(args.register?['--register']:[]),...(args.under??[]).map(dir=>`--under=${dir}`)],cliDiscover,v=>v,['config'])},
     projects:{create:({name,remote})=>run(['project','create',...(remote?['--remote',remote]:[]),'--',name],cliProjectCreated,v=>v,['clone'])},
     async skill({ ref, team, at }, options) {
       const parts = ref.split('/');
       const explicitTeam = team ?? (parts.length === 2 ? parts[0] : undefined);
       const name = parts.length === 2 ? parts[1]! : ref;
-      const selected = await inventoryTeam(explicitTeam, options);
+      // Keep the local scan's feature evidence before later reads replace the shared hello.
+      const [selected, { local, features }] = await Promise.all([inventoryTeam(explicitTeam, options), cached(['ls', '--local'], cliLs, options).then(local => ({ local, features: { localIdentity: hello?.features.localIdentity ?? false } }))]);
       if (!selected.ok) return { ok: false, error: selected.error, reason: selected.reason ?? 'unreadable' };
       const inventory = await cached(['ls', '--team', selected.value.team], cliLs, options);
       if (!inventory.ok) return { ok: false, error: inventory.error, reason: 'unreadable' };
       const matches = inventory.value.skills.filter(row => row.name === name || row.id.startsWith(name));
       const row = inventory.value.skills.find(row => row.name === name) ?? (matches.length === 1 ? matches[0] : undefined);
-      const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return { ok: false, error: local.error, reason: 'unreadable' };
-      const features = { localIdentity: hello?.features.localIdentity ?? false };
       // A root the scan does not report (a stale bookmark, a forgotten checkout, a hand-typed URL)
       // is ignored rather than answered with a fabricated absence: the machine-wide answer is what
       // an unscoped URL gives today, and it never claims a root it did not resolve.
@@ -665,12 +700,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         if (matches.length === 0) return { ok: false, reason: 'not-found', error: `No skill named ${name} is shared in team ${selected.value.team}, and no readable folder of that name is in your Library roots.` };
         return { ok: false, reason: 'ambiguous-ref', error: `${matches.length} team skills in ${selected.value.team} have an ID starting with ${name}; open the one you want from the marketplace.` };
       }
-      const validation = await backend.validate({ ref: row.name, team: selected.value.team }, options);
+      const [validation, report] = await Promise.all([backend.validate({ ref: row.name, team: selected.value.team }, options), backend.evalReport({ref:row.name,team:selected.value.team},options)]);
       // A hygiene failure has a parsed value; an unreadable/cancelled validation is a read failure.
       if (!validation.ok && validation.value === undefined) return { ok: false, error: validation.error, reason: 'unreadable' };
       const detail = inventoryDetail(row, presence, selected.value, selected.value.placements, validation, inventory.value, features, await home(), local.value, owning);
-      const report = await backend.evalReport({ref:row.name,team:selected.value.team},options);
       const merged = report.ok ? {...detail, ...report.value} : {...detail, evalReportError: report.error};
+      // The same captured snapshot inventoryDetail joined on: one skill() must not read localIdentity twice.
       // The version names the copy this page describes, so a scoped read reads the scoped placement.
       const placementVersion = onDisk(presence, selected.value.team, row.id, features).find(item => item.placement?.id === row.id && item.placement.team === selected.value.team)?.placement?.version;
       const version = placementVersion ?? merged.versions?.teamCurrent ?? detail.version_full;
@@ -687,7 +722,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     },
     inbox: async () => gap('The Inbox'),
     async roster(_, options) {
-      const data = await peopleInventory(options);
+      const data = await peopleInventory(options, true);
       if (!data.ok) return {ok:false,error:data.error,...(data.reason?{reason:data.reason}:{})};
       const { team } = data.value;
       return { ok: true, value: rosterModel(team) };
@@ -698,19 +733,37 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const { team, inventory, placements } = data.value;
       const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return fail(local.error);
+      const members = rosterModel(team).members;
+      const pending = new Set<Promise<unknown>>();
+      const readMember = async (handle: string): Promise<Inventory> => {
+        const argv = ['ls', 'member', '--team', team.team, '--', handle];
+        const first = cached(argv, cliLs, options);
+        pending.add(first);
+        let detail;
+        try { detail = await first; } finally { pending.delete(first); }
+        // Retry once after another in-flight read settles; match the wrapped bridge message.
+        if (!detail.ok && detail.error.includes(BRIDGE_BUSY)) {
+          if (pending.size) await Promise.race(pending);
+          detail = await cached(argv, cliLs, options);
+        }
+        if (!detail.ok) throw new Error(detail.error);
+        return detail.value;
+      };
+      let details;
+      try { details = await mapWithConcurrency(members, CATALOG_CONCURRENCY, (member) => readMember(member.handle)); }
+      catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
       const people: Person[] = [];
-      for (const member of rosterModel(team).members) {
-        const detail = await cached(['ls', 'member', '--team', team.team, '--', member.handle], cliLs, options);
-        if (!detail.ok) return fail(detail.error);
-        if (!detail.value.member) return fail(`No member data for ${member.handle}.`);
-        const authored = detail.value.skills;
+      for (const [index, member] of members.entries()) {
+        const detail = details[index]!;
+        if (!detail.member) return fail(`No member data for ${member.handle}.`);
+        const authored = detail.skills;
         const names = authored.map(skill => skill.name);
-        const installedIds = new Set((detail.value.member.installed ?? []).map(item => item.id));
+        const installedIds = new Set((detail.member.installed ?? []).map(item => item.id));
         const installable = inventory.skills.filter(skill => installedIds.has(skill.id));
         const latest = newestUpdated(authored);
         const lastPublish = latest ? `${relativeTime(latest.updated)} · ${latest.name}` : '—';
         const disk: Person['onDisk'] = [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length];
-        people.push({ ...member, joined: member.joined ?? '—', role: detail.value.member.role, lastPublish, last_publish: lastPublish, organization: null, declined: detail.value.member.declined, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: names.length ? [['Authored', names]] : [], placeNote: personPlaceNote(disk), onDisk: disk });
+        people.push({ ...member, joined: member.joined ?? '—', role: detail.member.role, lastPublish, last_publish: lastPublish, organization: null, declined: detail.member.declined, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: names.length ? [['Authored', names]] : [], placeNote: personPlaceNote(disk), onDisk: disk });
       }
       return { ok: true, value: catalogModel(team, inventory, local.value, placements, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
     },
@@ -747,6 +800,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     eval: (args: EvalArgs) => { const k = prefs.get('eval:k', ''), model = prefs.get('eval:model', ''), judge = prefs.get('eval:judge', ''); return run(['eval', ...(k && k !== '—' ? ['--k', k] : []), ...(model ? ['--model', model] : []), ...(judge ? ['--judge-model', judge] : []), ...(args.commit ? ['--commit'] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,commit:value.commit }), ['clone']); },
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? cached<ValidateResult>(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, options).then(result) : fail('validate needs a skill name or a folder.'),
     update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
+    appUpdate: createAppUpdate({ run, read, result, appVersion: import.meta.env.VITE_APP_VERSION }),
     diagnostics: () => run(['status'], z.unknown(), () => undefined, []),
     async windowAction(action) { try { const window = getCurrentWindow(); if (action === 'toggle-maximize') await window.toggleMaximize(); else await window.startDragging(); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async openUrl(url) { try { await openUrl(url); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },

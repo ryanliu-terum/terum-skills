@@ -1,4 +1,4 @@
-import { MAX_SELECT_ATTEMPTS, PromptClosedError, type Prompter } from './prompt.js';
+import { MAX_SELECT_ATTEMPTS, PromptClosedError, type Prompter, type ProgressUpdate } from './prompt.js';
 
 /**
  * Frame mode: the machine-readable channel a desktop shell (or any program) drives the CLI through.
@@ -19,8 +19,8 @@ export type AskKind = 'confirm' | 'text' | 'select';
 export interface HelloFrame { t: 'hello'; protocol: typeof FRAME_PROTOCOL; version: string | null; verbs: readonly string[]; features: Readonly<Record<string, boolean>>; }
 export interface PrintFrame { t: 'print'; level: FrameLevel; line: string; }
 export interface AskFrame { t: 'ask'; id: string; kind: AskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[]; }
-/** Reserved: no verb emits progress yet (the CLI has no progress events); the shape is fixed so a shell can render it when one does. */
-export interface ProgressFrame { t: 'progress'; step: string; current?: number; total?: number; }
+/** Emitted by `install`, `checkout discover` and `setup`'s discover/evals steps; every other verb is silent. One shape, declared once (Prompter.progress). Never ordered against `ask`; a shell may ignore it. */
+export interface ProgressFrame extends ProgressUpdate { t: 'progress'; }
 export interface ResultFrame { t: 'result'; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; refused?: boolean; value?: unknown; }
 export type Frame = HelloFrame | PrintFrame | AskFrame | ProgressFrame | ResultFrame;
 
@@ -29,7 +29,7 @@ export interface CancelFrame { t: 'cancel'; }
 export type InboundFrame = AnswerFrame | CancelFrame;
 
 /** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed). */
-export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'project create', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline', 'refresh'] as const;
+export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'project create', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline', 'refresh', 'checkout discover', 'app-update'] as const;
 
 /**
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
@@ -40,8 +40,8 @@ export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   checkouts: true, projects: true,
   memberRole: true, localIdentity: true, roles: true,
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
-  disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: false,
-  refresh: true,
+  disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: true,
+  refresh: true, discover: true, appUpdate: true,
 });
 
 export const COMMANDER_NON_ERRORS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);
@@ -179,6 +179,11 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
     },
     print(line) {
       writeFrame(output, { t: 'print', level: 'info', line });
+    },
+    progress(update) {
+      // Exactly one `result` frame ends a run (docs/frame-protocol.md); nothing may follow it.
+      if (closed) return;
+      writeFrame(output, { t: 'progress', ...update });
     },
   };
 
