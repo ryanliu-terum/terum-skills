@@ -117,7 +117,11 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   skill:({ref,at})=>read('skill',scenario=>{if(scenario==='not-installed'&&ref==='deploy-check')return ok(scopedDetail(removalState(detailOf(design.DETAIL_NOT_INSTALLED)),at));const result=skillByRef(ref);
    if(result.ok&&scenario==='invalid-newest')Object.assign(result.value,{latestState:'invalid',receipt:null,summary:null,reportNumbers:null,invalidReceiptFile:`evals/deploy-check/${design.DETAIL.version_full}/20260829T221500Z.json`});
    if(result.ok&&scenario==='version-mismatch')result.value.versions={placed:'a1b2c3d4'+'0'.repeat(32),teamCurrent:'5f0e12ab9c3d'+'0'.repeat(28),evaluated:'5f0e12ab9c3d'+'0'.repeat(28)};
-   if(result.ok&&scenario==='raw-md')result.value.skillMd={frontmatter:'',body:[],markdown:RAW_MD};
+   if(result.ok&&scenario==='raw-md'){
+    const frontmatter=/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(RAW_MD);
+    if(!frontmatter)throw new Error('RAW_MD must begin with fenced frontmatter.');
+    result.value.skillMd={frontmatter:frontmatter[0].replace(/\r?\n$/,''),body:[],markdown:RAW_MD.slice(frontmatter[0].length)};
+   }
    return result.ok?ok(scopedDetail(removalState(withInstall({...result.value,...(scenario==='not-installed'?{installed:'absent' as const,placed:false,onDiskOnly:false,root:'Marketplace' as const,flags:[]}:{}),...(scenario==='on-disk-only'&&ref==='deploy-check'?{installed:'placed' as const,placed:false,onDiskOnly:true,path:'~/.claude/skills/deploy-check',pathLabel:'~/.claude/skills/deploy-check',paths:[['~/.claude/skills/deploy-check','global']] as [string,string][]}:{}),enabled:scenario==='disabled'?false:backend.prefs.get('enabled:'+ref,result.value.enabled),favorite:backend.prefs.get('favorite:'+ref,result.value.favorite)})),at)):result;},ref),
   evalReport:async({ref})=>{const detail=await backend.skill({ref});if(!detail.ok)return detail;const {receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt}=detail.value;return ok({receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt});},
   receipts:({skillId,version})=>read('library',()=>{const detail=skillByRef(skillId);if(!detail.ok)return fail(detail.error);return ok(detail.value.version===version?detail.value.receipt??null:null);}),

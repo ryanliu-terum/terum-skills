@@ -519,7 +519,7 @@ describe('W-02 local read stability', () => {
     }
     const io = new ScriptedPrompter(); const result = await run({ local: true, home, config: store }, io);
     expect(result.ok).toBe(true);
-    expect(JSON.stringify({ value: result.value, lines: io.lines }).replaceAll(home, '<HOME>')).toMatchInlineSnapshot(`"{"value":{"roster":[],"skills":[],"problems":[],"local":[{"root":"<HOME>/.claude/skills","scope":"global","registered":false,"detected":false,"rootState":"scanned","label":"Global","remote":null,"counts":{"skillFolders":6,"connectable":0},"rows":[{"skillId":"33333333-3333-4333-8333-000000000000","placed":true,"connected":false,"name":"skill-0","path":"<HOME>/.claude/skills/skill-0","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000000","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000001","placed":true,"connected":false,"name":"skill-1","path":"<HOME>/.claude/skills/skill-1","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000001","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000002","placed":true,"connected":false,"name":"skill-2","path":"<HOME>/.claude/skills/skill-2","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000002","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000003","placed":true,"connected":false,"name":"skill-3","path":"<HOME>/.claude/skills/skill-3","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000003","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000004","placed":true,"connected":false,"name":"skill-4","path":"<HOME>/.claude/skills/skill-4","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000004","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000005","placed":true,"connected":false,"name":"skill-5","path":"<HOME>/.claude/skills/skill-5","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000005","team":"team","version":null},"health":"up-to-date","description":"stable","category":"testing","characters":180}],"notOffered":[],"problems":[]}]},"lines":["Local Claude Code skills (<HOME>/.claude/skills; global):","  skill-0 — placement recorded from team; path: <HOME>/.claude/skills/skill-0","  skill-1 — placement recorded from team; path: <HOME>/.claude/skills/skill-1","  skill-2 — placement recorded from team; path: <HOME>/.claude/skills/skill-2","  skill-3 — placement recorded from team; path: <HOME>/.claude/skills/skill-3","  skill-4 — placement recorded from team; path: <HOME>/.claude/skills/skill-4","  skill-5 — placement recorded from team; path: <HOME>/.claude/skills/skill-5","  6 skill folders (0 connectable)","Team status is from local clones and may be stale; open endorsement requests are not checked."]}"`);
+    expect(JSON.stringify({ value: result.value, lines: io.lines }).replaceAll(home, '<HOME>')).toMatchInlineSnapshot(`"{"value":{"roster":[],"skills":[],"problems":[],"local":[{"root":"<HOME>/.claude/skills","scope":"global","registered":false,"detected":false,"rootState":"scanned","label":"Global","remote":null,"counts":{"skillFolders":6,"connectable":0},"rows":[{"skillId":"33333333-3333-4333-8333-000000000000","placed":true,"connected":false,"name":"skill-0","path":"<HOME>/.claude/skills/skill-0","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000000","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-0\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000000\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000001","placed":true,"connected":false,"name":"skill-1","path":"<HOME>/.claude/skills/skill-1","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000001","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-1\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000001\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000002","placed":true,"connected":false,"name":"skill-2","path":"<HOME>/.claude/skills/skill-2","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000002","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-2\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000002\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000003","placed":true,"connected":false,"name":"skill-3","path":"<HOME>/.claude/skills/skill-3","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000003","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-3\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000003\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000004","placed":true,"connected":false,"name":"skill-4","path":"<HOME>/.claude/skills/skill-4","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000004","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-4\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000004\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000005","placed":true,"connected":false,"name":"skill-5","path":"<HOME>/.claude/skills/skill-5","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000005","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-5\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000005\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180}],"notOffered":[],"problems":[]}]},"lines":["Local Claude Code skills (<HOME>/.claude/skills; global):","  skill-0 — placement recorded from team; path: <HOME>/.claude/skills/skill-0","  skill-1 — placement recorded from team; path: <HOME>/.claude/skills/skill-1","  skill-2 — placement recorded from team; path: <HOME>/.claude/skills/skill-2","  skill-3 — placement recorded from team; path: <HOME>/.claude/skills/skill-3","  skill-4 — placement recorded from team; path: <HOME>/.claude/skills/skill-4","  skill-5 — placement recorded from team; path: <HOME>/.claude/skills/skill-5","  6 skill folders (0 connectable)","Team status is from local clones and may be stale; open endorsement requests are not checked."]}"`);
   });
 });
 
@@ -542,4 +542,55 @@ describe('W-02 local read failure isolation',()=>{
     const original=fs.readdir;const spy=vi.spyOn(fs,'readdir').mockImplementation(async(...args)=>{if(args[0]===path)throw new Error('unreadable walk');return original(...args);});
     try{const result=await run({local:true,home,config:store},new ScriptedPrompter());expect(result.value?.local?.[0]?.rows.map(r=>[r.name,r.health])).toEqual([['healthy','untracked'],['placed','unknown']]);}finally{spy.mockRestore();}
   });
+});
+
+
+it('returns the file frontmatter beside the team body without serializing YAML', async () => {
+  const home = await temporaryDirectory(), store = createConfigStore(join(home, 'state'));
+  const clone = store.teamClone('team');
+  await mkdir(join(clone, 'skills', 'sample'), { recursive: true });
+  await mkdir(join(clone, 'people'));
+  await writeFile(join(clone, 'team.json'), JSON.stringify(TEAM_JSON));
+  const raw = inventorySource('sample').replaceAll('\n', '\r\n');
+  await writeFile(join(clone, 'skills', 'sample', 'SKILL.md'), raw);
+  await store.update(config => { config.teams.team = { remote: '/unused', handle: 'seed' }; });
+  const runner: Runner = { run: async () => ({ code: 1, stdout: '', stderr: 'No version available' }) };
+  const result = await run({ config: store, runner }, new ScriptedPrompter());
+  expect(result.ok).toBe(true);
+  expect(result.value?.skills[0]).toMatchObject({ frontmatter: raw.slice(0, raw.indexOf('\r\n# Real body')), body: '# Real body\r\n' });
+});
+
+it('returns raw frontmatter for local candidates and rejected files, and null when unavailable', async () => {
+  const home = await temporaryDirectory(), store = createConfigStore(join(home, 'state'));
+  const frontmatter = '---\r\ndescription: "Local: quoted"\r\nname: sample\r\n---';
+  await localSource(home, 'sample', frontmatter + '\r\nLocal body stays out of inventory.');
+  await localSource(home, 'rejected', frontmatter + '\r\nBody');
+  await localSource(home, 'invalid', '---\nname: [\n---\nBody');
+  await localSource(home, 'missing', 'Body without frontmatter');
+  const result = await run({ local: true, home, config: store }, new ScriptedPrompter());
+  expect(result.ok).toBe(true);
+  const section = result.value?.local?.[0];
+  expect(section?.rows[0]).toMatchObject({ name: 'sample', frontmatter });
+  expect(section?.rows[0]).not.toHaveProperty('body');
+  expect(section?.notOffered.find(row => row.name === 'rejected')).toMatchObject({ frontmatter, reason: 'name-mismatch' });
+  expect(section?.notOffered.find(row => row.name === 'invalid')).toMatchObject({ frontmatter: '---\nname: [\n---', reason: 'invalid-yaml' });
+  expect(section?.notOffered.find(row => row.name === 'missing')).toMatchObject({ frontmatter: null, reason: 'no-frontmatter' });
+  for (const row of section?.notOffered ?? []) expect(row).not.toHaveProperty('body');
+});
+
+
+it('keeps unavailable local frontmatter null when reading SKILL.md fails', async () => {
+  const home = await temporaryDirectory(), store = createConfigStore(join(home, 'state'));
+  const path = await localSource(home, 'unreadable');
+  await store.update(config => { config.shared[ID] = { team: 'team', source: path }; });
+  const original = fs.readFile;
+  const spy = vi.spyOn(fs, 'readFile').mockImplementation(async (...args) => {
+    if (args[0] === join(path, 'SKILL.md')) throw new Error('Cannot read SKILL.md');
+    return original(...args);
+  });
+  try {
+    const result = await run({ local: true, home, config: store }, new ScriptedPrompter());
+    expect(result.value?.local?.[0]?.rows[0]).toMatchObject({ name: 'unreadable', frontmatter: null, description: null, problem: 'Cannot read SKILL.md' });
+    expect(result.value?.local?.[0]?.problems).toContainEqual({ path, reason: 'Cannot read SKILL.md' });
+  } finally { spy.mockRestore(); }
 });
