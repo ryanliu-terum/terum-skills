@@ -267,3 +267,27 @@ Walked as one decision because Ryan's counter-proposal replaced the framing. The
 - **Options:** **0** record the gate as retired on both sides (eval scores become information only) and log an override of the two walks that ruled a gate should exist. **1** the same, but annotate only the target spec. **2** keep the refusal, moved client-side: publish asks before publishing bytes whose newest local receipt is a FAIL, with `--allow-regression` as the override; absence of a receipt never blocks.
 - **The call:** 2. **Zoom-out:** the North Star is silent on blocking bad skills, so it does not decide this; the prior rulings (the 2026-09-06 publish-gate ruling and the 2026-09-07 hygiene/publish-gate walk) do, and overriding a Ryan ruling to tidy text is not a best-call authorization. Option 2 keeps their substance without GitHub in the loop, reads only the local store (nothing moves), and is asked rather than silently enforced — "prompts over flags". Recorded as `| .planning/specs/2026-09-04-eval-engine.md | locked, partly superseded |` in §16.
 - **Technical:** §5.1 step 6a; `PublishResult` unchanged; test in §14.1. The `receipt-check` verb stays a no-op-with-notice shim for one major (§12).
+
+### Decisions 12–16 — the five unplaced items (harden round 2's batch analysis, rev 7)
+
+**Resolved on Ryan's standing best-call authorization**, recorded as spec D20–D24. Each is something
+earlier revisions left with no home: an implementer would have had to invent an answer, and Codex is
+instructed to stop and record an `openQuestion` rather than do that — so leaving them would have
+stalled a batch.
+
+| # | Decision | Verdict | Rationale (plain) | Pointer |
+|---|---|---|---|---|
+| 12 | Setup's `actions` step after `connect` dies | LOCK — delete it; setup is twelve steps | Its only body offered to publish local skills. Under the North Star the Library's publish button *is* the ask; an onboarding step that offers to upload your skills is auto-share with a confirm on it | D20, §9.2 |
+| 13 | `readme --pr-comment`, which reads `team.global` and runs on PR events the product no longer creates | LOCK — no-op-with-notice shim for one major | Same rule §12 already applies to `receipt-check`: the committed Action is un-updatable, so a verb it invokes cannot simply vanish | D21, §11.5 |
+| 14 | The Inbox's `update` and `review` item kinds (§11.5 left this explicitly open) | LOCK — delete both; the surface stays dark | They encode the two mechanisms this refactor removes. `surfaces.inbox` is already false and the route redirects, so the cheapest correct answer is also the honest one | D22, §11.5 |
+| 15 | `policy.publish` in the byte-locked desktop fixture schema | LOCK — loosen the schema, record the deviation | `design.json` cannot be hand-edited (`export:check` byte-locks it) but `fixtures/schema.ts` can; making the field optional is the only edit available | D23, §11.5 |
+| 16 | Which new verbs are `FRAME_VERBS` | LOCK — `prune` and `skill *` yes, `team migrate` no | Each of the first two has a seam the app drives; the migration is run once per team by a human from a terminal, never from the app, and the inventory tests force the decision either way | D24, §7.5, §13 |
+
+**Also recorded in rev 7, and not a fork:** §16.1's build order was replaced. The milestone order it
+stated (M1 → M2 → M3, M7 "same commit as M2 or before") is not executable as green batches — deleting
+`src/lib/version.ts` and dropping `global`/`policy.publish` from `teamSchema` break `eval.ts`,
+`evalReport.ts`, `install.ts`, `publish.ts`, `status.ts`, `readme.ts`, `team.ts` and `guard.ts` at
+once, and `skillRecords` reading `v<N>/SKILL.md` invalidates ~34 test fixtures. The eight-batch order
+puts M7 first (so the guard-action call sites are gone before `guard.ts` is rewritten) and fuses
+M1+M2+M3. This is a correction of fact, not a product decision; the evidence is in
+`.planning/reviews/2026-09-11-refactor-implementation-batches.md`.
