@@ -4,7 +4,7 @@ import type { Command } from 'commander';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { FRAME_FEATURES, FRAME_PROTOCOL, FRAME_VERBS, frameChannel, attemptedVerb, type Frame } from '../frames.js';
-import { PromptClosedError } from '../prompt.js';
+import { PromptClosedError, terminalPrompter } from '../prompt.js';
 
 /** A shell on the other end: collects every frame the CLI writes and answers questions on cue. */
 function shell() {
@@ -35,7 +35,7 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
     expect(FRAME_FEATURES).toEqual({
       memberRole: true, localIdentity: true, checkouts: true, projects: true, roles: true,
       favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
-      disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: false,
+      disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: true,
       refresh: true, appUpdate: true,
     });
   });
@@ -224,4 +224,23 @@ it('carries uninstall disclosure in exactly one ask frame with no preceding prin
   expect(await pending).toBe(false);
   expect(s.frames).toEqual([{ t: 'ask', id: ask.id, kind: 'confirm', question, detail }]);
   s.input.end();
+});
+
+
+describe('W-02 progress channel', () => {
+  it('writes one progress frame per progress() call, omitting absent counters', () => {
+    const s = shell(); s.channel.io.progress?.({ step: 'Placing x' }); s.channel.io.progress?.({ step: 'Placing x', current: 2, total: 4 });
+    expect(s.frames).toEqual([{ t: 'progress', step: 'Placing x' }, { t: 'progress', step: 'Placing x', current: 2, total: 4 }]);
+    s.channel.result({ verb: 'install', ok: true, exitCode: 0 });
+  });
+  it('writes no progress frame after result', () => {
+    const s = shell(); s.channel.result({ verb: 'install', ok: true, exitCode: 0 });
+    const before = [...s.frames]; s.channel.io.progress?.({ step: 'too late' }); expect(s.frames).toEqual(before);
+  });
+  it('advertises progress as supported', () => { expect(FRAME_FEATURES.progress).toBe(true); });
+  it('the terminal prompter reports no progress channel', () => {
+    const input = new PassThrough(), output = new PassThrough();
+    expect(terminalPrompter({ input, output }).progress).toBeUndefined(); expect(output.read()).toBeNull();
+  });
+  it('keeps the protocol at 1', () => { expect(FRAME_PROTOCOL).toBe(1); });
 });

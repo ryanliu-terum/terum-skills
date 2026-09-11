@@ -1,11 +1,19 @@
-import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { packageRoot } from './package-root.js';
 
 export const PACKAGE_NAME = 'terum-skills';
 export const APPROVED_UPSTREAM = 'https://github.com/ryanliu-terum/terum-skills.git';
 export interface PackageMetadata { name: string | null; version: string | null; repository: string | null; upstreamApproved: boolean; }
 
 /** One adjacent manifest reader for source and shipped dist/lib layouts. Never invent a version. */
-export function packageMetadata(read: () => unknown = () => createRequire(import.meta.url)('../../package.json')): PackageMetadata {
+/** Resolve this package's manifest independently of the emitted layout. */
+function defaultRead(): unknown {
+  const root = packageRoot();
+  if (root === null) return null;
+  return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+}
+export function packageMetadata(read: () => unknown = defaultRead): PackageMetadata {
   const absent: PackageMetadata = { name: null, version: null, repository: null, upstreamApproved: false };
   try {
     const value = read();

@@ -96,6 +96,7 @@ export async function installOne(input: { team: string; destination: Destination
   const binding = config.teams[input.team];
   if (!binding?.handle) throw new Error(`Team ${input.team} has no joined handle.`);
   const clone = input.store.teamClone(input.team);
+  io.progress?.({ step: 'Reading the team clone', current: 1, total: 4 });
   const skill = await resolveSkill(clone, input.team, input.reference ?? input.id!);
   const teamJson = await readTeam(clone);
   const packageProject = input.project && teamJson.projects[input.project]?.skills.includes(skill.id) ? input.project : undefined;
@@ -118,6 +119,7 @@ export async function installOne(input: { team: string; destination: Destination
   const root = resolveTarget('claude-code', repoRoot ? { kind: 'project', project: packageProject ?? '' } : { kind: 'global' }, repoRoot, input.home ?? placementHome(input.store));
   const destination = join(root, skill.name);
   if (repoRoot) await assertCheckoutFolder(repoRoot);
+  io.progress?.({ step: `Placing ${skill.name}`, current: 2, total: 4 });
   const release = await lockTarget(root, skill.name);
   let placed: { path: string; snapshot: { fingerprint: string }; notices: string[] };
   try {
@@ -144,6 +146,7 @@ export async function installOne(input: { team: string; destination: Destination
     });
     for (const notice of placed.notices) io.print(notice);
   } finally { await release(); }
+  io.progress?.({ step: 'Publishing to the team repository', current: 3, total: 4 });
   const repo = openTeamRepo(clone, binding.remote, input.runner);
   await repo.safeWrite((tree) => {
     const path = `people/${binding.handle}.json`;
@@ -155,6 +158,7 @@ export async function installOne(input: { team: string; destination: Destination
     const declined = person.declined.filter((id) => id !== skill.id);
     tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);
   }, { action: 'install', handle: binding.handle, message: `${binding.handle}: install ${skill.name}`, ...input.safeWrite, ...lockWait(io) });
+  io.progress?.({ step: 'Recording your install', current: 4, total: 4 });
   await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
   return { id: skill.id, team: input.team, path: placed!.path, version: latest };
 }

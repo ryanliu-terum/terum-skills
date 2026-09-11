@@ -227,16 +227,16 @@ it('carries an explicit null version for an unpinned pending operation', async (
   expect(JSON.parse(JSON.stringify(result.value)).teams[0].pending[0].destination).toBeNull();
 });
 
-it('joins host admin permission onto each member when gh answers, and keeps it null otherwise', async () => {
+it('joins host admin permission onto each member with --permissions when gh answers, and keeps it null otherwise', async () => {
   const f = await fixture(['a', 'seed']);
   const admins = { code: 0, stdout: JSON.stringify([[{ login: 'SEED' }], [{ login: 'outsider' }]]), stderr: '' };
   const withGh = mappedRunner(REMOTE, f.bare, fakeGh('seed', { 'api repos/acme/team/collaborators?permission=admin --paginate --slurp': admins }));
-  const answered = await run({ config: f.store, runner: withGh }, new ScriptedPrompter());
+  const answered = await run({ config: f.store, runner: withGh, permissions: true }, new ScriptedPrompter());
   expect(answered.value?.teams[0]?.members).toMatchObject([{ handle: 'a', admin: false }, { handle: 'seed', admin: true }]);
   expect(withGh.calls.some(call => call.command === 'gh' && call.args.join(' ').includes('collaborators?permission=admin'))).toBe(true);
-  // gh installed but the lookup fails (offline / unauthorized): status still succeeds, admin unknown.
+  // gh installed and --permissions passed, but the lookup fails (offline / unauthorized): status still succeeds, admin unknown.
   const failing = mappedRunner(REMOTE, f.bare, fakeGh('seed'));
-  const offline = await run({ config: f.store, runner: failing }, new ScriptedPrompter());
+  const offline = await run({ config: f.store, runner: failing, permissions: true }, new ScriptedPrompter());
   expect(offline.ok).toBe(true);
   expect(offline.value?.teams[0]?.members.map(member => member.admin)).toEqual([null, null]);
   // No gh at all: the lookup is never attempted.
@@ -244,4 +244,34 @@ it('joins host admin permission onto each member when gh answers, and keeps it n
   expect(absent.ok).toBe(true);
   expect(absent.value?.teams[0]?.members.map(member => member.admin)).toEqual([null, null]);
   expect(f.runner.calls.filter(call => call.command === 'gh').map(call => call.args)).toEqual([['--version']]);
+});
+
+
+describe('W-02 status permissions and probes', () => {
+  const api = 'api repos/acme/team/collaborators?permission=admin --paginate --slurp';
+  it.each([false,true])('queries collaborators only with permissions=%s', async permissions => {
+    const f=await fixture(['seed','other']);
+    await writeFile(join(f.clone,'people/seed.json'),JSON.stringify({...person('seed'),github:'seed'}));
+    await writeFile(join(f.clone,'people/other.json'),JSON.stringify({...person('other'),github:'other'}));
+    const runner=mappedRunner(REMOTE,f.bare,fakeGh('seed',{[api]:{code:0,stdout:'[[{"login":"seed"}]]',stderr:''}}));
+    const result=await run({config:f.store,runner,...(permissions?{permissions:true}:{})},new ScriptedPrompter());
+    expect(result.ok).toBe(true);
+    expect(runner.calls.filter(c=>c.command==='gh'&&c.args[0]==='api').map(c=>c.args.join(' '))).toEqual(permissions?[api]:[]);
+    expect(result.value?.teams[0]?.members.map(m=>[m.handle,m.admin])).toEqual([['other',permissions?false:null],['seed',permissions?true:null]]);
+    if(!permissions){const calls=runner.calls.map(c=>[c.command,...c.args].join(' '));expect(calls.slice(0,2).sort()).toEqual(['gh --version','git --version']);expect(calls.slice(2)).toEqual(['git remote get-url origin']);}
+  });
+  it.each([false,true])('reports admin null when gh is absent, permissions=%s',async permissions=>{
+    const f=await fixture();const result=await run({config:f.store,runner:f.runner,permissions},new ScriptedPrompter());
+    expect(result).toMatchObject({ok:true,value:{tools:{git:true,gh:false}}});expect(result.value?.teams[0]?.members.every(m=>m.admin===null)).toBe(true);expect(f.runner.calls.some(c=>c.command==='gh'&&c.args[0]==='api')).toBe(false);
+  });
+  it.each([1,124])('reports admin null when collaborator lookup exits %s',async code=>{
+    const f=await fixture();let deadline:number|undefined;
+    const gh=fakeGh('seed');const runner=mappedRunner(REMOTE,f.bare,(args,options)=>{if(args[0]==='api'){deadline=options?.deadlineMs;return {code,stdout:'',stderr:code===124?'deadline':'HTTP 403'};}return gh(args,options);});
+    const result=await run({config:f.store,runner,permissions:true},new ScriptedPrompter());expect(result.ok).toBe(true);expect(result.value?.teams[0]?.members.every(m=>m.admin===null)).toBe(true);expect(deadline).toBe(10_000);
+  });
+  it('starts the git and gh probes together',async()=>{
+    const f=await fixture();let count=0;let release!:()=>void;const both=new Promise<void>(resolve=>{release=resolve;});
+    const runner=wrapRunner(f.runner,async(_command,args,_options,next)=>{if(args[0]==='--version'){if(++count===2)release();await both;}return next();});
+    expect((await run({config:f.store,runner},new ScriptedPrompter())).ok).toBe(true);expect(count).toBe(2);
+  },5000);
 });

@@ -1,9 +1,9 @@
+import { packageRoot } from '../lib/package-root.js';
 import { invocation } from '../lib/invocation.js';
 import type { WithForm, InvocationForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { reconcileShared } from './connect.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
@@ -361,7 +361,8 @@ function generationCommitNotice(args: EvalArgs, form: InvocationForm | undefined
 
 /** Product provenance is read-only and never falls back to the team clone's unrelated HEAD. */
 async function runningEngineCommit(runner: Runner): Promise<string> {
-  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const root = packageRoot();
+  if (root === null) return 'unknown';
   // An npm-installed package sits inside the CONSUMER's repository, and git walks upward — that
   // HEAD is not engine provenance (§5.3: "terum-skills commit of the running CLI"; review P2).
   const toplevel = await runner.run('git', ['rev-parse', '--show-toplevel'], { cwd: root });

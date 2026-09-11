@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
 import { packageVersion } from '../package.js';
-import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, treeText, withCloneLock, cloneLockPath, lockWait } from '../teamRepo.js';
+import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, localPushGuardLauncher, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, shellQuote, treeText, withCloneLock, cloneLockPath, lockWait } from '../teamRepo.js';
 import { createConfigStore } from '../config.js';
 import { run as connect } from '../../commands/connect.js';
 import { ScriptedPrompter } from './fixtures.js';
@@ -560,9 +560,17 @@ describe('the clone-local push guard arming (D12)', () => {
     await cloneTeam(fixture.bare, clone);
     const hook = join(clone, '.git', 'hooks', 'pre-push');
     expect((await stat(hook)).mode & 0o777).toBe(0o700);
-    // Under the TypeScript sources there is no built entry, so the arming falls back to npx pinned to this package's version.
+    // Which launcher arms the clone is a property of the layout, not of the hook: where a built `dist/index.js`
+    // exists (an install, the bundled entry, or a checkout someone has run `npm run build` in) the arming uses
+    // that absolute entry; where it does not, it falls back to npx pinned to this package's version. Derive the
+    // expectation from the same function the arming uses so this case is hermetic instead of silently asserting
+    // that this tree happens to be unbuilt, and pin both arms.
     const { version } = createRequire(import.meta.url)('../../../package.json') as { version: string };
-    expect(await readFile(hook, 'utf8')).toContain(`terum-skills@${version}' guard-push`);
+    const launcher = localPushGuardLauncher();
+    const body = await readFile(hook, 'utf8');
+    expect(body).toContain(launcher === null ? `terum-skills@${version}' guard-push` : `${shellQuote(launcher.entry)} guard-push`);
+    // Whichever arm ran, the armed hook never launches `@latest`.
+    expect(body.split('\n').find((line) => line.startsWith('exec '))).not.toContain('@latest');
     expect((await git(['config', '--local', 'core.hooksPath'], clone)).trim()).toBe('.git/hooks');
     // The body, driven the way git drives it, with a stub launcher that echoes its arguments and exits 3: two stdin lines become one flat argument list, and the launcher's exit status is the hook's.
     const stub = join(fixture.root, 'stub.js');
@@ -686,4 +694,18 @@ it('skillVersions returns an empty map when the valid ref has no skills tree', a
 });
 it('skillVersions preserves requireGitResult failure text', async () => {
   await expect(skillVersions({ run: async () => ({ code: 1, stdout: '', stderr: 'cannot read objects' }) }, '/clone', 'main')).rejects.toThrow('git ls-tree main:skills failed: cannot read objects');
+});
+
+
+describe('W-02 post-push cleanup',()=>{
+  it.each(['main','branch','unchanged','guard','exhausted'] as const)('preserves cleanup semantics for %s',async mode=>{
+    const f=await bareTeam();const clone=await cloneWithIdentity(f.bare,join(f.root,'clone'));const calls:string[][]=[];let pushed='';let clock=0;
+    const runner=wrapRunner(systemRunner,async(_command,args,_options,next)=>{calls.push([...args]);if(args[0]==='push'){pushed=(await git(['rev-parse','HEAD'],clone)).trim();if(mode==='exhausted'){clock=100;return {code:1,stdout:'',stderr:'! [rejected] main -> main (non-fast-forward)'};}}return next();});
+    const attempt=openTeamRepo(clone,f.bare,runner).safeWrite(tree=>{if(mode==='unchanged')return;if(mode==='guard'){tree.set('people/other.json',personJson('other'));return;}tree.set('people/me.json',personJson('me'));},{action:'join',handle:'me',...(mode==='branch'?{branch:'publish/x-seed-abcd1234'}:{}),...(mode==='exhausted'?{deadlineMs:50,now:()=>clock,sleep:async()=>{clock=100;}}:{})});
+    if(mode==='guard')await expect(attempt).rejects.toThrow(GuardError);else if(mode==='exhausted')await expect(attempt).rejects.toThrow(SafeWriteExhausted);else expect(await attempt).toMatchObject({changed:mode!=='unchanged'});
+    expect(calls.filter(c=>c[0]==='fetch')).toHaveLength(mode==='main'?1:2);
+    const push=calls.findIndex(c=>c[0]==='push');
+    if(mode==='main'){expect(calls.slice(push+1).some(c=>c[0]==='reset')).toBe(false);expect((await git(['rev-parse','HEAD'],clone)).trim()).toBe(pushed);}
+    else {expect(calls.at(-1)?.[0]==='reset'||calls.some((c,i)=>i>push&&c.join(' ')==='reset --hard origin/main')).toBe(true);expect(await exists(join(clone,'people/me.json'))).toBe(false);if(mode==='guard')expect(await exists(join(clone,'people/other.json'))).toBe(false);if(mode==='branch')expect((await git(['rev-parse','HEAD'],clone)).trim()).not.toBe(pushed);}
+  });
 });

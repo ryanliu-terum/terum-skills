@@ -546,7 +546,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/lib/wrapper.ts",
     "line": 24,
     "policy": "not-a-hint",
-    "pattern": "export const BUNDLED_WRAPPER = fileURLToPath(new URL('../claude/skills/terum-skills/SKILL.md', import.meta.url));"
+    "pattern": "export const BUNDLED_WRAPPER = join(packageRoot() ?? fileURLToPath(new URL('../../', import.meta.url)), 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');"
   },
   {
     "file": "src/lib/wrapper.ts",

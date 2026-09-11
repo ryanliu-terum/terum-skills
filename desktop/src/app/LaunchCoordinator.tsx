@@ -68,6 +68,8 @@ export function LaunchCoordinator() {
   window.addEventListener('focus', focus);
   void (async () => {
    await backend.prefs.ready;
+   // Warm status and the local scan; the adapter deduplicates these with the first render.
+   void backend.status().catch(()=>{});
    try {
     const ctx = await client.ensureQueryData({queryKey: ['launch-context'], queryFn: () => backend.launchContext(), staleTime: Infinity});
     if (!disposed && refreshNumber === 0) accept(ctx);

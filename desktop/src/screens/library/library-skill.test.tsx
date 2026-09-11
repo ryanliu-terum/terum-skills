@@ -411,3 +411,15 @@ it('maps the reachable global root URL to a global scope',async()=>{
  expect(skill).toHaveBeenCalledWith({ref:'deploy-check',at:{kind:'global'}},expect.objectContaining({signal:expect.any(AbortSignal)}));
  expect(screen.getByRole('link',{name:/^Global/})).toHaveAttribute('aria-current','page');
 });
+
+it.each([true,false])('shows in-flight Move progress only when advertised (%s)',async progress=>{
+ const backend=createMockBackend();const features=await backend.features();vi.spyOn(backend,'features').mockResolvedValue({...features,progress});
+ let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});const install=backend.install.bind(backend);
+ // Exercise the real mock's progress with consent already approved, holding completion for observation.
+ // The unchanged install-flow test above owns the interactive consent modal.
+ vi.spyOn(backend,'install').mockImplementation(args=>{const run=install(args);return {...run,frames:{async *[Symbol.asyncIterator](){for await(const frame of run.frames){if(frame.t==='ask'){run.answer(frame.id,true);continue;}yield frame;if(frame.t==='progress')await held;}}}};});
+ openWith('#/skill/deploy-check?dialog=move',backend);fireEvent.click(within(await screen.findByRole('dialog',{name:'Move deploy-check?'})).getByRole('button',{name:'Move'}));
+ const dialog=screen.getByRole('dialog',{name:'Move deploy-check?'});
+ if(progress)expect(await within(dialog).findByRole('status')).toHaveTextContent('Installed');else {await waitFor(()=>expect(within(dialog).getByRole('button',{name:'Move'})).toBeDisabled());expect(within(dialog).queryByRole('status')).toBeNull();}
+ release();await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Move deploy-check?'})).toBeNull());expect(document.querySelector('.skill-dialog-progress')).toBeNull();
+});

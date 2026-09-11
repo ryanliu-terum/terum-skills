@@ -17,14 +17,17 @@ function frames(args: readonly string[]) {
 }
 
 /** Every read verb replays a recording; `hold` keeps a verb open until released so concurrency can be observed. */
-function bridge(options: { fail?: string[]; hold?: string; ask?: string } = {}) {
+function bridge(options: { fail?: string[]; hold?: string; ask?: string; holdAfter?: number; mutate?: (frame: Record<string, unknown>, occurrence: number, verb: string) => void } = {}) {
   let release: (() => void) | undefined;
   const held = new Promise<void>(resolve => { release = resolve; });
+  const counts = new Map<string, number>();
   const f = fakeBridge(async (args, emit) => {
     const verb = args.join(' ');
-    if (options.hold === verb) await held;
+    const occurrence = (counts.get(verb) ?? 0) + 1; counts.set(verb, occurrence);
+    if (options.hold === verb && occurrence > (options.holdAfter ?? 0)) await held;
     const ok = !(options.fail ?? []).includes(verb);
     for (const frame of frames(args)) {
+      options.mutate?.(frame, occurrence, verb);
       if (frame.t === 'result') {
         if (options.ask === verb) { emit({ kind: 'stdout', line: JSON.stringify({ t: 'ask', id: 'q1', kind: 'confirm', question: 'Really?' }) }); return; }
         emit({ kind: 'stdout', line: JSON.stringify({ t: 'print', level: 'info', line: `ran ${verb}` }) });
@@ -68,12 +71,12 @@ describe('read cache (BUGS.md L18/M24: one CLI process per read verb per render)
     expect(argv(f)).toEqual(['status', 'ls --local', 'checkout add -- /work/x', 'status', 'ls --local']);
   });
 
-  it('window focus clears it (a change made in a terminal shows on the next look)', async () => {
-    const f = bridge(); const backend = createTauriBackend(f.bridge);
-    await backend.status();
-    window.dispatchEvent(new Event('focus'));
-    await backend.status();
-    expect(f.spawns).toHaveLength(4);
+  it('window focus serves the cached value and refreshes it behind the screen', async () => {
+    const f = bridge({hold:'status',holdAfter:1}); const backend = createTauriBackend(f.bridge);
+    const before=await backend.status(); window.dispatchEvent(new Event('focus'));
+    expect(await backend.status()).toEqual(before);
+    await vi.waitFor(()=>expect(argv(f).filter(v=>v==='status')).toHaveLength(2));
+    f.release();
   });
 
   it('a failed read is not kept: the next call retries', async () => {
@@ -118,5 +121,32 @@ describe('read cache (BUGS.md L18/M24: one CLI process per read verb per render)
     const [a, b] = await Promise.all([backend.status(), backend.settings()]);
     expect(a).toMatchObject({ ok: false, error: expect.stringContaining('ran ls --local') });
     expect(b).toMatchObject({ ok: false, error: expect.stringContaining('ran ls --local') });
+  });
+});
+
+
+describe('W-02 stale revalidation',()=>{
+  it('notifies subscribers exactly once when the refreshed value differs',async()=>{
+    const f=bridge({mutate:(frame,n,verb)=>{if(n>1&&verb==='status'&&frame.t==='result'){const value=frame.value as {version:string};value.version='9.9.9';}}});const backend=createTauriBackend(f.bridge);const listener=vi.fn();backend.subscribe(listener);
+    await backend.status();window.dispatchEvent(new Event('focus'));await backend.status();await vi.waitFor(()=>expect(listener).toHaveBeenCalledExactlyOnceWith('config'));
+    const count=f.spawns.length;await backend.status();expect(f.spawns).toHaveLength(count);
+  });
+  it('does not notify when only print lines differ',async()=>{
+    const f=bridge({mutate:(frame,n)=>{if(frame.t==='print')frame.line=`different prose ${n}`;}});const backend=createTauriBackend(f.bridge);const listener=vi.fn();backend.subscribe(listener);
+    await backend.status();window.dispatchEvent(new Event('focus'));await backend.status();await vi.waitFor(()=>expect(f.spawns).toHaveLength(4));await new Promise(resolve=>setTimeout(resolve,10));expect(listener).not.toHaveBeenCalled();
+  });
+  it('drops the entry and notifies when the background refresh fails',async()=>{
+    const f=bridge({mutate:(frame,n,verb)=>{if(n>1&&verb==='status'&&frame.t==='result')Object.assign(frame,{ok:false,exitCode:1,error:'CLI denied the read.'});}});const backend=createTauriBackend(f.bridge);const listener=vi.fn();backend.subscribe(listener);
+    const before=await backend.status();window.dispatchEvent(new Event('focus'));expect(await backend.status()).toEqual(before);await vi.waitFor(()=>expect(listener).toHaveBeenCalledExactlyOnceWith('config'));
+    expect(await backend.status()).toMatchObject({ok:false,error:expect.stringContaining('CLI denied the read.')});expect(argv(f).filter(v=>v==='status')).toHaveLength(3);
+  });
+  it('refreshLaunch marks stale instead of clearing',async()=>{
+    const f=bridge({hold:'status',holdAfter:1});const backend=createTauriBackend(f.bridge);const before=await backend.status();await backend.refreshLaunch();expect(await backend.status()).toEqual(before);await vi.waitFor(()=>expect(argv(f).filter(v=>v==='status')).toHaveLength(2));f.release();
+  });
+  it('only one refresh runs while a stale entry is being revalidated',async()=>{
+    const f=bridge({hold:'status',holdAfter:1});const backend=createTauriBackend(f.bridge);await backend.status();window.dispatchEvent(new Event('focus'));window.dispatchEvent(new Event('focus'));await Promise.all([backend.status(),backend.status(),backend.status()]);await vi.waitFor(()=>expect(argv(f).filter(v=>v==='status')).toHaveLength(2));f.release();
+  });
+  it('a mutation cannot be overwritten by an older background refresh',async()=>{
+    const f=bridge({hold:'status',holdAfter:1});const backend=createTauriBackend(f.bridge);await backend.status();window.dispatchEvent(new Event('focus'));await backend.status();await vi.waitFor(()=>expect(argv(f).filter(v=>v==='status')).toHaveLength(2));await backend.checkouts.add('/work/new').done;f.release();await backend.status();expect(argv(f).filter(v=>v==='status')).toHaveLength(3);
   });
 });

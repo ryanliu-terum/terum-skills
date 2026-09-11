@@ -1,3 +1,4 @@
+import { packageRoot } from './package-root.js';
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, rename, rm, rmdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -20,8 +21,8 @@ import { FRONTMATTER } from './schema.js';
  */
 export const WRAPPER_NAME = 'terum-skills';
 export const MANAGED_BY = 'terum-skills';
-/** Where `npm run build` puts the bundled copy, resolved from dist/lib. From src/lib (tests, an unbuilt checkout) it is absent, and every caller says so instead of failing. */
-export const BUNDLED_WRAPPER = fileURLToPath(new URL('../claude/skills/terum-skills/SKILL.md', import.meta.url));
+/** Where `npm run build` puts the bundled copy, resolved from the package root for dist/lib, a bundled entry, and a checkout. */
+export const BUNDLED_WRAPPER = join(packageRoot() ?? fileURLToPath(new URL('../../', import.meta.url)), 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');
 
 export interface WrapperOptions { skillsRoot?: string; source?: string; }
 

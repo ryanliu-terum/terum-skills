@@ -1,9 +1,13 @@
+import { mapWithConcurrency } from './concurrency.js';
 import { access, lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { Config } from './schema.js';
 import { AGENT_PATHS } from './placer/agent-paths.js';
 import { assertNotInsideStateRoot, inspectSkillSource, scanSkillFolder, type SourceProblem } from './skill-source.js';
+
+/** Per-folder scans overlap: on a UNC/9P root the cost is latency, not CPU (W-02). */
+const LOCAL_SCAN_CONCURRENCY = 8;
 
 export interface SharedRef { id: string; team: string; }
 export interface PlacementRef { id: string; team: string; version: string | null; }
@@ -109,7 +113,10 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
     names = [];
   }
   const { sharedPaths, placementPaths } = options.ledger ?? await canonicalLedger(config);
-  const canonicalRoot = await realpath(root).catch(() => root);
+  // One realpath per call: every name is one segment beneath the resolved root.
+  // Keep undefined on failure so ledger comparisons retain their exact resolve() fallback.
+  const realRoot = await realpath(root).then((value) => value, () => undefined);
+  const canonicalRoot = realRoot ?? root;
   for (const { target, canonical } of placementPaths) {
     if (dirname(resolve(target)) !== root && (canonical === undefined || dirname(canonical) !== canonicalRoot)) continue;
     try { await lstat(target); }
@@ -117,9 +124,9 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') inventory.problems.push({ path: target, reason: 'placement recorded in the ledger but the folder is missing' });
     }
   }
-  for (const name of names) {
+  const scanned = await mapWithConcurrency(names, LOCAL_SCAN_CONCURRENCY, async (name): Promise<LocalEntry | null> => {
     const path = join(root, name);
-    const canonical = await canonicalParentPath(path);
+    const canonical = realRoot === undefined ? undefined : join(realRoot, name);
     const shared = sharedPaths.filter(({ ref, canonical: reference }) => resolve(ref.source) === path || (canonical !== undefined && reference === canonical)).map(({ id, ref }) => ({ id, team: ref.team }));
     const placement = placementPaths.find(({ target, canonical: reference }) => resolve(target) === path || (canonical !== undefined && reference === canonical))?.ref;
     const tracked = shared.length > 0 || placement !== undefined;
@@ -129,24 +136,22 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
       const details = await lstat(path);
       if (details.isSymbolicLink()) {
         reject('symlink', 'symbolic link');
-        inventory.entries.push(entry);
-        continue;
+        return entry;
       }
       try { assertNotInsideStateRoot(path, options.stateRoot); }
       catch {
         reject('inside-state-root', `inside the terum-skills state directory ${options.stateRoot}`);
-        inventory.entries.push(entry);
-        continue;
+        return entry;
       }
       if (!details.isDirectory()) {
-        if (!tracked) continue;
+        if (!tracked) return null;
         reject('not-a-directory', 'not a directory');
       } else {
         let skill;
         try { skill = await stat(join(path, 'SKILL.md')); }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
         if (!skill) {
-          if (!tracked) continue;
+          if (!tracked) return null;
           reject('skill-md-missing', 'SKILL.md missing');
         } else if (!skill.isFile()) reject('skill-md-not-a-file', 'SKILL.md is not a regular file');
         else {
@@ -165,8 +170,9 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
         }
       }
     } catch (error) { entry.inspection = { kind: 'failed', reason: error instanceof Error ? error.message : String(error) }; }
-    inventory.entries.push(entry);
-  }
+    return entry;
+  });
+  for (const entry of scanned) if (entry !== null) inventory.entries.push(entry);
   return inventory;
 }
 
