@@ -17,19 +17,23 @@ export type AskKind = 'confirm' | 'text' | 'select';
 
 /** First line of every frame-mode run: what this CLI is and what it can honour, so a shell never hard-codes it. */
 export interface HelloFrame { t: 'hello'; protocol: typeof FRAME_PROTOCOL; version: string | null; verbs: readonly string[]; features: Readonly<Record<string, boolean>>; }
-export interface PrintFrame { t: 'print'; level: FrameLevel; line: string; }
-export interface AskFrame { t: 'ask'; id: string; kind: AskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[]; descriptions?: readonly string[]; }
+export interface PrintFrame { t: 'print'; id?: string; level: FrameLevel; line: string; }
+export interface AskFrame { t: 'ask'; id?: string; kind: AskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[]; descriptions?: readonly string[]; }
 /** Emitted by `install`, `checkout discover` and `setup`'s discover/evals steps; every other verb is silent. One shape, declared once (Prompter.progress). Never ordered against `ask`; a shell may ignore it. */
-export interface ProgressFrame extends ProgressUpdate { t: 'progress'; }
-export interface ResultFrame { t: 'result'; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; refused?: boolean; value?: unknown; }
+export interface ProgressFrame extends ProgressUpdate { t: 'progress'; id?: string; }
+export interface ResultFrame { t: 'result'; id?: string; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; refused?: boolean; value?: unknown; }
 export type Frame = HelloFrame | PrintFrame | AskFrame | ProgressFrame | ResultFrame;
 
 export interface AnswerFrame { t: 'answer'; id: string; value?: string | number | boolean; }
 export interface CancelFrame { t: 'cancel'; }
-export type InboundFrame = AnswerFrame | CancelFrame;
+export interface RequestFrame { t: 'request'; id: string; argv: string[]; cwd?: string; }
+export interface ServeCancelFrame { t: 'cancel'; id?: string; }
+export type InboundFrame = AnswerFrame | CancelFrame | RequestFrame | ServeCancelFrame;
+/** Shared by the CLI session and desktop adapter; mutations always keep their own process. */
+export { SERVE_READ_VERBS } from './serve-verbs.js';
 
 /** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed). */
-export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'project create', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline', 'refresh', 'checkout discover', 'app-update'] as const;
+export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'project create', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline', 'refresh', 'checkout discover', 'app-update', 'serve'] as const;
 
 /**
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
@@ -48,7 +52,7 @@ export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
   disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: false, progress: true,
   refresh: true, discover: true, appUpdate: true,
-  autoSync: true,
+  autoSync: true, serve: true,
 });
 
 export const COMMANDER_NON_ERRORS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);
@@ -71,6 +75,8 @@ export interface FrameStreams {
   /** Where malformed or unexpected inbound lines are reported (the bin passes stderr). */
   diagnostic?(line: string): void;
   onCancel?(): void;
+  /** Session requests use an isolated input stream and stamp every response with this id. */
+  requestId?: string;
 }
 
 export interface ResultOutcome { verb: string; ok: boolean; error?: string; cancelled?: true; refused?: true; value?: unknown; exitCode: 0 | 1; }
@@ -90,7 +96,7 @@ export function writeFrame(output: NodeJS.WritableStream, frame: Frame): void {
 }
 
 /** Splits an inbound stream into lines and parses each as one frame; malformed lines go to `onBad`. */
-function readFrames(input: NodeJS.ReadableStream, onFrame: (frame: InboundFrame) => void, onBad: (line: string) => void, onEnd: () => void): () => void {
+export function readFrames(input: NodeJS.ReadableStream, onFrame: (frame: InboundFrame) => void, onBad: (line: string) => void, onEnd: () => void, serve = false): () => void {
   let buffer = '';
   const onData = (chunk: Buffer | string) => {
     buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
@@ -105,7 +111,7 @@ function readFrames(input: NodeJS.ReadableStream, onFrame: (frame: InboundFrame)
   const deliver = (line: string) => {
     let parsed: unknown;
     try { parsed = JSON.parse(line); } catch { onBad(line); return; }
-    if (isAnswer(parsed) || isCancel(parsed)) onFrame(parsed);
+    if (isAnswer(parsed) || (!serve && isCancel(parsed)) || (serve && isServeCancel(parsed)) || (serve && isRequest(parsed))) onFrame(parsed);
     else onBad(line);
   };
   const onClose = () => { if (buffer.trim()) deliver(buffer.trim()); buffer = ''; onEnd(); };
@@ -115,13 +121,25 @@ function readFrames(input: NodeJS.ReadableStream, onFrame: (frame: InboundFrame)
   return () => { input.off('data', onData); input.off('end', onClose); input.off('close', onClose); };
 }
 
-function isAnswer(value: unknown): value is AnswerFrame {
+export function isAnswer(value: unknown): value is AnswerFrame {
   if (!value || typeof value !== 'object') return false;
   const frame = value as Partial<AnswerFrame>;
   return frame.t === 'answer' && typeof frame.id === 'string' && (frame.value === undefined || ['string', 'number', 'boolean'].includes(typeof frame.value));
 }
-function isCancel(value: unknown): value is CancelFrame {
+export function isCancel(value: unknown): value is CancelFrame {
   return Boolean(value) && typeof value === 'object' && (value as Partial<CancelFrame>).t === 'cancel';
+}
+
+function isRequestId(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 64; }
+export function isRequest(value: unknown): value is RequestFrame {
+  if (!value || typeof value !== 'object') return false;
+  const frame = value as Partial<RequestFrame>;
+  return frame.t === 'request' && isRequestId(frame.id) && Array.isArray(frame.argv) && frame.argv.every(arg => typeof arg === 'string') && (frame.cwd === undefined || typeof frame.cwd === 'string');
+}
+export function isServeCancel(value: unknown): value is ServeCancelFrame {
+  if (!value || typeof value !== 'object') return false;
+  const frame = value as Partial<ServeCancelFrame>;
+  return frame.t === 'cancel' && (frame.id === undefined || isRequestId(frame.id));
 }
 
 /**
@@ -133,8 +151,9 @@ function isCancel(value: unknown): value is CancelFrame {
  */
 export function frameChannel(streams: FrameStreams): FrameChannel {
   const { input, output } = streams;
+  const write = (frame: Frame) => writeFrame(output, streams.requestId !== undefined && frame.t !== 'hello' ? { ...frame, id: streams.requestId } : frame);
   const diagnostic = streams.diagnostic ?? (() => undefined);
-  const pending = new Map<string, { question: string; defaultChoice?: string; resolve(value: string | number | boolean): void; reject(error: Error): void }>();
+  const pending = new Map<string, { question: string; defaultChoice?: string | undefined; resolve(value: string | number | boolean): void; reject(error: Error): void }>();
   let sequence = 0;
   let closed = false;
   let closedReason: 'closed' | 'output-closed' = 'closed';
@@ -144,6 +163,7 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
   };
   const stop = readFrames(input, (frame) => {
     if (frame.t === 'cancel') { closed = true; failPending(); streams.onCancel?.(); return; }
+    if (frame.t !== 'answer') { diagnostic('frames: unexpected request ignored'); return; }
     const ask = pending.get(frame.id);
     if (!ask) { diagnostic(`frames: answer for unknown question id ${JSON.stringify(frame.id)} ignored`); return; }
     const value = frame.value ?? ask.defaultChoice;
@@ -154,11 +174,11 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
 
   const ask = (kind: AskKind, question: string, extra: Pick<AskFrame, 'default' | 'choices' | 'detail' | 'descriptions'> = {}): Promise<string | number | boolean> => {
     if (closed) return Promise.reject(new PromptClosedError(question, closedReason));
-    const id = `q${++sequence}`;
+    const id = streams.requestId ?? `q${++sequence}`;
     return new Promise((resolve, reject) => {
       pending.set(id, { question, resolve, reject, defaultChoice: kind === 'select' ? extra.default : undefined });
       const { detail, ...rest } = extra;
-      writeFrame(output, { t: 'ask', id, kind, question, ...rest, ...(detail?.length ? { detail } : {}) });
+      write({ t: 'ask', id, kind, question, ...rest, ...(detail?.length ? { detail } : {}) });
     });
   };
 
@@ -180,30 +200,31 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
         const index = typeof answer === 'number' ? answer : /^\d+$/.test(String(answer).trim()) ? Number(String(answer).trim()) : NaN;
         const picked = Number.isInteger(index) && index >= 1 && index <= choices.length ? choices[index - 1] : choices.find((choice) => choice === String(answer));
         if (picked !== undefined) return picked;
-        writeFrame(output, { t: 'print', level: 'warn', line: `Enter a number from 1 to ${choices.length} or one of the choices.` });
+        write({ t: 'print', level: 'warn', line: `Enter a number from 1 to ${choices.length} or one of the choices.` });
       }
       throw new Error(`No valid choice after ${MAX_SELECT_ATTEMPTS} attempts`);
     },
     print(line) {
-      writeFrame(output, { t: 'print', level: 'info', line });
+      if (streams.requestId !== undefined && closed) return;
+      write({ t: 'print', level: 'info', line });
     },
     progress(update) {
       // Exactly one `result` frame ends a run (docs/frame-protocol.md); nothing may follow it.
       if (closed) return;
-      writeFrame(output, { t: 'progress', ...update });
+      write({ t: 'progress', ...update });
     },
   };
 
   return {
     io,
-    hello(version) { writeFrame(output, { t: 'hello', protocol: FRAME_PROTOCOL, version, verbs: FRAME_VERBS, features: FRAME_FEATURES }); },
+    hello(version) { write({ t: 'hello', protocol: FRAME_PROTOCOL, version, verbs: FRAME_VERBS, features: FRAME_FEATURES }); },
     result(outcome) {
       const frame: ResultFrame = { t: 'result', verb: outcome.verb, ok: outcome.ok, exitCode: outcome.exitCode };
       if (outcome.error !== undefined) frame.error = outcome.error;
       if (outcome.cancelled === true) frame.declined = true;
       if (outcome.refused === true) frame.refused = true;
       if (outcome.value !== undefined) frame.value = outcome.value;
-      writeFrame(output, frame);
+      write(frame);
       // The run is over: stop holding stdin open so the process can exit without the shell closing the
       // pipe. Pausing alone is not enough for a piped stdin (the socket still refs the event loop), so
       // the stream is also unref'd when it can be.

@@ -38,6 +38,73 @@ Closing stdin fails pending questions closed; it does not invoke the bin’s can
 5. **`uninstall`: the consent inventory is the confirm's detail.** Render `ask.detail` verbatim in the danger dialog; answer false to cancel. Its result includes cleanup outcomes, `kept`, `record`, and CLI-generated `advice`.
 6. **One run per verb.** Start the process, read frames until `result`, let it exit.
 
+## Read sessions (`serve`)
+
+`terum-skills --frames serve` starts one stdio session, advertising `features.serve: true`
+in its single `hello`. Without `--frames`, `serve` immediately writes a result-shaped failure
+(`ok:false`, `error:"serve requires --frames"`) and exits 1. This is an app-owned child, not a
+network server or a daemon.
+
+Send one JSON request per stdin line:
+
+```json
+{"t":"request","id":"r7","argv":["status","--team","acme"],"cwd":"/some/path"}
+```
+
+`id` is a non-empty string of at most 64 characters and must be unique among pending requests.
+`argv` is an array of strings. `cwd` is an optional string; each request restores the process's
+original cwd, including on failure. Requests run **one at a time, in arrival order**. cwd is
+process-global, so even a cancelled invocation must unwind before the next one starts. A fresh
+commander program, Execute sink, and frame Prompter are created for each request.
+
+Only `status`, `ls`, `eval-report`, `search`, `validate`, and `update` are accepted. Any other
+verb gets `ok:false` with `serve does not run <verb>; spawn it as its own process`, without
+executing it. This is a transport allow-list; the accepted verbs retain their existing behavior
+(including `update`'s release-advertisement probe and local release-state maintenance).
+
+Every `print`, `ask`, `progress`, and `result` from a request carries its request `id`. A session
+`ask` uses that same id for its answer; questions within a request are answered sequentially.
+`hello` never has an id. Exactly one `result` settles each request, including a refused verb,
+a usage error, or an exception. After it, the session keeps reading. **This is the one rule the
+one-shot protocol states that `serve` deliberately breaks.** Rule 6 ("one run per verb")
+continues to hold for every verb except `serve` itself.
+
+- `{"t":"answer","id":"r7","value":true}` answers the pending ask for r7.
+- `{"t":"cancel","id":"r7"}` abandons only r7, fails its pending question closed, and emits
+  its failing result with `error:"cancelled"` and `declined:true`. Queued cancelled requests
+  never execute. The session survives and suppresses late output from the abandoned request.
+- `{"t":"cancel"}` ends the entire session immediately, drains nothing, runs the shutdown
+  hooks, and exits 143, as in a one-shot run. No terminal results are guaranteed in that case.
+
+Closing stdin finishes accepted requests (including the one in flight), fails unanswered
+questions closed, and exits 0 after their results. Malformed lines, unknown frame types,
+duplicate in-flight ids, and answers to unknown ids are diagnosed on stderr and ignored;
+none may disturb a pending question or write unframed text to stdout.
+
+Example (`>` is stdout, `<` is stdin):
+
+```text
+> {"t":"hello","protocol":1,"version":"0.13.0","verbs":["status","ls","serve"],"features":{"serve":true}}
+< {"t":"request","id":"r1","argv":["status"]}
+< {"t":"request","id":"r2","argv":["ls","--local"],"cwd":"/work/acme"}
+> {"t":"print","id":"r1","level":"info","line":"terum-skills 0.13.0"}
+> {"t":"result","id":"r1","verb":"status","ok":true,"exitCode":0,"value":{"teams":[]}}
+> {"t":"result","id":"r2","verb":"ls","ok":true,"exitCode":0,"value":{"local":[]}}
+< {"t":"request","id":"r3","argv":["install","example"]}
+> {"t":"result","id":"r3","verb":"install","ok":false,"exitCode":1,"error":"serve does not run install; spawn it as its own process"}
+```
+
+The desktop learns support from an ordinary run's hello before starting a session; if
+`hello.features.serve` is not true, every read uses the existing one-shot path. Sessions bind
+to the app state's `entry`, `node`, and `version` and are retired when any changes. A child
+failure fails pending reads; the next read may restart it once. A second failure disables
+sessions for the rest of the app's life and records the reason. A child that has not produced
+a hello within ten seconds is a startup failure. No request is automatically replayed after
+failure. Mutations and long-running verbs retain their own one-shot processes.
+
+Protocol stays **1** because every change is additive; one-shot frames retain their shapes
+and question ids, with only the advertised verb and feature lists extended.
+
 ## Example
 
 ```
@@ -69,7 +136,7 @@ A second-team binding refused before any side effect:
 
 Protocol stays 1. `hello.features.localIdentity` advertises the additive `ls --local` identity fields: every row and `notOffered` entry carries `skillId` (UUID or null), and every row carries independent `placed` and `connected` booleans. The app declares these keys optional while keeping local rows strict, so older CLIs remain readable; presence joins require the feature. `ls member` adds `member.installed` records (`id`, `scope`, `since`), and `connect` may return `adopted: true` after consent to record an existing identity. These are additive result fields. `ls --local` additionally carries `remote` on every section (`{url, slug}` or `null`, where `slug` is owner/repo on GitHub and null on every other host); the app declares it optional so an older CLI reads as "not connected".
 
-`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `checkouts`, `projects`, `refresh`, `discover`, `appUpdate`, and `autoSync`. `autoSync` advertises non-interactive `sync --auto`, its `--fresh-ms` option, progress frames, and phase timings. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh, and only when `status --permissions` is passed (null when the flag is absent, when gh is absent, or when the lookup fails or times out). `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `projects` is true and means the `project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from registering a local checkout folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs. `discover` is true and means the `checkout discover` verb exists and `setup` offers to look for skill folders on this machine; a shell whose CLI reports it false hides the "find skills" control. `liftOnCards` is true and means `ls` carries the per-skill `receipt` limb described below, so a shell may show a skill's net lift on its card; a shell whose CLI reports it false shows the verdict-free "—" card instead. Lift on a card must be rendered with its receipt's provenance (`model`, `k`, `cc_version`, `runner_handle`, `timestamp`) reachable from the same element, and no skill list may be sorted or ranked by any receipt number.
+`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `checkouts`, `projects`, `refresh`, `discover`, `appUpdate`, `autoSync`, and `serve`. `autoSync` advertises non-interactive `sync --auto`, its `--fresh-ms` option, progress frames, and phase timings. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh, and only when `status --permissions` is passed (null when the flag is absent, when gh is absent, or when the lookup fails or times out). `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `projects` is true and means the `project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from registering a local checkout folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs. `discover` is true and means the `checkout discover` verb exists and `setup` offers to look for skill folders on this machine; a shell whose CLI reports it false hides the "find skills" control. `liftOnCards` is true and means `ls` carries the per-skill `receipt` limb described below, so a shell may show a skill's net lift on its card; a shell whose CLI reports it false shows the verdict-free "—" card instead. Lift on a card must be rendered with its receipt's provenance (`model`, `k`, `cc_version`, `runner_handle`, `timestamp`) reachable from the same element, and no skill list may be sorted or ranked by any receipt number.
 
 `appUpdate` is true and means the `app-update` verb exists: a shell may check for, download and install a newer desktop app. A CLI that omits the key cannot, and a shell must render the honest read-only state instead of trying.
 
