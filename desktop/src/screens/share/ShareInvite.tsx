@@ -14,7 +14,7 @@ export function ShareInvite({close,data,error,retry,onDone}:{close:()=>void;data
 function InviteForm({close,team,copy,catalog,onDone}:InviteData&{close:()=>void;onDone:(line:string)=>void}){
   const backend=useBackend(),action=useWorkflow(),features=useFeatures();
   const projects=catalog?.projects??[];
-  const [logins,setLogins]=useState(copy.INVITEE??''),[scope,setScope]=useState('project'),[project,setProject]=useState(projects[0]?.name??''),[role,setRole]=useState('Member'),[help,setHelp]=useState(false),[invalid,setInvalid]=useState<string|null>(null);
+  const [logins,setLogins]=useState(copy.INVITEE??''),[scope,setScope]=useState('project'),[project,setProject]=useState(projects[0]?.name??''),[help,setHelp]=useState(false),[invalid,setInvalid]=useState<string|null>(null);
   const [outcomes,setOutcomes]=useState<string[]>([]);
   const selected=projects.find(p=>p.name===project);
   async function submit(){
@@ -24,7 +24,7 @@ function InviteForm({close,team,copy,catalog,onDone}:InviteData&{close:()=>void;
     if(!values.length||values.some(login=>!/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(login))){setInvalid('Enter valid GitHub logins, separated by commas or spaces.');return;}
     if(features?.inviteScoping&&scope==='project'&&!selected){setInvalid('Choose a project for this invitation.');return;}
     setInvalid(null);
-    const result=await action.run(()=>backend.invite({team:team.key,logins:values,...(features?.inviteScoping?{scope:scope==='team'?'Global':project}:{}),...(features?.roles?{role:role.toLowerCase()}:{})}));
+    const result=await action.run(()=>backend.invite({team:team.key,logins:values,...(features?.inviteScoping?{scope:scope==='team'?'Global':project}:{})}));
     if(!result)return;
     if(result.ok){onDone(outcomeLine(result.value));close();return;}
     if(result.value)setOutcomes(perLoginLines(result.value));
@@ -36,7 +36,6 @@ function InviteForm({close,team,copy,catalog,onDone}:InviteData&{close:()=>void;
       <label className="invite-scope" data-checked={scope==='team'||undefined}><span className="invite-radio-slot"><Radio.Root value="team" className="radio" aria-labelledby="invite-whole-team"><Radio.Indicator className="radio-dot"/></Radio.Root></span><span className="invite-scope-copy"><span id="invite-whole-team">Whole team</span><Small>They get the team's Global list when they join.</Small></span></label>
       <div className="invite-scope" data-checked={scope==='project'||undefined}><span className="invite-radio-slot"><Radio.Root value="project" className="radio" aria-label="Project"><Radio.Indicator className="radio-dot"/></Radio.Root></span><div className="invite-scope-copy"><span><InlineChoice label="Project" value={project} options={projects.map(p=>p.name)} onChange={value=>{setProject(value);setScope('project');}}/></span><Small>{selected?<RichText text={`${selected.desc} Its ${selected.skills} skills place when they sync inside the repo.`}/>:'No projects are available.'}</Small></div></div>
     </RadioGroup></div>:null}
-    {features?.roles?<div className="invite-field"><SectionLabel>Role</SectionLabel><div className="invite-role"><Small>Admins invite and remove members.</Small><InlineChoice label="Role" value={role} options={['Member','Admin']} onChange={setRole}/></div></div>:null}
     <div className="invite-field"><SectionLabel>Send them this</SectionLabel>{team.joinCommand?<CliBox command={team.joinCommand}/>:<Small>{`terum-skills reports no join command for ${team.remote??'this team'}.`}</Small>}<Small><RichText text={copy.JOIN_BLOCK_NOTE}/></Small></div>
     {outcomes.length>0&&<div className="invite-outcomes" role="status">{outcomes.map(line=><div key={line}>{line}</div>)}</div>}
   </WorkflowDialog>;

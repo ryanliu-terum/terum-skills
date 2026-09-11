@@ -35,7 +35,8 @@ it('serves Members with committed labels, no project column, and the permission 
   // The Teams column is gone; a member's projects are no longer drawn on this screen.
   expect(within(row).queryByText('terum')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Role for mira' })).toBeNull();
-  expect(within(row).getByRole('button', { name: 'Remove from team' })).toBeVisible();
+  // The inert removal control was pulled; `terum-skills team remove` is the way until it works end to end.
+  expect(within(row).queryByRole('button', { name: 'Remove from team' })).toBeNull();
 });
 // These frames were recorded from a CLI that reported neither field: the row must say '—', never 0 or a date.
 it('shows no join date and no skill total when the CLI reports neither', async () => {
