@@ -76,89 +76,285 @@ Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/sk
 **Nothing runs anywhere but laptops and the git host.** No HTTP client, no daemon, no API key. The CLI talks to git and, for GitHub teams, to `gh`.
 
 ## Evaluating skills
+A skill is a set of instructions and files that changes how a coding agent behaves. A good one makes the agent faster and safer; a bad one quietly makes it worse. The trouble is that "it seemed to help" is exactly the kind of claim humans get wrong — agents are noisy, tasks vary, and a skill that shines on its author's machine can do nothing on yours.
 
-The eval design is built on a measured record from earlier skill-evaluation work: a simulated run is worthless (shimmed execution scored a mean lift of −0.08 where real execution scored +0.24), one run is inside the noise band (about ±0.1), and per-arm scores reproduce across identical runs (r = 0.97) while the difference between arms does not (r = 0.35). Every rule below follows from that: real execution only, repeated runs, banded verdicts instead of point estimates, and receipts that accumulate rather than overwrite.
+So we treat skill evaluation the way medicine treats a new drug: with a control group, repeated trials, and a written record anyone can audit later. One command runs the whole study; one committed file preserves the result.
+
+### How an evaluation works
+An eval starts with a skill and a set of task cases. Each case runs repeatedly in fresh sandboxes, both without the skill and with it. The results are compared using checks, transcript judging when needed, and a small set of supporting metrics.
+
+The question is never "what score did the skill get?" It's the only question that matters in practice: is the agent measurably better with this skill than without it — and better than the version we already had?
+
+```mermaid
+
+flowchart TD
+
+    S["Skill"] --> G["Load authored or generated evals"]
+
+    G --> C["Task cases"]
+
+    C --> B["Baseline: without skill"]
+
+    C --> K["Candidate: with skill"]
+
+    B --> R["Repeat each case k times"]
+
+    K --> R
+
+    R --> D["Compare outcomes"]
+
+    D --> M["W / L / T by case"]
+
+    D --> A["Arm scores"]
+
+    D --> E["Efficiency and trigger metrics"]
+
+    M --> L["Net lift = (wins - losses) / scored rows"]
+
+```
+
+By default, each case runs once. Use `--k 3` when you need a more stable estimate.
 
 ### Two layers
+Evaluation has two parts: hygiene and execution.
 
-**Hygiene** is deterministic and free. `validate`, `connect`, `sync`, `publish`, `eval`, and the team CI all run it before any skill content reaches the repo. Six checks, each with a stable code:
+#### Hygiene
+Hygiene checks are deterministic and free. They run before skill content reaches the repository through `validate`, `connect`, `sync`, `publish`, `eval`, or team CI.
 
-| Code | Fails when |
-|---|---|
-| HYG1 | Frontmatter does not parse, folder name differs from `name`, or `allowed-tools` grants are malformed |
-| HYG2 | A text file contains bidi or zero-width characters, or a single token mixes scripts (the homoglyph shape) |
-| HYG3 | A credential pattern, or an email address other than the author's own |
-| HYG4 | An executable bit or shebang without `--allow-privileged` consent, or a file extension outside the allowlist |
-| HYG5 | `license`, the team policy license, and any bundled `LICENSE` file disagree |
-| HYG6 | `description` is empty. A SKILL.md over 20,000 characters is a warning, printed and never blocking |
+\| Code | Fails when |
 
-**`eval`** runs the skill for real, on your own logged-in Claude Code, in throwaway sandboxes. It reads the team clone and writes only its local run tree, plus one receipt file if you pass `--commit`. It never touches `skills/`, `people/`, or your placed copies.
+\| --- | --- |
 
-### Authoring evals
+\| `HYG1` | Frontmatter does not parse, the folder name differs from `name`, or `allowed-tools` grants are malformed. |
 
-Evals live inside the skill folder and travel with it.
+\| `HYG2` | A text file contains bidirectional or zero-width characters, or a token mixes scripts in a way that resembles a homoglyph attack. |
 
-`skills/<name>/evals/cases/<case>.yaml`, one execution case per file:
+\| `HYG3` | A file contains a credential pattern or an email address other than the author's own. |
+
+\| `HYG4` | A file has an executable bit or shebang without `--allow-privileged` consent, or uses an extension outside the allowlist. |
+
+\| `HYG5` | The frontmatter license, team policy license, and any bundled `LICENSE` file disagree. |
+
+\| `HYG6` | `description` is empty. A `SKILL.md` longer than 20,000 characters produces a warning but does not block. |
+
+#### Execution
+`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The command reads the team clone and writes only to its local run directory, plus a receipt when you pass `--commit`. It does not modify `skills/`, `people/`, or installed copies of a skill.
+
+### Writing evals
+Eval files live inside the skill folder and travel with the skill.
+
+#### Execution cases
+Put one case in each file under:
+
+```text
+
+skills/<name>/evals/cases/<case>.yaml
+
+```
+
+Example:
 
 ```yaml
+
 task: "Add a preflight check before deploy.sh runs and explain what it verifies."
-files: { "deploy.sh": "#!/bin/sh\necho deploying" }   # optional inline seeds
-setup: "git init -q"                                    # optional, 60 s cap
-requires: ["python3"]                                   # optional host tools; missing → case skipped, visibly
-checks:                                                  # all-or-nothing per arm
-  - file_exists: "preflight.sh"
-  - no_command_matching: "deploy\\.sh"
-  - command_succeeds: "sh -n preflight.sh"
-judge: "Prefer the transcript that names the concrete failure modes the preflight guards against."  # used only on check ties
+
+files:
+
+  deploy.sh: |-
+
+    #!/bin/sh
+
+    echo deploying
+
+setup: "git init -q"
+
+requires: ["python3"]
+
+checks:
+
+  - file_exists: "preflight.sh"
+
+  - no_command_matching: "deploy\\\\.sh"
+
+  - command_succeeds: "sh -n preflight.sh"
+
+judge: "Prefer the transcript that names the concrete failure modes the preflight guards against."
+
 ```
 
-Six check kinds: `transcript_mentions`, `command_matching`, `no_command_matching`, `file_exists`, `file_absent`, `command_succeeds`. Write tasks a headless agent can finish without asking a question, and phrase skill conventions as practice rather than magic strings, since an agent that stops to ask scores as a failure.
+`files` seeds the sandbox, `setup` runs once with a 60-second limit, and `requires` lists host tools the case needs. If a required tool is missing, the case is visibly skipped.
 
-`skills/<name>/evals/triggers.yaml`, for whether the skill fires when it should:
+The six supported check types are:
+
+- `transcript_mentions`
+
+- `command_matching`
+
+- `no_command_matching`
+
+- `file_exists`
+
+- `file_absent`
+
+- `command_succeeds`
+
+All checks for an arm must pass for that arm to pass the case. Write tasks that a headless agent can complete without asking questions. Describe conventions as normal working practices instead of hiding magic strings in the prompt; an agent that stops to ask for clarification fails the case.
+
+The optional `judge` is only used when the checks tie.
+
+#### Trigger cases
+Use `skills/<name>/evals/triggers.yaml` to test whether the skill is selected at the right time:
 
 ```yaml
-should_trigger:     ["prompts that must select this skill"]
-should_not_trigger: ["near-miss prompts; unrelated ones tell you nothing"]
+
+should_trigger:
+
+  - "prompts that must select this skill"
+
+should_not_trigger:
+
+  - "near-miss prompts that should select a sibling skill or no skill"
+
 ```
+
+Good negative examples are near misses. Unrelated prompts provide little useful signal.
 
 ### Generated evals
+You can evaluate a skill even when it does not include eval files. By default, `eval` generates whatever is missing. Authored assets always take priority:
 
-A skill with no evals can still be evaluated: `eval` generates what's missing, on your own subscription, and authored assets always win — if cases exist, none are generated; if only the trigger file is missing, only triggers are generated.
+- if execution cases exist, none are generated;
 
-Generation reads the full skill text and the team catalog, then writes 3 execution cases (at least one adversarial) and 5 + 5 trigger prompts with near-misses drawn from sibling skills. Every file is validated against the real case and trigger schemas before use — generated checks are limited to the five declarative kinds (`command_succeeds` is excluded, so a generator can never author a wrong verification program), and every file opens with `# generated by terum-skills eval-gen — review before trusting` plus model and timestamp provenance. A generation that can't produce valid files after two corrections fails the run rather than reporting an empty result.
+- if cases exist but `triggers.yaml` does not, only trigger prompts are generated; and
 
-Where the files go depends on who you are:
+- if neither exists, generation creates three execution cases, including at least one adversarial case, plus five positive and five negative trigger prompts.
 
-- **Not your skill:** generated assets live only in the local run tree. The run prints a verdict and the review path; it never writes the team repo and never files a receipt — a receipt must name a version that contains the cases that judged it.
-- **Your skill, one command:** `eval <skill> --commit` shows you the generated files and asks one question — *Commit generated eval assets for `<skill>`? [y/N]*. **y** commits them into your skill through the ordinary sync commit, re-runs at that new version, and files the receipt, now genuinely pinned to its dataset. **N** keeps everything local: the eval still runs and prints a verdict, and the files wait in the run tree for you to edit.
-- **Your skill, deliberately:** `eval --working --save` writes reviewed generated assets into your source folder without committing anything; the next `sync` carries them up, and `eval --commit` then receipts them like any authored case.
+Generation reads the complete skill and the team catalog. Negative trigger prompts are based on nearby sibling skills, so they test realistic confusion rather than random unrelated requests.
 
-Flags: `--no-gen` restores the old empty-asset behavior (and is the escape hatch when you want `--commit` untouched by generation); `--gen` produces a fresh second-opinion set for one run without reading or touching your authored files — it never commits and can't be combined with `--case`.
+Every generated file is checked against the real case or trigger schema before it is used. Generated cases may use the five declarative checks, but not `command_succeeds`; this prevents the generator from inventing an incorrect verification program. If the files are still invalid after two correction attempts, the eval stops with an error.
 
-### What a run does
+Generated files begin with:
 
-1. **Preflight.** `claude --version` is recorded and a one-turn smoke task runs, so a logged-out or broken CLI fails in seconds instead of after six paid trials.
-2. **Triggers.** The catalog is the team's endorsed set plus the skill under test. One tool-free, one-turn call per prompt asks which skills apply; the report prints recall, precision, and each `MISS` or `FALSE-FIRE`.
-3. **Three arms, k repetitions per case** (default 3, `--k 10` for depth). *Baseline* runs with no skill staged, *candidate* runs with the version under test, *incumbent* runs with the last version that has a committed receipt, so a re-publish is measured against what it replaces. Each arm runs `claude -p` in a fresh sandbox with `--setting-sources project`, so your user-level skills cannot leak in; the engine reads the resolved skill list from the run and refuses if the skill under test is present in baseline or missing from candidate.
-4. **Per-row verdict.** Both arms failed → tie. One failed → the other wins. Checks disagree → decided by checks. Checks tie and a `judge` rubric exists → a pairwise judge over the transcripts, asked twice in both A/B orderings; the two answers must agree or the row is a tie labelled `judge-split`. An unparseable judge answer is retried once, then re-asked on a stronger model (`opus` by default), and a still-unparseable or refused answer is a labelled tie, never a coerced win. Every row records how it was decided.
-5. **Headline.** Net lift on candidate-vs-baseline is (wins − losses) / rows. **PASS** at +1/3 or better, **FAIL** at −1/3 or worse, **NEUTRAL** between. Arm scores (mean fraction of checks passed) and efficiency (turns, seconds, cost per arm) print alongside. Unscored rows, from environment skips or double failures, stay visible as holes and grey the verdict instead of being averaged away.
+```text
 
-A transient agent or judge failure is retried once in a fresh sandbox; a second failure is scored, never hidden. Credential patterns are redacted from every free-text field before anything is written.
+## generated by terum-skills eval-gen — review before trusting
+```
+
+The header also records the model and generation time.
+
+
+
+### What happens during a run
+#### 1. Preflight
+The runner records `claude --version` and sends a one-turn smoke task. A logged-out or broken CLI therefore fails before the full set of paid trials begins.
+
+#### 2. Trigger evaluation
+The selection catalog contains the team's endorsed skills plus the candidate skill. For each trigger prompt, a tool-free one-turn call chooses which skills apply. The report shows recall, precision, and every `MISS` or `FALSE-FIRE`.
+
+#### 3. Execution arms
+Each case runs in three arms, with `k` repetitions per arm:
+
+\| Arm | What it contains |
+
+\| --- | --- |
+
+\| Baseline | No copy of the skill under test. |
+
+\| Candidate | The version currently being evaluated. |
+
+\| Incumbent | The latest version with a committed receipt. This shows whether a republish improves on what it would replace. |
+
+Every repetition runs `claude -p` in a fresh sandbox with `--setting-sources project`, preventing user-level skills from leaking into the run. The engine checks the resolved skill list and refuses to continue if the tested skill appears in baseline or is missing from candidate.
+
+#### 4. Row verdicts
+Each candidate-baseline row is decided in this order:
+
+1\. If both arms fail, the row is a tie.
+
+2\. If only one arm fails, the other wins.
+
+3\. If their checks differ, the checks decide the row.
+
+4\. If the checks tie and the case has a `judge`, a pairwise judge compares the transcripts twice, reversing the A/B order on the second pass.
+
+Both judge passes must agree. Otherwise, the row is a tie marked `judge-split`.
+
+If a judge response cannot be parsed, it is retried once. A second parse failure is sent to a stronger model—`opus` by default. If that response is also invalid or refuses the task, the result is a labelled tie. The runner never turns an unclear judgment into a win.
+
+Every row records how it was decided.
+
+#### 5. Headline and supporting metrics
+Candidate lift over baseline is:
+
+```text
+
+(wins - losses) / scored rows
+
+```
+
+The result is grouped into three bands:
+
+\| Verdict | Net lift |
+
+\| --- | ---: |
+
+\| `PASS` | At least `+1/3` |
+
+\| `NEUTRAL` | Between `-1/3` and `+1/3` |
+
+\| `FAIL` | At most `-1/3` |
+
+The report also includes:
+
+- ****arm score:**** checks passed divided by total checks for each arm;
+
+- ****efficiency:**** turns, elapsed time, and cost per arm; and
+
+- ****trigger quality:**** precision and recall.
+
+
 
 ### Receipts
+`eval --commit` writes one immutable receipt to:
 
-`eval --commit` writes one immutable file, `evals/<skill-id>/<tree-hash>/<run-id>.json`, through the same guarded write path as everything else. The tree hash pins exactly which bytes were evaluated. Re-running the same version appends a new receipt beside the old; nothing is overwritten or deleted. Anyone may evaluate anyone's skill; the receipt records who ran it, the engine and Claude Code versions, the models actually resolved, k, and the case list. Numbers from receipts with a different model or Claude Code version are never compared.
+```text
 
-`--working` evaluates your local connected source instead of the store copy, for the authoring loop. It cannot `--commit`, because receipts pin committed trees only.
+evals/<skill-id>/<tree-hash>/<run-id>.json
 
-### The publish gate
+```
 
-CI never runs a model and never holds an API key; every eval token is a member's own subscription. The generated team workflow has two deterministic jobs:
+The tree hash pins the exact bytes that were evaluated. Running the same version again adds another receipt beside the earlier one; receipts are never overwritten or deleted.
 
-- **hygiene** on any PR touching `skills/**`: `validate` per changed skill. Error findings block.
-- **receipt-check** on `publish` PRs: the PR must carry a schema-valid receipt at the skill's exact tree hash. If it includes a candidate-vs-incumbent comparison, that comparison must not be FAIL. If it includes none, CI confirms no prior version of the skill exists and lets the first publish through.
+Anyone can evaluate any team member's skill. A receipt records:
 
-`publish` opens the PR and both jobs run on it, so a reviewer sees the verdict without re-running anything. `team workflow-update --print` prints the current workflow when the scaffold changes.
+- who ran the eval;
+
+- the engine and Claude Code versions;
+
+- the models that were actually resolved;
+
+- the repetition count `k`; and
+
+- the cases included in the run.
+
+Results are only compared when their model and Claude Code versions match.
+
+`--working` evaluates your connected local source instead of the stored copy. It cannot be combined with `--commit`, because receipts only pin committed trees.
+
+### Where the design comes from
+The framework's measurement discipline comes from [NVIDIA's SkillEvaluator](https://docs.nvidia.com/skills/skillevaluator). We didn't adopt it on reputation: we ran it end-to-end on our own skills first, and kept what survived that trial. The adoptions fall into three groups.
+
+****Hygiene gates.**** The free deterministic tier is theirs in structure and substance: metadata schema validation, a scan for personal data, a security review of every bundled script, detection of hidden Unicode characters that could smuggle instructions past a human reader, and license reconciliation that fails closed when a skill's declared license conflicts with its LICENSE file. So is mandatory secret redaction of anything that crosses the sharing boundary — the rule the privacy note above enforces.
+
+****Measurement design.**** Their four-bucket taxonomy for trigger prompts — explicit, implicit, contextual, and negative near-misses — is the structure every authored test set follows. The efficiency dimension comes straight from their insistence that a skill that wins but triples token burn has to say so. Verdict banding with a neutral dead-zone follows their asymmetric threshold pattern — a modest positive bar to pass, a stricter negative bar to fail — applied here to net lift. And contamination control is their rule verbatim: the arm under test contains exactly the skill under test, and the engine refuses to run if a stray global copy of that skill would silently zero out the measured lift.
+
+****Operational robustness.**** Before any paid matrix runs, a runtime preflight performs one tiny real agent task — their preflight caught, in seconds, an infrastructure failure that would otherwise have burned six paid trials. Every result records its attempt policy and a digest of the exact test set that produced it, so no receipt can drift from its inputs. Partial results are labeled, never averaged into a clean-looking number. And the judge escalation chain — format-tolerant parsing, then retry, then a stronger judge model — exists because we watched a cheap judge fail deterministically on a single hard case.
+
+****What we deliberately left behind.**** SkillEvaluator's live-execution tier requires containers and a raw API key — an onboarding tax we measured firsthand, and one that shuts out subscription-authenticated agents entirely. We also passed on its agent-agnostic harness, its embedding-based deduplication tier, its cloud sandbox backends, and its five-dimension 0-to-1 rubric as the headline score: at the sample sizes a team can actually afford, a win/loss record summarized as net lift is the more honest instrument.
+
+The execution engine itself is our own: a three-arm, comparison-first harness that drives each member's own logged-in agent instead of containers or cloud sandboxes, plus the trigger evals measured against the team's real catalog, the incumbent regression arm, the committed receipt system, and the display rules above. SkillEvaluator supplied the discipline; our own measurements supplied every departure from it.
+
+### Why it's built this way
+Every rule above traces back to something we measured rather than assumed: that real execution is non-negotiable, that repetition is the price of a trustworthy verdict, that arm scores are stable where their differences are not, and that honest small-sample statistics mean saying "neutral" far more often than a marketing page would like. The framework's job is not to make skills look good. It's to make one command produce a verdict a teammate can commit, audit, and believe.
 
 ## Installing, updating, uninstalling
 
