@@ -65,6 +65,27 @@ describe('eval (§6 / IE2)', () => {
     expect(await readFile(join(clone, 'skills', 'sample', 'SKILL.md'), 'utf8')).toBe(skill());
   });
 
+  it('defaults to k=1 (rev 18): one rep per case per arm when --k is absent', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    let runs = 0;
+    const agent: AgentApi = {
+      runAgent: (_task, cwd) => { runs += 1; return Promise.resolve(transcript(existsSync(join(cwd, '.claude', 'skills', 'sample')) ? ['sample'] : [])); },
+      askJson: () => Promise.resolve({ selected: ['sample'] }),
+    };
+    const result = await run({ ref: 'sample', noGen: true, config: store, agent, now: () => new Date('2026-09-07T12:34:56Z'), preflight: async () => success({ ccVersion: 'stub' }) }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(runs).toBe(3); // 1 case x k=1 x (baseline, candidate, incumbent) — k=3 would be 9
+    // run.jsonl's _meta carries expected_rows, not k (k reaches the receipt's provenance):
+    // 1 case x k=1 x 2 opponents = 2 rows; the old k=3 default would write 6.
+    const meta: unknown = JSON.parse((await readFile(join(result.value.runDir, 'run.jsonl'), 'utf8')).split('\n')[0]!);
+    expect(meta).toMatchObject({ _meta: { expected_rows: 2 } });
+  });
+
   it('commits one schema-valid, redacted receipt and no derived README for a generic team remote (VE4)', async () => {
     const fixture = await bareTeam();
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
