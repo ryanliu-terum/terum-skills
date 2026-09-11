@@ -30,9 +30,14 @@ it('maps the stated receipt values and formats their units without fixture const
  expect(r.value.summary).toEqual({w:6,l:1,t:2,n:9,lift:56,verdict:'PASS',partial:null,signP:'0.125'});
  expect(r.value.reportNumbers).toEqual({holes:0,nRounds:9,triggerTotal:6});
  expect(r.value.receipt).toMatchObject({model:'sonnet',cc:'2.1.250',runner:'mira',timestamp:'2026-09-09 01:00 UTC',catalog:0,per_case:[],arm:{candidate:0.81,baseline:0.45,incumbent:null},eff:{candidate:['2','61 s','$0.40'],baseline:['3','90 s','$0.50'],incumbent:null}});
- expect(r.value.scoreFractions).toEqual({routesExpected:4,roi:null,quality:[0.81,0.45]});
+ expect(r.value.scoreFractions).toEqual({routesExpected:4,roi:[0.8,1],quality:[0.81,0.45]});
  expect(r.value.evalEstimate).toEqual({cases:3,k:3,arms:2,runs:18,minutes:25,dollars:8,model:'sonnet'});
  expect(r.value.evalEstimateText).toMatch(/arm-run pricing from the last receipt\.$/);
+});
+it('keeps ROI fractions null when an arm cost is missing',async()=>{
+ const latest=receipt();latest.efficiency.candidate.cost_usd=null as unknown as number;
+ const r=await adapter({...report(),latest}).backend.evalReport({ref:'deploy-check'});if(!r.ok)throw new Error(r.error);
+ expect(r.value.scoreFractions.roi).toBeNull();
 });
 it('does not estimate a default Sonnet run from an Opus receipt',async()=>{
  const r=await adapter(report('opus')).backend.evalReport({ref:'deploy-check'});expect(r.value?.evalEstimateText).toBe('');expect(r.value?.evalEstimate).toBeNull();
