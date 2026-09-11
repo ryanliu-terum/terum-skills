@@ -1,3 +1,4 @@
+import { PACKAGE_NAME } from '../package.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import lockfile from 'proper-lockfile';
@@ -29,10 +30,15 @@ export async function readEvalQueue(root: string): Promise<EvalQueue> {
 export async function withEvalQueueLock<T>(root: string, kind: 'state' | 'drain', action: (assertHeld: () => void) => Promise<T>): Promise<T> {
   await mkdirPrivate(join(root, 'run'));
   let compromised = false;
-  const release = await lockfile.lock(queuePath(root), {
+  // proper-lockfile keys its in-process bookkeeping by target, not lockfilePath.
+  // Distinct targets prevent a nested state lock from replacing the active drain lock.
+  const release = await lockfile.lock(`${queuePath(root)}.${kind}`, {
     realpath: false, lockfilePath: `${queuePath(root)}.${kind}.lock`,
     retries: kind === 'drain' ? 0 : { retries: 20, minTimeout: 25, maxTimeout: 250 },
     onCompromised: () => { compromised = true; },
+  }).catch((error: unknown) => {
+    if (kind === 'drain' && (error as NodeJS.ErrnoException).code === 'ELOCKED') throw new Error(`Another ${PACKAGE_NAME} drain is already running; wait for it to finish or stop it.`);
+    throw error;
   });
   try { return await action(() => { if (compromised) throw new Error('Lost the eval queue lock; retry the command.'); }); }
   finally { await release().catch(() => undefined); } // Preserve the action's result if its lock was already lost.

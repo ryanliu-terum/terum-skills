@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { BackendContext, PromptContext } from '../backend';
+import { BackendContext, PromptContext, setupSession } from '../backend';
 import { registerEvalQueue, type EvalQueueItem, type EvalQueueResult } from '../backend/eval-queue';
 import { createMockBackend } from '../backend/mock';
 import { createRun } from '../backend/mock/run';
@@ -78,4 +78,16 @@ it('does not launch another batch after the window closes or the component unmou
 it('reports list failures instead of silently dropping the queue', async () => {
   const h = harness(); h.list.mockResolvedValue({ ok: false, error: 'invalid queue' });
   await act(() => vi.advanceTimersByTimeAsync(30 * minute)); expect(screen.getByRole('alert')).toHaveTextContent('invalid queue'); expect(h.drain).not.toHaveBeenCalled();
+});
+
+it('does not start paid work while setup is active',async()=>{
+ const h=harness();vi.spyOn(h.backend,'setup').mockImplementation(()=>createRun(async ctx=>{await ctx.sleep(60*minute);return {ok:true,value:{team:'team',role:'creator'}};}));
+ const session=setupSession(h.backend,{writtenAt:'2026-09-10T01:00:00Z'});const running=session.start(async()=>false);
+ await act(()=>vi.advanceTimersByTimeAsync(30*minute));expect(h.list).not.toHaveBeenCalled();expect(h.drain).not.toHaveBeenCalled();await act(async()=>{await session.stop();await running;});
+});
+it.each(['activity','unmount','disable'] as const)('rechecks eligibility after a pending queue read: %s',async reason=>{
+ const h=harness();let finish!:(value:Result<EvalQueueResult>)=>void;h.list.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+ await act(()=>vi.advanceTimersByTimeAsync(30*minute));expect(h.list).toHaveBeenCalledOnce();
+ if(reason==='activity')fireEvent.pointerMove(window);else if(reason==='unmount')h.view.unmount();else act(()=>h.backend.prefs.set('evals:overnight',false));
+ await act(async()=>{finish({ok:true,value:{items:h.items}});});expect(h.drain).not.toHaveBeenCalled();
 });

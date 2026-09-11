@@ -14,7 +14,7 @@ export async function replaySetupEvals(ctx: RunContext): Promise<'queued' | 'bat
  const estimate = "Evaluating 2 skills, 4 at a time: no earlier runs to estimate from; each eval runs the skill's cases against a baseline on this machine and bills your Claude account.";
  ctx.print(estimate);
  const choice = await ctx.ask('select', 'Evaluate the 2 shared skills that have no receipt yet? This runs Claude on each one and commits each receipt to the team repo.', {
-  choices: ['Now', 'In batches', 'Overnight', 'Skip'], default: 'Overnight', detail: [estimate], descriptions: [
+  choices: ['Now', 'In batches', 'Overnight', 'Skip'], default: 'Skip', detail: [estimate], descriptions: [
    'Runs all 2, 4 at a time, in this terminal.', 'Asks how many at a time and checks in between batches.',
    'Queues them; the app runs them between 01:00 and 05:00 while it is open and idle.',
    'Evaluate any skill later with `npx -y terum-skills@latest eval <skill>`.',
@@ -24,7 +24,7 @@ export async function replaySetupEvals(ctx: RunContext): Promise<'queued' | 'bat
  if(choice==='Skip')return 'skipped';
  let parallel=4;
  if(choice==='In batches'){
-  for(;;){const answer=String(await ctx.ask('text','How many at a time?',{default:'4'}));if(/^\d+$/.test(answer)&&Number.isSafeInteger(Number(answer))&&Number(answer)>=1){parallel=Number(answer);break;}ctx.print('Enter a whole number of at least 1.');}
+  let valid=false;for(let attempt=0;attempt<3;attempt++){const answer=String(await ctx.ask('text','How many at a time?',{default:'4'}));if(/^\d+$/.test(answer)&&Number.isSafeInteger(Number(answer))&&Number(answer)>=1){parallel=Number(answer);valid=true;break;}ctx.print('Enter a whole number of at least 1.');}if(!valid)throw new Error('No valid batch size after 3 attempts.');
  }
  ctx.print(`Evaluating 2 skills, ${parallel} at a time…`);ctx.print('✓ deploy-check');ctx.progress(1,2,'evals');
  if(parallel===1&&!(await ctx.ask('confirm','Continue with the next 1? (1 of 2 done, 1 left)'))){ctx.print('Queued 1 evals for later. Run them with `npx -y terum-skills@latest eval --drain`.');return 'batched';}

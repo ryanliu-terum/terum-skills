@@ -16,7 +16,7 @@ export function printedSetupStep(line:string):SetupStep|null {
  if(line.startsWith('Looking for skill folders')||line.startsWith('No skill folders found')||line.startsWith('Could not look')||/ — \d+ skill folders( · already registered)?$/.test(line))return 'discover';
  // The four ways the batch can end without running: everything receipted, nothing shared, the version reader
  // failed, or nothing could be checked. All four are the evals step reporting, not unrecognized copy.
- if(line.startsWith('✓ ')||line.startsWith('✗ ')||line.startsWith('Queued ')||line==='Queued for overnight'||line.startsWith('Evaluating ')||line.startsWith('Evaluated ')||line.startsWith('Every shared skill already has')||line.startsWith('Skipping the eval')
+ if(line.startsWith('✓ ')||line.startsWith('✗ ')||line.startsWith('Queued ')||line.startsWith('Evaluating ')||line.startsWith('Evaluated ')||line.startsWith('Every shared skill already has')||line.startsWith('Skipping the eval')
   ||line.startsWith('The team has no shared skills yet')||line.startsWith('Could not read the current skill versions')||line.startsWith('No shared skill could be checked'))return 'evals';
  if(line.startsWith('Feedback and requests:'))return 'community';
  if(line.includes('session hook'))return 'hook';

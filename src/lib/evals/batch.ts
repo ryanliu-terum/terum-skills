@@ -17,12 +17,13 @@ export async function runEvalBatch(input: {
   const { items, io } = input;
   const parallel = Number.isFinite(input.parallel) ? Math.max(1, Math.floor(input.parallel)) : 1;
   let tail = Promise.resolve(), done = 0;
+  const pending: Promise<void>[] = [];
+  const outputErrors: unknown[] = [];
   function exclusive<T>(action: () => Promise<T>): Promise<T> {
     const result = tail.then(action);
     tail = result.then(() => undefined, () => undefined); // Release after a declined/failed prompt too.
     return result;
   }
-  io.print(`Evaluating ${items.length} skills, ${parallel} at a time…`);
   const settled = await settleWithConcurrency(items, parallel, async item => {
     const buffer: string[] = [];
     const flush = () => {
@@ -42,16 +43,18 @@ export async function runEvalBatch(input: {
     try { outcome = await input.run(item, captured); }
     catch (error) { outcome = fromError(error); }
     try { input.onSettled?.(item, outcome); }
-    catch (error) { outcome = fromError(error); }
-    await exclusive(async () => {
+    catch (error) { buffer.push(`Completion observer failed: ${error instanceof Error ? error.message : String(error)}`); } // Observers cannot undo a committed eval; report their failure without changing its outcome.
+    if (!outcome.ok) buffer.push(...outcome.error.split(/\r?\n/).slice(1));
+    pending.push(exclusive(async () => {
       flush();
       io.print(outcome.ok ? `✓ ${item.name}` : `✗ ${item.name}: ${outcome.error.split(/\r?\n/)[0]}`);
       io.progress?.({ step: 'evals', current: ++done, total: items.length });
-    });
+    }).catch(error => { outputErrors.push(error); })); // Observe immediately; report broken output after every worker settles.
     return outcome;
   });
+  await Promise.all(pending);
+  if (outputErrors.length) throw outputErrors[0];
   const outcomes = settled.map(result => result.status === 'fulfilled' ? result.value : fromError(result.reason));
   const ok = outcomes.filter(outcome => outcome.ok).length;
-  io.print(`Evaluated ${ok} of ${items.length}; ${items.length - ok} failed.`);
   return { ok, failed: items.length - ok, outcomes };
 }

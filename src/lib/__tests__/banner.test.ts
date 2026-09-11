@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MARK, bad, body, box, decorate, header, ok, sessionBox, style, welcome } from '../banner.js';
-import * as prompt from '../prompt.js';
+import * as tty from '../tty.js';
 import { ScriptedPrompter } from './fixtures.js';
-beforeEach(() => { vi.stubEnv('TERM', 'xterm'); vi.stubEnv('NO_COLOR', undefined); vi.spyOn(prompt, 'terminalOutputIsTTY').mockReturnValue(true); });
+beforeEach(() => { vi.stubEnv('TERM', 'xterm'); vi.stubEnv('NO_COLOR', undefined); vi.spyOn(tty, 'terminalOutputIsTTY').mockReturnValue(true); });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 it('keeps the generated mark within a 44 by 22 cell without trailing spaces', () => {
  const lines = MARK.split('\n'); expect(lines).toHaveLength(22); expect(Math.max(...lines.map(line => line.length))).toBe(44);
@@ -21,7 +21,7 @@ it('never decorates frames, pipes, quiet mode, NO_COLOR, dumb terminals, or non-
  expect(decorate(new ScriptedPrompter(), {})).toBe(false); expect(decorate(io, {quiet:true})).toBe(false);
  vi.stubEnv('TERM','dumb');expect(decorate(io,{})).toBe(false);vi.stubEnv('TERM','xterm');
  vi.stubEnv('NO_COLOR','');expect(decorate(io,{})).toBe(false);vi.stubEnv('NO_COLOR',undefined);
- vi.mocked(prompt.terminalOutputIsTTY).mockReturnValue(false);expect(decorate(io,{})).toBe(false);
+ vi.mocked(tty.terminalOutputIsTTY).mockReturnValue(false);expect(decorate(io,{})).toBe(false);
 });
 it('uses only the five specified styles and reset', () => {
  for(const [kind,code] of [['bold',1],['dim',2],['cyan',36],['green',32],['red',31]] as const)expect(style(kind,'line')).toBe(`\x1b[${code}mline\x1b[0m`);
@@ -29,7 +29,7 @@ it('uses only the five specified styles and reset', () => {
  expect(body('✓ alpha')).toBe('  \x1b[32m✓ alpha\x1b[0m');expect(body('  command')).toBe('    command');expect(body('  • item')).toBe('  • item');expect(body('  • Could not look in /gone')).toBe('  • \x1b[31m✗ Could not look in /gone\x1b[0m');
 });
 it.each(['NO_COLOR','notTTY'])('keeps style helpers plain for %s', mode => {
- if(mode==='NO_COLOR')vi.stubEnv('NO_COLOR','1');else vi.mocked(prompt.terminalOutputIsTTY).mockReturnValue(false);
+ if(mode==='NO_COLOR')vi.stubEnv('NO_COLOR','1');else vi.mocked(tty.terminalOutputIsTTY).mockReturnValue(false);
  expect(header('Team')).toBe('\n> Team');expect(ok('done')).toBe('done');expect(bad('error')).toBe('error');expect(style('cyan','choice')).toBe('choice');
 });
 it('renders the complete session box with a thirteen-column label gutter and no truncation', () => {
@@ -46,4 +46,12 @@ it('renders the complete session box with a thirteen-column label gutter and no 
  '╰──────────────────────────────────────────────────────────────────────╯',
  ]);
  expect(sessionBox({version:'1',team:'alpha',handle:'alice',roster:[{handle:'alice',displayName:'Alice'}],repository:'r',readme:'r',next:'ls'}).join('\n')).toContain('alpha · just you');
+});
+it.each([
+ ['GitHub: gh is logged in.',32],['Created team alpha at remote.',32],['Joined alpha.',32],['Invited bob.',32],['Connected alpha.',32],['Registered /work in your library.',32],['Installed the session hook at /settings.',32],['Installed the /terum-skills Claude Code skill at /skills.',32],['Queued 2 evals for later.',32],['Evaluated 3 of 3; 0 failed.',32],
+ ['Could not look in /gone: EACCES',31],['Could not evaluate the shared skills: failed',31],['Skipping the evals: offline',31],['Evaluated 0 of 3; 3 failed.',31],['✗ alpha: failed',31],
+ ['Evaluated 3 of 3; 0 failed',null],['GitHub: gh is installed but logged out.',null],
+] as const)('styles the enumerated outcome %s only as specified', (line,code)=>{
+ const marked=code===null?line:line.startsWith('✗ ')?line:`${code===32?'✓':'✗'} ${line}`;
+ expect(body(line)).toBe(code===null?`  ${line}`:`  \x1b[${code}m${marked}\x1b[0m`);
 });

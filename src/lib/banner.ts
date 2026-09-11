@@ -1,5 +1,5 @@
 import type { Prompter } from './prompt.js';
-import { terminalOutputIsTTY } from './prompt.js';
+import { terminalOutputIsTTY } from './tty.js';
 import { PACKAGE_NAME } from './package.js';
 
 /** Circled t, from desktop/src-tauri/icons/icon.png; regenerate with scripts/ascii-mark.mjs. */

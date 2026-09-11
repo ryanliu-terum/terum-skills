@@ -2,9 +2,6 @@ import { colorCapable, style } from './banner.js';
 import { createInterface } from 'node:readline/promises';
 import { stdin as processStdin, stdout as processStdout } from 'node:process';
 
-/** Read-only output capability for terminal furniture; all process stream access stays at this boundary. */
-export function terminalOutputIsTTY(): boolean { return Boolean(processStdout.isTTY); }
-
 /** Lines the person needs in order to answer; a terminal prints them once, immediately before the question; frame mode carries them on the ask frame. */
 export interface AskOptions { detail?: readonly string[]; descriptions?: readonly string[]; /** Internal terminal presentation; never changes frame question text. */ decorated?: boolean; }
 
@@ -90,6 +87,8 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
   async function ask(question: string, decorated = false): Promise<string> {
     if (!interactive) throw new PromptClosedError(question.trim(), 'not-interactive');
     if (outputBroken) throw new PromptClosedError(question.trim(), 'output-closed');
+    // Decorated mode is a line transcript: cooked input avoids raw-mode cursor controls on conhost/ssh.
+    // Its completed answers get a newline below because readline does not echo in this mode.
     const rl = createInterface({ input, output, terminal: !decorated });
     const closed = new Promise<never>((_, reject) => rl.once('close', () => reject(new PromptClosedError(question.trim(), 'closed'))));
     // A pending question also loses to the output breaking under it: the broken-pipe signal arrives
@@ -121,16 +120,18 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
     },
     async select(question, choices, defaultChoice, options) {
       for (const line of options?.detail ?? []) output.write(`${options?.decorated && colorCapable() ? '  ' : ''}${line}\n`);
-      if (options?.descriptions && options.descriptions.length !== choices.length) throw new Error('Select descriptions must match choices.');
+      const descriptions = options?.descriptions?.length === choices.length ? options.descriptions : undefined;
+      if (options?.descriptions && !descriptions) output.write('Select descriptions do not match choices; descriptions omitted.\n');
+      if (defaultChoice !== undefined && !choices.includes(defaultChoice)) throw new Error('Select default must be one of the choices.');
       const decorated = options?.decorated && colorCapable();
       const lines = choices.map((choice, index) => `${index + 1}. ${choice}`).join('\n');
       for (let attempt = 0; attempt < MAX_SELECT_ATTEMPTS; attempt++) {
         const suffix = defaultChoice === undefined ? '' : ` [${defaultChoice}]`;
         let prompt = `${question}${suffix}\n${lines}\n> `;
         if (decorated) {
-          const rows = choices.flatMap((choice, index) => [choice === defaultChoice ? style('cyan', `› ${index + 1}. ${choice}`) : `  ${index + 1}. ${choice}`, ...(options?.descriptions ? [style('dim', `     ${options.descriptions[index]}`)] : [])]);
-          const hint = defaultChoice === undefined ? '  Type a number to choose.' : `  Press enter to choose ${choices.indexOf(defaultChoice) + 1}. ${defaultChoice}, or type a number.`;
-          prompt = `  ${question}${suffix}\n${rows.join('\n')}\n${style('dim', hint)}\n> `;
+          const rows = choices.flatMap((choice, index) => [choice === defaultChoice ? style('cyan', `› ${index + 1}. ${choice}`) : `  ${index + 1}. ${choice}`, ...(descriptions?.[index] ? [style('dim', `     ${descriptions[index]}`)] : [])]);
+          const hint = defaultChoice === undefined ? undefined : `  Press enter to choose ${choices.indexOf(defaultChoice) + 1}. ${defaultChoice}, or type a number.`;
+          prompt = `  ${question}${suffix}\n${rows.join('\n')}${hint === undefined ? '' : `\n${style('dim', hint)}`}\n> `;
         }
         const answer = (await ask(prompt, Boolean(decorated))).trim();
         if (!answer && defaultChoice !== undefined) return defaultChoice;

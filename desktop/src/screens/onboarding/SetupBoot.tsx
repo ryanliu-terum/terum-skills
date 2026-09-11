@@ -24,7 +24,7 @@ export function SetupBoot({launch,restart=false}:{launch:LaunchContext;restart?:
   const outcome=steps?.[key];
   const complete=key==='hook'?outcome!==undefined&&steps?.wrapper!==undefined:outcome!==undefined;
   const skipped=key==='hook'?outcome==='skipped'&&steps?.wrapper==='skipped':outcome==='skipped';
-  return [complete?'done':!result&&(state.activeStep===key||(key==='hook'&&state.activeStep==='wrapper'))?'current':'pending',label,progress?.label===key?`${progress.done} of ${progress.total}`:skipped?'Skipped':outcome==='queued'?'Queued':complete?'Done':''];
+  return [complete?'done':!result&&(state.activeStep===key||(key==='hook'&&state.activeStep==='wrapper'))?'current':'pending',label,key==='evals'&&progress?.label==='evals'?`${progress.done} of ${progress.total}`:skipped?'Skipped':outcome==='queued'?'Queued':complete?'Done':''];
  });
  if(progress&&!progressRow)cardRows.push(['running',progress.label??'Setup progress','']);
  const current=state.activeStep?SETUP_STEP_TO_BOARD[state.activeStep]:null;

@@ -1,4 +1,4 @@
-import * as promptModule from '../prompt.js';
+import * as tty from '../tty.js';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
@@ -207,7 +207,7 @@ describe('terminalPrompter behaviour', () => {
   });
 
   it('decorated selects describe the default and accept numbers, enter, and out-of-range retries without cursor controls', async () => {
-    vi.spyOn(promptModule, 'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('TERM','xterm');vi.stubEnv('NO_COLOR',undefined);
+    vi.spyOn(tty, 'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('TERM','xterm');vi.stubEnv('NO_COLOR',undefined);
     try {
       const {io,out}=channel(['2','','0','2']);const options={decorated:true,descriptions:['First description','Second description']};
       expect(await io.select('Pick',['alpha','beta'],'beta',options)).toBe('beta');
@@ -224,4 +224,14 @@ describe('terminalPrompter behaviour', () => {
     io.print('hello');
     expect(out()).toBe('hello\n');
   });
+});
+
+it('decorated prompts accept chunked input, omit a no-default hint, and tolerate mismatched descriptions',async()=>{
+ vi.spyOn(tty,'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('NO_COLOR',undefined);vi.stubEnv('TERM','xterm');
+ const input=new PassThrough(),output=new PassThrough();let printed='';output.on('data',chunk=>{printed+=String(chunk);});const io=terminalPrompter({input,output,interactive:true});
+ try{
+  const pending=io.select('Choose',['One','Two'],undefined,{decorated:true,descriptions:['wrong length']});input.write('2');await Promise.resolve();input.write('\r');await Promise.resolve();input.write('\n');expect(await pending).toBe('Two');
+  expect(printed).toContain('descriptions omitted');expect(printed).not.toContain('Type a number to choose');expect(printed).not.toContain('Press enter');
+  await expect(io.select('Choose',['One'],'missing',{decorated:true})).rejects.toThrow('Select default must be one of the choices.');expect(printed).not.toContain('choose 0.');
+ }finally{vi.restoreAllMocks();vi.unstubAllEnvs();}
 });

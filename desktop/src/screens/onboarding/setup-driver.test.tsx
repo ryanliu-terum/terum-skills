@@ -187,7 +187,7 @@ it('shows a discover progress counter on its own row instead of a seventh row',a
  const view=open(b);await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('Looking for skill folders on this machine'));
  expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(6);
  expect([...view.container.querySelectorAll('.onboarding-progress-row')].find(row=>row.textContent?.includes('Looking for skill folders on this machine'))).toHaveAttribute('data-state','current');
- expect(screen.getByRole('status')).not.toHaveTextContent(/^discover$/);
+ expect(screen.getByRole('status')).not.toHaveTextContent(/^discover$/);expect(view.container.querySelector('.onboarding-progress-row[data-state="current"]>span:last-child')).not.toHaveTextContent('12 of 12');
  await act(async()=>finish());await screen.findByRole('heading',{name:'Setup finished'});
 });
 it('still shows an unknown progress label as its own row',async()=>{

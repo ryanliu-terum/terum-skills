@@ -13,7 +13,7 @@ import { discoverSkillRoots } from '../lib/discover.js';
 import { preflight as systemPreflight } from '../lib/evals/agent.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
 import { defaultWrapperOptions, offerWrapper as defaultOfferWrapper, WrapperOptions } from '../lib/wrapper.js';
-import { Prompter } from '../lib/prompt.js';
+import { MAX_SELECT_ATTEMPTS, Prompter } from '../lib/prompt.js';
 import { readRoster } from '../lib/skills.js';
 import { printable } from '../lib/skill-source.js';
 import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
@@ -159,7 +159,6 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   const say = (line: string): void => { if (!args.quiet) io.print(line); };
   try {
     if (decorated) { for (const line of MARK.split('\n')) output.print(style('dim', line)); output.print(''); output.print(welcome()); }
-    section('welcome');
     for (const line of WELCOME) say(line);
     steps.welcome = args.quiet ? 'skipped' : 'printed';
     const before = await store.read();
@@ -364,7 +363,11 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
                   : 'Every shared skill already has an eval receipt for its current version.');
             steps.evals = 'skipped';
           } else {
-            const estimate = estimateLine(candidates.length, await estimateFromReceipts(clone));
+            const measured = await estimateFromReceipts(clone).catch((error: unknown) => {
+              io.print(`Could not estimate eval cost: ${error instanceof Error ? error.message : String(error)}. Continuing without a numeric estimate.`);
+              return null; // Optional historical data must never remove the eval offer.
+            });
+            const estimate = estimateLine(candidates.length, measured);
             io.print(estimate);
             const choice = await io.select(evalsQuestion(candidates.length), ['Now', 'In batches', 'Overnight', 'Skip'], 'Skip', { ...(io.channel === 'frames' ? { detail: [estimate] } : {}), descriptions: [
               `Runs all ${candidates.length}, ${EVAL_PARALLEL_DEFAULT} at a time, in this terminal.`,
@@ -383,11 +386,14 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
             else if (choice === 'Now' || choice === 'In batches') {
               let batchSize = candidates.length;
               if (choice === 'In batches') {
-                while (true) {
+                let valid = false;
+                for (let attempt = 0; attempt < MAX_SELECT_ATTEMPTS; attempt++) {
                   const answer = (await io.text('How many at a time?', String(EVAL_PARALLEL_DEFAULT))).trim();
-                  if (/^[0-9]+$/.test(answer) && Number.isSafeInteger(Number(answer)) && Number(answer) >= 1) { batchSize = Number(answer); break; }
+                  if (/^[0-9]+$/.test(answer) && Number.isSafeInteger(Number(answer)) && Number(answer) >= 1) { batchSize = Number(answer); valid = true; break; }
                   io.print('Enter a whole number of at least 1.');
                 }
+                if (!valid) throw new Error(`No valid batch size after ${MAX_SELECT_ATTEMPTS} attempts.`);
+                if (batchSize !== EVAL_PARALLEL_DEFAULT) io.print(estimateLine(candidates.length, measured, batchSize));
               }
               const probe = await (args.preflight ?? verbs.preflight)();
               if (!probe.ok) { io.print(`Skipping the evals: ${probe.error}`); steps.evals = 'skipped'; }
@@ -395,17 +401,24 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
                 const reuse: EvalArgs['preflight'] = async () => probe;
                 const parallel = choice === 'In batches' ? batchSize : EVAL_PARALLEL_DEFAULT;
                 const width = choice === 'In batches' ? batchSize : candidates.length;
+                let ok = 0, failed = 0;
+                io.print(`Evaluating ${candidates.length} skills, ${parallel} at a time…`);
                 for (let offset = 0; offset < candidates.length; offset += width) {
                   if (offset > 0) {
                     const remaining = candidates.length - offset;
                     if (!(await io.confirm(`Continue with the next ${Math.min(width, remaining)}? (${offset} of ${candidates.length} done, ${remaining} left)`))) { await queue(candidates.slice(offset), 'later'); break; }
                   }
-                  await runEvalBatch({ items: candidates.slice(offset, offset + width), parallel, io,
+                  const batch = await runEvalBatch({ items: candidates.slice(offset, offset + width), parallel, io: {
+                    interactive: io.interactive, ...(io.channel === undefined ? {} : { channel: io.channel }),
+                    print: line => io.print(line), confirm: io.confirm.bind(io), text: io.text.bind(io), select: io.select.bind(io),
+                    progress: update => io.progress?.({ ...update, current: offset + (update.current ?? 0), total: candidates.length }),
+                  },
                     run: (candidate, captured) => verbs.eval({ form: args.form, ref: candidate.name, team: teamName, commit: true, config: store, runner, preflight: reuse, lockWaitMs: EVAL_LOCK_WAIT_MS }, captured),
                   });
+                  ok += batch.ok; failed += batch.failed;
                 }
+                io.print(`Evaluated ${ok} of ${candidates.length}; ${failed} failed.`);
                 steps.evals = choice === 'In batches' ? 'batched' : 'done';
-                if (steps.evals === 'batched') io.print('Evaluated in batches');
               }
             } else throw new Error(`Unknown eval choice: ${choice}`);
           }

@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { enqueueEvals, readEvalQueue, withEvalQueueLock, type EvalQueueItem } from '../../lib/evals/queue.js';
-import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, pushFromSeed, git, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { failure, success } from '../../lib/result.js';
+import { measuredReceipt } from './pending-eval-fixtures.js';
 import { runQueue, type EvalArgs, type EvalResult } from '../eval.js';
 
 const item = (skill = 'alpha', window: EvalQueueItem['window'] = 'overnight'): EvalQueueItem => ({ team: 'team', skill, version: 'a'.repeat(40), requestedAt: '2026-09-10T00:00:00Z', window });
@@ -44,11 +45,11 @@ it('retains failures with lastError, continues to the next item, and counts atte
   expect(outcome).toMatchObject({ ok: false, value: { attempted: 2, completed: 1, items: [{ ...item(), lastError: 'probe failed' }, item('gamma')] } });
   expect(evaluate).toHaveBeenCalledTimes(2);
 });
-it.each(['partial', 'failed', 'declined', 'thrown'] as const)('keeps an item after %s evaluation', async mode => {
+it.each(['declined', 'thrown'] as const)('keeps an item after %s evaluation', async mode => {
   const { config, io } = await fixture(); await enqueueEvals(config.root, [item()]);
   const evaluate = async () => {
     if (mode === 'thrown') throw new Error('interrupted');
-    return success({ ...result, executionStatus: mode === 'declined' ? 'complete' as const : mode, commit: mode === 'declined' ? null : result.commit });
+    return success({ ...result, executionStatus: 'complete' as const, commit: mode === 'declined' ? null : result.commit });
   };
   expect(await runQueue({ config, drain: true, evaluate }, io)).toMatchObject({ ok: false, value: { completed: 0 } });
   expect((await readEvalQueue(config.root)).items[0]?.lastError).toBeTruthy();
@@ -63,7 +64,7 @@ it('filters overnight items and dequeue removes all versions of only the named s
 it('refuses concurrent drains instead of evaluating an item twice', async () => {
   const { config, io } = await fixture(); await enqueueEvals(config.root, [item()]);
   await withEvalQueueLock(config.root, 'drain', async () => {
-    expect(await runQueue({ config, drain: true }, io)).toMatchObject({ ok: false });
+    expect(await runQueue({ config, drain: true }, io)).toMatchObject({ ok: false, error: 'Another terum-skills drain is already running; wait for it to finish or stop it.' });
   });
 });
 it('does not resurrect a dequeued item or lose a concurrent enqueue during a run', async () => {
@@ -107,4 +108,26 @@ it.each([undefined,2])('drains at the requested parallelism %s (default four)',a
  await vi.waitFor(()=>expect(gates).toHaveLength(Math.min(width,6-width)));for(const release of gates.splice(0))release();
  if(width===2){await vi.waitFor(()=>expect(gates).toHaveLength(2));for(const release of gates.splice(0))release();}
  expect(await running).toMatchObject({ok:true,value:{completed:6,items:[]}});expect(peak).toBe(width);
+});
+
+it.each(['partial','failed'] as const)('removes a committed %s receipt and never bills it on the next drain',async executionStatus=>{
+ const {config,io}=await fixture();await enqueueEvals(config.root,[item()]);const evaluate=vi.fn(async()=>success({...result,executionStatus}));
+ expect(await runQueue({config,drain:true,evaluate},io)).toMatchObject({ok:true,value:{completed:1,items:[]}});
+ expect(io.lines).toContain(`Receipt committed with ${executionStatus} results; this item will not be evaluated again automatically.`);
+ expect(await runQueue({config,drain:true,evaluate},io)).toMatchObject({ok:true,value:{attempted:0,completed:0,items:[]}});expect(evaluate).toHaveBeenCalledTimes(1);expect(io.lines.at(-1)).toBe('No queued evals.');
+});
+
+it('refreshes and removes an already receipted queued version before probing or creating a paid run',async()=>{
+ const f=await bareTeam();await pushFromSeed(f.seed,'skills/alpha/SKILL.md',`---\nname: alpha\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+ const config=createConfigStore(join(f.root,'state'));await cloneWithIdentity(f.bare,config.teamClone('team'));await config.update(state=>{state.teams.team={remote:f.bare,handle:'seed'};});
+ const version=(await git(['rev-parse','HEAD:skills/alpha'],f.seed)).trim();await enqueueEvals(config.root,[{...item(),version}]);
+ const receipt={...measuredReceipt(1,1000),version,execution_status:'partial'};
+ await pushFromSeed(f.seed,`evals/${receipt.skill_id}/${version}/${receipt.run_id}.json`,JSON.stringify(receipt));
+ const preflight=vi.fn(async()=>failure('Unexpected preflight: this receipt must prevent all paid work.')),io=new ScriptedPrompter();
+ expect(await runQueue({config,drain:true,preflight},io)).toMatchObject({ok:true,value:{completed:1,items:[]}});expect(preflight).not.toHaveBeenCalled();expect(io.lines.join('\n')).toContain('Already evaluated alpha; using committed receipt');
+ expect(await runQueue({config,drain:true,preflight},io)).toMatchObject({ok:true,value:{attempted:0}});expect(preflight).not.toHaveBeenCalled();
+});
+it('an empty window selection preserves other queued items and prints no zero-size batch',async()=>{
+ const {config,io}=await fixture();await enqueueEvals(config.root,[item('later','later')]);const evaluate=vi.fn();
+ expect(await runQueue({config,drain:true,window:'overnight',evaluate},io)).toEqual(success({items:[item('later','later')],attempted:0,completed:0,failures:[]}));expect(io.lines).toEqual(['No queued evals.']);expect(evaluate).not.toHaveBeenCalled();
 });

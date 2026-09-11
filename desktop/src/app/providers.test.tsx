@@ -25,7 +25,7 @@ it('shows each decision line as description and keeps confirms open on Escape an
 
 it('renders descriptions, preselects the default, and submits radio choices with Enter',async()=>{
  const result=vi.fn(),user=userEvent.setup();render(<Providers><PromptTrigger ask={p=>p.select('Evaluate them',['Now','Overnight'],{default:'Overnight',detail:['Estimated cost'],descriptions:['Run in this terminal.','Run while open and idle.']})} onResult={result}/></Providers>);
- await user.click(screen.getByRole('button',{name:'Ask'}));expect(await screen.findByRole('radio',{name:'Overnight'})).toBeChecked();
+ await user.click(screen.getByRole('button',{name:'Ask'}));expect(await screen.findByRole('radio',{name:'Overnight'})).toBeChecked();expect(screen.getByRole('radio',{name:'Overnight'})).toHaveAccessibleDescription('Run while open and idle.');
  expect(screen.getByRole('dialog')).toHaveTextContent('Estimated cost');expect(screen.getByText('Run while open and idle.')).toHaveClass('prompt-option-description');
  await user.click(screen.getByRole('radio',{name:'Now'}));await user.keyboard('{Enter}');await waitFor(()=>expect(result).toHaveBeenCalledWith('Now'));
 });

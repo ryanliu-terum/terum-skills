@@ -156,14 +156,13 @@ malformed or unreadable state fails without replacing it.
 
 `eval --drain [--parallel n] [--window overnight] [--max n]` returns `{ items, attempted, completed, failures }`.
 `failures` contains `{ item, error }` entries. A failure returns `ok:false` with that partial value, retains the
-item with `lastError`, and continues siblings up to the positive-integer attempt limit. The bounded pool defaults to four concurrent evals. Complete runs
-with committed receipts are removed. Partial runs, uncommitted receipts and changed queued versions remain.
+item with `lastError`, and continues siblings up to the positive-integer attempt limit. The bounded pool defaults to four concurrent evals. Runs with committed receipts are removed even when their execution status is partial or failed; that status remains visible in output. Uncommitted runs and changed queued versions without receipts remain. After refresh, an existing receipt for the pinned version satisfies the queue item before any paid work.
 Runs use ordinary eval preflight and consent; a drain never auto-answers a generated-asset confirmation.
 Print and `progress` frames identify the current eval; no new verb or feature key is added.
 
 Setup keeps the existing eval question string and uses a select with `Now`, `In batches`, `Overnight`, `Skip`
-(default `Skip`). The cost line precedes that question and uses only explicit measured run totals in the current
-team clone; legacy per-arm averages cannot be substituted for totals. With fewer than three eligible receipts,
+(default `Skip`). The cost line precedes that question and uses measured totals reconstructed from the current
+team clone: sum each arm mean multiplied by `provenance.cases.length * provenance.k`, for both cost and duration. Receipts with null arm measurements do not qualify. With fewer than three eligible receipts,
 the wizard explains that each eval bills the person's Claude account without inventing a number.
 `steps.evals` additionally admits `queued` (Queued for overnight) and `batched` (Evaluated in batches).
 A declined batch continuation queues the remaining skills for `later`; `eval --drain` includes those items.
@@ -188,5 +187,13 @@ Plain output and frame question strings retain their existing wording.
 
 Parallel batch output consists of contiguous `── skill ──` context blocks and `✓ skill` / `✗ skill: error`
 settlement lines, including over frames. Questions and block flushes share one mutex. Only the batch emits
-progress (`step: "evals"`, settled count, batch total); a check-in clears that progress display. Setup's queued
+progress (`step: "evals"`, cumulative settled count, full candidate total); a check-in clears that progress display. Setup's queued
 outcome is complete and reads `Queued`; batched reads `Done`. No protocol feature or verb key was added.
+
+Review fixes: In batches prints one run-wide opening and summary; after a different width is chosen,
+the estimate is repeated for that width. Historical-data I/O errors disclose the problem and leave the
+eval offer available. Batch-size input is limited to three attempts. An empty drain prints `No queued evals.`;
+a competing drain reports that another drain is already running. Buffered failures retain every remediation
+line; completion observers cannot change a committed result. Decorated Welcome has no separate header,
+and selects without defaults omit the Enter hint. Mock and real eval choices both default to Skip;
+the overnight replay explicitly chooses Overnight. Radio descriptions are associated for assistive technology.

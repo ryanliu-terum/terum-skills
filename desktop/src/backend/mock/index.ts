@@ -88,7 +88,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   const remaining=[...design.LOCAL_UNSHARED];
   while(true){
    const end=batch.shared.length?'Done':'Skip';
-   const answer=await ctx.ask('select',`Connect a local skill folder to team ${team}?`,{choices:[...remaining,end],descriptions:[...remaining.map(name=>`Connects ${name} so the team can install it.`),'Connect skills later with `npx -y terum-skills@latest connect`.']});
+   const answer=await ctx.ask('select',`Connect a local skill folder to team ${team}?`,{choices:[...remaining,end],descriptions:[...remaining.map(name=>`Connects ${name} so the team can install it.`),end==='Skip'?'Connect skills later with `npx -y terum-skills@latest connect`.':'']});
    if(answer==='Skip')return cancelled('Connect was declined.');
    if(answer==='Done')return ok(batch);
    const name=String(answer);

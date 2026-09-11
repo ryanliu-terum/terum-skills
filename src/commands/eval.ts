@@ -32,6 +32,8 @@ export interface EvalArgs extends WithForm {
   ref: string;
   /** Queue guard: never bill a different version than the one requested. */
   expectedVersion?: string;
+  /** Queue-only: reuse a receipt found after refresh, before any paid work. */
+  skipReceipted?: boolean;
   k?: number;
   triggersOnly?: boolean;
   executionOnly?: boolean;
@@ -54,6 +56,7 @@ export interface EvalArgs extends WithForm {
 }
 
 export interface EvalResult {
+  alreadyEvaluated?: boolean;
   team: string;
   id: string;
   name: string;
@@ -100,6 +103,15 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // hash must pin the exact skill text AND cases evaluated (§4.1; review P1). A concurrent
     // update may make this an older (but still exact) historical receipt.
     const originalVersion = await resolveVersion(clone, record.name, undefined, runner);
+    if (args.skipReceipted) {
+      const directory = join('evals', record.id, args.expectedVersion ?? originalVersion);
+      const existing = await newestReceiptAt(join(clone, directory));
+      if (existing) {
+        const path = join(directory, existing.file);
+        io.print(`Already evaluated ${record.name}; using committed receipt ${path}.`);
+        return success({ team: teamName, id: record.id, name: record.name, runDir: '', ccVersion: existing.receipt.provenance.cc_version, executionStatus: existing.receipt.execution_status, receiptPath: path, commit: { ok: true, receiptPath: path }, alreadyEvaluated: true });
+      }
+    }
     if (args.expectedVersion !== undefined && args.expectedVersion !== originalVersion) return failure(`Queued version ${args.expectedVersion} of ${record.name} is no longer current; dequeue it and run setup again to choose the new version.`);
     let version = originalVersion;
     let candidateDir: string;
@@ -558,11 +570,13 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
     }
     return await withEvalQueueLock(store.root, 'drain', async assertHeld => {
       const pending = (await readEvalQueue(store.root)).items.filter(item => args.window === undefined || item.window === args.window).slice(0, args.max);
+      if (!pending.length) { io.print('No queued evals.'); return success({ items: (await readEvalQueue(store.root)).items, attempted: 0, completed: 0, failures: [] }); }
       let attempted = 0, completed = 0;
       const failures: { item: EvalQueueItem; error: string }[] = [];
       let probe: ReturnType<typeof systemPreflight> | undefined;
       const preflight: EvalArgs['preflight'] = model => probe ??= (args.preflight ?? systemPreflight)(model);
       const byId = new Map(pending.map(item => [queueKey(item), item]));
+      io.print(`Evaluating ${pending.length} skills, ${args.parallel ?? EVAL_PARALLEL_DEFAULT} at a time…`);
       const batch = await runEvalBatch({
         items: pending.map(item => ({ id: queueKey(item), name: item.skill, version: item.version })),
         parallel: args.parallel ?? EVAL_PARALLEL_DEFAULT, io,
@@ -572,9 +586,10 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
           if (!(await readEvalQueue(store.root)).items.some(current => queueKey(current) === queueKey(item) && current.requestedAt === item.requestedAt)) return failure('Item was dequeued before it started.');
           attempted += 1;
           let outcome: Result<EvalResult>;
-          try { outcome = await (args.evaluate ?? run)({ ...args, config: store, ref: item.skill, team: item.team, expectedVersion: item.version, commit: true, preflight, lockWaitMs: EVAL_LOCK_WAIT_MS }, captured); }
+          try { outcome = await (args.evaluate ?? run)({ ...args, config: store, ref: item.skill, team: item.team, expectedVersion: item.version, skipReceipted: true, commit: true, preflight, lockWaitMs: EVAL_LOCK_WAIT_MS }, captured); }
           catch (error) { outcome = fromError(error); }
-          const error = !outcome.ok ? outcome.error : outcome.value.executionStatus !== 'complete' ? `Evaluation ${outcome.value.executionStatus}; the item remains queued.` : outcome.value.commit?.ok !== true ? 'No receipt was committed; the item remains queued.' : undefined;
+          const error = !outcome.ok ? outcome.error : outcome.value.commit?.ok !== true ? 'No receipt was committed; the item remains queued.' : undefined;
+          if (outcome.ok && error === undefined && outcome.value.executionStatus !== 'complete') captured.print(`Receipt committed with ${outcome.value.executionStatus} results; this item will not be evaluated again automatically.`);
           assertHeld();
           await updateEvalQueue(store.root, items => items.flatMap(current => queueKey(current) !== queueKey(item) || current.requestedAt !== item.requestedAt ? [current] : error === undefined ? [] : [{ ...current, lastError: error }]));
           if (error === undefined) completed += 1;
@@ -582,6 +597,7 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
           return outcome;
         },
       });
+      io.print(`Evaluated ${batch.ok} of ${pending.length}; ${batch.failed} failed.`);
       for (const [index, outcome] of batch.outcomes.entries()) {
         const item = pending[index]!;
         if (!outcome.ok && !failures.some(failed => queueKey(failed.item) === queueKey(item))) {

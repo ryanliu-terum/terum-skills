@@ -27,3 +27,15 @@ it('flushes context before a question and serializes all three question kinds',a
  await vi.waitFor(()=>expect(asks).toEqual(['first']));expect(io.lines.slice(-2)).toEqual(['── skill-0 ──','skill-0']);answers.shift()!();
  await vi.waitFor(()=>expect(asks).toEqual(['first','second']));answers.shift()!();await vi.waitFor(()=>expect(asks).toEqual(['first','second','third']));answers.shift()!();expect((await running).ok).toBe(3);
 });
+it('keeps starting queued evals while completed siblings wait behind an unanswered question',async()=>{
+ const io=Object.assign(new ScriptedPrompter([],[],true),{channel:'frames' as const});let answer!:()=>void;const asked=vi.fn();const started:string[]=[];
+ io.confirm=async()=>{asked();await new Promise<void>(resolve=>{answer=resolve;});return true;};
+ const running=runEvalBatch({items,parallel:4,io,run:async(item,captured)=>{expect(captured.channel).toBe('frames');started.push(item.id);if(item.id==='0'){captured.print('Commit context');await captured.confirm('Commit?');}return success(result());}});
+ await vi.waitFor(()=>expect(asked).toHaveBeenCalledOnce());await vi.waitFor(()=>expect(started).toHaveLength(8));expect(io.lines).toEqual(['── skill-0 ──','Commit context']);answer();expect((await running).ok).toBe(8);
+});
+it('preserves multiline failure remediation and never lets an observer change a committed success',async()=>{
+ const io=new ScriptedPrompter();const observed=vi.fn(()=>{throw new Error('observer unavailable');});
+ const outcome=await runEvalBatch({items:items.slice(0,2),parallel:2,io,onSettled:observed,run:async item=>item.id==='0'?success(result()):failure('Push refused\nRun gh auth login\nThen retry the push')});
+ expect(outcome.ok).toBe(1);expect(outcome.outcomes[0]).toEqual(success(result()));expect(observed).toHaveBeenCalledTimes(2);
+ const start=io.lines.indexOf('── skill-1 ──');expect(io.lines.slice(start,start+5)).toEqual(['── skill-1 ──','Completion observer failed: observer unavailable','Run gh auth login','Then retry the push','✗ skill-1: Push refused']);
+});

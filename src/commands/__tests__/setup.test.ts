@@ -1,3 +1,5 @@
+import * as estimates from '../../lib/evals/estimate.js';
+import * as tty from '../../lib/tty.js';
 import * as promptModule from '../../lib/prompt.js';
 import * as packageModule from '../../lib/package.js';
 import { readEvalQueue } from '../../lib/evals/queue.js';
@@ -15,7 +17,7 @@ import { createConfigStore } from '../../lib/config.js';
 import { failure, success } from '../../lib/result.js';
 import { offerHook } from '../../lib/hook.js';
 import { bareTeam, cloneWithIdentity, exists, fakeGh, git, mappedRunner, person, pushFromSeed, NonInteractivePrompter, ScriptedPrompter, temporaryDirectory, wrapperFor, wrapRunner } from '../../lib/__tests__/fixtures.js';
-import { seedPending, pendingReceipt, pendingSkill } from './pending-eval-fixtures.js';
+import { seedPending, pendingReceipt, pendingSkill, measuredReceipt } from './pending-eval-fixtures.js';
 import { Prompter, PromptClosedError } from '../../lib/prompt.js';
 import type { EvalArgs } from '../eval.js';
 import { DISCOVER_QUESTION, DISCOVER_WHERE_QUESTION, evalsQuestion, expandTilde, JOIN_CHOICE, ROLE_QUESTION, run } from '../setup.js';
@@ -930,9 +932,9 @@ describe('setup batch evals', () => {
     expect((await run(args, io)).ok).toBe(true); expect(io.events).toContain(`ask:${evalsQuestion(1)}`); expect(io.events).not.toContain(`ask:${evalsQuestion(2)}`);
   });
   it('accepting runs eval once per candidate with commit true and reports the summary', async () => {
-    const args = await optionalSetup(2); const evaluate = vi.fn(successfulEval); const io = optionalAnswers({}, { 'Evaluate the ': 'Now' });
+    const args = await optionalSetup(2); const evaluate = vi.fn(successfulEval); const io = Object.assign(optionalAnswers({}, { 'Evaluate the ': 'Now' }), {channel:'frames' as const});
     const result = await run({ ...args, preflight: async () => success({ ccVersion: 'test' }), verbs: { ...args.verbs, eval: evaluate } }, io);
-    expect(evaluate).toHaveBeenCalledTimes(2); for (const name of ['alpha', 'beta']) expect(evaluate).toHaveBeenCalledWith(expect.objectContaining({ ref: name, commit: true, team: 'team', preflight: expect.any(Function), lockWaitMs: 300_000 }), expect.objectContaining({ interactive: io.interactive, print: expect.any(Function) }));
+    expect(evaluate).toHaveBeenCalledTimes(2); for (const name of ['alpha', 'beta']) expect(evaluate).toHaveBeenCalledWith(expect.objectContaining({ ref: name, commit: true, team: 'team', preflight: expect.any(Function), lockWaitMs: 300_000 }), expect.objectContaining({ interactive: io.interactive, channel: io.channel, print: expect.any(Function) }));
     expect(io.events).toContain('print:Evaluating 2 skills, 4 at a time…'); expect(io.events).toContain('print:Evaluated 2 of 2; 0 failed.'); expect(result).toMatchObject({ ok: true, value: { steps: { evals: 'done' } } });
   });
   it('a failed eval is printed and the batch continues', async () => {
@@ -1009,6 +1011,11 @@ describe('setup batch evals', () => {
     expect((await run({ ...args, preflight: async () => success({ ccVersion: 'test' }), verbs: { ...args.verbs, eval: successfulEval } }, channel.io)).ok).toBe(true);
     channel.result({ verb: 'setup', ok: true, exitCode: 0 });
     expect(frames.filter(f => f.t === 'progress')).toEqual([{ t: 'progress', step: 'evals', current: 1, total: 2 }, { t: 'progress', step: 'evals', current: 2, total: 2 }]);
+    expect(frames.find(f=>f.t==='ask'&&f.question.startsWith('Evaluate the '))).toMatchObject({
+      t:'ask',kind:'select',question:'Evaluate the 2 shared skills that have no receipt yet? This runs Claude on each one and commits each receipt to the team repo.',default:'Skip',choices:['Now','In batches','Overnight','Skip'],
+      detail:["Evaluating 2 skills, 4 at a time: no earlier runs to estimate from; each eval runs the skill's cases against a baseline on this machine and bills your Claude account."],
+      descriptions:['Runs all 2, 4 at a time, in this terminal.','Asks how many at a time and checks in between batches.','Queues them; the app runs them between 01:00 and 05:00 while it is open and idle.','Evaluate any skill later with `npx -y terum-skills@latest eval <skill>`.'],
+    });
   });
 });
 
@@ -1019,34 +1026,34 @@ describe('f-wizard cost and run choices', () => {
     const samples = [{ cost_usd: 1, duration_ms: 60_000 }, { cost_usd: 2, duration_ms: 120_000 }, { cost_usd: 90, duration_ms: 300_000 }, { cost_usd: null, duration_ms: null }];
     for (const [index, efficiency] of samples.entries()) {
       const dir = join(args.config.teamClone('team'), 'evals', `historical-${index}`, String(index).repeat(40));
-      await mkdir(dir, { recursive: true }); await writeFile(join(dir, '20260909T000000Z.json'), JSON.stringify({ efficiency }));
+      await mkdir(dir, { recursive: true }); await writeFile(join(dir, '20260909T000000Z.json'), JSON.stringify(measuredReceipt(efficiency.cost_usd, efficiency.duration_ms)));
     }
     const io = optionalAnswers(); await run(args, io);
     const line = 'print:Evaluating 2 skills, 4 at a time: about $4.00 and 2 min on this machine, from 3 earlier runs (median $2.00 · 2 min each).';
     expect(io.events).toContain(line); expect(io.events.indexOf(line)).toBeLessThan(io.events.indexOf(`ask:${evalsQuestion(2)}`));
   });
-  it('does not invent totals from legacy per-arm averages or null measurements', async () => {
+  it('ignores receipts with null arm measurements', async () => {
     const args = await optionalSetup(1);
     for (let i = 0; i < 3; i++) {
       const dir = join(args.config.teamClone('team'), 'evals', 'historical', String(i).repeat(40)); await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, '20260909T000000Z.json'), JSON.stringify({ efficiency: { candidate: { cost_usd: 1, duration_ms: 2_000 } } }));
+      await writeFile(join(dir, '20260909T000000Z.json'), JSON.stringify(measuredReceipt(null, 2000)));
     }
     expect(await estimateFromReceipts(args.config.teamClone('team'))).toBeNull();
     const io = optionalAnswers(); await run(args, io);
-    expect(io.events).toContain(`print:${estimateLine(1, null)}`);
+    expect(io.events).toContain("print:Evaluating 1 skill, 4 at a time: no earlier runs to estimate from; each eval runs the skill's cases against a baseline on this machine and bills your Claude account.");
   });
   it('uses seconds for short runs and averages the middle pair for an even median', async () => {
     const args = await optionalSetup();
     for (const [index, cost] of [1, 2, 4, 99].entries()) {
       const dir = join(args.config.teamClone('team'), 'evals', 'historical', String(index).repeat(40)); await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, 'run.json'), JSON.stringify({ efficiency: { cost_usd: cost, duration_ms: cost * 1000 } }));
+      await writeFile(join(dir, 'run.json'), JSON.stringify(measuredReceipt(cost, cost * 1000)));
     }
     const estimate = await estimateFromReceipts(args.config.teamClone('team'));
     expect(estimate).toEqual({ runs: 4, costUsd: 3, durationMs: 3000 }); expect(estimateLine(2, estimate)).toContain('$6.00 and 3 s');
   });
   it('fewer than three runs and invalid JSON produce no numeric estimate', async () => {
     const args = await optionalSetup(); const dir = join(args.config.teamClone('team'), 'evals', 'historical', 'a'.repeat(40)); await mkdir(dir, { recursive: true });
-    for (const name of ['one', 'two']) await writeFile(join(dir, `${name}.json`), JSON.stringify({ efficiency: { cost_usd: 1, duration_ms: 2000 } }));
+    for (const name of ['one', 'two']) await writeFile(join(dir, `${name}.json`), JSON.stringify(measuredReceipt(1, 2000)));
     await writeFile(join(dir, 'invalid.json'), '{broken');
     expect(await estimateFromReceipts(args.config.teamClone('team'))).toBeNull();
   });
@@ -1067,20 +1074,21 @@ describe('f-wizard cost and run choices', () => {
     expect((await readEvalQueue(args.config.root)).items).toHaveLength(more ? 0 : 1);
     if (!more) expect((await readEvalQueue(args.config.root)).items[0]).toMatchObject({ skill: 'beta', window: 'later' });
   });
-  it('validates batch size before probing and offers a default of four', async () => {
+  it.each(['0', '-1', '1.5', 'no', '9007199254740992'])('rejects invalid batch size %s before probing and offers a default of four', async invalid => {
     const args = await optionalSetup(2), evaluate = vi.fn(successfulEval); const io = optionalAnswers({}, { 'Evaluate the ': 'In batches' });
-    const answers = ['0', '-1', '1.5', 'no', '9007199254740992', '3']; const original = io.text.bind(io);
+    const answers = [invalid, '3']; const original = io.text.bind(io);
     io.text = async (question, defaultValue) => { if (question !== 'How many at a time?') return original(question, defaultValue); expect(defaultValue).toBe('4'); return answers.shift()!; };
     expect(await run({ ...args, preflight: async () => success({ ccVersion: 'test' }), verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'batched' } } });
-    expect(io.events.filter(line => line === 'print:Enter a whole number of at least 1.')).toHaveLength(5); expect(evaluate).toHaveBeenCalledTimes(2);
+    expect(io.events.filter(line => line === 'print:Enter a whole number of at least 1.')).toHaveLength(1); expect(evaluate).toHaveBeenCalledTimes(2);
   });
   it('frames preserve the undecorated print transcript byte for byte', async () => {
-    const args = await optionalSetup(); const frames = Object.assign(optionalAnswers(), { channel: 'frames' as const });
-    const plain = optionalAnswers();
+    const fixture = await optionalSetup(2); const args = {...fixture,preflight:async()=>success({ccVersion:'test'}),verbs:{...fixture.verbs,eval:async(arg:EvalArgs,io:Prompter)=>{io.print(`Context for ${arg.ref}`);return arg.ref==='alpha'?successfulEval():failure('Could not evaluate beta\nTry again later');}}};
+    const frames = Object.assign(optionalAnswers({}, {'Evaluate the ':'Now'}), { channel: 'frames' as const });
+    const plain = optionalAnswers({}, {'Evaluate the ':'Now'});
     vi.stubEnv('NO_COLOR', undefined); vi.stubEnv('TERM', 'xterm');
     try {
       await run(args, frames); vi.stubEnv('NO_COLOR', '1'); await run(args, plain);
-      expect(frames.events).toEqual(plain.events); expect(frames.events.join('\n')).not.toMatch(/── Step|@@@@|╭|\x1b\[/);
+      expect(frames.events).toEqual(plain.events);expect(frames.events).toContain('print:── alpha ──');expect(frames.events).toContain('print:✓ alpha');expect(frames.events).toContain('print:✗ beta: Could not evaluate beta');expect(frames.events).toContain('print:Try again later'); expect(frames.events.join('\n')).not.toMatch(/── Step|@@@@|╭|\x1b\[/);
     } finally { vi.unstubAllEnvs(); vi.restoreAllMocks(); }
   });
   it.each([{ quiet: true }, { noColor: true }, { dumb: true }])('suppresses furniture for %j', async options => {
@@ -1090,7 +1098,7 @@ describe('f-wizard cost and run choices', () => {
     finally { vi.unstubAllEnvs(); vi.restoreAllMocks(); }
   });
   it('decorates interactive terminal sections and the closing summary', async () => {
-    vi.spyOn(promptModule, 'terminalOutputIsTTY').mockReturnValue(true);
+    vi.spyOn(tty, 'terminalOutputIsTTY').mockReturnValue(true);
     const args = await optionalSetup(); const io = optionalAnswers();
     vi.stubEnv('NO_COLOR', undefined); vi.stubEnv('TERM', 'xterm');
     try { await run(args, io); expect(io.events).toContainEqual(expect.stringContaining('Welcome to ')); expect(io.events).toContainEqual(expect.stringContaining('Evals')); expect(io.events).toContainEqual(expect.stringMatching(/^print:╭─/)); expect(io.events).toContainEqual(expect.stringContaining('@seed')); }
@@ -1121,7 +1129,7 @@ it('snapshots a decorated creator Overnight transcript and emits only headers fo
  };
  const args={...fixture,verbs:{...fixture.verbs,team:createTeam as typeof import('../team.js').run}}; // Fixture implements create only and explicitly rejects all other overloads.
 
- vi.spyOn(promptModule,'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('NO_COLOR',undefined);vi.stubEnv('TERM','xterm');
+ vi.spyOn(tty,'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('NO_COLOR',undefined);vi.stubEnv('TERM','xterm');
  // The session box prints the running version and the box is padded to its widest line, so the real version
  // would re-record this snapshot on every release. Pin it here; the box's own formatting is covered in banner.test.ts.
  vi.spyOn(packageModule,'packageVersion').mockReturnValue('9.9.9');
@@ -1134,10 +1142,29 @@ it('snapshots a decorated creator Overnight transcript and emits only headers fo
  };
  try {expect(await run(args,io)).toMatchObject({ok:true,value:{steps:{evals:'queued'}}});expect(transcript).toContain('>_ terum-skills (v9.9.9)');expect(transcript).toMatchSnapshot();
   const titles=transcript.split('\n').filter(line=>line.startsWith('> \x1b[1m')).map(line=>line.replace(/\x1b\[[0-9]+m/g,''));
-  expect(titles).toEqual(['> Welcome','> Role','> GitHub','> Team','> Invite','> Actions','> Find skills','> Evals','> Done']);expect(transcript).not.toMatch(/Step \d|of 13/);
+  expect(titles).toEqual(['> Role','> GitHub','> Team','> Invite','> Actions','> Find skills','> Evals','> Done']);expect(transcript).not.toMatch(/Step \d|of 13/);expect(transcript.replace(/\x1b\[[0-9]+m/g,'')).not.toContain('> Welcome');
  }finally{vi.restoreAllMocks();vi.unstubAllEnvs();}
 });
 it('omits the Invite header on a decorated joiner without numbering or empty sections',async()=>{
- const args=await optionalSetup(),io=optionalAnswers();vi.spyOn(promptModule,'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('NO_COLOR',undefined);vi.stubEnv('TERM','xterm');
+ const args=await optionalSetup(),io=optionalAnswers();vi.spyOn(tty,'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('NO_COLOR',undefined);vi.stubEnv('TERM','xterm');
  try{expect((await run({...args,target:'alice/team'},io)).ok).toBe(true);expect(io.events.join('\n')).not.toContain('> \x1b[1mInvite');expect(io.events.join('\n')).not.toMatch(/Step \d/);}finally{vi.restoreAllMocks();vi.unstubAllEnvs();}
+});
+
+it('pins the singular eval question byte for byte',()=>{expect(evalsQuestion(1)).toBe('Evaluate the 1 shared skill that has no receipt yet? This runs Claude on each one and commits each receipt to the team repo.');});
+it('retains the eval offer when historical receipt I/O fails',async()=>{
+ const args=await optionalSetup(2),io=optionalAnswers({}, {'Evaluate the ':'Overnight'});const spy=vi.spyOn(estimates,'estimateFromReceipts').mockRejectedValue(new Error('EACCES'));
+ try{expect(await run(args,io)).toMatchObject({ok:true,value:{steps:{evals:'queued'}}});expect(io.events).toContain(`ask:${evalsQuestion(2)}`);expect(io.events.join('\n')).toContain('Could not estimate eval cost: EACCES');expect((await readEvalQueue(args.config.root)).items).toHaveLength(2);}finally{spy.mockRestore();}
+});
+it('bounds invalid batch-size attempts without probing or billing',async()=>{
+ const args=await optionalSetup(2),io=optionalAnswers({}, {'Evaluate the ':'In batches','How many at a time?':'bad'}),preflight=vi.fn(),evaluate=vi.fn(successfulEval);
+ expect(await run({...args,preflight,verbs:{...args.verbs,eval:evaluate}},io)).toMatchObject({ok:true,value:{steps:{evals:'skipped'}}});expect(io.events.filter(line=>line==='ask:How many at a time?')).toHaveLength(3);expect(preflight).not.toHaveBeenCalled();expect(evaluate).not.toHaveBeenCalled();
+});
+it('keeps cumulative progress and one run-wide summary across batches, including an earlier failure',async()=>{
+ const args=await threePending(),io=Object.assign(optionalAnswers({'Continue with the next ':true},{'Evaluate the ':'In batches','How many at a time?':'2'}),{channel:'frames' as const,progress:vi.fn()});
+ const clone=args.config.teamClone('team');await pendingSkill(clone,'delta','44444444-4444-4444-8444-444444444444');await git(['add','--all'],clone);await git(['commit','-qm','fourth candidate'],clone);
+ const measured=vi.spyOn(estimates,'estimateFromReceipts').mockResolvedValue({runs:3,costUsd:2,durationMs:60000});
+ try{expect(await run({...args,preflight:async()=>success({ccVersion:'test'}),verbs:{...args.verbs,eval:async(arg:EvalArgs)=>arg.ref==='alpha'?failure('first batch failed'):successfulEval()}},io)).toMatchObject({ok:true,value:{steps:{evals:'batched'}}});}finally{measured.mockRestore();}
+ expect(io.progress.mock.calls.map(([frame])=>frame)).toEqual([1,2,3,4].map(current=>({step:'evals',current,total:4})));
+ expect(io.events.filter(line=>line.startsWith('print:Evaluated '))).toEqual(['print:Evaluated 3 of 4; 1 failed.']);expect(io.events.filter(line=>/^print:Evaluating .*…$/.test(line))).toEqual(['print:Evaluating 4 skills, 2 at a time…']);
+ expect(io.events).toContain('print:Evaluating 4 skills, 2 at a time: about $8.00 and 2 min on this machine, from 3 earlier runs (median $2.00 · 1 min each).');expect(io.events).not.toContain('print:Evaluated in batches');
 });
