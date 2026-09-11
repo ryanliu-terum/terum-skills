@@ -1,17 +1,20 @@
 import { createExecute } from '../../lib/execute.js';
-import type { ResultOutcome } from '../../lib/frames.js';
+import { frameChannel, type Frame, type ResultOutcome } from '../../lib/frames.js';
 import { randomUUID } from 'node:crypto';
 import { realpath, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { PassThrough } from 'node:stream';
+import { describe, expect, it, vi } from 'vitest';
 import { COMMUNITY_URL } from '../../lib/community.js';
 import { createConfigStore } from '../../lib/config.js';
 import { failure, success } from '../../lib/result.js';
 import { offerHook } from '../../lib/hook.js';
-import { bareTeam, cloneWithIdentity, exists, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, wrapperFor, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, exists, fakeGh, git, mappedRunner, person, pushFromSeed, NonInteractivePrompter, ScriptedPrompter, temporaryDirectory, wrapperFor, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { seedPending, pendingReceipt } from './pending-eval-fixtures.js';
 import { Prompter, PromptClosedError } from '../../lib/prompt.js';
-import { JOIN_CHOICE, ROLE_QUESTION, run } from '../setup.js';
+import type { EvalArgs } from '../eval.js';
+import { DISCOVER_QUESTION, DISCOVER_WHERE_QUESTION, evalsQuestion, expandTilde, JOIN_CHOICE, ROLE_QUESTION, run } from '../setup.js';
 import { APP_OFFER, APP_QUESTION } from '../app.js';
 
 const hookFor = (root: string) => ({ settingsFile: join(root, 'settings.json'), backupDir: join(root, 'backups') });
@@ -98,11 +101,13 @@ describe('setup (§6.1)', () => {
       config.teams.team = { remote: 'git.example/team', handle: 'seed' }; config.display_name = 'Seed'; config.email = 'seed@example.com';
       config.placements[join(cwd, '.claude', 'skills', 'endorsed')] = { id: '33333333-3333-4333-8333-333333333333', team: 'team', scope: { kind: 'project', project: cwd }, version: null, fingerprint: '', placed_at: '' };
     });
-    const io = new ScriptedPrompter(['Connect alpha', 'Connect beta'], [true, true], true);
+    // The two trailing falses answer the discovery and eval-batch offers this wizard now makes on every
+    // interactive run; connect has just shared alpha and beta, so both are candidates for an eval receipt.
+    const io = new ScriptedPrompter(['Connect alpha', 'Connect beta'], [true, true, false, false], true);
     const result = await run({ app: false, target: remote, config: store, home, cwd, runner: mappedRunner(remote, fixture.bare, fakeGh('seed')), wrapper: noBundledWrapper, verbs: { offerHook: async () => 'present' } }, io);
     expect(result, JSON.stringify(result)).toMatchObject({ ok: true, value: { role: 'joiner', steps: { actions: 'done', invite: 'skipped' } } });
     expect(io.offered).toEqual([['Connect alpha', 'Connect beta', 'Skip'], ['Connect beta', 'Done']]);
-    expect(io.asked).toEqual(['Connect a local skill folder to team team?', 'Connect alpha?', 'Connect a local skill folder to team team?', 'Connect beta?']);
+    expect(io.asked).toEqual(['Connect a local skill folder to team team?', 'Connect alpha?', 'Connect a local skill folder to team team?', 'Connect beta?', DISCOVER_QUESTION, evalsQuestion(2)]);
     expect((await store.read()).checkouts).toEqual([await realpath(cwd)]);
     // Alpha registers the canonical checkout; the next picker scan uses that registered root.
     expect(Object.values((await store.read()).shared).map((entry) => entry.source)).toEqual([
@@ -179,7 +184,8 @@ describe('setup (§6.1)', () => {
 
   it('uses the agreed invitation wording and no longer the old one', async () => {
     const args = await freshCreator();
-    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob', 'Connect starter'], [true, false], true);
+    // connect yes, discovery no, eval batch no, hook no.
+    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob', 'Connect starter'], [true, false, false, false], true);
     const result = await run(args, io);
     expect.soft(io.asked).toContain('Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)');
     expect.soft(io.askedAbout('GitHub logins to invite')).toBe(false);
@@ -393,7 +399,8 @@ describe('setup (§6.1)', () => {
       'api -X PUT --include repos/alice/alpha-repo/collaborators/bob': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' },
       'api -X PUT --include repos/alice/alpha-repo/collaborators/carol': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' },
     }));
-    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob carol', 'Connect starter'], [true, true, true], true);
+    // connect yes, discovery no, eval batch no, hook yes, wrapper yes.
+    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob carol', 'Connect starter'], [true, false, false, true, true], true);
     const result = await run({ app: false, config: store, home, runner, hook: hookFor(root), wrapper: wrapperFor(home), communityUrl: 'https://example.test/community' }, io);
     if (!result.ok) throw new Error(result.error);
 
@@ -401,6 +408,7 @@ describe('setup (§6.1)', () => {
     expect(io.asked).toEqual([
       'Create a team or join one?', 'Team name', 'GitHub login (- for none)', 'Team handle', 'Your name', 'Your email', 'GitHub repository name',
       'Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', 'Connect a local skill folder to team alpha?', 'Connect starter?',
+      DISCOVER_QUESTION, evalsQuestion(1),
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(root).settingsFile})`,
       `Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${join(home, '.claude', 'skills', 'terum-skills')})`,
     ]);
@@ -440,7 +448,8 @@ describe('setup (§6.1)', () => {
     const first = new ScriptedPrompter(['Create a new team', 'resume', '', '', 'Alice', 'alice@example.com', 'resume-repo', 'bob']);
     const interrupted = await run({ app: false, config: store, home, runner, hook: hookFor(root), wrapper: noBundledWrapper, verbs: { invite: async () => { throw new Error('stop after team'); } } }, first);
     expect(interrupted).toMatchObject({ ok: false, error: 'stop after team', value: { steps: { team: 'done' } } });
-    const second = new ScriptedPrompter(['bob', 'Connect starter'], [true, true], true);
+    // connect yes, discovery no, eval batch no, hook yes.
+    const second = new ScriptedPrompter(['bob', 'Connect starter'], [true, false, false, true], true);
     const resumed = await run({ app: false, config: store, home, runner, hook: hookFor(root), wrapper: noBundledWrapper }, second);
     if (!resumed.ok) throw new Error(resumed.error);
     expect(second.askedAbout('Create a team or join one?')).toBe(false);
@@ -478,7 +487,7 @@ describe('setup (§6.1)', () => {
     const home = join(root, 'home');
     const result = await run({ app: false, target: remote, quiet: true, offerConnect: false, config: store, runner, home, hook: hookFor(root), wrapper: wrapperFor(home), communityUrl: 'https://example.test/community' }, io);
     if (!result.ok) throw new Error(result.error);
-    expect(result.value.steps).toEqual({ welcome: 'skipped', app: 'skipped', github: 'done', team: 'done', actions: 'skipped', invite: 'skipped', community: 'skipped', hook: 'done', wrapper: 'done', done: 'skipped' });
+    expect(result.value.steps).toEqual({ welcome: 'skipped', app: 'skipped', github: 'done', team: 'done', actions: 'skipped', invite: 'skipped', discover: 'skipped', evals: 'skipped', community: 'skipped', hook: 'done', wrapper: 'done', done: 'skipped' });
     expect(io.countAsked('Install the Claude Code session-start hook')).toBe(1);
     expect(io.countAsked('Install the /terum-skills Claude Code skill')).toBe(1);
     expect(await exists(join(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'))).toBe(true);
@@ -489,8 +498,12 @@ describe('setup (§6.1)', () => {
 
   it('keeps setup as an orchestrator: real verbs ask every consent question themselves', async () => {
     const source = await readFile(new URL('../setup.ts', import.meta.url), 'utf8');
-    expect(source).not.toContain('io.confirm(');
-    expect([...source.matchAll(/io\.(?:confirm|select|text)\(/g)].map((match) => match[0])).toEqual(['io.select(', 'io.text(']);
+    // setup still delegates every DURABLE consent question to the real verb that performs the write. The only
+    // confirms it owns are the two optional trailing steps, which belong to no verb: the discovery offer, its
+    // folder question and per-candidate adds, and the eval-batch offer. This list is exhaustive and ordered, so
+    // any further prompt added to setup.ts fails here and has to be argued for.
+    expect([...source.matchAll(/io\.(?:confirm|select|text)\(/g)].map((match) => match[0]))
+      .toEqual(['io.select(', 'io.text(', 'io.confirm(', 'io.text(', 'io.confirm(', 'io.confirm(', 'io.confirm(']);
 
     const fixture = await bareTeam(); const root = join(fixture.root, 'real'); const home = join(root, 'home'); await skillUnder(home);
     const bare = join(fixture.root, 'empty.git'); await git(['init', '-q', '--bare', bare]);
@@ -499,7 +512,9 @@ describe('setup (§6.1)', () => {
       'repo create questions --private': { code: 0, stdout: '', stderr: '' },
       'repo view questions --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/questions\n', stderr: '' },
     }));
-    const io = new ScriptedPrompter(['Create a new team', 'questions', '', '', 'Alice', 'alice@example.com', 'questions', '', 'Connect starter'], [true, false, true], true);
+    // connect yes, discovery no, eval batch no, hook no, wrapper yes. (joinedIo below is non-interactive, so
+    // it is never offered either optional step.)
+    const io = new ScriptedPrompter(['Create a new team', 'questions', '', '', 'Alice', 'alice@example.com', 'questions', '', 'Connect starter'], [true, false, false, false, true], true);
     const created = await run({ app: false, config: createConfigStore(join(root, 'state')), home, runner, hook: hookFor(root), wrapper: wrapperFor(home), communityUrl: '' }, io);
     if (!created.ok) throw new Error(created.error);
     const joinFixture = await bareTeam();
@@ -593,7 +608,8 @@ it('the creator picker omits name-mismatched folders and reports the skipped cou
     'repo create alpha-repo --private': { code: 0, stdout: '', stderr: '' },
     'repo view alpha-repo --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/alpha-repo\n', stderr: '' },
   }));
-  const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', '', 'Connect starter', 'Done'], [true, false], true);
+  // connect yes, discovery no, eval batch no, hook no.
+  const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', '', 'Connect starter', 'Done'], [true, false, false, false], true);
   const result = await run({ app: false, config: store, home, runner, hook: hookFor(root), wrapper: noBundledWrapper, communityUrl: '' }, io);
   if (!result.ok) throw new Error(result.error);
   expect(io.offered).toEqual([['Create a new team', 'Join an existing team'], ['Connect skip', 'Connect starter', 'Skip'], ['Connect skip', 'Done']]);
@@ -608,7 +624,8 @@ describe('issue 9 setup delegation', () => {
     const runner = mappedRunner(remote, fixture.bare, fakeGh('alice'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote, handle: 'seed' }; });
-    const io = new ScriptedPrompter([''], [], true); let calls = 0;
+    // The single false answers the discovery offer; the 'failed' branch returns before it is asked.
+    const io = new ScriptedPrompter([''], [false], true); let calls = 0;
     const result = await run({ app: false, config: store, home, cwd, runner, wrapper: noBundledWrapper, communityUrl: '', verbs: {
       connect: async (args, received) => {
         calls += 1; expect(received).toBe(io); expect(args).toEqual({ team: 'team', home, cwd, config: store, runner });
@@ -617,7 +634,7 @@ describe('issue 9 setup delegation', () => {
     } }, io);
     expect(calls).toBe(1);
     if (outcome === 'failed') { expect(result).toMatchObject({ ok: false, error: 'connect failed' }); expect(result.value?.steps.actions).toBeUndefined(); expect(io.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)']); }
-    else { expect(result).toMatchObject({ ok: true, value: { steps: { actions: outcome, invite: 'skipped', done: 'printed' } } }); expect(io.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)']); }
+    else { expect(result).toMatchObject({ ok: true, value: { steps: { actions: outcome, invite: 'skipped', done: 'printed' } } }); expect(io.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', DISCOVER_QUESTION]); }
   });
 
   it.each([false, true])('continues to invite after empty inventory or Skip (candidate: %s)', async (hasCandidate) => {
@@ -626,10 +643,10 @@ describe('issue 9 setup delegation', () => {
     const store = createConfigStore(join(fixture.root, 'state')); const remote = githubRemote('alice', 'team');
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote, handle: 'seed' }; });
-    const io = new ScriptedPrompter(hasCandidate ? ['', 'Skip'] : [''], [], true);
+    const io = new ScriptedPrompter(hasCandidate ? ['', 'Skip'] : [''], [false], true);
     const result = await run({ app: false, config: store, home, runner: mappedRunner(remote, fixture.bare, fakeGh('alice')), wrapper: noBundledWrapper, communityUrl: '', verbs: { offerHook: async () => 'present' } }, io);
     expect(result).toMatchObject({ ok: true, value: { steps: { actions: 'skipped', invite: 'skipped', done: 'printed' } } });
-    expect(io.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', ...(hasCandidate ? ['Connect a local skill folder to team team?'] : [])]);
+    expect(io.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', ...(hasCandidate ? ['Connect a local skill folder to team team?'] : []), DISCOVER_QUESTION]);
     expect(io.lines).toContain(hasCandidate ? 'Nothing connected.' : `No local candidates to connect under ${join(home, '.claude', 'skills')}. Skills elsewhere can be connected by passing their folder path.`);
     expect(io.lines).toContain('  npx -y terum-skills@latest connect      — connect your local skills to the team (asks which)');
   });
@@ -814,4 +831,179 @@ it('setup refusal survives createExecute with exit 1 and its partial value', asy
   expect(codes).toEqual([1]);
   expect(frames).toEqual([expect.objectContaining({ ok: false, refused: true, exitCode: 1, value: expect.objectContaining({ role: 'joiner' }) })]);
   expect(frames[0]).not.toHaveProperty('cancelled');
+});
+
+async function optionalSetup(count = 0) {
+  const fixture = await configuredCreator({}); const args = { ...fixture.args, offerConnect: false, verbs: { ...fixture.args.verbs, offerWrapper: async () => 'present' as const } };
+  await mkdir(args.home, { recursive: true }); if (count) await seedPending(args.config.teamClone('team'), count);
+  return args;
+}
+function optionalAnswers(confirms: Record<string, boolean> = {}, answers: Record<string, string> = {}) {
+  return new AnsweringPrompter({ [DISCOVER_WHERE_QUESTION]: '', ...answers }, { 'Look for skill folders': false, 'Add all ': true, 'Evaluate the ': false, ...confirms });
+}
+describe('setup discovery', () => {
+  it('setup offers discovery, registers every candidate, and records steps.discover done', async () => {
+    const args = await optionalSetup(); const a = join(args.home, 'a'), b = join(args.home, 'b'); await skillUnder(a); await skillUnder(b);
+    const io = optionalAnswers({ 'Look for skill folders': true }); const result = await run(args, io);
+    expect(result).toMatchObject({ ok: true, value: { steps: { discover: 'done' } } }); expect((await args.config.read()).checkouts).toEqual([a, b]);
+    expect(io.events).toContain('print:Looking for skill folders on this machine…'); expect(io.events).toContain('ask:Add all 2?');
+  });
+  it('declining the discovery offer registers nothing and records skipped', async () => {
+    const args = await optionalSetup(); const io = optionalAnswers(); const before = (await args.config.read()).checkouts;
+    expect(await run(args, io)).toMatchObject({ ok: true, value: { steps: { discover: 'skipped' } } });
+    expect((await args.config.read()).checkouts).toEqual(before); expect(io.events).not.toContain(`ask:${DISCOVER_WHERE_QUESTION}`);
+  });
+  it('declining Add all falls back to one confirm per folder', async () => {
+    const args = await optionalSetup(); const a = join(args.home, 'a'), b = join(args.home, 'b'); await skillUnder(a); await skillUnder(b);
+    const io = optionalAnswers({ 'Look for skill folders': true, 'Add all ': false, [`Add ${a}?`]: true, [`Add ${b}?`]: false });
+    expect((await run(args, io)).ok).toBe(true); expect((await args.config.read()).checkouts).toEqual([a]);
+    expect(io.events).toContain(`ask:Add ${a}?`); expect(io.events).toContain(`ask:Add ${b}?`);
+  });
+  it.each([{ quiet: true }, { discover: false }])('%j never asks about discovery', async options => {
+    const args = await optionalSetup(); const io = optionalAnswers();
+    expect(await run({ ...args, ...options }, io)).toMatchObject({ ok: true, value: { steps: { discover: 'skipped' } } }); expect(io.events).not.toContain(`ask:${DISCOVER_QUESTION}`);
+  });
+  it('a non-interactive channel skips both new steps', async () => {
+    const args = await optionalSetup(); const io = new NonInteractivePrompter();
+    // A generic remote has no invite question, so this channel can reach the optional steps.
+    const remote = 'https://git.example/team.git'; const clone = args.config.teamClone('team');
+    await args.config.update(c => { c.teams.team!.remote = remote; });
+    const runner = wrapRunner(args.runner, async (command, argv, options, next) => {
+      const result = await next();
+      if (command === 'git' && options?.cwd === clone && argv.join(' ') === 'remote get-url origin') return { ...result, stdout: remote + '\n' };
+      return result;
+    });
+    expect(await run({ ...args, runner }, io)).toMatchObject({ ok: true, value: { steps: { discover: 'skipped', evals: 'skipped' } } }); expect(io.asked).toEqual([]);
+  });
+  it('zero candidates print the no-folders line and record done', async () => {
+    const args = await optionalSetup(); const io = optionalAnswers({ 'Look for skill folders': true });
+    expect(await run(args, io)).toMatchObject({ ok: true, value: { steps: { discover: 'done' } } }); expect(io.events).toContain(`print:No skill folders found under ${args.home}.`);
+  });
+  it('the folder question honours an edited answer', async () => {
+    const args = await optionalSetup(); const outside = join(args.home, '..', 'elsewhere'), a = join(args.home, 'a'); await skillUnder(a); await skillUnder(outside);
+    const io = optionalAnswers({ 'Look for skill folders': true }, { [DISCOVER_WHERE_QUESTION]: outside });
+    expect((await run(args, io)).ok).toBe(true); expect((await args.config.read()).checkouts).toEqual([outside]);
+  });
+  // The desktop's prompt dialog has no shell, so a typed ~ arrives literally; without expansion it would
+  // resolve under cwd and scan a folder that does not exist.
+  it.each(['~', '~/'])('a typed %s answer is expanded against home, not resolved under cwd', async prefix => {
+    const args = await optionalSetup(); const a = join(args.home, 'a'); await skillUnder(a);
+    const typed = prefix === '~' ? '~' : '~/';
+    const io = optionalAnswers({ 'Look for skill folders': true }, { [DISCOVER_WHERE_QUESTION]: typed });
+    expect((await run(args, io)).ok).toBe(true); expect((await args.config.read()).checkouts).toEqual([a]);
+    expect(io.events).not.toContainEqual(expect.stringContaining('print:Could not look in '));
+  });
+  it('a typed ~/<sub> answer scans that folder under home', async () => {
+    const args = await optionalSetup(); const nested = join(args.home, 'work', 'alpha'); await skillUnder(nested); await skillUnder(join(args.home, 'elsewhere'));
+    const io = optionalAnswers({ 'Look for skill folders': true }, { [DISCOVER_WHERE_QUESTION]: '~/work' });
+    expect((await run(args, io)).ok).toBe(true); expect((await args.config.read()).checkouts).toEqual([nested]);
+  });
+  it('expandTilde leaves an absolute path, a relative path and ~otheruser alone', () => {
+    const home = join('/tmp', 'home-of-someone');
+    expect(expandTilde('~', home)).toBe(home);
+    expect(expandTilde('~/x', home)).toBe(join(home, 'x'));
+    expect(expandTilde('~\\x', home)).toBe(join(home, 'x'));
+    // No password database here, so ~bob stays a literal folder name rather than a guess.
+    expect(expandTilde('~bob/x', home)).toBe('~bob/x');
+    expect(expandTilde('/abs/x', home)).toBe('/abs/x');
+    expect(expandTilde('rel/x', home)).toBe('rel/x');
+  });
+  it('a discovery failure is printed and setup still succeeds', async () => {
+    const args = await optionalSetup(); const file = join(args.home, 'file'); await writeFile(file, 'not a directory');
+    const io = optionalAnswers({ 'Look for skill folders': true });
+    expect(await run({ ...args, home: file }, io)).toMatchObject({ ok: true, value: { steps: { discover: 'done' } } });
+    expect(io.events).toContainEqual(expect.stringMatching(/^print:Could not look in .*ENOTDIR/));
+    const failing = optionalAnswers({ 'Look for skill folders': true }); const originalText = failing.text.bind(failing); const read = vi.spyOn(args.config, 'read');
+    failing.text = async (question, defaultValue) => { const value = await originalText(question, defaultValue); if (question === DISCOVER_WHERE_QUESTION) read.mockRejectedValueOnce(new Error('read denied')); return value; };
+    try { expect(await run(args, failing)).toMatchObject({ ok: true, value: { steps: { discover: 'skipped' } } }); expect(failing.events).toContain('print:Could not look for skill folders: read denied'); }
+    finally { read.mockRestore(); }
+  });
+});
+const successfulEval = async () => success({ team: 'team', id: 'test', name: 'sample', runDir: '/test/run', ccVersion: 'test', commit: null, executionStatus: 'complete' as const });
+describe('setup batch evals', () => {
+  it('setup offers the eval batch only for shared skills with no receipt at the current version', async () => {
+    const args = await optionalSetup(2); await pendingReceipt(args.config.teamClone('team')); const io = optionalAnswers();
+    expect((await run(args, io)).ok).toBe(true); expect(io.events).toContain(`ask:${evalsQuestion(1)}`); expect(io.events).not.toContain(`ask:${evalsQuestion(2)}`);
+  });
+  it('accepting runs eval once per candidate with commit true and reports the summary', async () => {
+    const args = await optionalSetup(2); const evaluate = vi.fn(successfulEval); const io = optionalAnswers({ 'Evaluate the ': true });
+    const result = await run({ ...args, preflight: async () => success({ ccVersion: 'test' }), verbs: { ...args.verbs, eval: evaluate } }, io);
+    expect(evaluate).toHaveBeenCalledTimes(2); for (const name of ['alpha', 'beta']) expect(evaluate).toHaveBeenCalledWith(expect.objectContaining({ ref: name, commit: true, team: 'team', preflight: expect.any(Function) }), io);
+    expect(io.events).toContain('print:Evaluating 1 of 2 · alpha'); expect(io.events).toContain('print:Evaluated 2 of 2; 0 failed.'); expect(result).toMatchObject({ ok: true, value: { steps: { evals: 'done' } } });
+  });
+  it('a failed eval is printed and the batch continues', async () => {
+    const args = await optionalSetup(2); const evaluate = vi.fn<typeof import('../eval.js').run>().mockResolvedValueOnce(failure('eval failed')).mockImplementation(successfulEval);
+    const io = optionalAnswers({ 'Evaluate the ': true });
+    expect(await run({ ...args, preflight: async () => success({ ccVersion: 'test' }), verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'done' } } });
+    expect(evaluate).toHaveBeenCalledTimes(2); expect(io.events).toContain('print:eval failed'); expect(io.events).toContain('print:Evaluated 1 of 2; 1 failed.');
+  });
+  it('declining the eval offer runs no eval', async () => {
+    const args = await optionalSetup(2); const evaluate = vi.fn(successfulEval), preflight = vi.fn(async () => success({ ccVersion: 'test' })); const io = optionalAnswers();
+    expect(await run({ ...args, preflight, verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } }); expect(evaluate).not.toHaveBeenCalled(); expect(preflight).not.toHaveBeenCalled();
+  });
+  // The probe is on the verb table as well as the args knob, so a test that stubs `verbs` at all can never
+  // reach the real `claude`; production still resolves to the same systemPreflight default.
+  it('the probe is taken from the injected verb table when args.preflight is absent', async () => {
+    const args = await optionalSetup(2); const preflight = vi.fn(async () => success({ ccVersion: 'stubbed' })); const evaluate = vi.fn(successfulEval);
+    const io = optionalAnswers({ 'Evaluate the ': true });
+    expect(await run({ ...args, verbs: { ...args.verbs, eval: evaluate, preflight } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'done' } } });
+    expect(preflight).toHaveBeenCalledTimes(1); expect(evaluate).toHaveBeenCalledTimes(2);
+  });
+  it('a team that shares nothing is told so, not that everything is already receipted', async () => {
+    const args = await optionalSetup(); const io = optionalAnswers();
+    expect(await run(args, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } });
+    expect(io.events).toContain('print:The team has no shared skills yet; nothing to evaluate.');
+    expect(io.events).not.toContain('print:Every shared skill already has an eval receipt for its current version.');
+  });
+  it('a failed version reader is reported instead of an already-receipted claim', async () => {
+    const args = await optionalSetup(2); const clone = args.config.teamClone('team'); const io = optionalAnswers();
+    const runner = wrapRunner(args.runner, async (command, argv, options, next) => {
+      if (command === 'git' && options?.cwd === clone && argv[0] === 'ls-tree') throw new Error('git unavailable');
+      return next();
+    });
+    expect(await run({ ...args, runner }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } });
+    expect(io.events).toContain('print:Could not read the current skill versions, so no shared skill could be checked for a receipt.');
+    expect(io.events).not.toContain('print:Every shared skill already has an eval receipt for its current version.');
+    expect(io.events.some(e => e.startsWith('ask:Evaluate the '))).toBe(false);
+  });
+  it.each([{ quiet: true }, { evals: false }])('quiet setup and --no-evals never ask (%j)', async options => {
+    const args = await optionalSetup(2); const io = optionalAnswers();
+    expect(await run({ ...args, ...options }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } }); expect(io.events.some(e => e.startsWith('ask:Evaluate the '))).toBe(false);
+  });
+  it('a failing preflight after the yes is printed and the step is skipped', async () => {
+    const args = await optionalSetup(2); const evaluate = vi.fn(successfulEval); const io = optionalAnswers({ 'Evaluate the ': true });
+    expect(await run({ ...args, preflight: async () => failure('claude is not runnable'), verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } });
+    expect(evaluate).not.toHaveBeenCalled(); expect(io.events).toContain('print:Skipping the evals: claude is not runnable');
+  });
+  it('the agent probe runs exactly once for the whole batch', async () => {
+    const args = await optionalSetup(2); const probe = success({ ccVersion: 'test' }); const preflight = vi.fn(async () => probe); const io = optionalAnswers({ 'Evaluate the ': true });
+    const evaluate = vi.fn(async (args: EvalArgs) => { expect(await args.preflight?.()).toBe(probe); return successfulEval(); });
+    expect((await run({ ...args, preflight, verbs: { ...args.verbs, eval: evaluate } }, io)).ok).toBe(true); expect(preflight).toHaveBeenCalledTimes(1); expect(evaluate).toHaveBeenCalledTimes(2);
+  });
+  it('a skill whose only receipt is for an older version is still a candidate', async () => {
+    const args = await optionalSetup(1); await pendingReceipt(args.config.teamClone('team'), { older: true }); const io = optionalAnswers();
+    expect((await run(args, io)).ok).toBe(true); expect(io.events).toContain(`ask:${evalsQuestion(1)}`);
+  });
+  it('a skill with a schema-invalid newest receipt is excluded with a warning', async () => {
+    const args = await optionalSetup(1); await pendingReceipt(args.config.teamClone('team'), { invalid: true }); const io = optionalAnswers();
+    expect(await run(args, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } });
+    expect(io.events).toContainEqual(expect.stringContaining('the newest receipt for the current version is invalid')); expect(io.events).toContain('print:Every shared skill already has an eval receipt for its current version.'); expect(io.events.some(e => e.startsWith('ask:Evaluate the '))).toBe(false);
+  });
+  it('a machine with no joined handle skips the eval step', async () => {
+    const args = await optionalSetup(1); const io = optionalAnswers(); const config = await args.config.read(); config.teams.team!.handle = '';
+    // Persisted config rejects an absent handle; model an unavailable handle at the step's read seam.
+    const read = vi.spyOn(args.config, 'read'); const confirm = io.confirm.bind(io);
+    io.confirm = async question => { const answer = await confirm(question); if (question === DISCOVER_QUESTION) read.mockResolvedValueOnce(config); return answer; };
+    try {
+      expect(await run(args, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } }); expect(io.events).toContain('print:Skipping the eval offer: this machine has no joined handle for the team yet, so a receipt could not be committed.'); expect(io.events.some(e => e.startsWith('ask:Evaluate the '))).toBe(false);
+    } finally { read.mockRestore(); }
+  });
+  it('progress frames name the evals step with current and total', async () => {
+    const args = await optionalSetup(2); const input = new PassThrough(), output = new PassThrough(); const frames: Frame[] = [];
+    output.on('data', (data: Buffer) => { const frame = JSON.parse(data.toString()) as Frame; frames.push(frame); if (frame.t === 'ask') input.write(JSON.stringify({ t: 'answer', id: frame.id, value: frame.kind === 'confirm' ? frame.question.startsWith('Evaluate the ') : '' }) + '\n'); });
+    const channel = frameChannel({ input, output });
+    expect((await run({ ...args, preflight: async () => success({ ccVersion: 'test' }), verbs: { ...args.verbs, eval: successfulEval } }, channel.io)).ok).toBe(true);
+    channel.result({ verb: 'setup', ok: true, exitCode: 0 });
+    expect(frames.filter(f => f.t === 'progress')).toEqual([{ t: 'progress', step: 'evals', current: 1, total: 2 }, { t: 'progress', step: 'evals', current: 2, total: 2 }]);
+  });
 });

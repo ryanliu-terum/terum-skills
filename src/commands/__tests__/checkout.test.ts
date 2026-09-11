@@ -1,7 +1,9 @@
-import { mkdir, realpath, readFile, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, realpath, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { PassThrough } from 'node:stream';
+import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
+import { frameChannel, type Frame } from '../../lib/frames.js';
 import { configSchema } from '../../lib/schema.js';
 import { ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run } from '../checkout.js';
@@ -81,4 +83,53 @@ it('preserves unrelated formatting and counts missing placements by lexical regi
   const result = await run({ ...args, kind: 'remove', path: args.root }, new ScriptedPrompter());
   expect(result).toMatchObject({ ok: true, value: { placementsRemaining: 1 } });
   expect(await readFile(file, 'utf8')).toContain('"kept"  :  true');
+});
+
+async function discoverFixture() {
+  const home = await temporaryDirectory(); const config = createConfigStore(join(home, 'state'));
+  async function skill(root: string) { const dir = join(root, '.claude', 'skills', 'sample'); await mkdir(dir, { recursive: true }); await writeFile(join(dir, 'SKILL.md'), '---\nname: sample\ndescription: sample skill\n---\n'); }
+  return { args: { kind: 'discover' as const, under: [home], home, config, cwd: home }, skill, a: join(home, 'a'), b: join(home, 'b') };
+}
+it('checkout discover lists every candidate with its count and returns the structure', async () => {
+  const { args, skill, a, b } = await discoverFixture(); await skill(a); await skill(b); const io = new ScriptedPrompter();
+  const result = await run(args, io); expect(result).toMatchObject({ ok: true, value: { candidates: [{ path: a, skillFolders: 1 }, { path: b, skillFolders: 1 }] } });
+  expect(io.lines[0]).toMatch(/^Looked in \d+ folders under /); expect(io.lines.slice(1)).toEqual([`${a} — 1 skill folders`, `${b} — 1 skill folders`]);
+});
+it('checkout discover prints none found when nothing matches', async () => {
+  const { args } = await discoverFixture(); const io = new ScriptedPrompter();
+  expect(await run(args, io)).toMatchObject({ ok: true, value: { candidates: [] } }); expect(io.lines.slice(1)).toEqual(['none found']);
+});
+it('checkout discover --register registers the unregistered candidates and leaves the registered one alone', async () => {
+  const { args, skill, a, b } = await discoverFixture(); await skill(a); await skill(b); await args.config.update(c => { c.checkouts = [a]; });
+  const io = new ScriptedPrompter(); expect(await run({ ...args, register: true }, io)).toMatchObject({ ok: true, value: { candidates: [{ path: a, registered: true }, { path: b, registered: true }] } });
+  expect((await args.config.read()).checkouts).toEqual([a, b]); expect(io.lines.filter(l => l.startsWith('Registered '))).toEqual([`Registered ${b}`]); expect(io.lines.some(l => l.startsWith('Already registered'))).toBe(false);
+});
+it('checkout discover --budget-ms 0 says it stopped early', async () => {
+  const { args } = await discoverFixture(); const io = new ScriptedPrompter(); expect(await run({ ...args, budgetMs: 0 }, io)).toMatchObject({ ok: true, value: { truncated: true, scanned: 0 } });
+  expect(io.lines).toContain('(stopped after 0 s; pass --budget-ms to look longer)');
+});
+it('checkout discover refuses a negative depth and a fractional budget', async () => {
+  const { args, skill, a } = await discoverFixture(); await skill(a); const io = new ScriptedPrompter();
+  expect(await run({ ...args, depth: -1 }, io)).toEqual({ ok: false, error: '--depth must be a non-negative integer.' });
+  expect(await run({ ...args, budgetMs: 1.5 }, io)).toEqual({ ok: false, error: '--budget-ms must be a non-negative integer.' }); expect(io.lines).toEqual([]);
+});
+it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('checkout discover reports an unreadable folder and still succeeds', async () => {
+  const { args, a } = await discoverFixture(); await mkdir(a); await chmod(a, 0); const io = new ScriptedPrompter();
+  try { expect((await run(args, io)).ok).toBe(true); expect(io.lines.filter(l => l.startsWith('Could not look in '))).toEqual([expect.stringContaining(a)]); }
+  finally { await chmod(a, 0o700); }
+});
+it('checkout discover emits progress frames with step discover', async () => {
+  const { args } = await discoverFixture(); const input = new PassThrough(), output = new PassThrough(); const frames: Frame[] = [];
+  output.on('data', (data: Buffer) => frames.push(JSON.parse(data.toString()) as Frame)); const channel = frameChannel({ input, output });
+  await run(args, channel.io); channel.result({ verb: 'checkout discover', ok: true, exitCode: 0 });
+  const progress = frames.filter(f => f.t === 'progress'); expect(progress.length).toBeGreaterThan(0);
+  for (const frame of progress) expect(frame).toEqual({ t: 'progress', step: 'discover', current: expect.any(Number) });
+});
+it('checkout discover keeps its own registration failure out of the result', async () => {
+  const { args, skill, a, b } = await discoverFixture(); await skill(a); await skill(b); const io = new ScriptedPrompter();
+  const update = vi.spyOn(args.config, 'update').mockRejectedValueOnce(new Error('write denied'));
+  try {
+    expect(await run({ ...args, register: true }, io)).toMatchObject({ ok: true, value: { candidates: [{ path: a, registered: false }, { path: b, registered: true }] } });
+    expect(io.lines).toContain(`Could not register ${a}: write denied`); expect((await args.config.read()).checkouts).toEqual([b]);
+  } finally { update.mockRestore(); }
 });

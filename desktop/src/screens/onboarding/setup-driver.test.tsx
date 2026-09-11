@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
 import { BackendContext, existingSetupSession, SETUP_STEP_TO_BOARD } from '../../backend';
@@ -33,11 +33,11 @@ it('routes a fresh target to Boot, waits for the human, renders prints/progress,
  expect(set.mock.calls.filter(([key])=>key==='launch:consumedWrittenAt')).toEqual([['launch:consumedWrittenAt',launch.writtenAt]]);
  view.unmount();open(b);await waitFor(()=>expect(location.hash).toBe('#/library/global'));expect(setup).toHaveBeenCalledTimes(1);
 });
-it('uses four result-driven rows without inventing a progress counter',async()=>{
+it('uses six result-driven rows without inventing a progress counter',async()=>{
  const b=backend();vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{
   ctx.print('Repository: https://github.com/terum/team-skills.git');return {ok:true,value:{team:'team',role:'joiner',steps:{github:'done',team:'done',actions:'skipped',hook:'skipped',wrapper:'skipped',done:'printed'}}};
  }));
- const view=open(b);await screen.findByRole('heading',{name:'Setup finished'});expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(4);
+ const view=open(b);await screen.findByRole('heading',{name:'Setup finished'});expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(6);
  expect(screen.queryByLabelText('Onboarding progress')).toBeNull();expect(screen.getByRole('progressbar',{name:'Setup progress'})).not.toHaveAttribute('aria-valuenow');expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuemax');
  expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
 });
@@ -176,4 +176,24 @@ it('uses identity ask detail for the dialog and the active team cue without tran
  expect(screen.getByText('Configuring the team').parentElement).toHaveAttribute('data-state','current');
  expect(screen.getByLabelText('Setup output')).not.toHaveTextContent('Identity:');
  fireEvent.click(within(dialog).getByRole('button',{name:'Yes'}));await screen.findByRole('heading',{name:'Setup finished'});
+});
+
+it('shows a discover progress counter on its own row instead of a seventh row',async()=>{
+ const b=backend();let finish!:()=>void;const pending=new Promise<void>(resolve=>{finish=resolve;});
+ vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{
+  ctx.print('Looking for skill folders on this machine…');ctx.progress(12,12,'discover');await pending;
+  return {ok:true,value:{team:'t',role:'creator',steps:{discover:'done'}}};
+ }));
+ const view=open(b);await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('Looking for skill folders on this machine'));
+ expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(6);
+ expect([...view.container.querySelectorAll('.onboarding-progress-row')].find(row=>row.textContent?.includes('Looking for skill folders on this machine'))).toHaveAttribute('data-state','current');
+ expect(screen.getByRole('status')).not.toHaveTextContent(/^discover$/);
+ await act(async()=>finish());await screen.findByRole('heading',{name:'Setup finished'});
+});
+it('still shows an unknown progress label as its own row',async()=>{
+ const b=backend();let finish!:()=>void;const pending=new Promise<void>(resolve=>{finish=resolve;});
+ vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{ctx.progress(1,2,'placing');await pending;return {ok:true,value:{team:'t',role:'creator',steps:{}}};}));
+ const view=open(b);await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('placing'));
+ const rows=view.container.querySelectorAll('.onboarding-progress-row');expect(rows).toHaveLength(7);expect(rows[6]).toHaveTextContent('placing');
+ await act(async()=>finish());await screen.findByRole('heading',{name:'Setup finished'});
 });
