@@ -291,3 +291,82 @@ once, and `skillRecords` reading `v<N>/SKILL.md` invalidates ~34 test fixtures. 
 puts M7 first (so the guard-action call sites are gone before `guard.ts` is rewritten) and fuses
 M1+M2+M3. This is a correction of fact, not a product decision; the evidence is in
 `.planning/reviews/2026-09-11-refactor-implementation-batches.md`.
+
+---
+
+## B1 implementation additions — 2026-09-11, the two batch-boundary calls the first Codex run forced
+
+**Resolved on Ryan's standing best-call authorization (handoff of 2026-09-11), not by Ryan in person.**
+Both surfaced while filling the B1 prompt and neither had an answer anywhere in rev 7: an implementer
+reaching them would have had to invent one, and Codex is instructed to record an `openQuestion` rather
+than do that — which would have stalled the batch on its first file. They are recorded here in advance
+of the diff; the spec will carry them as **D25–D26** in the rev-8 pass that follows B1's verification,
+so that revision describes what actually landed rather than what was predicted. Unchecked against the
+team's shared record like everything above — the `terum` MCP refused auth again this session (HTTP 401).
+
+| # | Decision | Verdict | Rationale (plain) | Pointer |
+|---|---|---|---|---|
+| 17 | `eval --working` and `eval --save`, which the spec names nowhere | LOCK — delete both in B1 | Both dereference `config.shared`, the thing §12 deletes. Keeping a flag whose only job is to point at a concept the release removes is a dead control that lies about what the product can do | rev-8 D25, §6.3, §12 |
+| 18 | `saveGeneratedAssets` has no caller left after D25 and the `--commit` deletion | LOCK — keep it, caller-less, until B3 | §6.3 re-wires it as the single generate destination two batches later. Deleting and re-adding the same function is churn that shows up in two diffs as a false rewrite | rev-8 D26, §6.3, OF-5 |
+
+### Decision 17 — `eval --working` and `eval --save`
+
+**Verdict: LOCK — delete both flags, their registrations and their guards, in B1.**
+
+- **What's at stake:** the batch plan flagged these as coupling 7 — "named nowhere in the spec" — and B1
+  is the batch that deletes the state they read. `--working` resolves eval's candidate directory out of
+  `config.shared[record.id].source` (`eval.ts:118-122`) and refuses when the skill is not a connected
+  local source; `--save` refuses unless `--working` is present (`eval.ts:79`) and writes generated assets
+  to that same connected source (`:186-188`). §12 deletes `config.shared` and every reader of it. So the
+  flags do not merely lose a feature — they lose the object they dereference.
+- **Options:** **A** delete both with `config.shared`. **B** keep `--working` and re-point it at the local
+  skill folder — but §6.3 makes the local folder the *only* eval target one batch later, so `--working`
+  would become a flag that selects the sole available option, and `--save` a flag that opts into the write
+  D9 makes unconditional. **C** leave them registered as no-op-with-notice shims, the way D21 treats
+  `readme --pr-comment` and §12 treats `receipt-check`.
+- **The call:** A. **Zoom-out:** the visibility half of the North Star is about seeing what is true on
+  each side, and a registered flag is a claim about what the product can do. `--working` claims there are
+  two things to evaluate — your copy and the team's — which is precisely the distinction this refactor
+  spends 890 lines removing. B revives it as a vestige; C is the shim rule applied where its reason does
+  not hold: `receipt-check` and `readme --pr-comment` survive as shims because a **committed GitHub Action
+  the product cannot update** invokes them by name, and nothing invokes `eval --working` but a human.
+- **Technical:** delete the two `EvalArgs` fields, both commander `.option()` registrations
+  (`cli.ts:157`), the `--save is only available with --working` guard (`eval.ts:79`), the
+  `--working --commit is refused` guard (`:361`), the `args.working` candidate branch (`:118-122`), the
+  `!args.working` argument threaded into `assessHygiene` (`:131`), the `args.save` write (`:186-188`), and
+  the mentions in the queue-mode per-skill-selection-flags guard (`:563`). The candidate stays the
+  materialized committed tree for B1 — §6.3's local-folder resolve is B3's.
+
+### Decision 18 — `saveGeneratedAssets` with no caller
+
+**Verdict: LOCK — keep the function unmodified through B1; B3 re-wires it.**
+
+- **What's at stake:** rule 0.2 ("one active path per behaviour") and the instinct to delete dead code.
+  After D25 and §6.3's `--commit` deletion, both of `saveGeneratedAssets`' call sites are gone
+  (`eval.ts:186-188` was `--save`; `:200-207` was the confirm-commit branch, which §6.3 deletes by name).
+- **Options:** **A** keep it caller-less for one batch. **B** delete it in B1 and re-create it in B3.
+- **The call:** A. **Zoom-out:** this is the same allowance §16.1 already makes for the guard rows of the
+  actions B1 deletes — they sit with zero callers for exactly one batch, which the spec calls "dead code,
+  not a second active path". The precedent is in the spec; applying it twice is consistency, not
+  laxity. B also costs a real thing: the function's refusal contract is the subject of an open finding
+  (**OF-5**, "`saveGeneratedAssets` refuses regeneration", blocking B3), and deleting it would hand B3 a
+  blank page instead of the code that finding was written against.
+- **Cost accepted:** its two `--save refused:` messages name a flag D25 deletes. No user can reach them
+  with the flag gone, and §6.3 rewrites them in B3. Noted so a reviewer reading B1's diff does not file it.
+
+### Also recorded, and not a fork: how §11.5's eight bullets split across B1 and B3
+
+Rev 7's §16.1 assigns "§11.5" to B1 wholesale, while the batch plan's B3 row claims part of it
+(`status.ts:26,113`, `cliSearch`/`SearchHit`). The spec settles its own conflict: §11.5's
+`policy.publish` bullet requires the field to leave `status.ts`, `teamSchema` **and** the desktop's
+non-passthrough `status` mirror *"in one change"*, and `teamSchema` is §4.1 — B3. So the whole
+`policy.publish` cluster is B3's, and with it D21 (`readme --pr-comment` reads `team.global`, also §4.1)
+and D23 (the fixture schema loosens *because* `policy.publish` leaves). `cliSearch`/`SearchHit` need
+§4.1's `unresolved` deletion, so they are B3's too.
+
+**B1 takes four bullets:** the `login.ts:42` identity notice, `status`'s pending-work guidance and the
+*fetched*-not-*synced* wording, the Inbox kinds (D22), and `decline`'s six surviving desktop declarations
+plus the two CLI-side names §12's `CliVerbs.decline` does not cover (`frames.ts`'s `'decline'` entry and
+the `cli.ts` registration). This is a reading of the spec against itself, not a decision — recorded
+because a reviewer comparing B1's diff to §16.1's one-line scope would otherwise read the four
+untouched bullets as omissions.
