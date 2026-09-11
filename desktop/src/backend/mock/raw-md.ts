@@ -1,10 +1,14 @@
+import { detailOf, design } from './data';
+
 /**
  * A construct-complete Markdown document for the test-only `?__mock=raw-md` scenario. It exists so the
  * real render path (SkillMarkdown) is reachable from a browser, which is the only place a computed style
  * can be asserted — `vitest.config.ts` sets `css:false`. It is NOT fixture content for any board: no
  * FIDELITY row may ever use `raw-md`, and `readScenario` returns 'default' inside the native shell.
  */
-export const RAW_MD = `## When to use
+export const RAW_MD = `${detailOf(design.DETAIL).skillMd.frontmatter}
+
+## When to use
 
 Before any deploy that touches migrations, with \`--dry-run\` first and a **rollback note** ready.
 

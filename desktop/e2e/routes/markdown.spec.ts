@@ -29,7 +29,13 @@ test("section headings carry the board's own weight and air",async({page})=>{
  await expect(heading).toHaveCSS('font-size','14px');
  await expect(heading).toHaveCSS('font-weight','590');
  await expect(heading).toHaveCSS('line-height','20px');
- // Spec §4.4 explicitly removes top air from the first child; RAW_MD begins with this h2.
+ // RAW_MD begins with this h2, but the frontmatter block renders above the doc, so the heading keeps the
+ // board's 6px (10px gap + 6px = the drawn 16px), exactly like the mock's first .md-h2 under its frontmatter.
+ await expect(heading).toHaveCSS('margin-top','6px');
+ expect(await heading.evaluate(element=>element.getBoundingClientRect().top-element.parentElement!.previousElementSibling!.getBoundingClientRect().bottom)).toBe(16);
+ // Spec §4.4 removes top air from the first child only when the doc is the panel's first block (a SKILL.md
+ // without frontmatter): take the frontmatter block away and the same heading sits flush.
+ await page.getByTestId('frontmatter').evaluate(element=>element.remove());
  await expect(heading).toHaveCSS('margin-top','0px');
  // Exercise the same heading after a paragraph without changing the spec's literal RAW_MD document.
  await heading.evaluate(element=>{

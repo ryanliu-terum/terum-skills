@@ -10,6 +10,7 @@ export interface SkillRecord {
   team: string;
   directory: string;
   frontmatter: SkillFrontmatter;
+  rawFrontmatter: string;
   body: string;
   /** UTF-16 code units of the whole SKILL.md, the basis HYG6's 20,000-character guideline uses. */
   characters: number;
@@ -33,7 +34,7 @@ export async function skillRecords(clone: string, team: string, options: SkillRe
       const parsed = parseSkillFrontmatter(source);
       if (!parsed.ok) throw new Error(`Invalid skills/${name}/SKILL.md: ${parsed.error}`);
       if (parsed.data.name !== name) throw new Error(`Skill folder ${name} does not match frontmatter name ${parsed.data.name}.`);
-      result.push({ id: parsed.data.metadata.id, name, team, directory, frontmatter: parsed.data, body: parsed.body, characters: source.length, grants: parsed.grants });
+      result.push({ id: parsed.data.metadata.id, name, team, directory, frontmatter: parsed.data, rawFrontmatter: parsed.frontmatter, body: parsed.body, characters: source.length, grants: parsed.grants });
     } catch (error) {
       options.onProblem?.({ name, message: error instanceof Error ? error.message : String(error) });
     }
