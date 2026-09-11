@@ -6,7 +6,19 @@ export const UI_KEY = 'terum-skills-app:ui';
 // The eval defaults are app-owned chrome too: the CLI keeps no defaults of its own, so Settings ▸ Evals
 // stores them here and the adapter passes them as flags on every eval run.
 export function isChromePreference(key: string): boolean {
- return ['ui','appearance:start','appearance:counts','appearance:machine','inbox:badge','inbox:seen','launch:consumedWrittenAt','onboardingSkipped','eval:k','eval:model','eval:judge','eval:commit'].includes(key) || /^inbox:kind:(share|update|alert|eval|review|author|team)$/.test(key);
+ return ['ui','appearance:start','appearance:counts','appearance:machine','inbox:badge','inbox:seen','launch:consumedWrittenAt','onboardingSkipped','eval:k','eval:model','eval:judge','eval:commit','updates:app:policy','updates:app:lastShown'].includes(key) || /^inbox:kind:(share|update|alert|eval|review|author|team)$/.test(key);
+}
+export type AppUpdatePolicy = 'ask' | 'on-close' | 'overnight';
+export function appUpdatePolicy(value: unknown): AppUpdatePolicy {
+ return value === 'ask' || value === 'overnight' ? value : 'on-close';
+}
+/** Existing policy wins; consume the boolean only once, even in an already-hydrated native file. */
+export function migrateAppUpdatePolicy(record: Record<string, unknown>): Record<string, unknown> {
+ const migrated = { ...record };
+ if (migrated['updates:app:policy'] === undefined) migrated['updates:app:policy'] = migrated['updates:app:auto'] === false ? 'ask' : 'on-close';
+ else migrated['updates:app:policy'] = appUpdatePolicy(migrated['updates:app:policy']);
+ delete migrated['updates:app:auto'];
+ return migrated;
 }
 export function preferenceValue<T>(value: unknown, fallback: T): T {
  return value !== undefined && (value === null) === (fallback === null) && typeof value === typeof fallback && Array.isArray(value) === Array.isArray(fallback) ? structuredClone(value) as T : fallback;
@@ -18,17 +30,35 @@ export function legacyPreferences(storage: Storage): Record<string, unknown> {
   const key = storage.key(i);
   if (!key?.startsWith(PREF_PREFIX)) continue;
   const name = key.slice(PREF_PREFIX.length);
-  if (!isChromePreference(name)) continue;
+  if (!isChromePreference(name) && name !== 'updates:app:auto') continue;
   try { record[name] = JSON.parse(storage.getItem(key) ?? 'null'); } catch { /* Malformed entries use their drawn default. */ }
  }
  try { const ui = storage.getItem(UI_KEY); if (ui) record.ui = JSON.parse(ui); else { const theme = storage.getItem('terum-theme'); if (theme === 'dark' || theme === 'light') record.ui = { state: { theme }, version: 0 }; } } catch { /* Drawn defaults. */ }
- return record;
+ return migrateAppUpdatePolicy(record);
 }
 export function browserPrefs(): PrefStore {
  const listeners = new Set<() => void>();
  return {
   get<T>(key: string, fallback: T): T {
-   try { return preferenceValue(JSON.parse(localStorage.getItem(key === 'ui' ? UI_KEY : PREF_PREFIX + key) ?? 'null'), fallback); }
+   try {
+    if (key === 'updates:app:policy') {
+     const current = localStorage.getItem(PREF_PREFIX + key), legacy = localStorage.getItem(PREF_PREFIX + 'updates:app:auto');
+     const record: Record<string, unknown> = {};
+     if (current !== null) {
+      try { record[key] = JSON.parse(current); } catch { record[key] = 'on-close'; }
+     } else if (legacy !== null) {
+      try { record['updates:app:auto'] = JSON.parse(legacy); } catch { /* Invalid legacy values use the policy default. */ }
+     }
+     const value = migrateAppUpdatePolicy(record)[key];
+     // A read after migration is read-only; a failed write must not erase the legacy opt-out.
+     const encoded = JSON.stringify(value);
+     try {
+      if (current !== encoded) localStorage.setItem(PREF_PREFIX + key, encoded);
+      if (legacy !== null) localStorage.removeItem(PREF_PREFIX + 'updates:app:auto');
+     } catch { /* Keep the observed choice for this read; a later read retries migration without losing the opt-out. */ }
+     return preferenceValue(value, fallback);
+    }
+    return preferenceValue(JSON.parse(localStorage.getItem(key === 'ui' ? UI_KEY : PREF_PREFIX + key) ?? 'null'), fallback); }
    catch { return fallback; }
   },
   set(key, value) {

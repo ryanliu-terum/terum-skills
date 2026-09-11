@@ -30,8 +30,8 @@ const cases:{name:string;patch:Partial<AppUpdateStatus>;desc:string;button?:stri
  {name:'probe skipped',patch:{probe:'skipped',latest:null,newer:false},desc:'0.1.10 · release advertisements are not checked on this machine.'},
  {name:'probe failed',patch:{probe:'failed',newer:false},desc:'0.1.10 · could not reach github.com to check for a newer app.',button:'Check again'},
  {name:'up to date',patch:{newer:false},desc:'0.1.10 · up to date',ok:true},
- {name:'downloaded',patch:{staged:'0.1.12'},desc:'0.1.10 · 0.1.12 downloaded and verified.',button:'Relaunch now'},
- {name:'newer available',patch:{},desc:'0.1.10 · 0.1.12 available.',button:'Download 0.1.12'},
+ {name:'downloaded',patch:{staged:'0.1.12'},desc:'0.1.10 · 0.1.12 downloaded and verified.',button:'Install now'},
+ {name:'newer available',patch:{},desc:'0.1.10 · 0.1.12 available.',button:'Download'},
 ];
 it.each(cases)('renders full mode $name',async({patch,desc,button,ok})=>{
  await configure('full',patch);open();await waitFor(()=>expect(group()).toHaveTextContent(desc));
@@ -54,39 +54,51 @@ it.each([
  if(control==='Show update command'){fireEvent.click(within(group()).getByRole('button',{name:control}));expect(await screen.findByRole('dialog')).toHaveTextContent('Update command');}
 });
 it('offers Download and stages the advertised version',async()=>{
- await configure();const stage=vi.spyOn(backend.appUpdate,'stage').mockImplementation(version=>createRun(async()=>({ok:true,value:{version,staged:true,notPublished:false,alreadyStaged:false}})));
- open();fireEvent.click(await screen.findByRole('button',{name:'Download 0.1.12'}));await waitFor(()=>expect(stage).toHaveBeenCalledExactlyOnceWith('0.1.12'));
+ const check=await configure();const stage=vi.spyOn(backend.appUpdate,'stage').mockImplementation(version=>createRun(async()=>({ok:true,value:{version,staged:true,notPublished:false,alreadyStaged:false}})));
+ open();fireEvent.click(await screen.findByRole('button',{name:'Download'}));await waitFor(()=>expect(stage).toHaveBeenCalledExactlyOnceWith('0.1.12'));
+ expect(await screen.findByRole('button',{name:'Install now'})).toBeVisible();expect(await screen.findByRole('button',{name:'Update ready · 0.1.12'})).toBeVisible();expect(check).toHaveBeenCalledOnce();
 });
 it('always asks before relaunching, and calls apply then quit in that order',async()=>{
  await configure('full',{staged:'0.1.12'});const order:string[]=[];const apply=vi.spyOn(backend.appUpdate,'apply').mockImplementation(async()=>{await Promise.resolve();order.push('apply');return {ok:true,value:undefined};});const quit=vi.spyOn(backend,'quit').mockImplementation(async()=>{order.push('quit');});
- open();fireEvent.click(await screen.findByRole('button',{name:'Relaunch now'}));const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Relaunch to finish updating');
+ open();fireEvent.click(await screen.findByRole('button',{name:'Install now'}));const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Install 0.1.12 and relaunch now?');
  expect(dialog).toHaveTextContent('Terum Skills 0.1.12 is downloaded and verified. Relaunching closes this window; anything the app is running — an eval, a sync — is stopped when it closes.');expect(apply).not.toHaveBeenCalled();expect(quit).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByRole('button',{name:'Relaunch'}));await waitFor(()=>expect(order).toEqual(['apply','quit']));expect(quit).toHaveBeenCalledOnce();expect(apply).toHaveBeenCalledExactlyOnceWith('0.1.12');
 });
 it('cancelling the relaunch dialog calls neither apply nor quit',async()=>{
- await configure('full',{staged:'0.1.12'});const apply=vi.spyOn(backend.appUpdate,'apply'),quit=vi.spyOn(backend,'quit');open();fireEvent.click(await screen.findByRole('button',{name:'Relaunch now'}));fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Later'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(apply).not.toHaveBeenCalled();expect(quit).not.toHaveBeenCalled();
+ await configure('full',{staged:'0.1.12'});const apply=vi.spyOn(backend.appUpdate,'apply'),quit=vi.spyOn(backend,'quit');open();fireEvent.click(await screen.findByRole('button',{name:'Install now'}));fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Later'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(apply).not.toHaveBeenCalled();expect(quit).not.toHaveBeenCalled();
 });
 it('keeps the dialog open and shows the error when apply fails',async()=>{
- await configure('full',{staged:'0.1.12'});vi.spyOn(backend.appUpdate,'apply').mockResolvedValue({ok:false,error:'Nothing is staged for 0.1.12; download it first.'});const quit=vi.spyOn(backend,'quit');open();fireEvent.click(await screen.findByRole('button',{name:'Relaunch now'}));const dialog=await screen.findByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:'Relaunch'}));
+ await configure('full',{staged:'0.1.12'});vi.spyOn(backend.appUpdate,'apply').mockResolvedValue({ok:false,error:'Nothing is staged for 0.1.12; download it first.'});const quit=vi.spyOn(backend,'quit');open();fireEvent.click(await screen.findByRole('button',{name:'Install now'}));const dialog=await screen.findByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:'Relaunch'}));
  expect(await within(dialog).findByRole('alert')).toHaveTextContent('Nothing is staged for 0.1.12; download it first.');expect(dialog).toBeInTheDocument();expect(quit).not.toHaveBeenCalled();
 });
 it('does not check on window focus',async()=>{
- const check=await configure();open();await screen.findByRole('button',{name:'Download 0.1.12'});fireEvent(window,new Event('focus'));await act(async()=>{});expect(check).toHaveBeenCalledExactlyOnceWith();
+ const check=await configure();open();await screen.findByRole('button',{name:'Download'});fireEvent(window,new Event('focus'));await act(async()=>{});expect(check).toHaveBeenCalledExactlyOnceWith();
 });
 it('never calls appUpdate.check in notice mode',async()=>{
  const check=await configure('notice');open();await screen.findByText('Terum Skills app');expect(check).not.toHaveBeenCalled();
 });
-it('writes the auto-download preference and reverts the switch when the write throws',async()=>{
- await configure('full',{newer:false});backend.prefs.set('updates:app:auto',true);const set=vi.spyOn(backend.prefs,'set');open();const toggle=await screen.findByRole('switch',{name:'Download updates automatically'});expect(toggle).toHaveAttribute('aria-checked','true');
- fireEvent.click(toggle);expect(set).toHaveBeenCalledWith('updates:app:auto',false);expect(toggle).toHaveAttribute('aria-checked','false');
- set.mockImplementation(()=>{throw new Error('Preferences are read-only.');});fireEvent.click(toggle);expect(await within(group()).findByRole('alert')).toHaveTextContent('Preferences are read-only.');expect(toggle).toHaveAttribute('aria-checked','false');
+it('migrates the opt-out, persists policy selection, and retains the selection on a failed write',async()=>{
+ await configure('full',{newer:false});const set=vi.spyOn(backend.prefs,'set');open();const select=await screen.findByRole('combobox',{name:'Install updates'});expect(select).toHaveTextContent('Ask me');
+ fireEvent.click(select);const onClose=await screen.findByRole('option',{name:'When I quit'});fireEvent.pointerDown(onClose,{pointerType:'mouse'});fireEvent.click(onClose);expect(set).toHaveBeenCalledWith('updates:app:policy','on-close');expect(select).toHaveTextContent('When I quit');
+ set.mockImplementation(()=>{throw new Error('Preferences are read-only.');});fireEvent.click(select);const overnight=await screen.findByRole('option',{name:'Overnight'});fireEvent.pointerDown(overnight,{pointerType:'mouse'});fireEvent.click(overnight);expect(await within(group()).findByRole('alert')).toHaveTextContent('Preferences are read-only.');expect(select).toHaveTextContent('When I quit');
 });
 it('streams download output and Cancel reaches the active Run',async()=>{
  await configure();const run=createRun(async ctx=>{ctx.print('Fetching the verified release…');await ctx.sleep(60_000);return {ok:true as const,value:{version:'0.1.12',staged:true,notPublished:false,alreadyStaged:false}};});const cancel=vi.spyOn(run,'cancel');vi.spyOn(backend.appUpdate,'stage').mockReturnValue(run);
- open();fireEvent.click(await screen.findByRole('button',{name:'Download 0.1.12'}));expect(await screen.findByRole('button',{name:'Downloading…'})).toBeDisabled();expect(group()).toHaveTextContent('0.1.10 · downloading 0.1.12…');expect(group()).toHaveTextContent('Fetching the verified release…');fireEvent.click(screen.getByRole('button',{name:'Cancel'}));await waitFor(()=>expect(cancel).toHaveBeenCalledOnce());
+ open();fireEvent.click(await screen.findByRole('button',{name:'Download'}));expect(await screen.findByRole('button',{name:'Downloading…'})).toBeDisabled();expect(group()).toHaveTextContent('0.1.10 · downloading 0.1.12…');expect(group()).toHaveTextContent('Fetching the verified release…');fireEvent.click(screen.getByRole('button',{name:'Cancel'}));await waitFor(()=>expect(cancel).toHaveBeenCalledOnce());
 });
 it.each([true,false])('renders a stage outcome with notPublished=%s',async notPublished=>{
- await configure();vi.spyOn(backend.appUpdate,'stage').mockImplementation(()=>createRun(async()=>notPublished?{ok:true,value:{version:'0.1.12',staged:false,notPublished:true,alreadyStaged:false}}:{ok:false,error:'checksum failed'}));open();fireEvent.click(await screen.findByRole('button',{name:'Download 0.1.12'}));
+ await configure();vi.spyOn(backend.appUpdate,'stage').mockImplementation(()=>createRun(async()=>notPublished?{ok:true,value:{version:'0.1.12',staged:false,notPublished:true,alreadyStaged:false}}:{ok:false,error:'checksum failed'}));open();fireEvent.click(await screen.findByRole('button',{name:'Download'}));
  await waitFor(()=>expect(group()).toHaveTextContent(notPublished?'0.1.10 · 0.1.12 is announced but its files are not published yet.':'0.1.10 · 0.1.12 could not be downloaded.'));
  if(notPublished)expect(within(group()).queryByRole('button')).toBeNull();else{expect(within(group()).getByRole('alert')).toHaveTextContent('checksum failed');expect(within(group()).getByRole('button',{name:'Try again'})).toBeVisible();}
+});
+
+it.each(['on-close','overnight','manual'] as const)('shows the successful marker reason %s',async reason=>{
+ await configure('full',{newer:false,lastApply:{version:'0.1.10',phase:'launched',at:'2026-09-10T00:00:00Z',error:null,reason}});open();
+ expect(await screen.findByText(`Updated to 0.1.10${reason==='on-close'?' when you quit':reason==='overnight'?' overnight':''}`)).toBeVisible();
+});
+it('focuses the app row when navigating to Updates',async()=>{await configure();open();await screen.findByRole('button',{name:'Download'});expect(document.getElementById('app-update-row')).toHaveFocus();});
+
+it('keeps the completed-update notice when another version is already advertised',async()=>{
+ await configure('full',{lastApply:{version:'0.1.10',phase:'launched',at:'2026-09-10T00:00:00Z',error:null,reason:'overnight'}});open();
+ await waitFor(()=>expect(group()).toHaveTextContent('Updated to 0.1.10 overnight.'));expect(within(group()).getByRole('button',{name:'Download'})).toBeVisible();
 });

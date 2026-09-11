@@ -80,7 +80,7 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |
 | Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
 | | `app` | Install and open the desktop app for this CLI version |
-| | `app-update [--check\|--stage\|--apply] [--release <version>]` | Check for, download, or install a newer desktop app; the app drives it from Settings ▸ Updates |
+| | `app-update [--check\|--stage\|--apply] [--release <version>] [--reason on-close\|overnight\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes) |
 
 `npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option you are expected to use.
 

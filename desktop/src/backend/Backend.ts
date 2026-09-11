@@ -51,7 +51,9 @@ export interface Backend {
   appUpdate: {
     check(q?: { force?: boolean }, options?: ReadOptions): Promise<Result<AppUpdateStatus>>;
     stage(version: string): Run<AppUpdateStaged>;
-    apply(version: string): Promise<Result<void>>;
+    apply(version: string, reason?: 'manual' | 'overnight'): Promise<Result<void>>;
+    armOnClose(version: string): Promise<Result<void>>;
+    disarmOnClose(): Promise<Result<void>>;
   };
   diagnostics(): Run<void>;
   openInEditor(path: string): Promise<Result<void>>;

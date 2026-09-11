@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-app-update-on-close"
+description = "Arm or disarm the detached installer that must outlive the WebView."
+commands.allow = ["app_update_on_close"]

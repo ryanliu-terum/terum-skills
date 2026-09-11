@@ -1,8 +1,10 @@
+import { invoke } from '@tauri-apps/api/core';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Frame } from '../../types';
 import { createTauriBackend } from '../index';
 import { fakeBridge } from './fake-bridge';
 
+vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>undefined)}));
 const check = {mode:'check',platform:'win32-x64',supported:true,cliVersion:'0.1.10',latest:'0.1.12',latestAt:null,probe:'cached',probeError:null,staged:null,installed:[],lastApply:null,ppid:42};
 const stage = {mode:'stage',version:'0.1.12',platform:'win32-x64',staged:true,notPublished:false,alreadyStaged:false,asset:'app.exe',bytes:16,path:'/app/0.1.12'};
 const apply = {mode:'apply',version:'0.1.12',platform:'win32-x64',awaitPid:42,handedOff:true};
@@ -57,4 +59,28 @@ it('maps the apply marker without its wire schema and check touches no read mode
  const h=harness({...check,lastApply}),listener=vi.fn();h.backend.subscribe(listener);
  const result=await h.backend.appUpdate.check();expect(result).toMatchObject({ok:true,value:{lastApply:{version:lastApply.version,phase:'failed',at:lastApply.at,error:lastApply.error}}});
  if(result.ok)expect(result.value.lastApply).not.toHaveProperty('schema');expect(listener).not.toHaveBeenCalled();
+});
+it('arms and disarms through the native command with exact payloads',async()=>{
+ const h=harness();vi.mocked(invoke).mockClear();
+ expect(await h.backend.appUpdate.armOnClose('0.1.12')).toEqual({ok:true,value:undefined});expect(await h.backend.appUpdate.disarmOnClose()).toEqual({ok:true,value:undefined});
+ expect(vi.mocked(invoke).mock.calls).toEqual([['app_update_on_close',{version:'0.1.12'}],['app_update_on_close',{version:null}]]);expect(h.spawns).toEqual([]);
+});
+it('returns a recorded failure when arming fails and allows a later disarm',async()=>{
+ const h=harness();vi.mocked(invoke).mockRejectedValueOnce(new Error('shell refused'));
+ await expect(h.backend.appUpdate.armOnClose('0.1.12')).resolves.toEqual({ok:false,error:'shell refused'});
+ await expect(h.backend.appUpdate.disarmOnClose()).resolves.toEqual({ok:true,value:undefined});
+});
+it('serializes arming and disarming and disarms before applying overnight',async()=>{
+ const h=harness(apply);let finish!:()=>void;vi.mocked(invoke).mockClear().mockImplementationOnce(()=>new Promise<void>(resolve=>{finish=resolve;}));
+ const arm=h.backend.appUpdate.armOnClose('0.1.12'),install=h.backend.appUpdate.apply('0.1.12','overnight');
+ await vi.waitFor(()=>expect(invoke).toHaveBeenCalledOnce());expect(h.spawns).toEqual([]);finish();await arm;expect((await install).ok).toBe(true);
+ expect(vi.mocked(invoke).mock.calls).toEqual([['app_update_on_close',{version:'0.1.12'}],['app_update_on_close',{version:null}]]);
+ expect(h.spawns[0]?.args).toEqual(['app-update','--apply','--release','0.1.12','--reason','overnight']);
+});
+it('does not hand off a second installer if disarming fails',async()=>{
+ const h=harness(apply);vi.mocked(invoke).mockRejectedValueOnce(new Error('cannot disarm'));expect(await h.backend.appUpdate.apply('0.1.12')).toEqual({ok:false,error:'cannot disarm'});expect(h.spawns).toEqual([]);
+});
+it.each(['on-close','overnight','manual'] as const)('maps marker reason %s to status and marker',async reason=>{
+ const h=harness({...check,lastApply:{schema:1,version:'0.1.12',phase:'failed',at:'2026-09-10T00:00:00Z',error:'failed',reason}});
+ expect(await h.backend.appUpdate.check()).toMatchObject({ok:true,value:{reason,lastApply:{reason}}});
 });
