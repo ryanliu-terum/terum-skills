@@ -52,7 +52,19 @@ test('raw Markdown matches the mock blocks at 1440×900', async ({ page, context
   expect(await page.locator('.skill-md-blocks').evaluate(element => getComputedStyle(element).gap)).toBe(mockGap);
   expect(await page.locator('.md-doc').evaluate(element => getComputedStyle(element).gap)).toBe(mockGap);
 
-  // W-05 explicitly keeps the first document heading's margin at zero. As in markdown.spec.ts,
+  // The first heading follows the frontmatter block in both panes: the 10px gap plus the heading's own 6px.
+  const airAfterFrontmatter = (pane: Page, selector: string) => pane.evaluate(headingSelector => {
+    const frontmatter = document.querySelector('[data-testid="frontmatter"]');
+    const heading = document.querySelector(headingSelector);
+    if (!frontmatter || !heading) throw new Error('Missing frontmatter block or first heading: ' + headingSelector);
+    return heading.getBoundingClientRect().top - frontmatter.getBoundingClientRect().bottom;
+  }, selector);
+  const firstHeadingAir = await airAfterFrontmatter(page, '.md-doc > h2.md-h2:first-child');
+  expect(firstHeadingAir, 'first heading after the frontmatter')
+    .toBe(await airAfterFrontmatter(mock, '.skill-md-blocks > [data-testid="frontmatter"] + .md-h2'));
+  expect(firstHeadingAir).toBe(16);
+
+  // W-05 keeps a first document heading's margin at zero only when the doc is the panel's first block. As in markdown.spec.ts,
   // move that h2 to exercise section headings after both a paragraph and a list without adding
   // headings to the shared RAW_MD fixture (whose heading ramp is covered by the existing tests).
   for (const [selector, mockIndex] of [['p.md-p', 1], ['ol.md-list', 2]] as const) {

@@ -13,7 +13,9 @@
    ancestor `.skill-md-tab` already caps the column at 760px, so `.md-doc` sets no max-width of its own. */
 .md-doc{display:flex;flex-direction:column;gap:10px;font-size:13px;font-weight:400;line-height:20px;color:var(--tk-text2);text-wrap:pretty;overflow-wrap:break-word}
 .md-doc>*{min-width:0}
-.md-doc>:first-child{margin-top:0}
+/* The first child sits flush only when the doc is the panel's first block (a SKILL.md without frontmatter).
+   Under the frontmatter block the mock's heading keeps its own margin (10px gap + 6px = the drawn 16px). */
+.md-doc:first-child>:first-child{margin-top:0}
 /* Heading ramp. `.md-h2` is the design's own rule (14/590/20 + margin-top:6px) and is NOT redefined.
    h1 is --text-xl and sits under the page title (.detail-title h1 = 24/590/30); h3-h6 step down through
    the design's 590/510 weights and the --text-* sizes. */
