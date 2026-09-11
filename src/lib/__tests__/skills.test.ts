@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { readRoster, canonicalDigest, declaredCategory, findSkill, injectManagedFields } from '../skills.js';
+import { joinDates, readRoster, canonicalDigest, declaredCategory, findSkill, injectManagedFields } from '../skills.js';
 import { parseSkillFrontmatter } from '../schema.js';
-import { bareTeam, person, TEAM_JSON, temporaryDirectory } from './fixtures.js';
+import type { Runner } from '../runner.js';
+import { bareTeam, git, person, TEAM_JSON, temporaryDirectory } from './fixtures.js';
 
 describe('skills (§5.3 canonical frontmatter)', () => {
   it('generates the whole metadata block for an off-the-shelf SKILL.md — id, author, license, and misc as the category — and never overwrites a declared category', () => {
@@ -92,9 +93,44 @@ it('readRoster checks filename identity before archives, reports bad files, and 
   await writeFile(join(seed, 'people', 'old.json'), JSON.stringify(person('new')));
   await writeFile(join(seed, 'people', 'broken.json'), '{');
   const result = await readRoster(seed);
-  expect(result.roster).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => ({ handle, displayName: handle, role: null, projects: [], admin: null })));
+  expect(result.roster).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => ({ handle, displayName: handle, role: null, projects: [], admin: null, joined: null, installed: 0 })));
   expect(result.problems.map((problem) => problem.file)).toEqual(['people/broken.json', 'people/old.json']);
   expect(result.problems.every((problem) => problem.message.length > 0)).toBe(true);
+});
+
+it('joinDates dates each member from the first commit that added their people file, not the latest one', async () => {
+  const { seed } = await bareTeam();
+  const commit = async (message: string, when: string) => { await git(['add', '-A'], seed); await git(['commit', '-q', '-m', message, `--date=${when}`], seed); };
+  await writeFile(join(seed, 'people', 'a.json'), JSON.stringify(person('a')));
+  await commit('a joins', '2026-06-12T10:00:00+00:00');
+  await writeFile(join(seed, 'people', 'b.json'), JSON.stringify(person('b')));
+  await commit('b joins', '2026-08-03T10:00:00+00:00');
+  // A later change to a's own file must not move a's join date.
+  await writeFile(join(seed, 'people', 'a.json'), JSON.stringify(person('a', { bio: 'later' })));
+  await commit('a edits', '2026-09-01T10:00:00+00:00');
+  const dates = await joinDates(seed);
+  expect([dates.get('a'), dates.get('b')]).toEqual(['2026-06-12', '2026-08-03']);
+  // The fixture's own seed member was committed today, so every people file in the tree is dated.
+  expect(dates.get('seed')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  const { roster } = await readRoster(seed, { joined: dates });
+  expect(roster.map((entry) => [entry.handle, entry.joined])).toEqual([['a', '2026-06-12'], ['b', '2026-08-03'], ['seed', dates.get('seed')]]);
+});
+
+it('joinDates reports no dates rather than wrong ones when the history cannot be read', async () => {
+  const outside = await temporaryDirectory();
+  expect([...(await joinDates(outside)).keys()]).toEqual([]);
+  const throwing = { run: () => { throw new Error('git is not installed'); } } as unknown as Runner;
+  expect([...(await joinDates(outside, throwing)).keys()]).toEqual([]);
+});
+
+it('readRoster counts the distinct skills a people file records as installed, not its entries', async () => {
+  const { seed } = await bareTeam();
+  const [one, two] = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+  const entry = (id: string, scope: Record<string, unknown>) => ({ id, version: null, scope, since: '2026-09-01' });
+  // The same skill placed globally and again in a project is one skill.
+  await writeFile(join(seed, 'people', 'a.json'), JSON.stringify(person('a', { installed: [entry(one, { kind: 'global' }), entry(one, { kind: 'project', project: 'app' }), entry(two, { kind: 'global' })] })));
+  const { roster } = await readRoster(seed);
+  expect(roster.map((member) => [member.handle, member.installed])).toEqual([['a', 2], ['seed', 0]]);
 });
 
 it('readRoster joins admin logins case-insensitively and keeps admin null without a login or a lookup', async () => {

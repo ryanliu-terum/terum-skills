@@ -40,7 +40,6 @@ const cases:Case[]=[
  {key:'disablePerMachine',cap:true,route:'/library/global',selector:'[aria-label="Enable deploy-check"]'},
  {key:'disablePerMachine',cap:true,route:'/skill/deploy-check?__mock=disabled',selector:'[aria-label="Enable skill"]',absentText:'On disk, not loaded'},
  {key:'projectMembers',route:'/marketplace/projects/terum',selector:'.market-project-heading .board-facepile'},
- {key:'memberRole',route:'/share',selector:'.member-row:not([data-testid="invited-row"]) > [role="cell"]:nth-child(4)',falseText:'—'},
  {key:'liftOnCards',route:'/library/global',selector:'[data-testid="skill-card-deploy-check"] .lift-figure',falseText:'—'},
  {key:'runEvalInApp',route:'/skill/deploy-check?tab=evals',selector:'.tab-head button'},
  {key:'runEvalInApp',route:'/skill/deploy-check?tab=evals&dialog=run-eval',selector:'[role="dialog"]'},

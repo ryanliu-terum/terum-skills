@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import YAML from 'yaml';
 import { allowedTools, parseJson, parseSkillFrontmatter, Person, SkillFrontmatter, Team, personSchema, teamSchema } from './schema.js';
+import { CommandResult, Runner, systemRunner } from './runner.js';
 
 export interface SkillRecord {
   id: string;
@@ -66,11 +67,42 @@ export async function endorsedCandidates(clone: string, team: string, handle: st
 export async function readTeam(clone: string): Promise<Team> { return parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json'); }
 export async function readPerson(clone: string, handle: string): Promise<Person> { return parseJson(personSchema, await readFile(join(clone, 'people', `${handle}.json`), 'utf8'), `people/${handle}.json`); }
 
-/** `admin` is host truth (GitHub collaborator permission), joined on the person's github login; null when the lookup was unavailable or the person declares no login. */
-export interface RosterEntry { handle: string; displayName: string; role: string | null; projects: readonly string[]; admin: boolean | null; }
+/**
+ * `admin` is host truth (GitHub collaborator permission), joined on the person's github login; null when the lookup was unavailable or the person declares no login.
+ * `joined` is the day this person's people file first landed in the team repo (`joinDates`); null when the history was not read or does not carry the file.
+ * `installed` counts the distinct skill IDs the person's committed people file records as installed — repo truth about that person, never a claim about the machine reading it.
+ */
+export interface RosterEntry { handle: string; displayName: string; role: string | null; projects: readonly string[]; admin: boolean | null; joined: string | null; installed: number; }
 
-/** Active roster with filename-checked identities; one bad people file never hides the others. `options.adminLogins` (lowercased GitHub logins with host admin permission, or null when unknown) decides each entry's `admin`. */
-export async function readRoster(clone: string, options: { adminLogins?: readonly string[] | null } = {}): Promise<{ roster: RosterEntry[]; problems: { file: string; message: string }[] }> {
+/**
+ * When each people file first landed in the team repo — the join date read from the repository's own
+ * committed history, because nothing records it as a field and a field added now would be blank for every
+ * member who joined before it shipped. One `git log` pass covers the whole roster: `--reverse` makes the
+ * first line naming a path its add, and `--no-renames` keeps a renamed handle an arrival instead of
+ * dropping it out of `--diff-filter=A`. The clone is always a full one (`team join` never passes
+ * `--depth`) and safeWrite's hard reset rewrites the working tree, never the history, so a sync cannot
+ * lose these dates. Offline-tolerant like the rest of `status`: a missing git, an unreadable clone or any
+ * non-zero exit yields an empty map, and the caller then reports no date rather than a wrong one.
+ */
+export async function joinDates(clone: string, runner: Runner = systemRunner): Promise<Map<string, string>> {
+  const dates = new Map<string, string>();
+  let result: CommandResult;
+  try { result = await runner.run('git', ['log', '--reverse', '--no-renames', '--diff-filter=A', '--format=%aI', '--name-only', '--', 'people'], { cwd: clone }); }
+  catch { return dates; }
+  if (result.code !== 0) return dates;
+  let when: string | null = null;
+  for (const line of result.stdout.split('\n')) {
+    const text = line.trim();
+    if (text === '') continue;
+    if (/^\d{4}-\d{2}-\d{2}T/.test(text)) { when = text.slice(0, 10); continue; }
+    const handle = /^people\/(.+)\.json$/.exec(text)?.[1];
+    if (handle !== undefined && when !== null && !dates.has(handle)) dates.set(handle, when);
+  }
+  return dates;
+}
+
+/** Active roster with filename-checked identities; one bad people file never hides the others. `options.adminLogins` (lowercased GitHub logins with host admin permission, or null when unknown) decides each entry's `admin`; `options.joined` (from `joinDates`) dates each entry. */
+export async function readRoster(clone: string, options: { adminLogins?: readonly string[] | null; joined?: ReadonlyMap<string, string> } = {}): Promise<{ roster: RosterEntry[]; problems: { file: string; message: string }[] }> {
   const team = await readTeam(clone);
   const adminLogins = options.adminLogins ?? null;
   const files = (await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).sort();
@@ -82,7 +114,9 @@ export async function readRoster(clone: string, options: { adminLogins?: readonl
       const person = await readPerson(clone, handle);
       if (person.handle !== handle) throw new Error(`Declared handle ${person.handle} does not match filename ${file}.`);
       const github = person.github.trim().toLowerCase();
-      if (!team.archived.includes(handle)) roster.push({ handle, displayName: person.display_name, role: person.role ?? null, projects: person.projects ?? [], admin: adminLogins === null || github === '' ? null : adminLogins.includes(github) });
+      // One skill installed globally and again into a project is one skill, so the count is over distinct IDs.
+      const installed = new Set(person.installed.map((entry) => entry.id)).size;
+      if (!team.archived.includes(handle)) roster.push({ handle, displayName: person.display_name, role: person.role ?? null, projects: person.projects ?? [], admin: adminLogins === null || github === '' ? null : adminLogins.includes(github), joined: options.joined?.get(handle) ?? null, installed });
     } catch (error) { problems.push({ file: `people/${file}`, message: error instanceof Error ? error.message : String(error) }); }
   }
   roster.sort((a, b) => a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0);

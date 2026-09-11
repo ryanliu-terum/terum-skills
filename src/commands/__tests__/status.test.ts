@@ -42,7 +42,11 @@ async function query(f: Awaited<ReturnType<typeof fixture>>, args: Partial<Statu
     expect(await git(['rev-parse', 'HEAD'], clone)).toBe(heads[index]);
     expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
   }
-  expect(f.runner.calls.map(({ command, args, cwd }) => ({ command, args, cwd }))).toEqual([{ command: 'git', args: ['--version'], cwd: undefined }, { command: 'gh', args: ['--version'], cwd: undefined }, ...probes.map((cwd) => ({ command: 'git', args: ['remote', 'get-url', 'origin'], cwd }))]);
+  const calls = f.runner.calls.map(({ command, args, cwd }) => ({ command, args, cwd }));
+  // A readable clone also gets the roster's join-date pass; it is one read-only `git log` over people/,
+  // asserted by shape here and by its dates in the roster tests below.
+  expect(calls.filter((call) => call.args[0] === 'log').every((call) => call.command === 'git' && call.args.join(' ') === 'log --reverse --no-renames --diff-filter=A --format=%aI --name-only -- people' && clones.includes(call.cwd ?? ''))).toBe(true);
+  expect(calls.filter((call) => call.args[0] !== 'log')).toEqual([{ command: 'git', args: ['--version'], cwd: undefined }, { command: 'gh', args: ['--version'], cwd: undefined }, ...probes.map((cwd) => ({ command: 'git', args: ['remote', 'get-url', 'origin'], cwd }))]);
   return { result, io };
 }
 
@@ -61,6 +65,11 @@ describe('status (offline local team summary)', () => {
       ...(size > 5 ? ['    … and 1 more'] : []), ...(size === 0 ? ['  Your membership: no entry in the local roster.'] : []),
       '  Shared skills: 0', '  Evaluated skills: not yet available', stale,
     ]);
+    // Every member carries the day their people file landed (the fixture commits them together) and an
+    // install count read from that file, so the app never has to invent either.
+    const members = result.ok ? result.value.teams[0]!.members : [];
+    expect(members.map((member) => member.installed)).toEqual(handles.map(() => 0));
+    for (const member of members) expect(member.joined).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it.each(['inactive', 'missing'] as const)('reports %s self membership as a successful query', async (membership) => {
