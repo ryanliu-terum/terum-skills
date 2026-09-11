@@ -315,6 +315,21 @@ it.each(['global','checkout','trailing'] as const)('maps the %s library from loc
   expect(result).toMatchObject({ok:true,value:{title:mode==='global'?'1 skill · 1 shared with acme':'0 skills',root:{id:mode==='global'?'global':'/work/ops',kind:scope.kind,label:mode==='global'?'Global':'ops',count:undefined},team:{kind:'ok',team:'acme'},skills:mode==='global'?[{name:'a',desc:'Live description',project:'Global',installs:'1 install',installsN:1,installed:'placed',placed:true,path:'/home/.claude/skills/a',updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}]:[],overview:{skills:mode==='global'?'1':'0',installs:mode==='global'?'1':'0',evaluated:'—',attention:'0',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:mode==='global'?'1 shared with acme':'',installs_note:''},provenance:null}});
   expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status','--team','acme'],['ls','--team','acme']]);
 });
+it('abbreviates a Library card checkout projectRoots entry under the home directory', async () => {
+  const repoRoot = '/Users/teddy/Documents/Terum/skill-management-software';
+  const path = repoRoot + '/.claude/skills/a';
+  const local = { roster: [], skills: [], problems: [], local: [{
+    root: repoRoot + '/.claude/skills', repoRoot, scope: 'project', rows: [{
+      name: 'a', path, state: 'placement recorded', tracked: true, shared: [],
+      placement: { id: 'id-a', team: 'acme', version: 'a'.repeat(40) }, health: 'up-to-date',
+    }], problems: [],
+  }] };
+  const result = await createTauriBackend(inventoryBridge({ local }).bridge).library({ scope: { kind: 'checkout', root: repoRoot }, team: 'acme' });
+  expect(result.ok).toBe(true);
+  expect(result.value?.skills).toHaveLength(1);
+  expect(result.value?.skills[0]?.projectRoots).toEqual(['~/Documents/Terum/skill-management-software']);
+});
+
 it('maps the detail body, grants and all install records without fabricating missing values',async()=>{
   const f=inventoryBridge();const result=await createTauriBackend(f.bridge).skill({ref:'acme/a'});
   expect(result).toMatchObject({ok:true,value:{desc:'Live description',skillMd:{frontmatter:'',body:[],markdown:'# Live body\n'},favorites:null,lines:1,receipt:null,summary:null,wlt:null,evalEstimate:null,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},hygiene:[],hygieneCaption:null,hygieneStatus:'pass',grants:['Bash','Read'],grants_approved:'',history:[],activity:[],files:null,used_by:['MC'],users:[['mira','MC','Global · since 2026-08-01'],['mira','MC','ops · since 2026-08-02']],path:'/home/.claude/skills/a',repo:'acme/team'}});
