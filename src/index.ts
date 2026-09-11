@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import module from 'node:module';
+// Caches the compiled form of every module loaded AFTER this line, which is the unbundled tree the tests and
+// `npm link` run. It cannot cache the shipped bundle: `dist/index.js` is one file and V8 has already compiled
+// it by the time this line executes. Measured (node 24, 15 runs) `--version` is 86 ms with this call and 74 ms
+// with NODE_COMPILE_CACHE set in the environment instead; see desktop/GAPS.md for why the 12 ms is not taken.
 try { module.enableCompileCache(); } catch { /* Unsupported runtime: a cache miss is a slower start, never a wrong answer. */ }
 import { constants } from 'node:fs';
 import path from 'node:path';
