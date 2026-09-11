@@ -258,3 +258,12 @@ Walked as one decision because Ryan's counter-proposal replaced the framing. The
 - **Options:** **1** `skill move` replaces the re-place on both surfaces. **2** keep both under different labels. **3** Move lives only in the Library; the marketplace card and the detail page lose it.
 - **The call:** 3 (1's substance, scoped to the surface D6 names). **Zoom-out:** a re-place moves bytes team→machine without the user asking for an install, and hides what is on the machine (a local edit vanishes into quarantine); a filesystem move moves nothing between machine and team and cannot leave the skill placed twice or nowhere — which is what the superseded ruling guarded against. D6 deliberately put the file actions in the Library.
 - **Technical:** delete `moveTo()` and `dialog=move` (`SkillScreen.tsx:85-87`); `moveAction` is pushed for Library cards only (`skill-card-actions.ts:24`) and routes to `backend.skill.move`.
+
+### Decision 11 — The publish regression gate (harden round 2, fork #8)
+
+**Verdict: LOCK — relocated into `publish`, not retired (spec D19).**
+
+- **What's at stake:** today the team repo refuses a skill whose own eval says it got worse — the eval-engine spec's publish-PR receipt check. §12 deletes PR creation, and with it that check, and nothing in the spec said whether the refusal was meant to die with the mechanism.
+- **Options:** **0** record the gate as retired on both sides (eval scores become information only) and log an override of the two walks that ruled a gate should exist. **1** the same, but annotate only the target spec. **2** keep the refusal, moved client-side: publish asks before publishing bytes whose newest local receipt is a FAIL, with `--allow-regression` as the override; absence of a receipt never blocks.
+- **The call:** 2. **Zoom-out:** the North Star is silent on blocking bad skills, so it does not decide this; the prior rulings (the 2026-09-06 publish-gate ruling and the 2026-09-07 hygiene/publish-gate walk) do, and overriding a Ryan ruling to tidy text is not a best-call authorization. Option 2 keeps their substance without GitHub in the loop, reads only the local store (nothing moves), and is asked rather than silently enforced — "prompts over flags". Recorded as `| .planning/specs/2026-09-04-eval-engine.md | locked, partly superseded |` in §16.
+- **Technical:** §5.1 step 6a; `PublishResult` unchanged; test in §14.1. The `receipt-check` verb stays a no-op-with-notice shim for one major (§12).
