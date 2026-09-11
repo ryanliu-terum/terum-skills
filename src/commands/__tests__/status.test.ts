@@ -1,9 +1,9 @@
 import { mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { stampPath } from '../../lib/hook.js';
-import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, ScriptedPrompter, TEAM_JSON, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, ScriptedPrompter, TEAM_JSON, wrapRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { slackBlock } from '../invite.js';
 import { run, StatusArgs } from '../status.js';
 
@@ -109,7 +109,7 @@ describe('status (offline local team summary)', () => {
     const { result, io } = await query(f, { team }, [f.clone], []);
     if (team) { expect(result).toMatchObject({ ok: false, error: 'Team nope is not configured.' }); expect(io.lines).toHaveLength(1); }
     else {
-      expect(result).toEqual({ ok: true, value: { version, teams: [], ledger: { placements: [], approvals: [], shared: [] }, identity: null, tools: { git: true, gh: false } } });
+      expect(result).toEqual({ ok: true, value: { version, teams: [], ledger: { placements: [], approvals: [], shared: [] }, identity: null, tools: { git: true, gh: false }, hostArch: process.arch, processArch: process.arch } });
       expect(io.lines.slice(1)).toEqual(['No team is configured on this machine.', '  Create a team: npx -y terum-skills@latest setup', '  Join a team:   npx -y terum-skills@latest setup <org>/<repo>']);
     }
   });
@@ -285,4 +285,35 @@ describe('W-02 status permissions and probes', () => {
     const runner=wrapRunner(f.runner,async(_command,args,_options,next)=>{if(args[0]==='--version'){if(++count===2)release();await both;}return next();});
     expect((await run({config:f.store,runner},new ScriptedPrompter())).ok).toBe(true);expect(count).toBe(2);
   },5000);
+});
+
+
+describe('status architecture (p-arch A4)', () => {
+  it.each([
+    ['win32', 'x64', 'ARM64', 'arm64'],
+    ['win32', 'arm64', undefined, 'arm64'],
+    ['win32', 'ia32', 'AMD64', 'x64'],
+    ['win32', 'future-arch', 'unknown', 'future-arch'],
+    ['darwin', 'x64', 'ARM64', 'x64'],
+    ['linux', 'x64', 'ARM64', 'x64'],
+  ] as const)('reports host and process separately on %s %s with hint %s', async (platform, arch, hint, host) => {
+    const config = createConfigStore(await temporaryDirectory());
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    const archDescriptor = Object.getOwnPropertyDescriptor(process, 'arch')!;
+    Object.defineProperty(process, 'platform', { value: platform });
+    Object.defineProperty(process, 'arch', { value: arch });
+    vi.stubEnv('PROCESSOR_ARCHITEW6432', hint);
+    const runner = { run: vi.fn(async () => ({ code: 0, stdout: '', stderr: '' })) };
+    try {
+      expect(await run({ config, runner }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { processArch: arch, hostArch: host } });
+      const read = vi.spyOn(config, 'read').mockRejectedValue(new Error('config unreadable'));
+      try {
+        expect(await run({ config, runner }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'config unreadable', value: { processArch: arch, hostArch: host } });
+      } finally { read.mockRestore(); }
+    } finally {
+      Object.defineProperty(process, 'platform', platformDescriptor);
+      Object.defineProperty(process, 'arch', archDescriptor);
+      vi.unstubAllEnvs();
+    }
+  });
 });

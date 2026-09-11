@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { exists, writeJsonPrivate } from '../../lib/fs.js';
 import * as pkg from '../../lib/package.js';
+import * as platformModule from '../../lib/platform.js';
 import { createReleaseState } from '../../lib/update.js';
 import type { CommandResult, Exec, Runner, RunOptions } from '../../lib/runner.js';
 import { ScriptedPrompter, ghOnlyRunner, noGhRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
@@ -243,4 +244,24 @@ it('keeps the installer failure when the Windows fallback relaunch cannot spawn'
   const error='The desktop app installer exited with code 1. kill failed';
   expect(await run({...h.args,applyNow:true,exec,localAppData},io())).toMatchObject({ok:true,value:{phase:'failed',error}});
   expect(await marker(h.root)).toMatchObject({phase:'failed',error});expect(calls).toEqual([installer,exe]);
+});
+
+
+it('app-update stages the ARM64 installer for an emulated x64 Node', async () => {
+  const h = await setup();
+  const asset = `${APP_SLUG}_${V}_arm64-setup.exe`;
+  expect(await run({ ...h.args, stage: true, evidence: { platform: 'win32', arch: 'x64', env: { PROCESSOR_ARCHITEW6432: 'ARM64' } } }, io())).toMatchObject({ ok: true, value: { platform: 'win32-arm64', asset, staged: true } });
+  expect(h.runner.calls.some(call => call.args.includes(asset))).toBe(true);
+  expect(JSON.parse(await fs.readFile(join(h.root, 'app', V, 'staged.json'), 'utf8'))).toMatchObject({ platform: 'win32-arm64', installer: asset });
+  expect(h.calls).toEqual([]);
+});
+
+it('app-update passes the live environment, but injected evidence still wins unchanged', async () => {
+  const h = await setup();
+  const detect = vi.spyOn(platformModule, 'detectPlatform').mockReturnValue('win32-arm64');
+  expect(await run({ ...h.args, evidence: undefined }, io())).toMatchObject({ ok: true, value: { platform: 'win32-arm64' } });
+  expect(detect.mock.calls[0]?.[0].env).toBe(process.env);
+  await run(h.args, io());
+  expect(detect.mock.calls[1]?.[0]).toBe(mac);
+  expect(mac).not.toHaveProperty('env');
 });

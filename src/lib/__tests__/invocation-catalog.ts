@@ -652,6 +652,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/app.ts",
+    "line": 139,
+    "policy": "routed",
+    "pattern": "if (emulation) io.print(`This machine has an ARM64 processor but you are running an x64 build of Node, so terum-skills and everything the desktop app starts will run under emulation. Install the ARM64 build of Node from nodejs.org, then run \\`${invocation(args.form, 'app')}\\` again to record it.`);"
+  },
+  {
+    "file": "src/commands/app.ts",
     "line": 166,
     "policy": "prose",
     "pattern": "if (RELEASE_ASSETS_MISSING.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;"

@@ -15,6 +15,7 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { adminLogins } from '../lib/collaborators.js';
 import { joinDates, readRoster, readTeam, RosterEntry, SkillProblem, skillRecords } from '../lib/skills.js';
 import { packageVersion } from '../lib/package.js';
+import { hostArch } from '../lib/platform.js';
 import { CloneState, describeClone } from '../lib/teamRepo.js';
 
 export interface StatusArgs extends WithForm { permissions?: boolean; team?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
@@ -29,6 +30,7 @@ export interface TeamStatus {
 }
 export interface StatusResult {
   version: string | null; teams: TeamStatus[];
+  hostArch: string; processArch: string;
   ledger: {
     placements: { path: string; id: string; team: string; version: string | null; scope: Config['pending'][number]['scope']; placed_at: string }[];
     approvals: { id: string; grants: string; approved_at: string }[];
@@ -41,6 +43,7 @@ export interface StatusResult {
 /** Offline local team summary; a successful query is not a setup-readiness or membership test. */
 export async function run(args: StatusArgs, io: Prompter): Promise<Result<StatusResult>> {
   const version = packageVersion();
+  const architecture = { hostArch: hostArch({ platform: process.platform, arch: process.arch, env: process.env }), processArch: process.arch };
   const teams: TeamStatus[] = [];
   const ledger: StatusResult['ledger'] = { placements: [], approvals: [], shared: [] };
   let identity: StatusResult['identity'] = null;
@@ -143,6 +146,6 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
       }
       if (!detail.readable) lines.push(`${team}: local team details could not be read.`);
     }
-    return lines.length ? failure(lines.join('\n'), { version, teams, ledger, identity, tools }) : success({ version, teams, ledger, identity, tools });
-  } catch (error) { return failure(error instanceof Error ? error.message : String(error), { version, teams, ledger, identity, tools }); }
+    return lines.length ? failure(lines.join('\n'), { version, teams, ledger, identity, tools, ...architecture }) : success({ version, teams, ledger, identity, tools, ...architecture });
+  } catch (error) { return failure(error instanceof Error ? error.message : String(error), { version, teams, ledger, identity, tools, ...architecture }); }
 }

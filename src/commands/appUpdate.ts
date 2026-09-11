@@ -51,7 +51,7 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
   if (args.reason !== undefined && !['on-close', 'overnight', 'manual'].includes(args.reason)) return failure('--reason must be on-close, overnight or manual.');
   if ([args.check, args.stage, args.apply].filter(Boolean).length > 1) return failure('Choose one of --check, --stage or --apply.');
   const store = args.config ?? createConfigStore(); const root = store.root; const appRoot = join(root, 'app');
-  const platform = detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, procVersion: await readProcVersion() });
+  const platform = detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, env: process.env, procVersion: await readProcVersion() });
   const suffix = assetSuffix(platform); const supported = suffix !== null;
   const runner = args.runner ?? systemRunner, exec = args.exec ?? execCommand;
   if (!args.applyNow && !args.apply && !args.stage) {

@@ -169,7 +169,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     // terminal (never over a pipe, never over frames, never in install's quiet bootstrap), setup installs and opens it
     // without asking and continues there (Teddy, 2026-09-09: the wizard boots the app; the D4 opt-in question is gone).
     // --no-app keeps the whole wizard in the terminal. A failed hand-off is printed and the terminal wizard continues.
-    if (args.quiet || !io.interactive || io.channel === 'frames' || args.app === false || assetSuffix(detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, procVersion: await readProcVersion() })) === null) {
+    if (args.quiet || !io.interactive || io.channel === 'frames' || args.app === false || assetSuffix(detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, env: process.env, procVersion: await readProcVersion() })) === null) {
       steps.app = 'skipped';
     } else {
       section('app');

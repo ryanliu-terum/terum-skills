@@ -2,6 +2,7 @@ import * as estimates from '../../lib/evals/estimate.js';
 import * as tty from '../../lib/tty.js';
 import * as promptModule from '../../lib/prompt.js';
 import * as packageModule from '../../lib/package.js';
+import * as platformModule from '../../lib/platform.js';
 import { readEvalQueue } from '../../lib/evals/queue.js';
 import { estimateFromReceipts, estimateLine } from '../../lib/evals/estimate.js';
 import { createExecute } from '../../lib/execute.js';
@@ -707,6 +708,20 @@ describe('the desktop app hand-off (D4/D5 2026-09-08; auto-launch, Teddy 2026-09
     return success({ platform: 'darwin-arm64' as const, version: '0.1.6', action: 'launched' as const, appPath: '/Applications/Terum Skills.app', statePath: '/tmp/app.json' });
   }) as never;
   class SP extends ScriptedPrompter { constructor(answers: string[] = [], confirms: boolean[] = []) { super(answers, confirms, true); } }
+
+  it('passes live environment to app availability detection and preserves injected evidence', async () => {
+    const detect = vi.spyOn(platformModule, 'detectPlatform').mockReturnValue('win32-arm64');
+    try {
+      const calls: unknown[] = [];
+      const config = createConfigStore(join(await temporaryDirectory(), 'state'));
+      expect(await run({ config, verbs: { app: appOk(calls) } }, new SP())).toMatchObject({ ok: true, value: { steps: { app: 'done' } } });
+      expect(detect.mock.calls[0]?.[0].env).toBe(process.env);
+      await run({ config, evidence: mac, verbs: { app: appOk(calls) } }, new SP());
+      expect(detect.mock.calls[1]?.[0]).toBe(mac);
+      expect(mac).not.toHaveProperty('env');
+      expect(calls).toHaveLength(2);
+    } finally { detect.mockRestore(); }
+  });
 
   it('opens the app without asking where one exists, and a failed hand-off is printed and the wizard continues', async () => {
     const store = createConfigStore(join(await temporaryDirectory(), 'state'));
