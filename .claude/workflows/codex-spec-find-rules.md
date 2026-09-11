@@ -8,14 +8,17 @@ evidence will be killed — cite, don't assert.
 
 These files define this repository's invariants and are **NOT** in your default context:
 
-1. `./CLAUDE.md` — repo root. The invariants, gates, and hard stops. (There is no `AGENTS.md`
-   in this repo, and there are no per-directory `CLAUDE.md` files — do not go looking for them.)
+1. `./AGENTS.md` then `./CLAUDE.md` — repo root. The invariants, gates, and hard stops. Anything
+   under `desktop/` is governed by `./desktop/AGENTS.md` as well — read it before citing a desktop file.
 2. `./README.md` — what the product is.
-3. This repository currently contains **no product source code**: it holds planning documents only
-   (`.planning/specs/`, `.planning/decisions/`) plus the Claude Code harness in `.claude/`.
-   The spec under review describes software that has not been written yet. Treat "this file /
-   module / command does not exist in the repo" as the expected state, never as a finding.
-   Sibling planning documents you may cite live in `.planning/specs/` and `.planning/decisions/`.
+3. This repository holds the product source: the `terum-skills` CLI in `src/` (verbs in
+   `src/commands/`, libraries in `src/lib/`, tests collocated in `__tests__/`) and the Tauri desktop
+   app in `desktop/`. Planning documents live in `.planning/specs/` and `.planning/decisions/`; the
+   Claude Code harness in `.claude/`. A spec here describes changes to code that exists, so "the file
+   or symbol the spec cites is absent, or does not do what the spec says" is a real, checkable claim —
+   grep for the symbol before asserting either way. The spec's own convention: a symbol beats a line
+   number, and a miss of a few lines is base drift, not a defect. Artifacts the spec marks `[new]` are
+   expected to be absent.
 
 ## THE RULE THAT KILLS MOST BAD SPEC FINDINGS
 
