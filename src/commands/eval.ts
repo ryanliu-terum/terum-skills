@@ -1,3 +1,5 @@
+import { runEvalBatch, EVAL_PARALLEL_DEFAULT, EVAL_LOCK_WAIT_MS } from '../lib/evals/batch.js';
+import { dequeueEvals, queueKey, readEvalQueue, updateEvalQueue, withEvalQueueLock, type EvalQueueItem } from '../lib/evals/queue.js';
 import { packageRoot } from '../lib/package-root.js';
 import { invocation } from '../lib/invocation.js';
 import type { WithForm, InvocationForm } from '../lib/invocation.js';
@@ -28,6 +30,10 @@ import { materializeVersion, resolveVersion } from '../lib/version.js';
 
 export interface EvalArgs extends WithForm {
   ref: string;
+  /** Queue guard: never bill a different version than the one requested. */
+  expectedVersion?: string;
+  /** Queue-only: reuse a receipt found after refresh, before any paid work. */
+  skipReceipted?: boolean;
   k?: number;
   triggersOnly?: boolean;
   executionOnly?: boolean;
@@ -50,6 +56,7 @@ export interface EvalArgs extends WithForm {
 }
 
 export interface EvalResult {
+  alreadyEvaluated?: boolean;
   team: string;
   id: string;
   name: string;
@@ -96,6 +103,16 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // hash must pin the exact skill text AND cases evaluated (§4.1; review P1). A concurrent
     // update may make this an older (but still exact) historical receipt.
     const originalVersion = await resolveVersion(clone, record.name, undefined, runner);
+    if (args.skipReceipted) {
+      const directory = join('evals', record.id, args.expectedVersion ?? originalVersion);
+      const existing = await newestReceiptAt(join(clone, directory));
+      if (existing) {
+        const path = join(directory, existing.file);
+        io.print(`Already evaluated ${record.name}; using committed receipt ${path}.`);
+        return success({ team: teamName, id: record.id, name: record.name, runDir: '', ccVersion: existing.receipt.provenance.cc_version, executionStatus: existing.receipt.execution_status, receiptPath: path, commit: { ok: true, receiptPath: path }, alreadyEvaluated: true });
+      }
+    }
+    if (args.expectedVersion !== undefined && args.expectedVersion !== originalVersion) return failure(`Queued version ${args.expectedVersion} of ${record.name} is no longer current; dequeue it and run setup again to choose the new version.`);
     let version = originalVersion;
     let candidateDir: string;
     if (args.working) {
@@ -513,4 +530,84 @@ export async function skillsWithoutReceipt(clone: string, team: string, runner: 
     }
   }
   return { pending, shared: records.length, considered, ...(versionProblem === undefined ? {} : { versionProblem }) };
+}
+
+
+export interface EvalQueueArgs extends Omit<EvalArgs, 'ref'> {
+  ref?: string;
+  parallel?: number;
+  queueList?: boolean;
+  drain?: boolean;
+  dequeue?: string;
+  window?: string;
+  max?: number;
+  /** Test seam; production always reuses the ordinary eval engine. */
+  evaluate?: typeof run;
+}
+export interface EvalQueueResult {
+  items: EvalQueueItem[];
+  attempted?: number;
+  completed?: number;
+  failures?: { item: EvalQueueItem; error: string }[];
+}
+export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Result<EvalQueueResult>> {
+  try {
+    const modes = Number(Boolean(args.queueList)) + Number(Boolean(args.drain)) + Number(args.dequeue !== undefined);
+    if (modes > 1) return failure('Choose only one of --queue-list, --drain, or --dequeue.');
+    if (!args.drain && (args.window !== undefined || args.max !== undefined || args.parallel !== undefined)) return failure('--window, --max and --parallel require --drain.');
+    if (args.window !== undefined && args.window !== 'overnight') return failure('--window must be overnight.');
+    if (args.max !== undefined && (!Number.isSafeInteger(args.max) || args.max < 1)) return failure('--max must be a positive integer.');
+    if (args.parallel !== undefined && (!Number.isSafeInteger(args.parallel) || args.parallel < 1)) return failure('--parallel must be a positive integer.');
+    if (modes === 0) return failure('Provide a skill, --queue-list, --drain, or --dequeue.');
+    if (args.ref !== undefined) return failure('Queue modes do not accept a skill argument.');
+    if (args.working || args.save || args.gen || args.noGen || args.case !== undefined || args.triggersOnly || args.executionOnly || args.expectedVersion !== undefined || args.team !== undefined) return failure('Queue modes use the queued team and the full committed skill; per-skill selection flags are unavailable.');
+    const store = args.config ?? createConfigStore();
+    if (args.queueList || args.dequeue !== undefined) {
+      const queue = args.dequeue === undefined ? await readEvalQueue(store.root) : await dequeueEvals(store.root, args.dequeue);
+      if (queue.items.length === 0) io.print('No queued evals.');
+      for (const item of queue.items) io.print(`${item.team}/${item.skill}@${item.version} · ${item.window} · ${item.requestedAt}${item.lastError === undefined ? '' : ` · ${item.lastError}`}`);
+      return success({ items: queue.items });
+    }
+    return await withEvalQueueLock(store.root, 'drain', async assertHeld => {
+      const pending = (await readEvalQueue(store.root)).items.filter(item => args.window === undefined || item.window === args.window).slice(0, args.max);
+      if (!pending.length) { io.print('No queued evals.'); return success({ items: (await readEvalQueue(store.root)).items, attempted: 0, completed: 0, failures: [] }); }
+      let attempted = 0, completed = 0;
+      const failures: { item: EvalQueueItem; error: string }[] = [];
+      let probe: ReturnType<typeof systemPreflight> | undefined;
+      const preflight: EvalArgs['preflight'] = model => probe ??= (args.preflight ?? systemPreflight)(model);
+      const byId = new Map(pending.map(item => [queueKey(item), item]));
+      io.print(`Evaluating ${pending.length} skills, ${args.parallel ?? EVAL_PARALLEL_DEFAULT} at a time…`);
+      const batch = await runEvalBatch({
+        items: pending.map(item => ({ id: queueKey(item), name: item.skill, version: item.version })),
+        parallel: args.parallel ?? EVAL_PARALLEL_DEFAULT, io,
+        run: async (candidate, captured) => {
+          const item = byId.get(candidate.id)!;
+          assertHeld();
+          if (!(await readEvalQueue(store.root)).items.some(current => queueKey(current) === queueKey(item) && current.requestedAt === item.requestedAt)) return failure('Item was dequeued before it started.');
+          attempted += 1;
+          let outcome: Result<EvalResult>;
+          try { outcome = await (args.evaluate ?? run)({ ...args, config: store, ref: item.skill, team: item.team, expectedVersion: item.version, skipReceipted: true, commit: true, preflight, lockWaitMs: EVAL_LOCK_WAIT_MS }, captured); }
+          catch (error) { outcome = fromError(error); }
+          const error = !outcome.ok ? outcome.error : outcome.value.commit?.ok !== true ? 'No receipt was committed; the item remains queued.' : undefined;
+          if (outcome.ok && error === undefined && outcome.value.executionStatus !== 'complete') captured.print(`Receipt committed with ${outcome.value.executionStatus} results; this item will not be evaluated again automatically.`);
+          assertHeld();
+          await updateEvalQueue(store.root, items => items.flatMap(current => queueKey(current) !== queueKey(item) || current.requestedAt !== item.requestedAt ? [current] : error === undefined ? [] : [{ ...current, lastError: error }]));
+          if (error === undefined) completed += 1;
+          else { failures.push({ item, error }); return failure(error); }
+          return outcome;
+        },
+      });
+      io.print(`Evaluated ${batch.ok} of ${pending.length}; ${batch.failed} failed.`);
+      for (const [index, outcome] of batch.outcomes.entries()) {
+        const item = pending[index]!;
+        if (!outcome.ok && !failures.some(failed => queueKey(failed.item) === queueKey(item))) {
+          assertHeld();
+          failures.push({ item, error: outcome.error });
+          await updateEvalQueue(store.root, items => items.map(current => queueKey(current) === queueKey(item) && current.requestedAt === item.requestedAt ? { ...current, lastError: outcome.error } : current));
+        }
+      }
+      const value = { items: (await readEvalQueue(store.root)).items, attempted, completed, failures };
+      return failures.length ? failureWith(value, `${failures.length} queued evals failed; they remain queued.`) : success(value);
+    });
+  } catch (error) { return fromError(error); }
 }

@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { run as publish } from '../commands/publish.js';
 import { DISCOVER_QUESTION, evalsQuestion, run as setup } from '../commands/setup.js';
 import { run as sync } from '../commands/sync.js';
@@ -18,6 +18,7 @@ async function emptyBare(root: string): Promise<string> {
 }
 
 describe('M3 setup walkthrough', () => {
+  afterEach(() => vi.unstubAllEnvs());
   it('gives each participating machine exactly one canonical session-start entry', async () => {
     const root = await temporaryDirectory('terum-m3-setup-');
     const alice = { settingsFile: join(root, 'alice.json'), backupDir: join(root, 'alice-backups') };
@@ -28,6 +29,8 @@ describe('M3 setup walkthrough', () => {
   });
 
   it('14 connects two skills for Alice, offers Bob his own skills, and resumes without reoffering connected sources', async () => {
+    // Keep this exact transcript walkthrough in the supported plain-text mode; banner behavior has its own tests.
+    vi.stubEnv('NO_COLOR', '1');
     const root = await temporaryDirectory('terum-m3-setup-');
     const bare = await emptyBare(root);
     const aliceHome = join(root, 'alice-home'); const bobHome = join(root, 'bob-home');
@@ -44,22 +47,22 @@ describe('M3 setup walkthrough', () => {
     await mkdir(second, { recursive: true });
     await writeFile(join(second, 'SKILL.md'), '---\nname: handoff\ndescription: second walkthrough skill\n---\n');
     // The connect picker is connect's own (issue 9): it offers `Connect <name>` labels and only on an interactive channel.
-    // connect sample, connect handoff, discovery no, eval batch no, hook, wrapper.
-    const aliceIo = new ScriptedPrompter(['Create a new team', 'team', '', '', 'Alice', 'alice@example.com', 'team', 'bob', 'Connect sample', 'Connect handoff'], [true, true, false, false, true, true], true);
+    // connect sample, connect handoff, discovery no, eval select Skip, hook, wrapper.
+    const aliceIo = new ScriptedPrompter(['Create a new team', 'team', '', '', 'Alice', 'alice@example.com', 'team', 'bob', 'Connect sample', 'Connect handoff', 'Skip'], [true, true, false, true, true], true);
     const alice = await setup({ app: false, config: aliceStore, home: aliceHome, runner: aliceRunner, hook: hookFor(root, 'alice'), wrapper: wrapperFor(aliceHome), communityUrl: '' }, aliceIo);
     if (!alice.ok) throw new Error(alice.error);
     expect(alice.value.steps).toMatchObject({ team: 'done', actions: 'done', invite: 'done', hook: 'done', wrapper: 'done', done: 'printed' });
     expect(aliceIo.lines).toContain('  @alice — Alice');
     expect(aliceRunner.calls.filter((call) => call.command === 'git' && call.args[0] === 'push')).toHaveLength(3);
-    expect(aliceIo.offered).toEqual([['Create a new team', 'Join an existing team'], ['Connect handoff', 'Connect sample', 'Skip'], ['Connect handoff', 'Done']]);
+    expect(aliceIo.offered).toEqual([['Create a new team', 'Join an existing team'], ['Connect handoff', 'Connect sample', 'Skip'], ['Connect handoff', 'Done'], ['Now', 'In batches', 'Overnight', 'Skip']]);
     expect(Object.keys((await aliceStore.read()).shared)).toHaveLength(2);
 
     const bobStore = createConfigStore(join(root, 'bob-state'));
     const bobRunner = mappedRunner(REMOTE, bare, fakeGh('bob', { 'api user/repository_invitations': { code: 0, stdout: '[]', stderr: '' } }));
     const bobSource = join(bobHome, '.claude', 'skills', 'bob-local'); await mkdir(bobSource, { recursive: true });
     const bobBytes = '---\nname: bob-local\ndescription: Bob local skill\n---\n'; await writeFile(join(bobSource, 'SKILL.md'), bobBytes);
-    // discovery no, eval batch no, hook, wrapper. (Bob answers the connect picker with a select, not a confirm.)
-    const bobIo = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com', 'Skip'], [false, false, true, true], true);
+    // discovery no, eval select Skip, hook, wrapper. (Bob answers the connect picker with a select, not a confirm.)
+    const bobIo = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com', 'Skip', 'Skip'], [false, true, true], true);
     const bob = await setup({ app: false, target: 'alice/team', config: bobStore, home: bobHome, runner: bobRunner, hook: hookFor(root, 'bob'), wrapper: wrapperFor(bobHome), communityUrl: '' }, bobIo);
     if (!bob.ok) throw new Error(bob.error);
     expect(bob.value.steps).toMatchObject({ team: 'done', actions: 'skipped', invite: 'skipped', hook: 'done', wrapper: 'done', done: 'printed' });
@@ -69,12 +72,12 @@ describe('M3 setup walkthrough', () => {
     for (const home of [aliceHome, bobHome]) expect(await readFile(join(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8')).toBe(await readFile(wrapperFor(home).source, 'utf8'));
     expect(bobIo.lines).toEqual(expect.arrayContaining(['  @alice — Alice', '  @bob — Bob']));
     expect(bobRunner.calls.filter((call) => call.command === 'git' && call.args[0] === 'push')).toHaveLength(1);
-    expect(bobIo.offered).toEqual([['Connect bob-local', 'Skip']]);
+    expect(bobIo.offered).toEqual([['Connect bob-local', 'Skip'], ['Now', 'In batches', 'Overnight', 'Skip']]);
     expect(await readFile(join(bobSource, 'SKILL.md'), 'utf8')).toBe(bobBytes);
-    const resumedIo = new ScriptedPrompter([''], [false, false], true);
+    const resumedIo = new ScriptedPrompter(['', 'Skip'], [false], true);
     expect(await setup({ app: false, config: aliceStore, home: aliceHome, runner: aliceRunner, hook: hookFor(root, 'alice'), wrapper: wrapperFor(aliceHome), communityUrl: '' }, resumedIo)).toMatchObject({ ok: true, value: { steps: { actions: 'skipped', wrapper: 'skipped' } } });
     expect(resumedIo.lines).toContain(`The /terum-skills Claude Code skill at ${join(aliceHome, '.claude', 'skills', 'terum-skills')} is current.`);
-    expect(resumedIo.offered).toEqual([]);
+    expect(resumedIo.offered).toEqual([['Now', 'In batches', 'Overnight', 'Skip']]);
     expect(resumedIo.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', DISCOVER_QUESTION, evalsQuestion(2)]);
 
     const publishRunner = mappedRunner(REMOTE, bare, (args, options) => args[0] === 'pr'

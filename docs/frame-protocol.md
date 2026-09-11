@@ -146,3 +146,54 @@ Native-command amendment: `app_update_on_close({ version: string | null })` arms
 Update diagnostics are kept for the session by concern, so successful arming cannot erase a download or install failure. A failed preference flush is reported without disabling the hydrated policy. A cosmetic acknowledgement write cannot turn a successful check into a failure; the desktop DTO can carry `acknowledgementError` alongside that successful observation. The install reason has one desktop DTO home, `AppUpdateStatus.reason`, mapped from the wire marker.
 
 The shared overnight hook resets idleness before handling activity. A timer more than one minute late is conservatively treated as a wake from suspension and requires another full idle period. Activity updates the idle timestamp without rescheduling on every pointer movement; the pending timer checks that timestamp before firing. Invalid clock readings are reported and retried with one pending timer. The chip carries a consumed `focus=app` navigation intent, so ordinary visits to Settings do not move keyboard focus.
+
+### f-wizard
+
+`eval --queue-list` returns `{ items }`, where each item has `team`, `skill`, `version`, `requestedAt`,
+`window: "overnight" | "later"`, and an optional `lastError`. `eval --dequeue <team>/<skill>` removes all queued
+versions of that team/skill and returns `{ items }` with the remaining queue. Missing queue state is empty;
+malformed or unreadable state fails without replacing it.
+
+`eval --drain [--parallel n] [--window overnight] [--max n]` returns `{ items, attempted, completed, failures }`.
+`failures` contains `{ item, error }` entries. A failure returns `ok:false` with that partial value, retains the
+item with `lastError`, and continues siblings up to the positive-integer attempt limit. The bounded pool defaults to four concurrent evals. Runs with committed receipts are removed even when their execution status is partial or failed; that status remains visible in output. Uncommitted runs and changed queued versions without receipts remain. After refresh, an existing receipt for the pinned version satisfies the queue item before any paid work.
+Runs use ordinary eval preflight and consent; a drain never auto-answers a generated-asset confirmation.
+Print and `progress` frames identify the current eval; no new verb or feature key is added.
+
+Setup keeps the existing eval question string and uses a select with `Now`, `In batches`, `Overnight`, `Skip`
+(default `Skip`). The cost line precedes that question and uses measured totals reconstructed from the current
+team clone: sum each arm mean multiplied by `provenance.cases.length * provenance.k`, for both cost and duration. Receipts with null arm measurements do not qualify. With fewer than three eligible receipts,
+the wizard explains that each eval bills the person's Claude account without inventing a number.
+`steps.evals` additionally admits `queued` (Queued for overnight) and `batched` (Evaluated in batches).
+A declined batch continuation queues the remaining skills for `later`; `eval --drain` includes those items.
+Decorative banners, step headers, bullets and boxes are terminal-only and never enter the frame transcript.
+
+The desktop drains overnight items through its visible, stoppable eval host, as one parallel batch, once per local night
+between 01:00 and 05:00 after thirty minutes without pointer or keyboard activity. The app starts `eval --drain --parallel 4` once that night; Stop cancels that one process. Activity, the preference, and the window are checked before launch; an active batch may finish. This unfiltered drain includes later items too, as required by A1. The app must remain open. Closed-app scheduling is deferred; a person can run
+`eval --drain` manually at any time. The overnight preference defaults to true.
+
+A1–A3: setup runs all candidates four at a time for Now; In batches asks `How many at a time?`
+(default 4), runs that many concurrently, and checks in between batches. Each eval gets a five-minute
+clone-lock wait budget. Cases inside an eval stay sequential. No account rate limit is guessed; an agent
+rate-limit error fails that eval and siblings continue. Cost scales by skill count; estimated elapsed time
+scales by `ceil(count / parallel)`. The estimate before choosing a mode assumes the default parallelism.
+
+Ask frames additionally accept optional `descriptions: string[]`, one per select choice. These pass through
+to native radio options in the desktop prompt dialog. Malformed descriptions are omitted, preserving choice
+positions. `detail` carries the estimate above the eval choices. Terminal options use typed numbers or Enter;
+arrow-key/raw-mode handling, cursor animation and spinners are out of scope. In decorated setup only, titles
+use unnumbered `> Title` headers, body text is indented, outcomes are colored, and Done prints a session box.
+Plain output and frame question strings retain their existing wording.
+
+Parallel batch output consists of contiguous `── skill ──` context blocks and `✓ skill` / `✗ skill: error`
+settlement lines, including over frames. Questions and block flushes share one mutex. Only the batch emits
+progress (`step: "evals"`, cumulative settled count, full candidate total); a check-in clears that progress display. Setup's queued
+outcome is complete and reads `Queued`; batched reads `Done`. No protocol feature or verb key was added.
+
+Review fixes: In batches prints one run-wide opening and summary; after a different width is chosen,
+the estimate is repeated for that width. Historical-data I/O errors disclose the problem and leave the
+eval offer available. Batch-size input is limited to three attempts. An empty drain prints `No queued evals.`;
+a competing drain reports that another drain is already running. Buffered failures retain every remediation
+line; completion observers cannot change a committed result. Decorated Welcome has no separate header,
+and selects without defaults omit the Enter hint. Mock and real eval choices both default to Skip;
+the overnight replay explicitly chooses Overnight. Radio descriptions are associated for assistive technology.

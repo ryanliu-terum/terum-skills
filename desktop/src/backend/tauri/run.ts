@@ -74,7 +74,7 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
     }
     switch (event.kind) {
       case 'stdout': {
-        const frame = parseCliFrame(event.line);
+        const frame = parseCliFrame(event.line, line => diagnostics.push(line));
         if (!frame) { diagnostics.push(`unparseable line from terum-skills: ${event.line.slice(0, 200)}`); return; }
         onFrame(frame);
         return;
@@ -115,7 +115,7 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
           void bridge.write(id, JSON.stringify({ t: 'answer', id: frame.id, value: false })).catch((error: unknown) => finish({ ok: false, error: `Could not answer terum-skills: ${error instanceof Error ? error.message : String(error)}` }));
           return;
         }
-        push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }), ...(frame.detail === undefined ? {} : { detail: frame.detail }) });
+        push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }), ...(frame.detail === undefined ? {} : { detail: frame.detail }), ...(frame.descriptions === undefined ? {} : { descriptions: frame.descriptions }) });
         return;
       }
       case 'progress': { const current = frame.current ?? 0; push({ t: 'progress', done: current, total: Math.max(frame.total ?? current, current, 1), label: frame.step }); return; }

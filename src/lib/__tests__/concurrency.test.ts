@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mapWithConcurrency } from '../concurrency.js';
+import { mapWithConcurrency, settleWithConcurrency } from '../concurrency.js';
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 describe('bounded concurrency', () => {
   it('returns results in input order, never completion order', async () => {
@@ -29,4 +29,17 @@ describe('bounded concurrency', () => {
     try { await expect(mapWithConcurrency([0,1], 2, async i => { await wait(i+1); throw new Error(String(i)); })).rejects.toThrow('0'); await wait(5); expect(unhandled).not.toHaveBeenCalled(); }
     finally { process.off('unhandledRejection', unhandled); }
   });
+});
+
+describe('all-settled bounded concurrency', () => {
+ it('keeps the pool full after rejection and preserves input order', async () => {
+  let active=0, peak=0;const started:number[]=[];
+  const gates=new Map<number,()=>void>();
+  const result=settleWithConcurrency([0,1,2,3],2,async i=>{started.push(i);peak=Math.max(peak,++active);await new Promise<void>(resolve=>gates.set(i,resolve));active--;if(i===1)throw new Error('one');return i;});
+  expect(started).toEqual([0,1]);gates.get(1)!();await vi.waitFor(()=>expect(started).toEqual([0,1,2]));expect(active).toBe(2);
+  gates.get(2)!();await vi.waitFor(()=>expect(started).toEqual([0,1,2,3]));gates.get(3)!();gates.get(0)!();
+  expect(await result).toEqual([{status:'fulfilled',value:0},{status:'rejected',reason:new Error('one')},{status:'fulfilled',value:2},{status:'fulfilled',value:3}]);expect(peak).toBe(2);
+ });
+ it.each([0,-1,NaN,Infinity])('clamps %s to one worker',async limit=>{let active=0,peak=0;await settleWithConcurrency([1,2,3],limit,async()=>{peak=Math.max(peak,++active);await Promise.resolve();active--;});expect(peak).toBe(1);});
+ it('settles empty input without work',async()=>{const fn=vi.fn();expect(await settleWithConcurrency([],4,fn)).toEqual([]);expect(fn).not.toHaveBeenCalled();});
 });

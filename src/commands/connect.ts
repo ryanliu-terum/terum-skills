@@ -133,12 +133,12 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
         }
         for (const candidate of candidates) if (candidates.some(other => other.name === candidate.name && other.path !== candidate.path)) qualify.add(candidate.name);
         if (!candidates.length) break;
-        const choices = new Map(candidates.map((candidate) => [`Connect ${printable(candidate.name)}${qualify!.has(candidate.name) ? ` (${printable(candidate.label)}${candidates.some(other => other.path !== candidate.path && other.name === candidate.name && other.label === candidate.label) ? `: ${printable(candidate.path)}` : ''})` : ''}`, candidate.path]));
+        const choices = new Map(candidates.map((candidate) => [`Connect ${printable(candidate.name)}${qualify!.has(candidate.name) ? ` (${printable(candidate.label)}${candidates.some(other => other.path !== candidate.path && other.name === candidate.name && other.label === candidate.label) ? `: ${printable(candidate.path)}` : ''})` : ''}`, candidate]));
         const exit = batch.shared.length ? 'Done' : 'Skip';
         menuStarted = true;
-        const choice = await io.select(`Connect a local skill folder to team ${printable(team)}?`, [...choices.keys(), exit]);
+        const choice = await io.select(`Connect a local skill folder to team ${printable(team)}?`, [...choices.keys(), exit], undefined, { descriptions: [...[...choices.values()].map(candidate => `Connects ${printable(candidate.name)} so the team can install it.`), exit === 'Skip' ? `Connect skills later with \`${invocation(args.form, 'connect')}\`.` : ''] });
         if (choice === exit) break;
-        selectedPath = choices.get(choice);
+        selectedPath = choices.get(choice)?.path;
         if (selectedPath === undefined) throw new Error(`Unknown choice ${printable(choice)}.`);
         try {
           const connected = await connectOne(resolve(selectedPath), { args, store, runner, config, team, binding, io });

@@ -20,3 +20,20 @@ export async function mapWithConcurrency<T, R>(items: readonly T[], limit: numbe
   if (failures.size > 0) throw failures.get(Math.min(...failures.keys()));
   return results;
 }
+
+/** All-settled pool: keep workers busy after failures and retain input order. */
+export async function settleWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<PromiseSettledResult<R>[]> {
+  const width = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 1;
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      try { results[index] = { status: 'fulfilled', value: await fn(items[index]!, index) }; }
+      catch (reason) { results[index] = { status: 'rejected', reason }; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(width, items.length) }, worker));
+  return results;
+}

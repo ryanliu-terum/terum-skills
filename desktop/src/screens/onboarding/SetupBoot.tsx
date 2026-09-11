@@ -24,7 +24,7 @@ export function SetupBoot({launch,restart=false}:{launch:LaunchContext;restart?:
   const outcome=steps?.[key];
   const complete=key==='hook'?outcome!==undefined&&steps?.wrapper!==undefined:outcome!==undefined;
   const skipped=key==='hook'?outcome==='skipped'&&steps?.wrapper==='skipped':outcome==='skipped';
-  return [complete?'done':!result&&(state.activeStep===key||(key==='hook'&&state.activeStep==='wrapper'))?'current':'pending',label,skipped?'Skipped':complete?'Done':''];
+  return [complete?'done':!result&&(state.activeStep===key||(key==='hook'&&state.activeStep==='wrapper'))?'current':'pending',label,key==='evals'&&progress?.label==='evals'?`${progress.done} of ${progress.total}`:skipped?'Skipped':outcome==='queued'?'Queued':complete?'Done':''];
  });
  if(progress&&!progressRow)cardRows.push(['running',progress.label??'Setup progress','']);
  const current=state.activeStep?SETUP_STEP_TO_BOARD[state.activeStep]:null;
@@ -34,7 +34,7 @@ export function SetupBoot({launch,restart=false}:{launch:LaunchContext;restart?:
   {launch.target&&<OnboardingPara>{launch.target}</OnboardingPara>}
   <ProgressCard label="Setup progress" rows={cardRows} placed={progress?.done??null} total={progress?.total??null} failed={failed}/>
   <div role="status" aria-live="polite">{result?(result.ok?state.outcome==='handoff'?'Ask your team owner to invite you.':'Setup finished.':result.error):progressRow?.[1]??progress?.label??current??'Setup is running.'}</div>
-  <div aria-label="Setup output" className="onboarding-error-line">{(state.outcome==='handoff'?state.lines.slice(-5):state.lines).map((line,index)=><div key={index}>{line}</div>)}</div>
+  <div aria-label="Setup output" className="onboarding-error-line">{(state.outcome==='handoff'?state.lines.slice(-5):state.lines).map((line,index)=><div key={index} className={line.startsWith('✓ ')?'setup-output-ok':line.startsWith('✗ ')?'setup-output-bad':undefined}>{line}</div>)}</div>
   {failed&&<div role="alert" className="onboarding-error-line">{result.error}</div>}
   {state.persistenceError&&<div role="alert">{state.persistenceError}</div>}
   {refused?<OnboardingActions primary="Open Settings ▸ Team" onPrimary={()=>navigate('/settings/teams')}/>:state.outcome==='running'?<OnboardingActions primary="Stop" onPrimary={()=>void session.stop()}/>:state.outcome==='failed'||state.outcome==='cancelled'?<OnboardingActions primary="Retry" onPrimary={()=>void session.retry()} secondary="Back" onSecondary={()=>navigate('/library/global')}/>:<OnboardingActions primary={state.outcome==='handoff'?'Back to the Library':'Open the Library'} onPrimary={()=>navigate('/library/global')}/>}

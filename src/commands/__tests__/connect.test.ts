@@ -1295,3 +1295,12 @@ it.each([false, true])('offers duplicate skills in registered roots without map 
     'Skip',
   ]]);
 });
+
+it('keeps picker descriptions aligned and describes Skip without misdescribing Done',async()=>{
+ const {home,store}=await batchFixture();const io=new ScriptedPrompter(['Connect a','Done'],[true],true);const original=io.select.bind(io);const menus:{choices:readonly string[];descriptions:readonly string[]|undefined}[]=[];
+ const observed:import('../../lib/prompt.js').Prompter={interactive:true,print:io.print.bind(io),confirm:io.confirm.bind(io),text:io.text.bind(io),select:async(question,choices,fallback,options)=>{menus.push({choices,descriptions:options?.descriptions});return original(question,choices,fallback);}};
+ expect((await run({home,config:store},observed)).ok).toBe(true);expect(menus).toEqual([
+  {choices:['Connect a','Connect b','Connect c','Skip'],descriptions:['Connects a so the team can install it.','Connects b so the team can install it.','Connects c so the team can install it.','Connect skills later with `npx -y terum-skills@latest connect`.']},
+  {choices:['Connect b','Connect c','Done'],descriptions:['Connects b so the team can install it.','Connects c so the team can install it.','']},
+ ]);
+});

@@ -41,3 +41,8 @@ it('does not mistake a discovered folder path for the wrapper step',()=>{
   'Skipped the /terum-skills skill; re-run setup to install it later.', 'Installed the /terum-skills Claude Code skill at /x.',
  ])expect(printedSetupStep(line)).toBe('wrapper');
 });
+
+it.each(['Queued 2 evals for later. Run them with `npx -y terum-skills@latest eval --drain`.', 'Evaluated 2 of 3; 1 failed.', 'Queued 3 evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle.'])('maps the new eval outcome %s', line => {
+ expect(printedSetupStep(line)).toBe('evals');
+});
+it.each(['Queued 3 evals for overnight: …','Queued 2 evals for later. …','✓ deploy-check','✗ release-notes: Hygiene failed for release-notes','Evaluating 3 skills, 4 at a time…'])('classifies parallel eval output %s',line=>{expect(printedSetupStep(line)).toBe('evals');});

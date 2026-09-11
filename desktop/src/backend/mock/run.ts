@@ -1,5 +1,5 @@
 import type { AskKind, Frame, Result, Run } from '../types';
-export interface RunContext {print(line:string):void;progress(done:number,total:number,label?:string):void;ask(kind:AskKind,question:string,opts?:{default?:string;choices?:readonly string[];detail?:readonly string[]}):Promise<string|boolean>;sleep(ms:number):Promise<void>}
+export interface RunContext {print(line:string):void;progress(done:number,total:number,label?:string):void;ask(kind:AskKind,question:string,opts?:{default?:string;choices?:readonly string[];detail?:readonly string[];descriptions?:readonly string[]}):Promise<string|boolean>;sleep(ms:number):Promise<void>}
 export function createRun<T>(script:(ctx:RunContext)=>Promise<Result<T>>):Run<T> {
  const buffer:Frame[]=[];
  const readers=new Set<()=>void>();
