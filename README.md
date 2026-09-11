@@ -1,5 +1,7 @@
 # terum-skills
 
+How to find the best skills:
+
 I've been searching for best skills and practices for using the amazing AI tools we have today from Claude Code to Cursor. While searching for best practices, I ended up personally evaluating skills I found via social media like superpowers or Matt Pocock by creating my own test framework. Then, when I wanted to share them with my team, I found myself having to manually zip files, send them over from my global folder(which I didn't want to link to my team's shared repo). All of this took quite a while, so I made this project, and hope it saves some time for others. 
 
 ## Quick start
@@ -22,11 +24,15 @@ Who would find this helpful?
 
 
 Isn't it super easy to share skills by just pushing them to GitHub? 
-- **Yes, it is**, and you should do that if you only work on one project and don't mind having your .claude in your project. However, if you're working on multiple projects with specialized skills, if the repo does not allow .claude in the repo itself(open source, enterprise projects), if you're trying to manage and separate global and project skills, or replicate a specific teammate's suite of skills with one click, then Terum will be useful. 
+- **Yes, it is**, and you should do that if you only work on one project and don't mind having your .claude in your project.
+- However, if any of the following apply, Terum might be useful:
+  - If you're working on multiple projects with specialized skills,
+  - If the repo does not allow .claude in the repo itself(open source, enterprise projects),
+  - If you're trying to manage and separate global and project skills while still sharing them easily with teammates 
 
 
 Aren't there open source frameworks for evaluating skills already? 
-- **Yes, there are!** Like Nvidia's SkillEvaluator or the SkillsBench paper. Our evaluation methods are heavily based off of these proven methods. Terum doesn't try to reinvent the wheel, it just adopts the methods so that they're fully plug and play. SkillEvaluator requires Docker and an API key; SkillsBench requires you to bring your own tests. Terum runs using your subscription plan, with one terminal installation, using dynamically generated tests for the specific skill being tested(we're currently looking into dynamic generation along with category-specific tests). 
+- **Yes, there are!** Like Nvidia's SkillEvaluator or the SkillsBench paper. Our evaluation methods are heavily based off of these proven methods. Terum doesn't try to reinvent the wheel, it just adopts the methods so that they are fully plug and play. SkillEvaluator requires Docker and an API key; SkillsBench requires you to bring your own tests. Terum runs using your subscription plan, with one terminal installation, using dynamically generated tests for the specific skill being tested(we're currently looking into dynamic generation along with category-specific tests). 
 
 How are you evaluating skills?
 - Answered above. For more specific notes on methodology, scroll to the bottom. 
@@ -45,16 +51,16 @@ Requires Node 22.12+, `git`, and an authenticated GitHub CLI (`gh auth login`).
 ```sh
 npx -y terum-skills@latest setup
 ```
+The default setup command will lead you towards creating a team. To join a team, ask the owner of a team to use `npx -y terum-skills@latest invite <your github username>`. They will receive a command that you can paste into your terminal. Or, if you know the organization name and repo name and have already been invited, you can run:
+
+```sh
+npx -y terum-skills@latest setup <org name>/<repo name>
+```
 
 There is no install step — `npx -y` fetches and runs the latest release every time. (Prefer a permanent `terum-skills` binary? See [Installing, updating, uninstalling](#installing-updating-uninstalling).)
 
 Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/skills/terum-skills/`, so Claude Code can run these commands for you inside a session (and hand you the ones that need a terminal). It ships inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes it.
 
-The default setup command will lead you towards creating a team. To join a team, ask the owner of a team to use `npx -y terum-skills@latest invite <your github username>`. They will receive a command that you can paste into your terminal. Or, if you know the organization name and repo name, you can run:
-
-```sh
-npx -y terum-skills@latest setup <org name>/<repo name>
-```
 
 ## Commands
 
@@ -89,23 +95,21 @@ For a program driving the CLI (the desktop app, a script), `--frames` turns any 
 
 ## How it works
 
-**Your library is your folders.** `ls --local` scans `~/.claude/skills` (Global), every checkout registered with `checkout add`, and the repository you run it from. Each checkout also reports its `origin`, so the listing (and the app's Library header) says whether the folder has a GitHub home and which repository it is. Registering a folder only tells this machine to scan and refresh it; connecting a skill or approving a tool grant is still a separate yes.
+**Your library is your folders.** Kind of just like a file explorer but just explicitly for your own skills. This is a direct mirror of your own local system. 
 
-**One repo, one copy of each skill.** The team repo holds `skills/<name>/` (the flat store, folder name equals frontmatter `name`, unique repo-wide), `team.json` (endorsed lists and policy), `people/<handle>.json` (each member's identity and installed list, the only file that member's installs touch), and `evals/` (committed receipts, keyed by skill id). A generated GitHub workflow runs the eval checks on PRs.
+**The team marketplace are your teams shared skills** 
 
-**Ownership is metadata.** Only the author named in a skill's `metadata.author` may change its folder; only you may write your people file; endorsed lists change through `publish` PRs. A pre-push guard enforces all of this, and every write goes through one `safeWrite` path that fetches, resets to `origin/main`, re-applies the change, and pushes, so two members writing at once never produce a merge conflict in generated files.
+**Local-first, with shared skills in a team Github, created on setup** The team repo holds every skill and their unique versions in GitHub along with each skill's associated eval. Each individual has their own .json detailing their personal profile along with the skills they have published or have installed. 
 
-**Placement is a plain copy.** `install --into global` copies the skill into `~/.claude/skills/<name>`; `--into <checkout root>` chooses and registers a checkout’s `.claude/skills/`. `uninstall-skill --from global` or `--from <checkout root>` names the copy to remove. Each copy has a per-file fingerprint, and `sync` refreshes Global and registered checkouts from anywhere when the store changes. Hand-edited placed copies are moved to `~/.terum/skills/quarantine/`, never silently overwritten. `sync --prune` empties the quarantine.
+**Installation of a team's skill** Installing copies the skill from your local clone of the shared team repo into the folder you select. Uninstall removes the copy of that skill from the folder. 
 
-**Connecting is consent.** `connect` shows the fields it will add to your SKILL.md (license, id, author, category) and asks y/N before writing anything. After that, `sync` mirrors your edits into the repo. If the repo copy and your source diverge, `sync` prints the remedy (`connect --keep-source <id>` or `--keep-repo <id>`) and does nothing until you choose. Skills containing hooks or plugin definitions need `--allow-privileged`.
-
-**Global skills auto-share by ID check.** `sync` mirrors `~/.claude/skills` into the team repo by default (ratified 2026-09-10): a new skill folder there with no `metadata.id`, or an id the team repo does not know, is connected automatically — license, a freshly minted id (a foreign id is replaced; the skill uploads as the team's) and your authorship are stamped, and the folder is committed, with one summary line per run. A folder carrying a known team id is left alone: content changes flow only through the author's own connected-source sync, and installs live in your people file. Folders the connect machinery refuses (hygiene, a name collision) are skipped and reported by name. Project checkouts are never auto-shared — add them deliberately (the app's Add project, or `connect <path>`). To opt out, set `"auto_share": false` in `~/.terum/skills/config.json`.
+**Version control** 
 
 **Nothing runs anywhere but laptops and the git host.** No HTTP client, no daemon, no API key. The CLI talks to git and, for GitHub teams, to `gh`.
 
 ## Evaluating skills
 
-The eval design is Ajay Wadhwani's, built on a measured record from earlier skill-evaluation work: a simulated run is worthless (shimmed execution scored a mean lift of −0.08 where real execution scored +0.24), one run is inside the noise band (about ±0.1), and per-arm scores reproduce across identical runs (r = 0.97) while the difference between arms does not (r = 0.35). Every rule below follows from that: real execution only, repeated runs, banded verdicts instead of point estimates, and receipts that accumulate rather than overwrite.
+The eval design is built on a measured record from earlier skill-evaluation work: a simulated run is worthless (shimmed execution scored a mean lift of −0.08 where real execution scored +0.24), one run is inside the noise band (about ±0.1), and per-arm scores reproduce across identical runs (r = 0.97) while the difference between arms does not (r = 0.35). Every rule below follows from that: real execution only, repeated runs, banded verdicts instead of point estimates, and receipts that accumulate rather than overwrite.
 
 ### Two layers
 
