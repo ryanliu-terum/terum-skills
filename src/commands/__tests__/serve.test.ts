@@ -162,7 +162,7 @@ describe('serve serial frame session', () => {
   });
 
   it('runs the real commander wiring with injected read verbs', async () => {
-    const status = vi.fn(async () => success({ version: 'test', teams: [], ledger: { placements: [], approvals: [], shared: [] }, identity: null, tools: { git: true, gh: false } }));
+    const status = vi.fn(async () => success({ version: 'test', teams: [], ledger: { placements: [], approvals: [], shared: [] }, identity: null, tools: { git: true, gh: false }, hostArch: 'arm64', processArch: 'arm64' }));
     const s = shell(undefined, true, execute => buildProgram(execute, { login: vi.fn(), team: vi.fn(), status }));
     s.request('a', ['status']); s.request('b', ['status', '--bad']); s.input.end(); await s.done;
     expect(status).toHaveBeenCalledOnce(); expect(s.results()).toMatchObject([{ id: 'a', ok: true, value: { version: 'test' } }, { id: 'b', ok: false }]);
