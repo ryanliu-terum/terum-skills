@@ -89,9 +89,7 @@ The question is never "what score did the skill get?" It's the only question tha
 
 flowchart TD
 
-    S["Skill"] --> G["Load test cases"]
-
-    G --> C["Task cases"]
+    S["Skill"] --> C["Load test cases"]
 
     C --> B["Baseline: without skill"]
 
