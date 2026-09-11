@@ -6,6 +6,10 @@ status: complete
 deferred:
   - what: Nothing in this walk was checked against the team's shared record; the terum MCP refused auth all session (HTTP 401, "No authorization provided"), so check_decision and get_standing_decisions never ran
     gate: the MCP endpoint accepts the configured Authorization header again — re-run check_decision over every LOCK in this ledger
+  - what: The category suggestion at publish and HYG7 are pulled out of B3 and become their own batch B9 (D28); until it lands, publish stamps `misc` on every skill that declares nothing, exactly as today
+    gate: B5 is merged — B9 is the next batch after it, and browse-by-category stays broken until then
+  - what: auto-category §6's caller list still names `connect.ts`, `publish.ts:64/:118`, `eval.ts:98` and `validate.ts:42`, all written against pre-B1 files (D28)
+    gate: B9 is picked up — rewrite the list to publish-only before building from it
   - what: Repeated replacement of the same skill in one root overwrites the previous kept copy in `.claude/old-skills/`; a timestamp suffix was raised and not decided (D4)
     gate: anyone loses a backup by replacing the same skill twice, or the first bug report of a missing old-skills copy
   - what: Nothing ever empties `.claude/old-skills/`, and the Library deliberately does not show it, so Finder is the only cleanup route; whether `prune` should cover it was not decided (D4)
@@ -399,3 +403,156 @@ from their `hello` after the CLI stopped advertising it — and that is the orch
 Codex's. And `docs/frame-protocol.md`'s `### f-auto-sync` section is *replaced*, not trimmed: every
 sentence in it described `sync --auto`, placement reconciliation, sharing and pending replay. B7's final
 protocol pass inherits the rest of the doc, not this section.
+
+---
+
+## Decisions 28–29 — the two rulings that blocked B3 (2026-09-11, walked with Ryan)
+
+Both were surfaced by `harden-refactor-scratch/of-checks-verified.md` as OF-1 and OF-5 and explicitly
+marked "needs a human ruling, not just an edit". Ryan decided both in session. The other three B3
+blockers (OF-2, OF-3, OF-4) are mechanical spec edits with determined fix shapes and are not walked here.
+
+| # | Decision | Verdict | Rationale (plain) | Trigger / Pointer |
+|---|---|---|---|---|
+| 28 | Who builds the category suggestion at publish, and HYG7 with it (OF-1) | **LOCK + DEFER** — B3 ships without them; auto-category becomes its own batch **B9**, after B5 | The suggestion is a feature with a model call in it, serving a *different* North Star ("browse actually works"); loading it into the keystone batch spends this refactor's risk budget on someone else's objective. Nothing regresses meanwhile — publish stamps `misc` exactly as it does today | B9, gated on B5 merging |
+| 29 | What `eval --generate` does when the skill already has eval cases (OF-5) | **LOCK** — delete `--gen`; eval uses the cases that are there and generates only what is missing, per asset; no overwrite path exists | The fork existed only because one flag forced generation over existing files. Removing the flag dissolves it: nothing can be overwritten, so there is no prompt to design and no generated-vs-authored provenance to invent. Regenerating is deleting the folder and re-running — which fits a Library that *is* your local files | — |
+
+---
+
+## Decision 28 — Who builds the category suggestion at publish, and HYG7 with it
+
+**Verdict: LOCK (B3's scope) + DEFER (the suggestion and HYG7 → batch B9, after B5).**
+
+### Plain English
+
+- **What's at stake:** when you publish a skill for the first time, the tool stamps a category on it —
+  the label that makes browsing a teammate's catalogue work. Rev 7 says publish should read the skill and
+  *suggest* one. That suggesting code has never been written and no batch builds it, so B3 as planned
+  calls a function that does not exist. HYG7 — the warning when you type a category your team does not
+  use — is unbuilt and unowned for the same reason.
+- **The filed question was the smaller half.** OF-1 asked who owns HYG7. Grounding showed the whole
+  auto-category build is unowned: `suggestCategory`, `src/lib/categorize.ts` and `askJson settingSources`
+  do not exist, and `hygiene.ts` stops at HYG6. `DEFAULT_CATEGORY = 'misc'` is the only piece that is real.
+- **Why it's a fork:** the suggestion is a feature with a model call in it (~$0.009 and ~5s per skill,
+  graded 11 clearly right / 4 contestable / 0 wrong over 15 real SKILL.md files). B3 already fuses three
+  milestones and is the batch everything downstream waits on. Putting a network-dependent path inside the
+  keystone makes the keystone riskier; leaving it out means publish keeps stamping `misc` on everything,
+  which is the dead-field problem auto-category was written to fix.
+- **Options:**
+  - **A —** B3 builds only what exists: precedence degrades to *declared › `--category` › `misc`*, no
+    model; the suggestion and HYG7 land in their own batch B9 after B5. *(The difference that decides:
+    B3 stays a refactor instead of a refactor-plus-feature, and nothing in it can fail on a model call.)*
+  - **B —** B3 absorbs auto-category whole. *(The difference: browse works the day publish ships, paid
+    for by adding a network-dependent path to the riskiest batch in the plan.)*
+  - **C —** build auto-category first, before B3. *(The difference: B3's step 4 compiles as written, but
+    it puts a feature ahead of the deletion work everything is blocked on — and auto-category's caller
+    list is written against files B1 deleted, so it needs a rewrite pass either way.)*
+- **Recommendation:** A — the category feature serves a different North Star, so it should not be paid
+  for out of this refactor's risk budget.
+- **Zoom-out (does this serve the North Star?):** yes, and that is exactly why. This batch's North Star is
+  about *what moves and what you can see on each side*; how well the catalogue is grouped is the
+  auto-category walk's objective, not this one's. Under A nothing regresses — publish stamps `misc` today
+  and still will — so the cost is a delay to an improvement, not a loss of one.
+- **The call:** **A** (Ryan, 2026-09-11, in session).
+- **Sub-fork, decided with it: HYG7 is kept, not dropped.** Once the suggestion exists, a suggested
+  category is on-list by construction, so HYG7 only ever fires on a category a human typed. It is a list
+  comparison — no model, no network — it warns and gates nothing, and it is the only thing that tells the
+  author their catalogue is about to grow a one-off bucket.
+
+### Technical
+
+- **Files / code paths:** `src/lib/evals/hygiene.ts` — `HygieneCode` is `'HYG1'…'HYG6'`;
+  `assessHygiene(name, input, license, allowExecutable = false)` has no fifth `categories?` parameter.
+  Refactor spec §5.1 **step 4** calls `suggestCategory(raw, team.categories, agent)`; **step 5** freezes
+  `assessHygiene(name, { files, executable }, policy.skill_license)` at three arguments — so even after
+  HYG7 exists, publish, the one caller holding both a category and the team's list, would skip it.
+- **Follow-on spec edits this ruling forces (mechanical, no further ruling):**
+  1. §5.1 step 4 — state the B3 precedence as *declared › `--category` › `DEFAULT_CATEGORY`*, with the
+     `suggestCategory` limb marked as arriving in B9.
+  2. §5.1 step 5 — note that the `categories` argument joins the call in B9, so the three-argument form
+     is not read as final.
+  3. The batch plan gains **B9 — auto-category** (after B5): `src/lib/categorize.ts`, `askJson
+     settingSources`, `--category` on publish, HYG7 plus the fifth parameter, and the rewrite of
+     auto-category §6's caller list from `connect.ts` to publish-only.
+  4. §16's auto-category row keeps "locked, amended" and gains the batch pointer.
+- **Migration / schema:** none. `metadata.terum-category` is written today and keeps being written.
+- **Effort / risk / blast radius (a footnote that decided nothing):** A is two spec edits plus a later
+  batch; B adds ~300 lines and a model path to an XL batch; C reorders the build plan.
+- **Grounding findings:** verified directly in the B1 tree — `categorize.ts` absent, `suggestCategory`
+  and `settingSources` absent, `DEFAULT_CATEGORY` present at `src/lib/skills.ts:157`, hygiene codes
+  HYG1–HYG6 at `src/lib/evals/hygiene.ts:6`, the three-argument call frozen at spec §5.1 step 5.
+
+---
+
+## Decision 29 — What `eval --generate` does when the skill already has eval cases
+
+**Verdict: LOCK — delete `--gen`. Eval uses the cases that are there and generates only what is missing,
+per asset. There is no overwrite path, so there is nothing to refuse and nothing to prompt.**
+
+### Plain English
+
+- **What's at stake:** `eval --generate` writes test cases for a skill. Under D9 those cases live *inside*
+  the skill folder — they are part of the skill, they change its content fingerprint, and they reach the
+  team at the next publish. The question was what happens the second time you run it, when
+  `evals/cases/` already has files: today the code refuses flatly, while D9 explicitly anticipates
+  regenerating and accepts the version churn. The spec described a path the code could not take.
+- **Why it looked like a fork:** the obviously-nice rule — overwrite what the tool generated, never touch
+  what you wrote by hand — is **not implementable**. Nothing on disk records which is which, and the
+  distinction cannot be added cheaply: under D2/D9 everything in the folder is content identity, so any
+  marker file becomes part of the skill and is published to the team.
+- **Options as first framed:** **A** ask before overwriting (prompt, default No). **B** overwrite
+  silently. **C** keep refusing, with an actionable message.
+- **Ryan's reframe, which replaced all three:** `--generate` should do nothing. Without it, eval looks
+  for cases and uses them if found, generates them if not. With it — the same. **This is already the
+  default:** `plannedGeneration` (`eval.ts:262`) generates only when no authored cases exist, *except*
+  for the `Boolean(args.gen) ||` limb, whose sole job is to force generation over existing files. That
+  limb is the entire reason this finding exists.
+- **Why it beats every option offered:** it dissolves the fork instead of resolving it. With the flag
+  gone, `saveGeneratedAssets` can never be asked to overwrite, so there is no prompt to design, no
+  provenance scheme to invent, and the `--save refused:` strings — which already name a flag B1 deleted —
+  become unreachable code to delete rather than text to rewrite.
+- **What it costs, plainly:** regenerating means deleting `evals/cases/` and re-running. That is the only
+  path, and it belongs in the miss message for anyone who goes looking for the flag.
+- **Zoom-out (does this serve the North Star?):** yes, more directly than the prompt did. Under the
+  two-mirror model the Library *is* your local files, so managing them is yours, in Finder or an editor;
+  a second CLI route that mutates them was against the grain. And nothing here moves toward the team —
+  publish still asks before any byte leaves.
+- **The call:** Ryan's reframe, 2026-09-11, in session, confirmed with three riders:
+  1. **`--no-gen` survives** — "use what's there, spend no model call" is the honest opposite now that the
+     positive flag is gone.
+  2. **Per asset, not all-or-nothing** — a folder with cases but no `triggers.yaml` generates only the
+     triggers. Cases and triggers are already decided independently; the spec must say so, so nobody
+     re-reads the rule as a single switch.
+  3. **The disclosure line matters more, not less** — with no flag, the first eval of a skill quietly
+     writes into that skill's folder, changing its content fingerprint, so the next publish mints a new
+     version and the current eval score blanks. §6.3 already requires saying so before the write; under
+     this rule that line is the only signal the user gets. It stays a **printed line naming the path and
+     the consequence, not a prompt**: publish already asks before anything leaves the machine, and
+     publish already writes into the same folder (§5.1 step 5), so a prompt here would be friction on the
+     happy path.
+
+### Technical
+
+- **Delete:** the `Boolean(args.gen) ||` limb in both lines of `plannedGeneration`
+  (`src/commands/eval.ts:262-263`), the `--gen` option in `src/cli.ts:155`, `EvalArgs.gen`
+  (`eval.ts:42`), its conflict guard against `--case` (`:75`) and its rejection in queue modes (`:441`),
+  and both `pathExists` refusals in `saveGeneratedAssets` (`:315-316`) — unreachable once no caller can
+  present an asset that already exists. The `--save refused:` strings name a flag deleted in B1
+  (Decision 17), which is why they read as dead text today.
+- **Keep:** `--no-gen`, `writeGeneratedAssets`, the per-asset shape of `GeneratedAssets` (only the
+  generated half is ever written), and `saveGeneratedAssets` itself — §6.3 makes it the sole route
+  (`saveGeneratedAssets(<the local skill folder>, generated)`), and D26 kept it callerless for exactly
+  this.
+- **Unchanged:** generation still runs into `runDir/generated` for the run itself; only the write-back
+  into the skill folder is governed here.
+- **Spec edits this forces:** §6.3's "`saveGeneratedAssets(<the local skill folder>, generated)`, full
+  stop" gains the rule (use what's there, generate what's missing, per asset), the removal of `--gen`,
+  the delete-and-re-run answer for regeneration, and the disclosure line as a print. `cli.ts:155`'s help
+  text loses one option. `src/commands/__tests__/eval.test.ts` loses its `--gen` cases and gains one:
+  a folder with cases and no triggers generates only triggers.
+- **Effort / risk / blast radius (a footnote that decided nothing):** strictly subtractive — one flag,
+  two guards, two refusals; no new code path and no desktop change (`EvalArgs` on the desktop never
+  carried `gen`).
+- **Grounding findings:** verified in the B1 tree — `plannedGeneration` at `eval.ts:262-263`;
+  `--gen`/`--no-gen` registered at `cli.ts:155`; the two refusals at `eval.ts:315-316`; `--save` and
+  `--working` absent from the whole tree after B1; no desktop caller of `gen`.
