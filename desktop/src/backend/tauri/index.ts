@@ -1,5 +1,6 @@
 import { registerEvalQueue } from '../eval-queue';
 import { createEvalQueue } from './eval-queue';
+import { createAutoSyncPolicy, createWorkflowGate, AUTO_SYNC_MIN_INTERVAL_MS } from './auto-sync';
 import { z } from 'zod';
 import { createAppUpdate } from './app-update';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -46,7 +47,7 @@ const cliMachine = z.object({ teams: z.array(z.string()), removedPlacements: z.n
 const cliConnectResult = z.object({ id: z.string(), name: z.string(), reconciled: z.boolean().optional(), adopted: z.boolean().optional() }).passthrough();
 const cliConnect = z.union([z.object({ kind: z.literal('batch'), shared: z.array(cliConnectResult), declined: z.array(z.string()), refused: z.array(z.object({ name: z.string(), reason: z.string() })) }).passthrough(), cliConnectResult]).optional();
 const cliPublish = z.object({ name: z.string(), branch: z.string().nullable(), prUrl: z.string().nullable(), changed: z.boolean().optional() }).passthrough();
-const cliSync = z.object({ placed: z.number(), deferred: z.array(z.string()), notices: z.array(z.string()), changed: z.boolean(), teams: z.array(z.object({ team: z.string(), state: z.string(), message: z.string().optional() })) });
+const cliSync = z.object({ timings: z.array(z.object({ team:z.string(), phase:z.enum(['fetch','place','share','orphans']), ms:z.number() })).optional(), placed: z.number(), deferred: z.array(z.string()), notices: z.array(z.string()), changed: z.boolean(), teams: z.array(z.object({ team: z.string(), state: z.string(), message: z.string().optional() })) });
 const cliInvite = z.object({ team: z.string(), invited: z.array(z.string()), already: z.array(z.string()).default([]), failed: z.array(z.object({ login: z.string(), error: z.string() })).default([]) }).passthrough();
 const cliTeam = z.object({ team: z.string() }).passthrough();
 const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(), steps: z.partialRecord(z.enum(SETUP_STEP_KEYS), z.enum(['done','skipped','printed','queued','batched'])).nullish().transform(value => value ?? null) });
@@ -359,7 +360,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   // The launch refresh: the FIRST hello is where this adapter learns whether the CLI has `refresh` at all. Later
   // hellos are not triggers — every verb that produces one (sync, eval, publish, install, connect) already
   // fetched. Scheduled as a microtask so it never re-enters run()/cwd() from inside the frame loop.
-  const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { const first = hello === null; hello = frame; if (first && frame.features.refresh === true) void Promise.resolve().then(() => { refreshPolicy.trigger(); }); };
+  let autoAdvertised = false;
+  const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { const first = hello === null; hello = frame; if (!autoAdvertised && frame.features.autoSync === true) { void Promise.resolve().then(tryLaunchSync); } else if (first && frame.features.refresh === true) void Promise.resolve().then(() => { if (!retired) refreshPolicy.trigger(); }); };
   let stateOnce: Promise<AppState | null> | undefined;
   let inFlight: Promise<AppState | null> | undefined;
   let generation = 0;
@@ -417,11 +419,21 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   // only after the reads already in flight have settled: notify('clone') re-spawns seven query prefixes and the
   // shell caps concurrent CLI children at eight (src-tauri/src/lib.rs).
   const refreshPolicy = createRefreshPolicy({
-    supported: () => hello?.features.refresh === true,
+    supported: () => hello?.features.refresh === true && hello?.features.autoSync !== true,
     run: () => read(run(['refresh'], cliRefresh, value => value, [])),
     onChanged: async () => { await Promise.allSettled([...reads.values()].map(entry => entry.promise)); notify('clone'); },
   });
-  const onWindowFocus = () => { markStale(); refreshPolicy.trigger(); };
+  const tryLaunchSync = () => { if (!retired && !autoAdvertised && autoSyncPolicy.trigger()) autoAdvertised = true; };
+  const workflowGate = createWorkflowGate(() => { void Promise.resolve().then(tryLaunchSync); });
+  const autoSyncPolicy = createAutoSyncPolicy({
+    supported: () => hello?.features.autoSync === true,
+    busy: workflowGate.busy,
+    run: force => read(backend.sync({ auto: true, ...(force ? { freshMs: 0 } : {}) })),
+    onChanged: async () => { await Promise.allSettled([...reads.values()].map(entry => entry.promise)); notify('clone', 'placed', 'stamp'); },
+    // Status lives on this adapter, not in CLI read caches; notify subscribers without clearing reads.
+    onStatusChanged: () => { broadcast('stamp'); },
+  });
+  const onWindowFocus = () => { markStale(); if (hello?.features.autoSync === true) autoSyncPolicy.trigger(); else refreshPolicy.trigger(); };
   retireWindowListeners?.();
   let retired = false; let unlistenNativeFocus: (() => void) | undefined;
   if (typeof window !== 'undefined') window.addEventListener('focus', onWindowFocus);
@@ -434,9 +446,13 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const cwd = () => backend.prefs.get<string>('workspace', '') || undefined;
 
   function run<TIn, TOut>(argv: readonly (string | Promise<string>)[], schema: z.ZodType<TIn>, map: (value: TIn) => TOut, touches: ChangeSource[] = ['config', 'placed']): Run<TOut> {
-    const job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), onHello, map: (value) => map(schema.parse(value)), onSettled: (result) => { if (argv[0] === 'setup' || argv[0] === 'team' || argv[0] === 'uninstall') notify('config', 'clone', 'placed'); else if (result.ok || result.value !== undefined) notify(...touches); } });
+    const finishWorkflow = workflowGate.start(argv);
+    let job: Run<TOut>;
+    try {
+      job = cliRun<unknown, TOut>(bridge, state(), argv, { cwd: cwd(), onHello, map: (value) => map(schema.parse(value)), onSettled: (result) => { if (argv[0] === 'setup' || argv[0] === 'team' || argv[0] === 'uninstall') notify('config', 'clone', 'placed'); else if (result.ok || result.value !== undefined) notify(...touches); } });
+    } catch (error) { finishWorkflow(); throw error; }
     return {
-      done: job.done.then(result),
+      done: job.done.then(result).finally(finishWorkflow),
       answer: (id, value) => job.answer(id, value),
       cancel: () => job.cancel(),
       frames: {
@@ -585,7 +601,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     onLaunchRequest(listener) {
       let disposed = false;
       let unlisten: (() => void) | undefined;
-      launchListenerReady = bridge.onLaunchRequest(listener).then(stop => {
+      launchListenerReady = bridge.onLaunchRequest(() => { autoSyncPolicy.reset(); autoAdvertised = false; listener(); void autoSyncPolicy.settled().then(tryLaunchSync); }).then(stop => {
         if (disposed) stop(); else unlisten = stop;
       });
       return () => { disposed = true; unlisten?.(); };
@@ -605,6 +621,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     status: (_, options) => readModels(options, (value, local, platform, home) => statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }, home)),
     async settings(_, options) {
       const models = await readModels(options, (value, local, platform, home) => settingsModel(value, local, statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }, home), home));
+      if (models.value) models.value.lastAutomatic = autoSyncPolicy.last();
       const team = models.value?.TEAMS.length === 1 ? models.value.TEAMS[0] : undefined;
       if (!team || !models.value) return models;
       const inventory = await cached(['ls', '--team', team.key], cliLs, options);
@@ -794,7 +811,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     decline: args => run(['decline', '--', args.ref], cliDecline, value => ({ id: value.id }), ['clone']),
     publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), ...(args.project ? ['--project', args.project] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, version: value.prUrl ?? value.branch ?? null, changed: value.changed ?? true, prUrl: value.prUrl ?? null }), ['clone']),
     // Never `--hook` from the app: its stdout is the reload directive (frame mode refuses it anyway).
-    sync: (args: SyncArgs) => run(['sync', ...(args.prune ? ['--prune'] : []), ...(args.team ? ['--team', args.team] : [])], cliSync, (value): SyncResult => ({ placed:value.placed,deferred:value.deferred,notices:value.notices,changed:value.changed,teams:value.teams.map(team=>({team:team.team,state:team.state,...(team.message===undefined?{}:{message:team.message})})) }), ['clone', 'placed', 'stamp']),
+    sync: (args: SyncArgs) => prepareRun(async () => { if (!args.auto) await autoSyncPolicy.settled(); return { ok: true, value: undefined }; }, () => run(['sync', ...(args.auto ? ['--auto', '--fresh-ms', String(args.freshMs ?? AUTO_SYNC_MIN_INTERVAL_MS)] : []), ...(args.prune ? ['--prune'] : []), ...(args.team ? ['--team', args.team] : [])], cliSync, (value): SyncResult => ({ ...(value.timings ? { timings: value.timings } : {}), placed:value.placed,deferred:value.deferred,notices:value.notices,changed:value.changed,teams:value.teams.map(team=>({team:team.team,state:team.state,...(team.message===undefined?{}:{message:team.message})})) }), args.auto ? [] : ['clone', 'placed', 'stamp'])),
     invite: (args: InviteArgs) => run(['invite', ...(args.team ? ['--team', args.team] : []), ...(args.logins.length ? ['--', ...args.logins] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited], already: [...value.already], failed: value.failed.map(f => ({ login: f.login, error: f.error })) }), ['clone']),
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),

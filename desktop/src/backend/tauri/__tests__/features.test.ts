@@ -23,7 +23,8 @@ it('caches the last hello from any verb, including failed runs, without an extra
  enabled=true;await b.sync({}).done;
  expect(Object.values(await b.features())).toEqual(FEATURE_KEYS.map(()=>true));
  expect(await b.capabilities()).toMatchObject({disablePerMachine:true,perCaseEvalTables:true,inboxEventLog:false,offtargetKind:false,machineRegistry:false});
- expect(f.spawns.map(s=>s.args)).toEqual([['connect'],['sync']]);
+ expect(f.spawns.map(s=>s.args)).toEqual([['connect'],['sync'],['sync','--auto','--fresh-ms','600000']]);
+ expect(f.spawns.filter(s=>s.args[0]==='status')).toHaveLength(0);
 });
 it('falls back to false when hello is missing, without repeatedly spawning status',async()=>{
  const f=fakeBridge((_args,emit)=>emit({kind:'exit',code:1}));const b=createTauriBackend(f.bridge);

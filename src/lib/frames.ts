@@ -42,6 +42,7 @@ export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
   disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: true,
   refresh: true, discover: true, appUpdate: true,
+  autoSync: true,
 });
 
 export const COMMANDER_NON_ERRORS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);

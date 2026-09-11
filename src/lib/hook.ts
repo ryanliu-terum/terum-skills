@@ -7,7 +7,7 @@ import { mkdirPrivate } from './fs.js';
 import { Prompter } from './prompt.js';
 
 /** The one seam hook.test.ts needs to simulate a crash between the temp write and the rename. */
-export const fsForTests = { rename };
+export const fsForTests = { rename, rm };
 
 export const HOOK_COMMAND = 'npx -y terum-skills@latest sync --hook';
 export const HOOK_ENTRY = { matcher: 'startup', hooks: [{ type: 'command', command: HOOK_COMMAND, async: true, timeout: 60 }] } as const;
@@ -148,7 +148,7 @@ async function existsFile(path: string): Promise<boolean> {
 /** §8: a hook run within an hour of the team's last fully successful sync is a no-op. */
 export const STAMP_FRESH_MS = 60 * 60_000;
 /** How far in the future a stamp may be dated and still count as just written: filesystem timestamp granularity and rounding, not a clock step. */
-const STAMP_SKEW_MS = 60_000;
+export const STAMP_SKEW_MS = 60_000;
 /** §8: a lock older than this is stale whoever holds it — a crashed process must not disable sync forever. */
 export const LOCK_STALE_MS = 10 * 60_000;
 
@@ -159,6 +159,27 @@ export function stampPath(storeRoot: string, team: string): string { return join
 export async function stampedAt(storeRoot: string, team: string): Promise<string | null> {
   try { return new Date((await stat(stampPath(storeRoot, team))).mtimeMs).toISOString(); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+}
+
+export interface SyncStamp { head: string; at: string; }
+/** Legacy empty/ISO stamps still throttle by mtime, but cannot establish an unchanged HEAD. */
+export async function readStamp(root: string, team: string): Promise<SyncStamp | null> {
+  let raw: string;
+  try { raw = await readFile(stampPath(root, team), 'utf8'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (typeof value !== 'object' || value === null) return null;
+    const stamp = value as Partial<SyncStamp>;
+    return typeof stamp.head === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(stamp.head) && typeof stamp.at === 'string' && Number.isFinite(Date.parse(stamp.at)) ? { head: stamp.head, at: stamp.at } : null;
+  } catch { return null; } // A legacy or interrupted write provides no cache evidence.
+}
+export async function writeStamp(root: string, team: string, stamp: SyncStamp): Promise<void> {
+  const path = stampPath(root, team);
+  await mkdirPrivate(dirname(path));
+  const temp = `${path}.${randomUUID()}.tmp`;
+  try { await writeFile(temp, JSON.stringify(stamp) + '\n', { mode: 0o600 }); await fsForTests.rename(temp, path); }
+  finally { await fsForTests.rm(temp, { force: true }).catch(() => undefined); /* Best-effort cleanup must not replace the write failure. */ }
 }
 
 export function lockPath(storeRoot: string, team: string): string { return join(storeRoot, 'run', `${team}.lock`); }

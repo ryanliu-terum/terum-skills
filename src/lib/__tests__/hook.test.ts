@@ -128,3 +128,30 @@ it('stampedAt rethrows filesystem failures other than ENOENT', async () => {
   await writeFile(join(root, 'run'), 'not a directory');
   await expect(stampedAt(root, 'acme')).rejects.toMatchObject({ code: 'ENOTDIR' });
 });
+
+it('round-trips HEAD stamps while legacy empty and ISO stamps remain fresh by mtime', async () => {
+  const { readStamp, writeStamp, stampIsFresh } = await import('../hook.js');
+  const root = await temporaryDirectory();
+  const stamp = { head: 'a'.repeat(40), at: new Date().toISOString() };
+  await writeStamp(root, 'team', stamp);
+  expect(await readStamp(root, 'team')).toEqual(stamp);
+  expect(await stampIsFresh(root, 'team')).toBe(true);
+  for (const legacy of ['', stamp.at, '{broken', JSON.stringify({ head: 7, at: stamp.at })]) {
+    await writeFile(stampPath(root, 'team'), legacy);
+    expect(await readStamp(root, 'team')).toBeNull();
+    expect(await stampIsFresh(root, 'team')).toBe(true);
+  }
+  expect(await readStamp(root, 'missing')).toBeNull();
+});
+
+it('stamp rename uses the crash seam and cleanup cannot mask its primary error', async () => {
+  const { writeStamp } = await import('../hook.js');
+  const root = await temporaryDirectory();
+  const rename = fsForTests.rename, rm = fsForTests.rm;
+  fsForTests.rename = async () => { throw new Error('rename denied'); };
+  fsForTests.rm = async () => { throw new Error('cleanup busy'); };
+  try {
+    await expect(writeStamp(root, 'team', { head: 'a'.repeat(40), at: new Date().toISOString() })).rejects.toThrow('rename denied');
+    await expect(stat(stampPath(root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally { fsForTests.rename = rename; fsForTests.rm = rm; }
+});

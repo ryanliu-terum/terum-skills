@@ -101,22 +101,23 @@ describe('sync --hook (§3, §6)', () => {
     void fixture;
   });
 
-  it('a clone removed mid-run costs that team\'s endorsed batch alone: the run still succeeds and every other team is stamped', async () => {
+  it('a clone removed during fetch fails the run with the fetch diagnostic', async () => {
     const { fixture, store } = await configuredSkill();
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [ID], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
     const other = await bareTeam();
     await cloneWithIdentity(other.bare, store.teamClone('other'));
     await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
-    // `team leave team` in another window: it removes the clone before it deletes the ledger entry, so
-    // the endorsed batch — which walks the start-of-run snapshot — can reach a clone that is gone.
-    let fetches = 0;
-    const midRun = wrapRunner(systemRunner, async (command, args, _options, next) => {
-      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) await rm(store.teamClone('team'), { recursive: true, force: true });
-      return next();
+    // A clone removed before refresh finishes is a fetch failure, not a successful endorsed skip.
+    const clone = store.teamClone('team');
+    const midRun = wrapRunner(systemRunner, async (command, args, options, next) => {
+      if (!(command === 'git' && args[0] === 'fetch' && options?.cwd === clone)) return next();
+      const result = await next();
+      await rm(clone, { recursive: true, force: true });
+      return result;
     });
     const io: NonInteractivePrompter & { lines: string[] } = { interactive: false, lines: [], print(line) { this.lines.push(line); } };
-    expect(await run({ hook: true, config: store, runner: midRun }, io)).toMatchObject({ ok: true, value: { deferred: [], notices: expect.arrayContaining([expect.stringContaining('Skipping endorsed batch for team')]) } });
-    await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+    expect(await run({ hook: true, config: store, runner: midRun }, io)).toMatchObject({ ok: false, error: expect.any(String), value: { notices: [] } });
+    await expect(access(stampPath(store.root, 'other'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -850,9 +851,9 @@ describe('sync --hook (§3, §6)', () => {
     const other = await bareTeam();
     await cloneWithIdentity(other.bare, store.teamClone('other'));
     await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
-    let fetches = 0;
-    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
-      if (command === 'git' && args[0] === 'fetch' && ++fetches === 2) await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'global' }, started: '2026-09-08T00:00:00Z' }); });
+    let otherHeads = 0;
+    const runner = wrapRunner(systemRunner, async (command, args, options, next) => {
+      if (command === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD' && options?.cwd === store.teamClone('other') && ++otherHeads === 3) await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'global' }, started: '2026-09-08T00:00:00Z' }); });
       return next();
     });
     const io = new ScriptedPrompter();
@@ -1387,14 +1388,15 @@ describe('sync --hook mutex and rate limit (§8, §12 "hook mutex")', () => {
     await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
     const late = await bareTeam();
     await cloneWithIdentity(late.bare, store.teamClone('late'));
-    let fetches = 0;
-    const midRun = wrapRunner(systemRunner, async (command, args, _options, next) => {
+    let fetches = 0, otherHeads = 0;
+    const midRun = wrapRunner(systemRunner, async (command, args, options, next) => {
       if (command === 'git' && args[0] === 'fetch') {
         fetches++;
-        // During team's fetch a third team is bound; during other's fetch — team's replay is already done — an install is recorded for team.
+        // Bind during phase A; inject pending at the next team's phase B, after team's replay.
         if (fetches === 1) await store.update((config) => { config.teams.late = { remote: late.bare, handle: 'seed' }; });
-        if (fetches === 2) await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'global' }, started: new Date().toISOString() }); });
+
       }
+      if (command === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD' && options?.cwd === store.teamClone('other') && ++otherHeads === 3) await store.update((config) => { config.pending.push({ op: 'install', id: ID, team: 'team', version: null, scope: { kind: 'global' }, started: new Date().toISOString() }); });
       return next();
     });
     expect(await run({ hook: true, config: store, runner: midRun }, hookIo())).toMatchObject({ ok: true, value: { notices: [] } });
@@ -1675,4 +1677,362 @@ describe('the roster skill count (people/<handle>.json local_skills)', () => {
       expect(await recorded(f.fixture.bare)).toBeUndefined();
     } finally { await chmod(global, 0o700); }
   });
+});
+describe('automatic program sync', () => {
+  it('never prompts even with interactive I/O, defers wider tools and emits phase timings silently', async () => {
+    const { fixture, store } = await configuredSkill();
+    await install({ ref: 'sample', config: store }, new ScriptedPrompter());
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('wider', ['Bash']));
+    const io = Object.assign(new ScriptedPrompter([], [], true), { progress: vi.fn() });
+    const result = await run({ auto: true, config: store }, io);
+    expect(result).toMatchObject({ ok: true, value: { placed: 0, deferred: ['sample'], hook: false } });
+    expect(io.asked).toEqual([]); expect(io.lines).toEqual([]);
+    expect(io.progress.mock.calls.map(([update]) => update.step)).toEqual(['team: fetch', 'team: share', 'team: place', 'team: orphans']);
+    expect(result.value?.timings?.map(row => row.phase)).toEqual(['fetch', 'share', 'place', 'orphans']);
+    expect(result.value?.timings?.every(row => row.ms >= 0)).toBe(true);
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('honours freshness independently of the hook hour; zero always fetches', async () => {
+    const { store } = await configuredSkill();
+    await run({ auto: true, config: store }, new ScriptedPrompter());
+    const runner = wrapRunner(systemRunner, async (_command, _args, _options, next) => next());
+    const spy = vi.spyOn(runner, 'run');
+    expect(await run({ auto: true, freshMs: 600_000, config: store, runner }, new ScriptedPrompter())).toMatchObject({ value: { teams: [{ state: 'skipped', reason: 'fresh' }] } });
+    expect(spy).not.toHaveBeenCalled();
+    await run({ auto: true, freshMs: 0, config: store, runner }, new ScriptedPrompter());
+    expect(spy.mock.calls.some(([, args]) => args[0] === 'fetch')).toBe(true);
+  });
+  it.each([-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])('rejects invalid freshness %s', async freshMs => {
+    expect(await run({ auto: true, freshMs }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('--fresh-ms') });
+  });
+  it.each([{ auto: true, hook: true }, { auto: true, prune: true }, { freshMs: 1 }])('rejects conflicting program options %j', async args => {
+    expect(await run(args, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('freshMs' in args ? '--fresh-ms requires --auto and a non-negative safe integer.' : '--auto cannot be combined with --hook or --prune.') });
+  });
+  it('takes the unchanged path only with HEAD and intact placements, and never interactively', async () => {
+    const { fixture, store } = await configuredSkill();
+    await install({ ref: 'sample', config: store }, new ScriptedPrompter());
+    const io = Object.assign(new ScriptedPrompter(), { progress: vi.fn() });
+    const sync = () => run({ auto: true, config: store }, io);
+    await sync(); io.progress.mockClear();
+    await sync(); expect(io.progress).toHaveBeenCalledWith({ step: 'team: place: skipped (unchanged)' });
+    const path = Object.keys((await store.read()).placements)[0]!;
+    await rm(join(path, 'SKILL.md')); io.progress.mockClear();
+    await sync(); expect(io.progress).toHaveBeenCalledWith({ step: 'team: place' });
+    expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('old');
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('new'));
+    io.progress.mockClear(); await sync(); expect(io.progress).toHaveBeenCalledWith({ step: 'team: place' });
+    await writeFile(join(path, 'SKILL.md'), 'local edit');
+    await run({ config: store }, new ScriptedPrompter());
+    expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toContain('new');
+  });
+  it('fetches teams concurrently within four slots, retaining config order', async () => {
+    const { store } = await configuredSkill();
+    for (const name of ['second', 'third', 'fourth', 'fifth']) {
+      const fixture = await bareTeam(); await cloneWithIdentity(fixture.bare, store.teamClone(name));
+      await store.update(config => { config.teams[name] = { remote: fixture.bare, handle: 'seed' }; });
+    }
+    let active = 0, peak = 0;
+    let release!: () => void;
+    const firstFour = new Promise<void>(resolve => { release = resolve; });
+    const watchdog = setTimeout(release, 5000);
+    const runner = wrapRunner(systemRunner, async (command, args, _options, next) => {
+      if (command !== 'git' || args[0] !== 'fetch') return next();
+      active++; peak = Math.max(peak, active);
+      if (active === 4) release();
+      try { await firstFour; return await next(); }
+      finally { active--; }
+    });
+    const result = await run({ auto: true, config: store, runner }, new ScriptedPrompter());
+    clearTimeout(watchdog);
+    expect(result.ok).toBe(true); expect(peak).toBe(4);
+    expect(result.value?.teams.map(team => team.team)).toEqual(['team', 'second', 'third', 'fourth', 'fifth']);
+  });
+  it('fetches a shared remote once in phase A and refreshes both clones, retaining safeWrite fetches', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    const other = await cloneWithIdentity(fixture.bare, store.teamClone('other'));
+    await store.update(config => { config.teams.other = { remote: fixture.bare, handle: 'seed' }; config.auto_share = true; });
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('shared remote moved'));
+    let phaseA = true, fetches = 0, writeFetches = 0;
+    const io = Object.assign(new ScriptedPrompter(), { progress: ({ step }: { step: string }) => { if (step.endsWith(': share')) phaseA = false; } });
+    const runner = wrapRunner(systemRunner, async (_command, args, _options, next) => {
+      if (args[0] === 'fetch' && args[1] === 'origin') { if (phaseA) fetches++; else writeFetches++; }
+      return next();
+    });
+    expect((await run({ auto: true, config: store, runner }, io)).ok).toBe(true);
+    expect(fetches).toBe(1); expect(writeFetches).toBeGreaterThan(0);
+    expect(await git(['rev-parse', 'HEAD'], clone)).toBe(await git(['rev-parse', 'HEAD'], other));
+    expect(await readFile(join(other, 'skills/sample/SKILL.md'), 'utf8')).toContain('shared remote moved');
+  });
+  it('a failed fetch leaves other teams synchronized with the existing notice', async () => {
+    const { store, fixture, clone } = await configuredSkill();
+    const other = await bareTeam(); await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update(config => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    const remote = 'https://github.com/example/unreachable.git';
+    await git(['remote', 'set-url', 'origin', remote], clone);
+    await store.update(config => { config.teams.team!.remote = remote; });
+    const runner = wrapRunner(mappedRunner(remote, fixture.bare), async (_command, args, options, next) => args[0] === 'fetch' && options?.cwd === store.teamClone('team') ? { code: 1, stdout: '', stderr: 'remote: Repository not found.' } : next());
+    const result = await run({ auto: true, config: store, runner }, new ScriptedPrompter());
+    expect(result.ok).toBe(false);
+    expect(result.value?.teams).toMatchObject([{ team: 'team', state: 'skipped' }, { team: 'other', state: 'complete' }]);
+    expect(result.value?.notices[0]).toContain('Skipping team:');
+    await expect(access(stampPath(store.root, 'other'))).resolves.toBeUndefined();
+  });
+});
+
+it('automatic sync restores a missing registered project placement even when Global and HEAD are unchanged', async () => {
+  const { fixture, store } = await configuredSkill();
+  await install({ ref:'sample', into:'global', config:store },new ScriptedPrompter());
+  await install({ ref:'sample', into:fixture.seed, config:store },new ScriptedPrompter());
+  const projectPath=join(fixture.seed,'.claude','skills','sample');
+  expect(await readFile(join(projectPath,'SKILL.md'),'utf8')).toContain('old');
+  await run({ auto:true, config:store },new ScriptedPrompter());
+  await rm(projectPath,{recursive:true});
+  const io=Object.assign(new ScriptedPrompter(),{progress:vi.fn()});
+  expect((await run({auto:true,config:store},io)).ok).toBe(true);
+  expect(io.progress).toHaveBeenCalledWith({step:'team: place'});
+  expect(await readFile(join(projectPath,'SKILL.md'),'utf8')).toContain('old');
+});
+it('automatic sync marks an incoming repository change even without placements', async()=>{
+  const {fixture,store}=await configuredSkill();
+  await pushFromSeed(fixture.seed,'README.md','Incoming metadata');
+  expect(await run({auto:true,config:store},new ScriptedPrompter())).toMatchObject({ok:true,value:{changed:true,placed:0}});
+});
+
+describe('automatic sync review regressions', () => {
+  it.each(['install', 'uninstall'] as const)('counts the library once after every team has replayed pending %s intent', async op => {
+    const { store, fixture, clone } = await configuredSkill();
+    if (op === 'uninstall') expect(await install({ ref: 'sample', into: 'global', config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    const other = await bareTeam(); await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update(config => { config.teams = { other: { remote: other.bare, handle: 'seed' }, ...config.teams }; });
+    await store.update(config => { config.pending.push({ op, id: ID, team: 'team', scope: { kind: 'global' }, destination: { kind: 'global' }, started: '2026-09-10' }); });
+    const local = await import('../../lib/local-skills.js');
+    const count = vi.spyOn(local, 'librarySize');
+    const io = Object.assign(new ScriptedPrompter(), { progress: vi.fn() });
+    try {
+      const result = await run({ auto: true, config: store }, io);
+      expect(result).toMatchObject({ ok: true, value: { notices: [], teams: [{ state: 'complete' }, { state: 'complete' }] } });
+      expect(count).toHaveBeenCalledTimes(1);
+      expect(Object.keys(count.mock.calls[0]![1].placements)).toHaveLength(op === 'install' ? 1 : 0);
+      for (const repo of [fixture.bare, other.bare]) expect(JSON.parse(await git(['show', 'main:people/seed.json'], repo)).local_skills).toBe(op === 'install' ? 1 : 0);
+      expect((await store.read()).pending).toEqual([]);
+      expect(io.progress.mock.calls.filter(([update]) => update.step === 'team: place')).toHaveLength(1);
+      expect(result.value?.timings?.filter(row => row.team === 'team' && row.phase === 'place')).toHaveLength(1);
+      const personBefore = await readFile(join(clone, 'people/seed.json'), 'utf8');
+      expect(await run({ auto: true, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { changed: false, placed: 0 } });
+      expect(await readFile(join(clone, 'people/seed.json'), 'utf8')).toBe(personBefore);
+    } finally { count.mockRestore(); }
+  });
+  it('stamps count-only commits and reports local additions and removals on the unchanged placement path', async () => {
+    const { fixture, store, clone } = await configuredSkill();
+    await store.update(config => { config.auto_share = false; });
+    const { readStamp } = await import('../../lib/hook.js');
+    const io = Object.assign(new ScriptedPrompter(), { progress: vi.fn() });
+    const sync = async (total: number) => {
+      expect(await run({ auto: true, config: store }, io)).toMatchObject({ ok: true, value: { changed: false, placed: 0, notices: [] } });
+      expect(JSON.parse(await git(['show', 'main:people/seed.json'], fixture.bare)).local_skills).toBe(total);
+      expect((await readStamp(store.root, 'team'))?.head).toBe((await git(['rev-parse', 'HEAD'], clone)).trim());
+    };
+    const initialHead = await git(['rev-parse', 'HEAD'], clone);
+    await sync(0);
+    expect(await git(['rev-parse', 'HEAD'], clone)).not.toBe(initialHead);
+    io.progress.mockClear(); await sync(0);
+    expect(io.progress).toHaveBeenCalledWith({ step: 'team: place: skipped (unchanged)' });
+    const directory = join(placementHome(store), '.claude', 'skills', 'local-only');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'SKILL.md'), '---\nname: local-only\ndescription: Local instructions\n---\nBody\n');
+    io.progress.mockClear(); await sync(1);
+    expect(io.progress).toHaveBeenCalledWith({ step: 'team: place: skipped (unchanged)' });
+    await rm(directory, { recursive: true });
+    io.progress.mockClear(); await sync(0);
+    expect(io.progress).toHaveBeenCalledWith({ step: 'team: place: skipped (unchanged)' });
+  });
+  it('does not hide a peer skill change fetched by the library-count write', async () => {
+    const { fixture, store } = await configuredSkill();
+    await store.update(config => { config.auto_share = false; });
+    expect(await install({ ref: 'sample', into: 'global', config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    await run({ auto: true, config: store }, new ScriptedPrompter());
+    const directory = join(placementHome(store), '.claude', 'skills', 'local-only');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'SKILL.md'), '---\nname: local-only\ndescription: Local instructions\n---\nBody\n');
+    let fetches = 0;
+    const runner = wrapRunner(systemRunner, async (_command, args, _options, next) => {
+      if (args[0] === 'fetch' && args[1] === 'origin' && ++fetches === 2) await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('peer update'));
+      return next();
+    });
+    const io = Object.assign(new ScriptedPrompter(), { progress: vi.fn() });
+    expect(await run({ auto: true, config: store, runner }, io)).toMatchObject({ ok: true, value: { placed: 1 } });
+    expect(io.progress).toHaveBeenCalledWith({ step: 'team: place' });
+    expect(await readFile(join(placementHome(store), '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('peer update');
+  });
+  it.each([true, false])('claims duplicate pending installs once per destination (explicit global: %s)', async explicitGlobal => {
+    const { store, fixture } = await configuredSkill();
+    const placement = await import('../../lib/placer.js');
+    const copy = vi.spyOn(placement, 'place');
+    await store.update(config => {
+      config.auto_share = false; config.checkouts = [fixture.seed];
+      for (const destination of [{ kind: 'global' as const }, { kind: 'checkout' as const, root: fixture.seed }]) {
+        const intent = { op: 'install' as const, id: ID, team: 'team', scope: { kind: 'global' as const }, ...(explicitGlobal || destination.kind === 'checkout' ? { destination } : {}), started: '2026-09-10' };
+        config.pending.push(intent, { ...intent });
+      }
+    });
+    try {
+      expect(await run({ auto: true, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { placed: 2 } });
+      expect(copy).toHaveBeenCalledTimes(2);
+      expect((await store.read()).pending).toEqual([]);
+      expect(Object.keys((await store.read()).placements)).toHaveLength(2);
+    } finally { copy.mockRestore(); }
+  });
+  it.each([{}, { auto: true }, { hook: true }])('preserves fatal generic fetch errors in mode %j', async mode => {
+    const { store } = await configuredSkill();
+    const runner = wrapRunner(systemRunner, async (_command, args, _options, next) => {
+      if (args[0] === 'fetch') throw new Error('fetch exploded');
+      return next();
+    });
+    const result = await run({ ...mode, config: store, runner }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false, error: 'auto' in mode || 'hook' in mode ? 'fetch exploded' : 'Sync failed: fetch exploded' });
+    expect(result.value?.notices ?? []).toEqual([]);
+    if (!('auto' in mode)) expect(result.value?.timings).toBeUndefined();
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(lockPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('an unreachable clone missing team.json still fails with the original remote diagnostic', async () => {
+    const { store, clone, fixture } = await configuredSkill();
+    await rm(join(clone, 'team.json'));
+    const remote = 'https://github.com/example/unreachable.git';
+    await git(['remote', 'set-url', 'origin', remote], clone);
+    await store.update(config => { config.teams.team!.remote = remote; });
+    const runner = wrapRunner(mappedRunner(remote, fixture.bare), async (_command, args, _options, next) => args[0] === 'fetch' ? { code: 1, stdout: '', stderr: 'remote: Repository not found.' } : next());
+    expect(await run({ auto: true, config: store, runner }, new ScriptedPrompter())).toMatchObject({
+      ok: false, error: 'Sync finished with 1 team(s) skipped: team. See the notices above.',
+      value: { teams: [{ team: 'team', state: 'skipped', reason: 'unreachable' }], notices: [expect.stringContaining('could not fetch')] },
+    });
+  });
+  it.each([{ auto: true }, { hook: true, now: later }])('mirrors local connected edits with unchanged remote HEAD in %j', async mode => {
+    const { store, source, clone } = await sharedSyncFixture();
+    expect(await install({ ref: 'sample', into: 'global', config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    await run({ auto: true, config: store }, new ScriptedPrompter());
+    const file = join(source, 'SKILL.md');
+    await writeFile(file, (await readFile(file, 'utf8')).replaceAll('shared source', 'edited locally'));
+    const io = new ScriptedPrompter([], [], true);
+    const result = await run({ ...mode, config: store }, io);
+    expect(result).toMatchObject({ ok: true, value: { changed: true, teams: [{ shared: { pushed: 1 } }] } });
+    expect(io.asked).toEqual([]);
+    expect(await readFile(join(clone, 'skills/sample/SKILL.md'), 'utf8')).toContain('edited locally');
+    const target = Object.keys((await store.read()).placements)[0]!;
+    expect(await readFile(join(target, 'SKILL.md'), 'utf8')).toContain('edited locally');
+    const { readStamp } = await import('../../lib/hook.js');
+    expect((await readStamp(store.root, 'team'))?.head).toBe((await git(['rev-parse', 'HEAD'], clone)).trim());
+  });
+  it.each(['global', 'checkout'])('auto-shares new %s folders after an unchanged stamped run', async root => {
+    const { store, fixture, clone } = await configuredSkill();
+    await store.update(config => { config.display_name = 'Me'; config.email = 'me@example.com'; config.checkouts = [fixture.seed]; });
+    await run({ auto: true, config: store }, new ScriptedPrompter());
+    const directory = join(root === 'global' ? placementHome(store) : fixture.seed, '.claude', 'skills', 'local-new');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'SKILL.md'), '---\nname: local-new\ndescription: A locally authored skill\n---\nLocal instructions.\n');
+    const io = new ScriptedPrompter([], [], true);
+    expect(await run({ auto: true, config: store }, io)).toMatchObject({ ok: true, value: { changed: true } });
+    expect(io.asked).toEqual([]);
+    expect(await readFile(join(clone, 'skills/local-new/SKILL.md'), 'utf8')).toContain('Local instructions.');
+  });
+  it('keeps missing-ledger restore consent visible even when all remaining placements and HEAD match', async () => {
+    const { store } = await configuredSkill();
+    await install({ ref: 'sample', config: store }, new ScriptedPrompter());
+    await run({ auto: true, config: store }, new ScriptedPrompter());
+    await store.update(config => { config.placements = {}; });
+    const io = new ScriptedPrompter([], [], true);
+    expect(await run({ auto: true, config: store }, io)).toMatchObject({ ok: true, value: { deferred: ['sample'], teams: [{ state: 'incomplete' }] } });
+    expect(io.asked).toEqual([]);
+  });
+  it('replays pending intent added during phase A from the fresh per-team read', async () => {
+    const { store } = await configuredSkill();
+    const placement = await import('../../lib/placer.js');
+    const copy = vi.spyOn(placement, 'place');
+    let phaseA = true, injected = 0;
+    const io = Object.assign(new ScriptedPrompter(), { progress: ({ step }: { step: string }) => { if (!step.endsWith(': fetch')) phaseA = false; } });
+    const runner = wrapRunner(systemRunner, async (_command, args, _options, next) => {
+      if (phaseA && args[0] === 'fetch') await store.update(config => {
+        for (let duplicate = 0; duplicate < 2; duplicate++) {
+          config.pending.push({ op: 'install', id: ID, team: 'team', scope: { kind: 'global' }, destination: { kind: 'global' }, started: '2026-09-10' }); injected++;
+        }
+      });
+      return next();
+    });
+    try {
+      expect(await run({ auto: true, config: store, runner }, io)).toMatchObject({ ok: true, value: { placed: 1 } });
+      expect(injected).toBe(2);
+      expect((await store.read()).pending).toEqual([]);
+      expect(copy).toHaveBeenCalledTimes(1);
+    } finally { copy.mockRestore(); }
+  });
+  it('retains auto lock notices in config order, regardless of lock completion order', async () => {
+    const { store, fixture } = await configuredSkill();
+    await store.update(config => { config.teams.other = { remote: fixture.bare, handle: 'seed' }; });
+    const releases = await Promise.all(['team', 'other'].map(team => acquireTeamLock(store.root, team)));
+    try {
+      const result = await run({ auto: true, config: store }, new ScriptedPrompter());
+      expect(result.value?.notices).toEqual(['team', 'other'].map(team => `Skipping ${team}: another terum-skills sync holds its session lock (${lockPath(store.root, team)}); retry when it finishes.`));
+    } finally { for (const release of releases) await release?.(); }
+  });
+  it('leaves an intent arriving during the later count write pending and withholds the stamp', async () => {
+    const { store } = await configuredSkill();
+    let fetches = 0;
+    const runner = wrapRunner(systemRunner, async (_command, args, _options, next) => {
+      if (args[0] === 'fetch' && args[1] === 'origin' && ++fetches === 2) await store.update(config => {
+        config.pending.push({ op: 'install', id: ID, team: 'team', scope: { kind: 'global' }, destination: { kind: 'global' }, started: '2026-09-10' });
+      });
+      return next();
+    });
+    expect(await run({ auto: true, config: store, runner }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { placed: 0, teams: [{ state: 'incomplete', pendingLeft: 1 }] } });
+    expect((await store.read()).pending).toHaveLength(1);
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await run({ auto: true, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { placed: 1 } });
+    expect((await store.read()).pending).toEqual([]);
+  });
+  it('the unchanged count excludes unregistered and no-longer-installed ledger entries like a full run', async () => {
+    const { store, fixture } = await configuredSkill();
+    await install({ ref: 'sample', config: store }, new ScriptedPrompter());
+    const current = await store.read(), entry = Object.values(current.placements)[0]!;
+    const path = join(fixture.seed, '.claude', 'skills', 'sample');
+    await mkdir(path, { recursive: true }); await writeFile(join(path, 'SKILL.md'), skill('old'));
+    await store.update(config => { config.placements[path] = entry; config.checkouts = []; });
+    const full = await run({ config: store }, new ScriptedPrompter());
+    const quick = await run({ auto: true, config: store }, new ScriptedPrompter());
+    expect(quick.value?.teams).toEqual(full.value?.teams);
+    expect(quick.value?.teams[0]).toMatchObject({ counts: { unchanged: 1 } });
+  });
+});
+
+it('shares once across teams and emits placement progress before the actual copy', async () => {
+  const sharing = await import('../connect.js');
+  const placement = await import('../../lib/placer.js');
+  const { store, source, fixture } = await sharedSyncFixture();
+  expect(await install({ ref: 'sample', into: 'global', config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
+  const other = await bareTeam(); await cloneWithIdentity(other.bare, store.teamClone('other'));
+  await store.update(config => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+  await writeFile(join(source, 'SKILL.md'), (await readFile(join(source, 'SKILL.md'), 'utf8')).replaceAll('shared source', 'changed instructions'));
+  const phases: string[] = [];
+  const realPlace = placement.place;
+  const share = vi.spyOn(sharing, 'reconcileShared');
+  const copy = vi.spyOn(placement, 'place').mockImplementation(async (...args) => {
+    expect(phases.at(-1)).toBe('team: place');
+    return realPlace(...args);
+  });
+  try {
+    const io = Object.assign(new ScriptedPrompter(), { progress: (update: {step:string}) => { phases.push(update.step); } });
+    expect(await run({ auto:true, config:store, cwd:fixture.seed },io)).toMatchObject({ok:true,value:{placed:1}});
+    expect(share).toHaveBeenCalledTimes(1); expect(copy).toHaveBeenCalledTimes(1);
+    expect(phases.indexOf('team: share')).toBeLessThan(phases.indexOf('team: place'));
+    expect(phases.indexOf('team: place')).toBeLessThan(phases.indexOf('team: orphans'));
+  } finally { share.mockRestore(); copy.mockRestore(); }
+});
+it('fresh replay includes a destination filled in while fetching', async () => {
+  const {store}=await configuredSkill();
+  await store.update(config => { config.pending.push({op:'install',id:ID,team:'team',scope:{kind:'global'},started:'2026-09-10'}); });
+  const runner=wrapRunner(systemRunner,async(_command,args,_options,next)=>{
+    if(args[0]==='fetch')await store.update(config=>{config.pending[0]!.destination={kind:'global'};});
+    return next();
+  });
+  expect(await run({auto:true,config:store,runner},new ScriptedPrompter())).toMatchObject({ok:true,value:{placed:1}});
+  expect((await store.read()).pending).toEqual([]);
 });
