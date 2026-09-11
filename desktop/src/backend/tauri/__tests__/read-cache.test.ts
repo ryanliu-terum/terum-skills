@@ -1,3 +1,5 @@
+import type { Backend } from '../../Backend.js';
+import type { ChangeSource, Run } from '../../types.js';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +13,19 @@ const framesDirectory = resolve('../.planning/codex-runs/m7-S7g/frames');
 const recorded = (name: string) => readFileSync(resolve(framesDirectory, `${name}.jsonl`), 'utf8').trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>);
 /** `status` / `status --team` replay status.jsonl, `ls --local` replays ls-local.jsonl, `ls --team` replays ls.jsonl. */
 function frames(args: readonly string[]) {
+  const mutations: Record<string, unknown> = {
+    install: [{ id: 'deploy-check', team: 'acme' }],
+    'uninstall-skill': [{ id: 'deploy-check', team: 'acme', removed: 1 }],
+    connect: { id: 'deploy-check', name: 'deploy-check' },
+    profile: { handle: 'teddy', changed: ['display_name'] },
+    publish: { name: 'deploy-check', branch: null, prUrl: null },
+    sync: { placed: 1, deferred: [], notices: [], changed: true, teams: [] },
+    eval: { name: 'deploy-check', runDir: '/runs/1', executionStatus: 'complete', commit: null },
+    setup: { role: 'joiner', team: 'acme' },
+    team: { team: 'acme' },
+    uninstall: { teams: ['acme'], removedPlacements: 1, hookRemoved: true, wrapperRemoved: true, configRemoved: true, kept: [], record: '/backups/1', advice: [] },
+  };
+  if (args[0] && Object.hasOwn(mutations, args[0])) return [{ t: 'result', verb: args[0], ok: true, exitCode: 0, value: mutations[args[0]] }];
   if (args[0] === 'checkout') return [{ t: 'result', verb: 'checkout', ok: true, exitCode: 0, value: { path: args[3], registered: true } }];
   if (args[0] === 'status') return recorded('status');
   return recorded(args[1] === '--local' ? 'ls-local' : 'ls');
@@ -149,4 +164,55 @@ describe('W-02 stale revalidation',()=>{
   it('a mutation cannot be overwritten by an older background refresh',async()=>{
     const f=bridge({hold:'status',holdAfter:1});const backend=createTauriBackend(f.bridge);await backend.status();window.dispatchEvent(new Event('focus'));await backend.status();await vi.waitFor(()=>expect(argv(f).filter(v=>v==='status')).toHaveLength(2));await backend.checkouts.add('/work/new').done;f.release();await backend.status();expect(argv(f).filter(v=>v==='status')).toHaveLength(3);
   });
+});
+
+
+/** Audit regressions assert the public notification as well as spawn argv: blanket clearing alone
+ * would hide an omitted family, but could not satisfy these subscription assertions. */
+describe('mutation write-family audit', () => {
+  const cases: { verb: string; run: (backend: Backend) => Run<unknown>; sources: ChangeSource[] }[] = [
+    { verb: 'install', run: backend => backend.install({ ref: 'deploy-check' }), sources: ['config', 'placed', 'clone'] },
+    { verb: 'uninstall-skill', run: backend => backend.uninstallSkill({ ref: 'deploy-check' }), sources: ['config', 'placed', 'clone'] },
+    { verb: 'connect', run: backend => backend.connect({ path: '/work/deploy-check' }), sources: ['config', 'clone', 'placed'] },
+    { verb: 'profile', run: backend => backend.profile({ name: 'New name' }), sources: ['config', 'clone'] },
+    { verb: 'publish', run: backend => backend.publish({ ref: 'deploy-check' }), sources: ['config', 'clone'] },
+    { verb: 'sync', run: backend => backend.sync({}), sources: ['config', 'clone', 'placed', 'stamp'] },
+    { verb: 'eval', run: backend => backend.eval({ ref: 'deploy-check', commit: true }), sources: ['config', 'clone', 'placed'] },
+  ];
+  it.each(cases)('$verb notifies every family its CLI can write', async ({ run, sources }) => {
+    const f = bridge(); const backend = createTauriBackend(f.bridge); const listener = vi.fn();
+    backend.subscribe(listener);
+    expect((await run(backend).done).ok).toBe(true);
+    expect(listener.mock.calls.map(([source]) => source)).toEqual(sources);
+  });
+  it.each(cases)('$verb also invalidates after a partial failure carrying a result', async ({ verb, run, sources }) => {
+    const f = bridge({ mutate: (frame, _n, argv) => {
+      if (argv.split(' ')[0] === verb && frame.t === 'result') Object.assign(frame, { ok: false, exitCode: 1, error: 'Partial write.' });
+    } });
+    const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
+    expect(await run(backend).done).toMatchObject({ ok: false, error: 'Partial write.' });
+    expect(listener.mock.calls.map(([source]) => source)).toEqual(sources);
+  });
+  it.each(['install', 'setup', 'team', 'uninstall'] as const)('%s drops all three cached families, each re-read exactly once', async verb => {
+    const f = bridge(); const backend = createTauriBackend(f.bridge);
+    const read = () => Promise.all([backend.status(), backend.library({ scope: { kind: 'global' }, team: 'acme' })]);
+    expect((await read()).every(value => value.ok)).toBe(true);
+    const before = f.spawns.length;
+    const job = verb === 'install' ? backend.install({ ref: 'deploy-check' }) : verb === 'setup' ? backend.setup({}) : verb === 'team' ? backend.team({ kind: 'join', remote: 'acme/skills' }) : backend.uninstallMachine({});
+    expect((await job.done).ok).toBe(true);
+    expect((await read()).every(value => value.ok)).toBe(true);
+    expect(argv(f).slice(before + 1).sort()).toEqual(['ls --local', 'ls --team acme', 'status', 'status --team acme']);
+    const after = f.spawns.length; await read(); expect(f.spawns).toHaveLength(after);
+  });
+});
+
+
+it('automatic sync broadcasts config changes alongside clone, placement and stamp changes', async () => {
+  const f = bridge({ mutate: frame => {
+    if (frame.t === 'hello') (frame.features as Record<string, unknown>).autoSync = true;
+  } });
+  const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
+  await backend.status();
+  await vi.waitFor(() => expect(listener.mock.calls.map(([source]) => source)).toEqual(['config', 'clone', 'placed', 'stamp']));
+  expect(argv(f).filter(value => value.startsWith('sync '))).toEqual(['sync --auto --fresh-ms 600000']);
 });

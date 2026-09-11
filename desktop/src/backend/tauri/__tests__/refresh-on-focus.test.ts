@@ -166,7 +166,7 @@ it('autoSync replaces refresh at launch/focus, preserves timing data and invalid
   const syncs=()=>f.spawns.filter(spawn=>spawn.args[0]==='sync');
   expect(syncs()).toHaveLength(1); expect(syncs()[0]?.args).toEqual(['sync','--auto','--fresh-ms','600000']);
   expect(f.spawns.some(spawn=>spawn.args[0]==='refresh')).toBe(false);
-  expect(listener.mock.calls.map(([key]) => key)).toEqual(['clone','placed','stamp']);
+  expect(listener.mock.calls.map(([key]) => key)).toEqual(['config','clone','placed','stamp']);
   focus(); focus(); await drain(); expect(syncs()).toHaveLength(1);
   vi.setSystemTime(Date.now()+600_000); await drain(); expect(syncs()).toHaveLength(1);
   focus(); await drain(); expect(syncs()).toHaveLength(2);
