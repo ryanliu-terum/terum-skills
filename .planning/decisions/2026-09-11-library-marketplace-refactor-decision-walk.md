@@ -210,3 +210,51 @@ Walked as one decision because Ryan's counter-proposal replaced the framing. The
 - **D1** deletes guard row h, removes `evals/**` from the content-digest ignore list, and collapses §5.1's two-map read back to one.
 - **D4** deletes the `owned`/`foreign` split, the `--force` flag and `quarantineDrift` from the install path, and narrows `LocalHealth` from five states to two.
 - **D5** deletes `src/lib/discover.ts` outright, reversing §7.1's decision to keep it as a read-only lister.
+
+---
+
+## Rev-4 additions — 2026-09-11, the four forks raised by the unadjudicated rev-2 findings
+
+**Resolved by the harden session on Ryan's standing "best call" authorization (handoff of 2026-09-11), not by Ryan in person.** Each is recorded here so it can be overturned with the reasoning in view; the spec carries them as D15–D18. Like everything above, these are unchecked against the team's shared record — the `terum` MCP refused auth again this session (HTTP 401). The 53 findings themselves are in `.planning/reviews/2026-09-11-refactor-spec-unadjudicated.md`; of them 30 were applied in rev 4, 15 were already present in rev 3, 4 were stale under D9/D13, and these 4 were forks.
+
+| # | Decision | Verdict | Rationale (plain) | Trigger / Pointer |
+|---|---|---|---|---|
+| 7 | What may a raw `git push` do with `skills/**` once the author-ownership row is gone? (M10, M47) | LOCK | Refuse it, naming `publish`; delete `ownsSkill` and the author-identity plumbing with it | spec D15, §4.2 |
+| 8 | Does the Library show folders the scanner rejects? (M21) | LOCK | Yes — every direct child folder is a card, with its reason; only eval and publish are withheld | spec D16, §7.4 |
+| 9 | How does the rewritten `/terum-skills` manual reach a machine that already has the old one? (M29) | LOCK | `sync --hook` refreshes the marker-gated managed copy and prints one line — the single carve-out from "sync touches nothing" | spec D17, §11.1 |
+| 10 | Two Moves: the install-then-uninstall re-place vs `skill move` (M44) | LOCK | `skill move` is the only Move and lives in the Library; the 2026-09-09 "placed twice rather than nowhere" ruling is superseded | spec D18, §7.5, §11.4 |
+
+### Decision 7 — A raw `git push` of skill bytes
+
+**Verdict: LOCK — C, refuse every `skills/**` path on a raw push, naming `publish`.**
+
+- **What's at stake:** the pre-push hook is the last line against an accidental hand push into the team repo. Today it admits a skill folder when the pusher is its author (`ownsSkill`, reading `skills/<name>/SKILL.md`). Under layout 3 that path no longer exists, and §4.2 deletes row a and the `'connect'` action the hook passes — so the hook has no rule for `skills/**` and a compile error where it calls `ownsSkill`.
+- **Options:** **A** keep author ownership, re-pointed at the latest pre-image `v<max>/SKILL.md` plus the add-only `v<N>` shape — the raw path stays stricter than `publish` (which under row a′ has no ownership gate at all), an asymmetry nothing justifies, and ~40 lines of author-identity plumbing survive for one caller. **B** mirror row a′ exactly: admit add-only `v<N>` paths with no author check — a hand-minted folder skips the identical-digest refusal, the project list and the receipt attach, so the marketplace would show a version the product's own rules say cannot exist. **C** refuse `skills/**` outright with a message naming `terum-skills publish`; delete the author machinery.
+- **The call:** C. **Zoom-out:** the only option under which "you can always see exactly what's on each" stays true of a version folder. `safeWrite` pushes `--no-verify` (`teamRepo.ts:285`), so the hook only ever sees hand pushes — a hand push of skill bytes is exactly the accident it exists to catch, and the bypass stays attributed.
+- **Technical:** `guard.ts:117` (the `{ action: 'connect' }` call), `:116` (the no-identity refusal), `:142-160` (`ownsSkill`), `authorOf`, `GuardContext.author`/`previousAuthor`, `skills.ts:152` (`canonicalSkillDigest`, sole caller `ownsSkill`) — all deleted. `evals/**` stays refused on a raw push, as today. Test in §14.1.
+
+### Decision 8 — Folders the scanner rejects
+
+**Verdict: LOCK — A, every direct child folder of a Library root is a card.**
+
+- **What's at stake:** the prompt's most literal sentence — "a 1:1 copy of your local files" — against a scanner that classifies folders as `candidate` / `rejected` / `failed`. Grounded: `rejected` folders already reach the Library as `notOffered` cards (`ls.ts:266`, `notOfferedCard`); `failed` inspections never become a row, and the sidebar count admits only candidates plus frontmatter-problem rejects (`local-skills.ts:192-194`), so the count and the grid can disagree.
+- **Options:** **A** every folder is a card and is counted; `rejected`/`failed` show the reason, withheld only from eval and publish. **B** keep today's filter. **C** show all, count candidates only.
+- **The call:** A. **Zoom-out:** the North Star is visibility; D6 lets the user delete, rename and move folders Terum never placed, and cannot act on a folder it hides. Cost is one predicate plus routing `failed` through the existing `notOffered` path.
+
+### Decision 9 — Refreshing the bundled `/terum-skills` manual
+
+**Verdict: LOCK — A, `sync --hook` refreshes the managed copy, marker-gated, with a printed line.**
+
+- **What's at stake:** §11.1 rewrites the operator manual Claude Code reads, but the only path that refreshes an existing machine's copy is `setup`'s `wrapper` step. Until the user happens to re-run setup, every Claude Code session is told to run `connect`, `checkout add` and `sync --prune` — verbs this refactor deletes. `wrapper.ts:82-108` already reports a `managed` copy as `outdated` and replaces it in place; only the trigger is missing.
+- **Why it is a fork:** §10's new promise is "nothing on this machine is changed", and the manual sits in `~/.claude/skills/`, a folder the Library shows.
+- **Options:** **A** `sync --hook` refreshes when `wrapperState() === 'outdated'`, never touches a `foreign` copy, prints one line; §10 carries the carve-out. **B** no silent refresh — `sync`/`status` print "run `terum-skills setup`". **C** refresh from the first run of any verb, silently.
+- **The call:** A. **Zoom-out:** the manual is not team content — it moves between the npm package the hook already upgrades and the machine — the marker gate means no user-authored folder is ever touched, and the printed line keeps the visibility half honest. B leaves the product driving deleted verbs until the user notices; C fails the visibility half.
+
+### Decision 10 — Two Moves
+
+**Verdict: LOCK — `skill move` is the only Move; it lives in the Library; the 2026-09-09 re-place ruling is superseded.**
+
+- **What's at stake:** the card menu and detail page already have a Move that is deliberately not a file move — install into the destination, then uninstall from the old scope, "so a failure leaves the skill placed twice rather than nowhere" (`SkillScreen.tsx:85-87`, Ryan 2026-09-09). §7.5's `skill move` is a `moveDirectory()` rename plus a ledger update. Rev 3 left both alive under one label.
+- **Options:** **1** `skill move` replaces the re-place on both surfaces. **2** keep both under different labels. **3** Move lives only in the Library; the marketplace card and the detail page lose it.
+- **The call:** 3 (1's substance, scoped to the surface D6 names). **Zoom-out:** a re-place moves bytes team→machine without the user asking for an install, and hides what is on the machine (a local edit vanishes into quarantine); a filesystem move moves nothing between machine and team and cannot leave the skill placed twice or nowhere — which is what the superseded ruling guarded against. D6 deliberately put the file actions in the Library.
+- **Technical:** delete `moveTo()` and `dialog=move` (`SkillScreen.tsx:85-87`); `moveAction` is pushed for Library cards only (`skill-card-actions.ts:24`) and routes to `backend.skill.move`.
