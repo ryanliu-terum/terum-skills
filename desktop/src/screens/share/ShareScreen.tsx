@@ -6,7 +6,7 @@ import type { Member, Roster, TeamStatus } from '../../backend/types';
 import { useUrlState } from '../../app/url-state';
 import { Shell } from '../../components/domain/Shell';
 import { ScreenFrame } from '../../components/domain/ScreenFrame';
-import { Avatar, BoardSkeleton, CenteredState, ErrorLine, IconButton, TerminalHint } from '../../components/domain/Primitives';
+import { Avatar, BoardSkeleton, CenteredState, ErrorLine, HoverTip, IconButton, TerminalHint } from '../../components/domain/Primitives';
 import { WorkflowHeader } from '../../components/domain/WorkflowControls';
 import { useSyncAction } from '../../components/domain/useSyncAction';
 import { useWorkflow } from '../../components/domain/useWorkflow';
@@ -62,7 +62,22 @@ export function ShareScreen() {
   {syncAction.popup}</ScreenFrame></Shell>;
 }
 function teamSelectionMessage(teams:TeamStatus[]){return teams.length===0?'No team is configured on this machine.':`Choose a team first: this machine has ${teams.map(team=>team.name).join(' and ')}. terum-skills invites one team at a time.`;}
-function MembersHead(){const features=useFeatures();return <div role="row" className="members-head"><div role="columnheader" className="member-name">Name<Icon name="chevron-down" size={12} stroke="2"/></div>{['Status','Joined','Skills','Last seen'].map(label=><div role="columnheader" key={label} style={label==='Last seen'&&!features?.lastSeen?{visibility:'hidden'}:undefined}>{label}</div>)}</div>;}
+function MembersHead(){const features=useFeatures();return <div role="row" className="members-head"><div role="columnheader" className="member-name">Name<Icon name="chevron-down" size={12} stroke="2"/></div>{['Status','Joined','Skills','Last seen'].map(label=><div role="columnheader" key={label} style={label==='Last seen'&&!features?.lastSeen?{visibility:'hidden'}:undefined}>{label}{label==='Status'&&features?.roles?<StatusHelp/>:null}</div>)}</div>;}
+// Why the permission column explains itself (Ryan, 2026-09-10): `status` mirrors the GitHub repository
+// permission the CLI read on the last sync, and terum-skills has no write path for it — so the chip is a
+// label the reader cannot act on, and an unexplained label was the complaint. The tip names the three
+// things a reader otherwise has to guess: where the value comes from, that it is changed on GitHub and
+// not here, and that a repository owned by a personal account carries only owner and write (GitHub
+// grants no other permission there), which is why every collaborator on such a team reads as Member.
+// It sits on the column header, not each row: one affordance for a column-wide fact, not 13 icons. The
+// `roles` gate matches the chip's own — a tip for a column that draws nothing would be worse than none.
+function StatusHelp(){
+  const [open,setOpen]=useState(false);
+  return <span className="member-status-help" onMouseEnter={()=>setOpen(true)} onMouseLeave={()=>setOpen(false)}>
+    <IconButton icon="info" label="About member permissions" size={20} iconSize={13} onClick={()=>setOpen(!open)}/>
+    {open&&<HoverTip>Read-only, from GitHub. Admin means admin permission on the team repository, read when you sync; terum-skills never writes it, so change it on GitHub. A repository owned by a personal account has only owner and write, so everyone but the owner reads as Member. A dash means the permission could not be read — not Member.</HoverTip>}
+  </span>;
+}
 // The identity sub-line: the handle (dropped when it just repeats the display name) and the role, without dangling separators around missing data.
 function sub(m:{name:string;handle:string;role:string|null},memberRole:boolean|undefined){return [m.handle===m.name?'':m.handle,memberRole?m.role:''].filter(Boolean).join(' · ');}
 function MemberRow({member:m,index,error,onRemove}:{member:Member;index:number;error:string|null;onRemove:()=>void}){
