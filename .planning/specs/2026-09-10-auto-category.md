@@ -1,5 +1,7 @@
 # Auto-populate `terum-category` at connect
 
+> **Amended 2026-09-11 by `.planning/specs/2026-09-11-library-marketplace-refactor.md` (§5.1 step 4, §16):** `connect` is deleted by that refactor. The suggestion now happens once, at a skill's **first publish**, with the same precedence (declared › `--category` › `suggestCategory` › `DEFAULT_CATEGORY`), the same four-state disclosure, and the same write-back of the injected `SKILL.md` into the user's local folder. Read "connect" below as "publish"; the `--category` flag moves with it. A category remains ordinary content thereafter (§7), and is part of the skill's content identity.
+
 **Status:** rev 1 (Claude Opus 5, 2026-09-10). LOCKED by the
 `.planning/decisions/2026-09-10-auto-category-decision-walk.md` walk. Ready to build.
 
