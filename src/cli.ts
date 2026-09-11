@@ -139,11 +139,14 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .action(async (remote: string, url: string, refs: string[]) => execute((io) => active.guardPush({ form: context.form, remote, url, refs }, io), { verb: 'guard-push', notices: false }));
 
   program
-    .command('publish <ref>')
+    .command('publish <ref...>')
     .description('Endorse a shared skill for the team: opens a pull request under policy "pr", commits directly under policy "push"')
     .option('--project <project>', 'endorse into the project list instead of the global list')
     .addOption(new Option('--team <team>', 'configured team (required when more than one exists and the ref is bare)').hideHelp())
-    .action(async (ref: string, options: { project?: string; team?: string }) => execute((io) => active.publish({ form: context.form, ref, ...options, cwd: process.cwd() }, io), { verb: 'publish', notices: true }));
+    // One ref keeps the pre-batch call shape exactly: `refs` is what switches publish into batch
+    // mode, and passing it for a single skill would rename its branch to `publish/batch-…` and
+    // change the result shape for every existing single-skill caller.
+    .action(async (refs: string[], options: { project?: string; team?: string }) => execute((io) => active.publish({ form: context.form, ref: refs[0]!, ...(refs.length > 1 ? { refs } : {}), ...options, cwd: process.cwd() }, io), { verb: 'publish', notices: true }));
 
   program.command('validate <path|name>').description("Check a skill's safety and formatting deterministically: a shared skill by name or its local source folder by path (requires a configured team)").addHelpText('after', '\nDeterministic and offline (no model, no network call): HYG1 frontmatter, HYG2 hidden characters, HYG3 credentials and foreign emails, HYG4 executables and extensions, HYG5 license agreement, HYG6 description (size over 20,000 is a warning). A folder that has never been connected fails HYG1 on the managed fields connect adds (license, metadata.id, metadata.author, metadata.terum-category); connect it first.').addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp()).option('--cwd <team-checkout>', 'read the skill and team policy directly from this team checkout').action(async (target: string, options: { team?: string; cwd?: string }) => execute((io) => active.validate({ form: context.form, target, ...options }, io), { verb: 'validate', notices: true }));
   program.command('receipt-check', { hidden: true }).option('--cwd <team-checkout>', 'team checkout (default: current directory)').option('--base <ref>', 'base ref (default: origin/main)').action(async (options: { cwd?: string; base?: string }) => execute((io) => active.receiptCheck({ ...options, form: context.form }, io), { verb: 'receipt-check', notices: false }));

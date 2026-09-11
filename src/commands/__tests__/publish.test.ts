@@ -24,7 +24,8 @@ function ghCreating(reply: CommandResult, api: Record<string, CommandResult> = {
   const base = fakeGh('seed', api);
   return (args, options) => (args[0] === 'pr' && args[1] === 'create' ? reply : base(args, options));
 }
-const skill = (name = 'sample') => `---\nname: ${name}\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\nallowed-tools: Bash(git status)\n---\n`;
+const skill = (name = 'sample', id = ID) => `---\nname: ${name}\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\nallowed-tools: Bash(git status)\n---\n`;
+const ID_TWO = '22222222-2222-4222-8222-222222222222';
 
 /** Commit files from the seed clone and push them to a branch only — main stays where it is; the seed is reset afterwards. */
 async function pushBranchFromSeed(seed: string, files: ReadonlyArray<{ path: string; content: string }>, branch: string): Promise<string> {
@@ -50,6 +51,56 @@ async function prepared(policy: 'pr' | 'push' = 'pr') {
 }
 
 describe('publish (§6)', () => {
+  it('batches refs into one branch, remote probe, write, PR and merge while ignoring unrelated checks', async () => {
+    const { fixture, store } = await prepared();
+    await pushFromSeed(fixture.seed, 'skills/other/SKILL.md', skill('other', ID_TWO));
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ ...TEAM_JSON, projects: { product: { remotes: [], skills: [] } } })}\n`);
+    const base = fakeGh('seed');
+    const runner = mappedRunner(REMOTE, fixture.bare, args => {
+      if (args[0] === 'pr' && args[1] === 'create') return { code: 0, stdout: 'https://github.com/acme/team/pull/1\n', stderr: '' };
+      if (args[0] === 'pr' && args[1] === 'view') return { code: 0, stdout: JSON.stringify({ mergeable: 'MERGEABLE', statusCheckRollup: [
+        { workflowName: 'terum-skills', name: 'hygiene', conclusion: 'SUCCESS' },
+        { workflowName: 'terum-skills', name: 'receipt-check', conclusion: 'SUCCESS' },
+        { workflowName: 'organization-ci', name: 'unrelated', conclusion: 'FAILURE' },
+      ] }), stderr: '' };
+      if (args[0] === 'pr' && args[1] === 'merge') return { code: 0, stdout: '', stderr: '' };
+      return base(args, undefined);
+    });
+    const result = await run({ ref: 'sample', refs: ['sample', 'other'], project: 'product', config: store, runner }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { branch: /^publish\/batch-seed-[0-9a-f]{8}$/, outcomes: [{ name: 'sample', outcome: 'added' }, { name: 'other', outcome: 'added' }] } });
+    const branch = result.ok ? result.value.branch! : '';
+    expect(JSON.parse(await git(['show', `${branch}:team.json`], fixture.bare)).projects.product.skills).toEqual([ID, ID_TWO]);
+    expect(runner.calls.filter(call => call.command === 'git' && call.args[0] === 'ls-remote')).toHaveLength(1);
+    expect(runner.calls.filter(call => call.command === 'git' && call.args[0] === 'push')).toHaveLength(1);
+    expect(runner.calls.filter(call => call.command === 'gh' && call.args[0] === 'pr' && call.args[1] === 'create')).toHaveLength(1);
+    expect(runner.calls.filter(call => call.command === 'gh' && call.args[0] === 'pr' && call.args[1] === 'merge')).toHaveLength(1);
+  });
+
+  it('waits through UNKNOWN and hands a genuine conflict to GitHub without merging', async () => {
+    const { fixture, store } = await prepared(); let tick = 0; let views = 0;
+    const base = fakeGh('seed');
+    const runner = mappedRunner(REMOTE, fixture.bare, args => {
+      if (args[0] === 'pr' && args[1] === 'create') return { code: 0, stdout: 'https://github.com/acme/team/pull/2\n', stderr: '' };
+      if (args[0] === 'pr' && args[1] === 'view') return { code: 0, stdout: JSON.stringify({ mergeable: ++views === 1 ? 'UNKNOWN' : 'CONFLICTING', statusCheckRollup: [] }), stderr: '' };
+      if (args[0] === 'pr' && args[1] === 'merge') throw new Error('must not merge a conflict');
+      return base(args, undefined);
+    });
+    const result = await run({ ref: 'sample', refs: ['sample'], config: store, runner, autoMerge: { now: () => tick, sleep: async () => { tick += 1_000; } } }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false, error: 'Someone changed the team first, so these could not be added automatically. Resolve it on GitHub.' });
+    expect(runner.calls.some(call => call.command === 'gh' && call.args[0] === 'pr' && call.args[1] === 'merge')).toBe(false);
+  });
+
+  it('reports a failed hygiene check locally and never attempts a merge', async () => {
+    const { fixture, store } = await prepared();
+    const base = fakeGh('seed');
+    const runner = mappedRunner(REMOTE, fixture.bare, args => {
+      if (args[0] === 'pr' && args[1] === 'create') return { code: 0, stdout: 'https://github.com/acme/team/pull/3\n', stderr: '' };
+      if (args[0] === 'pr' && args[1] === 'view') return { code: 0, stdout: JSON.stringify({ mergeable: 'MERGEABLE', statusCheckRollup: [{ workflowName: 'terum-skills', name: 'hygiene', conclusion: 'FAILURE' }] }), stderr: '' };
+      return base(args, undefined);
+    });
+    await expect(run({ ref: 'sample', refs: ['sample'], config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: 'sample did not pass hygiene.' });
+    expect(runner.calls.some(call => call.command === 'gh' && call.args[0] === 'pr' && call.args[1] === 'merge')).toBe(false);
+  });
   it('pushes a PR branch only and opens a GitHub pull request', async () => {
     const { fixture, store } = await prepared();
     const runner = mappedRunner(REMOTE, fixture.bare, ghCreating({ code: 0, stdout: 'https://github.com/acme/team/pull/1\n', stderr: '' }));

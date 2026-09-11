@@ -70,15 +70,21 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/publish.ts",
-    "line": 90,
+    "line": 157,
     "policy": "prose",
     "pattern": "if (teamSource === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');"
   },
   {
     "file": "src/commands/publish.ts",
-    "line": 131,
+    "line": 204,
     "policy": "not-a-hint",
-    "pattern": "'--body', `Endorse ${record.name} (${record.id.slice(0, 8)}) for ${team}: ${scopeLabel}.\\n\\nOpened by terum-skills publish; merge to endorse.`,"
+    "pattern": "const created = await runner.run('gh', ['pr', 'create', '-R', ownerRepo, '--base', 'main', '--head', branch, '--title', `${binding.handle}: publish ${pending.length === 1 ? pending[0]!.name : `${pending.length} skills`}`, '--body', `Endorse ${pending.map(item => `${item.name} (${item.record.id.slice(0, 8)})`).join(', ')} for ${team}: ${label(scope)}.\\n\\nOpened by terum-skills publish; merge to endorse.`]);"
+  },
+  {
+    "file": "src/commands/publish.ts",
+    "line": 295,
+    "policy": "not-a-hint",
+    "pattern": "function ownChecks(raw: unknown): Check[] { return parseArray(raw).flatMap(value => { const check = parseObject(value); const name = string(check.name); const workflow = string(check.workflowName); return workflow === 'terum-skills' && (name === 'hygiene' || name === 'receipt-check') ? [{ name, conclusion: string(check.conclusion) }] : []; }); }"
   },
   {
     "file": "src/commands/readme.ts",
