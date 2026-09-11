@@ -40,7 +40,7 @@ import { failure, Result } from './lib/result.js';
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
 export interface CliVerbs { checkout?: typeof runCheckout; project?: typeof runProject; profile?: typeof profile; decline?: typeof decline; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; connect?: typeof connect; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; receiptCheck?: typeof runReceiptCheck; refresh?: typeof runRefresh; }
 
-export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean } = {}): Command {
+export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean; serve?: () => Promise<void> } = {}): Command {
   const active: Required<CliVerbs> = { checkout: verbs.checkout ?? runCheckout, project: verbs.project ?? runProject, profile: verbs.profile ?? profile, decline: verbs.decline ?? decline, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, connect: verbs.connect ?? connect, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport, receiptCheck: verbs.receiptCheck ?? runReceiptCheck, refresh: verbs.refresh ?? runRefresh };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
@@ -53,6 +53,12 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     '  Have a skill install command? Run it directly.',
     '  If no teams are configured, it guides you through setup first.',
   ].join('\n'));
+
+  program.command('serve').description('Serve serial read requests over --frames stdio')
+    .action(async () => {
+      if (context.serve) await context.serve();
+      else await execute(async () => failure('serve requires --frames'), { verb: 'serve', notices: false });
+    });
 
   program
     .command('login')

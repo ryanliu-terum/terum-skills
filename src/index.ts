@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import module from 'node:module';
+try { module.enableCompileCache(); } catch { /* Unsupported runtime: a cache miss is a slower start, never a wrong answer. */ }
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { resolveInvocationForm } from './lib/invocation.js';
@@ -9,6 +11,7 @@ import { createReleaseState, updateNotice } from './lib/update.js';
 import { fileURLToPath } from 'node:url';
 import { describeLaunch } from './lib/launch.js';
 import { CommanderError } from 'commander';
+import { run as serve } from './commands/serve.js';
 import { buildProgram } from './cli.js';
 import { createExecute } from './lib/execute.js';
 import { terminalPrompter } from './lib/prompt.js';
@@ -44,6 +47,25 @@ const separator = process.argv.indexOf('--');
 const prefixEnd = separator === -1 ? process.argv.length : separator;
 const frames = process.argv.slice(0, prefixEnd).includes(FRAMES_FLAG);
 const argv = process.argv.filter((argument, index) => index >= prefixEnd || argument !== FRAMES_FLAG);
+if (argv[2] === 'serve') {
+  // A session owns stdin and many results; never attach the one-shot channel/report sink.
+  const diagnostic = (line: string) => { process.stderr.write(`${line}\n`); };
+  const runSession = async () => {
+    process.exitCode = await serve({
+      frames, version: packageVersion(), input: process.stdin, output: process.stdout, diagnostic, form,
+      onCancel: () => { runShutdownHooks(); process.exit(143); },
+      buildProgram: execute => buildProgram(execute, undefined, { launch, form, noUpdateCheck: true }),
+    });
+  };
+  try {
+    await buildProgram(async () => undefined, undefined, { launch, form, serve: runSession })
+      .configureOutput({ writeOut: diagnostic, writeErr: diagnostic }).parseAsync(argv);
+  } catch (error) {
+    const failure = frameChannel({ input: process.stdin, output: process.stdout, diagnostic });
+    failure.result({ verb: 'serve', ok: false, error: error instanceof Error ? error.message : String(error), exitCode: 1 });
+    process.exitCode = 1;
+  }
+} else {
 // A verb that never asks (eval) would otherwise keep running after cancel. Exit, never self-signal:
 // on Windows process.kill(self) is TerminateProcess, which runs no 'exit' handler, so the clone's
 // writer lock would be left behind for up to a minute. process.exit runs the hooks' children-killing
@@ -90,4 +112,6 @@ try {
     const message = error instanceof Error ? error.message : String(error);
     report({ verb, ok: false, error: message === '(outputHelp)' ? `Usage error: ${verb} needs an argument; run it without --frames for the full help.` : message, exitCode: 1 });
   }
+}
+
 }

@@ -16,6 +16,7 @@ import type { Backend } from '../Backend';
 import type { Root, LibraryScope, LibraryTeam, IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
+import { createReadSession } from './session.js';
 import { prepareRun } from './prepare-run';
 import { cliEvalReport, mapEvalReport } from './eval-report';
 import { receiptSummary } from '../receipt-summary';
@@ -371,7 +372,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   // hellos are not triggers — every verb that produces one (sync, eval, publish, install, connect) already
   // fetched. Scheduled as a microtask so it never re-enters run()/cwd() from inside the frame loop.
   let autoAdvertised = false;
-  const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { const first = hello === null; hello = frame; if (!autoAdvertised && frame.features.autoSync === true) { void Promise.resolve().then(tryLaunchSync); } else if (first && frame.features.refresh === true) void Promise.resolve().then(() => { if (!retired) refreshPolicy.trigger(); }); };
+  const onHello = (frame: Extract<CliFrame, { t: 'hello' }>) => { readSession.observe(frame); const first = hello === null; hello = frame; if (!autoAdvertised && frame.features.autoSync === true) { void Promise.resolve().then(tryLaunchSync); } else if (first && frame.features.refresh === true) void Promise.resolve().then(() => { if (!retired) refreshPolicy.trigger(); }); };
   let stateOnce: Promise<AppState | null> | undefined;
   let inFlight: Promise<AppState | null> | undefined;
   let generation = 0;
@@ -385,6 +386,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         try {
           const value = await bridge.readAppState();
           if (readingGeneration !== generation) continue;
+          if (value) readSession.bind(value);
           return value;
         } catch (error) {
           if (readingGeneration !== generation) continue;
@@ -478,6 +480,26 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     };
   }
 
+  const readSession = createReadSession(bridge, {
+    state, onHello,
+    async read(job) {
+      const lines: string[] = [];
+      const outcome = await read(job, undefined, lines);
+      const directory = await home();
+      return { result: await result(outcome), lines: lines.map(line => abbreviateHome(line, directory)) };
+    },
+  });
+  async function readThroughSession(argv: readonly string[]) {
+    try {
+      const shared = await readSession.request(argv, cwd());
+      if (shared) return shared;
+    } catch (error) {
+      return { result: await fail(error instanceof Error ? error.message : String(error)), lines: [] };
+    }
+    const lines: string[] = [];
+    return read(run(argv, z.unknown(), value => value, []), undefined, lines).then(result => ({ result, lines }));
+  }
+
   /** Query families affected by a refreshed read, without clearing the newly replaced cache. */
   function sourceOf(argv: readonly string[]): ChangeSource {
     if (argv[0] === 'status') return 'config';
@@ -496,8 +518,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     return start(key, argv, now);
   }
   function start(key: string, argv: readonly string[], at: number): Promise<{ result: Result<unknown>; lines: string[] }> {
-    const lines: string[] = [];
-    const promise = read(run(argv, z.unknown(), value => value, []), undefined, lines).then(result => ({ result, lines }));
+    const promise = readThroughSession(argv);
     const entry = { promise, at, stale: false, refreshing: false };
     reads.set(key, entry);
     void promise.then(({ result }) => { if (!result.ok && reads.get(key) === entry) reads.delete(key); }, () => { if (reads.get(key) === entry) reads.delete(key); });
@@ -507,9 +528,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
    * Compare only result: print lines are prose and may drift without a data change. */
   async function revalidate(key: string, argv: readonly string[], entry: { promise: Promise<{ result: Result<unknown>; lines: string[] }>; at: number; stale: boolean; refreshing: boolean }): Promise<void> {
     const previous = await entry.promise.then(value => value.result, () => undefined);
-    const lines: string[] = [];
     let next: { result: Result<unknown>; lines: string[] } | undefined;
-    try { next = await read(run(argv, z.unknown(), value => value, []), undefined, lines).then(result => ({ result, lines })); }
+    try { next = await readThroughSession(argv); }
     catch { next = undefined; }
     if (reads.get(key) !== entry) return;
     entry.refreshing = false;

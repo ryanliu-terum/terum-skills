@@ -54,14 +54,27 @@ function harness(verbs: CliVerbs) {
 describe('frame mode through commander — every public verb', () => {
   const verbs: CliVerbs = { checkout: asking, project: asking, app: asking, profile: asking, decline: asking, login: asking, team: asking, setup: asking, connect: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, evalReport: asking, receiptCheck: asking, update: asking, appUpdate: asking, refresh: asking };
 
+  /**
+   * `serve` is a session, not a one-shot verb: it holds stdin open, answers many requests, and writes one
+   * `result` per request rather than one per run (docs/frame-protocol.md). The ask/answer drive below asserts
+   * the one-run-per-verb contract, which `serve` is the single documented exception to, so it is exempt from
+   * that loop alone. It is NOT exempt from the registration check: every FRAME_VERBS entry, `serve` included,
+   * must still be a command commander knows. Its own behaviour is covered in src/commands/__tests__/serve.test.ts.
+   */
+  const SESSION_VERBS = new Set(['serve']);
+  const ONE_SHOT_VERBS = FRAME_VERBS.filter((verb) => !SESSION_VERBS.has(verb));
+
   it('FRAME_VERBS names only registered commands, and every one is covered here', () => {
     const program = buildProgram(async () => undefined, verbs, {});
     const names = new Set<string>();
     for (const command of program.commands) { names.add(command.name()); for (const sub of command.commands) names.add(`${command.name()} ${sub.name()}`); }
-    for (const verb of FRAME_VERBS) { expect(names.has(verb), verb).toBe(true); expect(INVOCATIONS[verb], `no invocation for ${verb}`).toBeDefined(); }
+    for (const verb of FRAME_VERBS) expect(names.has(verb), verb).toBe(true);
+    for (const verb of ONE_SHOT_VERBS) expect(INVOCATIONS[verb], `no invocation for ${verb}`).toBeDefined();
+    // The exemption cannot rot into a blanket one: every name in it must still be a real public verb.
+    for (const verb of SESSION_VERBS) expect(FRAME_VERBS, `${verb} is exempt but not public`).toContain(verb);
   });
 
-  for (const verb of FRAME_VERBS) {
+  for (const verb of ONE_SHOT_VERBS) {
     it(`${verb}: confirm, text, select and print become frames; the run ends in one ok result with the verb's value`, async () => {
       const h = harness(verbs);
       await h.run(INVOCATIONS[verb]!);
