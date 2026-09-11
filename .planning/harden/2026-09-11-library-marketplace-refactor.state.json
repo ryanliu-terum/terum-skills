@@ -1,0 +1,177 @@
+{
+  "slug": "2026-09-11-library-marketplace-refactor",
+  "lane": "spec",
+  "shape": "full-rounds",
+  "cap": 3,
+  "mode": "unattended",
+  "base": null,
+  "args": "",
+  "startedAt": "2026-09-11T10:30:33.350Z",
+  "finishedAt": null,
+  "status": "running",
+  "verdict": null,
+  "startRound": 1,
+  "nextRound": 3,
+  "rounds": [
+    {
+      "round": 1,
+      "kind": "full",
+      "report": ".planning/specs/reviews/2026-09-11-library-marketplace-refactor.codex-spec.r1.review.md",
+      "at": "2026-09-11T11:37:09.007Z",
+      "counts": {
+        "blocker": 5,
+        "drift": 3,
+        "ambiguity": 1,
+        "gap": 1,
+        "note": 0
+      },
+      "confirmed": 10,
+      "top": 8,
+      "regression": false,
+      "triage": {
+        "mechanical": 1,
+        "clear": 9,
+        "fork": 0,
+        "declined": 0,
+        "untriaged": 0
+      },
+      "contested": 3,
+      "unverified": 0,
+      "applied": {
+        "mechanical": 1,
+        "clear": 7
+      },
+      "gates": "n/a",
+      "commit": "f11a04a",
+      "confirmBase": null,
+      "human": {
+        "mediums": [
+          {
+            "title": "#19 Incumbent selection requires an undefined candidate ordinal and conflicting ordering — adjudicated outside the loop in c892759 (receipt-recency incumbent rule, per the 2026-09-07 ruling)",
+            "location": "/Users/ryanliu/Documents/Terum/terum-codex/harden-refactor/.planning/specs/2026-09-11-library-marketplace-refactor.md §6.5 line 420 (with the conflicting restatement at line 421, the identity rule at §6.1 lines 373–376, and the pointer at §4.1 line 265)"
+          },
+          {
+            "title": "#23 Incumbent selection requires an ordinal that local candidates do not have — adjudicated outside the loop in c892759 (receipt-recency incumbent rule, per the 2026-09-07 ruling)",
+            "location": ".planning/specs/2026-09-11-library-marketplace-refactor.md §6.5 \"The eval's incumbent arm\", lines 418-422 (primary: line 420, contradicted by line 421); restated at §4.1 line 265; sibling statements at .planning/specs/2026-09-04-eval-engine.md §11 line 292 and §7.1 lines 303-308"
+          }
+        ],
+        "forks": [],
+        "notApplied": [],
+        "contested": [
+          {
+            "title": "#8 [BLOCKER] STALE COPY — publish’s hygiene call silently disables HYG7 (vote 1-2)",
+            "location": ""
+          },
+          {
+            "title": "#6 [DRIFT] STALE ECHO: local inventory still includes implicit roots and team-derived health (vote 2-1)",
+            "location": ""
+          },
+          {
+            "title": "#13 [DRIFT] Eval fallback uses the wrong return shape for the existing receipt helper (vote 2-1)",
+            "location": ""
+          }
+        ],
+        "declinedByTriage": [],
+        "declinedByLoop": [],
+        "untriaged": []
+      }
+    },
+    {
+      "round": 2,
+      "kind": "full",
+      "report": ".planning/specs/reviews/2026-09-11-library-marketplace-refactor.codex-spec.r2.review.md",
+      "at": "2026-09-11T12:32:57.318Z",
+      "counts": {
+        "blocker": 2,
+        "drift": 6,
+        "ambiguity": 1,
+        "gap": 3,
+        "note": 2
+      },
+      "confirmed": 14,
+      "top": 8,
+      "regression": false,
+      "triage": {
+        "mechanical": 1,
+        "clear": 12,
+        "fork": 1,
+        "declined": 0,
+        "untriaged": 0
+      },
+      "contested": 4,
+      "unverified": 0,
+      "applied": {
+        "mechanical": 0,
+        "clear": 7
+      },
+      "gates": "n/a",
+      "commit": "09b89aa",
+      "confirmBase": null,
+      "human": {
+        "mediums": [
+          {
+            "title": "#0 [GAP] Renaming an existing Global project leaves persisted project references dangling — adjudicated outside the loop in the follow-up commit",
+            "location": ".planning/specs/2026-09-11-library-marketplace-refactor.md §13 step 2, line 748 (the rename is authorised) with §13 step 5, line 751 and §3.4, line 218 (the two places that would have to carry the reference rewrite and do not)"
+          },
+          {
+            "title": "#10 [NOTE] Machine teardown already clears pending rows — adjudicated outside the loop in the follow-up commit",
+            "location": "/Users/ryanliu/Documents/Terum/terum-codex/harden-refactor/.planning/specs/2026-09-11-library-marketplace-refactor.md §13 Migration (D3), line 755 — final paragraph, the two clauses after \"or a crashed install leaves a row nothing can ever clear\""
+          },
+          {
+            "title": "#12 [NOTE] The specified tree helper rejects the existing MutableTree type — adjudicated outside the loop in the follow-up commit",
+            "location": ".planning/specs/2026-09-11-library-marketplace-refactor.md:172 — §3.2 \"The version vocabulary — one module\", the `versionsInTree` declaration inside the ```ts block"
+          },
+          {
+            "title": "#20 [AMBIGUITY] The incumbent algorithm conflicts with its mandatory test — adjudicated outside the loop in the follow-up commit",
+            "location": ".planning/specs/2026-09-11-library-marketplace-refactor.md §6.5 \"The eval's incumbent arm\", line 423, bullet 1, sentence 3 (the \"fall back to the highest remaining digest-unequal `v<N>`\" clause); contradicted at §14.1 line 800"
+          },
+          {
+            "title": "#21 [GAP] Move and rename lack a recoverable multi-write contract — adjudicated outside the loop in the follow-up commit",
+            "location": "/Users/ryanliu/Documents/Terum/terum-codex/harden-refactor/.planning/specs/2026-09-11-library-marketplace-refactor.md §7.5 \"D6 — delete, rename, move\", lines 493 and 504–508 (ledger-ordering bullet at 506, false no-torn-state claim at 508); restated in §2 D18 line 126 and undercut by §1.5 line 78"
+          },
+          {
+            "title": "#22 [GAP] Unpublished local evals have no specified skill_id representation — adjudicated outside the loop in the follow-up commit",
+            "location": ".planning/specs/2026-09-11-library-marketplace-refactor.md §6.1 lines 377–380 (schema-v2 bullet list — omits `skill_id`); co-located gaps at §5.1 step 9 line 337 (\"Attach matching receipts\", stamping undefined), §6.4 line 411 (consequence asserted, representation undefined), §3.4 table lines 206–211 (no `skill_id` row)"
+          }
+        ],
+        "forks": [
+          {
+            "title": "#8 Retire the sibling's mandatory publish receipt gate — resolved as D19 (ledger Decision 11) on the standing best-call authorization",
+            "location": "Primary: `.planning/specs/2026-09-04-eval-engine.md:3` (supersession head note scoped to §6.5 only) together with `.planning/specs/2026-09-11-library-marketplace-refactor.md` §16:824-832 (collision/supersession table omits the eval-engine spec). Contradicting text: target §12:729 and §12:737 vs sibling §6.1:294, §11:465-479, §16:645 and §16:648.",
+            "why": "Option 1 beats option 2 outright — same fit, more of the problem removed, and the sibling has already been annotated once at its own head, so the \"never edit a sibling\" objection does not hold here. The real fork is between option 1 and option 3, and it is a product question, not a wording question:"
+          }
+        ],
+        "notApplied": [],
+        "contested": [
+          {
+            "title": "#7 [BLOCKER] Reconcile eval's candidate source and receipt writer (vote 2-1)",
+            "location": ""
+          },
+          {
+            "title": "#19 [BLOCKER] Receipt seeding requires a digest that migrated receipts never acquire (vote 1-2)",
+            "location": ""
+          },
+          {
+            "title": "#15 [DRIFT] Current catalog call count omits its existing team inventory read (vote 1-2)",
+            "location": ""
+          },
+          {
+            "title": "#16 [DRIFT] Reusing uninstallMany does not guarantee undoable Library deletion (vote 2-1)",
+            "location": ""
+          }
+        ],
+        "declinedByTriage": [],
+        "declinedByLoop": [],
+        "untriaged": []
+      }
+    }
+  ],
+  "invalidAttempts": [
+    {
+      "round": 3,
+      "report": ".planning/specs/reviews/2026-09-11-library-marketplace-refactor.codex-spec.r3.review.md",
+      "reason": "Verify half aborted: 28 of 70 Claude agents failed with 'You've hit your monthly spend limit' (weekly reset Sep 14 05:00 America/Los_Angeles). All 3 verifiers died on 7 findings (engine reports them as contested 0-0, they are UNVERIFIED), all 6 triage agents died (6 untriaged), and synthesis died (no reportMarkdown, no r3 review file written). The Codex FIND half succeeded: 54/54 reviewers, 0 failures, 21 findings at scratch harden-r3/findings.json (copied to ../harden-refactor-scratch/r3-findings.json). Re-run round 3's verify with resumeFromRunId wf_58a777ea-40c after the limit resets.",
+      "at": "2026-09-11T17:43:58.015Z"
+    }
+  ]
+}
