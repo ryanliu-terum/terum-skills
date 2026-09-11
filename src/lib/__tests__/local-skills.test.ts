@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import YAML from 'yaml';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { candidatesOf, localSkills, localSkillRoots } from '../local-skills.js';
+import { candidatesOf, createLibraryScan, librarySize, localSkills, localSkillRoots } from '../local-skills.js';
 import { emptyConfig } from '../schema.js';
 import { assertSkillSource } from '../skill-source.js';
 import { BUNDLED_SKILL_SOURCE, temporaryDirectory } from './fixtures.js';
@@ -349,5 +349,71 @@ describe('W-02 parallel folder scan', () => {
   it('scans a root of 200 folders', async () => {
     const root=await temporaryDirectory();const names=Array.from({length:200},(_,i)=>`skill-${i}`);for(const name of names)await candidate(root,name);
     expect((await localSkills(root,emptyConfig(),{scope:'global',stateRoot:join(root,'.state')})).entries.map(e=>e.name)).toEqual(names.sort());
+  });
+});
+
+describe('run-local library inventory reuse', () => {
+  it.each([false, true])('matches fresh counts without another walk (unreadable root: %s)', async unreadable => {
+    const home = await temporaryDirectory();
+    const global = join(home, '.claude', 'skills');
+    const checkout = join(home, 'project');
+    const project = join(checkout, '.claude', 'skills');
+    const stateRoot = join(home, '.terum', 'skills');
+    const config = emptyConfig();
+    config.checkouts = [checkout, join(home, 'absent')];
+    await candidate(global, 'alpha');
+    await candidate(global, 'bad-frontmatter', '---\nname: different\ndescription: skill\n---\n');
+    await candidate(project, 'beta');
+    await mkdir(join(global, 'not-a-skill'));
+    await symlink(join(global, 'alpha'), join(global, 'link'));
+    const original = fs.readdir;
+    const reads = vi.spyOn(fs, 'readdir').mockImplementation((...args) => {
+      if (unreadable && args[0] === project) return Promise.reject(Object.assign(new Error('permission denied'), { code: 'EACCES' }));
+      return original(...args);
+    });
+    try {
+      const scan = createLibraryScan(home, config.checkouts, stateRoot);
+      expect(reads).not.toHaveBeenCalled();
+      const roots = await scan.roots();
+      for (const root of roots) await scan.inventory(root, config);
+      for (const root of roots) expect(reads.mock.calls.filter(([path]) => path === root.root)).toHaveLength(1);
+      reads.mockClear();
+      const reused = await librarySize(home, config, stateRoot, scan);
+      expect(reads).not.toHaveBeenCalled();
+      expect(reused).toBe(unreadable ? null : 3);
+      expect(await librarySize(home, config, stateRoot)).toBe(reused);
+      expect(reads.mock.calls.filter(([path]) => path === global)).toHaveLength(1);
+      expect(reads.mock.calls.filter(([path]) => path === project)).toHaveLength(1);
+    } finally { reads.mockRestore(); }
+  });
+
+  it('rebinds shared and placement provenance through aliases without rescanning or mutating the snapshot', async () => {
+    const home = await temporaryDirectory();
+    const root = join(home, '.claude', 'skills');
+    const source = await candidate(root, 'alpha');
+    const placed = await candidate(root, 'beta');
+    const alias = join(home, 'alias');
+    await symlink(root, alias);
+    const config = emptyConfig();
+    const scan = createLibraryScan(home, [], join(home, '.terum', 'skills'));
+    const [global] = await scan.roots();
+    const before = await scan.inventory(global!, config);
+    const current = structuredClone(config);
+    current.shared['first'] = { team: 'team', source: join(alias, 'alpha'), baseline: 'sha256:0' };
+    current.placements[join(alias, 'beta')] = {
+      id: 'second', team: 'team', version: null, fingerprint: 'sha256:0',
+      scope: { kind: 'global' }, placed_at: new Date().toISOString(),
+    };
+    const reads = vi.spyOn(fs, 'readdir');
+    try {
+      const inventory = await scan.inventory(global!, current);
+      expect(candidatesOf(inventory)).toEqual([]);
+      expect(candidatesOf(before).map(entry => entry.path)).toEqual([source, placed]);
+      expect(inventory.entries[0]?.shared).toEqual([{ id: 'first', team: 'team' }]);
+      expect(inventory.entries[1]?.placement).toEqual({ id: 'second', team: 'team', version: null });
+      expect(await librarySize(home, current, join(home, '.terum', 'skills'), scan)).toBe(2);
+      expect(reads).not.toHaveBeenCalled();
+      expect(candidatesOf(await scan.inventory(global!, emptyConfig()))).toHaveLength(2);
+    } finally { reads.mockRestore(); }
   });
 });

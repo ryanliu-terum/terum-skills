@@ -1,5 +1,6 @@
 import { expectTypeOf, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
+import * as fs from 'node:fs/promises';
 import { access, chmod, cp, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
@@ -1088,6 +1089,61 @@ describe('sync auto-share pass (ID check, spec 2026-09-10-library-mirror-id-sync
     return { fixture, store, clone, globalRoot, candidate, checkout };
   }
 
+  it.each([true, false])('walks each root once per run across sharing, teams and counting (auto-share: %s)', async autoShare => {
+    const f = await autoShareFixture();
+    await f.candidate('fresh', 'fresh body');
+    await f.checkout('project', 'project-skill', 'project body', true);
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, f.store.teamClone('other'));
+    await f.store.update(config => {
+      config.teams.other = { remote: other.bare, handle: 'seed' };
+      config.auto_share = autoShare;
+    });
+    const roots = [f.globalRoot, join(f.fixture.root, 'project', '.claude', 'skills')];
+    const walks = vi.spyOn(fs, 'readdir');
+    try {
+      for (let runNumber = 0; runNumber < 2; runNumber++) {
+        walks.mockClear();
+        const result = await run({ auto: true, config: f.store }, new ScriptedPrompter());
+        expect(result).toMatchObject({ ok: true, value: {
+          changed: autoShare && runNumber === 0, deferred: [],
+          teams: [{ team: 'team', state: 'complete', swept: true }, { team: 'other', state: 'complete', swept: true }],
+        } });
+        for (const root of roots) expect(walks.mock.calls.filter(([path]) => path === root)).toHaveLength(1);
+        for (const bare of [f.fixture.bare, other.bare]) {
+          expect(JSON.parse(await git(['show', 'main:people/seed.json'], bare)).local_skills).toBe(2);
+        }
+        const shared = Object.values((await f.store.read()).shared);
+        expect(shared).toHaveLength(autoShare ? 2 : 0);
+        expect(shared.every(entry => entry.team === 'team')).toBe(true);
+      }
+    } finally { walks.mockRestore(); }
+  });
+
+  it("keeps every team's previous total when a reused root is unreadable", async () => {
+    const f = await autoShareFixture();
+    await f.candidate('fresh', 'fresh body');
+    await f.checkout('project', 'project-skill', 'project body', true);
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, f.store.teamClone('other'));
+    await f.store.update(config => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    await pushFromSeed(f.fixture.seed, 'people/seed.json', JSON.stringify(person('seed', { local_skills: 7 })) + '\n');
+    await pushFromSeed(other.seed, 'people/seed.json', JSON.stringify(person('seed', { local_skills: 9 })) + '\n');
+    const blockedRoot = join(f.fixture.root, 'project', '.claude', 'skills');
+    const actual = fs.readdir;
+    const walks = vi.spyOn(fs, 'readdir').mockImplementation((...args) => {
+      if (args[0] === blockedRoot) return Promise.reject(Object.assign(new Error('unreadable project'), { code: 'EACCES' }));
+      return actual(...args);
+    });
+    try {
+      expect(await run({ auto: true, config: f.store }, new ScriptedPrompter())).toMatchObject({ ok: true });
+      expect(walks.mock.calls.filter(([path]) => path === blockedRoot)).toHaveLength(1);
+      expect(JSON.parse(await git(['show', 'main:people/seed.json'], f.fixture.bare)).local_skills).toBe(7);
+      expect(JSON.parse(await git(['show', 'main:people/seed.json'], other.bare)).local_skills).toBe(9);
+      expect(Object.values((await f.store.read()).shared)).toHaveLength(1);
+    } finally { walks.mockRestore(); }
+  });
+
   it('uploads an id-less global candidate with no per-folder ask, stamps the managed fields, and never re-offers it', async () => {
     const f = await autoShareFixture();
     await f.candidate('fresh', 'fresh body');
@@ -2035,4 +2091,49 @@ it('fresh replay includes a destination filled in while fetching', async () => {
   });
   expect(await run({auto:true,config:store,runner},new ScriptedPrompter())).toMatchObject({ok:true,value:{placed:1}});
   expect((await store.read()).pending).toEqual([]);
+});
+
+
+describe('automatic freshness reporting', () => {
+  it.each([
+    { freshMs: 600_000, skipped: false },
+    { freshMs: 1_200_000, skipped: true },
+  ])('a 600000 ms trigger interval with freshness $freshMs skips: $skipped', async ({ freshMs, skipped }) => {
+    const { store } = await configuredSkill();
+    expect(await run({ auto: true, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    const stamp = await fs.lstat(stampPath(store.root, 'team'));
+    const scan = vi.spyOn(fs, 'readdir');
+    const runner = wrapRunner(systemRunner, async (_command, _args, _options, next) => next());
+    const calls = vi.spyOn(runner, 'run');
+    try {
+      const result = await run({ auto: true, freshMs, now: () => stamp.mtimeMs + 600_000, config: store, runner }, new ScriptedPrompter());
+      expect(result).toMatchObject({ ok: true, value: { teams: [skipped
+        ? { team: 'team', state: 'skipped', reason: 'fresh' }
+        : { team: 'team', state: 'complete', swept: true }] } });
+      if (skipped) {
+        expect(result.value?.teams[0]).not.toHaveProperty('swept');
+        expect(result.value?.timings).toEqual([]);
+        expect(calls).not.toHaveBeenCalled();
+        expect(scan).not.toHaveBeenCalled();
+        expect((await fs.lstat(stampPath(store.root, 'team'))).mtimeMs).toBe(stamp.mtimeMs);
+      } else expect(calls.mock.calls.some(([, argv]) => argv[0] === 'fetch')).toBe(true);
+    } finally { calls.mockRestore(); scan.mockRestore(); }
+  });
+
+  it('reports both fresh and incomplete swept teams in config order without stamping deferred work', async () => {
+    const { fixture, store } = await configuredSkill();
+    await install({ ref: 'sample', config: store }, new ScriptedPrompter());
+    const other = await bareTeam();
+    await cloneWithIdentity(other.bare, store.teamClone('other'));
+    await store.update(config => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
+    expect(await run({ auto: true, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', toolSkill('wider', ['Bash']));
+    await rm(stampPath(store.root, 'team'));
+    const result = await run({ auto: true, freshMs: 1_200_000, config: store }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { deferred: ['sample'], teams: [
+      { team: 'team', state: 'incomplete', swept: true },
+      { team: 'other', state: 'skipped', reason: 'fresh' },
+    ] } });
+    await expect(access(stampPath(store.root, 'team'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
 });

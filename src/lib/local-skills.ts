@@ -101,6 +101,12 @@ export async function canonicalParentPath(path: string): Promise<string | undefi
   catch { return undefined; }
 }
 
+function entryProvenance(path: string, canonical: string | undefined, { sharedPaths, placementPaths }: Awaited<ReturnType<typeof canonicalLedger>>) {
+  const shared = sharedPaths.filter(({ ref, canonical: reference }) => resolve(ref.source) === path || (canonical !== undefined && reference === canonical)).map(({ id, ref }) => ({ id, team: ref.team }));
+  const placement = placementPaths.find(({ target, canonical: reference }) => resolve(target) === path || (canonical !== undefined && reference === canonical))?.ref;
+  return { shared, placement };
+}
+
 /** Direct entries only. Provenance is ledger evidence, independent of inspection success. */
 export async function localSkills(root: string, config: Pick<Config, 'shared' | 'placements'>, options: { scope: LocalRoot['scope']; stateRoot: string; ledger?: Awaited<ReturnType<typeof canonicalLedger>> }): Promise<LocalInventory> {
   root = resolve(root);
@@ -127,8 +133,7 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
   const scanned = await mapWithConcurrency(names, LOCAL_SCAN_CONCURRENCY, async (name): Promise<LocalEntry | null> => {
     const path = join(root, name);
     const canonical = realRoot === undefined ? undefined : join(realRoot, name);
-    const shared = sharedPaths.filter(({ ref, canonical: reference }) => resolve(ref.source) === path || (canonical !== undefined && reference === canonical)).map(({ id, ref }) => ({ id, team: ref.team }));
-    const placement = placementPaths.find(({ target, canonical: reference }) => resolve(target) === path || (canonical !== undefined && reference === canonical))?.ref;
+    const { shared, placement } = entryProvenance(path, canonical, { sharedPaths, placementPaths });
     const tracked = shared.length > 0 || placement !== undefined;
     const entry: LocalEntry = { frontmatter: null, skillId: null, category: null, name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
     const reject = (reason: SourceProblem, detail: string, description?: string): void => { entry.inspection = { kind: 'rejected', reason, detail, ...(description === undefined ? {} : { description }) }; };
@@ -190,6 +195,45 @@ export function localSkillCounts(inventory: LocalInventory): { skillFolders: num
   return { skillFolders, connectable: candidatesOf(inventory).length };
 }
 
+/** A run-local snapshot: discovery and each root walk happen at most once, on demand. */
+export interface LibraryScan {
+  roots(): Promise<LocalRoot[]>;
+  inventory(root: LocalRoot, config: Pick<Config, 'shared' | 'placements'>): Promise<LocalInventory>;
+}
+
+export function createLibraryScan(home: string, checkouts: readonly string[], stateRoot: string): LibraryScan {
+  let roots: Promise<LocalRoot[]> | undefined;
+  const ledgers = new WeakMap<Pick<Config, 'shared' | 'placements'>, ReturnType<typeof canonicalLedger>>();
+  const inventories = new Map<string, Promise<LocalInventory>>();
+  return {
+    roots: () => roots ??= localSkillRoots(home, undefined, checkouts).then(discovery => discovery.roots),
+    async inventory(root, config) {
+      let ledger = ledgers.get(config);
+      if (!ledger) { ledger = canonicalLedger(config); ledgers.set(config, ledger); }
+      const previous = inventories.get(root.root);
+      if (!previous) {
+        const inventory = ledger.then(ledger => localSkills(root.root, config, { scope: root.scope, stateRoot, ledger }));
+        inventories.set(root.root, inventory);
+        return inventory;
+      }
+      const inventory = await previous;
+      // Earlier teams may have shared these sources since the snapshot. Rebind provenance from
+      // the current ledger so reuse never offers those folders to a second team. No folder walk.
+      const currentLedger = await ledger;
+      const canonicalRoot = await realpath(inventory.root).then(value => value, () => undefined);
+      const entries = inventory.entries.map(entry => {
+        const canonical = canonicalRoot === undefined ? undefined : join(canonicalRoot, entry.name);
+        const { shared, placement } = entryProvenance(entry.path, canonical, currentLedger);
+        const source = { ...entry, shared };
+        delete source.placement;
+        delete source.placementFingerprint;
+        return { ...source, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}) };
+      });
+      return { ...inventory, entries };
+    },
+  };
+}
+
 /**
  * How many skill folders this machine holds, for the roster's per-member total (`person.local_skills`).
  * The roots are the ones the product owns — the global root plus every registered project checkout —
@@ -202,13 +246,11 @@ export function localSkillCounts(inventory: LocalInventory): { skillFolders: num
  * as looking and finding nothing, and the caller must leave the last known total alone rather than
  * publish a wrong zero. This is a best-effort self-report, not an audit.
  */
-export async function librarySize(home: string, config: Pick<Config, 'shared' | 'placements' | 'checkouts'>, stateRoot: string): Promise<number | null> {
-  const discovery = await localSkillRoots(home, undefined, config.checkouts ?? []);
-  const ledger = await canonicalLedger(config);
+export async function librarySize(home: string, config: Pick<Config, 'shared' | 'placements' | 'checkouts'>, stateRoot: string, scan = createLibraryScan(home, config.checkouts ?? [], stateRoot)): Promise<number | null> {
   let total = 0;
-  for (const root of discovery.roots) {
+  for (const root of await scan.roots()) {
     if (root.scope !== 'global' && !root.registered) continue;
-    const inventory = await localSkills(root.root, config, { scope: root.scope, stateRoot, ledger });
+    const inventory = await scan.inventory(root, config);
     if (inventory.rootState === 'unreadable') return null;
     total += localSkillCounts(inventory).skillFolders;
   }
