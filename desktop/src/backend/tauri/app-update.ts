@@ -44,11 +44,12 @@ export function createAppUpdate(deps: AppUpdateDeps): {
       const checked: Result<AppUpdateStatus> = await deps.read(deps.run(['app-update', '--check', ...(q?.force ? ['--force'] : [])], cliAppUpdateCheck, value => ({ ...value, appVersion: deps.appVersion, ...(value.lastApply?.reason === undefined ? {} : { reason: value.lastApply.reason }), newer: isNewer(value.latest, deps.appVersion), lastApply: value.lastApply === null ? null : { version: value.lastApply.version, phase: value.lastApply.phase, at: value.lastApply.at, error: value.lastApply.error } }), []), options);
       if (checked.ok && checked.value.lastApply?.phase === 'launched' && checked.value.lastApply.version === deps.appVersion) {
         const token = `${checked.value.lastApply.version}:${checked.value.lastApply.at}`;
-        if (!shown.has(token) && deps.prefs.get('updates:app:lastShown', '') === token) checked.value.lastApply = null;
-        else if (!shown.has(token)) {
-          shown.add(token);
-          try { deps.prefs.set('updates:app:lastShown', token); }
-          catch (error) {
+        if (!shown.has(token)) {
+          try {
+            if (deps.prefs.get('updates:app:lastShown', '') === token) checked.value.lastApply = null;
+            else { shown.add(token); deps.prefs.set('updates:app:lastShown', token); }
+          } catch (error) {
+            shown.add(token);
             // A cosmetic acknowledgement cannot invalidate the observed update.
             acknowledgementError = `Could not save update acknowledgement: ${String(error)}`;
           }

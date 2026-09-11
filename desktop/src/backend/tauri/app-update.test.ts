@@ -38,7 +38,7 @@ it('records the native failure as a Result and never rejects the caller', async 
 
 it.each(['result','throw'] as const)('restores the arm after a failed manual apply (%s)',async mode=>{
  const h=harness();await h.update.armOnClose('0.12.2');
- h.deps.run=()=>createRun(async()=>{if(mode==='throw')throw new Error('apply failed');return {ok:false,error:'apply failed'};});
+ h.deps.run=()=>{if(mode==='throw')throw new Error('apply failed');return createRun(async()=>({ok:false,error:'apply failed'}));};
  expect(await h.update.apply('0.12.2','manual')).toMatchObject({ok:false,error:expect.stringContaining('apply failed')});
  expect(vi.mocked(h.deps.invoke!).mock.calls).toEqual([['app_update_on_close',{version:'0.12.2'}],['app_update_on_close',{version:null}],['app_update_on_close',{version:'0.12.2'}]]);
 });
@@ -54,4 +54,9 @@ it('reports both apply and restore failures',async()=>{
  h.deps.run=()=>createRun(async()=>({ok:false,error:'apply failed'}));
  vi.mocked(h.deps.invoke!).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('restore failed'));
  expect(await h.update.apply('0.12.2')).toEqual({ok:false,error:'apply failed Could not restore install-on-close: restore failed'});
+});
+
+it('an unreadable acknowledgement also preserves the successful check',async()=>{
+ const h=harness();h.deps.prefs.get=()=>{throw new Error('read failed');};
+ expect(await h.update.check()).toMatchObject({ok:true,value:{lastApply:{version:'0.12.2'},acknowledgementError:expect.stringContaining('read failed')}});
 });

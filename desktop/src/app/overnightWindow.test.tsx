@@ -38,9 +38,10 @@ it('does not fire at the exclusive end and waits until the next night', async ()
   vi.setSystemTime(at(4, 30)); const onFire = vi.fn(); renderHook(() => useOvernightWindow({ enabled: true, onFire }));
   await advance(30 * minute); expect(onFire).not.toHaveBeenCalled(); await advance(20 * 60 * minute); expect(onFire).toHaveBeenCalledOnce();
 });
-it('checks elapsed idleness on activity after a suspended timer', async () => {
+it('requires fresh idleness on activity after a suspended timer', async () => {
   vi.setSystemTime(at(0)); const onFire = vi.fn(); renderHook(() => useOvernightWindow({ enabled: true, onFire }));
-  vi.setSystemTime(at(2)); await act(async () => { fireEvent.pointerMove(window); }); expect(onFire).toHaveBeenCalledOnce();
+  vi.setSystemTime(at(2)); await act(async () => { fireEvent.pointerMove(window); }); expect(onFire).not.toHaveBeenCalled();
+  await advance(29 * minute); expect(onFire).not.toHaveBeenCalled(); await advance(minute); expect(onFire).toHaveBeenCalledOnce();
 });
 it('disabled and unmounted hooks have no timer or activity listener', async () => {
   const onFire = vi.fn(); const view = renderHook(({ enabled }) => useOvernightWindow({ enabled, onFire }), { initialProps: { enabled: false } });
@@ -76,4 +77,30 @@ it('does not fire on a wake event after the window has ended',async()=>{
 it('absorbs a rejected callback when no error handler is supplied',async()=>{
  vi.setSystemTime(at(1));const onFire=vi.fn(async()=>{throw new Error('failed');});
  renderHook(()=>useOvernightWindow({enabled:true,onFire}));await advance(30*minute);expect(onFire).toHaveBeenCalledOnce();
+});
+
+it('an overdue timer after sleep starts a fresh idle period',async()=>{
+ let elapsed=at(0).getTime();const now=()=>new Date(elapsed),onFire=vi.fn();
+ renderHook(()=>useOvernightWindow({enabled:true,onFire,now}));
+ elapsed=at(2,10).getTime();await advance(60*minute);expect(onFire).not.toHaveBeenCalled();
+ elapsed+=29*minute;await advance(29*minute);expect(onFire).not.toHaveBeenCalled();
+ elapsed+=minute;await advance(minute);expect(onFire).toHaveBeenCalledOnce();
+});
+it('high-frequency pointer activity does not churn timers inside or outside the window',async()=>{
+ const onFire=vi.fn();const timer=vi.spyOn(globalThis,'setTimeout');
+ try{renderHook(()=>useOvernightWindow({enabled:true,onFire}));const outside=timer.mock.calls.length;
+ for(let i=0;i<100;i++)fireEvent.pointerMove(window);expect(timer.mock.calls.length).toBe(outside);
+ await advance(59*minute);fireEvent.pointerMove(window);await advance(minute);const inside=timer.mock.calls.length;
+ for(let i=0;i<100;i++)fireEvent.pointerMove(window);expect(timer.mock.calls.length).toBe(inside);expect(onFire).not.toHaveBeenCalled();
+ }finally{timer.mockRestore();}
+});
+it('a transient invalid clock is reported, retried, and requires fresh idle time',async()=>{
+ vi.setSystemTime(at(1));let invalid=false;const now=()=>invalid?new Date(NaN):new Date(),onFire=vi.fn(),onError=vi.fn();
+ renderHook(()=>useOvernightWindow({enabled:true,onFire,onError,now}));invalid=true;await advance(30*minute);
+ expect(onError).toHaveBeenCalledOnce();expect(onFire).not.toHaveBeenCalled();expect(vi.getTimerCount()).toBe(1);
+ invalid=false;await advance(minute);await advance(29*minute);expect(onFire).not.toHaveBeenCalled();await advance(minute);expect(onFire).toHaveBeenCalledOnce();
+});
+it('invalid options report errors without throwing and can recover on new options',async()=>{
+ const onError=vi.fn(),onFire=vi.fn();const view=renderHook(({startHour})=>useOvernightWindow({enabled:true,onFire,onError,startHour}),{initialProps:{startHour:6}});
+ expect(onError).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(1);view.rerender({startHour:1});await advance(60*minute);expect(onFire).toHaveBeenCalledOnce();
 });

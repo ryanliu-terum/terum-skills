@@ -207,7 +207,7 @@ Browser development still uses the mock backend. The app bundle is separate from
 Every app-spawned CLI child, including under `tauri dev`, has piped stderr and
 `TERUM_SKILLS_NO_UPDATE_NOTIFIER=1`; `--frames` forces `noUpdateCheck`, and `update` is registered with
 `notices: false`. Background terminal release notices are therefore suppressed in the app. Explicit update
-checks still return release observations and installation-specific advice; and `app-update` gives the app its own channel for the app itself — it checks once per launch against the release advertisement the CLI already caches, downloads through `gh release download`, verifies the published SHA-256, and installs only after you press Relaunch. It never updates the CLI.
+checks still return release observations and installation-specific advice; and `app-update` gives the app its own channel for the app itself — it checks once per launch against the release advertisement the CLI already caches, downloads through `gh release download`, verifies the published SHA-256, and installs it the way Settings ▸ Updates says to: when you press Install now, when you quit, or overnight while the app is open and idle. It never updates the CLI.
 
 ## Releasing (maintainers)
 

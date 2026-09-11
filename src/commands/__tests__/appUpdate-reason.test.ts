@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
@@ -41,4 +41,18 @@ it('retains the reason on an installer failure', async () => {
   const h = await fixture(); h.exec.mockResolvedValue({ code: 7, stdout: '', stderr: 'installer failed' });
   await run({ ...h.args, applyNow: true, reason: 'overnight' }, new ScriptedPrompter());
   expect(JSON.parse(await readFile(h.marker, 'utf8'))).toMatchObject({ phase: 'failed', reason: 'overnight', error: expect.stringContaining('installer failed') });
+});
+
+it.each(['missing-stage','unsupported','invalid-version','invalid-pid'] as const)('records early apply-now failure: %s',async mode=>{
+ const h=await fixture();
+ if(mode==='missing-stage')await rm(join(h.args.config!.root,'app'),{recursive:true});
+ const patch:Partial<AppUpdateArgs>=mode==='unsupported'?{evidence:{platform:'linux',arch:'x64'}}:mode==='invalid-version'?{release:'not-a-release'}:mode==='invalid-pid'?{awaitPid:'bad'}:{};
+ const result=await run({...h.args,...patch,applyNow:true,reason:'on-close'},new ScriptedPrompter());
+ expect(result).toMatchObject({ok:true,value:{phase:'failed',error:expect.any(String)}});expect(h.exec).not.toHaveBeenCalled();
+ expect(JSON.parse(await readFile(h.marker,'utf8'))).toMatchObject({schema:1,phase:'failed',reason:'on-close',error:expect.any(String)});
+});
+it('reads the exact native pending marker after an installer dies before running',async()=>{
+ const h=await fixture();const pending={schema:1,version:'0.12.2',phase:'waiting',at:'1970-01-01T00:00:00.000Z',error:null,reason:'on-close'};
+ await writeJsonPrivate(h.marker,pending);
+ expect(await run({...h.args,check:true},new ScriptedPrompter())).toMatchObject({ok:true,value:{lastApply:pending}});
 });
