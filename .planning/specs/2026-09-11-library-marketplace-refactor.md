@@ -1,6 +1,7 @@
 # terum-skills — Library/Marketplace split and immutable skill versions (spec)
 
-**Status:** DRAFT rev 2 for Ryan's approval (2026-09-11). §2 records the eight rulings already taken; §15 holds what still needs a human before an implementer starts. Rev 2 applies 27 findings that survived an adversarial verification pass (6 lenses, 49 findings adjudicated).
+**Status:** DRAFT rev 3 (2026-09-11). §2 records fourteen rulings. §15 is empty — every open question was walked to a resolution.
+Rev 2 applied 27 findings that survived an adversarial verification pass (6 lenses, 49 findings adjudicated). **Rev 3 applies the six decisions of `.planning/decisions/2026-09-11-library-marketplace-refactor-decision-walk.md`**, three of which change sections rev 2 had locked — read §2 D9–D14 before anything else.
 **Base:** line numbers were taken at `origin/main` @ `faa402c`. The v0.14.0 serve work (`d09d278`) shifts every `src/commands/sync.ts` citation by **+5** and `desktop/src/backend/tauri/index.ts` by **up to +33**; `src/commands/serve.ts` and `src/lib/serve-verbs.ts` (§1.5) exist only at `d09d278`. Every other file cited here is byte-identical at both. The primary checkout is on `feat/frame-mode`, which is 357 commits behind and carries no `desktop/`; implementation belongs in a worktree off `origin/main`.
 **Trigger:** Ryan, 2026-09-10 — `~/Downloads/Refactor Prompt/RefactorPrompt.html` plus the whiteboard photo (`images/image1.jpg`).
 **Evidence:** a 29-agent survey of `origin/main` (15 subsystem maps, 10 requirement traces, 4 adversarial critics), plus direct inspection of the live clone at `~/.terum/skills/teams/terum-shared-skills` and the live config at `~/.terum/skills/config.json`.
@@ -84,7 +85,7 @@ Skills are keyed by **UUID** in every join (`team.json.projects[].skills`, `peop
 
 **D1 — Path shape: lowercase, `v<N>`.** `skills/<name>/v<N>/`, `people/<handle>.json`, `evals/<uuid>/v<N>/<runId>.json`. Rendered as **"Version 3"** in every user-facing string. *Reason:* a case-only rename of `skills/` → `Skills/` cannot run through `safeWrite` on a case-insensitive volume — reproduced on this Mac: the add sorts before the remove, the new file lands *inside* the old lowercase directory, `git add` stages only the deletion, and safeWrite's staged-diff proof throws. Lowercase removes the hazard entirely and removes a two-step `git mv` from the migration. It also keeps the GitHub tree URL (`SkillScreen.tsx:28`, a raw template literal with no `encodeURIComponent`) free of an unencoded space.
 
-**D2 — Byte identity: content and path only.** Compared: every file under the skill folder. Ignored: `.DS_Store`, `Thumbs.db`, `.git/**`, `.skillhub/**`, `evals/**`. Normalized: file mode and mtime — identity is **content + relative path** only. `SKILL.md` is compared post-`injectManagedFields`.
+**D2 — Byte identity: content and path only.** Compared: every file under the skill folder, **eval cases included** (D9). Ignored: `.DS_Store`, `Thumbs.db`, `.git/**`, `.skillhub/**`. Normalized: file mode and mtime — identity is **content + relative path** only. `SKILL.md` is compared post-`injectManagedFields`.
 
 **D3 — Existing team repos migrate in place, once.** One migration, one target shape, one version number: `layout_version: 3`. An older CLI reading a layout-3 repo refuses by name with an upgrade sentence.
 
@@ -97,6 +98,22 @@ Skills are keyed by **UUID** in every join (`team.json.projects[].skills`, `peop
 **D7 — Eval receipts at tree hashes that never become a version are archived, never deleted.** `evals/<uuid>/archive/<40-hex>/<runId>.json`, preserved verbatim, read by nothing today.
 
 **D8 — Race conditions between two simultaneous publishes are out of scope** (Ryan, verbatim). This is **not** permission to drop `safeWrite`. `safeWrite`'s fetch-reset-mutate-verify-push loop is what makes a publish atomic against an unrelated concurrent write; D8 only says that two people minting `v4` at the same instant need no coordination beyond it. Any implementer who reads D8 as "skip the lock" has misread it.
+
+### Rev 3 — the decision walk (ledger: `.planning/decisions/2026-09-11-library-marketplace-refactor-decision-walk.md`)
+
+**North Star, ratified:** *Nothing moves between your machine and the team unless you ask — and you can always see exactly what's on each.* This is the yardstick, and it is deliberately **not** the two-mirror mechanism: purity is a means to visibility, so where a mirror's purity would make the user less able to see what is true, purity loses (see D11).
+
+**D9 — Eval cases are part of the skill.** They are generated into the user's **local** folder, digested as content identity, published inside `v<N>/`, and copied on install. *Grounding:* 88 local skill folders on the author's machine contain **zero** `evals/` directories, while the team repo's `decision-walk` carries four eval asset files — cases are generated straight into the repo today and have never been on disk, and this refactor deletes both routes that put them there. **Accepted cost:** regenerating cases mints a new skill version. This reverses rev 2's §3.1 derived decision.
+
+**D10 — The executable bit is fixed, in M1.** Not warned about — fixed. Publish becomes the only way bytes travel, so bytes must arrive intact. See §4.5 for the five touch points, one of which is `safeWrite`'s staged-diff invariant.
+
+**D11 — Install seeds the local eval store, naming the runner.** The receipt's digest provably describes the bytes just placed, so the score is shown; `provenance.runner_handle` is rendered so the user knows it was not their run. This is the L-DECL principle applied a second time.
+
+**D12 — One replace rule on install; quarantine leaves the install path.** Something already at the destination → keep it at `<root>/.claude/old-skills/<name>`, install the new copy, say so. No `--force`, no `owned`/`foreign` distinction, no `quarantineDrift`. *Grounding:* `config.placements` is `{}` on a real machine, so all 88 skills are "foreign" — the distinction is about Terum's bookkeeping, not the user's files. The Library keeps only the **local** leg of the drift check.
+
+**D13 — Onboarding asks for one project with a folder picker.** No new ask-frame kind. `src/lib/discover.ts` is deleted outright — this reverses rev 2's §7.1 decision to keep it as a read-only lister.
+
+**D14 — PR #173 closed, PR #167 closed with its picker lifted.** Both done 2026-09-11; branches left intact. See §16.
 
 ---
 
@@ -115,8 +132,8 @@ team.json
     policy: { skill_license } }                    <- `publish` removed; `global[]` removed
 README.md                                          generated
 skills/<name>/v<N>/**                              immutable. never modified after commit.
-skills/<name>/evals/triggers.yaml                  UNVERSIONED, sibling to the version folders
-skills/<name>/evals/cases/*.yaml                   UNVERSIONED
+                                                   (incl. evals/triggers.yaml and
+                                                    evals/cases/*.yaml — D9)
 people/<handle>.json
 evals/<skill-uuid>/v<N>/<YYYYMMDDTHHMMSSZ>.json    receipts. append-only.
 evals/<skill-uuid>/archive/<40-hex>/<runId>.json   D7. preserved, read by nothing.
@@ -125,7 +142,7 @@ evals/<skill-uuid>/archive/<40-hex>/<runId>.json   D7. preserved, read by nothin
 
 - `<name>` keeps `isSkillName` (`src/lib/schema.ts:29`), `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`, ≤64, and must equal the `name` frontmatter of the **latest** version.
 - `Global` is a reserved project name, auto-created at team creation, present in every layout-3 repo.
-- **Eval cases are unversioned and live outside the version folder.** Derived decision, flagged in §15-Q1. *Reason:* if cases lived inside `v<N>/` they would be part of the immutable bytes, so adding a test case would mint a new skill version — and attaching a newly-authored case to an existing version would require mutating a frozen folder. Keeping them at `skills/<name>/evals/` matches today's layout exactly and matches the guard's existing row h (`EVAL_ASSET_PATH`). Consequence to accept: a receipt records *which* cases ran (`provenance.cases`) but not their exact bytes at run time.
+- **Eval cases live INSIDE the version folder (D9).** `v<N>/evals/triggers.yaml` and `v<N>/evals/cases/*.yaml` are ordinary version bytes: digested, immutable, copied on install. There is no unversioned `skills/<name>/evals/` path and **guard row h (`EVAL_ASSET_PATH`) is deleted, not re-pointed** — publish writes cases the same way it writes `SKILL.md`. Consequence, accepted: regenerating cases changes the content digest and so mints a new version. That is the honest reading — the test suite changed, so the artifact changed — and it is bounded, because generating and publishing are both deliberate acts. *Rev 2 said the opposite; see D9 for why.*
 - **Receipts are never co-located inside a version folder.** Attaching an eval to an already-frozen version must not change that version's bytes — doing so would destroy immutability *and* make the publish-time comparison meaningless.
 - **There is no per-version manifest file.** A manifest would be bytes the local candidate folder does not have, so it would break byte-identity on every republish.
 
@@ -157,7 +174,7 @@ Ordinals may have gaps (a version folder deleted by hand). **Next = highest exis
 
 `canonicalDigest(root)` in `src/lib/skills.ts:126` **is** this function. It is not replaced, duplicated or re-implemented. Two changes:
 
-1. Add the D2 ignore list to `walk()` (`src/lib/skills.ts:216`), which today has none: skip any path whose first segment is `.git`, `.skillhub` or `evals`, and any basename `.DS_Store` or `Thumbs.db`.
+1. Add the D2 ignore list to `walk()` (`src/lib/skills.ts:216`), which today has none: skip any path whose first segment is `.git` or `.skillhub`, and any basename `.DS_Store` or `Thumbs.db`. **`evals/` is NOT skipped** (D9) — cases are part of the skill's identity.
 2. Export a second entry point `skillContentDigest(files: Map<string,Buffer>): string` computing the identical record stream from an in-memory file map, so the same digest can be taken of a tree inside `safeWrite`'s pure mutation without touching the filesystem.
 
 The record stream is unchanged and stays frozen: `` `${digestKey(relative)}:${sha256hex(content)}\n` ``, ascending by unescaped path, `SKILL.md` passed through `canonicalSkillMd` first, result prefixed `sha256:`. `digestKey` is the existing prefix-free escape (`src/lib/skills.ts:147`) — do not invent a second one. Mode and mtime are **not** in the stream (D2).
@@ -245,7 +262,7 @@ Model the preprocess on the existing `teamsSchema` one (`src/lib/schema.ts:104-1
 - `GuardAction`: delete `'connect'`, `'eval'`, `'eval-assets'`, `'decline'`. Add `'migrate'`.
 - Delete `SKILL_ACTIONS` (`:37`) and the `skills/` regex at `:52-53`.
 - **New row a′ — publish writes a version folder.** A changed path is permitted under action `'publish'` only if it matches `/^skills\/([^/]+)\/v[1-9][0-9]*\/.+$/`, `tree.before(path) === undefined` and `tree.after(path) !== undefined`. **Add-only: never modify, never remove.** This is what makes a version immutable at the authorization layer rather than by convention.
-- **New row a″ — publish writes unversioned eval assets.** `/^skills\/([^/]+)\/evals\/(?:cases\/[^/]+\.ya?ml|triggers\.yaml)$/`, add-or-replace, under `'publish'` only. Replaces today's row h.
+- **Row h (`EVAL_ASSET_PATH`, `permitsEvalAsset`) is deleted outright, with no replacement (D9).** Eval cases are ordinary version bytes now, admitted by row a′ like every other file in `v<N>/`. There is no add-or-replace row anywhere: a version folder is add-only, full stop.
 - **Row g moves under `'publish'`.** `RECEIPT_PATH` becomes `/^evals\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/(v[1-9][0-9]*)\/(\d{8}T\d{6}Z)\.json$/`. **Drop `permitsReceipt`'s `tree.changedPaths.length !== 1` clause** — a publish commit legitimately writes a version folder, the `team.json` list, a people file and N receipts at once, so append-only must become a per-path predicate, not a whole-commit one. Keep the uuid→`metadata.id` resolution, re-pointed at `tree.paths('skills/')` filtered by `/^skills\/[^/]+\/v[1-9][0-9]*\/SKILL\.md$/`.
 - `PEOPLE_ACTIONS` becomes `['join','install','uninstall','profile','publish']`. **Edit this list in exactly one place and re-list every verb that writes the file in the same change** — a mismatch here throws `Write guard refused people/<handle>.json for install` on every install.
 - Row c (`guardTeam`): `publish` may append to `projects[].skills`; the `global` branch is deleted.
@@ -262,6 +279,24 @@ Re-arm from the migration verb **and** from the first successful `safeWrite` aft
 
 `applyTree` (`src/lib/teamRepo.ts:399-405`) processes `changedPaths` in sorted order, so an add can precede its own remove. Under D1 there is no case-only rename in the migration, so this is not on the critical path — but the same hazard fires on any ordinary case-only *skill* rename. Fix it here: process removals before writes, and `rmdir` emptied parents in between (lift the loop from `removeCreated`, `:415-419`). Add a test that runs on a case-insensitive filesystem; a Linux-only CI run cannot see it.
 
+### 4.5 File modes survive a publish (D10)
+
+Today a `0755` script published to the team arrives `0644` and will not run, with nothing saying why. Under this refactor publish becomes the only way bytes travel, so this stops being a latent curiosity and becomes the single path every script takes. **Five touch points, and the fifth is the one that makes this bigger than it looks:**
+
+1. `MutableTree.setExecutable(path: string, executable: boolean): void` on the interface (`teamRepo.ts:24-31`).
+2. A `modes = new Map<string, boolean>()` overlay in `makeTree` (`:305`).
+3. `treePaths` (`:333`) must **stop requiring `tracked.has(path)` for overlay entries** — a path created by `tree.set()` is never in the committed index, so today it can never be reported executable, which is the root of the bug.
+4. A `chmod` after `writeFile` in `applyTree` (`:399-405`).
+5. **`changedPaths` (`:321`) must learn about modes.** It compares **content only** (`sameContent`), but `git diff --cached --name-only` reports a mode-only change — so a chmod of a file whose bytes are unchanged stages a path `changedPaths` does not list, and `safeWrite`'s staged-diff equality proof (`:220-223`) throws `Staged diff [...] does not match the mutation [...]`. This cannot fire for publish itself (a version folder is add-only, so every path is already in `changedPaths`) but `applyTree` is shared by every write path, so it must be handled or an ordinary mode-only write breaks.
+
+Detection on the read side already exists: `src/lib/skill-source.ts:86` does `lstat(next).mode & 0o111`.
+
+Mode is **not** part of content identity (D2 normalizes it), so nothing here touches version identity — an executable and a non-executable copy of the same bytes are the same version.
+
+**Test:** publish a skill containing a `0755` file, re-read from a fresh clone, assert `git ls-tree` reports `100755`; plus a mode-only-change case asserting the staged-diff proof does not throw.
+
+**Grounding, so nobody is surprised by the scope:** there are currently **zero** `100755` files in the team repo and **zero** executable files across 88 local skill folders. This fixes a real mechanism with no live instances — a deliberate call (D10) taken over the cheaper warn-and-gate, on the grounds that a warning announces a loss where the fix means nothing is lost.
+
 ---
 
 ## 5. Milestone M2 — publish
@@ -275,19 +310,15 @@ Re-arm from the migration verb **and** from the first successful `safeWrite` aft
 1. Resolve `ref` to a **local folder** from the Library roots (global + `config.projects`). Not from the clone: you publish what is on your machine.
 2. `assertNotInsideStateRoot` + `assertSkillDirectory` (both already used in `connect.ts:181,184`) so a nested symlink or a non-directory is refused before anything is read.
 3. Hygiene checks as today, including the privileged-grants confirmation.
-4. **Read the folder into two maps**, both keyed relative to the skill root:
-   - `versioned: Map<relPath, Buffer>` — every file **except** the D2 ignore list. These become `v<N>/` and are the only bytes `skillContentDigest` ever sees.
-   - `evalAssets: Map<relPath, Buffer>` — only `evals/triggers.yaml` and `evals/cases/*.ya?ml`. Read separately, **never digested** (D2, §3.1), written by step 9 outside the version folder. Any other path under `evals/` is neither digested nor published: publish warns by name that it is dropping it, because `evals/` is a reserved namespace in the remote layout. This is not a publish failure.
-
-   Two maps, not one filtered at the point of use: the single-map reading either digests eval cases — so editing a test case mints a new skill version, which §3.1 forbids — or leaves step 9 with no bytes to write, so authored cases never reach the team repo at all.
+4. Read the folder into **one** map, `files: Map<relPath, Buffer>`, keyed relative to the skill root: every file except the D2 ignore list. `evals/triggers.yaml` and `evals/cases/*.yaml` are **in** this map (D9) — they are skill bytes like any other, digested and written into `v<N>/`. *Rev 2 split this into two maps; D9 collapsed it back.*
 5. `injectManagedFields` into the in-memory `SKILL.md` — `license` from `team.json.policy.skill_license`, `metadata.id` (existing, or minted at v1), `metadata.author`, and `metadata.terum-category` when absent. **This is the only surviving caller of `injectManagedFields`**, migrated out of `connect.ts` before that file is deleted.
-6. `candidate = skillContentDigest(versioned)` — after step 5, so the comparison is post-normalization (§1.2).
+6. `candidate = skillContentDigest(files)` — after step 5, so the comparison is post-normalization (§1.2).
 
 Then inside `safeWrite` with `action: 'publish'`, a pure mutation:
 
 7. Enumerate the name's existing versions **from the tree**, not with `listVersions` — `listVersions` is a `readdir` of the working copy and a pure mutation may only see the post-image. Derive them from `tree.paths('skills/<name>/')` by taking the segment after the name and keeping what `parseVersionFolder` accepts. For each version `v<K>`, digest its bytes with `skillContentDigest` after **stripping the `skills/<name>/v<K>/` prefix from every key** — `tree.paths(prefix)` returns full repo-relative paths and does not strip (`teamRepo.ts:325-329`), while §3.3's record stream is keyed skill-folder-relative. Feed it unstripped and no version can ever compare equal, so every publish mints a new version forever and the step-8 refusal is unreachable. §14.1's republish test is the gate that catches this.
 8. **If a version's digest equals `candidate`:** do not mint. `identicalTo = K`. Still attach any local receipts whose `content_digest` equals `candidate` and that are not already committed under `v<K>` (D from the refactor's republish rule). If there are none either, the mutation is empty and `safeWrite` returns `changed: false`.
-9. **Otherwise:** `N = highest + 1` (never `count + 1`; on a first publish the highest is 0, so `N = 1`). Write every entry of `versioned` under `skills/<name>/v<N>/`. Write every entry of `evalAssets` under `skills/<name>/evals/` (unversioned, add-or-replace). Append the uuid to `team.json.projects[<project>].skills` if absent. Attach matching receipts under `evals/<uuid>/v<N>/`.
+9. **Otherwise:** `N = highest + 1` (never `count + 1`; on a first publish the highest is 0, so `N = 1`). Write every entry of `files` under `skills/<name>/v<N>/`, eval cases included. Append the uuid to `team.json.projects[<project>].skills` if absent. Attach matching receipts under `evals/<uuid>/v<N>/`.
 10. Append/refresh `installed[]`? **No.** Publishing is not installing — D5 splits the two lists, and `installed[]` means *a copy is on a machine*. The prompt's sentence *"The person who published it has their .json changed to include that skill"* is satisfied by the profile prompt writing `profile[] {via:'publish'}`. Only that prompt writes the people file here.
 
 ### 5.2 Messages
@@ -348,6 +379,9 @@ Re-keyed from today's `evals/<team>/<skill-id>/<runId>/` so a skill belonging to
 - Resolve `ref` to a **local folder**, not a team skill. Miss message: *"No local skill folder named `<ref>` in your library; install it from the marketplace first, or pass `--path`."*
 - Add `content_digest` where the receipt is built (`:295-324`), from the exact candidate files the run used, after the same ignore list.
 - **Delete `--commit` end to end**: the receipt `safeWrite` (`:330-343`), `commitEligibility` (`:358-370`) and both call sites, `generationCommitNotice`, and the generated-asset confirm-commit branch (`:194-237`) including its `reconcileShared` call. Publish is the only writer.
+- **`--generate` writes cases to the LOCAL folder, always (D9).** Today it has two routes and neither survives: with a connected source it calls `saveGeneratedAssets(shared.source, …)` then mirrors up through `reconcileShared`; without one it commits straight into the team repo under the `eval-assets` guard row. Both go. The new behaviour is the first half of the old one and nothing else — `saveGeneratedAssets(<the local skill folder>, generated)`, full stop. The cases then reach the team the same way every other byte does: the user publishes.
+  **This is why D9 matters operationally, not just architecturally.** Rev 2 deleted both routes and added none, so nothing would have produced eval cases anywhere. Verified: 88 local skill folders on the author's machine carry zero `evals/` directories today, because the generated cases went straight to the repo.
+  **Consequence to state in the UI:** generating cases changes the skill's content digest, so the next publish mints a new version *and* the existing local eval score blanks (§7.3). The generate flow should say so before it writes.
 - After a run completes, the result carries `shareHint: true` so the caller can show: *"To share these results, publish the skill again."*
 
 ### 6.4 `receiptPath` and the readers
@@ -395,13 +429,13 @@ Two traces proposed two incompatible registries; this is the single answer.
 | CLI, local | `project add [path]` · `project remove <path>` · `project list` |
 | CLI, team | `team project create` (moved from `project create`) |
 | Feature keys | `libraryProjects` (local — **renamed from the existing `checkouts`**) · `projects` (shared — **already taken** by the marketplace Teams/Projects screen, `MarketplaceScreen.tsx:44`, and it does not move) |
-| Seam | `backend.projects.{add,remove,discover}` · `backend.teamProjects.create` |
+| Seam | `backend.projects.{add,remove}` · `backend.teamProjects.create` (no `discover` — D13) |
 
 The rename is worth its cost precisely because the sidebar's existing **Add project** button runs `checkout add` — the user-facing word is already "project". `desktop/AGENTS.md` invariant 2 requires exactly one consumer per feature flag, which is why the local key is `libraryProjects` and not `projects`: `projects` is live today for the marketplace's team-projects screen, and giving the same boolean two meanings in one app is the thing that invariant forbids. Renaming `checkouts` → `libraryProjects` is a `FEATURE_KEYS` edit (`desktop/src/backend/types.ts:12`) plus its two consumers at `Sidebar.tsx:39,48`, and `Surfaces.checkouts` moves with it.
 
-**`src/commands/checkout.ts` and the `checkout` commander group are renamed here, not deleted in §12.** The verb surface `checkout add|remove|list|discover` becomes `project add|remove|list|discover`, `CliVerbs.checkout` becomes `CliVerbs.project`'s local half, and `src/commands/project.ts`'s team-project creator moves to `team project create`. §12 lists only the two checkout behaviours that genuinely die — `writableCheckout` and `discover --register`.
+**`src/commands/checkout.ts` and the `checkout` commander group are renamed here, not deleted in §12.** The verb surface `checkout add|remove|list|discover` becomes `project add|remove|list` (no `discover` — D13), `CliVerbs.checkout` becomes `CliVerbs.project`'s local half, and `src/commands/project.ts`'s team-project creator moves to `team project create`. §12 lists the checkout behaviours that genuinely die — `writableCheckout`, and the whole of `discover`.
 
-**`discover` survives as a read-only lister.** Its `--register` side effect is deleted. Deleting the scanner outright would also delete the onboarding "find my projects" step that M6 depends on.
+**`discover` is deleted outright (D13).** Rev 2 kept it as a read-only lister purely to feed the onboarding step's candidate list; D13 makes that step a single folder picker, so nothing consumes it. Delete `src/lib/discover.ts` entirely — `discoverSkillRoots`, `DiscoverCandidate`, `DiscoverResult`, `DEFAULT_MAX_DEPTH`, `DEFAULT_BUDGET_MS`, `SKIPPED_DIRECTORIES` — plus the `kind: 'discover'` verb arm, the `discover` CLI subcommand, and `backend.projects.discover` on the seam.
 
 ### 7.2 The app never adds a project by itself
 
@@ -421,13 +455,16 @@ Delete every implicit registration:
 A Library card's eval comes from `~/.terum/skills/evals/local/<digest>/` for the digest of the folder **as it is on disk right now**. Consequences to state plainly in the spec so nobody treats them as bugs:
 
 - Editing a skill changes its digest, so its card's score **blanks**. That is correct: the score described the old bytes. The card shows "Not evaluated" plus, when an older digest has runs, a quiet line *"evaluated before your last edit"*.
-- A freshly installed skill shows **no eval at all**, even though the marketplace card showed one — the team's receipt is for a version you now have a copy of, but the local store is empty. §15-Q2.
+- **A freshly installed skill shows the team's score, attributed (D11).** Install seeds the local store with the committed receipt for the version it placed (§9.1), so the card reads e.g. `+18% PASS · run by ajayw36 · Version 4` rather than blanking. This is sound because the receipt's `content_digest` provably describes the exact bytes now on disk — the same digest the card looks the score up by. The runner attribution is **mandatory**, not optional: without it the Library claims the user ran something they did not.
+- Combining the two: editing an installed skill blanks a **teammate's** score. Correct, and the empty state must say so — *"evaluated before your last edit"* — rather than reading as a bug.
 
 ### 7.4 The card and the screen
 
 - `[modify] desktop/src/backend/tauri/index.ts` — **`inventoryCard` (`:193`) is the MARKETPLACE's builder and is not touched here**; it stays with `catalog()` (`:332`). The Library's builder is `localCard` (`:137`). Change `library()` (`:645`): delete the `joinedSkill` + `inventoryCard` branch at `:658` and the `libraryTeam(team, options)` half of the `Promise.all` at `:647`, so `library()` spawns only `ls --local` and every row is built by `localCard`. Delete `joinedSkill`, and `notOfferedCard`'s team path, if they lose their last caller. Replace `Library.team` (`LibraryTeam`) with nothing — the Library has no team limb — and re-word the `No such checkout: … Settings ▸ This machine ▸ Checkouts` message at `:650` for the L-PROJ rename.
 - **`SkillCard` stays ONE shared type** (`desktop/src/backend/types.ts:33`); the Library and the Marketplace are two *builders* over it, not two types — splitting it would fork every card component, the `⋯` menu and the router. The type gains `localEval: ReceiptSummary|null`, `localEvalStale: boolean`, `installedVersion: string|null`, `latestVersion: string|null`, `evalVersion: number|null`, `evalStale: boolean`, `latestEvalState: 'ok'|'none'|'invalid'|null`, `profileVersion: string|null` — all **required-nullable**, so neither builder can forget one.
   The Library builder sets every team-derived field to a fixed neutral value, named here once: `installs: 0`, `teamState: 'unknown'`, `latestVersion: null`, `installedVersion: null`, `evalVersion: null`, `evalStale: false`, `latestEvalState: null`, `profileVersion: null`. It sets `localEval`/`localEvalStale`; the Marketplace builder leaves those null/false. `teamed` stays on the type and is set by both — `detailPath()` (`skill-card-actions.ts:11`) routes on it.
+  `localEval` carries `runnerHandle: string | null` so D11's attribution can render. Null means the run was this machine's.
+- **`edited: boolean` on the Library card (D12).** True when the folder's current fingerprint differs from `config.placements[<path>].fingerprint`. Local-vs-local — **no clone read** — so it survives the pure-mirror rule. `healthOf` (`src/commands/ls.ts:212-225`) narrows from five states to this one plus `unknown`: the `snapshots` map and the `update-available`, `both` and `gone-from-repo` branches are deleted, because all three need the clone and §8.3 already puts the version comparison on the Marketplace card. This is a **deletion, not new work** — the local leg exists and already runs. Cost is one `snapshotSkillDirectory` per **placed** skill per library load, already paid today and proportional to installed skills rather than to the whole library.
 - The empty state: *"Skills in `~/.claude/skills` and in the projects you add show up here."*
 
 ### 7.5 D6 — delete, rename, move
@@ -521,21 +558,54 @@ The marketplace person page (`#/marketplace/people/<handle>`, `MarketplaceScreen
 `[rewrite] src/commands/install.ts` — source becomes `<clone>/skills/<name>/v<max>/`, copied whole. No `resolveVersion`, no `materializeVersion`, no cache: the version folder is already an immutable checkout inside the clone.
 
 - **Always ask where.** The destination picker offers Global (`~/.claude/skills`) and every `config.projects` entry. Delete `if (!roots.length) return { kind: 'global' }` (`:255`) — an interactive install always asks.
-- `@version` in a ref is **refused**: *"Installing a previous version is not supported yet; install installs the latest version."* (The refactor defers previous versions; `materializeVersion` stays for the eval's incumbent arm and is not reachable from a user ref.)
+- `@version` in a ref is **refused**: *"Installing a previous version is not supported yet; install installs the latest version."* (The refactor defers previous versions.)
 - `--into <untracked path>` refuses and names `project add` (§7.2).
 - Writes `config.placements[<path>] = { id, team, version: 'v4', scope, placed_at, fingerprint }` where `fingerprint` is still `snapshotSkillDirectory` (§3.3).
 - Writes `installed[]` automatically (D5). Then **offers the profile**: `Add <name> to your profile?`, default no.
+- **Seeds the local eval store (D11).** Copy every committed receipt for the version being placed — `evals/<uuid>/v<N>/*.json` in the clone — to `~/.terum/skills/evals/local/<digest>/<runId>/receipt.json`, where `<digest>` is that version's `content_digest`. No transformation: the receipt already carries `version: 'v<N>'` and `provenance.runner_handle`. This is a file copy of data already in the clone; it moves no bytes between machine and team.
 - `InstalledResult` gains `path`, `version`, `profiled`.
 
-**PR #167 (`feat/bulk-install-destination`) already contains `desktop/src/screens/marketplace/install-destinations.ts` — the exact destination-list builder this needs.** Reuse it rather than writing a second one; §16.
+#### 9.1.1 The replace rule (D12) — one behaviour, not three
+
+Today install branches three ways on what is already at the destination: `foreign` refuses unless `--force`; `ours` + drifted quarantines your edits; `absent` places cleanly. That split is about **Terum's bookkeeping, not the user's files** — `config.placements` is `{}` on a real machine, so every one of its 88 skills is "foreign." Under a Finder-mirror Library the distinction means nothing.
+
+**One rule replaces all three.** Something is already at the destination → move it to `<root>/.claude/old-skills/<name>`, place the new copy, say so:
+
+```
+You already have a skill named deploy-check.
+Your copy is kept at ~/.claude/old-skills/deploy-check.
+Replace it with Version 4?  [y/N]
+```
+
+- **`old-skills` is a sibling of the `skills/` root that was targeted** — never the home directory for a project install. A project install's kept copy is `<project>/.claude/old-skills/<name>`.
+- **It is hidden from both scanners by construction, not by a filter.** Claude Code scans `.claude/skills/*`, so a sibling directory is never a skill; `localSkillRoots` resolves only `<x>/.claude/skills` (`AGENT_PATHS`), so the Library never sees it. **No hiding code exists that could forget to run.** This is why it beats a `deploy-check.old` sibling, which would leave two folders declaring `name: deploy-check` inside a skills root.
+- **For a project root, add `.claude/old-skills/` to `.git/info/exclude`** via the existing `appendExclude()` (`placer.ts:194`), which already does exactly this for `.claude/skills/<name>`. Local-only, never committed — otherwise a replaced skill shows up as untracked in a repo that has nothing to do with Terum.
+- **Deleted from `install.ts:131-141`:** the `collision.kind === 'foreign'` refusal, the `--force` flag, the `collision.kind === 'ours' && entry` branch and its `quarantineDrift` call. `inspect()` (`placer.ts:29`) loses its `owned` parameter. `place()`'s `replace` option is always false now — the destination is always empty by the time it runs.
+- `quarantineDrift` and `moveToQuarantine` **survive** in `placer.ts` for `placer.remove()` and `uninstall`; only install stops calling them, and `prune` still owns the quarantine directory.
+- **Two sub-forks deliberately left open** (declared in the ledger's `deferred:`): replacing the same skill twice overwrites the previous kept copy — a timestamp suffix was raised, not decided; and nothing ever empties `old-skills/`, with the Library deliberately not showing it, so Finder is the only cleanup route.
+
+**The destination picker is lifted from closed PR #167**, not rewritten — `install-destinations.ts` and its test are exactly this builder. They stay retrievable from the intact branch:
+
+```
+git show origin/feat/bulk-install-destination:desktop/src/screens/marketplace/install-destinations.ts
+git show origin/feat/bulk-install-destination:desktop/src/screens/marketplace/install-destinations.test.ts
+```
 
 ### 9.2 Onboarding gains an "Add your projects" step
 
 `[modify] src/commands/setup.ts` — **rename the `discover` step to `projects` in its existing ordinal slot; every other step keeps its position.** The full list is thirteen steps, not eleven: `welcome, app, role, github, team, actions, invite, projects, evals, community, hook, wrapper, done`. **`hook` and `wrapper` are untouched** — `setup.ts:436` (`section('hook'); verbs.offerHook(…)`) and `:445` (`section('wrapper'); verbs.offerWrapper(…)`) are both live, `wrapper` is what places the bundled `/terum-skills` skill §11.1 rewrites, and §12 keeps `--hook` alive as a shim. Truncating either declaration is a loud typecheck failure (`SETUP_STEP_TO_BOARD` closes `satisfies Record<SetupStep, string>`); the hazard is repairing it by deleting the two sections instead of restoring the two entries.
 
-The step lists discovered candidates (read-only, §7.1) with checkboxes, adds nothing without a tick, and is skippable.
+**The step asks for one project with a folder picker (D13)** — not a scan-and-checklist. It is skippable, and adds nothing unless the user chooses a folder:
 
-`src/lib/prompt.ts` `AskOptions` gains `path?: boolean` — "the answer is a filesystem path; a shell may offer a folder chooser, a terminal ignores it". `src/lib/frames.ts` `AskKind` gains `'path'`; `docs/frame-protocol.md` documents it; `desktop/src/components/domain/WorkflowControls.tsx` renders the text input plus a **Choose folder…** button that calls `backend.pickFolder()`. **The step also needs a multi-select** for the candidate list, which the `Prompter` does not have; either add one `AskKind` for it or run the candidates as N sequential confirms — decide in §15-Q6 before building.
+```
+Add a project?
+  Terum will track the skills in that project's .claude folder.
+  [ Choose folder… ]   [ Skip ]
+```
+
+Rev 2 assumed a candidate checklist, which needs a multi-select the `Prompter` does not have — every question it can ask is a confirm, a text answer or a single choice. Adding a `kind: 'multi'` ask frame plus its terminal renderer, its desktop renderer and a protocol doc, for one first-run screen, would also build a **second** way to add a project alongside the Library's own affordance — which root `CLAUDE.md` forbids. The second and third project are added from the Library.
+
+`src/lib/prompt.ts` `AskOptions` gains `path?: boolean` — "the answer is a filesystem path; a shell may offer a folder chooser, a terminal ignores it". `src/lib/frames.ts` `AskKind` gains `'path'`; `docs/frame-protocol.md` documents it; `desktop/src/components/domain/WorkflowControls.tsx` renders the text input plus a **Choose folder…** button that calls `backend.pickFolder()`. **No other ask kind is added** — D13 makes `'path'` sufficient, which is the point of choosing a folder picker over a candidate checklist.
 
 **Every test and fixture pinning the current step order must move in the same commit**: `desktop/src/backend/setup-session.ts` (`SETUP_STEP_TO_BOARD` — a key **rename** `discover:'Done'` → `projects:'Done'`, not a rewrite), `desktop/src/screens/onboarding/SetupBoot.tsx`, `desktop/src/backend/types.ts` (`SETUP_STEP_KEYS`, all thirteen entries), `src/commands/__tests__/setup.test.ts`. `desktop/src/fixtures/design.json` is generated by `desktop/tools/export-design.py` and byte-checked by `npm run export:check` — it cannot be hand-edited; record the deviation in `desktop/FIDELITY.md` instead.
 
@@ -562,7 +632,7 @@ New `sync` description: *"Fetch each team clone and reset it to origin/main. Not
 | Auto-share pass (`:294-320`), `autoShareRoots`, the `auto_share` gate | **Delete.** This is the single biggest violation of "never published unless you explicitly do so". |
 | `reconcileShared` (`:364`) and the `config.shared` ledger | **Delete** — but read §11.3 first. |
 | Automatic placement of endorsed skills | **Delete.** Install is the only thing that places bytes. |
-| Placement drift scan + `quarantineDrift` loop (`:463`) | **Delete from sync.** See §15-Q3. |
+| Placement drift scan + `quarantineDrift` loop (`:463`) | **Delete from sync.** The signal survives as the Library card's `edited` flag (§7.4, D12); the automatic move does not survive anywhere — install's replace rule (§9.1.1) supersedes it. |
 | Library-size pass (`:321-362`) writing `local_skills` | **Delete from sync**; written opportunistically instead (§3.5). |
 | Orphan adopt/decline people writes (`:653-677`) | **Delete.** |
 | `prune` / `underQuarantine` (`:783-802`) | **Move** to a new `src/commands/prune.ts` verb, verbatim. |
@@ -627,7 +697,7 @@ Deleting `config.shared` deletes that guard. **Replacement rule, locked:** `tear
 
 ## 12. Deleted in full
 
-`connect` (the whole verb and `src/commands/connect.ts`, 597 lines — moving `injectManagedFields`'s use into publish first) · `autoShareRoots` · `reconcileShared` · `config.shared` **and every reader of it** (§11.3) · `config.auto_share` · `decline` (verb + `src/commands/decline.ts` + `CliVerbs.decline` + its six desktop declarations) · `eval --commit` and the `eval`/`eval-assets` guard actions · the `evalCommitChoice` capability and the "Commit the receipt to the team" checkbox · `policy.publish` **and its desktop zod mirror** (§11.5) · `team.json.global` · PR creation in publish (`gh pr create`, the `publish/*` branch, `openEndorsements`, `SafeWriteOptions.branch`, the non-main `push()` body) · `receiptCheck.ts` (moving `receiptFiles`/`newestReceiptAt` into `src/lib/evals/receipt-store.ts` first) · `src/commands/sync.ts` · `desktop/src/backend/tauri/auto-sync.ts` · `writableCheckout` · `discover --register` · `librarySize`'s sync call site · the marketplace's `ls --local` read and per-member fan-out · Settings ▸ Sharing · `AddSkillsDialog.tsx` (§11.6) · `resolveVersion` and `materializeVersion` (§4.1, §6.5).
+`connect` (the whole verb and `src/commands/connect.ts`, 597 lines — moving `injectManagedFields`'s use into publish first) · `autoShareRoots` · `reconcileShared` · `config.shared` **and every reader of it** (§11.3) · `config.auto_share` · `decline` (verb + `src/commands/decline.ts` + `CliVerbs.decline` + its six desktop declarations) · `eval --commit` and the `eval`/`eval-assets` guard actions · the `evalCommitChoice` capability and the "Commit the receipt to the team" checkbox · `policy.publish` **and its desktop zod mirror** (§11.5) · `team.json.global` · PR creation in publish (`gh pr create`, the `publish/*` branch, `openEndorsements`, `SafeWriteOptions.branch`, the non-main `push()` body) · `receiptCheck.ts` (moving `receiptFiles`/`newestReceiptAt` into `src/lib/evals/receipt-store.ts` first) · `src/commands/sync.ts` · `desktop/src/backend/tauri/auto-sync.ts` · `writableCheckout` · `src/lib/discover.ts` in full and every consumer (§7.1, D13) · `librarySize`'s sync call site · the marketplace's `ls --local` read and per-member fan-out · Settings ▸ Sharing · `AddSkillsDialog.tsx` (§11.6) · `resolveVersion` and `materializeVersion` (§4.1, §6.5).
 
 **Three entries need their callers named, or the build breaks:**
 
@@ -645,7 +715,7 @@ One verb, one target shape, one version number. `terum-skills team migrate`, gua
 
 **Steps, in one commit per team repo:**
 
-1. For each `skills/<name>/`: move its current contents to `skills/<name>/v1/`, leaving `skills/<name>/evals/**` where it is (§3.1).
+1. For each `skills/<name>/`: move **all** of its current contents to `skills/<name>/v1/`, `evals/**` included (D9) — a repo migrated before this ruling would strand its cases outside every version.
 2. Fold `team.json.global[]` into `projects.Global.skills[]`; create `projects.Global` if absent; delete `global`; delete `policy.publish`; set `layout_version: 3`. Parse the pre-image with `anyLayoutTeamSchema` (§4.1) — the strict layout-3 schema rejects its own input. **Check for an existing project whose name case-insensitively equals `Global`** before creating one: `projectNameSchema` does not reserve the name today, so a team may already have `global` or `GLOBAL`, and blind creation either collides or silently orphans that project's skills. If one exists, adopt it and normalize the key to `Global`.
 3. Re-key eval receipts: the receipts under the tree hash that `HEAD:skills/<name>` resolved to at migration time move to `evals/<uuid>/v1/`, with their `version` field rewritten to `'v1'` and a new `version_tree: '<40-hex>'` field preserving the original so a re-keyed receipt still provably describes specific bytes. **Every other receipt moves verbatim to `evals/<uuid>/archive/<40-hex>/<runId>.json`** (D7).
 4. Re-arm the clone's pre-push guard (§4.3).
@@ -689,9 +759,11 @@ npm --prefix <wt>/desktop run test:e2e                          # Playwright + f
 ### 14.1 Tests that must exist
 
 - `src/lib/__tests__/versions.test.ts` — `['v2','v10','v9']` → `[10,9,2]`; rejects `v0`, `v03`, `V3`, `v1.0`, and a *file* named `v4`; `[]` for a missing directory. **The two-digit case is the point.**
-- `src/lib/__tests__/skills.test.ts` — a literal-hex pin on `skillContentDigest` for a fixed fixture (§3.3); `.DS_Store` and `evals/**` do not change the digest; a managed-field-only frontmatter change does not change it.
-- `src/commands/__tests__/publish.test.ts` — republish of an unchanged folder returns `created:false, identicalTo:'v2'` with the verbatim message; republish after an eval attaches the receipt under `v2` and mints nothing; a changed byte mints `v3`; a repo whose highest version is `v5` with `v3` deleted mints `v6`, not `v5`; an edit to `evals/cases/*.yaml` alone mints **nothing** and updates the unversioned assets. **The first of these is the gate on §5.1 step 7's prefix stripping** — get that wrong and it is the only test that fails, so it must exist before publish does.
-- `src/lib/__tests__/guard.test.ts` — `skills/x/v3/SKILL.md` admitted as an add under `publish`; a *modification* of `skills/x/v3/SKILL.md` refused; `evals/<uuid>/v3/<run>.json` admitted; the old 40-hex receipt path refused; `v03` refused; a multi-path publish commit (version folder + team.json + receipt) admitted; **row a″** — `skills/x/evals/cases/a.yaml` admitted under `publish` as add-*or-replace*, and `skills/x/v3/evals/cases/a.yaml` **refused** (eval assets never land inside a version folder); **row j** — a migrate diff carrying `team.json`, `skills/x/v1/SKILL.md` and `evals/<uuid>/archive/<40-hex>/<run>.json` is admitted, and the same paths under `publish` are refused.
+- `src/lib/__tests__/skills.test.ts` — a literal-hex pin on `skillContentDigest` for a fixed fixture (§3.3); `.DS_Store` does not change the digest; **editing `evals/cases/*.yaml` DOES** (D9); a managed-field-only frontmatter change does not change it.
+- `src/commands/__tests__/publish.test.ts` — republish of an unchanged folder returns `created:false, identicalTo:'v2'` with the verbatim message; republish after an eval attaches the receipt under `v2` and mints nothing; a changed byte mints `v3`; a repo whose highest version is `v5` with `v3` deleted mints `v6`, not `v5`; **an edit to `evals/cases/*.yaml` alone mints a new version** (D9 — cases are content identity), and a republish with byte-identical cases does not. **The first of these is the gate on §5.1 step 7's prefix stripping** — get that wrong and it is the only test that fails, so it must exist before publish does.
+- `src/lib/__tests__/guard.test.ts` — `skills/x/v3/SKILL.md` admitted as an add under `publish`; a *modification* of `skills/x/v3/SKILL.md` refused; `evals/<uuid>/v3/<run>.json` admitted; the old 40-hex receipt path refused; `v03` refused; a multi-path publish commit (version folder + team.json + receipt) admitted; `skills/x/v3/evals/cases/a.yaml` admitted under `publish` as an ordinary version byte, and `skills/x/evals/cases/a.yaml` (no version segment) **refused** — row h is gone; **row j** — a migrate diff carrying `team.json`, `skills/x/v1/SKILL.md` and `evals/<uuid>/archive/<40-hex>/<run>.json` is admitted, and the same paths under `publish` are refused.
+- `src/commands/__tests__/install.test.ts` — a destination holding an unrelated folder is moved to `<root>/.claude/old-skills/<name>` and the new version placed, with **no** `--force` and no quarantine call (D12); a project install's kept copy lands in `<project>/.claude/old-skills/`, not `$HOME`; `.claude/old-skills/` is added to `.git/info/exclude` for a project root; install seeds `~/.terum/skills/evals/local/<digest>/` from the clone's receipts for the placed version, preserving `runner_handle` (D11).
+- `src/lib/__tests__/teamRepo.test.ts` — publish a skill containing a `0755` file, re-read from a fresh clone, assert `git ls-tree` reports `100755`; a mode-only change does not trip the staged-diff proof (D10, §4.5).
 - `src/lib/__tests__/readme.test.ts` — `applyReadme` refuses to replace a non-empty catalogue block with `No shared skills yet.` and leaves the block untouched; the generated table's version column reads `Version 3`.
 - `src/lib/__tests__/schema.test.ts` — an untouched pre-upgrade `config.json` with 40-hex versions parses and yields `null`s; a `preserveUnchanged` update afterwards does not throw.
 - `src/commands/__tests__/ls-receipt.test.ts` (rewrite) — every branch of §8.1 including the invalid-newest-receipt descent.
@@ -702,17 +774,18 @@ npm --prefix <wt>/desktop run test:e2e                          # Playwright + f
 
 ## 15. What still needs a human
 
-**Q1 — Are unversioned eval cases right?** §3.1 places `skills/<name>/evals/**` outside the version folder so that authoring a test case does not mint a skill version and attaching an eval never mutates frozen bytes. This is a derived decision, not one Ryan made. The cost: a receipt records which cases ran by name, not their bytes, so an old receipt and a newly-edited case can disagree about what was tested. The alternative — cases inside `v<N>/` — is more honest about provenance and makes every case edit a new version.
+**Nothing blocking.** All six open questions of rev 2 were walked to LOCK resolutions on 2026-09-11 — ledger: `.planning/decisions/2026-09-11-library-marketplace-refactor-decision-walk.md`. Q1→D9, Q2→D11, Q3→D12, Q4→D10, Q6→D13, and the §16 call→D14. Q5 (the unreachable team record) is unresolved but is a condition, not a fork.
 
-**Q2 — A freshly installed skill shows no eval in the Library.** The marketplace card showed Version 4's score; after installing, the Library card shows "Not evaluated" because the local store is empty. Options: (a) accept it and say so in the empty state; (b) install seeds the local store with the team's receipt for that exact digest, which is defensible since the digest provably matches the installed bytes — but it puts a teammate's run into a store the Library calls "evals you have run locally".
+Four things are consciously deferred rather than decided. They are declared in the ledger's `deferred:` frontmatter, which is what feeds `.planning/DEFERRED-INDEX.md`:
 
-**Q3 — Placement drift detection has no home after sync collapses.** Today sync notices that you hand-edited an installed skill and quarantines it before re-placing. With sync touching nothing local, nothing notices. Options: (a) drop it — under a Finder Library, editing an installed skill is a normal thing to do, not drift; (b) keep a read-only drift indicator on the Library card; (c) move the check into `install`'s re-place path only. Recommend (a) plus (c): the quarantine rule exists to stop install from silently overwriting your edits, and that is the only moment it matters.
+| Deferred | Revisit when |
+| --- | --- |
+| **Nothing in this spec was checked against the team's shared record.** The `terum` MCP refused auth for the whole session (HTTP 401, `No authorization provided`), so `check_decision` and `get_standing_decisions` never ran. Treat every ruling as unchecked, not as cleared — the 2026-09-10 auto-share walk recorded the same condition. | the endpoint accepts the configured header again; re-run `check_decision` over every LOCK |
+| Replacing the same skill twice in one root overwrites the previous kept copy in `.claude/old-skills/` (D12). A timestamp suffix was raised and not decided. | anyone loses a backup by replacing the same skill twice |
+| Nothing ever empties `.claude/old-skills/`, and the Library deliberately does not show it, so Finder is the only cleanup route (D12). Whether `prune` should cover it was not decided. | an `old-skills` folder is reported as large or confusing, or `prune` is next touched |
+| `eval --generate` now writes cases into the user's local folder, which mints a new version on the next publish (D9). The churn was accepted but not measured. | anyone reports unexpected version churn after regenerating cases |
 
-**Q4 — The executable bit is not preserved through a publish.** Independent of D2 (mode is out of the digest), `MutableTree` has no way to set a mode: `executablePaths()` requires `tracked.has(path)`, which a newly-`set()` path never satisfies, and `applyTree` writes with no mode. So `scripts/run.sh` published at 0755 lands 0644 and arrives broken. This is a pre-existing bug the refactor makes more visible (publish becomes the only way bytes travel). Fixing it means `setExecutable` on the interface, a mode overlay in `makeTree`, and a chmod in `applyTree`. Is that in scope for this refactor or a separate fix?
-
-**Q5 — `terum` MCP could not be reached this session** (HTTP 401, `No authorization provided`), so `check_decision` and `get_standing_decisions` were not run against this architecture change. There may be standing team decisions about versioning or repo layout that this spec contradicts unknowingly.
-
-**Q6 — the onboarding projects step needs a multi-select the `Prompter` does not have.** §9.2 adds `AskOptions.path` for a folder chooser, but the step's real shape is "here are 4 candidate repos, tick the ones to track". Options: (a) add a `kind: 'multi'` ask frame, which the desktop's `WorkflowControls` must also render; (b) run the candidates as N sequential confirms, which is ugly at 10 candidates but needs no protocol change; (c) make the step a single folder-chooser and let the Library's own affordance handle the rest. Recommend (c) for the onboarding step plus (b) as the CLI fallback — the protocol change in (a) is a bigger commitment than this step justifies.
+**Still outstanding from verification, not from the walk:** 53 medium/low findings from the rev-2 adversarial pass were never adjudicated. They are in this session's workflow journal, not in this document.
 
 ---
 
@@ -720,8 +793,8 @@ npm --prefix <wt>/desktop run test:e2e                          # Playwright + f
 
 | | State | Collision |
 | --- | --- | --- |
-| **PR #173** `codex/batched-endorsement` (+450/−258) | open, non-draft | Builds the PR-endorsement batching subsystem §12 deletes; adds 376 lines to `publish.ts`, the file §5 rewrites. **Decide before starting: merge-then-revert, or close.** Recommend close. |
-| **PR #167** `feat/bulk-install-destination` (+250/−24) | open, marked *DO NOT MERGE — 2 human gates open* | Adds `install-destinations.ts`, the exact destination picker §9.1 needs. **Reusable.** Land it first or lift the file. |
+| **PR #173** `codex/batched-endorsement` (+450/−258) | **CLOSED 2026-09-11** (D14); branch intact | Built the endorsement subsystem §12 deletes. Every file it touched is rewritten or deleted by M2 / M5 / §11.6 — salvage: none. Closed rather than merged-then-reverted so `main` never carries a subsystem scheduled for deletion. |
+| **PR #167** `feat/bulk-install-destination` (+250/−24) | **CLOSED 2026-09-11** (D14); branch intact, **picker lifted** | `install-destinations.ts` + its test are lifted into M6 (§9.1). Its blocking gate was a known-false dialog string owned by Teddy — moot, because D12 made that copy *more* wrong (the destination now also decides where a replaced copy is kept) and §9.1 rewrites the dialog anyway. Everything else it touched is rewritten by M5/M6. |
 | `.planning/specs/2026-09-10-auto-share-batching.md` | locked | Obsoleted — auto-share is deleted. |
 | `.planning/specs/2026-09-10-add-skills-batched-endorsement.md` | locked | Obsoleted — endorsement is replaced by publish. |
 | `.planning/specs/2026-09-10-auto-category.md` | locked | Survives: `injectManagedFields` still injects `terum-category`, now from publish. |
