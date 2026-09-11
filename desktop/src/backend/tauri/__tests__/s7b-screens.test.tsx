@@ -27,14 +27,34 @@ function open(route: string, change?: (frame: Record<string, unknown>, name: str
   render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Tooltip.Provider><App/></Tooltip.Provider></QueryClientProvider></BackendContext>);
   return backend;
 }
-it('serves Share with committed labels and Teams while hiding the permission chip', async () => {
+it('serves Members with committed labels, no project column, and the permission chip hidden', async () => {
   open('#/share');
   const row = await screen.findByTestId('member-row-0');
   expect(row).toHaveTextContent('Mira Chen');
   expect(row).toHaveTextContent('mira · Platform');
-  expect(within(row).getByText('terum')).toBeVisible();
+  // The Teams column is gone; a member's projects are no longer drawn on this screen.
+  expect(within(row).queryByText('terum')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Role for mira' })).toBeNull();
-  expect(within(row).getByRole('button', { name: 'Remove from team' })).toBeVisible();
+  // The inert removal control was pulled; `terum-skills team remove` is the way until it works end to end.
+  expect(within(row).queryByRole('button', { name: 'Remove from team' })).toBeNull();
+});
+// These frames were recorded from a CLI that reported neither field: the row must say '—', never 0 or a date.
+it('shows no join date and no skill total when the CLI reports neither', async () => {
+  open('#/share');
+  const cells = within(await screen.findByTestId('member-row-0')).getAllByRole('cell');
+  expect(cells[2]).toHaveTextContent('—');
+  expect(cells[3]).toHaveTextContent('—');
+});
+it('renders the join date and the skill total the CLI reports', async () => {
+  open('#/share', (frame, name) => {
+    if (name !== 'status' || frame.t !== 'result') return;
+    const value = frame.value as { teams: { members: { handle: string; joined?: string; skillsTotal?: number }[] }[] };
+    const mira = value.teams[0]?.members.find(member => member.handle === 'mira');
+    if (mira) { mira.joined = '2026-06-12'; mira.skillsTotal = 96; }
+  });
+  const cells = within(await screen.findByTestId('member-row-0')).getAllByRole('cell');
+  expect(cells[2]).toHaveTextContent('2026-06-12');
+  expect(cells[3]).toHaveTextContent('96');
 });
 it('drops the dangling role separator for a member without a role', async () => {
   open('#/share');

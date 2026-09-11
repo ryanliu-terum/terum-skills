@@ -12,6 +12,8 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
 import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, shortHash, skillEndorsement } from '../lib/readme.js';
+import type { Receipt } from '../lib/evals/receipt.js';
+import { newestReceiptAt } from './receiptCheck.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
@@ -23,11 +25,27 @@ import { skillVersions } from '../lib/teamRepo.js';
 const FINGERPRINT_CONCURRENCY = 8;
 
 export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
-export interface LsSkill { id: string; name: string; author: string; category: string; characters: number; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; updated: string; unresolved: boolean; }
+/**
+ * The display facts of the newest valid receipt at a skill's current tree hash — a strict subset of
+ * the receipt, under the receipt's own field names so a shell maps it with the same code it already
+ * maps `eval-report` with. Never derived across receipts and never combined (eval-engine spec §12).
+ * `null` is the honest "no receipt at this version" state a shell draws as "—".
+ */
+export interface LsReceipt {
+  run_id: string;
+  verdict: Receipt['verdict'];
+  execution_status: Receipt['execution_status'];
+  expected_rows: number;
+  scored_rows: number;
+  comparisons: Receipt['comparisons'];
+  arm_scores: Receipt['arm_scores'];
+  provenance: Pick<Receipt['provenance'], 'model' | 'k' | 'cc_version' | 'timestamp' | 'runner_handle'>;
+}
+export interface LsSkill { id: string; name: string; author: string; category: string; characters: number; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; frontmatter: string | null; updated: string; unresolved: boolean; receipt: LsReceipt | null; }
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
-export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; description: string | null; category: string | null; characters: number | null; otherAuthor: string | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string; description: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; description: string | null; frontmatter: string | null; category: string | null; characters: number | null; otherAuthor: string | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string; description: string | null; frontmatter: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
@@ -71,6 +89,9 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
   for (let index = 0; index < records.length; index += 8) {
     const chunk = records.slice(index, index + 8);
     const dates = await Promise.allSettled(chunk.map((record) => latestChange(runner, clone, record.name)));
+    // The version this chunk resolved is already in hand, so the card's receipt costs one readdir and
+    // one readFile per skill — no extra process and no second version resolution (card-lift override).
+    const receipts = await Promise.allSettled(chunk.map((record) => cardReceipt(clone, record.id, versions.get(record.name))));
     for (const [offset, record] of chunk.entries()) {
       const { id, name, frontmatter, grants } = record;
       const latest = versions.get(name);
@@ -84,10 +105,33 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
         const message = date.reason instanceof Error ? date.reason.message : String(date.reason);
         problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`);
       }
-      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: shortHash(latest ?? '—'), endorsement: skillEndorsement(team, id), unresolved: latest === undefined, grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, updated });
+      // An unreadable receipt is this skill's problem, never the listing's: the row still lists, with
+      // the receipt limb null, so one corrupt file cannot blank a team's inventory.
+      const found = receipts[offset]!;
+      if (found.status === 'rejected') {
+        const message = found.reason instanceof Error ? found.reason.message : String(found.reason);
+        problems.push({ source: `evals/${id}`, message }); io.print(`${name}: ${message}`);
+      }
+      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: shortHash(latest ?? '—'), endorsement: skillEndorsement(team, id), unresolved: latest === undefined, grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, frontmatter: record.rawFrontmatter, updated, receipt: found.status === 'fulfilled' ? found.value : null });
     }
   }
   return skills;
+}
+/**
+ * The newest valid receipt at `version`, reduced to the card's display facts. A version with no
+ * receipt directory is not a problem — it is the "—" state. The identity check is `eval-report`'s
+ * own (evalReport.ts), so the two verbs cannot disagree about which receipt is this version's.
+ */
+async function cardReceipt(clone: string, id: string, version: string | undefined): Promise<LsReceipt | null> {
+  if (version === undefined) return null;
+  const newest = await newestReceiptAt(join(clone, 'evals', id, version));
+  if (newest === undefined) return null;
+  const found = newest.receipt;
+  if (found.skill_id.toLowerCase() !== id.toLowerCase() || found.version !== version) {
+    throw new Error(`newest receipt ${newest.file} does not match the receipt path: its skill ID or version disagrees.`);
+  }
+  const { model, k, cc_version, timestamp, runner_handle } = found.provenance;
+  return { run_id: found.run_id, verdict: found.verdict, execution_status: found.execution_status, expected_rows: found.expected_rows, scored_rows: found.scored_rows, comparisons: found.comparisons, arm_scores: found.arm_scores, provenance: { model, k, cc_version, timestamp, runner_handle } };
 }
 async function showMember(handle: string | undefined, people: Awaited<ReturnType<typeof readPeople>>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems']): Promise<Result<LsResult>> {
   if (!handle) throw new Error('Specify a member handle.');
@@ -222,8 +266,8 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
       const inspection = entry.inspection;
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (connect needs --allow-privileged)' : undefined;
-        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: healths.get(entry)!, description: describedBy(inspection), category: entry.category, characters: entry.characters ?? null, otherAuthor: mine !== null && entry.author !== null && normalizeAuthor(entry.author) !== mine ? entry.author : null, ...(problem === undefined ? {} : { problem }) });
-      } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail, description: inspection.description ?? null, category: entry.category, characters: entry.characters ?? null });
+        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: healths.get(entry)!, description: describedBy(inspection), frontmatter: entry.frontmatter, category: entry.category, characters: entry.characters ?? null, otherAuthor: mine !== null && entry.author !== null && normalizeAuthor(entry.author) !== mine ? entry.author : null, ...(problem === undefined ? {} : { problem }) });
+      } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail, description: inspection.description ?? null, frontmatter: entry.frontmatter, category: entry.category, characters: entry.characters ?? null });
       if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
     }
     for (const row of local.rows) io.print(`  ${printable(row.name)} — ${printable(row.state)}${row.problem === undefined ? '' : `; source problem: ${printable(row.problem)}`}; path: ${printable(row.path)}`);

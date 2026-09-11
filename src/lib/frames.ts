@@ -18,7 +18,7 @@ export type AskKind = 'confirm' | 'text' | 'select';
 /** First line of every frame-mode run: what this CLI is and what it can honour, so a shell never hard-codes it. */
 export interface HelloFrame { t: 'hello'; protocol: typeof FRAME_PROTOCOL; version: string | null; verbs: readonly string[]; features: Readonly<Record<string, boolean>>; }
 export interface PrintFrame { t: 'print'; level: FrameLevel; line: string; }
-export interface AskFrame { t: 'ask'; id: string; kind: AskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[]; }
+export interface AskFrame { t: 'ask'; id: string; kind: AskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[]; descriptions?: readonly string[]; }
 /** Emitted by `install`, `checkout discover` and `setup`'s discover/evals steps; every other verb is silent. One shape, declared once (Prompter.progress). Never ordered against `ask`; a shell may ignore it. */
 export interface ProgressFrame extends ProgressUpdate { t: 'progress'; }
 export interface ResultFrame { t: 'result'; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; refused?: boolean; value?: unknown; }
@@ -35,13 +35,20 @@ export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
  * `false` is a drawn control a real shell must hide or grey; flipping one is a product decision, not
  * a frame-mode change.
+ *
+ * `liftOnCards` moved false -> true on 2026-09-10 (Ryan), overriding the D29 display resolution's
+ * "no lift-style decimal appears at card level" for the desktop app's Library and Marketplace cards
+ * only; the rest of D29 stands. The card is backed by `ls`'s `receipt` limb, so the number a card
+ * shows is one receipt's own `candidate-vs-baseline` net lift with its provenance beside it, never a
+ * statistic derived across receipts. See .planning/specs/2026-09-04-eval-engine.md §12.
  */
 export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   checkouts: true, projects: true,
   memberRole: true, localIdentity: true, roles: true,
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
-  disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: true,
+  disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: false, progress: true,
   refresh: true, discover: true, appUpdate: true,
+  autoSync: true,
 });
 
 export const COMMANDER_NON_ERRORS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);
@@ -145,7 +152,7 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
     ask.resolve(value);
   }, (line) => diagnostic(`frames: ignored malformed line ${JSON.stringify(line.length > 200 ? `${line.slice(0, 200)}…` : line)}`), () => { closed = true; failPending(); });
 
-  const ask = (kind: AskKind, question: string, extra: Pick<AskFrame, 'default' | 'choices' | 'detail'> = {}): Promise<string | number | boolean> => {
+  const ask = (kind: AskKind, question: string, extra: Pick<AskFrame, 'default' | 'choices' | 'detail' | 'descriptions'> = {}): Promise<string | number | boolean> => {
     if (closed) return Promise.reject(new PromptClosedError(question, closedReason));
     const id = `q${++sequence}`;
     return new Promise((resolve, reject) => {
@@ -168,7 +175,7 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
     },
     async select(question, choices, defaultChoice, options) {
       for (let attempt = 0; attempt < MAX_SELECT_ATTEMPTS; attempt++) {
-        const answer = await ask('select', question, { choices, ...(defaultChoice === undefined ? {} : { default: defaultChoice }), ...(options?.detail?.length ? { detail: options.detail } : {}) });
+        const answer = await ask('select', question, { choices, ...(options?.descriptions ? { descriptions: options.descriptions } : {}), ...(defaultChoice === undefined ? {} : { default: defaultChoice }), ...(options?.detail?.length ? { detail: options.detail } : {}) });
         if ((answer === undefined || answer === null || String(answer).trim() === '') && defaultChoice !== undefined) return defaultChoice;
         const index = typeof answer === 'number' ? answer : /^\d+$/.test(String(answer).trim()) ? Number(String(answer).trim()) : NaN;
         const picked = Number.isInteger(index) && index >= 1 && index <= choices.length ? choices[index - 1] : choices.find((choice) => choice === String(answer));

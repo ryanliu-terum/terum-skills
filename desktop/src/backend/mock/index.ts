@@ -10,7 +10,7 @@ import type { Backend } from '../Backend';
 import type { ConnectBatch, ConnectOutcome, InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard } from '../types';
 import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData } from './data';
 import { cli, library_title, roster_by_adoption, statusLines } from './derive';
-import { onboardingData } from './onboarding';
+import { onboardingData, replaySetupEvals } from './onboarding';
 import { readScenario } from './scenario';
 import { RAW_MD } from './raw-md';
 import { statusCounts } from './status-counts';
@@ -50,7 +50,7 @@ const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeT
 const zeroCopy=overviewCopy;
 const zeroOverview={skills:'0',skills_note:zeroCopy.skills,evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:zeroCopy.evaluated,installs:'0',installs_note:zeroCopy.installs,attention:'0',attention_lines:[zeroCopy.attention],attention_link:design.LIBRARY_OVERVIEW.attention_link,zero:zeroCopy};
 function removalState<T extends SkillCard>(skill:T):T { return removed.has(skill.name)?{...skill,installed:'absent',placed:false,onDiskOnly:false,paths:[]}:skill; }
-export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readonly quitRequested:boolean} {
+export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readonly quitRequested:boolean;readonly appUpdateCalls:readonly (readonly ['armOnClose',string] | readonly ['disarmOnClose'])[]} {
  const identity:Identity=structuredClone({...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login});
  const listeners=new Set<(source:ChangeSource)=>void>();
  const latency=opts.latencyMs??0;
@@ -78,13 +78,17 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
  /** Endorsements this session opened, so a project's card reflects what the picker did. */
  const endorsed: {project:string;name:string}[] = [];
  const asProject=(q:{name:string;remote:string|null}):Project=>({name:q.name,key:q.name,ico:'folder',desc:'',skills:0,members:0,remote:q.remote??'—',installed:false,favorites:null,updated:null,path:null,admin:null,evaluated:null,memberHandles:[],memberInitials:[],skillsIn:[]});
- const roster=():Roster=>({members:design.ROSTER.map(q=>({...q,...(q.handle===design.ME.handle?profileValues:{}),lastPublish:q.last_publish,status:design.MEMBER[q.handle]?.[0]??'',projects:q.handle===design.ME.handle?profileValues.projects??design.MEMBER[q.handle]?.[1]??[]:design.MEMBER[q.handle]?.[1]??[],lastSeen:design.MEMBER[q.handle]?.[2]??''})),byAdoption:roster_by_adoption().map(q=>q.handle),invited:design.INVITED,member:Object.fromEntries(Object.entries(design.MEMBER).map(([handle,[status,projects,lastSeen]])=>[handle,{status,projects:handle===design.ME.handle?profileValues.projects??projects:projects,lastSeen}]))});
+ // `skillsTotal` is null on the mock: the canvas fixture records who authored a skill and how many installs
+ // it has team-wide, but never how many skills a member's own machine holds, so there is no honest number to
+ // draw. The real adapter reads each member's self-report from their people file; the column shows '—' here
+ // until the canvas gains the field.
+ const roster=():Roster=>({members:design.ROSTER.map(q=>({...q,...(q.handle===design.ME.handle?profileValues:{}),skillsTotal:null,lastPublish:q.last_publish,status:design.MEMBER[q.handle]?.[0]??'',projects:q.handle===design.ME.handle?profileValues.projects??design.MEMBER[q.handle]?.[1]??[]:design.MEMBER[q.handle]?.[1]??[],lastSeen:design.MEMBER[q.handle]?.[2]??''})),byAdoption:roster_by_adoption().map(q=>q.handle),invited:design.INVITED,member:Object.fromEntries(Object.entries(design.MEMBER).map(([handle,[status,projects,lastSeen]])=>[handle,{status,projects:handle===design.ME.handle?profileValues.projects??projects:projects,lastSeen}]))});
  async function connectPicker(ctx:RunContext,team:string):Promise<Result<ConnectOutcome>>{
   const batch:ConnectBatch={kind:'batch',shared:[],declined:[],refused:[]};
   const remaining=[...design.LOCAL_UNSHARED];
   while(true){
    const end=batch.shared.length?'Done':'Skip';
-   const answer=await ctx.ask('select',`Connect a local skill folder to team ${team}?`,{choices:[...remaining,end]});
+   const answer=await ctx.ask('select',`Connect a local skill folder to team ${team}?`,{choices:[...remaining,end],descriptions:[...remaining.map(name=>`Connects ${name} so the team can install it.`),end==='Skip'?'Connect skills later with `npx -y terum-skills@latest connect`.':'']});
    if(answer==='Skip')return cancelled('Connect was declined.');
    if(answer==='Done')return ok(batch);
    const name=String(answer);
@@ -92,8 +96,10 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    if(await ctx.ask('confirm',`Connect ${name}?`)){batch.shared.push({id:name,name});ctx.print(`Connected ${name}.`);}else batch.declined.push(name);
   }
  }
+ const appUpdateCalls: (readonly ['armOnClose',string] | readonly ['disarmOnClose'])[]=[];
  let quitRequested=false;
- const backend:Backend & {readonly quitRequested:boolean} = {
+ const backend:Backend & {readonly quitRequested:boolean;readonly appUpdateCalls:readonly (readonly ['armOnClose',string] | readonly ['disarmOnClose'])[]} = {
+  get appUpdateCalls(){return appUpdateCalls.slice();},
   get quitRequested(){return quitRequested;},
   async quit(){quitRequested=true;try{window.close();}catch{ /* jsdom / Playwright: no-op */ }},
   async setWindowBackground(){return ok(undefined);},
@@ -117,7 +123,11 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   skill:({ref,at})=>read('skill',scenario=>{if(scenario==='not-installed'&&ref==='deploy-check')return ok(scopedDetail(removalState(detailOf(design.DETAIL_NOT_INSTALLED)),at));const result=skillByRef(ref);
    if(result.ok&&scenario==='invalid-newest')Object.assign(result.value,{latestState:'invalid',receipt:null,summary:null,reportNumbers:null,invalidReceiptFile:`evals/deploy-check/${design.DETAIL.version_full}/20260829T221500Z.json`});
    if(result.ok&&scenario==='version-mismatch')result.value.versions={placed:'a1b2c3d4'+'0'.repeat(32),teamCurrent:'5f0e12ab9c3d'+'0'.repeat(28),evaluated:'5f0e12ab9c3d'+'0'.repeat(28)};
-   if(result.ok&&scenario==='raw-md')result.value.skillMd={frontmatter:'',body:[],markdown:RAW_MD};
+   if(result.ok&&scenario==='raw-md'){
+    const frontmatter=/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(RAW_MD);
+    if(!frontmatter)throw new Error('RAW_MD must begin with fenced frontmatter.');
+    result.value.skillMd={frontmatter:frontmatter[0].replace(/\r?\n$/,''),body:[],markdown:RAW_MD.slice(frontmatter[0].length)};
+   }
    return result.ok?ok(scopedDetail(removalState(withInstall({...result.value,...(scenario==='not-installed'?{installed:'absent' as const,placed:false,onDiskOnly:false,root:'Marketplace' as const,flags:[]}:{}),...(scenario==='on-disk-only'&&ref==='deploy-check'?{installed:'placed' as const,placed:false,onDiskOnly:true,path:'~/.claude/skills/deploy-check',pathLabel:'~/.claude/skills/deploy-check',paths:[['~/.claude/skills/deploy-check','global']] as [string,string][]}:{}),enabled:scenario==='disabled'?false:backend.prefs.get('enabled:'+ref,result.value.enabled),favorite:backend.prefs.get('favorite:'+ref,result.value.favorite)})),at)):result;},ref),
   evalReport:async({ref})=>{const detail=await backend.skill({ref});if(!detail.ok)return detail;const {receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt}=detail.value;return ok({receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt});},
   receipts:({skillId,version})=>read('library',()=>{const detail=skillByRef(skillId);if(!detail.ok)return fail(detail.error);return ok(detail.value.version===version?detail.value.receipt??null:null);}),
@@ -189,7 +199,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   sync:args=>long<SyncResult>('onboarding',async ctx=>{ctx.print('Syncing team skills…');const names=design.QUARANTINE.map(q=>q[1]??'');if(args.prune&&!await ctx.ask('confirm',`Delete ${names.length} quarantined item(s)?`)){ctx.print('Prune cancelled; nothing deleted.');return ok({placed:0,deferred:[],notices:[],changed:false,teams:[]});}return ok({placed:design.SKILLS.map(s=>s.name).length,deferred:[],notices:[],changed:true,teams:[{team:args.team??design.TEAMS[0]!.key,state:'synced'}]});}),
   invite:args=>long<InviteResult>('share',async ctx=>{if(!args.logins.length||args.logins.some(login=>!login.trim()))return fail('At least one GitHub login is required.');ctx.print(`Inviting ${args.logins.join(', ')}…`);if(readScenario()==='partial'){const [first,...rest]=args.logins;const failed=rest.map(login=>({login,error:`Could not invite @${login} (GitHub status 422). gh: Validation Failed (HTTP 422)`}));return {ok:false,error:failed.map(f=>f.error).join('\n'),value:{invited:first?[first]:[],already:[],failed}};}return ok({invited:[...args.logins],already:[],failed:[]});}),
   team:args=>long('share',async ctx=>{const name=args.team??args.name??design.TEAMS[0]?.name??'Terum';ctx.print(`${args.kind}: ${name}`);if(args.kind==='leave'&&!await ctx.ask('confirm',`Leave ${name}? This removes ${design.PLACEMENTS_N} placed skill(s) from this machine.`))return cancelled('Leave was declined.');return ok({name,kind:args.kind});}),
-  setup:args=>long('share',async ctx=>{ctx.print('Setting up terum-skills…');const choice=await ctx.ask('select','Create a team or join one?',{choices:['Create a new team','Join an existing team']});const role=choice==='Create a new team'?'creator' as const:'joiner' as const;const team=args.target??design.TEAM_REPO;let connected:ConnectOutcome|undefined;if(args.offerConnect!==false){const picked=await connectPicker(ctx,team);if(!picked.ok)return fail(picked.error);connected=picked.value;}const steps:NonNullable<SetupResult['steps']>={role:'done',team:'done',actions:connected?'done':'skipped'};ctx.print('Looking for skill folders on this machine…');if(await ctx.ask('confirm','Look for skill folders on this machine and add them to your library?')){await ctx.ask('text','Look under which folder?',{default:'~'});ctx.print('No skill folders found under ~.');steps.discover='done';}else steps.discover='skipped';steps.evals=await ctx.ask('confirm','Evaluate the 1 shared skill that has no receipt yet? This runs Claude on each one and commits each receipt to the team repo.')?'done':'skipped';return ok({team,role,...(connected?{connected}:{}),steps});}),
+  setup:args=>long('share',async ctx=>{ctx.print('Setting up terum-skills…');const choice=await ctx.ask('select','Create a team or join one?',{choices:['Create a new team','Join an existing team'],descriptions:['Creates a private GitHub repository under your account.','Uses an invitation from the team owner.']});const role=choice==='Create a new team'?'creator' as const:'joiner' as const;const team=args.target??design.TEAM_REPO;let connected:ConnectOutcome|undefined;if(args.offerConnect!==false){const picked=await connectPicker(ctx,team);if(!picked.ok&&!picked.cancelled)return fail(picked.error);connected=picked.ok?picked.value:undefined;}const steps:NonNullable<SetupResult['steps']>={role:'done',team:'done',actions:connected?'done':'skipped'};ctx.print('Looking for skill folders on this machine…');if(await ctx.ask('confirm','Look for skill folders on this machine and add them to your library?')){await ctx.ask('text','Look under which folder?',{default:'~'});ctx.print('No skill folders found under ~.');steps.discover='done';}else steps.discover='skipped';steps.evals=await replaySetupEvals(ctx);return ok({team,role,...(connected?{connected}:{}),steps});}),
   eval:args=>long('library',async ctx=>{const detail=skillByRef(args.ref);if(!detail.ok)return fail(detail.error);ctx.print(`Evaluating ${args.ref}…`);ctx.progress(1,1,'Complete');return ok({name:args.ref,runDir:`~/.terum/skills/evals/terum/${args.ref}/20260906T120000Z`,executionStatus:'complete' as const,commit:args.commit?{ok:true as const,receiptPath:`evals/${args.ref}/20260906T120000Z.json`}:null});}),
   validate:args=>read('library',()=>{const name=args.ref??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0}):fail(detail.error);}),
   update:()=>read('settings',()=>ok({running:design.CLI_VERSION,latest:design.CLI_LATEST,observation:'newer',launch:'npx',description:`${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`,advice:updateAdvice,lines:[`terum-skills ${design.CLI_VERSION}`,`Latest advertised release: ${design.CLI_LATEST}`,...updateAdvice]})),
@@ -197,6 +207,8 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    check:()=>read('settings',()=>ok({appVersion:design.APP_VERSION,supported:false,cliVersion:design.CLI_VERSION,latest:design.CLI_LATEST,latestAt:null,probe:'skipped' as const,probeError:null,staged:null,installed:[],lastApply:null,newer:false,ppid:0})),
    stage:()=>long('settings',async()=>fail('The mock backend does not download or install anything.')),
    apply:async()=>fail('The mock backend does not download or install anything.'),
+   armOnClose:async version=>{appUpdateCalls.push(['armOnClose',version]);return ok(undefined);},
+   disarmOnClose:async()=>{appUpdateCalls.push(['disarmOnClose']);return ok(undefined);},
   },
   diagnostics:()=>long('status',async ctx=>{for(const line of statusLines(design))ctx.print(line);return ok(undefined);}),
   async openInEditor(path){return (path==='~'||path.startsWith('~/')||path.startsWith('/'))?ok(undefined):fail('An editor path is required.');},

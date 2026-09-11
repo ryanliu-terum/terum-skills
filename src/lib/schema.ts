@@ -73,6 +73,16 @@ export const personSchema = z.object({
   installed: z.array(installedSchema),
   declined: z.array(skillIdSchema),
   projects: z.array(z.string().min(1)).optional(),
+  /**
+   * How many skill folders this person's machine holds across the global root and its registered
+   * project checkouts, as the last `sync` from that machine counted them (`librarySize`). It is a
+   * self-report, not an audit: nothing in the repository can verify it, a person who has not synced
+   * since it shipped has no value at all (absent, never 0), and a person who syncs two machines
+   * against one team records whichever synced last. It carries no timestamp on purpose — the last
+   * commit to this file already dates it, and a stamp rewritten on every sync would commit for no
+   * reason. Optional forever: a reader must render "no answer", never a zero.
+   */
+  local_skills: z.number().int().nonnegative().optional(),
 }).passthrough();
 export type Person = z.infer<typeof personSchema>;
 
@@ -172,7 +182,7 @@ function hashed(normalized: string): AllowedTools & { ok: true } {
 export const FRONTMATTER = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
 /** Parse a whole SKILL.md: the YAML block between the first two `---` lines, then the schema. */
-export function parseSkillFrontmatter(source: string): { ok: true; data: SkillFrontmatter; grants: AllowedTools; body: string } | { ok: false; error: string } {
+export function parseSkillFrontmatter(source: string): { ok: true; data: SkillFrontmatter; grants: AllowedTools; frontmatter: string; body: string } | { ok: false; error: string } {
   const match = FRONTMATTER.exec(source);
   if (!match) return { ok: false, error: 'SKILL.md has no YAML frontmatter' };
   const document = YAML.parseDocument(match[1]!);
@@ -180,7 +190,7 @@ export function parseSkillFrontmatter(source: string): { ok: true; data: SkillFr
   const raw = document.toJS() as unknown;
   const parsed = skillFrontmatterSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: parsed.error.message };
-  return { ok: true, data: parsed.data, grants: allowedTools(parsed.data['allowed-tools']), body: source.slice(match[0].length) };
+  return { ok: true, data: parsed.data, grants: allowedTools(parsed.data['allowed-tools']), frontmatter: match[0].replace(/\r?\n$/, ''), body: source.slice(match[0].length) };
 }
 
 /** Human-readable zod issues: `field: message; field2: message`. */

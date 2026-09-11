@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { roiFractions } from '../score-fractions';
-import type { EvalReportModel, Receipt, ReceiptSummary } from '../types';
+import { comparisonSummary, receiptSummary } from '../receipt-summary';
+import type { EvalReportModel, Receipt } from '../types';
 
 const comparison = z.object({ win:z.number(), loss:z.number(), tie:z.number(), net_lift:z.number(), sign_p:z.number() }).passthrough();
 const efficiency = z.object({ turns:z.number().nullish(), duration_ms:z.number().nullish(), cost_usd:z.number().nullish() }).passthrough();
@@ -23,12 +24,6 @@ export const cliEvalReport = z.object({
 type CliReceipt = z.infer<typeof receipt>;
 type Comparison = z.infer<typeof comparison>;
 function wlt(c:Comparison):[number,number,number] { return [c.win,c.loss,c.tie]; }
-function summary(c:Comparison|null|undefined,v:ReceiptSummary['verdict'],partial:ReceiptSummary['partial']=null):ReceiptSummary|null {
- return c ? {w:c.win,l:c.loss,t:c.tie,n:c.win+c.loss+c.tie,lift:Math.round(c.net_lift*100),verdict:v,partial,signP:c.sign_p.toFixed(3)} : null;
-}
-function receiptSummary(r:CliReceipt|null):ReceiptSummary|null {
- return r?summary(r.comparisons['candidate-vs-baseline'],r.verdict,r.execution_status==='partial'?[r.scored_rows,r.expected_rows]:null):null;
-}
 function mapReceipt(r:CliReceipt):Receipt {
  const p=r.provenance,c=r.comparisons['candidate-vs-baseline'],inc=r.comparisons['candidate-vs-incumbent'],t=r.triggers;
  const eff=(arm:string):string[]=>{const e=r.efficiency[arm];return [String(e?.turns??'—'),e?.duration_ms==null?'—':`${Math.round(e.duration_ms/1000)} s`,e?.cost_usd==null?'—':`$${e.cost_usd.toFixed(2)}`];};
@@ -52,7 +47,7 @@ export function mapEvalReport(report:z.infer<typeof cliEvalReport>,lines:readonl
  const s=receiptSummary(r),inc=r?.comparisons['candidate-vs-incumbent'],t=r?.triggers;
  const holes=s?.partial?r!.expected_rows-r!.scored_rows:0;
  const localRuns=report.localRuns.map(run=>({runId:run.run_id,runDir:run.run_dir,executionStatus:run.execution_status,committed:run.committed,receipt:run.receipt?mapReceipt(run.receipt):null,summary:receiptSummary(run.receipt)}));
- const history:EvalReportModel['history']=report.history.map(h=>({when:h.timestamp.slice(0,10),runner:h.runner_handle,version:h.version.slice(0,12),wlt:h.comparison?wlt(h.comparison):[0,0,0],rows:'',summary:summary(h.comparison,h.verdict)}));
+ const history:EvalReportModel['history']=report.history.map(h=>({when:h.timestamp.slice(0,10),runner:h.runner_handle,version:h.version.slice(0,12),wlt:h.comparison?wlt(h.comparison):[0,0,0],rows:'',summary:comparisonSummary(h.comparison,h.verdict)}));
  for(const run of report.localRuns.filter(run=>!run.committed)){const c=run.receipt?.comparisons['candidate-vs-baseline'];history.push({when:run.receipt?.provenance.timestamp.slice(0,10)??run.run_id,runner:'local',version:(run.receipt?.version??'—').slice(0,12),wlt:c?wlt(c):[0,0,0],rows:'',summary:receiptSummary(run.receipt),local:true});}
  let evalEstimate:EvalReportModel['evalEstimate']=null,evalEstimateText='';
  const latest=report.latest;

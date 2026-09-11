@@ -8,6 +8,7 @@ import { createTauriBackend } from '../index';
 import { createMockBackend } from '../../mock';
 import { fakeBridge } from './fake-bridge';
 import { installedReplay } from './installed-fixture';
+import { detailReplay } from './skill-detail-replay';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
@@ -980,4 +981,85 @@ it('reads the discover result and rejects a malformed one',async()=>{
  const value={candidates:[{path:'/a',skillFolders:2,registered:false,repoRoot:true}],scanned:5,truncated:false,problems:[]};
  expect(await createTauriBackend(replay(value).bridge).checkouts.discover({}).done).toEqual({ok:true,value});
  expect(await createTauriBackend(replay({candidates:'no'}).bridge).checkouts.discover({}).done).toMatchObject({ok:false,error:expect.stringContaining('could not read the result')});
+});
+
+
+it.each(['---\r\nname: "deploy-check"\r\n# original comment\r\n---', null, undefined])('maps team frontmatter verbatim, with an empty fallback for %j', async frontmatter => {
+  const f = detailReplay((name, value) => {
+    if (name === 'ls') for (const row of value.skills as Record<string, unknown>[]) {
+      if (frontmatter === undefined) delete row.frontmatter;
+      else row.frontmatter = frontmatter;
+    }
+  });
+  const backend = createTauriBackend(f.bridge);
+  for (const detail of [await backend.skill({ ref: 'deploy-check' }), await backend.skill({ ref: 'deploy-check', at: { kind: 'global' } }), await backend.localSkill({ path: '/Users/teddy/.claude/skills/deploy-check' })]) {
+    expect(detail).toMatchObject({ ok: true, value: { skillMd: { frontmatter: frontmatter ?? '' } } });
+  }
+});
+
+it.each(['---\nname: "local-only"\n---', null, undefined])('maps local and not-offered frontmatter on name and path routes: %j', async frontmatter => {
+  const f = detailReplay((name, value) => {
+    if (name !== 'ls-local') return;
+    const section = (value.local as Record<string, unknown>[])[0]!;
+    section.rows = [{ name: 'local-only', path: '/local-only', state: '', tracked: false, shared: [], placement: null, health: 'untracked', ...(frontmatter === undefined ? {} : { frontmatter }) }];
+    section.notOffered = [{ name: 'rejected', path: '/rejected', reason: 'invalid-yaml', ...(frontmatter === undefined ? {} : { frontmatter }) }];
+  });
+  const backend = createTauriBackend(f.bridge);
+  for (const ref of ['local-only', 'rejected']) {
+    for (const detail of [await backend.skill({ ref }), await backend.localSkill({ path: '/' + ref })]) {
+      expect(detail).toMatchObject({ ok: true, value: { skillMd: { frontmatter: frontmatter ?? '', markdown: null, body: [] } } });
+    }
+  }
+});
+
+
+it.each(['ls', 'ls-local'])('rejects a non-text frontmatter field from %s', async source => {
+  const f = detailReplay((name, value) => {
+    if (name !== source) return;
+    if (source === 'ls') (value.skills as Record<string, unknown>[])[0]!.frontmatter = 42;
+    else {
+      const section = (value.local as { rows: Record<string, unknown>[] }[])[0]!;
+      section.rows[0]!.frontmatter = 42;
+    }
+  });
+  const backend = createTauriBackend(f.bridge);
+  const result = source === 'ls' ? await backend.skill({ ref: 'deploy-check' }) : await backend.localSkill({ path: '/Users/teddy/.claude/skills/deploy-check' });
+  expect(result.ok).toBe(false);
+});
+
+// The card's lift comes from `ls`'s receipt limb — the same receipt the detail page opens, mapped by
+// the same helper — so a card and its detail cannot state different numbers for one run.
+const cardReceipt = { run_id: '20260101T000000Z', verdict: 'PASS' as const, execution_status: 'complete' as const, expected_rows: 12, scored_rows: 12, comparisons: { 'candidate-vs-baseline': { win: 7, loss: 2, tie: 3, net_lift: 0.42, sign_p: 0.09 } }, arm_scores: { candidate: 0.82, baseline: 0.61 }, provenance: { model: 'sonnet', k: 3, cc_version: '2.1.0', timestamp: '2026-09-01T10:00:00Z', runner_handle: 'mira' } };
+const placedLocal = { roster: [], skills: [], problems: [], local: [{ root: '/home/.claude/skills', scope: 'global', rows: [{ name: 'a', path: '/home/.claude/skills/a', state: 'placement recorded', tracked: true, shared: [], placement: { id: 'id-a', team: 'acme', version: 'a'.repeat(40) }, health: 'up-to-date' }], notOffered: [], problems: [] }] };
+/** The one Library card for skill `a`, built from an `ls --team` row carrying `receipt`. */
+async function cardWith(receipt: unknown) {
+  const overrides = { local: placedLocal, ...(receipt === undefined ? {} : { row: { receipt } as unknown as Partial<typeof lsRow> }) };
+  const result = await createTauriBackend(inventoryBridge(overrides).bridge).library({ scope: { kind: 'global' }, team: 'acme' });
+  if (!result.ok) throw new Error(result.error);
+  return result.value.skills.find(skill => skill.name === 'a')!;
+}
+
+it('maps a card lift, W/L/T and provenance from the receipt ls carries', async () => {
+  const card = await cardWith(cardReceipt);
+  // 0.42 net lift is +42%, the receipt's own number rounded — never rescaled, never combined.
+  expect(card.summary).toEqual({ w: 7, l: 2, t: 3, n: 12, lift: 42, verdict: 'PASS', partial: null, signP: '0.090' });
+  expect(card.wlt).toEqual([7, 2, 3]);
+  expect(card.provenance).toEqual({ model: 'sonnet', k: 3, ccVersion: '2.1.0', runner: 'mira', when: '2026-09-01' });
+});
+
+it('greys a partial run by carrying its scored/expected rows instead of presenting it as complete', async () => {
+  const card = await cardWith({ ...cardReceipt, execution_status: 'partial', scored_rows: 9 });
+  expect(card.summary).toMatchObject({ partial: [9, 12], lift: 42 });
+});
+
+it('leaves a card without a receipt at null rather than drawing a zero', async () => {
+  const card = await cardWith(undefined);
+  expect(card.summary).toBeNull();
+  expect(card.wlt).toBeNull();
+  expect(card.provenance).toBeNull();
+});
+
+it('keeps the card null when the receipt carries no candidate-vs-baseline comparison', async () => {
+  // A receipt with no baseline comparison has no lift to show; provenance alone is not a number.
+  expect((await cardWith({ ...cardReceipt, comparisons: {} })).summary).toBeNull();
 });

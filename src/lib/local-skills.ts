@@ -2,7 +2,7 @@ import { mapWithConcurrency } from './concurrency.js';
 import { access, lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { Config } from './schema.js';
+import { FRONTMATTER, type Config } from './schema.js';
 import { AGENT_PATHS } from './placer/agent-paths.js';
 import { assertNotInsideStateRoot, inspectSkillSource, scanSkillFolder, type SourceProblem } from './skill-source.js';
 
@@ -15,7 +15,7 @@ export type Inspection =
   | { kind: 'candidate'; description: string; privileged: boolean }
   | { kind: 'rejected'; reason: SourceProblem; detail: string; description?: string }
   | { kind: 'failed'; reason: string };
-export interface LocalEntry { skillId: string | null; name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; placementFingerprint?: string; characters?: number; category: string | null; author: string | null; inspection: Inspection; }
+export interface LocalEntry { frontmatter: string | null; skillId: string | null; name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; placementFingerprint?: string; characters?: number; category: string | null; author: string | null; inspection: Inspection; }
 export interface LocalInventory {
   root: string;
   scope: 'global' | 'project';
@@ -130,7 +130,7 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
     const shared = sharedPaths.filter(({ ref, canonical: reference }) => resolve(ref.source) === path || (canonical !== undefined && reference === canonical)).map(({ id, ref }) => ({ id, team: ref.team }));
     const placement = placementPaths.find(({ target, canonical: reference }) => resolve(target) === path || (canonical !== undefined && reference === canonical))?.ref;
     const tracked = shared.length > 0 || placement !== undefined;
-    const entry: LocalEntry = { skillId: null, category: null, author: null, name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
+    const entry: LocalEntry = { frontmatter: null, skillId: null, category: null, author: null, name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
     const reject = (reason: SourceProblem, detail: string, description?: string): void => { entry.inspection = { kind: 'rejected', reason, detail, ...(description === undefined ? {} : { description }) }; };
     try {
       const details = await lstat(path);
@@ -159,6 +159,7 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
           // String.prototype.length counts UTF-16 code units, the same basis HYG6's 20,000-character
           // guideline uses; the file is already in hand, so the count costs no extra read.
           entry.characters = raw.length;
+          entry.frontmatter = FRONTMATTER.exec(raw)?.[0].replace(/\r?\n$/, '') ?? null;
           const inspection = inspectSkillSource(raw, tracked ? undefined : name);
           entry.category = inspection.category ?? null;
           entry.author = inspection.author ?? null;
@@ -188,4 +189,29 @@ const FRONTMATTER_PROBLEMS: ReadonlySet<SourceProblem> = new Set(['no-frontmatte
 export function localSkillCounts(inventory: LocalInventory): { skillFolders: number; connectable: number } {
   const skillFolders = inventory.entries.filter(entry => entry.shared.length > 0 || entry.placement !== undefined || entry.inspection.kind === 'candidate' || (entry.inspection.kind === 'rejected' && FRONTMATTER_PROBLEMS.has(entry.inspection.reason))).length;
   return { skillFolders, connectable: candidatesOf(inventory).length };
+}
+
+/**
+ * How many skill folders this machine holds, for the roster's per-member total (`person.local_skills`).
+ * The roots are the ones the product owns — the global root plus every registered project checkout —
+ * and never a root merely discovered from the current directory, so the number does not change with
+ * where a sync happened to run. The per-root formula is `localSkillCounts().skillFolders`, the same one
+ * the Library prints, so a machine never reports two different totals: every displayed row plus a
+ * folder rejected only over its frontmatter, because an unshareable folder is still a skill the person
+ * has. An absent root contributes 0 — a machine with no global skills folder really has no skills
+ * there — but an *unreadable* one makes the whole answer null: not being able to look is not the same
+ * as looking and finding nothing, and the caller must leave the last known total alone rather than
+ * publish a wrong zero. This is a best-effort self-report, not an audit.
+ */
+export async function librarySize(home: string, config: Pick<Config, 'shared' | 'placements' | 'checkouts'>, stateRoot: string): Promise<number | null> {
+  const discovery = await localSkillRoots(home, undefined, config.checkouts ?? []);
+  const ledger = await canonicalLedger(config);
+  let total = 0;
+  for (const root of discovery.roots) {
+    if (root.scope !== 'global' && !root.registered) continue;
+    const inventory = await localSkills(root.root, config, { scope: root.scope, stateRoot, ledger });
+    if (inventory.rootState === 'unreadable') return null;
+    total += localSkillCounts(inventory).skillFolders;
+  }
+  return total;
 }

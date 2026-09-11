@@ -35,8 +35,8 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
     expect(FRAME_FEATURES).toEqual({
       memberRole: true, localIdentity: true, checkouts: true, projects: true, roles: true,
       favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
-      disablePerMachine: false, projectMembers: false, liftOnCards: false, runEvalInApp: true, perCase: false, progress: true,
-      refresh: true, discover: true, appUpdate: true,
+      disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: false, progress: true,
+      refresh: true, discover: true, appUpdate: true, autoSync: true,
     });
   });
 

@@ -133,12 +133,12 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
         }
         for (const candidate of candidates) if (candidates.some(other => other.name === candidate.name && other.path !== candidate.path)) qualify.add(candidate.name);
         if (!candidates.length) break;
-        const choices = new Map(candidates.map((candidate) => [`Connect ${printable(candidate.name)}${qualify!.has(candidate.name) ? ` (${printable(candidate.label)}${candidates.some(other => other.path !== candidate.path && other.name === candidate.name && other.label === candidate.label) ? `: ${printable(candidate.path)}` : ''})` : ''}`, candidate.path]));
+        const choices = new Map(candidates.map((candidate) => [`Connect ${printable(candidate.name)}${qualify!.has(candidate.name) ? ` (${printable(candidate.label)}${candidates.some(other => other.path !== candidate.path && other.name === candidate.name && other.label === candidate.label) ? `: ${printable(candidate.path)}` : ''})` : ''}`, candidate]));
         const exit = batch.shared.length ? 'Done' : 'Skip';
         menuStarted = true;
-        const choice = await io.select(`Connect a local skill folder to team ${printable(team)}?`, [...choices.keys(), exit]);
+        const choice = await io.select(`Connect a local skill folder to team ${printable(team)}?`, [...choices.keys(), exit], undefined, { descriptions: [...[...choices.values()].map(candidate => `Connects ${printable(candidate.name)} so the team can install it.`), exit === 'Skip' ? `Connect skills later with \`${invocation(args.form, 'connect')}\`.` : ''] });
         if (choice === exit) break;
-        selectedPath = choices.get(choice);
+        selectedPath = choices.get(choice)?.path;
         if (selectedPath === undefined) throw new Error(`Unknown choice ${printable(choice)}.`);
         try {
           const connected = await connectOne(resolve(selectedPath), { args, store, runner, config, team, binding, io });
@@ -266,6 +266,8 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
 export interface ReconcileSharedOptions {
   readonly ids?: ReadonlySet<string>;
   readonly failFast?: boolean;
+  /** Optional per-entry timing; called only for entries this pass reconciles. */
+  readonly onEntry?: (team: string) => () => void;
 }
 
 /**
@@ -283,6 +285,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
   for (const [id, tracked] of Object.entries(config.shared)) {
     if (options.ids !== undefined && !options.ids.has(id)) continue;
     if (skipTeams.has(tracked.team)) continue;
+    const finish = options.onEntry?.(tracked.team);
     const outcome = (kind: ReconcileOutcome['kind'], name = id.slice(0, 8)) => outcomes.push({ id, team: tracked.team, name, kind });
     try {
       const clone = store.teamClone(tracked.team);
@@ -400,7 +403,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
       io.print(`Could not reconcile connected ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`);
       defer(tracked.team, id.slice(0, 8));
       outcome('deferred');
-    }
+    } finally { finish?.(); }
   }
   return outcomes;
 }

@@ -32,7 +32,7 @@ Closing stdin fails pending questions closed; it does not invoke the bin’s can
 ## Rules a shell must follow
 
 1. **The `gh auth login` offer never arrives over frames.** When `gh` is installed but logged out, the CLI in frame mode prints `GitHub CLI is installed but logged out. Run \`gh auth login\` in a terminal, then try again.` instead of asking (it would otherwise hand its stdio to `gh`, which here means the frame pipes). Likewise `setup` never asks the desktop-app opt-in question over frames. If a shell ever does see that confirm, the CLI is older than 0.1.6: answer `false`.
-2. **Never use `sync --hook` over frames.** Its stdout is the Claude Code reload directive, not frames; the CLI refuses it with a `result` frame and exit 1. Call plain `sync`.
+2. **Never use `sync --hook` over frames.** Its stdout is the Claude Code reload directive, not frames; the CLI refuses it with a `result` frame and exit 1. Call plain `sync` for an interactive workflow, or `sync --auto --fresh-ms 600000` for background synchronization.
 3. **Never ask the CLI for `--help` or `--version` in frame mode.** Commander prints those as text.
 4. **`cwd` is advisory; every write names its destination.** `install` asks `Install to` (or takes `--into`), `sync` refreshes every registered checkout from any cwd, `uninstall-skill` takes `--from`.
 5. **`uninstall`: the consent inventory is the confirm's detail.** Render `ask.detail` verbatim in the danger dialog; answer false to cancel. Its result includes cleanup outcomes, `kept`, `record`, and CLI-generated `advice`.
@@ -69,11 +69,21 @@ A second-team binding refused before any side effect:
 
 Protocol stays 1. `hello.features.localIdentity` advertises the additive `ls --local` identity fields: every row and `notOffered` entry carries `skillId` (UUID or null), and every row carries independent `placed` and `connected` booleans. The app declares these keys optional while keeping local rows strict, so older CLIs remain readable; presence joins require the feature. `ls member` adds `member.installed` records (`id`, `scope`, `since`), and `connect` may return `adopted: true` after consent to record an existing identity. These are additive result fields. `ls --local` additionally carries `remote` on every section (`{url, slug}` or `null`, where `slug` is owner/repo on GitHub and null on every other host); the app declares it optional so an older CLI reads as "not connected".
 
-`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `checkouts`, `projects`, `refresh`, `discover`, and `appUpdate`. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh, and only when `status --permissions` is passed (null when the flag is absent, when gh is absent, or when the lookup fails or times out). `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `projects` is true and means the `project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from registering a local checkout folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs. `discover` is true and means the `checkout discover` verb exists and `setup` offers to look for skill folders on this machine; a shell whose CLI reports it false hides the "find skills" control.
+`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `checkouts`, `projects`, `refresh`, `discover`, `appUpdate`, and `autoSync`. `autoSync` advertises non-interactive `sync --auto`, its `--fresh-ms` option, progress frames, and phase timings. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh, and only when `status --permissions` is passed (null when the flag is absent, when gh is absent, or when the lookup fails or times out). `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `projects` is true and means the `project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from registering a local checkout folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs. `discover` is true and means the `checkout discover` verb exists and `setup` offers to look for skill folders on this machine; a shell whose CLI reports it false hides the "find skills" control. `liftOnCards` is true and means `ls` carries the per-skill `receipt` limb described below, so a shell may show a skill's net lift on its card; a shell whose CLI reports it false shows the verdict-free "—" card instead. Lift on a card must be rendered with its receipt's provenance (`model`, `k`, `cc_version`, `runner_handle`, `timestamp`) reachable from the same element, and no skill list may be sorted or ranked by any receipt number.
 
 `appUpdate` is true and means the `app-update` verb exists: a shell may check for, download and install a newer desktop app. A CLI that omits the key cannot, and a shell must render the honest read-only state instead of trying.
 
 `hello.protocol` is `1`. `install`, `sync`, and `uninstall-skill` carry `detail` on their confirmation asks. `detail` is an additive optional field: protocol stays 1. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.
+
+Each `ls` team skill carries `receipt`: the newest schema-valid committed receipt at that skill's own
+current tree hash, reduced to the card's display facts — `{ run_id, verdict, execution_status,
+expected_rows, scored_rows, comparisons, arm_scores, provenance: { model, k, cc_version, timestamp,
+runner_handle } }` — under the receipt's own field names, or null when that version has no receipt
+(the honest "—" state). `comparisons` and `arm_scores` are the receipt's own records, verbatim; a
+shell reads `comparisons['candidate-vs-baseline']` for the card and never combines receipts. The limb
+costs no extra process: `ls` has already resolved each skill's version. A receipt that is unreadable,
+or whose `skill_id`/`version` disagrees with its path, is reported as that skill's problem and leaves
+the limb null — it never fails the listing.
 
 ## Verbs added for the desktop app
 
@@ -108,7 +118,7 @@ Over frames the verb emits only `hello` and `result`.
 
 `app-update --stage [--release <version>]` downloads the selected release through `gh`, verifies its published SHA-256, and stages it without installing. The default release is this CLI's version. An advertised tag with missing release assets returns `ok: true, notPublished: true, staged: false`; the shell stays quiet and retries on the next launch.
 
-`app-update --apply [--release <version>]` hands a staged install to a detached process. The public result values are:
+`app-update --apply [--release <version>] [--reason on-close|overnight|manual]` hands a staged install to a detached process. The public result values are:
 
 ```ts
 export interface AppUpdateCheck {
@@ -126,8 +136,109 @@ export interface AppUpdateStage {
 export interface AppUpdateApply { mode: 'apply'; version: string; platform: AppPlatform; awaitPid: number | null; handedOff: true }
 ```
 
-`AppPlatform` is the existing desktop platform name. `lastApply` has `{schema:1, version:string, phase:'waiting'|'installing'|'launched'|'failed', at:string, error:string|null}`. `ppid` is the CLI's parent process ID, available for verifying the app handoff.
+`AppPlatform` is the existing desktop platform name. `lastApply` has `{schema:1, version:string, phase:'waiting'|'installing'|'launched'|'failed', at:string, error:string|null, reason?:'on-close'|'overnight'|'manual'}`. `ppid` is the CLI's parent process ID, available for verifying the app handoff.
 
 `app-update --apply` returns as soon as the background installer process exists. The shell must then quit; it is the shell's job to quit and the CLI never kills it. `--apply` watches the CLI's parent process only in frame mode, where that parent is the shell itself; from a terminal it installs immediately.
 
 On macOS, quit the running app before applying from a terminal: `open` without `-n` would otherwise bring the old instance to front. On Windows, the silent installer handles an existing running copy. The hidden detached install leg never uses `--frames`; it records its phases in `run/app-update.json`, never rewrites `run/app.json`, and does not update the CLI.
+
+### f-md-parity
+
+`ls` skill rows add `frontmatter: string | null` beside `body`; `ls --local` rows and `notOffered` entries also include the raw fenced frontmatter when readable (otherwise null), without adding body text to local inventory; key order, quoting, and internal line endings are preserved, and older CLIs may omit the field.
+### f-update-policy
+
+`app-update --reason on-close|overnight|manual` records the install reason in every apply marker and forwards it from `--apply` to `--apply-now`. Omission remains compatible with old callers and displays the manual wording. No CLI verb or feature key is added.
+
+The desktop checks once at launch and displays the cached advertised version in its top-bar update chip. Settings ▸ Updates uses `updates:app:policy`: `ask` (manual download/install), `on-close` (the default), or `overnight` (01:00–05:00 local after 30 idle minutes). The old boolean migrates once: false → ask, true → on-close. Successful install markers display “Updated to {version}”, adding “when you quit” or “overnight”; `updates:app:lastShown` acknowledges the marker across launches while the current session retains it. Failure markers remain visible.
+
+Native-command amendment: `app_update_on_close({ version: string | null })` arms or disarms one detached installer. This additional command is necessary because the installer must outlive the WebView. The base actually has six commands including `quit`, so this is its seventh (the original decision's “five” count predates `quit`). On the last window's CloseRequested or ExitRequested, the shell consumes the arm once and invokes the recorded Node/CLI with `app-update --apply-now --release <version> --reason on-close`, plus `--await-pid <shell-pid>` to preserve the CLI's Windows wait. It uses a new process group on macOS and CREATE_NO_WINDOW | DETACHED_PROCESS on Windows and stays outside the bridge's child cleanup. The command follows the existing application-command registration, without a separate app ACL permission. Before spawning, the shell writes a waiting marker; a spawn failure replaces it with a failed marker. A child that dies before executing the CLI leaves the waiting marker visible as an unfinished install on the next launch. An unwritable marker is logged without preventing close. A manual or overnight handoff first disarms the close action to prevent two installers; a failed handoff restores the previous arm unless the policy changed in the meantime.
+
+Update diagnostics are kept for the session by concern, so successful arming cannot erase a download or install failure. A failed preference flush is reported without disabling the hydrated policy. A cosmetic acknowledgement write cannot turn a successful check into a failure; the desktop DTO can carry `acknowledgementError` alongside that successful observation. The install reason has one desktop DTO home, `AppUpdateStatus.reason`, mapped from the wire marker.
+
+The shared overnight hook resets idleness before handling activity. A timer more than one minute late is conservatively treated as a wake from suspension and requires another full idle period. Activity updates the idle timestamp without rescheduling on every pointer movement; the pending timer checks that timestamp before firing. Invalid clock readings are reported and retried with one pending timer. The chip carries a consumed `focus=app` navigation intent, so ordinary visits to Settings do not move keyboard focus.
+
+### f-wizard
+
+`eval --queue-list` returns `{ items }`, where each item has `team`, `skill`, `version`, `requestedAt`,
+`window: "overnight" | "later"`, and an optional `lastError`. `eval --dequeue <team>/<skill>` removes all queued
+versions of that team/skill and returns `{ items }` with the remaining queue. Missing queue state is empty;
+malformed or unreadable state fails without replacing it.
+
+`eval --drain [--parallel n] [--window overnight] [--max n]` returns `{ items, attempted, completed, failures }`.
+`failures` contains `{ item, error }` entries. A failure returns `ok:false` with that partial value, retains the
+item with `lastError`, and continues siblings up to the positive-integer attempt limit. The bounded pool defaults to four concurrent evals. Runs with committed receipts are removed even when their execution status is partial or failed; that status remains visible in output. Uncommitted runs and changed queued versions without receipts remain. After refresh, an existing receipt for the pinned version satisfies the queue item before any paid work.
+Runs use ordinary eval preflight and consent; a drain never auto-answers a generated-asset confirmation.
+Print and `progress` frames identify the current eval; no new verb or feature key is added.
+
+Setup keeps the existing eval question string and uses a select with `Now`, `In batches`, `Overnight`, `Skip`
+(default `Skip`). The cost line precedes that question and uses measured totals reconstructed from the current
+team clone: sum each arm mean multiplied by `provenance.cases.length * provenance.k`, for both cost and duration. Receipts with null arm measurements do not qualify. With fewer than three eligible receipts,
+the wizard explains that each eval bills the person's Claude account without inventing a number.
+`steps.evals` additionally admits `queued` (Queued for overnight) and `batched` (Evaluated in batches).
+A declined batch continuation queues the remaining skills for `later`; `eval --drain` includes those items.
+Decorative banners, step headers, bullets and boxes are terminal-only and never enter the frame transcript.
+
+The desktop drains overnight items through its visible, stoppable eval host, as one parallel batch, once per local night
+between 01:00 and 05:00 after thirty minutes without pointer or keyboard activity. The app starts `eval --drain --parallel 4` once that night; Stop cancels that one process. Activity, the preference, and the window are checked before launch; an active batch may finish. This unfiltered drain includes later items too, as required by A1. The app must remain open. Closed-app scheduling is deferred; a person can run
+`eval --drain` manually at any time. The overnight preference defaults to true.
+
+A1–A3: setup runs all candidates four at a time for Now; In batches asks `How many at a time?`
+(default 4), runs that many concurrently, and checks in between batches. Each eval gets a five-minute
+clone-lock wait budget. Cases inside an eval stay sequential. No account rate limit is guessed; an agent
+rate-limit error fails that eval and siblings continue. Cost scales by skill count; estimated elapsed time
+scales by `ceil(count / parallel)`. The estimate before choosing a mode assumes the default parallelism.
+
+Ask frames additionally accept optional `descriptions: string[]`, one per select choice. These pass through
+to native radio options in the desktop prompt dialog. Malformed descriptions are omitted, preserving choice
+positions. `detail` carries the estimate above the eval choices. Terminal options use typed numbers or Enter;
+arrow-key/raw-mode handling, cursor animation and spinners are out of scope. In decorated setup only, titles
+use unnumbered `> Title` headers, body text is indented, outcomes are colored, and Done prints a session box.
+Plain output and frame question strings retain their existing wording.
+
+Parallel batch output consists of contiguous `── skill ──` context blocks and `✓ skill` / `✗ skill: error`
+settlement lines, including over frames. Questions and block flushes share one mutex. Only the batch emits
+progress (`step: "evals"`, cumulative settled count, full candidate total); a check-in clears that progress display. Setup's queued
+outcome is complete and reads `Queued`; batched reads `Done`. No protocol feature or verb key was added.
+
+Review fixes: In batches prints one run-wide opening and summary; after a different width is chosen,
+the estimate is repeated for that width. Historical-data I/O errors disclose the problem and leave the
+eval offer available. Batch-size input is limited to three attempts. An empty drain prints `No queued evals.`;
+a competing drain reports that another drain is already running. Buffered failures retain every remediation
+line; completion observers cannot change a committed result. Decorated Welcome has no separate header,
+and selects without defaults omit the Enter hint. Mock and real eval choices both default to Skip;
+the overnight replay explicitly chooses Overnight. Radio descriptions are associated for assistive technology.
+### f-auto-sync
+`sync --auto --frames` never asks questions or prints ordinary notices; consent-dependent work is
+returned in `deferred` for the Inbox. `notices` and team outcomes retain their existing meaning.
+`--fresh-ms <n>` accepts a non-negative safe integer and requires `--auto`; default 0 always runs.
+`--auto` cannot be combined with `--hook` or `--prune`. Automatic runs disable Git terminal prompts
+and use the hook's short lock budget, but do not use its one-hour throttle.
+Each attempted team emits a `progress` frame for `fetch`, `place`, `share`, and `orphans` as those
+phases begin. `step` is `<team>: <phase>`; unchanged phases append `: skipped (unchanged)`.
+The result adds `timings: { team, phase, ms }[]`, measured with a monotonic clock. A freshness or
+lock skip has no phases; a failed fetch has only its fetch timing. Team results stay in config order.
+Fetches run with concurrency at most four; teams sharing a URL transfer the fetched refs locally
+instead of fetching that remote again in phase A. Subsequent `safeWrite` operations retain their
+own fetch/retry protection. Placement and ledger writes stay sequential.
+Successful teams write JSON `{head, at}` stamps; freshness readers still use mtime. Empty and ISO
+legacy stamps remain valid for freshness but cannot establish an unchanged HEAD. Automatic and hook
+runs skip placement fingerprinting when HEAD still matches the stamp after local sharing and eligible
+ledger placements (and their SKILL.md files) exist, provided no pending intent remains. Sharing local
+sources, restoring missing ledger entries, and orphan checks always run: their inputs can change
+without a remote commit. Sharing precedes placement reconciliation so connected edits reach placed copies in the
+same run. Shared and orphan ledgers are each scanned once; timings accumulate actual per-team work.
+Stamps record the final HEAD, including this run’s pushes. Manual sync always reconciles.
+Pending intent is replayed for every fetched team before auto-share and the top-level library-size
+pass, preserving the count's observation point from interactive sync. Placement timings include both
+pending replay and later placement reconciliation, with one progress frame when placement first begins.
+Intent arriving after replay remains pending and withholds the team's stamp for a later run.
+The top-level library-size pass also always runs before shared reconciliation. Its own count-only
+commit directly atop the fetched HEAD does not invalidate unchanged placements; any intervening
+commit still requires full reconciliation. Pending replay rechecks the live queue so matching intents
+already completed by an earlier replay cannot place the same destination twice.
+Teddy ratified launch/focus automatic sync on 2026-09-10, overriding the desktop's on-demand-only
+rule. The app runs at most once per ten minutes, single-flight, with no polling; a workflow already
+running skips that focus trigger; an unstarted launch sync retries when the workflow settles. The
+ten-minute cooldown begins at completion; a native relaunch bypasses both the policy and stamp gates.
+Manual sync waits for an automatic sync already in flight. Failed automatic outcomes retain CLI
+notices beside their first error line. Cache-notification failures never change the sync outcome. Older CLIs retain the read-only launch/focus refresh policy.

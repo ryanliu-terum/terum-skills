@@ -17,18 +17,18 @@ it('omits the entire Inbox group when its surface is unavailable', async () => {
   const surfaces = { ...await createMockBackend().surfaces(), inbox: false };
   render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={surfaces}/></HashRouter></QueryClientProvider></BackendContext>);
   for (const name of ['Inbox', 'Pushes', 'Updates', 'Alerts']) expect(screen.queryByRole('link', { name })).toBeNull();
-  expect(screen.getByRole('link', { name: 'Share' })).toBeVisible();
+  expect(screen.getByRole('link', { name: 'Members' })).toBeVisible();
 });
 
 it.each([true, false])('renders served navigation and hides Inbox until its surface resolves: %s', async loaded => {
   const status = await createMockBackend().status();
   render(<QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={loaded ? await createMockBackend().surfaces() : undefined} roots={status.ok ? status.value.roots ?? undefined : undefined}/></HashRouter></QueryClientProvider>);
-  for (const name of ['Global', 'Projects', 'Terum', 'SSM', 'MRF', 'Marketplace', 'Share']) expect(screen.getByRole('link', { name })).toBeVisible();
+  for (const name of ['Global', 'Projects', 'Terum', 'SSM', 'MRF', 'Marketplace', 'Members']) expect(screen.getByRole('link', { name })).toBeVisible();
   for (const name of ['Inbox','Pushes','Updates','Alerts']) { if (loaded) expect(screen.getByRole('link',{name})).toBeVisible(); else expect(screen.queryByRole('link',{name})).toBeNull(); }
   expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
 });
 
-it('renders Global, Share and Marketplace navigation for the real adapter, retaining the settings gear', async () => {
+it('renders Global, Members and Marketplace navigation for the real adapter, retaining the settings gear', async () => {
   const backend = createTauriBackend(fakeBridge(() => undefined).bridge);
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><BackendContext value={backend}><HashRouter><Shell/></HashRouter></BackendContext></QueryClientProvider>);
   // The real adapter serves no project list here (status has no frames), so Projects renders empty; wait for the surfaces read.
@@ -38,7 +38,7 @@ it('renders Global, Share and Marketplace navigation for the real adapter, retai
   expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull(); // this fake CLI answers no features, so registration is not offered
   expect(screen.getByRole('link', { name: 'Global' })).toBeVisible();
   expect(screen.getByRole('link', { name: 'Marketplace' })).toBeVisible();
-  expect(screen.getByRole('link', { name: 'Share' })).toBeVisible();
+  expect(screen.getByRole('link', { name: 'Members' })).toBeVisible();
   expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
   expect(screen.getByRole('link', { name: 'Settings' })).toBeVisible();
 });
@@ -170,7 +170,7 @@ const surfaceCases:{label:string;of:(base:Surfaces)=>Surfaces|undefined}[]=[
  {label:'the Inbox surface is unavailable',of:base=>({...base,inbox:false})},
  {label:'the Projects surface is unavailable',of:base=>({...base,library:false})},
  {label:'only the Marketplace row is available',of:base=>({...base,roster:false})},
- {label:'only the Share row is available',of:base=>({...base,catalog:false})},
+ {label:'only the Members row is available',of:base=>({...base,catalog:false})},
 ];
 
 it.each(surfaceCases)('renders the Team group as the second .nav-group when $label',async({of})=>{
@@ -190,7 +190,7 @@ it('renders no second .nav-group when neither Team surface is available, so noth
  expect(groups).toHaveLength(1);
  expect(groups[0]).toHaveTextContent('Library');
  expect(screen.queryByRole('link',{name:'Marketplace'})).toBeNull();
- expect(screen.queryByRole('link',{name:'Share'})).toBeNull();
+ expect(screen.queryByRole('link',{name:'Members'})).toBeNull();
 });
 
 it('keeps the Inbox rows inside the Library group, so folding Inbox never changes the group count',async()=>{

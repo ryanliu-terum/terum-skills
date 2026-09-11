@@ -2,14 +2,14 @@ import type { Design } from '../fixtures/schema';
 export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library'|'not-found'|'ambiguous-ref'|'unreadable'|'invalid-config';value?:T};
 export interface LaunchContext { writtenAt: string; target?: string; intent?: 'setup' }
 export class PromptCancelledError extends Error { readonly cancelled = true as const; }
-export interface AskOptions {detail?:readonly string[]}
+export interface AskOptions {detail?:readonly string[];descriptions?:readonly string[];default?:string}
 export interface Prompter {readonly interactive:boolean;confirm(question:string,options?:AskOptions):Promise<boolean>;text(question:string,defaultValue?:string,options?:AskOptions):Promise<string>;select(question:string,choices:readonly string[],options?:AskOptions):Promise<string>;print(line:string):void}
 export type AskKind='confirm'|'text'|'select';
-export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[]}
-export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
+export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[];descriptions?:readonly string[]}
+export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[];descriptions?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;evalCommitChoice:boolean;openInEditor:boolean;clipboard:boolean}
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','checkouts','projects','refresh','discover','appUpdate'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','checkouts','projects','refresh','discover','appUpdate','autoSync'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {checkouts:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
@@ -19,6 +19,8 @@ export type Scope=string;
 export type TokenKey=keyof Design['TOKENS'];
 export type IndicatorKey='update'|'local'|'broken';
 export interface ReceiptSummary {w:number;l:number;t:number;n:number;lift:number;verdict:'PASS'|'NEUTRAL'|'FAIL';partial:[number,number]|null;signP:string}
+/** The provenance a card must keep reachable from any receipt number it draws (frame-protocol.md). */
+export interface CardProvenance {model:string;k:number;ccVersion:string;runner:string;when:string}
 /** Where a skill stands with the team, which decides whether Publish can run: `endorsed` is
  *  listed in team.json, `shared` is in the team repo but not endorsed, `unshared` is a folder
  *  the team repo does not hold, `unknown` is a team the CLI could not read. */
@@ -28,7 +30,7 @@ export type InstallState='placed'|'recorded'|'absent';/** Which detail backend c
  *  addressed by `path` through `localSkill({path})`, because the team inventory has no row for
  *  it. Never infer this from `project` — that field carries the root a folder lives in ('Global'
  *  or a checkout's basename), which no longer distinguishes the two. */
-export interface SkillCard {teamed:boolean;path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:InstallState;placed:boolean;onDiskOnly:boolean;teamState:TeamState;paths:[string,string][];projectRoots?:string[];connectedSources?:string[];/** The author this folder's own SKILL.md declares, when that is not the viewer. Disclosure only: connect still stamps the actor (ajay, 2026-09-10). */otherAuthor?:string|null;wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
+export interface SkillCard {teamed:boolean;path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:InstallState;placed:boolean;onDiskOnly:boolean;teamState:TeamState;paths:[string,string][];projectRoots?:string[];connectedSources?:string[];/** The author this folder's own SKILL.md declares, when that is not the viewer. Disclosure only: connect still stamps the actor (ajay, 2026-09-10). */otherAuthor?:string|null;provenance?:CardProvenance|null;wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
 export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
 export interface ReportNumbers {holes:number;nRounds:number;triggerTotal:number;precisionObserved?:string}
@@ -58,8 +60,9 @@ export type InboxItem=Omit<Design['INBOX'][number],'kind'> & {id:string;skillRef
 export type Person=Omit<Design['ROSTER'][number], 'followers'|'role'> & {role:string|null;followers:number|null;projects:string[];declined:string[];organization:string|null;lastPublish:string;skills:string[];installable:string[];adoption:number;publishLine:string;teamsLine:string;buckets:[string,string[]][];placeNote:string;onDisk:[number,number]};
 export type Project=Omit<Design['PROJECTS'][number], 'evaluated'|'favorites'|'admin'|'updated'> & {admin:Design['PROJECTS'][number]['admin']|null;updated:string|null;evaluated:number|null;favorites:number|null;memberHandles:string[];memberInitials:string[];skillsIn:string[]};
 export interface Catalog {scanned:string[]|null;repository:string|null;skills:SkillCard[];extras:SkillCard[];people:Person[];projects:Project[];categories:Design['CATEGORIES'];categoryRemaining:Record<string,number>;topRated:string[];peopleByAdoption:string[];projectsByMembers:string[];categorySkills:Record<string,string[]>;filterDefault:Design['FILTER_DEFAULT'];filterCount:number;verdictCounts:Record<'PASS'|'NEUTRAL'|'FAIL'|'Not evaluated',number|null>;catalogN:number;teamN:number;bulkInstall:Record<string,{total:number;asking:number}>}
-export type Member=Omit<Design['ROSTER'][number], 'followers'|'role'|'joined'> & {role:string|null;followers:number|null;joined:string|null;status:string;projects:string[];lastSeen:string;lastPublish:string};
-/** `invited` and `joined` are null when the CLI does not report them — the screen omits the claim rather than asserting zero or a date. */
+/** `skillsTotal` is how many skills that member's own machine last reported having (their people file's `local_skills`) — a self-report about them, not a fact about this machine; null when nobody has reported one. */
+export type Member=Omit<Design['ROSTER'][number], 'followers'|'role'|'joined'> & {role:string|null;followers:number|null;joined:string|null;skillsTotal:number|null;status:string;projects:string[];lastSeen:string;lastPublish:string};
+/** `invited`, `joined` and `skillsTotal` are null when the source does not report them — the screen omits the claim rather than asserting zero or a date. */
 export interface Roster {members:Member[];invited:Design['INVITED']|null;member:Record<string,{status:string;projects:string[];lastSeen:string}>;byAdoption:string[]}
 /** `slug` is owner/repo on GitHub and null on every other host; `remote` is null when the folder has no origin at all. */
 export interface RootRemote {url:string;slug:string|null}
@@ -110,31 +113,35 @@ export type PublishOutcome='added'|'already-endorsed'|'not-found'|'hygiene-faile
 export interface PublishSkillResult {name:string;outcome:PublishOutcome;detail?:string}
 /** `prUrl` is set only under `policy.publish: 'pr'`, where team.json does not change until that pull request merges. */
 export interface PublishResult {name:string;version:string|null;changed:boolean;prUrl:string|null;compareUrl?:string|null;outcomes?:PublishSkillResult[]}
-export interface SyncArgs {team?:string;prune?:boolean;hook?:boolean}
-export interface SyncResult {placed:number;deferred:string[];notices:string[];changed:boolean;teams:{team:string;state:string;message?:string}[]}
-export interface InviteArgs {team?:string;logins:string[];scope?:Scope;role?:string}
+export interface SyncArgs { freshMs?: number;auto?:boolean;team?:string;prune?:boolean;hook?:boolean}
+export interface AutoSyncOutcome { at: number; state: 'synced' | 'failed'; detail?: string; notices?: string[] }
+export interface SyncResult {timings?:{team:string;phase:'fetch'|'place'|'share'|'orphans';ms:number}[];placed:number;deferred:string[];notices:string[];changed:boolean;teams:{team:string;state:string;message?:string}[]}
+// No `role`: GitHub's collaborator `permission` is "Only valid on organization-owned repositories" and
+// the CLI's invite verb takes only logins and --team, so an invitation cannot carry one (Ryan, 2026-09-10).
+export interface InviteArgs {team?:string;logins:string[];scope?:Scope}
 export interface InviteResult {invited:string[];already:string[];failed:{login:string;error:string}[]}
 export interface TeamArgs {kind:'create'|'join'|'remove'|'leave';name?:string;team?:string;remote?:string;handle?:string}
 export interface TeamResult {name:string;kind:TeamArgs['kind']}
 export interface SetupArgs {target?:string;offerConnect?:boolean}
 export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','actions','invite','discover','evals','community','hook','wrapper','done'] as const;
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
-export interface SetupResult {team:string;role:'creator'|'joiner';connected?:ConnectOutcome;steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'>>|null}
+export interface SetupResult {team:string;role:'creator'|'joiner';connected?:ConnectOutcome;steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'|'queued'|'batched'>>|null}
 export interface EvalArgs {team?:string;ref:string;commit?:boolean;cases?:number}
 export interface EvalResult {name:string;runDir:string;executionStatus:'complete'|'partial'|'failed';commit:{ok:true;receiptPath:string}|{ok:false;error:string}|null}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
 export interface ValidateResult {name:string;findings:number;warnings:number}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
 export type AppUpdatePhase='waiting'|'installing'|'launched'|'failed';
+export type AppUpdateReason='on-close'|'overnight'|'manual';
 export interface AppUpdateMarker {version:string;phase:AppUpdatePhase;at:string;error:string|null}
 /** The app's own update state. `newer` is computed in the adapter from `latest` vs the running build. */
-export interface AppUpdateStatus {appVersion:string;supported:boolean;cliVersion:string|null;latest:string|null;latestAt:string|null;probe:'ok'|'skipped'|'cached'|'failed';probeError:string|null;staged:string|null;installed:string[];lastApply:AppUpdateMarker|null;newer:boolean;ppid:number}
+export interface AppUpdateStatus {acknowledgementError?:string;reason?:AppUpdateReason;appVersion:string;supported:boolean;cliVersion:string|null;latest:string|null;latestAt:string|null;probe:'ok'|'skipped'|'cached'|'failed';probeError:string|null;staged:string|null;installed:string[];lastApply:AppUpdateMarker|null;newer:boolean;ppid:number}
 export interface AppUpdateStaged {version:string;staged:boolean;notPublished:boolean;alreadyStaged:boolean}
 export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void;readonly ready?:Promise<void>;flush?():Promise<void>;subscribe?(listener:()=>void):Subscription}
 export type Subscription=()=>void;
 export type ChangeSource='config'|'clone'|'placed'|'stamp';
 
-export type Settings = Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'LOCAL_UNSHARED'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'FOLLOWING'|'INVITE_TIP'|'JOIN_BLOCK_NOTE' > & {
+export type Settings = { lastAutomatic?: AutoSyncOutcome | null } & Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'LOCAL_UNSHARED'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'FOLLOWING'|'INVITE_TIP'|'JOIN_BLOCK_NOTE' > & {
 HOOK:Design['HOOK']|null;QUARANTINE:Design['QUARANTINE']|null;CLI_LATEST:string|null;STORAGE:Omit<Design['STORAGE'],'cache_n'|'evals_n'>&{cache_n:number|null;evals_n:number|null};
 // mock-only: the drawn specimen login (design INVITEE); the real adapter never sets it
 INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{publish:string|null;license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED:[string,string,string,string][];SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};

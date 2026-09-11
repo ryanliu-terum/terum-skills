@@ -141,7 +141,7 @@ describe('issue 9 local inventory', () => {
     config.shared.first = { team: 'one', source: path };
     config.shared.second = { team: 'two', source: join(path, '..', 'missing') };
     config.placements[path] = { id: '33333333-3333-4333-8333-333333333333', team: 'three', version: null, scope: { kind: 'global' }, placed_at: '', fingerprint: '' };
-    expect((await localSkills(root, config, { scope: 'global', stateRoot: join(root, '.state') })).entries).toEqual([{ skillId: null, category: null, author: null, name: 'missing', path, shared: [{ id: 'first', team: 'one' }, { id: 'second', team: 'two' }], placement: { id: config.placements[path]!.id, team: 'three', version: null }, placementFingerprint: '', inspection: { kind: 'rejected', reason: 'skill-md-missing', detail: 'SKILL.md missing' } }]);
+    expect((await localSkills(root, config, { scope: 'global', stateRoot: join(root, '.state') })).entries).toEqual([{ frontmatter: null, skillId: null, category: null, author: null, name: 'missing', path, shared: [{ id: 'first', team: 'one' }, { id: 'second', team: 'two' }], placement: { id: config.placements[path]!.id, team: 'three', version: null }, placementFingerprint: '', inspection: { kind: 'rejected', reason: 'skill-md-missing', detail: 'SKILL.md missing' } }]);
   });
 
   it('distinguishes an absent root from a scanned empty root', async () => {
@@ -328,11 +328,11 @@ describe('W-02 parallel folder scan', () => {
     await candidate(root,'invalid','---\nname: [\n---\n'); await symlink(join(root,'a'),join(root,'linked'));
     const inventory = await localSkills(root,emptyConfig(),{scope:'global',stateRoot:join(root,'.state')});
     expect(inventory.entries.map(e=>e.name)).toEqual((await fs.readdir(root)).sort().filter(n=>!['plain','empty'].includes(n)));
-    const expected = names.sort().map(name=>({skillId:null,category:null,author:null,name,path:join(root,name),shared:[],characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
+    const expected = names.sort().map(name=>({frontmatter:`---\nname: ${name}\ndescription: skill\n---`,skillId:null,category:null,author:null,name,path:join(root,name),shared:[],characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
     expect(inventory).toEqual({root,scope:'global',rootState:'scanned',problems:[],entries:[...expected,
-      {skillId:null,category:null,author:null,name:'directory',path:join(root,'directory'),shared:[],inspection:{kind:'rejected',reason:'skill-md-not-a-file',detail:'SKILL.md is not a regular file'}},
-      {skillId:null,category:null,author:null,name:'invalid',path:join(root,'invalid'),shared:[],characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
-      {skillId:null,category:null,author:null,name:'linked',path:join(root,'linked'),shared:[],inspection:{kind:'rejected',reason:'symlink',detail:'symbolic link'}},
+      {frontmatter:null,skillId:null,category:null,author:null,name:'directory',path:join(root,'directory'),shared:[],inspection:{kind:'rejected',reason:'skill-md-not-a-file',detail:'SKILL.md is not a regular file'}},
+      {frontmatter:'---\nname: [\n---',skillId:null,category:null,author:null,name:'invalid',path:join(root,'invalid'),shared:[],characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
+      {frontmatter:null,skillId:null,category:null,author:null,name:'linked',path:join(root,'linked'),shared:[],inspection:{kind:'rejected',reason:'symlink',detail:'symbolic link'}},
     ].sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0)});
   });
   it('reports a folder whose lstat fails as failed without aborting its siblings', async () => {

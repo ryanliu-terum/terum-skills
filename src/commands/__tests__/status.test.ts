@@ -42,7 +42,11 @@ async function query(f: Awaited<ReturnType<typeof fixture>>, args: Partial<Statu
     expect(await git(['rev-parse', 'HEAD'], clone)).toBe(heads[index]);
     expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
   }
-  expect(f.runner.calls.map(({ command, args, cwd }) => ({ command, args, cwd }))).toEqual([{ command: 'git', args: ['--version'], cwd: undefined }, { command: 'gh', args: ['--version'], cwd: undefined }, ...probes.map((cwd) => ({ command: 'git', args: ['remote', 'get-url', 'origin'], cwd }))]);
+  const calls = f.runner.calls.map(({ command, args, cwd }) => ({ command, args, cwd }));
+  // A readable clone also gets the roster's join-date pass; it is one read-only `git log` over people/,
+  // asserted by shape here and by its dates in the roster tests below.
+  expect(calls.filter((call) => call.args[0] === 'log').every((call) => call.command === 'git' && call.args.join(' ') === 'log --reverse --no-renames --diff-filter=A --format=%aI --name-only -- people' && clones.includes(call.cwd ?? ''))).toBe(true);
+  expect(calls.filter((call) => call.args[0] !== 'log')).toEqual([{ command: 'git', args: ['--version'], cwd: undefined }, { command: 'gh', args: ['--version'], cwd: undefined }, ...probes.map((cwd) => ({ command: 'git', args: ['remote', 'get-url', 'origin'], cwd }))]);
   return { result, io };
 }
 
@@ -61,6 +65,11 @@ describe('status (offline local team summary)', () => {
       ...(size > 5 ? ['    … and 1 more'] : []), ...(size === 0 ? ['  Your membership: no entry in the local roster.'] : []),
       '  Shared skills: 0', '  Evaluated skills: not yet available', stale,
     ]);
+    // Every member carries the day their people file landed (the fixture commits them together); none of
+    // these fixture people has reported a skill total, so every `skillsTotal` is null and never 0.
+    const members = result.ok ? result.value.teams[0]!.members : [];
+    expect(members.map((member) => member.skillsTotal)).toEqual(handles.map(() => null));
+    for (const member of members) expect(member.joined).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it.each(['inactive', 'missing'] as const)('reports %s self membership as a successful query', async (membership) => {
@@ -258,7 +267,9 @@ describe('W-02 status permissions and probes', () => {
     expect(result.ok).toBe(true);
     expect(runner.calls.filter(c=>c.command==='gh'&&c.args[0]==='api').map(c=>c.args.join(' '))).toEqual(permissions?[api]:[]);
     expect(result.value?.teams[0]?.members.map(m=>[m.handle,m.admin])).toEqual([['other',permissions?false:null],['seed',permissions?true:null]]);
-    if(!permissions){const calls=runner.calls.map(c=>[c.command,...c.args].join(' '));expect(calls.slice(0,2).sort()).toEqual(['gh --version','git --version']);expect(calls.slice(2)).toEqual(['git remote get-url origin']);}
+    // Without --permissions status still makes no gh API call; the one extra git call is the roster's
+    // local read-only join-date pass over people/, which needs no network and no credentials.
+    if(!permissions){const calls=runner.calls.map(c=>[c.command,...c.args].join(' '));expect(calls.slice(0,2).sort()).toEqual(['gh --version','git --version']);expect(calls.slice(2)).toEqual(['git remote get-url origin','git log --reverse --no-renames --diff-filter=A --format=%aI --name-only -- people']);}
   });
   it.each([false,true])('reports admin null when gh is absent, permissions=%s',async permissions=>{
     const f=await fixture();const result=await run({config:f.store,runner:f.runner,permissions},new ScriptedPrompter());
