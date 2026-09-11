@@ -1,33 +1,75 @@
-import { useEffect } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { useBackend } from '../backend';
+import { useEffect, useRef, useState } from 'react';
+import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBackend, usePreference } from '../backend';
+import { appUpdatePolicy, stagedAppUpdate, recordAppUpdateError, type AppUpdateErrors } from '../lib/app-update';
+import type { AppUpdateStatus, Result } from '../backend/types';
+import { useOvernightWindow } from './overnightWindow';
 
-/** One check per app process (m7 decision walk row 9: no timer, no poll, and — deliberately narrower
- *  than that gate — not on window focus either, because a check can reach the network). When the
- *  preference allows it and a newer app is advertised, the download starts here and the Relaunch
- *  button on Settings ▸ Updates is what installs it. Every failure is swallowed: a launch must never
- *  be worse because an update check did not work. */
+/** A single launch check fills the cache. Policy changes act on that observation, never check again. */
 export function useAppUpdateCheck(): void {
   const backend = useBackend(), client = useQueryClient();
+  const policy = appUpdatePolicy(usePreference('updates:app:policy', 'on-close'));
+  const [ready, setReady] = useState(false);
+  const attempted = useRef(new Set<string>());
+  const observation = useQuery<Result<AppUpdateStatus>>({ queryKey: ['app-update'], enabled: false, queryFn: skipToken });
+  const staging = useQuery<string | null>({ queryKey: ['app-update-staging'], enabled: false, queryFn: skipToken });
+  const status = observation.data?.ok ? observation.data.value : null;
+  const version = ready && status?.supported && status.newer ? status.latest : null;
+  const staged = ready ? stagedAppUpdate(status) : null;
+  useQuery<AppUpdateErrors>({ queryKey: ['app-update-policy-outcome'], enabled: false, queryFn: skipToken, gcTime: Infinity });
+  const recordError = (error: unknown) => recordAppUpdateError(client, 'apply', error);
   useEffect(() => {
     let disposed = false;
     void (async () => {
       try {
-        const surfaces = await backend.surfaces();
-        if (disposed || !surfaces.appUpdate) return;
-        const features = await backend.features();
-        if (disposed || !features.appUpdate) return;
+        if (!(await backend.surfaces()).appUpdate || disposed) return;
+        if (!(await backend.features()).appUpdate || disposed) return;
         await backend.prefs.ready;
-        const status = await client.ensureQueryData({ queryKey: ['app-update'], queryFn: () => backend.appUpdate.check(), staleTime: Infinity, gcTime: Infinity, retry: false });
-        if (disposed || !status.ok) return;
-        const latest = status.value.latest;
-        if (!status.value.newer || latest === null || status.value.staged === latest) return;
-        if (!backend.prefs.get('updates:app:auto', true)) return;
-        const staged = await backend.appUpdate.stage(latest).done;
-        if (disposed || !staged.ok) return;
-        client.setQueryData(['app-update'], { ok: true, value: { ...status.value, staged: staged.value.staged ? latest : status.value.staged } });
-      } catch { /* A failed launch-time check leaves Settings ▸ Updates to report it on demand. */ }
+        await client.ensureQueryData({ queryKey: ['app-update'], queryFn: () => backend.appUpdate.check(), staleTime: Infinity, gcTime: Infinity, retry: false });
+        try { await backend.prefs.flush?.(); }
+        catch (error) {
+          recordAppUpdateError(client, 'preferences', `Could not save update preferences: ${String(error)}`);
+        }
+        if (!disposed) setReady(true);
+      } catch (error) { recordAppUpdateError(client, 'launch', error); }
     })();
     return () => { disposed = true; };
   }, [backend, client]);
+  useEffect(() => {
+    if (!version || status?.installed.includes(version) || staged || policy === 'ask' || staging.data || attempted.current.has(version)) return;
+    attempted.current.add(version);
+    client.setQueryData(['app-update-staging'], version);
+    void (async () => {
+      try {
+        const result = await backend.appUpdate.stage(version).done;
+        if (!result.ok) recordAppUpdateError(client, 'stage', result.error);
+        else if (result.value.staged) client.setQueryData<Result<AppUpdateStatus>>(['app-update'], current => current?.ok ? { ok: true, value: { ...current.value, staged: version } } : current);
+        // An advertised release without published assets is a quiet W-01 no-op; Download remains available.
+      } catch (error) {
+        recordAppUpdateError(client, 'stage', error);
+      } finally { client.setQueryData(['app-update-staging'], null); }
+    })();
+  }, [backend, client, policy, version, staged, staging.data, status?.installed]);
+  useEffect(() => {
+    if (!ready) return;
+    const result = policy === 'on-close' && staged ? backend.appUpdate.armOnClose(staged) : backend.appUpdate.disarmOnClose();
+    void result.then(outcome => { if (!outcome.ok) recordAppUpdateError(client, 'arm', outcome.error); }, error => {
+      recordAppUpdateError(client, 'arm', error);
+    });
+    return () => {
+      void backend.appUpdate.disarmOnClose().then(outcome => {
+        if (!outcome.ok) recordAppUpdateError(client, 'arm', outcome.error);
+      }, error => { recordAppUpdateError(client, 'arm', error); });
+    };
+  }, [backend, client, policy, ready, staged]);
+  useOvernightWindow({
+    enabled: policy === 'overnight' && staged !== null,
+    onFire: async () => {
+      if (staged === null) return;
+      const result = await backend.appUpdate.apply(staged, 'overnight');
+      if (!result.ok) recordAppUpdateError(client, 'apply', result.error);
+      if (result.ok) await backend.quit();
+    },
+    onError: recordError,
+  });
 }

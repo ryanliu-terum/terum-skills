@@ -289,3 +289,15 @@ it('validates the team name on a qualified name route, not its placed folder or 
  await waitFor(()=>expect(validate).toHaveBeenCalledWith({ref:'deploy-check',team:'acme'}));
  expect(validate.mock.calls.every(([args])=>args.ref==='deploy-check')).toBe(true);
 });
+
+
+it('renders the real adapter frontmatter exactly as the CLI read it', async () => {
+ const frontmatter='---\n# Keep the file formatting\ndescription: "Deploy: carefully"\nname: deploy-check\nmetadata:\n  author: "Mira <mira@example.com>"\n---';
+ open('#/skill/deploy-check',(name,value)=>{
+  if(name==='ls')for(const row of value.skills as Record<string,unknown>[])row.frontmatter=frontmatter;
+ });
+ const block=await screen.findByTestId('frontmatter');
+ expect(block.textContent).toBe(frontmatter);
+ expect(block).toHaveClass('md-code','md-frontmatter');
+ expect(document.querySelector('.md-doc')?.textContent).not.toContain('# Keep the file formatting');
+});

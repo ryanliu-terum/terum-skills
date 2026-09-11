@@ -101,8 +101,8 @@ it('replays zero-team startup and the no-default Create fork, preserving the rec
  const {fake,backend}=firstRunReplay('setup-create-fork',{...STATE});
  const dialog=await screen.findByRole('dialog',{name:'Create a team or join one?'});
  expect(location.hash).toBe('#/onboarding/boot');
- expect(within(dialog).getByRole('combobox')).toHaveValue('');expect(within(dialog).getByRole('button',{name:'Continue'})).toBeDisabled();
- fireEvent.change(within(dialog).getByRole('combobox'),{target:{value:'Create a new team'}});
+ expect(within(dialog).getAllByRole('radio').every(radio=>!(radio as HTMLInputElement).checked)).toBe(true);expect(within(dialog).getByRole('button',{name:'Continue'})).toBeDisabled();
+ fireEvent.click(within(dialog).getByRole('radio',{name:'Create a new team'}));
  fireEvent.click(within(dialog).getByRole('button',{name:'Continue'}));
  const team=await screen.findByRole('dialog',{name:'Team name'});
  // Advance to the recorded stdin-ended tail, which is an ordinary failure at this CLI revision.
@@ -116,7 +116,7 @@ it('replays zero-team startup and the no-default Create fork, preserving the rec
 it('replays the target-less Join hand-off and consumes the successful request',async()=>{
  const {fake,backend}=firstRunReplay('setup-join-handoff',{...STATE,intent:'setup'});
  const dialog=await screen.findByRole('dialog',{name:'Create a team or join one?'});
- fireEvent.change(within(dialog).getByRole('combobox'),{target:{value:'Join an existing team'}});
+ fireEvent.click(within(dialog).getByRole('radio',{name:'Join an existing team'}));
  fireEvent.click(within(dialog).getByRole('button',{name:'Continue'}));
  await screen.findByRole('heading',{name:'Ask your team owner to invite you'});
  const output=screen.getByLabelText('Setup output');expect(output.children).toHaveLength(5);

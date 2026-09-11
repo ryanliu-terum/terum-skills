@@ -2,14 +2,14 @@ import type { Design } from '../fixtures/schema';
 export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library'|'not-found'|'ambiguous-ref'|'unreadable'|'invalid-config';value?:T};
 export interface LaunchContext { writtenAt: string; target?: string; intent?: 'setup' }
 export class PromptCancelledError extends Error { readonly cancelled = true as const; }
-export interface AskOptions {detail?:readonly string[]}
+export interface AskOptions {detail?:readonly string[];descriptions?:readonly string[];default?:string}
 export interface Prompter {readonly interactive:boolean;confirm(question:string,options?:AskOptions):Promise<boolean>;text(question:string,defaultValue?:string,options?:AskOptions):Promise<string>;select(question:string,choices:readonly string[],options?:AskOptions):Promise<string>;print(line:string):void}
 export type AskKind='confirm'|'text'|'select';
-export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[]}
-export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
+export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[];descriptions?:readonly string[]}
+export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[];descriptions?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;evalCommitChoice:boolean;openInEditor:boolean;clipboard:boolean}
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','checkouts','projects','refresh','discover','appUpdate'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','checkouts','projects','refresh','discover','appUpdate','autoSync'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {checkouts:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
@@ -109,8 +109,9 @@ export type ConnectOutcome=ConnectResult|ConnectBatch;
 export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string}
 /** `prUrl` is set only under `policy.publish: 'pr'`, where team.json does not change until that pull request merges. */
 export interface PublishResult {name:string;version:string|null;changed:boolean;prUrl:string|null}
-export interface SyncArgs {team?:string;prune?:boolean;hook?:boolean}
-export interface SyncResult {placed:number;deferred:string[];notices:string[];changed:boolean;teams:{team:string;state:string;message?:string}[]}
+export interface SyncArgs { freshMs?: number;auto?:boolean;team?:string;prune?:boolean;hook?:boolean}
+export interface AutoSyncOutcome { at: number; state: 'synced' | 'failed'; detail?: string; notices?: string[] }
+export interface SyncResult {timings?:{team:string;phase:'fetch'|'place'|'share'|'orphans';ms:number}[];placed:number;deferred:string[];notices:string[];changed:boolean;teams:{team:string;state:string;message?:string}[]}
 // No `role`: GitHub's collaborator `permission` is "Only valid on organization-owned repositories" and
 // the CLI's invite verb takes only logins and --team, so an invitation cannot carry one (Ryan, 2026-09-10).
 export interface InviteArgs {team?:string;logins:string[];scope?:Scope}
@@ -120,22 +121,23 @@ export interface TeamResult {name:string;kind:TeamArgs['kind']}
 export interface SetupArgs {target?:string;offerConnect?:boolean}
 export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','actions','invite','discover','evals','community','hook','wrapper','done'] as const;
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
-export interface SetupResult {team:string;role:'creator'|'joiner';connected?:ConnectOutcome;steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'>>|null}
+export interface SetupResult {team:string;role:'creator'|'joiner';connected?:ConnectOutcome;steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'|'queued'|'batched'>>|null}
 export interface EvalArgs {team?:string;ref:string;commit?:boolean;cases?:number}
 export interface EvalResult {name:string;runDir:string;executionStatus:'complete'|'partial'|'failed';commit:{ok:true;receiptPath:string}|{ok:false;error:string}|null}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
 export interface ValidateResult {name:string;findings:number;warnings:number}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
 export type AppUpdatePhase='waiting'|'installing'|'launched'|'failed';
+export type AppUpdateReason='on-close'|'overnight'|'manual';
 export interface AppUpdateMarker {version:string;phase:AppUpdatePhase;at:string;error:string|null}
 /** The app's own update state. `newer` is computed in the adapter from `latest` vs the running build. */
-export interface AppUpdateStatus {appVersion:string;supported:boolean;cliVersion:string|null;latest:string|null;latestAt:string|null;probe:'ok'|'skipped'|'cached'|'failed';probeError:string|null;staged:string|null;installed:string[];lastApply:AppUpdateMarker|null;newer:boolean;ppid:number}
+export interface AppUpdateStatus {acknowledgementError?:string;reason?:AppUpdateReason;appVersion:string;supported:boolean;cliVersion:string|null;latest:string|null;latestAt:string|null;probe:'ok'|'skipped'|'cached'|'failed';probeError:string|null;staged:string|null;installed:string[];lastApply:AppUpdateMarker|null;newer:boolean;ppid:number}
 export interface AppUpdateStaged {version:string;staged:boolean;notPublished:boolean;alreadyStaged:boolean}
 export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void;readonly ready?:Promise<void>;flush?():Promise<void>;subscribe?(listener:()=>void):Subscription}
 export type Subscription=()=>void;
 export type ChangeSource='config'|'clone'|'placed'|'stamp';
 
-export type Settings = Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'LOCAL_UNSHARED'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'FOLLOWING'|'INVITE_TIP'|'JOIN_BLOCK_NOTE' > & {
+export type Settings = { lastAutomatic?: AutoSyncOutcome | null } & Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'LOCAL_UNSHARED'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'FOLLOWING'|'INVITE_TIP'|'JOIN_BLOCK_NOTE' > & {
 HOOK:Design['HOOK']|null;QUARANTINE:Design['QUARANTINE']|null;CLI_LATEST:string|null;STORAGE:Omit<Design['STORAGE'],'cache_n'|'evals_n'>&{cache_n:number|null;evals_n:number|null};
 // mock-only: the drawn specimen login (design INVITEE); the real adapter never sets it
 INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{publish:string|null;license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED:[string,string,string,string][];SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};

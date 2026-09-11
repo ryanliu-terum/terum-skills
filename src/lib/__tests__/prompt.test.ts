@@ -1,9 +1,10 @@
+import * as tty from '../tty.js';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { PassThrough } from 'node:stream';
 import { ESLint } from 'eslint';
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { NonInteractivePrompter, PromptClosedError, terminalPrompter } from '../prompt.js';
 
 describe('Prompter boundary (§3, §12 "prompter")', () => {
@@ -205,9 +206,32 @@ describe('terminalPrompter behaviour', () => {
     expect(out().match(/Select context\n/g)).toHaveLength(1);
   });
 
+  it('decorated selects describe the default and accept numbers, enter, and out-of-range retries without cursor controls', async () => {
+    vi.spyOn(tty, 'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('TERM','xterm');vi.stubEnv('NO_COLOR',undefined);
+    try {
+      const {io,out}=channel(['2','','0','2']);const options={decorated:true,descriptions:['First description','Second description']};
+      expect(await io.select('Pick',['alpha','beta'],'beta',options)).toBe('beta');
+      expect(await io.select('Pick',['alpha','beta'],'beta',options)).toBe('beta');
+      expect(await io.select('Pick',['alpha','beta'],'beta',options)).toBe('beta');
+      expect(out()).toContain('  Pick [beta]\n  1. alpha\n\x1b[2m     First description\x1b[0m\n\x1b[36m› 2. beta\x1b[0m');
+      expect(out()).toContain('  Press enter to choose 2. beta, or type a number.');expect(out()).toContain('  Enter a number from 1 to 2.');
+      expect(out().replace(/\x1b\[[0-9]+m/g,'')).not.toContain('\x1b');
+    } finally {vi.restoreAllMocks();vi.unstubAllEnvs();}
+  });
+
   it('print writes one line to the output stream', () => {
     const { io, out } = channel([]);
     io.print('hello');
     expect(out()).toBe('hello\n');
   });
+});
+
+it('decorated prompts accept chunked input, omit a no-default hint, and tolerate mismatched descriptions',async()=>{
+ vi.spyOn(tty,'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('NO_COLOR',undefined);vi.stubEnv('TERM','xterm');
+ const input=new PassThrough(),output=new PassThrough();let printed='';output.on('data',chunk=>{printed+=String(chunk);});const io=terminalPrompter({input,output,interactive:true});
+ try{
+  const pending=io.select('Choose',['One','Two'],undefined,{decorated:true,descriptions:['wrong length']});input.write('2');await Promise.resolve();input.write('\r');await Promise.resolve();input.write('\n');expect(await pending).toBe('Two');
+  expect(printed).toContain('descriptions omitted');expect(printed).not.toContain('Type a number to choose');expect(printed).not.toContain('Press enter');
+  await expect(io.select('Choose',['One'],'missing',{decorated:true})).rejects.toThrow('Select default must be one of the choices.');expect(printed).not.toContain('choose 0.');
+ }finally{vi.restoreAllMocks();vi.unstubAllEnvs();}
 });

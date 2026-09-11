@@ -72,15 +72,15 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
 | Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
 | | `install <ref> [--into global\|<checkout root>]` / `uninstall-skill <ref> [--from global\|<checkout root>]` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |
-| | `sync` | Pull, finish pending installs, mirror connected edits, refresh placed copies |
+| | `sync` | Pull, finish pending installs, mirror connected edits, refresh placed copies; `--auto` runs without prompts, `--fresh-ms <n>` sets its freshness window |
 | | `refresh` | Fetch the team clone to `origin/main` and nothing else — no placement, no sharing, no stamp; the desktop app runs it in the background so a teammate's committed work becomes visible |
 | | `publish <skill>` | Endorse a skill for the team: a PR (default policy) or a direct commit |
 | Evals | `validate <path\|name>` | Deterministic safety and formatting checks, no model |
-| | `eval <skill>` | Run the skill's evals on your own Claude Code login; `--commit` files a receipt |
+| | `eval <skill>` | Run the skill's evals on your own Claude Code login; `--commit` files a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes queued versions |
 | | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |
 | Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
 | | `app` | Install and open the desktop app for this CLI version |
-| | `app-update [--check\|--stage\|--apply] [--release <version>]` | Check for, download, or install a newer desktop app; the app drives it from Settings ▸ Updates |
+| | `app-update [--check\|--stage\|--apply] [--release <version>] [--reason on-close\|overnight\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes) |
 
 `npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option you are expected to use.
 
@@ -207,7 +207,7 @@ Browser development still uses the mock backend. The app bundle is separate from
 Every app-spawned CLI child, including under `tauri dev`, has piped stderr and
 `TERUM_SKILLS_NO_UPDATE_NOTIFIER=1`; `--frames` forces `noUpdateCheck`, and `update` is registered with
 `notices: false`. Background terminal release notices are therefore suppressed in the app. Explicit update
-checks still return release observations and installation-specific advice; and `app-update` gives the app its own channel for the app itself — it checks once per launch against the release advertisement the CLI already caches, downloads through `gh release download`, verifies the published SHA-256, and installs only after you press Relaunch. It never updates the CLI.
+checks still return release observations and installation-specific advice; and `app-update` gives the app its own channel for the app itself — it checks once per launch against the release advertisement the CLI already caches, downloads through `gh release download`, verifies the published SHA-256, and installs it the way Settings ▸ Updates says to: when you press Install now, when you quit, or overnight while the app is open and idle. It never updates the CLI.
 
 ## Releasing (maintainers)
 

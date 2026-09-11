@@ -8,6 +8,7 @@ import { createTauriBackend } from '../index';
 import { createMockBackend } from '../../mock';
 import { fakeBridge } from './fake-bridge';
 import { installedReplay } from './installed-fixture';
+import { detailReplay } from './skill-detail-replay';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
@@ -980,4 +981,48 @@ it('reads the discover result and rejects a malformed one',async()=>{
  const value={candidates:[{path:'/a',skillFolders:2,registered:false,repoRoot:true}],scanned:5,truncated:false,problems:[]};
  expect(await createTauriBackend(replay(value).bridge).checkouts.discover({}).done).toEqual({ok:true,value});
  expect(await createTauriBackend(replay({candidates:'no'}).bridge).checkouts.discover({}).done).toMatchObject({ok:false,error:expect.stringContaining('could not read the result')});
+});
+
+
+it.each(['---\r\nname: "deploy-check"\r\n# original comment\r\n---', null, undefined])('maps team frontmatter verbatim, with an empty fallback for %j', async frontmatter => {
+  const f = detailReplay((name, value) => {
+    if (name === 'ls') for (const row of value.skills as Record<string, unknown>[]) {
+      if (frontmatter === undefined) delete row.frontmatter;
+      else row.frontmatter = frontmatter;
+    }
+  });
+  const backend = createTauriBackend(f.bridge);
+  for (const detail of [await backend.skill({ ref: 'deploy-check' }), await backend.skill({ ref: 'deploy-check', at: { kind: 'global' } }), await backend.localSkill({ path: '/Users/teddy/.claude/skills/deploy-check' })]) {
+    expect(detail).toMatchObject({ ok: true, value: { skillMd: { frontmatter: frontmatter ?? '' } } });
+  }
+});
+
+it.each(['---\nname: "local-only"\n---', null, undefined])('maps local and not-offered frontmatter on name and path routes: %j', async frontmatter => {
+  const f = detailReplay((name, value) => {
+    if (name !== 'ls-local') return;
+    const section = (value.local as Record<string, unknown>[])[0]!;
+    section.rows = [{ name: 'local-only', path: '/local-only', state: '', tracked: false, shared: [], placement: null, health: 'untracked', ...(frontmatter === undefined ? {} : { frontmatter }) }];
+    section.notOffered = [{ name: 'rejected', path: '/rejected', reason: 'invalid-yaml', ...(frontmatter === undefined ? {} : { frontmatter }) }];
+  });
+  const backend = createTauriBackend(f.bridge);
+  for (const ref of ['local-only', 'rejected']) {
+    for (const detail of [await backend.skill({ ref }), await backend.localSkill({ path: '/' + ref })]) {
+      expect(detail).toMatchObject({ ok: true, value: { skillMd: { frontmatter: frontmatter ?? '', markdown: null, body: [] } } });
+    }
+  }
+});
+
+
+it.each(['ls', 'ls-local'])('rejects a non-text frontmatter field from %s', async source => {
+  const f = detailReplay((name, value) => {
+    if (name !== source) return;
+    if (source === 'ls') (value.skills as Record<string, unknown>[])[0]!.frontmatter = 42;
+    else {
+      const section = (value.local as { rows: Record<string, unknown>[] }[])[0]!;
+      section.rows[0]!.frontmatter = 42;
+    }
+  });
+  const backend = createTauriBackend(f.bridge);
+  const result = source === 'ls' ? await backend.skill({ ref: 'deploy-check' }) : await backend.localSkill({ path: '/Users/teddy/.claude/skills/deploy-check' });
+  expect(result.ok).toBe(false);
 });

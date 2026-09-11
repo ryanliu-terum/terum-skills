@@ -8,7 +8,7 @@ export type CliAskKind = 'confirm' | 'text' | 'select';
 export type CliFrame =
   | { t: 'hello'; protocol: number; version: string | null; verbs: readonly string[]; features: Readonly<Record<string, boolean>> }
   | { t: 'print'; level: CliLevel; line: string }
-  | { t: 'ask'; id: string; kind: CliAskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[] }
+  | { t: 'ask'; id: string; kind: CliAskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[]; descriptions?: readonly string[] }
   | { t: 'progress'; step: string; current?: number; total?: number }
   | { t: 'result'; verb: string; ok: boolean; exitCode: number; error?: string; declined?: boolean; refused?: boolean; value?: unknown };
 export type CliInbound = { t: 'answer'; id: string; value: string | number | boolean } | { t: 'cancel' };
@@ -18,7 +18,7 @@ const LEVELS = new Set(['info', 'warn', 'error']);
 const str = (v: unknown): v is string => typeof v === 'string';
 
 /** One stdout line to one frame; anything that is not a well-formed frame is null (the caller reports it). */
-export function parseCliFrame(line: string): CliFrame | null {
+export function parseCliFrame(line: string, diagnostic?: (line: string) => void): CliFrame | null {
   let raw: unknown;
   try { raw = JSON.parse(line); } catch { return null; }
   if (!raw || typeof raw !== 'object') return null;
@@ -40,8 +40,11 @@ export function parseCliFrame(line: string): CliFrame | null {
         if (!(f['choices'] as unknown[]).every(str)) return null;
         frame.choices = f['choices'] as string[];
       }
+      if (f['detail'] !== undefined && (!Array.isArray(f['detail']) || !f['detail'].every(str))) diagnostic?.('Malformed ask detail from terum-skills; invalid entries omitted.');
       const detail = Array.isArray(f['detail']) ? f['detail'].filter(str) : [];
       if (detail.length) frame.detail = detail;
+      if (Array.isArray(f['descriptions']) && f['descriptions'].every(str) && f['descriptions'].length === frame.choices?.length) frame.descriptions = f['descriptions'];
+      else if (f['descriptions'] !== undefined) diagnostic?.('Malformed ask descriptions from terum-skills; descriptions omitted.');
       return frame;
     }
     case 'progress': {

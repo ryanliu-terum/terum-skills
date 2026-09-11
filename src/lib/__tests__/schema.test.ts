@@ -90,3 +90,23 @@ it('accepts optional checkout arrays and refuses a scalar', () => {
   expect(configSchema.parse({ ...emptyConfig(), checkouts: ['/a'] }).checkouts).toEqual(['/a']);
   expect(configSchema.safeParse({ ...emptyConfig(), checkouts: 'x' }).success).toBe(false);
 });
+
+
+it.each(['\n', '\r\n'])('returns fenced frontmatter verbatim with %j line endings', newline => {
+  const frontmatter = [
+    '---', '# Keep this comment and key order', 'description: "Quoted: text"', "name: 'x'",
+    'license: UNLICENSED', 'metadata:', '  author: "A <a@b.test>"',
+    '  id: 4e80fd2a-04bc-4d9f-88f7-a849d92879f1', '  terum-category: docs', '---',
+  ].join(newline);
+  const body = newline + '## Body' + newline + '---' + newline;
+  expect(parseSkillFrontmatter(frontmatter + newline + body)).toMatchObject({ ok: true, frontmatter, body });
+  expect(parseSkillFrontmatter(frontmatter)).toMatchObject({ ok: true, frontmatter, body: '' });
+  expect(parseSkillFrontmatter(frontmatter + newline)).toMatchObject({ ok: true, frontmatter, body: '' });
+});
+
+it.each(['no fences', '---\nname: [\n---\nbody', '---\nname: x\n---\nbody'])('does not expose a partial success for invalid frontmatter: %s', source => {
+  const parsed = parseSkillFrontmatter(source);
+  expect(parsed.ok).toBe(false);
+  expect(parsed).not.toHaveProperty('frontmatter');
+  expect(parsed).not.toHaveProperty('body');
+});

@@ -1,0 +1,90 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`snapshots a decorated creator Overnight transcript and emits only headers for sections that print 1`] = `
+"[2m@@@@*=:           .......            :=*@@@@[0m
+[2m@@+.         .::....   .....::.         .+@@[0m
+[2m@:       .::..      .:        ..::.       :@[0m
+[2m-      .:.         *@@%=          .:.      -[0m
+[2m     .-.          #@@@@@=           .-.[0m
+[2m    :-           +@*#@@@@:            -:[0m
+[2m   ::           .@-  +@%@*             ::[0m
+[2m  :-            =#    #@@%              -:[0m
+[2m  =    .==.     =:    +@%@:              =[0m
+[2m ::   -@%             -@%@= .=*###*+:    ::[0m
+[2m -.   %@%+:     .:--  :@@@+ %@@@@@@@@#   .-[0m
+[2m -.   -@@@@%%#%%@@@@. .@@@* =*+:..:*@@*  .-[0m
+[2m ::    .+#@@@@@@@#+    %@@+         *@#  ::[0m
+[2m  -       .:---:.      %@@=         *+   -[0m
+[2m  ::             -    .@@@:        .    ::[0m
+[2m   -.            %:   =@@#             .-[0m
+[2m    -:           =@-.-%@@-            :-[0m
+[2m     .-.          *@@@@@*           .-.[0m
+[2m-      ::.         =%@@*          .::      -[0m
+[2m@:       .::.        ..        .::.       :@[0m
+[2m@@+.        .::....      ....::.        .+@@[0m
+[2m@@@@*=:          ..........          :=*@@@@[0m
+
+  Welcome to [1mterum-skills[0m, your team's skill library.
+  Welcome to terum-skills.
+  Your team's skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have.
+  This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.
+
+> [1mRole[0m
+  Creating a new team creates a private GitHub repository under your account.
+  Create a team or join one?
+  1. Create a new team
+[2m     Creates a private GitHub repository under your account.[0m
+  2. Join an existing team
+[2m     Uses an invitation from the team owner.[0m
+> 
+
+> [1mGitHub[0m
+  [32m✓ GitHub: gh is logged in.[0m
+
+> [1mTeam[0m
+  [32m✓ Created team team at https://github.com/alice/team.[0m
+
+> [1mInvite[0m
+  Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip): 
+
+> [1mActions[0m
+  Next, from any terminal:
+    npx -y terum-skills@latest install team/<skill>   — install a shared skill (add @<version> to pin it)
+    npx -y terum-skills@latest ls [--local]             — list members and shared skills; --local lists your own
+    npx -y terum-skills@latest search <term>            — find a skill by name, description, or category
+    npx -y terum-skills@latest sync                     — pull updates and finish pending work
+    npx -y terum-skills@latest publish <skill> — endorse a skill already connected to the team
+    npx -y terum-skills@latest eval <skill>             — evaluate a shared skill locally before publishing
+    npx -y terum-skills@latest connect      — connect your local skills to the team (asks which)
+
+> [1mFind skills[0m
+  Looking for skill folders on this machine…
+  Look for skill folders on this machine and add them to your library? [y/N] 
+
+> [1mEvals[0m
+  Evaluating 2 skills, 4 at a time: no earlier runs to estimate from; each eval runs the skill's cases against a baseline on this machine and bills your Claude account.
+  Evaluate the 2 shared skills that have no receipt yet? This runs Claude on each one and commits each receipt to the team repo. [Skip]
+  1. Now
+[2m     Runs all 2, 4 at a time, in this terminal.[0m
+  2. In batches
+[2m     Asks how many at a time and checks in between batches.[0m
+  3. Overnight
+[2m     Queues them; the app runs them between 01:00 and 05:00 while it is open and idle.[0m
+[36m› 4. Skip[0m
+[2m     Evaluate any skill later with \`npx -y terum-skills@latest eval <skill>\`.[0m
+[2m  Press enter to choose 4. Skip, or type a number.[0m
+> 
+  [32m✓ Queued 2 evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with \`npx -y terum-skills@latest eval --drain\`.[0m
+
+> [1mDone[0m
+╭────────────────────────────────────────────────────────────────╮
+│ >_ terum-skills (v9.9.9)                                       │
+│                                                                │
+│ team:        team · you and 1 teammate                         │
+│ members:     @seed — seed                                      │
+│ repository:  https://github.com/alice/team                     │
+│ readme:      https://github.com/alice/team/blob/main/README.md │
+│ next:        npx -y terum-skills@latest ls                     │
+╰────────────────────────────────────────────────────────────────╯
+"
+`;

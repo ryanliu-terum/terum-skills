@@ -27,11 +27,11 @@ it.each(['surface','feature'] as const)('never checks when the %s is off',async 
  const h=await setup();if(mode==='surface')vi.mocked(h.backend.surfaces).mockResolvedValue({...await h.backend.surfaces(),appUpdate:false});else vi.mocked(h.backend.features).mockResolvedValue({...await h.backend.features(),appUpdate:false});
  h.open();await act(async()=>{});expect(h.check).not.toHaveBeenCalled();expect(h.stage).not.toHaveBeenCalled();
 });
-it('auto-stages the advertised version when the preference is on',async()=>{
+it('auto-stages the advertised version under the default on-close policy',async()=>{
  const h=await setup();h.open();await waitFor(()=>expect(h.stage).toHaveBeenCalledExactlyOnceWith('0.1.12'));await waitFor(()=>expect(h.client.getQueryData(['app-update'])).toMatchObject({ok:true,value:{staged:'0.1.12'}}));
 });
-it.each(['preference','not-newer','already-staged'] as const)('does not stage for %s',async mode=>{
- const h=await setup(mode==='not-newer'?{newer:false}:mode==='already-staged'?{staged:'0.1.12'}:{});if(mode==='preference')h.backend.prefs.set('updates:app:auto',false);
+it.each(['ask-policy','not-newer','already-staged'] as const)('does not stage for %s',async mode=>{
+ const h=await setup(mode==='not-newer'?{newer:false}:mode==='already-staged'?{staged:'0.1.12'}:{});if(mode==='ask-policy')h.backend.prefs.set('updates:app:policy','ask');
  h.open();await waitFor(()=>expect(h.check).toHaveBeenCalledOnce());await act(async()=>{});expect(h.stage).not.toHaveBeenCalled();
 });
 it.each(['check','stage'] as const)('swallows a failing %s',async mode=>{
@@ -44,5 +44,5 @@ it('does nothing after unmount',async()=>{
 });
 it('keeps not-yet-published releases unstaged and never applies automatically',async()=>{
  const h=await setup(),apply=vi.spyOn(h.backend.appUpdate,'apply');h.stage.mockImplementation(version=>createRun(async()=>({ok:true,value:{version,staged:false,notPublished:true,alreadyStaged:false}})));
- h.open();await waitFor(()=>expect(h.stage).toHaveBeenCalledOnce());await act(async()=>{});expect(h.client.getQueryData(['app-update'])).toMatchObject({ok:true,value:{staged:null}});expect(apply).not.toHaveBeenCalled();
+ h.open();await waitFor(()=>expect(h.stage).toHaveBeenCalledOnce());await act(async()=>{});expect(h.client.getQueryData(['app-update'])).toMatchObject({ok:true,value:{staged:null}});expect(apply).not.toHaveBeenCalled();expect(h.client.getQueryData(['app-update-policy-outcome'])).toBeUndefined();fireEvent(window,new Event('focus'));await act(async()=>{});expect(h.stage).toHaveBeenCalledOnce();
 });
