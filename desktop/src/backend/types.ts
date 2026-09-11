@@ -108,7 +108,9 @@ export interface PublishArgs {team?:string;ref:string;message?:string;/** Endors
 export interface PublishResult {name:string;version:string|null;changed:boolean;prUrl:string|null}
 export interface SyncArgs {team?:string;prune?:boolean;hook?:boolean}
 export interface SyncResult {placed:number;deferred:string[];notices:string[];changed:boolean;teams:{team:string;state:string;message?:string}[]}
-export interface InviteArgs {team?:string;logins:string[];scope?:Scope;role?:string}
+// No `role`: GitHub's collaborator `permission` is "Only valid on organization-owned repositories" and
+// the CLI's invite verb takes only logins and --team, so an invitation cannot carry one (Ryan, 2026-09-10).
+export interface InviteArgs {team?:string;logins:string[];scope?:Scope}
 export interface InviteResult {invited:string[];already:string[];failed:{login:string;error:string}[]}
 export interface TeamArgs {kind:'create'|'join'|'remove'|'leave';name?:string;team?:string;remote?:string;handle?:string}
 export interface TeamResult {name:string;kind:TeamArgs['kind']}

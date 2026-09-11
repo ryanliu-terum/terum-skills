@@ -13,7 +13,21 @@ beforeEach(()=>{localStorage.clear();useUiStore.getState().setTheme('dark');});
 afterEach(()=>{cleanup();location.hash='';vi.restoreAllMocks();});
 it('renders Members in roster order with twelve members and one invited row',async()=>{open('#/share');const table=await screen.findByRole('table',{name:'Members'});await screen.findByTestId('member-row-5');expect(within(table).getAllByRole('row')).toHaveLength(14);for(const [i,member] of design.ROSTER.entries())expect(screen.getByTestId('member-row-'+i)).toHaveTextContent(member.name);expect(screen.getByTestId('invited-row')).toHaveTextContent('Sam Ortiz');expect(screen.getByText('12 members · 1 invitation')).toBeInTheDocument();});
 it('renders the full invite form and exact join command',async()=>{open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});const dialog=screen.getByRole('dialog');expect(dialog).toHaveTextContent('npx -y terum-skills@latest setup terum/team-skills');expect(within(dialog).getAllByRole('radio')).toHaveLength(2);expect(within(dialog).getByRole('textbox',{name:'GitHub logins'})).toHaveValue('sortiz');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));});
-it('invites with logins, scope, and role and closes only after success',async()=>{const invite=vi.spyOn(backend,'invite');open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(invite).toHaveBeenCalledWith({logins:['sortiz'],scope:'Terum',role:'member',team:'terum'});expect(location.hash).toBe('#/share');});
+it('invites with logins and scope and closes only after success',async()=>{const invite=vi.spyOn(backend,'invite');open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(invite).toHaveBeenCalledWith({logins:['sortiz'],scope:'Terum',team:'terum'});expect(location.hash).toBe('#/share');});
+it('offers no role control on an invitation and never sends one',async()=>{
+ // The picker used to draw Member/Admin and was dropped before reaching the CLI: `invite` takes only
+ // logins and --team, and GitHub's collaborator permission is org-repo-only. A control that cannot act
+ // is worse than none, so the dialog no longer offers one (Ryan, 2026-09-10).
+ const invite=vi.spyOn(backend,'invite');
+ open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});
+ const dialog=screen.getByRole('dialog');
+ expect(within(dialog).queryByText('Role')).toBeNull();
+ expect(within(dialog).queryByText('Admin')).toBeNull();
+ expect(within(dialog).queryByText('Admins invite and remove members.')).toBeNull();
+ fireEvent.click(within(dialog).getByRole('button',{name:'Invite'}));
+ await waitFor(()=>expect(invite).toHaveBeenCalled());
+ expect(invite.mock.calls[0]?.[0]).not.toHaveProperty('role');
+});
 it.each(['','bad/login','@someone','-invalid'])('rejects invalid invite logins %j without starting a run',async(value)=>{const invite=vi.spyOn(backend,'invite');open('#/share?dialog=invite');fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));expect(await screen.findByRole('alert')).toHaveTextContent('Enter valid GitHub logins');expect(invite).not.toHaveBeenCalled();});
 it('keeps the invite open and displays a failed result',async()=>{vi.spyOn(backend,'invite').mockImplementation(()=>createRun(async()=>({ok:false,error:'Invitation denied.'})));open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));expect(await screen.findByRole('alert')).toHaveTextContent('Invitation denied.');expect(screen.getByRole('dialog')).toBeInTheDocument();});
 it('opens a prompt dialog for an unexpected invite question',async()=>{vi.spyOn(backend,'invite').mockImplementation(()=>createRun(async ctx=>{const answer=await ctx.ask('confirm','Allow this invitation?');return answer?{ok:true,value:{invited:['sortiz'],already:[],failed:[]}}:{ok:false,error:'Declined.'};}));open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await screen.findByText('Allow this invitation?');fireEvent.click(screen.getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());});
@@ -46,6 +60,36 @@ it('renders thirteen skeletons with settled loading readiness and hidden counts'
 it('searches members without changing roster indices',async()=>{open('#/share');await screen.findByTestId('member-row-5');const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');fireEvent.change(screen.getByRole('textbox',{name:'Find members'}),{target:{value:member.handle}});expect(await screen.findByTestId('member-row-5')).toHaveTextContent(member.name);expect(screen.getAllByTestId(/^member-row-/)).toHaveLength(1);});
 it('renders read-only permission chips from roster status, never from prefs',async()=>{const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');backend.prefs.set('role:'+member.handle,design.MEMBER[member.handle]?.[0]==='admin'?'member':'admin');open('#/share');await screen.findByTestId('member-row-5');const row=screen.getByTestId('member-row-5');const chip=row.querySelector('.member-role');expect(chip).toHaveTextContent(design.MEMBER[member.handle]?.[0]==='admin'?'Admin':'Member');expect(chip).toHaveClass(design.MEMBER[member.handle]?.[0]==='admin'?'admin':'member');expect(chip?.tagName).toBe('SPAN');expect(screen.queryByRole('button',{name:'Role for '+member.handle})).toBeNull();expect(screen.queryByRole('menuitem')).toBeNull();});
 it('removes a team member through the backend and stays on Share',async()=>{const remove=vi.spyOn(backend,'team');open('#/share');await screen.findByTestId('member-row-5');const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');fireEvent.click(within(screen.getByTestId('member-row-5')).getByRole('button',{name:'Remove from team'}));await waitFor(()=>expect(remove).toHaveBeenCalledWith({kind:'remove',handle:member.handle}));expect(location.hash).toBe('#/share');});
+it('explains the read-only permission column from the header, and offers no way to change it',async()=>{
+ open('#/share');await screen.findByTestId('member-row-5');
+ const help=screen.getByRole('button',{name:'About member permissions'});
+ expect(within(screen.getByRole('row',{name:/Status/})).getByRole('button',{name:'About member permissions'})).toBe(help);
+ expect(screen.queryByRole('tooltip')).toBeNull();
+ fireEvent.mouseEnter(help.parentElement!);
+ const tip=await screen.findByRole('tooltip');
+ expect(tip).toHaveTextContent('Read-only, from GitHub.');
+ expect(tip).toHaveTextContent('terum-skills never writes it, so change it on GitHub.');
+ expect(tip).toHaveTextContent('A repository owned by a personal account has only owner and write, so everyone but the owner reads as Member.');
+ expect(tip).toHaveTextContent('A dash means the permission could not be read — not Member.');
+ // The tip explains the chip; it must never grow into a control for it.
+ expect(within(tip).queryByRole('button')).toBeNull();
+ expect(screen.queryByRole('combobox')).toBeNull();
+ expect(screen.queryByRole('menuitem')).toBeNull();
+ fireEvent.mouseLeave(help.parentElement!);
+ await waitFor(()=>expect(screen.queryByRole('tooltip')).toBeNull());
+});
+it('toggles the permission tip by click so it is reachable without a pointer',async()=>{
+ open('#/share');await screen.findByTestId('member-row-5');
+ const help=screen.getByRole('button',{name:'About member permissions'});
+ fireEvent.click(help);expect(await screen.findByRole('tooltip')).toBeVisible();
+ fireEvent.click(help);await waitFor(()=>expect(screen.queryByRole('tooltip')).toBeNull());
+});
+it('hides the permission tip wherever the chip itself is hidden',async()=>{
+ const features=await backend.features();vi.spyOn(backend,'features').mockResolvedValue({...features,roles:false});
+ open('#/share');await screen.findByTestId('member-row-5');
+ expect(screen.queryByRole('button',{name:'About member permissions'})).toBeNull();
+ expect(document.querySelector('.member-role')).toBeNull();
+});
 it("renders '—' for an unknown permission and never defaults to Member",async()=>{const roster=await backend.roster();if(!roster.ok)throw new Error(roster.error);const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');vi.spyOn(backend,'roster').mockResolvedValue({...roster,value:{...roster.value,members:roster.value.members.map(row=>row.handle===member.handle?{...row,status:'unknown'}:row)}});open('#/share');await screen.findByTestId('member-row-5');const row=screen.getByTestId('member-row-5');expect(row.querySelector('.member-role')).toBeNull();expect(row.querySelectorAll('[role="cell"]')[1]).toHaveTextContent('—');expect(within(screen.getByTestId('member-row-0')).getByText('Admin')).toBeVisible();});
 it('cancels an invitation dialog with Escape while preserving URL state',async()=>{open('#/share?dialog=invite&theme=light');await screen.findByRole('textbox',{name:'GitHub logins'});fireEvent.keyDown(screen.getByRole('dialog'),{key:'Escape'});await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(location.hash).toBe('#/share?theme=light');});
 it('reports invitation auxiliary data failures without claiming readiness early',async()=>{vi.spyOn(backend,'catalog').mockResolvedValue({ok:false,error:'Projects unavailable.'});open('#/share?dialog=invite');expect(await screen.findByRole('alert')).toHaveTextContent('Projects unavailable.');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));});
@@ -92,7 +136,7 @@ it('keeps job labels separate from the permission chip and preserves removal wit
 });
 
 it('invite from status rejects consecutive hyphens before starting a run',async()=>{const invite=vi.spyOn(backend,'invite');open('#/share?dialog=invite');fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value:'a--b'}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));expect(await screen.findByRole('alert')).toHaveTextContent('Enter valid GitHub logins');expect(invite).not.toHaveBeenCalled();});
-it('invite from status deduplicates case-insensitively preserving the first spelling',async()=>{const invite=vi.spyOn(backend,'invite');open('#/share?dialog=invite');fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value:'Sortiz, sortiz'}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(invite).toHaveBeenCalledWith({team:'terum',logins:['Sortiz'],scope:'Terum',role:'member'}));});
+it('invite from status deduplicates case-insensitively preserving the first spelling',async()=>{const invite=vi.spyOn(backend,'invite');open('#/share?dialog=invite');fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value:'Sortiz, sortiz'}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(invite).toHaveBeenCalledWith({team:'terum',logins:['Sortiz'],scope:'Terum'}));});
 it('invite from status refuses to select silently from two teams',async()=>{const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);const t=settings.value.TEAMS[0]!;vi.spyOn(backend,'settings').mockResolvedValue({...settings,value:{...settings.value,TEAMS:[t,{...t,name:'Acme',key:'acme'}]}});const invite=vi.spyOn(backend,'invite');open('#/share?dialog=invite');await waitFor(()=>expect(screen.getByRole('dialog')).toHaveTextContent('Choose a team first'));const dialog=screen.getByRole('dialog');expect(dialog).toHaveTextContent('Terum and Acme');expect(within(dialog).queryByRole('textbox',{name:'GitHub logins'})).toBeNull();fireEvent.click(within(dialog).getByRole('button',{name:'Invite'}));await waitFor(()=>expect(invite).not.toHaveBeenCalled());});
 it('invite from status reports null join commands in the form and copy action',async()=>{const settings=await backend.settings();if(!settings.ok)throw new Error(settings.error);const t=settings.value.TEAMS[0]!;vi.spyOn(backend,'settings').mockResolvedValue({...settings,value:{...settings.value,TEAMS:[{...t,joinCommand:null,joinBlock:null}]}});open('#/share?dialog=invite');await screen.findByRole('textbox',{name:'GitHub logins'});const dialog=screen.getByRole('dialog');expect(dialog.querySelector('.cli-box')).toBeNull();expect(dialog).toHaveTextContent('terum-skills reports no join command for github.com/terum/team-skills');cleanup();open('#/share?__mock=empty');fireEvent.click(await screen.findByRole('button',{name:'Copy join block'}));expect(await screen.findByRole('alert')).toHaveTextContent('no join command');});
 it('invite from status copies the supplied join command',async()=>{const copy=vi.spyOn(backend,'copyToClipboard');const settings=vi.spyOn(backend,'settings');open('#/share?__mock=empty');fireEvent.click(await screen.findByRole('button',{name:'Copy join block'}));await waitFor(()=>expect(copy).toHaveBeenCalledWith('npx -y terum-skills@latest setup terum/team-skills'));expect(settings).toHaveBeenCalled();});
