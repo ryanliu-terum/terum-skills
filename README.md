@@ -244,11 +244,11 @@ The selection catalog contains the team's endorsed skills plus the candidate ski
 #### 3. Execution arms
 Each case runs in three arms, with `k` repetitions per arm:
 
-\| Arm | What it contains |
-\| --- | --- |
-\| Baseline | No copy of the skill under test. |
-\| Candidate | The version currently being evaluated. |
-\| Incumbent | The latest version with a committed receipt. This shows whether a republish improves on what it would replace. |
+| Arm | What it contains |
+| --- | --- |
+| Baseline | No copy of the skill under test. |
+| Candidate | The version currently being evaluated. |
+| Incumbent | The latest version with a committed receipt. This shows whether a republish improves on what it would replace. |
 
 Every repetition runs `claude -p` in a fresh sandbox with `--setting-sources project`, preventing user-level skills from leaking into the run. The engine checks the resolved skill list and refuses to continue if the tested skill appears in baseline or is missing from candidate.
 
@@ -280,15 +280,11 @@ Candidate lift over baseline is:
 
 The result is grouped into three bands:
 
-\| Verdict | Net lift |
-
-\| --- | ---: |
-
-\| `PASS` | At least `+1/3` |
-
-\| `NEUTRAL` | Between `-1/3` and `+1/3` |
-
-\| `FAIL` | At most `-1/3` |
+| Verdict | Net lift |
+| --- | ---: |
+| `PASS` | At least `+1/3` |
+| `NEUTRAL` | Between `-1/3` and `+1/3` |
+| `FAIL` | At most `-1/3` |
 
 The report also includes:
 
