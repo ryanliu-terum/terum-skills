@@ -328,7 +328,8 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     const result = await backend.uninstallSkill({ ref: 'product', kind: 'project', project: 'product', team: 't' }).done;
     expect(f.spawns[0]?.args).toEqual(['uninstall-skill', '--team', 't', '--', 'project', 'product']);
     expect(result).toEqual(cancelled ? { ok: false, error: 'Remove was declined.', cancelled: true } : { ok: false, error: 'push refused', value: [{ id: 'a', name: 'a' }] });
-    expect(seen.mock.calls).toEqual(cancelled ? [] : [['config'], ['placed']]);
+    // uninstall-skill rewrites the person's entry in the team clone as well as the config and the folder.
+    expect(seen.mock.calls).toEqual(cancelled ? [] : [['config'], ['placed'], ['clone']]);
   });
   it('routes member removal through a single member command', async () => {
     const f = fakeBridge(ok('uninstall-skill', []));
@@ -341,10 +342,12 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     const seen: string[] = [];
     const off = backend.subscribe((source) => seen.push(source));
     await backend.sync({}).done;
-    expect(seen).toEqual(['clone', 'placed', 'stamp']);
+    // sync writes the config ledgers too, so 'config' joins the three it always broadcast.
+    expect(seen).toEqual(['config', 'clone', 'placed', 'stamp']);
     off();
     await backend.sync({}).done;
-    expect(seen).toHaveLength(3);
+    // Unsubscribed: the second run adds nothing, so the count is still the first run's four.
+    expect(seen).toHaveLength(4);
   });
 });
 

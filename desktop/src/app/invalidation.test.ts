@@ -41,12 +41,13 @@ it('uses the focus lifecycle policy and invalidates mapped queries after a settl
   expect(client.getDefaultOptions().queries).toEqual({ retry: false, staleTime: 30_000, refetchOnWindowFocus: true, refetchOnReconnect: false, refetchOnMount: 'always' });
   for (const key of keys) client.setQueryData([key, 'acme'], 'cached');
   await act(async () => { await backend.sync({}).done; });
-  expect(invalidate).toHaveBeenCalledTimes(3);
-  for (const key of keys) expect(client.getQueryState([key, 'acme'])?.isInvalidated).toBe(['clone', 'placed', 'stamp'].some(source => affects(source as ChangeSource, [key])));
+  expect(invalidate).toHaveBeenCalledTimes(4);
+  // sync writes the config ledgers too, so it broadcasts 'config' alongside the three it always did.
+  for (const key of keys) expect(client.getQueryState([key, 'acme'])?.isInvalidated).toBe(['config', 'clone', 'placed', 'stamp'].some(source => affects(source as ChangeSource, [key])));
   expect(client.getQueryData(['library', 'acme'])).toBe('cached');
   view.unmount();
   await backend.sync({}).done;
-  expect(invalidate).toHaveBeenCalledTimes(3);
+  expect(invalidate).toHaveBeenCalledTimes(4);
 });
 
 it('does not invalidate after a failed run', async () => {
