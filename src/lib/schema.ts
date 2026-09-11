@@ -73,6 +73,16 @@ export const personSchema = z.object({
   installed: z.array(installedSchema),
   declined: z.array(skillIdSchema),
   projects: z.array(z.string().min(1)).optional(),
+  /**
+   * How many skill folders this person's machine holds across the global root and its registered
+   * project checkouts, as the last `sync` from that machine counted them (`librarySize`). It is a
+   * self-report, not an audit: nothing in the repository can verify it, a person who has not synced
+   * since it shipped has no value at all (absent, never 0), and a person who syncs two machines
+   * against one team records whichever synced last. It carries no timestamp on purpose — the last
+   * commit to this file already dates it, and a stamp rewritten on every sync would commit for no
+   * reason. Optional forever: a reader must render "no answer", never a zero.
+   */
+  local_skills: z.number().int().nonnegative().optional(),
 }).passthrough();
 export type Person = z.infer<typeof personSchema>;
 

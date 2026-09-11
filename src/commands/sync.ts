@@ -10,6 +10,7 @@ import { acquireTeamLock, lockPath, stampIsFresh, stampPath, TeamLockOptions } f
 import { inspect, lockTarget, place, quarantineDrift, remove, snapshotIfPresent } from '../lib/placer.js';
 import { NonInteractivePrompter, Prompter, PromptClosedError } from '../lib/prompt.js';
 import { checkoutPath, writableCheckout } from '../lib/checkouts.js';
+import { librarySize } from '../lib/local-skills.js';
 import { AGENT_PATHS, checkoutRootOf } from '../lib/placer/agent-paths.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
@@ -235,6 +236,38 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
           if (error instanceof PromptClosedError) throw error; // the channel is gone, not this team
           notice(`Skipping auto-share for ${team}: ${error instanceof Error ? error.message : String(error)}`); defer(team);
         }
+      }
+    }
+    // Library-size pass (Ryan, 2026-09-10): the roster's per-member skill total. Nothing in a team
+    // repository can observe how many skills a teammate has, so each machine reports its own count
+    // into its own people file — the one place the guard already lets a person write about themselves
+    // (row b) — and the roster reads it back. It is counted once per run for the machine, not per
+    // team, and written only when it differs from what the file records, so an unchanged library
+    // costs no commit and a normal sync stays a no-op here. A write failure is one team's notice,
+    // never the sync: the count is the least important thing this command does. It deliberately does
+    // NOT set `changed`: that flag tells the user their skills moved, and bookkeeping about this
+    // machine is not a skill moving — a run whose only write was this one still reports nothing to do.
+    let counted: number | null | undefined;
+    for (const [team, binding] of Object.entries(config.teams)) {
+      if (!binding.handle || skipped.has(team)) continue;
+      const handle = binding.handle;
+      try {
+        counted ??= await librarySize(home, await store.read(), store.root);
+        const total = counted;
+        if (total === null) break; // a root this machine cannot read: keep the last known total everywhere
+        if ((await actorPerson(store, team, handle))?.local_skills === total) continue;
+        await openTeamRepo(store.teamClone(team), binding.remote, runner).safeWrite((tree) => {
+          const personPath = `people/${handle}.json`;
+          const raw = tree.before(personPath);
+          if (!raw) throw new Error(`Missing ${personPath}.`);
+          const fresh = parseJson(personSchema, treeText(raw), personPath);
+          if (fresh.local_skills === total) return; // another machine got there between the read and the lock
+          fresh.local_skills = total;
+          tree.set(personPath, `${JSON.stringify(fresh, null, 2)}\n`);
+        }, { action: 'sync', handle, message: `${handle}: library holds ${total} skill(s)`, ...lockWaiting });
+      } catch (error) {
+        if (error instanceof PromptClosedError) throw error; // the channel is gone, not this team
+        notice(`Could not record this machine's skill count for ${team}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     // Reconciliation never prompts, but it reports — through the same notice channel.

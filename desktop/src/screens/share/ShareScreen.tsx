@@ -11,7 +11,6 @@ import { WorkflowHeader } from '../../components/domain/WorkflowControls';
 import { useSyncAction } from '../../components/domain/useSyncAction';
 import { useWorkflow } from '../../components/domain/useWorkflow';
 import { Button } from '../../components/ui/Button';
-import { Chip } from '../../components/ui/Chip';
 import { Icon } from '../../components/ui/Icon';
 import { ShareInvite } from './ShareInvite';
 import { plural } from '../marketplace/market-data';
@@ -44,7 +43,7 @@ export function ShareScreen() {
   function close(){setSearch(p=>{p.delete('dialog');return p;});}
   const q=(search.get('q')??'').toLowerCase();
   const matches=(row:{name:string;handle:string})=>`${row.name} ${row.handle}`.toLowerCase().includes(q);
-  return <Shell selected="Share" counts={loading||error?null:undefined}><ScreenFrame ready={(!query.isPending||state.mock==='loading')&&(state.dialog!=='invite'||(!settings.isPending&&(!catalogNeeded||!catalog.isPending))||state.mock==='loading')}>
+  return <Shell selected="Members" counts={loading||error?null:undefined}><ScreenFrame ready={(!query.isPending||state.mock==='loading')&&(state.dialog!=='invite'||(!settings.isPending&&(!catalogNeeded||!catalog.isPending))||state.mock==='loading')}>
     <WorkflowHeader title="Members" icon="users" subtitle={data?empty?'1 member':plural(data.members.length,'member')+(data.invited===null?'':` · ${plural(data.invited.length,'invitation')}`):undefined}>{<Button icon="user-plus" state={state.dialog==='invite'?'pressed':'default'} onClick={invite}>Invite</Button>}</WorkflowHeader>
     {error?reason==='no-team'?<CenteredState icon="users" title="No team on this machine" body="Create a team or join the one you were invited to. Setup runs here in the app." primary="Start setup" secondary="Copy terminal command" onPrimary={()=>navigate('/onboarding/boot?start=1')} onSecondary={()=>{setErrorAt(null);void action.perform(()=>backend.copyToClipboard('npx -y terum-skills@latest setup'));}}><TerminalHint command="npx -y terum-skills@latest setup" prefix="From the terminal"/></CenteredState>
     :reason==='ambiguous-team'?<CenteredState alert icon="users" title="Choose a team" body="This machine is configured for more than one team; the roster shows one team at a time. Keep the team you want in Settings ▸ Team." primary="Open settings" onPrimary={()=>navigate('/settings/teams')}><ErrorLine>{error}</ErrorLine></CenteredState>
@@ -63,7 +62,7 @@ export function ShareScreen() {
   {syncAction.popup}</ScreenFrame></Shell>;
 }
 function teamSelectionMessage(teams:TeamStatus[]){return teams.length===0?'No team is configured on this machine.':`Choose a team first: this machine has ${teams.map(team=>team.name).join(' and ')}. terum-skills invites one team at a time.`;}
-function MembersHead(){const features=useFeatures();return <div role="row" className="members-head"><div role="columnheader" className="member-name">Name<Icon name="chevron-down" size={12} stroke="2"/></div>{['Status','Joined','Teams','Last seen'].map(label=><div role="columnheader" key={label} style={(label==='Teams'&&!features?.memberRole)||(label==='Last seen'&&!features?.lastSeen)?{visibility:'hidden'}:undefined}>{label}</div>)}</div>;}
+function MembersHead(){const features=useFeatures();return <div role="row" className="members-head"><div role="columnheader" className="member-name">Name<Icon name="chevron-down" size={12} stroke="2"/></div>{['Status','Joined','Skills','Last seen'].map(label=><div role="columnheader" key={label} style={label==='Last seen'&&!features?.lastSeen?{visibility:'hidden'}:undefined}>{label}</div>)}</div>;}
 // The identity sub-line: the handle (dropped when it just repeats the display name) and the role, without dangling separators around missing data.
 function sub(m:{name:string;handle:string;role:string|null},memberRole:boolean|undefined){return [m.handle===m.name?'':m.handle,memberRole?m.role:''].filter(Boolean).join(' · ');}
 function MemberRow({member:m,index,error,onRemove}:{member:Member;index:number;error:string|null;onRemove:()=>void}){
@@ -75,8 +74,9 @@ function MemberRow({member:m,index,error,onRemove}:{member:Member;index:number;e
   return <div role="row" className="member-row" data-testid={'member-row-'+index}>
     <div role="cell" className="member-name"><Avatar initials={m.initials} size={28}/><div className="member-identity"><span>{m.name}</span><span>{sub(m,features?.memberRole)}</span></div></div>
     <div role="cell">{features?.roles?status?<span className={'member-role '+status}>{status==='admin'?'Admin':'Member'}</span>:'—':null}<IconButton label="Remove from team" icon="x" size={20} iconSize={14} onClick={onRemove}/>{error&&<span role="alert" className="member-error">{error}</span>}</div>
-    <div role="cell">{m.joined??'—'}</div><div role="cell" style={{visibility:features?.memberRole?'visible':'hidden'}}>{features?.memberRole?m.projects.map(project=><Chip key={project}>{project}</Chip>):'—'}</div><div key={features?.lastSeen?'seen':'hidden'} role="cell" style={features?.lastSeen?undefined:{visibility:'hidden'}}>{features?.lastSeen?m.lastSeen:'—'}</div>
+    {/* Skills is what that member's machine last reported having, so '—' means nobody has reported one — never 0. */}
+    <div role="cell">{m.joined??'—'}</div><div role="cell">{m.skillsTotal===null?'—':m.skillsTotal}</div><div key={features?.lastSeen?'seen':'hidden'} role="cell" style={features?.lastSeen?undefined:{visibility:'hidden'}}>{features?.lastSeen?m.lastSeen:'—'}</div>
   </div>;
 }
 function InvitedRow({member:m}:{member:NonNullable<Roster['invited']>[number]}){const features=useFeatures();return <div role="row" className="member-row" data-testid="invited-row"><div role="cell" className="member-name"><Avatar initials={m.initials} size={28}/><div className="member-identity"><span>{m.name}</span><span>{[sub(m,features?.memberRole),`invited ${m.invited} by ${m.by}`].filter(Boolean).join(' · ')}</span></div></div><div role="cell">Invited</div><div role="cell">—</div><div role="cell">—</div><div key={features?.lastSeen?'seen':'hidden'} role="cell" style={features?.lastSeen?undefined:{visibility:'hidden'}}>—</div></div>;}
-function MemberSkeleton(){return <div className="member-row" data-testid="member-skeleton"><div className="member-name"><BoardSkeleton width={28} height={28} radius={14}/><div style={{flexGrow:1}}><div style={{height:18,display:'flex',alignItems:'center'}}><BoardSkeleton width="40%" height={12}/></div><div style={{height:16,marginTop:1,display:'flex',alignItems:'center'}}><BoardSkeleton width="28%" height={10}/></div></div></div><div><BoardSkeleton width={68} height={20}/></div><div><BoardSkeleton width={76} height={10}/></div><div><BoardSkeleton width={52} height={20}/><BoardSkeleton width={40} height={20}/></div><div><BoardSkeleton width={60} height={10}/></div></div>;}
+function MemberSkeleton(){return <div className="member-row" data-testid="member-skeleton"><div className="member-name"><BoardSkeleton width={28} height={28} radius={14}/><div style={{flexGrow:1}}><div style={{height:18,display:'flex',alignItems:'center'}}><BoardSkeleton width="40%" height={12}/></div><div style={{height:16,marginTop:1,display:'flex',alignItems:'center'}}><BoardSkeleton width="28%" height={10}/></div></div></div><div><BoardSkeleton width={68} height={20}/></div><div><BoardSkeleton width={76} height={10}/></div><div><BoardSkeleton width={24} height={10}/></div><div><BoardSkeleton width={60} height={10}/></div></div>;}

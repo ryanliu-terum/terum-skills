@@ -13,7 +13,7 @@ import { githubOwnerRepo, normalizeRemote, repositoryUrl } from '../lib/remote.j
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { adminLogins } from '../lib/collaborators.js';
-import { readRoster, readTeam, RosterEntry, SkillProblem, skillRecords } from '../lib/skills.js';
+import { joinDates, readRoster, readTeam, RosterEntry, SkillProblem, skillRecords } from '../lib/skills.js';
 import { packageVersion } from '../lib/package.js';
 import { CloneState, describeClone } from '../lib/teamRepo.js';
 
@@ -99,7 +99,9 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
           // the lookup fails, or when --permissions was not passed — status stays an offline-tolerant read
           // and never throws for it.
           const admins = args.permissions && tools.gh && ownerRepo !== null ? await adminLogins(runner, ownerRepo) : null;
-          const { roster, problems } = await readRoster(clone, { adminLogins: admins });
+          // Join dates come from the clone's own history (one git pass for the whole roster); an
+          // unreadable history leaves every `joined` null, exactly as an absent gh leaves `admin` null.
+          const { roster, problems } = await readRoster(clone, { adminLogins: admins, joined: tools.git ? await joinDates(clone, runner) : undefined });
           detail.members = roster;
           detail.memberCount = roster.length;
           detail.unreadableMembers = problems.length;

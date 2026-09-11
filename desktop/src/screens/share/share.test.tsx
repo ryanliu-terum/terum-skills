@@ -88,7 +88,7 @@ it('keeps job labels separate from the permission chip and preserves removal wit
  backend.prefs.set('role:ryan','admin');open('#/share');const row=await screen.findByTestId('member-row-0');
  expect(row).toHaveTextContent(design.ROSTER[0]!.role);expect(row.querySelector('.member-role')).toBeNull();
  expect(within(row).getByRole('button',{name:'Remove from team'})).toBeVisible();expect(backend.prefs.get('role:ryan','')).toBe('admin');
- for(const project of design.MEMBER.ryan?.[1]??[])expect(within(row).getByText(project)).toBeVisible();
+ for(const project of design.MEMBER.ryan?.[1]??[])expect(within(row).queryByText(project)).toBeNull();
 });
 
 it('invite from status rejects consecutive hyphens before starting a run',async()=>{const invite=vi.spyOn(backend,'invite');open('#/share?dialog=invite');fireEvent.change(await screen.findByRole('textbox',{name:'GitHub logins'}),{target:{value:'a--b'}});fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Invite'}));expect(await screen.findByRole('alert')).toHaveTextContent('Enter valid GitHub logins');expect(invite).not.toHaveBeenCalled();});
@@ -145,7 +145,7 @@ it('dismisses a removal error when the invite dialog opens',async()=>{
  await screen.findByRole('dialog');
  expect(screen.queryByRole('alert')).toBeNull();
 });
-it('drops a removal error on navigating away from Share',async()=>{
+it('drops a removal error on navigating away from Members',async()=>{
  vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
  open('#/share');await screen.findByTestId('member-row-1');
  fireEvent.click(within(screen.getByTestId('member-row-1')).getByRole('button',{name:'Remove from team'}));
@@ -155,7 +155,7 @@ it('drops a removal error on navigating away from Share',async()=>{
  // HashRouter processes the hashchange task later, so a hash wait can pass before ShareScreen
  // unmounts — and clicking Share again then coalesces both navigations into staying on Share.
  await screen.findByRole('heading',{name:'Browse by category'});
- fireEvent.click(screen.getByRole('link',{name:'Share'}));
+ fireEvent.click(screen.getByRole('link',{name:'Members'}));
  await screen.findByTestId('member-row-1');
  expect(screen.queryByRole('alert')).toBeNull();
 });
