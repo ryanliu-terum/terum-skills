@@ -59,7 +59,16 @@ it('tells the user to pick a team when the machine is configured for two',async(
 it('renders thirteen skeletons with settled loading readiness and hidden counts',async()=>{open('#/share?__mock=loading');expect(screen.getAllByTestId('member-skeleton')).toHaveLength(13);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
 it('searches members without changing roster indices',async()=>{open('#/share');await screen.findByTestId('member-row-5');const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');fireEvent.change(screen.getByRole('textbox',{name:'Find members'}),{target:{value:member.handle}});expect(await screen.findByTestId('member-row-5')).toHaveTextContent(member.name);expect(screen.getAllByTestId(/^member-row-/)).toHaveLength(1);});
 it('renders read-only permission chips from roster status, never from prefs',async()=>{const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');backend.prefs.set('role:'+member.handle,design.MEMBER[member.handle]?.[0]==='admin'?'member':'admin');open('#/share');await screen.findByTestId('member-row-5');const row=screen.getByTestId('member-row-5');const chip=row.querySelector('.member-role');expect(chip).toHaveTextContent(design.MEMBER[member.handle]?.[0]==='admin'?'Admin':'Member');expect(chip).toHaveClass(design.MEMBER[member.handle]?.[0]==='admin'?'admin':'member');expect(chip?.tagName).toBe('SPAN');expect(screen.queryByRole('button',{name:'Role for '+member.handle})).toBeNull();expect(screen.queryByRole('menuitem')).toBeNull();});
-it('removes a team member through the backend and stays on Share',async()=>{const remove=vi.spyOn(backend,'team');open('#/share');await screen.findByTestId('member-row-5');const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');fireEvent.click(within(screen.getByTestId('member-row-5')).getByRole('button',{name:'Remove from team'}));await waitFor(()=>expect(remove).toHaveBeenCalledWith({kind:'remove',handle:member.handle}));expect(location.hash).toBe('#/share');});
+// The removal control was drawn but inert: `team remove` asks for confirmation, and the mock backend
+// neither asks nor mutates the roster, so the X did nothing a user could see. It stays out until the
+// confirmation is driven end to end. This guards against it coming back unnoticed.
+it('offers no per-row removal control and never asks the backend to remove',async()=>{
+ const team=vi.spyOn(backend,'team');
+ open('#/share');await screen.findByTestId('member-row-5');
+ for(const row of screen.getAllByTestId(/^member-row-/))expect(within(row).queryByRole('button',{name:'Remove from team'})).toBeNull();
+ expect(screen.queryByRole('button',{name:'Remove from team'})).toBeNull();
+ expect(team).not.toHaveBeenCalled();
+});
 it('explains the read-only permission column from the header, and offers no way to change it',async()=>{
  open('#/share');await screen.findByTestId('member-row-5');
  const help=screen.getByRole('button',{name:'About member permissions'});
@@ -127,11 +136,11 @@ it('uses status Global and checkout root counts on the empty scenario', async ()
   expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(['71','8','3','2']);
 });
 
-it('keeps job labels separate from the permission chip and preserves removal without roles',async()=>{
+it('keeps job labels separate from the permission chip and draws no removal control without roles',async()=>{
  const features=await backend.features();vi.spyOn(backend,'features').mockResolvedValue({...features,roles:false,memberRole:true});
  backend.prefs.set('role:ryan','admin');open('#/share');const row=await screen.findByTestId('member-row-0');
  expect(row).toHaveTextContent(design.ROSTER[0]!.role);expect(row.querySelector('.member-role')).toBeNull();
- expect(within(row).getByRole('button',{name:'Remove from team'})).toBeVisible();expect(backend.prefs.get('role:ryan','')).toBe('admin');
+ expect(within(row).queryByRole('button',{name:'Remove from team'})).toBeNull();expect(backend.prefs.get('role:ryan','')).toBe('admin');
  for(const project of design.MEMBER.ryan?.[1]??[])expect(within(row).queryByText(project)).toBeNull();
 });
 
@@ -156,52 +165,6 @@ it('keeps the mock invitation clause and joined dates when they are served',asyn
  open('#/share');await screen.findByTestId('member-row-0');
  expect(screen.getByText('12 members · 1 invitation')).toBeInTheDocument();
  expect(within(screen.getByTestId('member-row-0')).getAllByRole('cell')[2]).toHaveTextContent(design.ROSTER[0]!.joined);
-});
-it('shows a failed removal on its row and clears it when the next removal succeeds',async()=>{
- const team=vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
- open('#/share');await screen.findByTestId('member-row-1');
- fireEvent.click(within(screen.getByTestId('member-row-1')).getByRole('button',{name:'Remove from team'}));
- const alert=await screen.findByRole('alert');
- expect(alert).toHaveTextContent('Team removal requires GitHub repository admin permission.');
- expect(screen.getByTestId('member-row-1')).toContainElement(alert);
- team.mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'Terum',kind:'remove'}})));
- fireEvent.click(within(screen.getByTestId('member-row-2')).getByRole('button',{name:'Remove from team'}));
- await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
- expect(team).toHaveBeenCalledTimes(2);
- expect(team).toHaveBeenLastCalledWith({kind:'remove',handle:design.ROSTER[2]!.handle});
-});
-it('moves the removal error to the row that failed last, never stacking two',async()=>{
- vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
- open('#/share');await screen.findByTestId('member-row-1');
- fireEvent.click(within(screen.getByTestId('member-row-1')).getByRole('button',{name:'Remove from team'}));
- await screen.findByRole('alert');
- fireEvent.click(within(screen.getByTestId('member-row-3')).getByRole('button',{name:'Remove from team'}));
- await waitFor(()=>expect(within(screen.getByTestId('member-row-3')).getByRole('alert')).toBeVisible());
- expect(screen.getAllByRole('alert')).toHaveLength(1);
- expect(within(screen.getByTestId('member-row-1')).queryByRole('alert')).toBeNull();
-});
-it('dismisses a removal error when the invite dialog opens',async()=>{
- vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
- open('#/share');await screen.findByTestId('member-row-1');
- fireEvent.click(within(screen.getByTestId('member-row-1')).getByRole('button',{name:'Remove from team'}));
- await screen.findByRole('alert');
- fireEvent.click(screen.getByRole('button',{name:'Invite'}));
- await screen.findByRole('dialog');
- expect(screen.queryByRole('alert')).toBeNull();
-});
-it('drops a removal error on navigating away from Members',async()=>{
- vi.spyOn(backend,'team').mockImplementation(()=>createRun(async()=>({ok:false,error:'Team removal requires GitHub repository admin permission.'})));
- open('#/share');await screen.findByTestId('member-row-1');
- fireEvent.click(within(screen.getByTestId('member-row-1')).getByRole('button',{name:'Remove from team'}));
- await screen.findByRole('alert');
- fireEvent.click(screen.getByRole('link',{name:'Marketplace'}));
- // Wait for Marketplace content, not the hash: the click sets location.hash synchronously while
- // HashRouter processes the hashchange task later, so a hash wait can pass before ShareScreen
- // unmounts — and clicking Share again then coalesces both navigations into staying on Share.
- await screen.findByRole('heading',{name:'Browse by category'});
- fireEvent.click(screen.getByRole('link',{name:'Members'}));
- await screen.findByTestId('member-row-1');
- expect(screen.queryByRole('alert')).toBeNull();
 });
 it('keeps mock founder role suffixes',async()=>{
  open('#/share');const row=await screen.findByTestId('member-row-0');
