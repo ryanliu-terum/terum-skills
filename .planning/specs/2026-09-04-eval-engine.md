@@ -497,9 +497,35 @@ Card (per the D29 resolution, commit `25ff226`):
 | One click deeper | `attribution` (one-line why), `comparisons` (W/L/T, net lift, sign p), full `efficiency` breakdown, full provenance |
 
 Hard rules: no skill list is ever sorted or ranked by any receipt number; no lift-style
-decimal appears at card level; a skill without a receipt shows "—" (phase-1 D22
-behavior); numbers from different `model`/`cc_version` never appear in one comparison
+decimal appears at card level (**overridden for the desktop app's own cards — see below**); a
+skill without a receipt shows "—" (phase-1 D22 behavior); numbers from different
+`model`/`cc_version` never appear in one comparison surface.
+
+**Card-lift override** (rev 18, Ryan 2026-09-10). The "no lift-style decimal appears at card
+level" clause is overridden **for the desktop app's Library and Marketplace cards only**. Those
+cards show the skill's net lift as the headline figure, under its verdict chip. Everything else
+in the D29 resolution stands and is unchanged by this: the share card keeps the table above; no
+skill list is sorted or ranked by any receipt number; a skill without a receipt at its current
+version still shows "—"; and numbers from different `model`/`cc_version` still never share a
 surface.
+
+*What is being overridden, and why it was there.* The D29 resolution (Ajay, 2026-09-04) put lift
+one click deeper because the 14-skill test–retest found per-skill lift moving inside a ±0.1 noise
+band across two identical runs (mean |Δ| 0.083, max 0.222) while the PASS/NEUTRAL/FAIL verdict
+reproduced 13/14 — see `.planning/decisions/2026-09-01-team-skill-sharing-decision-walk.md:153`
+and the ρ figures in `.planning/research/2026-09-04-eval-determinism-probe.md:191`. That finding
+is not retracted: the verdict is still the more reproducible of the two numbers. The override is a
+product call that a card carrying only a dash is worse for the reader than a card carrying a noisy
+number under a reproducible band.
+
+*Conditions the override carries.* (1) The number is one receipt's own `candidate-vs-baseline`
+net lift, never derived across receipts — it reaches the card through `ls`'s `receipt` limb and
+the same mapper the detail page uses. (2) The card must keep that receipt's provenance
+(`model`, `k`, `cc_version`, `runner_handle`, `timestamp`) reachable from the figure itself, so
+the lift is never read naked; the desktop renders it on hover and on focus. (3) A partial run
+carries its scored/expected rows and is greyed rather than presented as complete. (4) The
+"never sorted or ranked" rule is untouched, so no sort-by-lift control may be added on the back
+of this.
 
 **Permitted display derivations** (rev 17, Ajay 2026-09-08 — an enumeration, not a
 relaxation: "the UI never runs evals and never derives new statistics" stands, and
