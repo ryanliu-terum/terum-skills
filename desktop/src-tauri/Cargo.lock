@@ -4031,6 +4031,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-store",
  "tauri-plugin-window-state",
+ "tokio",
 ]
 
 [[package]]
