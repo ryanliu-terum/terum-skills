@@ -14,15 +14,16 @@ it('has no interval or timer-driven query refetch in production source',()=>{
   expect(code,path).not.toMatch(/setTimeout[\s\S]{0,200}(?:refetch|invalidateQueries)/);
  }
 });
-it.each(['#/marketplace?__mock=error','#/share?__mock=error','#/settings/sync'])('sync on %s starts only from an explicit action and renders the workflow popup',async route=>{
+it.each(['#/marketplace?__mock=error','#/share?__mock=error','#/settings/sync'])('manual sync on %s retains its interactive workflow popup',async route=>{
  const backend=createMockBackend(),sync=vi.spyOn(backend,'sync');location.hash=route;render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
  const button=await screen.findByRole('button',{name:'Sync now'});fireEvent(window,new Event('focus'));expect(sync).not.toHaveBeenCalled();
- fireEvent.click(button);expect(await screen.findByRole('dialog')).toHaveTextContent('Sync now');
+ fireEvent.click(button);expect(await screen.findByRole('dialog')).toHaveTextContent('Sync also runs by itself at launch and when you come back to the app.');
  await waitFor(()=>expect(sync).toHaveBeenCalledTimes(1));expect(sync).toHaveBeenCalledWith({});
 });
-it('uses only the drawn shortcuts and never syncs from focus',async()=>{
+it('uses only the drawn shortcuts for manual sync',async()=>{
  const backend=createMockBackend(),sync=vi.spyOn(backend,'sync');location.hash='#/library/global';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
- await screen.findByRole('navigation');fireEvent.keyDown(document.body,{key:'k',metaKey:true});await waitFor(()=>expect(location.hash).toBe('#/search'));
+ await screen.findByRole('navigation');fireEvent(window,new Event('focus'));expect(sync).not.toHaveBeenCalled();fireEvent.keyDown(document.body,{key:'k',metaKey:true});await waitFor(()=>expect(location.hash).toBe('#/search'));
  fireEvent.keyDown(document.body,{key:',',metaKey:true});await waitFor(()=>expect(location.hash).toBe('#/settings/account'));
  fireEvent.keyDown(document.body,{key:'r',metaKey:true});expect(await screen.findByRole('dialog')).toHaveTextContent('Sync now');await waitFor(()=>expect(sync).toHaveBeenCalledTimes(1));
 });
+

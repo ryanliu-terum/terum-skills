@@ -433,3 +433,17 @@ it('reports discovery and registration failures without claiming a folder was ad
  fireEvent.click(within(row).getByRole('button',{name:'Add'}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Add failed.'));
  expect(within(row).getByRole('button',{name:'Add'})).toBeVisible();expect(row).not.toHaveTextContent('already registered');
 });
+
+it('explains launch/focus automatic sync in the existing Sync row', async()=>{
+ open('#/settings/sync');
+ expect(await screen.findByText(/Automatic: at launch and when you come back to the app, at most every 10 minutes; one sync covers every team, root and project/)).toBeVisible();
+ expect(screen.queryByText(/Last automatic sync failed/)).toBeNull();
+});
+it('shows only the first CLI error line for the last failed automatic sync', async()=>{
+ const settings=await backend.settings(); if(!settings.ok)throw new Error(settings.error);
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,lastAutomatic:{at:Date.now()-120_000,state:'failed',detail:'Could not fetch team\nLong diagnostics',notices:['Skipping acme: Permission denied (publickey).']}}});
+ open('#/settings/sync');
+ expect(await screen.findByText(/Last automatic sync failed 2 minutes ago: Could not fetch team\./)).toBeVisible();
+ expect(screen.getByText('Skipping acme: Permission denied (publickey).')).toBeVisible();
+ expect(screen.queryByText(/Long diagnostics/)).toBeNull();
+});

@@ -266,6 +266,8 @@ async function connectOne(source: string, ctx: ConnectContext): Promise<ConnectR
 export interface ReconcileSharedOptions {
   readonly ids?: ReadonlySet<string>;
   readonly failFast?: boolean;
+  /** Optional per-entry timing; called only for entries this pass reconciles. */
+  readonly onEntry?: (team: string) => () => void;
 }
 
 /**
@@ -283,6 +285,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
   for (const [id, tracked] of Object.entries(config.shared)) {
     if (options.ids !== undefined && !options.ids.has(id)) continue;
     if (skipTeams.has(tracked.team)) continue;
+    const finish = options.onEntry?.(tracked.team);
     const outcome = (kind: ReconcileOutcome['kind'], name = id.slice(0, 8)) => outcomes.push({ id, team: tracked.team, name, kind });
     try {
       const clone = store.teamClone(tracked.team);
@@ -400,7 +403,7 @@ export async function reconcileShared(store: ConfigStore, runner: Runner, io: Pr
       io.print(`Could not reconcile connected ${id.slice(0, 8)}: ${error instanceof Error ? error.message : String(error)}`);
       defer(tracked.team, id.slice(0, 8));
       outcome('deferred');
-    }
+    } finally { finish?.(); }
   }
   return outcomes;
 }
