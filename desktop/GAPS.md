@@ -118,3 +118,13 @@ S7q (2026-09-08): the flags now have consumers. The adapter caches the CLI's `he
 - Two speed-ups inside `sync` itself: teams are fetched four at a time (the place phase stays sequential because placements share the config and the ledger, and team order in the result is unchanged), and a team whose fetched HEAD matches the stamped HEAD skips its place phase — but only when every registered placement, its SKILL.md and the upstream skill files are present and no intent is pending, so an unmoved HEAD can never hide a missing file or a deleted-skill diagnostic.
 - This overrides the on-demand-only rule recorded for the app (the app acted only when asked): authority is Teddy, 2026-09-10, "Sync should be automatic and much faster for the application (for all skills projects, etc)."
 - Still open: (a) no measured before/after numbers — `scripts/bench-sync.mjs` ships but the agent's sandbox forbids git, so the Windows figures in the reporter's falsifier are the real check; (b) automatic sync is skipped while an eval or another workflow holds the adapter's lock, and simply waits for the next focus; (c) the Settings ▸ Sync board is not redrawn for the new description lines.
+
+## Ratified 2026-09-11 — the new Settings and onboarding designs stand; the canvas follows them
+
+Teddy, 2026-09-11: "I support the designs for settings and others." This settles the three surfaces the
+2026-09-10 batches moved ahead of the locked canvas — Settings ▸ Updates (the three-way install policy and the
+Install now / Download actions), Settings ▸ Sync (the automatic-cadence description and the failure line), and
+Settings ▸ Evals with the onboarding prompt dialog (the overnight row, and selects drawn as a radio list with a
+description under each choice). The app is the reference for all three: the canvas is redrawn to match it, and
+none of them should be reverted to the drawn version. The affected boards stay `in-progress` only until that
+redraw lands; see the deliberate-deviation entries in FIDELITY.md for the per-board detail.
