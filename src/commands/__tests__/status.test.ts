@@ -65,10 +65,10 @@ describe('status (offline local team summary)', () => {
       ...(size > 5 ? ['    … and 1 more'] : []), ...(size === 0 ? ['  Your membership: no entry in the local roster.'] : []),
       '  Shared skills: 0', '  Evaluated skills: not yet available', stale,
     ]);
-    // Every member carries the day their people file landed (the fixture commits them together) and an
-    // install count read from that file, so the app never has to invent either.
+    // Every member carries the day their people file landed (the fixture commits them together); none of
+    // these fixture people has reported a skill total, so every `skillsTotal` is null and never 0.
     const members = result.ok ? result.value.teams[0]!.members : [];
-    expect(members.map((member) => member.installed)).toEqual(handles.map(() => 0));
+    expect(members.map((member) => member.skillsTotal)).toEqual(handles.map(() => null));
     for (const member of members) expect(member.joined).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 

@@ -93,7 +93,7 @@ it('readRoster checks filename identity before archives, reports bad files, and 
   await writeFile(join(seed, 'people', 'old.json'), JSON.stringify(person('new')));
   await writeFile(join(seed, 'people', 'broken.json'), '{');
   const result = await readRoster(seed);
-  expect(result.roster).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => ({ handle, displayName: handle, role: null, projects: [], admin: null, joined: null, installed: 0 })));
+  expect(result.roster).toEqual(['a', 'a-b', 'a0', 'b'].map((handle) => ({ handle, displayName: handle, role: null, projects: [], admin: null, joined: null, skillsTotal: null })));
   expect(result.problems.map((problem) => problem.file)).toEqual(['people/broken.json', 'people/old.json']);
   expect(result.problems.every((problem) => problem.message.length > 0)).toBe(true);
 });
@@ -123,14 +123,13 @@ it('joinDates reports no dates rather than wrong ones when the history cannot be
   expect([...(await joinDates(outside, throwing)).keys()]).toEqual([]);
 });
 
-it('readRoster counts the distinct skills a people file records as installed, not its entries', async () => {
+it('readRoster reports the skill total a people file records and null for a member who has never reported one', async () => {
   const { seed } = await bareTeam();
-  const [one, two] = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
-  const entry = (id: string, scope: Record<string, unknown>) => ({ id, version: null, scope, since: '2026-09-01' });
-  // The same skill placed globally and again in a project is one skill.
-  await writeFile(join(seed, 'people', 'a.json'), JSON.stringify(person('a', { installed: [entry(one, { kind: 'global' }), entry(one, { kind: 'project', project: 'app' }), entry(two, { kind: 'global' })] })));
+  await writeFile(join(seed, 'people', 'a.json'), JSON.stringify(person('a', { local_skills: 101 })));
+  await writeFile(join(seed, 'people', 'b.json'), JSON.stringify(person('b', { local_skills: 0 })));
   const { roster } = await readRoster(seed);
-  expect(roster.map((member) => [member.handle, member.installed])).toEqual([['a', 2], ['seed', 0]]);
+  // 0 is a member who reported an empty library; the seed file, which reports nothing, is null — never 0.
+  expect(roster.map((member) => [member.handle, member.skillsTotal])).toEqual([['a', 101], ['b', 0], ['seed', null]]);
 });
 
 it('readRoster joins admin logins case-insensitively and keeps admin null without a login or a lookup', async () => {

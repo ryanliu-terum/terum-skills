@@ -38,22 +38,22 @@ it('serves Members with committed labels, no project column, and the permission 
   expect(within(row).getByRole('button', { name: 'Remove from team' })).toBeVisible();
 });
 // These frames were recorded from a CLI that reported neither field: the row must say '—', never 0 or a date.
-it('shows no join date and no install count when the CLI reports neither', async () => {
+it('shows no join date and no skill total when the CLI reports neither', async () => {
   open('#/share');
   const cells = within(await screen.findByTestId('member-row-0')).getAllByRole('cell');
   expect(cells[2]).toHaveTextContent('—');
   expect(cells[3]).toHaveTextContent('—');
 });
-it('renders the join date and the install count the CLI reports', async () => {
+it('renders the join date and the skill total the CLI reports', async () => {
   open('#/share', (frame, name) => {
     if (name !== 'status' || frame.t !== 'result') return;
-    const value = frame.value as { teams: { members: { handle: string; joined?: string; installed?: number }[] }[] };
+    const value = frame.value as { teams: { members: { handle: string; joined?: string; skillsTotal?: number }[] }[] };
     const mira = value.teams[0]?.members.find(member => member.handle === 'mira');
-    if (mira) { mira.joined = '2026-06-12'; mira.installed = 7; }
+    if (mira) { mira.joined = '2026-06-12'; mira.skillsTotal = 96; }
   });
   const cells = within(await screen.findByTestId('member-row-0')).getAllByRole('cell');
   expect(cells[2]).toHaveTextContent('2026-06-12');
-  expect(cells[3]).toHaveTextContent('7');
+  expect(cells[3]).toHaveTextContent('96');
 });
 it('drops the dangling role separator for a member without a role', async () => {
   open('#/share');
