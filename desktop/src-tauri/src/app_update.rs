@@ -30,7 +30,7 @@ fn released(version: &str) -> bool {
   let parts: Vec<_> = version.split('.').collect();
   parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit()))
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn app_update_on_close(state: tauri::State<'_, CloseUpdate>, version: Option<String>) -> Result<(), String> {
   arm(&state, version, super::read_app_state)
 }
