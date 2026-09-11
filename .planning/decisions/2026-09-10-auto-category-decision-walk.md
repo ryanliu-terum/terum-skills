@@ -35,7 +35,7 @@ Carried in as context, not re-litigated. These are the build inputs the three de
 - **Approach A** — a constrained Haiku call through the existing `askJson` seam at `connect` time, validated against the team's list, silent fallback to `misc`. Graded on 15 real SKILL.md files: 11 clearly right, 4 contestable, 0 wrong, 0 invented categories.
 - **The 8-category taxonomy** — the shipping 7 plus `review`. Measured 15/15 stable across order reversal, largest bucket 33%, against 53% for the 7 and a 10/15 stability failure plus forced-fit errors for the desktop design's 10. Overrode teddyzheng's 28-category seed decision `d15d09a6`; recorded as `2e21eae8`. Shipped: `team.ts:42`, guard row h, and `terum-shared-skills` commit `15c57cb`.
 - **`misc` stays** — measured, not preferred: strip the escape hatch and the model forces confidently wrong answers rather than admitting no fit.
-- **Bulk connect batches** — one call for 15 skills gave identical answers at 26s / $0.028 against $0.137 and ~74s serial.
+- **Bulk connect batches** — ~~one call for 15 skills gave identical answers at 26s / $0.028 against $0.137 and ~74s serial~~. **Corrected 2026-09-10 while writing the build spec:** this rested on a misreading of `connect`. Its no-path mode is an interactive one-at-a-time menu (`connect.ts:117-127`), not a loop over every local skill, so there is no bulk path to batch — one call per deliberate connect, ~5s before the y/N. The measurement stands and belongs to D1's gated re-label verb, which does have a real batch to process.
 - **R1 preserved** — generated never prompted, shown in the existing y/N, a declared category always wins, plus a `--category <name>` override.
 
 ---
