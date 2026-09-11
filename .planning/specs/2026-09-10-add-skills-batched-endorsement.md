@@ -1,8 +1,14 @@
 # Adding skills to a team project — batched endorsement with auto-merge
 
-**Status:** DRAFT rev 1 (Ryan, 2026-09-10). The five product decisions are LOCKED
+**Status:** LOCKED rev 1 (Ryan, 2026-09-10 — "build symptom 3 with codex-implement").
+The five product decisions are LOCKED
 (`.planning/decisions/2026-09-10-add-skills-to-project-decision-walk.md`, commit
-`b7e6c9e`); the implementation detail below is derived from them and open to review.
+`b7e6c9e`); the implementation detail below is derived from them.
+
+**§9 open risk cleared 2026-09-11:** re-verified against `origin/main` after #156/#157
+merged. `team.ts:527` still defaults `policy: { publish: 'pr' }`, and the `publish/`
+prefix gates at `:583` and `:609` are unchanged. The concurrent edit was in the
+`feat/frame-mode` working tree and never reached main, so §3.1 stands as written.
 
 Fixes symptom 3 of the three Ryan reported against the shipped desktop app. His
 description, verbatim in intent: **"Adding skills to a team project takes forever"**,
