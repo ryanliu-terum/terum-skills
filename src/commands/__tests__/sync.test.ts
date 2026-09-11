@@ -1065,7 +1065,15 @@ describe('sync auto-share pass (ID check, spec 2026-09-10-library-mirror-id-sync
     const globalRoot = join(fixture.root, 'home', '.claude', 'skills');
     await mkdir(globalRoot, { recursive: true });
     const candidate = async (name: string, body: string, id?: string) => { await mkdir(join(globalRoot, name), { recursive: true }); await writeFile(join(globalRoot, name, 'SKILL.md'), candidateMd(name, body, id)); };
-    return { fixture, store, clone, globalRoot, candidate };
+    /** A repo with a skill in its `.claude/skills`; `register` decides whether the pass may see it. */
+    const checkout = async (repo: string, name: string, body: string, register: boolean) => {
+      const root = join(fixture.root, repo, '.claude', 'skills');
+      await mkdir(join(root, name), { recursive: true });
+      await writeFile(join(root, name, 'SKILL.md'), candidateMd(name, body));
+      if (register) await store.update((config) => { config.checkouts = [...(config.checkouts ?? []), join(fixture.root, repo)]; });
+      return join(root, name);
+    };
+    return { fixture, store, clone, globalRoot, candidate, checkout };
   }
 
   it('uploads an id-less global candidate with no per-folder ask, stamps the managed fields, and never re-offers it', async () => {
@@ -1130,6 +1138,26 @@ describe('sync auto-share pass (ID check, spec 2026-09-10-library-mirror-id-sync
     await expect(access(stampPath(f.store.root, 'team'))).resolves.toBeUndefined();
   });
 
+  // The spec's model: an added project's skills "then sync the same way" as global ones, so a
+  // REGISTERED checkout is in the pass and `checkout add` / Add project is that root's consent.
+  it('auto-shares a registered checkout the same way as global, and leaves an unregistered repo alone', async () => {
+    const f = await autoShareFixture();
+    await f.candidate('fromglobal', 'global body');
+    const registered = await f.checkout('mine', 'fromproject', 'project body', true);
+    await f.checkout('theirs', 'untouched', 'not ours', false);
+    const io = new ScriptedPrompter([], [], true); // still never asks: registering the checkout was the consent
+    expect(await run({ config: f.store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { changed: true, deferred: [], teams: [{ team: 'team', state: 'complete' }] } });
+    expect(io.asked).toEqual([]);
+    expect(await git(['show', 'main:skills/fromproject/SKILL.md'], f.fixture.bare)).toContain('description: project body');
+    expect(await git(['show', 'main:skills/fromglobal/SKILL.md'], f.fixture.bare)).toContain('description: global body');
+    // The project skill is stamped in place, so the app can join it to the repo row by id.
+    const stamped = await readFile(join(registered, 'SKILL.md'), 'utf8');
+    expect(/id: [0-9a-f-]{36}/.test(stamped)).toBe(true);
+    expect(stamped).toContain('author: Me <me@example.com>');
+    // An unregistered repo is never scanned, so nothing of its own reaches the team.
+    await expect(git(['show', 'main:skills/untouched/SKILL.md'], f.fixture.bare)).rejects.toThrow();
+  });
+
   it('reports a refused folder by name, still shares the rest, and withholds the stamp for review', async () => {
     const f = await autoShareFixture();
     await pushFromSeed(f.fixture.seed, 'skills/sample/SKILL.md', skill('old'));
@@ -1138,7 +1166,8 @@ describe('sync auto-share pass (ID check, spec 2026-09-10-library-mirror-id-sync
     const io = new ScriptedPrompter([], [], true);
     const result = await run({ config: f.store, noUpdateCheck: true }, io);
     expect(result).toMatchObject({ ok: true, value: { deferred: ['sample'], teams: [{ team: 'team', state: 'incomplete', review: ['sample'] }] } });
-    expect(io.lines).toContain('Skipped auto-share of sample: Skill name sample already exists in team team; choose a unique name.');
+    // The root is named beside the folder: with checkouts in the pass, "sample" alone is ambiguous.
+    expect(io.lines).toContain('Skipped auto-share of sample (Global): Skill name sample already exists in team team; choose a unique name.');
     expect(io.lines).toContain('Auto-shared 1 skill(s): fresh.');
     expect(Object.values((await f.store.read()).shared)).toMatchObject([{ team: 'team', source: join(f.globalRoot, 'fresh') }]);
     expect(await git(['show', 'main:skills/sample/SKILL.md'], f.fixture.bare)).toContain('description: old');
