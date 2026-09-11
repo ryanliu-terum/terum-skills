@@ -12,9 +12,3 @@ it('mock profile updates roster/catalog separately from the permission preferenc
  expect(await backend.profile(args).done).toEqual({ok:true,value:{handle:design.ME.handle,changed:[]}});
  expect(backend.prefs.get('role:'+design.ME.handle,'')).toBe('admin');
 });
-it('mock decline persists once and refuses an installed skill',async()=>{
- const backend=createMockBackend();
- for(let i=0;i<2;i++)expect(await backend.decline({ref:'secret-scan'}).done).toEqual({ok:true,value:{id:'secret-scan'}});
- expect((await backend.catalog()).value?.people.find(member=>member.handle===design.ME.handle)?.declined).toEqual(['secret-scan']);
- expect(await backend.decline({ref:'deploy-check'}).done).toMatchObject({ok:false,error:expect.stringContaining('uninstall-skill first')});
-});

@@ -39,7 +39,7 @@ export async function run(args: LoginArgs, io: Prompter): Promise<Result<LoginRe
       let notice: string | null = null;
       const config = await store.update((fresh) => {
         setIdentity(fresh, identity);
-        notice = `This changes the author line (${fresh.display_name ?? '<display_name>'} <${fresh.email ?? 'email'}>) that the next sync writes into the skills you have connected on this machine; skills you authored elsewhere keep their recorded author.`;
+        notice = `This changes the author line (${fresh.display_name ?? '<display_name>'} <${fresh.email ?? 'email'}>) that publish writes into the skills you publish from this machine; versions already published keep their recorded author.`;
         io.print(notice);
       }, { preserveUnchanged: true });
       return success({ gh: null, handle: config.default_handle ?? null, updated, notice });

@@ -7,7 +7,7 @@ import { OnboardingActions, OnboardingColumn, OnboardingFrame, OnboardingPara, O
 
 const rows: readonly [SetupStep, string][] = [
  ['github','Checking GitHub access'], ['team','Configuring the team'],
- ['actions','Offering local skills'], ['discover','Looking for skill folders on this machine'],
+ ['discover','Looking for skill folders on this machine'],
  ['evals','Evaluating shared skills'], ['hook','Offering the session hook and Claude Code skill'],
 ];
 export function SetupBoot({launch,restart=false}:{launch:LaunchContext;restart?:boolean}) {

@@ -5,7 +5,7 @@ import { Dialog, DialogTitle } from '../ui/Dialog';
 import { Button } from '../ui/Button';
 import { WorkflowPopup } from './WorkflowPopup';
 import { useWorkflow } from './useWorkflow';
-/** Manual sync keeps its interactive workflow. The adapter also syncs automatically on launch/focus (Teddy, 2026-09-10). */
+/** Manual sync fetches team clones; background refreshes use the same fetch-only path. */
 export function useSyncAction() {
  const backend=useBackend(),action=useWorkflow();
  const [open,setOpen]=useState(false),[finished,setFinished]=useState(false);
@@ -20,9 +20,9 @@ export function useSyncAction() {
   } finally {opening.current=false;}
  }
  const popup=open?<Dialog open onOpenChange={value=>{if(!action.busy)setOpen(value);}}><WorkflowPopup><DialogTitle>Sync now</DialogTitle>
-  <div>Sync also runs by itself at launch and when you come back to the app.</div>
+  <div>Sync fetches each team clone and leaves your local Library unchanged.</div>
   <div role="status">{action.busy?'Sync is running.':action.notice??(finished?'Sync finished.':'Ready to sync.')}</div>
-  {outcome&&<><div>{outcome.placed} placed</div>{outcome.deferred.length>0&&<div>Waiting for tool review: {outcome.deferred.join(', ')}</div>}{outcome.notices.map((notice,index)=><div key={index}>{notice}</div>)}{outcome.teams.filter(team=>team.state!=='synced').map((team,index)=><div key={index}>{team.team}: {team.state}{team.message?' · '+team.message:''}</div>)}</>}
+  {outcome&&<>{outcome.notices.map((notice,index)=><div key={index}>{notice}</div>)}{outcome.teams.filter(team=>team.state!=='refreshed').map((team,index)=><div key={index}>{team.team}: {team.state}{team.detail?' · '+team.detail:''}</div>)}</>}
   {action.lines.map((line,index)=><div key={index}>{line}</div>)}
   {action.error&&<div role="alert">{action.error}</div>}
   <Button disabled={action.busy} onClick={()=>setOpen(false)}>Close</Button>

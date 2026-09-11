@@ -5,11 +5,14 @@ it.each([
  ['/Users/you/code/mrf — 3 skill folders','Done'],['/Users/you/code/mrf — 1 skill folders · already registered','Done'],
  ['Could not look in /Users/you/Library: EACCES','Done'],['Evaluating 1 of 2 · deploy-check','Done'],['Evaluated 2 of 2; 0 failed.','Done'],
  ['Welcome to terum-skills.','Welcome'],['GitHub: gh is not installed.','Team'],['Identity: @seed','Team'],
- ['Team acme is already configured on this machine.','Team'],['Connected tdd.','Basics'],['Next, from any terminal:','Basics'],
+ ['Team acme is already configured on this machine.','Team'],
  ['Feedback and requests: https://example.com','Feedback'],['Skipped the session hook; re-run setup to install it later.','Done'],
  ['Installed the /terum-skills Claude Code skill at /fixture.','Done'],['Repository: /fixture/team.git','Done'],['Members:','Done'],['README: /fixture/team.git','Done'],
 ])('maps printed step %s to its drawn tour step',(line,board)=>{const step=printedSetupStep(line);expect(step&&SETUP_STEP_TO_BOARD[step]).toBe(board);});
 it('keeps unrecognized CLI output as copy without inventing a step outcome',()=>{expect(printedSetupStep('An unexpected diagnostic.')).toBeNull();});
+// B1 deletes the actions step, so the terminal-hint block setup still prints after invite belongs to no
+// step: it is copy in the output pane, and no tour row may claim it.
+it('claims no step for the terminal hint block setup still prints',()=>{expect(printedSetupStep('Next, from any terminal:')).toBeNull();expect(printedSetupStep('  npx -y terum-skills@latest publish <skill>          — publish a local skill explicitly')).toBeNull();});
 
 it('maps the identity ask to team without treating unrelated asks as setup steps',()=>{expect(askedSetupStep('Use this identity?')).toBe('team');expect(askedSetupStep('Join this team?')).toBeNull();});
 

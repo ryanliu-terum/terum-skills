@@ -13,7 +13,7 @@ import { fromError, CancelledError, failure, Result, success } from '../lib/resu
 import { parseJson, parseSkillFrontmatter, Team, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { findSkill, readTeam } from '../lib/skills.js';
-import { openTeamRepo, refreshClone, SafeWriteOptions, shellQuote, treeText, lockWait } from '../lib/teamRepo.js';
+import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
 import { sourceFiles } from '../lib/skill-source.js';
 import { assessHygiene, formatHygieneWarnings, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
@@ -231,10 +231,9 @@ async function notInTeam(args: PublishArgs, config: Config, team: string, name: 
   const inventories = await Promise.all(discovery.roots.map((root) => localSkills(root.root, config, { scope: root.scope, stateRoot, ledger })));
   const found = inventories.flatMap((inventory, index) => candidatesOf(inventory).filter((entry) => entry.name === name).map((entry) => ({ ...entry, scope: inventory.scope, label: localRootLabel(discovery.roots[index]!), repoRoot: discovery.roots[index]!.repoRoot })));
   const unreadable = discovery.problems.length + inventories.reduce((count, inventory) => count + inventory.problems.length + inventory.entries.filter((entry) => entry.inspection.kind === 'failed').length, 0);
-  const retry = invocation(args.form, 'publish', args.ref) + (args.project === undefined ? '' : ` --project ${shellQuote(args.project)}`);
   const note = unreadable ? ` (${unreadable} local folder(s) under ${discovery.roots.map((root) => root.root).join(' or ')} could not be read.)` : '';
   if (found.length) {
-    return found.map(({ path, scope }) => `No skill ${args.ref} in team ${team}. Found a local folder at ${path}${found.length > 1 ? ` (${scope})` : ''} that is not tracked as a connected source or placement on this machine. To connect it to ${team}, run \`${invocation(args.form, 'connect', path)}\`, then retry \`${retry}\`.`).join('\n') + note;
+    return found.map(({ path, scope }) => `No skill ${args.ref} in team ${team}. Found a local folder at ${path}${found.length > 1 ? ` (${scope})` : ''}. Inspect local skills with \`${invocation(args.form, 'ls --local')}\`; publish local skills explicitly from the Library.`).join('\n') + note;
   }
-  return `No skill ${args.ref} in team ${team}. Run \`${invocation(args.form, 'ls')}\` to check the team's skill names. To add a local skill, run \`${invocation(args.form, 'connect', { raw: '<path-to-skill>' })}\`, then publish its name.${note}`;
+  return `No skill ${args.ref} in team ${team}. Run \`${invocation(args.form, 'ls')}\` to check the team's skill names. Inspect local folders with \`${invocation(args.form, 'ls --local')}\`; publish local skills explicitly from the Library.${note}`;
 }

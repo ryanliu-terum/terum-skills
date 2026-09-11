@@ -9,7 +9,7 @@ import { failure, fromError, type Result, success } from '../lib/result.js';
 import { type Runner, systemRunner } from '../lib/runner.js';
 import { findSkill } from '../lib/skills.js';
 import { resolveVersion } from '../lib/version.js';
-import { newestReceiptAt, receiptFiles } from './receiptCheck.js';
+import { newestReceiptAt, receiptFiles } from '../lib/evals/receipt-store.js';
 
 export interface EvalReportArgs extends WithForm { ref: string; team?: string; config?: ConfigStore; runner?: Runner; }
 export interface ReceiptView extends Receipt { path: string; }

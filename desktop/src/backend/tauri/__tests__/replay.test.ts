@@ -93,7 +93,6 @@ it('replays S7g local frames through settings: the real placement path, name, tr
   const row=frame?.value?.local.flatMap(section=>section.rows).find(row=>row.name==='deploy-check');
   expect(row?.health).toBe('up-to-date');expect(row?.placement.team).toBe('acme');
   expect(result).toMatchObject({ok:true,value:{PLACEMENTS:[[row?.path,'deploy-check','Global',null,'2026-09-01T00:00:00Z','up to date']],PLACEMENTS_N:1,PINNED_N:0}});
-  expect(result.value?.SHARED).toEqual([['tdd',expect.stringContaining('/skills/tdd'),'acme','—']]);
 });
 it.each([
   ['usage-error', false, "error: unknown option '-x'"],

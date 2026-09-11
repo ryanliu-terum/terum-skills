@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Result } from '../../types';
 import { createRefreshPolicy, REFRESH_MIN_INTERVAL_MS, type CliRefresh } from '../refresh';
 
-const value = (changed = false): CliRefresh => ({ changed, teams: [{ team: 't', state: 'refreshed', changed, head: 'a'.repeat(40) }] });
+const value = (changed = false): CliRefresh => ({ changed, notices: [], teams: [{ team: 't', state: 'refreshed', changed, head: 'a'.repeat(40) }] });
 function setup(result: Result<CliRefresh> = { ok: true, value: value() }) {
   let now = 10_000_000;
   const run = vi.fn<() => Promise<Result<CliRefresh>>>().mockResolvedValue(result);
@@ -48,7 +48,7 @@ describe('background refresh policy', () => {
     const { policy, onChanged } = setup(); policy.trigger(); await policy.settled(); expect(onChanged).not.toHaveBeenCalled();
   });
   it('records a skipped outcome naming every team that did not refresh', async () => {
-    const { policy } = setup({ ok: true, value: { changed: false, teams: [
+    const { policy } = setup({ ok: true, value: { changed: false, notices: [], teams: [
       { team: 'a', state: 'busy', changed: false, head: null, detail: 'writer holds lock' },
       { team: 'b', state: 'unreachable', changed: false, head: null, detail: 'no access' },
     ] } }); policy.trigger(); await policy.settled();
@@ -77,7 +77,7 @@ describe('background refresh policy', () => {
     policy.trigger(); await policy.settled(); expect(run).toHaveBeenCalledTimes(2);
   });
   it('treats an empty teams array as a clean refresh with nothing to invalidate', async () => {
-    const { policy, onChanged } = setup({ ok: true, value: { changed: false, teams: [] } }); policy.trigger(); await policy.settled();
+    const { policy, onChanged } = setup({ ok: true, value: { changed: false, notices: [], teams: [] } }); policy.trigger(); await policy.settled();
     expect(policy.last()?.state).toBe('refreshed'); expect(onChanged).not.toHaveBeenCalled();
   });
 });

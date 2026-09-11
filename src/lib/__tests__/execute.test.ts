@@ -28,32 +28,17 @@ describe('execute — the bin contract (§3)', () => {
     expect(ok.codes).toEqual([]);
   });
 
-  it('a hook sync sends its notices and the review count to stderr on success and on failure, before any error line', async () => {
-    const ok = sink();
-    await ok.execute(async () => success({ placed: 0, deferred: ['a', 'b'], notices: ['Skipping team/x: bad'], changed: false, hook: true }));
-    expect(ok.lines).toEqual(['Skipping team/x: bad', '2 skills need review — run `npx -y terum-skills@latest sync`']);
-    expect(ok.codes).toEqual([]);
-    const failed = sink();
-    await failed.execute(async () => failure('Could not fast-forward team: offline', { placed: 0, deferred: [], notices: ['note'], changed: false, hook: true }));
-    expect(failed.lines).toEqual(['note', 'Could not fast-forward team: offline']);
-    expect(failed.codes).toEqual([1]);
-    const quiet = sink();
-    // A plain (non-hook) sync carries the same shape; its notices already went to stdout, so nothing is echoed here.
-    await quiet.execute(async () => success({ placed: 1, deferred: ['a'], notices: ['note'], changed: true, hook: false }));
-    expect(quiet.lines).toEqual([]);
-  });
 
-  it('counts a skill deferred twice in one run (pending replay, then the placement loop) once', async () => {
-    const dup = sink();
-    await dup.execute(async () => success({ placed: 0, deferred: ['sample', 'sample'], notices: [], changed: false, hook: true }));
-    expect(dup.lines).toEqual(['1 skills need review — run `npx -y terum-skills@latest sync`']);
-  });
 
-  it('keeps an unreachable sync failure after hook notices and before the release tail', async () => {
+
+  it('sends a hook manual-refresh notice to stderr before a failed result, leaving verb stdout alone', async () => {
     const lines: string[] = []; const codes: number[] = [];
-    const execute = createExecute({ io: new ScriptedPrompter(), stderr: (line) => lines.push(line), setExitCode: (code) => codes.push(code), afterVerb: async () => { lines.push('notice'); } });
-    await execute(async () => failure('Sync finished with 1 team(s) skipped: team. See the notices above.', { placed: 0, deferred: [], notices: ['Skipping team: could not fetch https://example.test/team.git'], changed: false, hook: true, teams: [{ team: 'team', state: 'skipped', reason: 'unreachable', detail: 'https://example.test/team.git' }] }), { verb: 'sync', notices: true });
-    expect(lines).toEqual(['Skipping team: could not fetch https://example.test/team.git', 'Sync finished with 1 team(s) skipped: team. See the notices above.', 'notice']);
+    const execute = createExecute({ io: new ScriptedPrompter(), stderr: line => { lines.push(line); }, setExitCode: code => { codes.push(code); } });
+    await execute(async () => success({ changed: false, teams: [], notices: ['Updated your /terum-skills manual for this CLI.'], hook: true }), { verb: 'sync', notices: false });
+    expect(lines).toEqual(['Updated your /terum-skills manual for this CLI.']);
+    expect(codes).toEqual([]);
+    await execute(async () => failure('fetch failed', { changed: false, teams: [], notices: ['Updated your /terum-skills manual for this CLI.'], hook: true }), { verb: 'sync', notices: false });
+    expect(lines).toEqual(['Updated your /terum-skills manual for this CLI.', 'Updated your /terum-skills manual for this CLI.', 'fetch failed']);
     expect(codes).toEqual([1]);
   });
 });

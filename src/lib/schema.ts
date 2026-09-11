@@ -121,22 +121,18 @@ export type Destination = z.infer<typeof destinationSchema>;
 export const configSchema = z.object({
   checkouts: z.array(z.string()).optional(),
   app: appChoiceSchema.optional(),
-  /** Sync's ID-check auto-share of the global root (`~/.claude/skills`). Absent = on (the ratified
-   * default, ajay 2026-09-10, spec 2026-09-10-library-mirror-id-sync.md); `false` disables the pass. */
-  auto_share: z.boolean().optional(),
   default_handle: handleSchema.optional(),
   email: emailSchema.optional(),
   display_name: z.string().min(1).optional(),
   github: z.string().optional(),
   teams: teamsSchema,
-  shared: z.record(z.string(), z.object({ source: z.string(), team: z.string(), baseline: z.string().optional() }).passthrough()),
   approvals: z.record(z.string(), z.object({ grants: z.string(), approved_at: z.string() }).passthrough()),
   pending: z.array(z.object({ op: z.enum(['install', 'uninstall']), id: skillIdSchema, team: z.string(), scope: scopeSchema, destination: destinationSchema.optional(), started: z.string() }).passthrough()),
   placements: z.record(z.string(), z.object({ id: skillIdSchema, team: z.string(), version: z.string().length(40).nullable(), scope: scopeSchema, placed_at: z.string(), fingerprint: z.string() }).passthrough()),
 }).passthrough();
 export type Config = z.infer<typeof configSchema>;
 
-export const emptyConfig = (): Config => ({ teams: {}, shared: {}, approvals: {}, pending: [], placements: {} });
+export const emptyConfig = (): Config => ({ teams: {}, approvals: {}, pending: [], placements: {} });
 
 /** §5.3: only Agent-Skills-legal top-level keys; everything custom nests under `metadata`. */
 export const skillFrontmatterSchema = z.object({

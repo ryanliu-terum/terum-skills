@@ -1,4 +1,4 @@
-import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, DiscoverArgs, DiscoverResult, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, CheckoutAdded, CheckoutRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, DiscoverArgs, DiscoverResult, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, CheckoutAdded, CheckoutRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   quit(): Promise<void>;
@@ -33,14 +33,13 @@ export interface Backend {
   roster(q?: undefined, options?: ReadOptions): Promise<Result<Roster>>;
   search(args: SearchArgs, options?: ReadOptions): Promise<Result<SearchHit[]>>;
   profile(args: { name?: string; bio?: string; role?: string; projects?: string[] }): Run<{ handle: string; changed: string[] }>;
-  decline(args: { ref: string }): Run<{ id: string }>;
   setIdentity(args: IdentityArgs): Run<IdentityWrite>;
   install(args: InstallArgs): Run<InstalledResult[]>;
   uninstallSkill(args: UninstallArgs): Run<UninstalledResult[]>;
   uninstallMachine(args: Record<string, never>): Run<MachineUninstallResult>;
-  connect(args: ConnectArgs): Run<ConnectOutcome | undefined>;
   publish(args: PublishArgs): Run<PublishResult>;
   sync(args: SyncArgs): Run<SyncResult>;
+  prune(): Run<void>;
   invite(args: InviteArgs): Run<InviteResult>;
   team(args: TeamArgs): Run<TeamResult>;
   setup(args: SetupArgs): Run<SetupResult>;

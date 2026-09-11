@@ -9,13 +9,12 @@ import { assertNotInsideStateRoot, inspectSkillSource, scanSkillFolder, type Sou
 /** Per-folder scans overlap: on a UNC/9P root the cost is latency, not CPU (W-02). */
 const LOCAL_SCAN_CONCURRENCY = 8;
 
-export interface SharedRef { id: string; team: string; }
 export interface PlacementRef { id: string; team: string; version: string | null; }
 export type Inspection =
   | { kind: 'candidate'; description: string; privileged: boolean }
   | { kind: 'rejected'; reason: SourceProblem; detail: string; description?: string }
   | { kind: 'failed'; reason: string };
-export interface LocalEntry { frontmatter: string | null; skillId: string | null; name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; placementFingerprint?: string; characters?: number; category: string | null; inspection: Inspection; }
+export interface LocalEntry { frontmatter: string | null; skillId: string | null; name: string; path: string; placement?: PlacementRef; placementFingerprint?: string; characters?: number; category: string | null; inspection: Inspection; }
 export interface LocalInventory {
   root: string;
   scope: 'global' | 'project';
@@ -87,12 +86,9 @@ export async function localSkillRoots(home: string, cwd?: string, checkouts: rea
 
 export function localRootLabel(root: LocalRoot): string { return root.repoRoot === undefined ? 'Global' : basename(root.repoRoot); }
 
-export async function canonicalLedger(config: Pick<Config, 'shared' | 'placements'>) {
-  const [sharedPaths, placementPaths] = await Promise.all([
-    Promise.all(Object.entries(config.shared).map(async ([id, ref]) => ({ id, ref, canonical: await canonicalParentPath(resolve(ref.source)) }))),
-    Promise.all(Object.entries(config.placements).map(async ([target, ref]) => ({ target, ref, canonical: await canonicalParentPath(resolve(target)) }))),
-  ]);
-  return { sharedPaths, placementPaths };
+export async function canonicalLedger(config: Pick<Config, 'placements'>) {
+  const placementPaths = await Promise.all(Object.entries(config.placements).map(async ([target, ref]) => ({ target, ref, canonical: await canonicalParentPath(resolve(target)) })));
+  return { placementPaths };
 }
 
 /** Canonicalize only the parent: a child symlink must remain a distinct, rejected entry. */
@@ -101,14 +97,13 @@ export async function canonicalParentPath(path: string): Promise<string | undefi
   catch { return undefined; }
 }
 
-function entryProvenance(path: string, canonical: string | undefined, { sharedPaths, placementPaths }: Awaited<ReturnType<typeof canonicalLedger>>) {
-  const shared = sharedPaths.filter(({ ref, canonical: reference }) => resolve(ref.source) === path || (canonical !== undefined && reference === canonical)).map(({ id, ref }) => ({ id, team: ref.team }));
+function entryProvenance(path: string, canonical: string | undefined, { placementPaths }: Awaited<ReturnType<typeof canonicalLedger>>) {
   const placement = placementPaths.find(({ target, canonical: reference }) => resolve(target) === path || (canonical !== undefined && reference === canonical))?.ref;
-  return { shared, placement };
+  return { placement };
 }
 
 /** Direct entries only. Provenance is ledger evidence, independent of inspection success. */
-export async function localSkills(root: string, config: Pick<Config, 'shared' | 'placements'>, options: { scope: LocalRoot['scope']; stateRoot: string; ledger?: Awaited<ReturnType<typeof canonicalLedger>> }): Promise<LocalInventory> {
+export async function localSkills(root: string, config: Pick<Config, 'placements'>, options: { scope: LocalRoot['scope']; stateRoot: string; ledger?: Awaited<ReturnType<typeof canonicalLedger>> }): Promise<LocalInventory> {
   root = resolve(root);
   const inventory: LocalInventory = { root, scope: options.scope, rootState: 'scanned', entries: [], problems: [] };
   let names: string[];
@@ -118,7 +113,7 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
     else { inventory.rootState = 'unreadable'; inventory.problems.push({ path: root, reason: error instanceof Error ? error.message : String(error) }); }
     names = [];
   }
-  const { sharedPaths, placementPaths } = options.ledger ?? await canonicalLedger(config);
+  const { placementPaths } = options.ledger ?? await canonicalLedger(config);
   // One realpath per call: every name is one segment beneath the resolved root.
   // Keep undefined on failure so ledger comparisons retain their exact resolve() fallback.
   const realRoot = await realpath(root).then((value) => value, () => undefined);
@@ -133,9 +128,9 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
   const scanned = await mapWithConcurrency(names, LOCAL_SCAN_CONCURRENCY, async (name): Promise<LocalEntry | null> => {
     const path = join(root, name);
     const canonical = realRoot === undefined ? undefined : join(realRoot, name);
-    const { shared, placement } = entryProvenance(path, canonical, { sharedPaths, placementPaths });
-    const tracked = shared.length > 0 || placement !== undefined;
-    const entry: LocalEntry = { frontmatter: null, skillId: null, category: null, name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
+    const { placement } = entryProvenance(path, canonical, { placementPaths });
+    const tracked = placement !== undefined;
+    const entry: LocalEntry = { frontmatter: null, skillId: null, category: null, name, path, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
     const reject = (reason: SourceProblem, detail: string, description?: string): void => { entry.inspection = { kind: 'rejected', reason, detail, ...(description === undefined ? {} : { description }) }; };
     try {
       const details = await lstat(path);
@@ -184,26 +179,26 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
 
 /** The picker offers untracked candidates; privileged content needs explicit opt-in. */
 export function candidatesOf(inventory: LocalInventory, allowPrivileged = false): LocalEntry[] {
-  return inventory.entries.filter((entry) => !entry.shared.length && !entry.placement && entry.inspection.kind === 'candidate' && (allowPrivileged || !entry.inspection.privileged));
+  return inventory.entries.filter((entry) => !entry.placement && entry.inspection.kind === 'candidate' && (allowPrivileged || !entry.inspection.privileged));
 }
 
 
 /** F2 wire formula: every displayed row, plus untracked folders rejected for frontmatter. */
 const FRONTMATTER_PROBLEMS: ReadonlySet<SourceProblem> = new Set(['no-frontmatter', 'invalid-yaml', 'illegal-name', 'name-mismatch', 'description-missing', 'unsupported-field', 'malformed-allowed-tools', 'managed-wrapper']);
 export function localSkillCounts(inventory: LocalInventory): { skillFolders: number; connectable: number } {
-  const skillFolders = inventory.entries.filter(entry => entry.shared.length > 0 || entry.placement !== undefined || entry.inspection.kind === 'candidate' || (entry.inspection.kind === 'rejected' && FRONTMATTER_PROBLEMS.has(entry.inspection.reason))).length;
+  const skillFolders = inventory.entries.filter(entry => entry.placement !== undefined || entry.inspection.kind === 'candidate' || (entry.inspection.kind === 'rejected' && FRONTMATTER_PROBLEMS.has(entry.inspection.reason))).length;
   return { skillFolders, connectable: candidatesOf(inventory).length };
 }
 
 /** A run-local snapshot: discovery and each root walk happen at most once, on demand. */
 export interface LibraryScan {
   roots(): Promise<LocalRoot[]>;
-  inventory(root: LocalRoot, config: Pick<Config, 'shared' | 'placements'>): Promise<LocalInventory>;
+  inventory(root: LocalRoot, config: Pick<Config, 'placements'>): Promise<LocalInventory>;
 }
 
 export function createLibraryScan(home: string, checkouts: readonly string[], stateRoot: string): LibraryScan {
   let roots: Promise<LocalRoot[]> | undefined;
-  const ledgers = new WeakMap<Pick<Config, 'shared' | 'placements'>, ReturnType<typeof canonicalLedger>>();
+  const ledgers = new WeakMap<Pick<Config, 'placements'>, ReturnType<typeof canonicalLedger>>();
   const inventories = new Map<string, Promise<LocalInventory>>();
   return {
     roots: () => roots ??= localSkillRoots(home, undefined, checkouts).then(discovery => discovery.roots),
@@ -217,14 +212,13 @@ export function createLibraryScan(home: string, checkouts: readonly string[], st
         return inventory;
       }
       const inventory = await previous;
-      // Earlier teams may have shared these sources since the snapshot. Rebind provenance from
-      // the current ledger so reuse never offers those folders to a second team. No folder walk.
+      // Rebind placement provenance from the current ledger without another folder walk.
       const currentLedger = await ledger;
       const canonicalRoot = await realpath(inventory.root).then(value => value, () => undefined);
       const entries = inventory.entries.map(entry => {
         const canonical = canonicalRoot === undefined ? undefined : join(canonicalRoot, entry.name);
-        const { shared, placement } = entryProvenance(entry.path, canonical, currentLedger);
-        const source = { ...entry, shared };
+        const { placement } = entryProvenance(entry.path, canonical, currentLedger);
+        const source = { ...entry };
         delete source.placement;
         delete source.placementFingerprint;
         return { ...source, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}) };
@@ -246,7 +240,7 @@ export function createLibraryScan(home: string, checkouts: readonly string[], st
  * as looking and finding nothing, and the caller must leave the last known total alone rather than
  * publish a wrong zero. This is a best-effort self-report, not an audit.
  */
-export async function librarySize(home: string, config: Pick<Config, 'shared' | 'placements' | 'checkouts'>, stateRoot: string, scan = createLibraryScan(home, config.checkouts ?? [], stateRoot)): Promise<number | null> {
+export async function librarySize(home: string, config: Pick<Config, 'placements' | 'checkouts'>, stateRoot: string, scan = createLibraryScan(home, config.checkouts ?? [], stateRoot)): Promise<number | null> {
   let total = 0;
   for (const root of await scan.roots()) {
     if (root.scope !== 'global' && !root.registered) continue;

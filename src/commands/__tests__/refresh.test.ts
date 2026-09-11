@@ -57,13 +57,13 @@ describe('refresh', () => {
     expect(second).toMatchObject({ ok: true, value: { changed: false, teams: [{ changed: false, head: first.value?.teams[0]?.head }] } });
     expect(second.value?.teams[0]?.head).toBe((await git(['rev-parse', 'HEAD'], clone)).trim());
   });
-  it('never writes the sync stamp or the run directory', async () => {
+  it('stamps each successfully fetched clone without changing config', async () => {
     const { store } = await setup();
     expect(await stampedAt(store.root, 'team')).toBeNull();
     expect((await run({ config: store }, new ScriptedPrompter())).ok).toBe(true);
-    expect(await stampedAt(store.root, 'team')).toBeNull();
-    expect(await stampIsFresh(store.root, 'team')).toBe(false);
-    expect(await exists(join(store.root, 'run'))).toBe(false);
+    expect(await stampedAt(store.root, 'team')).not.toBeNull();
+    expect(await stampIsFresh(store.root, 'team')).toBe(true);
+    expect(await exists(join(store.root, 'run'))).toBe(true);
   });
   it('asks nothing and does not rewrite config.json', async () => {
     const { store } = await setup(); const io = new ScriptedPrompter();
@@ -151,7 +151,7 @@ describe('refresh', () => {
   });
   it('refreshes nothing and touches git not at all when no team is configured', async () => {
     const store = createConfigStore(await temporaryDirectory());
-    expect(await run({ config: store, runner: denyingRunner([]) }, new ScriptedPrompter())).toEqual({ ok: true, value: { changed: false, teams: [] } });
+    expect(await run({ config: store, runner: denyingRunner([]) }, new ScriptedPrompter())).toEqual({ ok: true, value: { changed: false, teams: [], notices: [] } });
   });
   it('passes the fetch deadline to the runner for the fetch step only, and never for the reset', async () => {
     const { store } = await setup(); const { runner, calls } = recordingRunner();

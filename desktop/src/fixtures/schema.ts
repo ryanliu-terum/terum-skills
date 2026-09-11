@@ -76,7 +76,9 @@ SKILL_MD_BODY: z.array(z.tuple([z.enum(["h2","p","ol","code"]),z.union([z.string
 "STORAGE": z.object({"cache":z.string(),"cache_n":z.number(),"evals":z.string(),"evals_n":z.number(),"quarantine":z.string()}),
 "SETTINGS_NAV": z.array(z.array(z.string())),
 "SHORTCUTS": z.array(z.array(z.string())),
-"INBOX_KIND_TEXT": z.object({"share":z.string(),"update":z.string(),"alert":z.string(),"eval":z.string(),"review":z.string(),"author":z.string(),"team":z.string()}),
+// D22 deletes the update and review item kinds. design.json still records their canvas copy; the
+// schema stops projecting it, so nothing in the app can render a kind it no longer has.
+"INBOX_KIND_TEXT": z.object({"share":z.string(),"update":z.string().optional(),"alert":z.string(),"eval":z.string(),"review":z.string().optional(),"author":z.string(),"team":z.string()}),
 "THEME_OPTIONS": z.array(z.string()),
 "ONBOARD_STEPS": z.array(z.string()),
 "ONBOARD_BASICS": z.array(z.array(z.string())),

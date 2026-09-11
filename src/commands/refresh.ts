@@ -1,8 +1,8 @@
 /**
  * §6: the one verb that only moves a team clone forward — fetch, then hard reset to origin/main, under the
  * per-clone writer lock, and nothing else. No placement, no pending replay, no auto-share, no push, no prompt,
- * and deliberately NO `run/<team>.stamp` write: the stamp means "fully synced" (src/commands/sync.ts, and
- * stampIsFresh in src/lib/hook.ts suppresses the session hook for an hour), which a fetch does not earn.
+ * and records `run/<team>.stamp` after every successful fetch. The stamp now means the clone was fetched at
+ * its recorded time and head; it no longer claims that placements or local authoring sources were reconciled.
  *
  * It exists because every read verb is contractually fetch-free, so a teammate's committed receipt reaches this
  * machine only when someone runs a write verb. The desktop app calls this in the background on launch and on
@@ -16,8 +16,10 @@ import { normalizeRemote } from '../lib/remote.js';
 import { fromError, type Result, success } from '../lib/result.js';
 import { type Runner, systemRunner } from '../lib/runner.js';
 import { CloneBusy, type CloneState, describeClone, refreshClone, RemoteAccessError } from '../lib/teamRepo.js';
+import { defaultWrapperOptions, installWrapper, wrapperState } from '../lib/wrapper.js';
+import { writeStamp } from '../lib/hook.js';
 
-export interface RefreshArgs extends WithForm {
+export interface SyncArgs extends WithForm {
   /** Absent means every configured team. */
   team?: string;
   config?: ConfigStore;
@@ -26,6 +28,8 @@ export interface RefreshArgs extends WithForm {
   lockStale?: number;
   /** How long the fetch may run before it is killed; default REFRESH_DEADLINE_MS. */
   deadlineMs?: number;
+  /** Session-start hook mode; it may refresh only Terum's managed bundled manual. */
+  hook?: boolean;
 }
 export type RefreshState = 'refreshed' | 'busy' | 'unreachable' | 'no-clone' | 'error';
 export interface RefreshTeam {
@@ -38,7 +42,9 @@ export interface RefreshTeam {
   /** This CLI's own explanation for a state other than 'refreshed'. */
   detail?: string;
 }
-export interface RefreshResult { changed: boolean; teams: RefreshTeam[] }
+export interface SyncResult { changed: boolean; teams: RefreshTeam[]; notices: string[]; }
+export type RefreshArgs = SyncArgs;
+export type RefreshResult = SyncResult;
 
 /** A fetch that has not finished in this long is killed; a background caller must never wedge (W-08). */
 export const REFRESH_DEADLINE_MS = 20_000;
@@ -49,7 +55,7 @@ export const REFRESH_DEADLINE_MS = 20_000;
  */
 const NON_INTERACTIVE_GIT: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.interactive', GIT_CONFIG_VALUE_0: 'false' };
 
-export async function run(args: RefreshArgs, io: Prompter): Promise<Result<RefreshResult>> {
+export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResult>> {
   try {
     const store = args.config ?? createConfigStore();
     const config = await store.read();
@@ -70,6 +76,9 @@ export async function run(args: RefreshArgs, io: Prompter): Promise<Result<Refre
       try {
         await refreshClone(runner, clone, { label: team, env: NON_INTERACTIVE_GIT, lockStale: args.lockStale, deadlineMs });
         const after = await headOf(runner, clone);
+        // A successful refresh records exactly the clone state that read verbs will now observe. A runner that
+        // cannot report HEAD has no truthful stamp value, so it is deliberately left unstamped for retry.
+        if (after !== null) await writeStamp(store.root, team, { head: after, at: new Date().toISOString() });
         teams.push({ team, state: 'refreshed', changed: wasDirty || before !== after, head: after });
       } catch (error) {
         // A background caller must never surface an error board for one team, and the clone it failed on is
@@ -80,9 +89,20 @@ export async function run(args: RefreshArgs, io: Prompter): Promise<Result<Refre
         else teams.push({ team, state: 'error', changed: false, head, detail: error instanceof Error ? error.message : String(error) });
       }
     }
+    const notices: string[] = [];
+    if (args.hook && await wrapperState(defaultWrapperOptions()) === 'outdated') {
+      await installWrapper(defaultWrapperOptions());
+      notices.push('Updated your /terum-skills manual for this CLI.');
+    }
+    if (args.hook) io.print('{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}');
     // A program reads `detail`; only a person needs the line, and a program's channel must stay result-only.
     if (io.channel !== 'frames') for (const outcome of teams) if (outcome.state !== 'refreshed') io.print(`${outcome.team}: not refreshed (${outcome.state})${outcome.detail ? ` — ${outcome.detail}` : ''}`);
-    return success({ changed: teams.some((outcome) => outcome.changed), teams });
+    const result: SyncResult = { changed: teams.some((outcome) => outcome.changed), teams, notices };
+    // This internal marker keeps the public DTO to its three declared fields while allowing the bin
+    // to route hook notices to stderr. It is intentionally non-enumerable, so frames and JSON retain
+    // the same SyncResult shape as ordinary sync.
+    if (args.hook) Object.defineProperty(result, 'hook', { value: true });
+    return success(result);
   } catch (error) { return fromError(error); }
 }
 

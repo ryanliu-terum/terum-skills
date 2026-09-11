@@ -139,12 +139,11 @@ it('keeps a rejected validation in Quality',async()=>{
   expect(await screen.findByText('Validation unavailable.')).toHaveClass('board-error-line');
   expect(screen.getByRole('heading',{name:'deploy-check'})).toBeVisible();
 });
-it('makes the eval command follow the commit choice',async()=>{
+it('shows the local eval command without a receipt commit choice',async()=>{
   open('#/skill/deploy-check?dialog=run-eval');
   const dialog=await screen.findByRole('dialog');
-  expect(dialog.querySelector('.terminal-hint .board-mono')).toHaveTextContent('npx -y terum-skills@latest eval deploy-check --commit');
-  fireEvent.click(within(dialog).getByRole('checkbox',{name:'Commit the receipt to the team'}));
-  expect(dialog.querySelector('.terminal-hint .board-mono')?.textContent).toBe('npx -y terum-skills@latest eval deploy-check');
+  expect(dialog.querySelector('.terminal-hint .board-mono')).toHaveTextContent('npx -y terum-skills@latest eval deploy-check');
+  expect(dialog.querySelector('[role="checkbox"]')).toBeNull();
 });
 it.each(['global','project'])('passes the selected %s copy to Remove',async scope=>{
   const {f}=open('#/skill/deploy-check?dialog=remove',(name,value)=>{
@@ -201,7 +200,7 @@ function localFolder(root=uncRoot,invalid=false):AmendResult{return (name,value)
  const sections=value.local as Record<string,unknown>[];
  const separator=root===uncRoot?String.raw`\\`.slice(0,1):'/';
  const folder=root+separator+'.claude'+separator+'skills',path=folder+separator+'adopt-agent-tooling';
- Object.assign(sections[1]!,{root:folder,repoRoot:root,label:'teniroo',rootState:'scanned',registered:false,detected:true,rows:invalid?[]:[{name:'adopt-agent-tooling',path,state:'untracked locally',tracked:false,shared:[],placement:null,health:'untracked'}],notOffered:invalid?[{name:'adopt-agent-tooling',path,reason:'invalid-yaml'}]:[]});
+ Object.assign(sections[1]!,{root:folder,repoRoot:root,label:'teniroo',rootState:'scanned',registered:false,detected:true,rows:invalid?[]:[{name:'adopt-agent-tooling',path,state:'untracked locally',tracked:false,placement:null,health:'untracked'}],notOffered:invalid?[{name:'adopt-agent-tooling',path,reason:'invalid-yaml'}]:[]});
 };}
 it.each([['UNC',uncRoot,uncPath],['POSIX','/home/teniroo','/home/teniroo/.claude/skills/adopt-agent-tooling']] as const)('names the checkout in the crumb and the sidebar when a %s payload holds the folder',async(_label,root,path)=>{
  open('#/skill/local?path='+encodeURIComponent(path),localFolder(root));
@@ -231,7 +230,7 @@ it('sends the skill name, not the route segment, to eval',async()=>{
  const dialog=await screen.findByRole('dialog');
  const evaluate=vi.spyOn(backend,'eval').mockImplementation(()=>createRun(async()=>({ok:false,error:'Eval failed for this test.'})));
  fireEvent.click(within(dialog).getByRole('button',{name:'Run eval'}));
- await waitFor(()=>expect(evaluate).toHaveBeenCalledExactlyOnceWith({ref:'adopt-agent-tooling',commit:true}));
+ await waitFor(()=>expect(evaluate).toHaveBeenCalledExactlyOnceWith({ref:'adopt-agent-tooling'}));
  await waitFor(()=>expect(new URLSearchParams(location.hash.split('?')[1]).has('dialog')).toBe(false));
  // Successful runs dismiss themselves; retain a failed run to exercise the host's URL dismissal.
  await screen.findByText('Eval failed for this test.');

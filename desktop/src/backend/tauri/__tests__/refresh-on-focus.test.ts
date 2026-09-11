@@ -11,7 +11,7 @@ const currentWindow = vi.hoisted(() => vi.fn<() => Pick<NativeWindow, 'onFocusCh
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: currentWindow }));
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); currentWindow.mockReset(); });
 const recorded = (name: string) => readFileSync(resolve('../.planning/codex-runs/m7-S7g/frames', `${name}.jsonl`), 'utf8').trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>);
-function fixture(options: { supported?: boolean; changed?: boolean; hold?: 'refresh' | 'status'; noHello?: boolean; laterHello?: boolean; failure?: boolean; ask?: boolean; invalid?: boolean } = {}) {
+function fixture(options: { supported?: boolean; changed?: boolean; hold?: 'sync' | 'status'; noHello?: boolean; laterHello?: boolean; failure?: boolean; ask?: boolean; invalid?: boolean } = {}) {
   let release!: () => void;
   let finished!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
@@ -22,10 +22,10 @@ function fixture(options: { supported?: boolean; changed?: boolean; hold?: 'refr
     const supported = options.laterHello ? hellos++ > 0 : options.supported !== false;
     emit({ kind: 'stdout', line: JSON.stringify({ t: 'hello', protocol: 1, verbs: [], features: supported ? { refresh: true } : {} }) });
     if (options.hold === args[0]) await held;
-    if (args[0] === 'refresh') {
+    if (args[0] === 'sync') {
       if (options.ask) { emit({ kind: 'stdout', line: JSON.stringify({ t: 'ask', id: 'q1', kind: 'confirm', question: 'Refresh?' }) }); finished(); return; }
       const changed = options.changed ?? false;
-      emit({ kind: 'stdout', line: JSON.stringify({ t: 'result', verb: 'refresh', ok: !options.failure, exitCode: options.failure ? 1 : 0, ...(options.failure ? { error: 'refresh failed' } : { value: options.invalid ? { changed: 'yes' } : { changed, teams: [{ team: 'acme', state: 'refreshed', changed, head: 'a'.repeat(40) }] } }) }) });
+      emit({ kind: 'stdout', line: JSON.stringify({ t: 'result', verb: 'sync', ok: !options.failure, exitCode: options.failure ? 1 : 0, ...(options.failure ? { error: 'refresh failed' } : { value: options.invalid ? { changed: 'yes' } : { changed, notices: [], teams: [{ team: 'acme', state: 'refreshed', changed, head: 'a'.repeat(40) }] } }) }) });
       emit({ kind: 'exit', code: options.failure ? 1 : 0 }); finished(); return;
     }
     for (const frame of recorded(args[0] === 'status' ? 'status' : 'ls-local')) if (frame.t !== 'hello') emit({ kind: 'stdout', line: JSON.stringify(frame) });
@@ -33,7 +33,7 @@ function fixture(options: { supported?: boolean; changed?: boolean; hold?: 'refr
   });
   return { ...f, release, refreshed };
 }
-const refreshes = (f: ReturnType<typeof fixture>) => f.spawns.filter(s => s.args.join(' ') === 'refresh');
+const refreshes = (f: ReturnType<typeof fixture>) => f.spawns.filter(s => s.args.join(' ') === 'sync');
 const focus = () => window.dispatchEvent(new Event('focus'));
 /** Flush the finite frame/read/policy promise chain without a clock-driven wait. */
 async function drain() { for (let i = 0; i < 50; i++) await Promise.resolve(); }
@@ -55,7 +55,7 @@ describe('adapter background refresh', () => {
   });
   it('invalidates with clone only when a clone moved', async () => {
     const f = fixture({ changed: true }); const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
-    await backend.status(); await vi.waitFor(() => expect(listener).toHaveBeenCalledExactlyOnceWith('clone'));
+    await backend.status(); await vi.waitFor(() => expect(listener).toHaveBeenCalledExactlyOnceWith('marketplace'));
     await backend.status(); expect(f.spawns.filter(s => s.args[0] === 'status')).toHaveLength(2);
   });
   it('throttles: three focus events inside the interval spawn one refresh', async () => {
@@ -68,7 +68,7 @@ describe('adapter background refresh', () => {
     await vi.waitFor(() => expect(refreshes(f)).toHaveLength(2)); await drain();
   });
   it('is single-flight: a focus while a refresh is in flight spawns nothing', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] }); const f = fixture({ hold: 'refresh' }); const backend = createTauriBackend(f.bridge);
+    vi.useFakeTimers({ toFake: ['Date'] }); const f = fixture({ hold: 'sync' }); const backend = createTauriBackend(f.bridge);
     await backend.status(); await vi.waitFor(() => expect(refreshes(f)).toHaveLength(1));
     try { vi.setSystemTime(Date.now() + REFRESH_MIN_INTERVAL_MS + 1); focus(); await drain(); expect(refreshes(f)).toHaveLength(1); }
     finally { f.release(); await f.refreshed; await drain(); }
@@ -105,7 +105,7 @@ describe('adapter background refresh', () => {
     const status = backend.status();
     try { await f.refreshed; await drain(); expect(refreshes(f)).toHaveLength(1); expect(listener).not.toHaveBeenCalled(); }
     finally { f.release(); }
-    expect((await status).ok).toBe(true); await vi.waitFor(() => expect(listener).toHaveBeenCalledExactlyOnceWith('clone'));
+    expect((await status).ok).toBe(true); await vi.waitFor(() => expect(listener).toHaveBeenCalledExactlyOnceWith('marketplace'));
   });
   it('a retired backend instance never spawns on a later focus event', async () => {
     // This lifecycle test necessarily constructs two instances, unlike every other test in this file.
@@ -153,84 +153,3 @@ it('native subscription rejection leaves the DOM focus fallback working', async 
   await vi.waitFor(() => expect(refreshes(f)).toHaveLength(2)); await drain();
 });
 
-it('autoSync replaces refresh at launch/focus, preserves timing data and invalidates sync keys', async () => {
-  vi.useFakeTimers({ toFake: ['Date'] });
-  const f = fakeBridge((args, emit) => {
-    emit({kind:'stdout',line:JSON.stringify({t:'hello',protocol:1,verbs:[],features:{refresh:true,autoSync:true}})});
-    if (args[0] === 'sync') emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{changed:true,placed:1,deferred:[],notices:[],teams:[],timings:[{team:'team',phase:'fetch',ms:2}]}})});
-    else for (const frame of recorded(args[0] === 'status' ? 'status' : 'ls-local')) if(frame.t!=='hello')emit({kind:'stdout',line:JSON.stringify(frame)});
-    emit({kind:'exit',code:0});
-  });
-  const backend=createTauriBackend(f.bridge), listener=vi.fn(); backend.subscribe(listener);
-  await backend.status(); await drain();
-  const syncs=()=>f.spawns.filter(spawn=>spawn.args[0]==='sync');
-  expect(syncs()).toHaveLength(1); expect(syncs()[0]?.args).toEqual(['sync','--auto','--fresh-ms','600000']);
-  expect(f.spawns.some(spawn=>spawn.args[0]==='refresh')).toBe(false);
-  expect(listener.mock.calls.map(([key]) => key)).toEqual(['config','clone','placed','stamp']);
-  focus(); focus(); await drain(); expect(syncs()).toHaveLength(1);
-  vi.setSystemTime(Date.now()+600_000); await drain(); expect(syncs()).toHaveLength(1);
-  focus(); await drain(); expect(syncs()).toHaveLength(2);
-  await backend.refreshLaunch(); focus(); await drain(); expect(syncs()).toHaveLength(2);
-  const stop = backend.onLaunchRequest(() => { void backend.refreshLaunch(); }); await drain();
-  f.reopen(); await drain(); expect(syncs()).toHaveLength(3);
-  expect(syncs()[2]?.args).toEqual(['sync','--auto','--fresh-ms','0']); stop();
-});
-
-it('automatic sync does not answer an unexpected CLI question and exposes the failure through settings', async () => {
-  const f=fakeBridge((args,emit)=>{
-    emit({kind:'stdout',line:JSON.stringify({t:'hello',protocol:1,verbs:[],features:{autoSync:true}})});
-    if(args[0]==='sync'){emit({kind:'stdout',line:JSON.stringify({t:'ask',id:'unexpected',kind:'confirm',question:'Approve tools?'})});return;}
-    for(const frame of recorded(args[0]==='status'?'status':'ls-local'))if(frame.t!=='hello')emit({kind:'stdout',line:JSON.stringify(frame)});
-    emit({kind:'exit',code:0});
-  });
-  const backend=createTauriBackend(f.bridge); await backend.status(); await drain();
-  expect(f.kills.length).toBeGreaterThan(0); expect(f.writes.some(line=>line.includes('"t":"answer"'))).toBe(false);
-  const settings=await backend.settings(); expect(settings.value?.lastAutomatic?.state).toBe('failed');
-});
-
-it('defers the first hello launch sync until its workflow settles, without needing focus', async () => {
-  let finish!:()=>void;
-  const held=new Promise<void>(resolve=>{finish=resolve;});
-  const f=fakeBridge(async(args,emit)=>{
-    emit({kind:'stdout',line:JSON.stringify({t:'hello',protocol:1,verbs:[],features:{autoSync:true}})});
-    if(args[0]==='sync')emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{changed:false,placed:0,deferred:[],notices:[],teams:[],timings:[{team:'team',phase:'place',ms:3}]}})});
-    else {await held;emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'validate',ok:false,exitCode:1,error:'Validation failed'})});}
-    emit({kind:'exit',code:args[0]==='sync'?0:1});
-  });
-  const backend=createTauriBackend(f.bridge);
-  const workflow=backend.validate({ref:'team/sample'});await drain();focus();await drain();
-  expect(f.spawns.map(spawn=>spawn.args[0])).toEqual(['validate']);
-  finish();await workflow;await drain();
-  expect(f.spawns.map(spawn=>spawn.args[0])).toEqual(['validate','sync']);
-  const result=await backend.sync({auto:true}).done;
-  expect(result.value?.timings).toEqual([{team:'team',phase:'place',ms:3}]);
-});
-
-it('manual sync waits for automatic completion and a cancelled queued sync never spawns', async () => {
-  let finish!:()=>void; const held=new Promise<void>(resolve=>{finish=resolve;});
-  const f=fakeBridge(async(args,emit)=>{
-    emit({kind:'stdout',line:JSON.stringify({t:'hello',protocol:1,verbs:[],features:{autoSync:true}})});
-    if(args[0]==='sync') {
-      if(args.includes('--auto')) await held;
-      emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{changed:false,placed:0,deferred:[],notices:[],teams:[]}})});
-    } else for(const frame of recorded('status')) if(frame.t!=='hello')emit({kind:'stdout',line:JSON.stringify(frame)});
-    emit({kind:'exit',code:0});
-  });
-  const backend=createTauriBackend(f.bridge); await backend.status(); await drain();
-  const cancelled=backend.sync({}); const cancellation=cancelled.cancel();
-  const manual=backend.sync({}); await drain(); expect(f.spawns.filter(s=>s.args[0]==='sync')).toHaveLength(1);
-  finish(); await cancellation; expect(await cancelled.done).toMatchObject({ok:false,cancelled:true});
-  expect(await manual.done).toMatchObject({ok:true});
-  expect(f.spawns.filter(s=>s.args[0]==='sync').map(s=>s.args)).toEqual([['sync','--auto','--fresh-ms','600000'],['sync']]);
-});
-it('an unchanged automatic sync preserves cached reads and emits no invalidation wave', async () => {
-  const f=fakeBridge((args,emit)=>{
-    emit({kind:'stdout',line:JSON.stringify({t:'hello',protocol:1,verbs:[],features:{autoSync:true}})});
-    if(args[0]==='sync')emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{changed:false,placed:0,deferred:[],notices:[],teams:[]}})});
-    else for(const frame of recorded('status'))if(frame.t!=='hello')emit({kind:'stdout',line:JSON.stringify(frame)});
-    emit({kind:'exit',code:0});
-  });
-  const backend=createTauriBackend(f.bridge),listener=vi.fn(); backend.subscribe(listener);
-  await backend.status(); await drain(); await backend.status();
-  expect(listener).not.toHaveBeenCalled(); expect(f.spawns.filter(s=>s.args[0]==='status')).toHaveLength(1);
-});

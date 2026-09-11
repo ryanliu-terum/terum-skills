@@ -91,7 +91,7 @@ async function localSource(home: string, name: string, raw = `---\nname: ${name}
 }
 const FOOTER = 'Team status is from local clones and may be stale; open endorsement requests are not checked.';
 
-describe.each([false, true])('B2 local category (tracked=%s)', tracked => {
+describe('local category', () => {
   it.each([
     { name:'tdd',raw:'---\nname: tdd\ndescription: Test first\nmetadata:\n  terum-category: misc\n---\n',category:'misc' },
     { name:'no-category',raw:'---\nname: no-category\ndescription: No category\nmetadata:\n  author: Someone\n---\n',category:null },
@@ -103,11 +103,9 @@ describe.each([false, true])('B2 local category (tracked=%s)', tracked => {
     { name:'Bad',raw:'---\nname: Bad\ndescription: Rejected before parsing\nmetadata:\n  terum-category: misc\n---\n',category:null,reason:'illegal-name' },
   ])('emits the parsed category or null for $name',async({name,raw,category,reason})=>{
     const home=await temporaryDirectory(),store=createConfigStore(join(home,'state')),path=await localSource(home,name,raw);
-    if(tracked)await store.update(config=>{config.shared[ID]={source:path,team:'team'};});
     const result=await run({local:true,home,config:store,runner:{run:async()=>{throw new Error('no commands');}}},new ScriptedPrompter());
-    // Tracked sources may be relocated, so their folder name does not gate parsing.
-    const expected=tracked&&reason==='illegal-name'?'misc':category;
-    const key=tracked||reason===undefined?'rows':'notOffered';
+    const expected=category;
+    const key=reason===undefined?'rows':'notOffered';
     expect(result).toMatchObject({ok:true,value:{local:[{[key]:[{name,path,category:expected}]}]}});
   });
 });
@@ -125,42 +123,7 @@ describe('issue 9 local ls', () => {
     expect(io.asked).toEqual([]);
   });
 
-  it.each(['global', 'project', 'unendorsed', 'missing', 'broken', 'unparsable'] as const)('enriches by ledger ID with %s clone evidence without writing or running git', async (mode) => {
-    const fixture = await bareTeam(); const home = join(fixture.root, 'home');
-    const stored = `---\nname: report\ndescription: stored\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`;
-    await pushFromSeed(fixture.seed, 'skills/report/SKILL.md', stored);
-    await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ ...TEAM_JSON, global: mode === 'global' ? [ID] : [], projects: { b: { remotes: [], skills: [ID] }, a: { remotes: [], skills: [ID] } } }));
-    const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    const source = await localSource(home, 'relocated', stored); await localSource(home, 'report');
-    const trackedId = mode === 'missing' || mode === 'unparsable' ? '11111111-1111-4111-8111-111111111111' : ID;
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.shared[trackedId] = { team: 'team', source }; });
-    if (mode === 'unendorsed') await writeFile(join(clone, 'team.json'), JSON.stringify(TEAM_JSON));
-    if (mode === 'unparsable') { await mkdir(join(clone, 'skills', 'broken')); await writeFile(join(clone, 'skills', 'broken', 'SKILL.md'), 'bad'); }
-    const before = await git(['rev-parse', 'HEAD'], clone); const status = await git(['status', '--porcelain'], clone); const configBefore = await readFile(join(store.root, 'config.json'), 'utf8');
-    if (mode === 'broken') await rm(clone, { recursive: true });
-    const io = new ScriptedPrompter();
-    const result = await run({ local: true, home, config: store, runner: { run: async () => { throw new Error('no git'); } } }, io);
-    const suffix = mode === 'global' ? 'endorsed (global)' : mode === 'project' ? 'endorsed (project: a, b)' : mode === 'unendorsed' ? 'not endorsed in local clone' : mode === 'missing' ? 'repository copy missing from local clone' : 'repository status unknown';
-    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [{ name: 'relocated', state: `connected source for team; ${suffix}` }, { name: 'report', state: 'untracked locally' }] }] } });
-    expect(io.lines).toContain(`  relocated — connected source for team; ${suffix}; path: ${source}`);
-    expect(io.asked).toEqual([]); expect(io.lines.at(-1)).toBe(FOOTER);
-    expect(await readFile(join(store.root, 'config.json'), 'utf8')).toBe(configBefore);
-    if (mode !== 'broken') { expect(await git(['rev-parse', 'HEAD'], clone)).toBe(before); expect(await git(['status', '--porcelain'], clone)).toBe(status); }
-  });
 
-  it('reads each referenced team once and retains all conflicting tracking plus a source problem', async () => {
-    const home = await temporaryDirectory(); const store = createConfigStore(join(home, 'state')); const path = await localSource(home, 'missing'); await rm(join(path, 'SKILL.md'));
-    await localSource(home, 'second');
-    await store.update((config) => {
-      config.shared.one = { source: path, team: 'one' }; config.shared.two = { source: path, team: 'two' }; config.shared.three = { source: join(home, '.claude', 'skills', 'second'), team: 'one' };
-      config.placements[path] = { id: ID, team: 'two', version: null, scope: { kind: 'global' }, fingerprint: '', placed_at: '' };
-    });
-    const calls: string[] = []; const wrapped = { ...store, teamClone: (team: string) => { calls.push(team); return store.teamClone(team); } };
-    const io = new ScriptedPrompter(); const result = await run({ local: true, home, config: wrapped }, io);
-    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [expect.objectContaining({ name: 'missing', state: 'conflicting tracking: connected source for one; repository status unknown; connected source for two; repository status unknown; placement recorded from two', problem: 'SKILL.md missing' }), expect.objectContaining({ name: 'second' })] }] } });
-    expect(calls.sort()).toEqual(['one', 'two']);
-    expect(io.lines[1]).toContain('; source problem: SKILL.md missing; path: ');
-  });
 
   it.each(['empty', 'absent'])('renders the %s root and always prints the footer', async (state) => {
     const home = await temporaryDirectory(); const root = join(home, '.claude', 'skills'); if (state === 'empty') await mkdir(root, { recursive: true });
@@ -206,11 +169,9 @@ describe('global and project local sections', () => {
   it('lists both roots, retains project placements and malformed YAML, and caches team snapshots across roots with no runner call beyond each checkout\'s origin probe', async () => {
     const home = await temporaryDirectory(); const repo = join(home, 'repo'); await mkdir(join(repo, '.git'), { recursive: true });
     const store = createConfigStore(join(home, 'state'));
-    const global = await localSource(home, 'global'); const project = await localSource(repo, 'project'); const placed = await localSource(repo, 'placed');
+    await localSource(home, 'global'); await localSource(repo, 'project'); const placed = await localSource(repo, 'placed');
     const invalid = await localSource(repo, 'invalid', '---\nname: invalid\ndescription: a: b\n---\n');
     await store.update((config) => {
-      config.shared[ID] = { source: global, team: 'team' };
-      config.shared.other = { source: project, team: 'team' };
       config.placements[placed] = { id: ID, team: 'team', version: null, scope: { kind: 'project', project: 'app' }, fingerprint: '', placed_at: '' };
     });
     const clone = store.teamClone('team'); await mkdir(join(clone, 'skills', 'global'), { recursive: true });
@@ -221,7 +182,7 @@ describe('global and project local sections', () => {
     const before = await readFile(join(store.root, 'config.json'));
     const result = await run({ local: true, home, cwd: repo, config: wrapped, runner }, io);
     expect(result).toMatchObject({ ok: true, value: { local: [
-      { root: join(home, '.claude', 'skills'), scope: 'global', rows: [{ name: 'global', state: 'connected source for team; endorsed (global)' }] },
+      { root: join(home, '.claude', 'skills'), scope: 'global', rows: [{ name: 'global', state: 'untracked locally' }] },
       { root: join(repo, '.claude', 'skills'), scope: 'project', repoRoot: repo, rows: [{ name: 'placed', state: 'placement recorded from team' }, { name: 'project' }], notOffered: [{ name: 'invalid', path: invalid, reason: 'invalid-yaml', detail: expect.stringContaining('not valid YAML') }] },
     ] } });
     expect(io.lines.filter((line) => line.startsWith('Local Claude Code skills'))).toEqual([
@@ -232,7 +193,7 @@ describe('global and project local sections', () => {
     expect(io.lines.filter((line) => line === FOOTER)).toHaveLength(1); expect(io.lines.at(-1)).toBe(FOOTER);
     expect(teamCalls).toEqual(['team']); expect(runner.calls).toEqual([{ command: 'git', args: ['remote', 'get-url', 'origin'], cwd: repo, env: undefined, stdio: undefined }]); expect(io.asked).toEqual([]);
     expect(await readFile(join(store.root, 'config.json'))).toEqual(before);
-    expect(candidatesOf(await localSkills(join(repo, '.claude', 'skills'), await store.read(), { scope: 'project', stateRoot: store.root }))).toEqual([]);
+    expect(candidatesOf(await localSkills(join(repo, '.claude', 'skills'), await store.read(), { scope: 'project', stateRoot: store.root })).map((entry) => entry.name)).toEqual(['project']);
   });
 
   it('renders an absent project root as its own empty section', async () => {
@@ -391,7 +352,7 @@ describe('S7g local health and provenance', () => {
     try {
       const io = new ScriptedPrompter(), result = await run({local:true,home,config:store},io);
       const health = ['unreadable','incomplete','rejected','failed-snapshot'].includes(mode) ? 'unknown' : mode;
-      expect(result).toMatchObject({ok:true,value:{local:[{rows:[{name:'good',path:placed,tracked:true,shared:[],placement:{id:ID,team:'team',version:'a'.repeat(40)},health}]}]}});
+      expect(result).toMatchObject({ok:true,value:{local:[{rows:[{name:'good',path:placed,tracked:true,placement:{id:ID,team:'team',version:'a'.repeat(40)},health}]}]}});
       if (mode === 'rejected') {
         expect(spy.mock.calls.some(([path])=>path===placed)).toBe(false);
         expect(result.value?.local?.[0]?.rows[0]?.problem).toBe('symbolic link');
@@ -400,14 +361,14 @@ describe('S7g local health and provenance', () => {
     } finally { spy.mockRestore(); }
   });
 
-  it('carries shared refs, null tracking versions and untracked rows independently of prose',async()=>{
+  it('carries null placement versions and untracked rows independently of prose',async()=>{
     const home=await temporaryDirectory(),store=createConfigStore(join(home,'state'));
-    const connected=await localSource(home,'connected'),placed=await localSource(home,'placed');await localSource(home,'untracked');
-    await store.update(config=>{config.shared[ID]={source:connected,team:'one'};config.placements[placed]={id:ID,team:'two',version:null,fingerprint:'',scope:{kind:'global'},placed_at:''};});
+    await localSource(home,'connected'); const placed=await localSource(home,'placed');await localSource(home,'untracked');
+    await store.update(config=>{config.placements[placed]={id:ID,team:'two',version:null,fingerprint:'',scope:{kind:'global'},placed_at:''};});
     expect(await run({local:true,home,config:store},new ScriptedPrompter())).toMatchObject({ok:true,value:{local:[{rows:[
-      {name:'connected',tracked:true,shared:[{id:ID,team:'one'}],placement:null,health:'unknown'},
-      {name:'placed',tracked:true,shared:[],placement:{id:ID,team:'two',version:null},health:'unknown'},
-      {name:'untracked',tracked:false,shared:[],placement:null,health:'untracked'},
+      {name:'connected',tracked:false,placement:null,health:'untracked'},
+      {name:'placed',tracked:true,placement:{id:ID,team:'two',version:null},health:'unknown'},
+      {name:'untracked',tracked:false,placement:null,health:'untracked'},
     ]}]}});
   });
 
@@ -421,22 +382,20 @@ describe('S7g local health and provenance', () => {
 
 
 describe('local identity', () => {
-  it.each(['present', 'placed', 'connected-and-placed', 'rejected', 'non-uuid'])('reports %s without changing printed state', async mode => {
+  it.each(['present', 'placed', 'rejected', 'non-uuid'])('reports %s without changing printed state', async mode => {
     const home = await temporaryDirectory(), store = createConfigStore(join(home, 'state'));
     const raw = mode === 'rejected' ? 'not frontmatter' : inventorySource('good').replace(ID, mode === 'non-uuid' ? 'not-an-id' : ID);
     const path = await localSource(home, 'good', raw);
-    const placed = mode === 'placed' || mode === 'connected-and-placed';
-    const connected = mode === 'connected-and-placed';
+    const placed = mode === 'placed';
     if (placed) await store.update(config => {
       config.placements[path] = { id: ID, team: 'team', version: null, fingerprint: '', scope: {kind:'global'}, placed_at: '' };
-      if (connected) config.shared[ID] = { source: path, team: 'team' };
     });
     const io = new ScriptedPrompter(), result = await run({ local: true, home, config: store }, io);
     expect(result.ok).toBe(true);
     if (mode === 'rejected') expect(result.value?.local?.[0]?.notOffered[0]).toMatchObject({skillId:null});
     else {
-      expect(result.value?.local?.[0]?.rows[0]).toMatchObject({skillId:mode === 'non-uuid' ? null : ID, placed, connected});
-      const state = connected ? 'conflicting tracking: connected source for team; repository status unknown; placement recorded from team' : placed ? 'placement recorded from team' : 'untracked locally';
+      expect(result.value?.local?.[0]?.rows[0]).toMatchObject({skillId:mode === 'non-uuid' ? null : ID, placed});
+      const state = placed ? 'placement recorded from team' : 'untracked locally';
       expect(io.lines).toContain(`  good — ${state}; path: ${path}`);
     }
   });
@@ -481,13 +440,12 @@ it('lists registered and detected roots with typed counts without registering on
 });
 
 
-it('detects shared-source and project-placement repositories without cwd or config writes', async () => {
+it('detects a project-placement repository without cwd or config writes', async () => {
   const home = await temporaryDirectory(); const config = createConfigStore(join(home, 'state'));
-  const roots = [join(home, 'shared'), join(home, 'placed')];
+  const roots = [join(home, 'placed')];
   for (const root of roots) await mkdir(join(root, '.git'), { recursive: true });
   await config.update(c => {
-    c.shared[ID] = { source: join(roots[0]!, 'any', 'skill'), team: 'unavailable' };
-    c.placements[join(roots[1]!, '.claude', 'skills', 'missing')] = { id: ID, team: 'unavailable', scope: { kind: 'project', project: 'app' }, version: null, placed_at: '', fingerprint: '' };
+    c.placements[join(roots[0]!, '.claude', 'skills', 'missing')] = { id: ID, team: 'unavailable', scope: { kind: 'project', project: 'app' }, version: null, placed_at: '', fingerprint: '' };
   });
   const before = await readFile(join(config.root, 'config.json'), 'utf8');
   const result = await run({ local: true, home, config }, new ScriptedPrompter());
@@ -519,7 +477,7 @@ describe('W-02 local read stability', () => {
     }
     const io = new ScriptedPrompter(); const result = await run({ local: true, home, config: store }, io);
     expect(result.ok).toBe(true);
-    expect(JSON.stringify({ value: result.value, lines: io.lines }).replaceAll(home, '<HOME>')).toMatchInlineSnapshot(`"{"value":{"roster":[],"skills":[],"problems":[],"local":[{"root":"<HOME>/.claude/skills","scope":"global","registered":false,"detected":false,"rootState":"scanned","label":"Global","remote":null,"counts":{"skillFolders":6,"connectable":0},"rows":[{"skillId":"33333333-3333-4333-8333-000000000000","placed":true,"connected":false,"name":"skill-0","path":"<HOME>/.claude/skills/skill-0","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000000","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-0\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000000\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000001","placed":true,"connected":false,"name":"skill-1","path":"<HOME>/.claude/skills/skill-1","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000001","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-1\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000001\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000002","placed":true,"connected":false,"name":"skill-2","path":"<HOME>/.claude/skills/skill-2","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000002","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-2\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000002\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000003","placed":true,"connected":false,"name":"skill-3","path":"<HOME>/.claude/skills/skill-3","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000003","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-3\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000003\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000004","placed":true,"connected":false,"name":"skill-4","path":"<HOME>/.claude/skills/skill-4","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000004","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-4\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000004\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000005","placed":true,"connected":false,"name":"skill-5","path":"<HOME>/.claude/skills/skill-5","state":"placement recorded from team","tracked":true,"shared":[],"placement":{"id":"33333333-3333-4333-8333-000000000005","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-5\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000005\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180}],"notOffered":[],"problems":[]}]},"lines":["Local Claude Code skills (<HOME>/.claude/skills; global):","  skill-0 — placement recorded from team; path: <HOME>/.claude/skills/skill-0","  skill-1 — placement recorded from team; path: <HOME>/.claude/skills/skill-1","  skill-2 — placement recorded from team; path: <HOME>/.claude/skills/skill-2","  skill-3 — placement recorded from team; path: <HOME>/.claude/skills/skill-3","  skill-4 — placement recorded from team; path: <HOME>/.claude/skills/skill-4","  skill-5 — placement recorded from team; path: <HOME>/.claude/skills/skill-5","  6 skill folders (0 connectable)","Team status is from local clones and may be stale; open endorsement requests are not checked."]}"`);
+    expect(JSON.stringify({ value: result.value, lines: io.lines }).replaceAll(home, '<HOME>')).toMatchInlineSnapshot(`"{"value":{"roster":[],"skills":[],"problems":[],"local":[{"root":"<HOME>/.claude/skills","scope":"global","registered":false,"detected":false,"rootState":"scanned","label":"Global","remote":null,"counts":{"skillFolders":6,"connectable":0},"rows":[{"skillId":"33333333-3333-4333-8333-000000000000","placed":true,"name":"skill-0","path":"<HOME>/.claude/skills/skill-0","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000000","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-0\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000000\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000001","placed":true,"name":"skill-1","path":"<HOME>/.claude/skills/skill-1","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000001","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-1\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000001\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000002","placed":true,"name":"skill-2","path":"<HOME>/.claude/skills/skill-2","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000002","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-2\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000002\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000003","placed":true,"name":"skill-3","path":"<HOME>/.claude/skills/skill-3","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000003","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-3\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000003\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000004","placed":true,"name":"skill-4","path":"<HOME>/.claude/skills/skill-4","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000004","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-4\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000004\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000005","placed":true,"name":"skill-5","path":"<HOME>/.claude/skills/skill-5","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000005","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-5\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000005\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180}],"notOffered":[],"problems":[]}]},"lines":["Local Claude Code skills (<HOME>/.claude/skills; global):","  skill-0 — placement recorded from team; path: <HOME>/.claude/skills/skill-0","  skill-1 — placement recorded from team; path: <HOME>/.claude/skills/skill-1","  skill-2 — placement recorded from team; path: <HOME>/.claude/skills/skill-2","  skill-3 — placement recorded from team; path: <HOME>/.claude/skills/skill-3","  skill-4 — placement recorded from team; path: <HOME>/.claude/skills/skill-4","  skill-5 — placement recorded from team; path: <HOME>/.claude/skills/skill-5","  6 skill folders (0 connectable)","Team status is from local clones and may be stale; open endorsement requests are not checked."]}"`);
   });
 });
 
@@ -579,10 +537,9 @@ it('returns raw frontmatter for local candidates and rejected files, and null wh
 });
 
 
-it('keeps unavailable local frontmatter null when reading SKILL.md fails', async () => {
+it('reports an unavailable untracked SKILL.md without inventing a local row', async () => {
   const home = await temporaryDirectory(), store = createConfigStore(join(home, 'state'));
   const path = await localSource(home, 'unreadable');
-  await store.update(config => { config.shared[ID] = { team: 'team', source: path }; });
   const original = fs.readFile;
   const spy = vi.spyOn(fs, 'readFile').mockImplementation(async (...args) => {
     if (args[0] === join(path, 'SKILL.md')) throw new Error('Cannot read SKILL.md');
@@ -590,7 +547,7 @@ it('keeps unavailable local frontmatter null when reading SKILL.md fails', async
   });
   try {
     const result = await run({ local: true, home, config: store }, new ScriptedPrompter());
-    expect(result.value?.local?.[0]?.rows[0]).toMatchObject({ name: 'unreadable', frontmatter: null, description: null, problem: 'Cannot read SKILL.md' });
+    expect(result.value?.local?.[0]?.rows).toEqual([]);
     expect(result.value?.local?.[0]?.problems).toContainEqual({ path, reason: 'Cannot read SKILL.md' });
   } finally { spy.mockRestore(); }
 });

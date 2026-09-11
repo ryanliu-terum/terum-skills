@@ -18,12 +18,12 @@ it('reads one recorded status hello for concurrent feature/capability requests, 
 it('caches the last hello from any verb, including failed runs, without an extra status',async()=>{
  let enabled=false;
  const f=fakeBridge((args,emit)=>{emit({kind:'stdout',line:JSON.stringify({t:'hello',protocol:1,verbs:[],features:Object.fromEntries(FEATURE_KEYS.map(key=>[key,enabled]))})});emit({kind:'stdout',line:JSON.stringify({t:'result',verb:args[0],ok:false,error:'declined'})});});
- const b=createTauriBackend(f.bridge);await b.connect({}).done;
+ const b=createTauriBackend(f.bridge);await b.sync({}).done;
  expect(Object.values(await b.features())).toEqual(FEATURE_KEYS.map(()=>false));
  enabled=true;await b.sync({}).done;
  expect(Object.values(await b.features())).toEqual(FEATURE_KEYS.map(()=>true));
  expect(await b.capabilities()).toMatchObject({disablePerMachine:true,perCaseEvalTables:true,inboxEventLog:false,offtargetKind:false,machineRegistry:false});
- expect(f.spawns.map(s=>s.args)).toEqual([['connect'],['sync'],['sync','--auto','--fresh-ms','600000']]);
+ expect(f.spawns.map(s=>s.args)).toEqual([['sync'],['sync'],['sync']]);
  expect(f.spawns.filter(s=>s.args[0]==='status')).toHaveLength(0);
 });
 it('falls back to false when hello is missing, without repeatedly spawning status',async()=>{

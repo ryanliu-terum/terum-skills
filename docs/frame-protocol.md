@@ -32,7 +32,7 @@ Closing stdin fails pending questions closed; it does not invoke the bin’s can
 ## Rules a shell must follow
 
 1. **The `gh auth login` offer never arrives over frames.** When `gh` is installed but logged out, the CLI in frame mode prints `GitHub CLI is installed but logged out. Run \`gh auth login\` in a terminal, then try again.` instead of asking (it would otherwise hand its stdio to `gh`, which here means the frame pipes). Likewise `setup` never asks the desktop-app opt-in question over frames. If a shell ever does see that confirm, the CLI is older than 0.1.6: answer `false`.
-2. **Never use `sync --hook` over frames.** Its stdout is the Claude Code reload directive, not frames; the CLI refuses it with a `result` frame and exit 1. Call plain `sync` for an interactive workflow, or `sync --auto --fresh-ms 600000` for background synchronization.
+2. **Never use `sync --hook` over frames.** Its stdout is the Claude Code reload directive, not frames; the CLI refuses it with a `result` frame and exit 1. Call plain `sync` for both foreground and background use: it fetches and changes nothing on this machine (see `f-sync`).
 3. **Never ask the CLI for `--help` or `--version` in frame mode.** Commander prints those as text.
 4. **`cwd` is advisory; every write names its destination.** `install` asks `Install to` (or takes `--into`), `sync` refreshes every registered checkout from any cwd, `uninstall-skill` takes `--from`.
 5. **`uninstall`: the consent inventory is the confirm's detail.** Render `ask.detail` verbatim in the danger dialog; answer false to cancel. Its result includes cleanup outcomes, `kept`, `record`, and CLI-generated `advice`.
@@ -116,14 +116,12 @@ $ printf '' | terum-skills --frames status
 {"t":"result","verb":"status","ok":true,"exitCode":0,"value":{"version":"0.1.5","teams":[]}}
 ```
 
-A `connect` that asks:
+An `install` whose tool grants are declined:
 
 ```
-> {"t":"ask","id":"q1","kind":"select","question":"Which skill?","choices":["diagnose (global)","tdd (project)"]}
-< {"t":"answer","id":"q1","value":2}
-> {"t":"ask","id":"q2","kind":"confirm","question":"Connect tdd to team terum? Adds license, id and author to its SKILL.md."}
-< {"t":"answer","id":"q2","value":false}
-> {"t":"result","verb":"connect","ok":false,"exitCode":1,"error":"Connect was declined.","declined":true}
+> {"t":"ask","id":"q1","kind":"confirm","question":"Approve these tools for tdd?"}
+< {"t":"answer","id":"q1","value":false}
+> {"t":"result","verb":"install","ok":false,"exitCode":1,"error":"Install was declined.","declined":true}
 ```
 
 A second-team binding refused before any side effect:
@@ -136,7 +134,7 @@ A second-team binding refused before any side effect:
 
 Protocol stays 1. `hello.features.localIdentity` advertises the additive `ls --local` identity fields: every row and `notOffered` entry carries `skillId` (UUID or null), and every row carries independent `placed` and `connected` booleans. The app declares these keys optional while keeping local rows strict, so older CLIs remain readable; presence joins require the feature. `ls member` adds `member.installed` records (`id`, `scope`, `since`), and `connect` may return `adopted: true` after consent to record an existing identity. These are additive result fields. `ls --local` additionally carries `remote` on every section (`{url, slug}` or `null`, where `slug` is owner/repo on GitHub and null on every other host); the app declares it optional so an older CLI reads as "not connected".
 
-`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `checkouts`, `projects`, `refresh`, `discover`, `appUpdate`, `autoSync`, and `serve`. `autoSync` advertises non-interactive `sync --auto`, its `--fresh-ms` option, progress frames, and phase timings. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh, and only when `status --permissions` is passed (null when the flag is absent, when gh is absent, or when the lookup fails or times out). `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `projects` is true and means the `project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from registering a local checkout folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs. `discover` is true and means the `checkout discover` verb exists and `setup` offers to look for skill folders on this machine; a shell whose CLI reports it false hides the "find skills" control. `liftOnCards` is true and means `ls` carries the per-skill `receipt` limb described below, so a shell may show a skill's net lift on its card; a shell whose CLI reports it false shows the verdict-free "—" card instead. Lift on a card must be rendered with its receipt's provenance (`model`, `k`, `cc_version`, `runner_handle`, `timestamp`) reachable from the same element, and no skill list may be sorted or ranked by any receipt number.
+`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `checkouts`, `projects`, `refresh`, `discover`, `appUpdate`, and `serve`. `refresh` advertises that `sync` is fetch-only, so a shell may call it in the background. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh, and only when `status --permissions` is passed (null when the flag is absent, when gh is absent, or when the lookup fails or times out). `checkouts` is true and means the `checkout add`, `checkout remove`, and `checkout list` verbs and the `registered`/`detected` section fields exist. `projects` is true and means the `project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from registering a local checkout folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs. `discover` is true and means the `checkout discover` verb exists and `setup` offers to look for skill folders on this machine; a shell whose CLI reports it false hides the "find skills" control. `liftOnCards` is true and means `ls` carries the per-skill `receipt` limb described below, so a shell may show a skill's net lift on its card; a shell whose CLI reports it false shows the verdict-free "—" card instead. Lift on a card must be rendered with its receipt's provenance (`model`, `k`, `cc_version`, `runner_handle`, `timestamp`) reachable from the same element, and no skill list may be sorted or ranked by any receipt number.
 
 `appUpdate` is true and means the `app-update` verb exists: a shell may check for, download and install a newer desktop app. A CLI that omits the key cannot, and a shell must render the honest read-only state instead of trying.
 
@@ -294,42 +292,27 @@ a competing drain reports that another drain is already running. Buffered failur
 line; completion observers cannot change a committed result. Decorated Welcome has no separate header,
 and selects without defaults omit the Enter hint. Mock and real eval choices both default to Skip;
 the overnight replay explicitly chooses Overnight. Radio descriptions are associated for assistive technology.
-### f-auto-sync
-`sync --auto --frames` never asks questions or prints ordinary notices; consent-dependent work is
-returned in `deferred` for the Inbox. `notices` and team outcomes retain their existing meaning.
-`--fresh-ms <n>` accepts a non-negative safe integer and requires `--auto`; default 0 always runs.
-Choose a value larger than the caller's trigger interval: equal windows expire before the next
-trigger, so a caller throttled to 600000 ms needs a freshness window greater than 600000 ms to skip.
-In `teams`, fresh skips report `state: "skipped", reason: "fresh"`; swept teams retain their
-`complete` or `incomplete` state and add `swept: true`, including sweeps that leave deferred work.
-`--auto` cannot be combined with `--hook` or `--prune`. Automatic runs disable Git terminal prompts
-and use the hook's short lock budget, but do not use its one-hour throttle.
-Each attempted team emits a `progress` frame for `fetch`, `place`, `share`, and `orphans` as those
-phases begin. `step` is `<team>: <phase>`; unchanged phases append `: skipped (unchanged)`.
-The result adds `timings: { team, phase, ms }[]`, measured with a monotonic clock. A freshness or
-lock skip has no phases; a failed fetch has only its fetch timing. Team results stay in config order.
-Fetches run with concurrency at most four; teams sharing a URL transfer the fetched refs locally
-instead of fetching that remote again in phase A. Subsequent `safeWrite` operations retain their
-own fetch/retry protection. Placement and ledger writes stay sequential.
-Successful teams write JSON `{head, at}` stamps; freshness readers still use mtime. Empty and ISO
-legacy stamps remain valid for freshness but cannot establish an unchanged HEAD. Automatic and hook
-runs skip placement fingerprinting when HEAD still matches the stamp after local sharing and eligible
-ledger placements (and their SKILL.md files) exist, provided no pending intent remains. Sharing local
-sources, restoring missing ledger entries, and orphan checks always run: their inputs can change
-without a remote commit. Sharing precedes placement reconciliation so connected edits reach placed copies in the
-same run. Shared and orphan ledgers are each scanned once; timings accumulate actual per-team work.
-Stamps record the final HEAD, including this run’s pushes. Manual sync always reconciles.
-Pending intent is replayed for every fetched team before auto-share and the top-level library-size
-pass, preserving the count's observation point from interactive sync. Placement timings include both
-pending replay and later placement reconciliation, with one progress frame when placement first begins.
-Intent arriving after replay remains pending and withholds the team's stamp for a later run.
-The top-level library-size pass also always runs before shared reconciliation. Its own count-only
-commit directly atop the fetched HEAD does not invalidate unchanged placements; any intervening
-commit still requires full reconciliation. Pending replay rechecks the live queue so matching intents
-already completed by an earlier replay cannot place the same destination twice.
-Teddy ratified launch/focus automatic sync on 2026-09-10, overriding the desktop's on-demand-only
-rule. The app runs at most once per ten minutes, single-flight, with no polling; a workflow already
-running skips that focus trigger; an unstarted launch sync retries when the workflow settles. The
-ten-minute cooldown begins at completion; a native relaunch bypasses both the policy and stamp gates.
-Manual sync waits for an automatic sync already in flight. Failed automatic outcomes retain CLI
-notices beside their first error line. Cache-notification failures never change the sync outcome. Older CLIs retain the read-only launch/focus refresh policy.
+### f-sync
+`sync` fetches each configured team clone and hard-resets it to `origin/main`, one team at a time,
+under the clone lock. **Nothing on this machine is changed by it: no placement, no upload, no edit to
+a local skill.** It never repairs and never re-clones — a clone that is missing or foreign is reported
+as `no-clone` and skipped — because it runs unattended.
+
+The result is `{ changed, teams, notices }`. Each attempted team reports `team`, its own `changed`,
+the `head` it ended on (or null when HEAD could not be read), a
+`state` of `refreshed` | `busy` | `unreachable` | `no-clone` | `error`, and a `detail` line for any
+state other than `refreshed`. Top-level `changed` is true when any team moved; a tracked tree that was
+dirty and got reset counts as moved, because the read verbs now see something different.
+
+A successful fetch writes a JSON `{head, at}` stamp, which means *this clone was fetched at this time*
+— never *these skills were reconciled*. A team whose HEAD could not be read is deliberately left
+unstamped so the next run retries it. Empty and ISO legacy stamps remain valid for freshness but
+cannot establish an unchanged HEAD. A fetch that outruns the deadline is killed, so a background
+caller never wedges, and Git terminal prompts are disabled for the whole run.
+
+`--hook` is the session-start entry and must never be driven over frames (rule 2). It is also the one
+carve-out from "nothing on this machine is changed": it may replace Terum's own bundled
+`/terum-skills` manual when that copy is outdated, and nothing else.
+
+Work recorded in `pending` is drained by re-running the matching `install` or `uninstall-skill`, never
+by `sync`.

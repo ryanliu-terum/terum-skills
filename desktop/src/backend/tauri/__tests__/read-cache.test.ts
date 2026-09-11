@@ -16,11 +16,10 @@ function frames(args: readonly string[]) {
   const mutations: Record<string, unknown> = {
     install: [{ id: 'deploy-check', team: 'acme' }],
     'uninstall-skill': [{ id: 'deploy-check', team: 'acme', removed: 1 }],
-    connect: { id: 'deploy-check', name: 'deploy-check' },
     profile: { handle: 'teddy', changed: ['display_name'] },
     publish: { name: 'deploy-check', branch: null, prUrl: null },
-    sync: { placed: 1, deferred: [], notices: [], changed: true, teams: [] },
-    eval: { name: 'deploy-check', runDir: '/runs/1', executionStatus: 'complete', commit: null },
+    sync: { notices: [], changed: true, teams: [] },
+    eval: { name: 'deploy-check', runDir: '/runs/1', executionStatus: 'complete' },
     setup: { role: 'joiner', team: 'acme' },
     team: { team: 'acme' },
     uninstall: { teams: ['acme'], removedPlacements: 1, hookRemoved: true, wrapperRemoved: true, configRemoved: true, kept: [], record: '/backups/1', advice: [] },
@@ -173,11 +172,10 @@ describe('mutation write-family audit', () => {
   const cases: { verb: string; run: (backend: Backend) => Run<unknown>; sources: ChangeSource[] }[] = [
     { verb: 'install', run: backend => backend.install({ ref: 'deploy-check' }), sources: ['config', 'placed', 'clone'] },
     { verb: 'uninstall-skill', run: backend => backend.uninstallSkill({ ref: 'deploy-check' }), sources: ['config', 'placed', 'clone'] },
-    { verb: 'connect', run: backend => backend.connect({ path: '/work/deploy-check' }), sources: ['config', 'clone', 'placed'] },
     { verb: 'profile', run: backend => backend.profile({ name: 'New name' }), sources: ['config', 'clone'] },
     { verb: 'publish', run: backend => backend.publish({ ref: 'deploy-check' }), sources: ['config', 'clone'] },
-    { verb: 'sync', run: backend => backend.sync({}), sources: ['config', 'clone', 'placed', 'stamp'] },
-    { verb: 'eval', run: backend => backend.eval({ ref: 'deploy-check', commit: true }), sources: ['config', 'clone', 'placed'] },
+    { verb: 'sync', run: backend => backend.sync({}), sources: ['marketplace', 'stamp'] },
+    { verb: 'eval', run: backend => backend.eval({ ref: 'deploy-check' }), sources: ['config', 'placed'] },
   ];
   it.each(cases)('$verb notifies every family its CLI can write', async ({ run, sources }) => {
     const f = bridge(); const backend = createTauriBackend(f.bridge); const listener = vi.fn();
@@ -206,13 +204,3 @@ describe('mutation write-family audit', () => {
   });
 });
 
-
-it('automatic sync broadcasts config changes alongside clone, placement and stamp changes', async () => {
-  const f = bridge({ mutate: frame => {
-    if (frame.t === 'hello') (frame.features as Record<string, unknown>).autoSync = true;
-  } });
-  const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
-  await backend.status();
-  await vi.waitFor(() => expect(listener.mock.calls.map(([source]) => source)).toEqual(['config', 'clone', 'placed', 'stamp']));
-  expect(argv(f).filter(value => value.startsWith('sync '))).toEqual(['sync --auto --fresh-ms 600000']);
-});

@@ -111,10 +111,10 @@ describe('cliRun — a CLI process as a seam Run<T>', () => {
   });
 
   it('a failing result frame settles done with the CLI error and ends the frames with ok:false', async () => {
-    const { bridge } = fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'result', verb: 'connect', ok: false, exitCode: 1, error: 'Connect was declined.', declined: true }) }); emit({ kind: 'exit', code: 1 }); });
-    const run = cliRun(bridge, Promise.resolve(STATE), ['connect'], { map: (v) => v });
-    expect(await collect(run.frames)).toEqual([{ t: 'result', ok: false, error: 'Connect was declined.', declined: true }]);
-    expect(await run.done).toEqual({ ok: false, error: 'Connect was declined.', cancelled: true });
+    const { bridge } = fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'result', verb: 'publish', ok: false, exitCode: 1, error: 'Publish was declined.', declined: true }) }); emit({ kind: 'exit', code: 1 }); });
+    const run = cliRun(bridge, Promise.resolve(STATE), ['publish'], { map: (v) => v });
+    expect(await collect(run.frames)).toEqual([{ t: 'result', ok: false, error: 'Publish was declined.', declined: true }]);
+    expect(await run.done).toEqual({ ok: false, error: 'Publish was declined.', cancelled: true });
   });
 
   it('exit without a result is a failure that quotes the last stderr lines', async () => {
@@ -256,10 +256,10 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
   const ok = (verb: string, value: unknown) => (_a: readonly string[], emit: (e: LineEvent) => void) => { emit({ kind: 'stdout', line: line({ t: 'result', verb, ok: true, exitCode: 0, value }) }); emit({ kind: 'exit', code: 0 }); };
   it('capabilities: mac-overlay on macOS, every flagged gap false, editor and clipboard true', async () => {
     const backend = createTauriBackend(fakeBridge(ok('status', {})).bridge);
-    expect(await backend.capabilities()).toEqual({ appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: 'mac-overlay', disablePerMachine: false, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: false, evalCommitChoice: false, openInEditor: true, clipboard: true });
+    expect(await backend.capabilities()).toEqual({ appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: 'mac-overlay', disablePerMachine: false, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: false, openInEditor: true, clipboard: true });
   });
   it.each(['missing', 'malformed'] as const)('retries a %s state read on the next run, then memoises success', async (kind) => {
-    const f = fakeBridge(ok('sync', { placed: 0, deferred: [], notices: [], changed: true, teams: [] }));
+    const f = fakeBridge(ok('sync', { notices: [], changed: true, teams: [] }));
     const read = vi.spyOn(f.bridge, 'readAppState');
     if (kind === 'missing') read.mockResolvedValueOnce(null);
     else read.mockRejectedValueOnce(new Error(`${NO_STATE} app.json could not be parsed: truncated`));
@@ -272,7 +272,7 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     expect(f.spawns).toHaveLength(2);
   });
   it('shares concurrent state reads and exposes the target without consuming it', async () => {
-    const f = fakeBridge(ok('sync', { placed: 0, deferred: [], notices: [], changed: true, teams: [] }), { ...STATE, target: 'acme/team' });
+    const f = fakeBridge(ok('sync', { notices: [], changed: true, teams: [] }), { ...STATE, target: 'acme/team' });
     const read = vi.spyOn(f.bridge, 'readAppState');
     const backend = createTauriBackend(f.bridge);
     const [first, second, run] = await Promise.all([backend.launchContext(), backend.launchContext(), backend.sync({}).done]);
@@ -296,18 +296,18 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     await backend.install({ ref: '', kind: 'project', project: 'ssm' }).done;
     expect(f.spawns.map((s) => s.args)).toEqual([['ls','--local'], ['install', '--force', '--into', '/Projects/SSM', '--', 'deploy-check'], ['install', '--into', 'global', '--', 'member', 'ryan'], ['install', '--into', 'global', '--', 'project', 'ssm']]);
   });
-  it('team, sync, connect, validate, search argv; sync never passes --hook', async () => {
-    const f = fakeBridge(ok('x', { team: 't', placed: 2, deferred: [], notices: [], changed: true, teams: [], id: 'a', name: 'a', findings: 0, warnings: 1 }));
+  it('team, sync, and prune argv; sync never passes --hook', async () => {
+    const f = fakeBridge(ok('x', { team: 't', notices: [], changed: true, teams: [], id: 'a', name: 'a', findings: 0, warnings: 1 }));
     const backend = createTauriBackend(f.bridge);
     await backend.team({ kind: 'create', name: 'terum', remote: 'git@x:y.git' }).done;
     await backend.team({ kind: 'join', remote: 'o/r', name: 'local' }).done;
     await backend.team({ kind: 'leave', name: 'terum' }).done;
     await backend.team({ kind: 'remove', handle: 'bob', team: 'terum' }).done;
-    await backend.sync({ prune: true, hook: true }).done;
-    await backend.connect({ path: '~/.claude/skills/x', team: 'terum', allowPrivileged: true }).done;
+    await backend.sync({}).done;
+    await backend.prune().done;
     expect(f.spawns.map((s) => s.args)).toEqual([
       ['team', 'create', '--remote', 'git@x:y.git', '--', 'terum'], ['team', 'join', '--as', 'local', '--', 'o/r'], ['team', 'leave', '--', 'terum'], ['team', 'remove', '--team', 'terum', '--', 'bob'],
-      ['sync', '--prune'], ['connect', '--team', 'terum', '--allow-privileged', '--', '/Users/teddy/.claude/skills/x'],
+      ['sync'], ['prune'],
     ]);
   });
   it('search maps CLI hits to seam hits; read models the CLI lacks fail naming GAPS.md; a read that asks is refused', async () => {
@@ -337,17 +337,17 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     expect(f.spawns[0]?.args).toEqual(['uninstall-skill', '--', 'member', 'seed']);
   });
   it('subscribe is notified after a successful run and not after a failure', async () => {
-    const f = fakeBridge(ok('sync', { placed: 1, deferred: [], notices: [], changed: true, teams: [] }));
+    const f = fakeBridge(ok('sync', { notices: [], changed: true, teams: [] }));
     const backend = createTauriBackend(f.bridge);
     const seen: string[] = [];
     const off = backend.subscribe((source) => seen.push(source));
     await backend.sync({}).done;
-    // sync writes the config ledgers too, so 'config' joins the three it always broadcast.
-    expect(seen).toEqual(['config', 'clone', 'placed', 'stamp']);
+    // A fetch-only sync changes nothing on this machine: only the team clone the marketplace reads and the fetch stamp.
+    expect(seen).toEqual(['marketplace', 'stamp']);
     off();
     await backend.sync({}).done;
-    // Unsubscribed: the second run adds nothing, so the count is still the first run's four.
-    expect(seen).toHaveLength(4);
+    // Unsubscribed: the second run adds nothing, so the count is still the first run's two.
+    expect(seen).toHaveLength(2);
   });
 });
 
@@ -417,7 +417,7 @@ it.each([true, false, undefined])('maps only a typed wire decline into both seam
 });
 
 it('refreshes A to B, including the environment used by subsequent CLI runs', async () => {
- const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{placed:0,deferred:[],notices:[],changed:true,teams:[]}})}));
+ const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{notices:[],changed:true,teams:[]}})}));
  const b=createTauriBackend(f.bridge), spawn=vi.spyOn(f.bridge,'spawn');
  expect(await b.launchContext()).toEqual({writtenAt:STATE.writtenAt});
  const next={...STATE,writtenAt:'B',target:'org/team',intent:'setup' as const,node:'/new/node',entry:'/new/cli',path:'/new/path'};

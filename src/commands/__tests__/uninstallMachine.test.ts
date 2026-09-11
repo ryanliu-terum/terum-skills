@@ -130,30 +130,7 @@ describe('machine uninstall', () => {
     expect(io.lines).not.toContain(complete);
   });
 
-  it('preserves an authoring source equal to a placement and rescues a dirty clone', async () => {
-    const { store, hook, placements } = await prepared(); const path = placements[0]!;
-    await store.update((c) => { c.shared.sample = { team: 'team', source: path }; });
-    await writeFile(join(store.teamClone('team'), 'untracked.txt'), 'local work');
-    const io = new ScriptedPrompter([], [true]); const result = await run({ config: store, hook }, io);
-    expect(result.ok).toBe(true); await expect(access(path)).resolves.toBeUndefined(); expect((await store.read()).placements).toEqual({});
-    expect(io.details['Remove terum-skills from this machine?']).toContain(`Connected-skill sources stay where they are: team: ${path}`);
-    expect(io.lines).toContain(`${path} is also the authoring source of team; left in place.`);
-    if (!result.ok) throw new Error(result.error);
-    const destination = result.value.kept.find((item) => item.endsWith('teams-team'))!;
-    expect(await readFile(join(destination, 'untracked.txt'), 'utf8')).toBe('local work');
-    expect(io.lines).toContain(`Local clone ${store.teamClone('team')} has uncommitted or unpushed work; moved to ${destination}.`);
-  });
 
-  it('protects a source shared with one team that is a placement of another, whichever team goes first', async () => {
-    const { store, hook, placements } = await prepared(['team', 'other']);
-    // `team` is torn down first and its shared record with it; `other`'s placement at that path must still count as an authoring source.
-    await store.update((c) => { c.shared.sample = { team: 'team', source: placements[1]! }; });
-    const io = new ScriptedPrompter([], [true]); const result = await run({ config: store, hook }, io);
-    expect(result.ok).toBe(true);
-    await expect(access(join(placements[1]!, 'SKILL.md'))).resolves.toBeUndefined(); await gone(placements[0]!);
-    expect((await store.read()).placements).toEqual({});
-    expect(io.lines).toContain(`${placements[1]} is also the authoring source of other; left in place.`);
-  });
 
   it('refuses malformed settings before confirming or creating a record', async () => {
     const { store, hook } = await prepared(); await writeFile(hook.settingsFile, '{');
@@ -207,15 +184,6 @@ describe('machine uninstall', () => {
     expect(io.lines.slice(-2)).toEqual(['This copy of terum-skills runs from an unknown location.', 'Remove it with whatever put it there.']);
   });
 
-  it.each([undefined, 'bare'] as const)('keeps config when orphaned shared state remains (form=%s)', async (form) => {
-    const { root, store, hook } = await minimal(); const source = join(root, 'source'); await mkdir(source);
-    await store.update((c) => { c.shared.sample = { source, team: 'gone' }; });
-    const io = new ScriptedPrompter([], [true]);
-    const result = await run({ config: store, hook, form }, io);
-      expect(result.ok ? '' : result.error).toContain(`${form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest'} uninstall`);
-      expect(result).toMatchObject({ ok: false, error: expect.stringContaining('still configured — connected: 1') });
-    await expect(access(source)).resolves.toBeUndefined(); expect((await store.read()).shared.sample).toBeDefined(); expect(io.lines).not.toContain(complete);
-  });
 });
 
 

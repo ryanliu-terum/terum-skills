@@ -11,7 +11,7 @@ async function skillAt(root: string, name = 'sample') {
 }
 async function fixture() {
   const home = await temporaryDirectory();
-  const options: DiscoverOptions = { under: [home], home, checkouts: [], stateRoot: join(home, '.terum', 'skills'), config: { shared: {}, placements: {} } };
+  const options: DiscoverOptions = { under: [home], home, checkouts: [], stateRoot: join(home, '.terum', 'skills'), config: { placements: {} } };
   return { home, options, scan: (extra: Partial<DiscoverOptions> = {}) => discoverSkillRoots({ ...options, ...extra }) };
 }
 const cannotChmod = process.platform === 'win32' || process.getuid?.() === 0;

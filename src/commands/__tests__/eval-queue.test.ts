@@ -9,7 +9,7 @@ import { measuredReceipt } from './pending-eval-fixtures.js';
 import { runQueue, type EvalArgs, type EvalResult } from '../eval.js';
 
 const item = (skill = 'alpha', window: EvalQueueItem['window'] = 'overnight'): EvalQueueItem => ({ team: 'team', skill, version: 'a'.repeat(40), requestedAt: '2026-09-10T00:00:00Z', window });
-const result: EvalResult = { team: 'team', id: 'id', name: 'alpha', runDir: '/runs/alpha', ccVersion: 'test', executionStatus: 'complete', commit: { ok: true, receiptPath: 'evals/receipt.json' } };
+const result: EvalResult = { team: 'team', id: 'id', name: 'alpha', runDir: '/runs/alpha', ccVersion: 'test', executionStatus: 'complete' };
 async function fixture() { const config = createConfigStore(await temporaryDirectory()); return { config, io: new ScriptedPrompter() }; }
 it('enqueues uniquely by team, skill and version and writes private atomic JSON', async () => {
   const { config } = await fixture();
@@ -27,11 +27,11 @@ it('list is empty before any write and exposes items and errors without probing 
   expect(await runQueue({ config, queueList: true }, io)).toEqual(success({ items: [{ ...item(), lastError: 'not signed in' }] }));
   expect(io.lines.at(-1)).toContain('team/alpha@'); expect(io.lines.at(-1)).toContain('not signed in');
 });
-it('drains with pinned versions, commit intent, and one shared probe', async () => {
+it('drains with pinned versions and one shared probe', async () => {
   const { config, io } = await fixture(); await enqueueEvals(config.root, [item(), item('beta')]);
   const preflight = vi.fn(async () => success({ ccVersion: 'test' }));
   const evaluate = vi.fn(async (args: EvalArgs) => {
-    expect(args.lockWaitMs).toBe(300_000); expect(args.expectedVersion).toBe(item().version); expect(args.commit).toBe(true); expect(args.team).toBe('team');
+    expect(args.lockWaitMs).toBe(300_000); expect(args.expectedVersion).toBe(item().version); expect(args.team).toBe('team');
     expect(await args.preflight?.()).toEqual(success({ ccVersion: 'test' }));
     await Promise.resolve(); return success(result);
   });
@@ -49,7 +49,7 @@ it.each(['declined', 'thrown'] as const)('keeps an item after %s evaluation', as
   const { config, io } = await fixture(); await enqueueEvals(config.root, [item()]);
   const evaluate = async () => {
     if (mode === 'thrown') throw new Error('interrupted');
-    return success({ ...result, executionStatus: 'complete' as const, commit: mode === 'declined' ? null : result.commit });
+    return mode === 'declined' ? failure('evaluation declined') : success({ ...result, executionStatus: 'complete' as const });
   };
   expect(await runQueue({ config, drain: true, evaluate }, io)).toMatchObject({ ok: false, value: { completed: 0 } });
   expect((await readEvalQueue(config.root)).items[0]?.lastError).toBeTruthy();
@@ -84,7 +84,7 @@ it('fails closed on malformed queue state and invalid items', async () => {
 });
 it.each([
   {}, { drain: true, queueList: true }, { max: 1 }, { window: 'overnight' }, { drain: true, max: 0 }, { drain: true, max: 1.5 },
-  { drain: true, max: Infinity }, { drain: true, window: 'later' }, { dequeue: 'alpha' }, { drain: true, ref: 'alpha' }, { drain: true, working: true },
+  { drain: true, max: Infinity }, { drain: true, window: 'later' }, { dequeue: 'alpha' }, { drain: true, ref: 'alpha' },
 ])('rejects invalid queue options %j', async args => {
   const { config, io } = await fixture(); expect(await runQueue({ config, ...args }, io)).toMatchObject({ ok: false });
 });
@@ -110,10 +110,10 @@ it.each([undefined,2])('drains at the requested parallelism %s (default four)',a
  expect(await running).toMatchObject({ok:true,value:{completed:6,items:[]}});expect(peak).toBe(width);
 });
 
-it.each(['partial','failed'] as const)('removes a committed %s receipt and never bills it on the next drain',async executionStatus=>{
+it.each(['partial','failed'] as const)('removes a completed %s eval and never bills it on the next drain',async executionStatus=>{
  const {config,io}=await fixture();await enqueueEvals(config.root,[item()]);const evaluate=vi.fn(async()=>success({...result,executionStatus}));
  expect(await runQueue({config,drain:true,evaluate},io)).toMatchObject({ok:true,value:{completed:1,items:[]}});
- expect(io.lines).toContain(`Receipt committed with ${executionStatus} results; this item will not be evaluated again automatically.`);
+ expect(io.lines).toContain(`Eval completed with ${executionStatus} results.`);
  expect(await runQueue({config,drain:true,evaluate},io)).toMatchObject({ok:true,value:{attempted:0,completed:0,items:[]}});expect(evaluate).toHaveBeenCalledTimes(1);expect(io.lines.at(-1)).toBe('No queued evals.');
 });
 
