@@ -10,7 +10,7 @@ import { acquireTeamLock, lockPath, stampIsFresh, stampPath, readStamp, writeSta
 import { inspect, lockTarget, place, quarantineDrift, remove, snapshotIfPresent } from '../lib/placer.js';
 import { NonInteractivePrompter, Prompter, PromptClosedError } from '../lib/prompt.js';
 import { checkoutPath, writableCheckout } from '../lib/checkouts.js';
-import { librarySize } from '../lib/local-skills.js';
+import { createLibraryScan, librarySize } from '../lib/local-skills.js';
 import { AGENT_PATHS, checkoutRootOf } from '../lib/placer/agent-paths.js';
 import { failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
@@ -26,7 +26,10 @@ import { uninstallOne } from './uninstall.js';
 
 export interface SyncArgs extends WithForm {
   launch?: Launch; noUpdateCheck?: boolean; probe?: ProbePolicy; upstream?: string; state?: ReleaseStateStore;
-  hook?: boolean; auto?: boolean; freshMs?: number; prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string; home?: string;
+  hook?: boolean; auto?: boolean;
+  /** --fresh-ms must exceed the caller's trigger interval: equal windows expire before its next run. */
+  freshMs?: number;
+  prune?: boolean; config?: ConfigStore; runner?: Runner; cwd?: string; home?: string;
   /** Test knob: the clone lock's stale window for refreshClone. */
   lockStale?: number;
   /** Test knob: the clone lock's wait budget. Production takes it from the Prompter (teamRepo lockWait). */
@@ -37,8 +40,8 @@ export interface SyncArgs extends WithForm {
 export interface PlacementCounts { placed: number; updated: number; renamed: number; removed: number; unchanged: number; adopted: number; declined: number; }
 export interface SharedCounts { pushed: number; pulled: number; renamed: number; repaired: number; }
 export type TeamOutcome =
-  | { team: string; state: 'complete'; counts: PlacementCounts; shared: SharedCounts }
-  | { team: string; state: 'incomplete'; counts: PlacementCounts; shared: SharedCounts; review: string[]; blocked: string[]; pendingLeft: number }
+  | { team: string; state: 'complete'; swept: true; counts: PlacementCounts; shared: SharedCounts }
+  | { team: string; state: 'incomplete'; swept: true; counts: PlacementCounts; shared: SharedCounts; review: string[]; blocked: string[]; pendingLeft: number }
   | { team: string; state: 'skipped'; reason: 'unreachable' | 'locked' | 'busy' | 'error' | 'fresh'; detail: string }
   | { team: string; state: 'gone' };
 export interface SyncTiming { team: string; phase: 'fetch' | 'place' | 'share' | 'orphans'; ms: number; }
@@ -301,12 +304,14 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
     // excludes — so nothing ping-pongs in either direction. A refused folder (hygiene, name
     // collision) is reported by name and deferred so the team is not stamped fully synced (the R6
     // rule reconcileShared follows); a pass failure costs its team a notice, never the sync.
-    if ((await store.read()).auto_share !== false) {
+    const libraryConfig = await store.read();
+    const libraryScan = createLibraryScan(home, libraryConfig.checkouts ?? [], store.root);
+    if (libraryConfig.auto_share !== false) {
       for (const [team, binding] of Object.entries(config.teams)) {
         if (!binding.handle || skipped.has(team)) continue;
         const finish = measure(team, 'share');
         try {
-          const outcome = await autoShareRoots({ store, runner, team, home, form: args.form }, childIo);
+          const outcome = await autoShareRoots({ store, runner, team, home, form: args.form, scan: libraryScan }, childIo);
           for (const folder of outcome.skipped) { notice(`Skipped auto-share of ${folder.name} (${folder.root}): ${folder.reason}`); defer(team, folder.name); }
           if (outcome.shared.length) {
             notice(`Auto-shared ${outcome.shared.length} skill(s): ${outcome.shared.map((skill) => skill.name).join(', ')}.`);
@@ -333,7 +338,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
       if (!binding.handle || skipped.has(team)) continue;
       const handle = binding.handle;
       try {
-        counted ??= await librarySize(home, await store.read(), store.root);
+        counted ??= await librarySize(home, await store.read(), store.root, libraryScan);
         const total = counted;
         if (total === null) break; // a root this machine cannot read: keep the last known total everywhere
         if ((await actorPerson(store, team, handle))?.local_skills === total) continue;
@@ -601,13 +606,13 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
       const counts = countPlacement(team);
       const sharedCounts = countShared(team);
       if (incomplete.has(team) || pendingLeft > 0) {
-        teams.push({ team, state: 'incomplete', counts, shared: sharedCounts, review: reviews.get(team) ?? [], blocked: blocks.get(team) ?? [], pendingLeft });
+        teams.push({ team, state: 'incomplete', swept: true, counts, shared: sharedCounts, review: reviews.get(team) ?? [], blocked: blocks.get(team) ?? [], pendingLeft });
         continue;
       }
       const finalHead = await runner.run('git', ['rev-parse', 'HEAD'], { cwd: store.teamClone(team) });
       if (finalHead.code !== 0) throw new Error(finalHead.stderr || 'Could not read HEAD.');
       await writeStamp(store.root, team, { head: finalHead.stdout.trim(), at: new Date((args.now ?? Date.now)()).toISOString() });
-      teams.push({ team, state: 'complete', counts, shared: sharedCounts });
+      teams.push({ team, state: 'complete', swept: true, counts, shared: sharedCounts });
     }
     unreachable.sort((left, right) => Object.keys(config.teams).indexOf(left) - Object.keys(config.teams).indexOf(right));
     if (unreachable.length) {

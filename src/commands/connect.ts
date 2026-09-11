@@ -4,7 +4,7 @@ import { cp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { canonicalLedger, localRootLabel, candidatesOf, localSkillRoots, localSkills, type LocalEntry } from '../lib/local-skills.js';
+import { canonicalLedger, createLibraryScan, localRootLabel, candidatesOf, localSkillRoots, localSkills, type LibraryScan, type LocalEntry } from '../lib/local-skills.js';
 import { assertNotInsideStateRoot, assertSkillDirectory, inspectSkillSource, printable, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
 import { registerCheckout, writableCheckout } from '../lib/checkouts.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
@@ -511,7 +511,7 @@ export interface AutoShareOutcome { shared: ConnectResult[]; skipped: { name: st
  * never blocks the rest — nor does one bad root stop the others. Never prompts, so it runs
  * identically in hook mode.
  */
-export async function autoShareRoots(options: { store: ConfigStore; runner: Runner; team: string; home?: string; form?: InvocationForm }, io: Prompter): Promise<AutoShareOutcome> {
+export async function autoShareRoots(options: { store: ConfigStore; runner: Runner; team: string; home?: string; form?: InvocationForm; scan?: LibraryScan }, io: Prompter): Promise<AutoShareOutcome> {
   const { store, runner, team } = options;
   const outcome: AutoShareOutcome = { shared: [], skipped: [] };
   const config = await store.read();
@@ -522,14 +522,14 @@ export async function autoShareRoots(options: { store: ConfigStore; runner: Runn
   if (!config.email || !config.display_name) return outcome;
   const home = options.home ?? homedir();
   // cwd is left undefined on purpose: only global plus registered checkouts, never a detected repo.
-  const { roots } = await localSkillRoots(home, undefined, config.checkouts);
-  const ledger = await canonicalLedger(config);
+  const scan = options.scan ?? createLibraryScan(home, config.checkouts ?? [], store.root);
+  const roots = await scan.roots();
   let known: Set<string> | undefined;
   for (const root of roots) {
     const label = localRootLabel(root);
     let candidates: LocalEntry[];
     try {
-      const inventory = await localSkills(root.root, config, { scope: root.scope, stateRoot: store.root, ledger });
+      const inventory = await scan.inventory(root, config);
       candidates = candidatesOf(inventory); // privileged folders stay excluded, exactly as from bare connect
     } catch (error) {
       // An unreadable root costs its own notice, never the pass: the other roots still share.

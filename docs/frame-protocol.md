@@ -298,6 +298,10 @@ the overnight replay explicitly chooses Overnight. Radio descriptions are associ
 `sync --auto --frames` never asks questions or prints ordinary notices; consent-dependent work is
 returned in `deferred` for the Inbox. `notices` and team outcomes retain their existing meaning.
 `--fresh-ms <n>` accepts a non-negative safe integer and requires `--auto`; default 0 always runs.
+Choose a value larger than the caller's trigger interval: equal windows expire before the next
+trigger, so a caller throttled to 600000 ms needs a freshness window greater than 600000 ms to skip.
+In `teams`, fresh skips report `state: "skipped", reason: "fresh"`; swept teams retain their
+`complete` or `incomplete` state and add `swept: true`, including sweeps that leave deferred work.
 `--auto` cannot be combined with `--hook` or `--prune`. Automatic runs disable Git terminal prompts
 and use the hook's short lock budget, but do not use its one-hour throttle.
 Each attempted team emits a `progress` frame for `fetch`, `place`, `share`, and `orphans` as those
