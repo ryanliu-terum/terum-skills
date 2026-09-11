@@ -9,7 +9,7 @@ import { Button } from '../../components/ui/Button';
 import { Dialog, DialogDescription, DialogPopup, DialogTitle } from '../../components/ui/Dialog';
 
 type RowState = 'in-project' | 'endorse' | 'share';
-interface Row { name: string; desc: string; path: string | null; where: string; state: RowState }
+interface Row { name: string; desc: string; path: string | null; where: string; state: RowState; otherAuthor: string | null }
 interface Outcome { kind: 'done' | 'opened' | 'failed'; text: string; url?: string }
 const ORDER: Record<RowState, number> = { endorse: 0, share: 1, 'in-project': 2 };
 
@@ -19,7 +19,7 @@ function rowsFrom(local: { root: string; skills: SkillCard[] }[], catalog: Catal
   for (const section of local) for (const skill of section.skills) {
     if (seen.has(skill.name)) continue;
     seen.add(skill.name);
-    rows.push({ name: skill.name, desc: skill.desc, path: skill.path, where: section.root, state: inProject.has(skill.name) ? 'in-project' : inTeam.has(skill.name) ? 'endorse' : 'share' });
+    rows.push({ name: skill.name, desc: skill.desc, path: skill.path, where: section.root, otherAuthor: skill.otherAuthor ?? null, state: inProject.has(skill.name) ? 'in-project' : inTeam.has(skill.name) ? 'endorse' : 'share' });
   }
   return rows.sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.name.localeCompare(b.name));
 }
@@ -50,6 +50,7 @@ export function AddSkillsDialog({ project, catalog, onClose }: { project: Projec
   const shareRows = selectedRows.filter(row => row.state === 'share');
   const counts = { endorse: rows.filter(row => row.state === 'endorse').length, share: rows.filter(row => row.state === 'share').length };
   const error = local.data === undefined && local.isError ? local.error.message : status.data?.ok === false ? status.data.error : null;
+  const credited = shareRows.filter(row => row.otherAuthor !== null);
   const publishQuestion = `Publish ${selectedRows.length} skills to ${catalog.repository ?? 'the team'} (project ${project.key})?`;
 
   function toggle(name: string, checked: boolean) { setSelected(current => { const next = new Set(current); if (checked) next.add(name); else next.delete(name); return next; }); }
@@ -101,6 +102,10 @@ export function AddSkillsDialog({ project, catalog, onClose }: { project: Projec
   {confirmShare ? <Dialog open onOpenChange={open => { if (!open) { working.current = false; setConfirmShare(false); } }}><DialogPopup>
     <DialogTitle>Share {shareRows.length} skills first?</DialogTitle>
     <DialogDescription>{shareRows.map(row => row.path ?? row.name).join(', ')} will be published under your name. Connect edits each local SKILL.md to add a metadata id before these skills can be endorsed.</DialogDescription>
+    {/* Someone else's work is about to be imported under this user's name. The import itself is the
+        team's standing choice (ajay, 2026-09-10: a foreign id uploads as team-owned); saying whose
+        work it is costs nothing and is the difference between a decision and a surprise. */}
+    {credited.length ? <div className="market-picker-credits">{credited.map(row => <Small key={row.name}>{row.name} credits {row.otherAuthor} — connecting imports it under your name.</Small>)}</div> : null}
     <div className="market-dialog-actions"><Button onClick={() => { working.current = false; setConfirmShare(false); }}>Cancel</Button><Button kind="primary" onClick={() => { working.current = true; setConfirmShare(false); void publish(); }}>Share, then add</Button></div>
   </DialogPopup></Dialog> : null}</>;
 }

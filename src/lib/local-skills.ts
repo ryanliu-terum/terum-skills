@@ -15,7 +15,7 @@ export type Inspection =
   | { kind: 'candidate'; description: string; privileged: boolean }
   | { kind: 'rejected'; reason: SourceProblem; detail: string; description?: string }
   | { kind: 'failed'; reason: string };
-export interface LocalEntry { skillId: string | null; name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; placementFingerprint?: string; characters?: number; category: string | null; inspection: Inspection; }
+export interface LocalEntry { skillId: string | null; name: string; path: string; shared: SharedRef[]; placement?: PlacementRef; placementFingerprint?: string; characters?: number; category: string | null; author: string | null; inspection: Inspection; }
 export interface LocalInventory {
   root: string;
   scope: 'global' | 'project';
@@ -130,7 +130,7 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
     const shared = sharedPaths.filter(({ ref, canonical: reference }) => resolve(ref.source) === path || (canonical !== undefined && reference === canonical)).map(({ id, ref }) => ({ id, team: ref.team }));
     const placement = placementPaths.find(({ target, canonical: reference }) => resolve(target) === path || (canonical !== undefined && reference === canonical))?.ref;
     const tracked = shared.length > 0 || placement !== undefined;
-    const entry: LocalEntry = { skillId: null, category: null, name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
+    const entry: LocalEntry = { skillId: null, category: null, author: null, name, path, shared, ...(placement ? { placement: { id: placement.id, team: placement.team, version: placement.version }, placementFingerprint: placement.fingerprint } : {}), inspection: { kind: 'failed', reason: '' } };
     const reject = (reason: SourceProblem, detail: string, description?: string): void => { entry.inspection = { kind: 'rejected', reason, detail, ...(description === undefined ? {} : { description }) }; };
     try {
       const details = await lstat(path);
@@ -161,6 +161,7 @@ export async function localSkills(root: string, config: Pick<Config, 'shared' | 
           entry.characters = raw.length;
           const inspection = inspectSkillSource(raw, tracked ? undefined : name);
           entry.category = inspection.category ?? null;
+          entry.author = inspection.author ?? null;
           if (!inspection.ok) reject(inspection.reason, inspection.detail, inspection.description);
           else {
             const scan = await scanSkillFolder(path);

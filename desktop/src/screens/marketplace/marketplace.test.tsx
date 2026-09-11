@@ -108,6 +108,17 @@ it('hides Add when the CLI reports no project verb', async () => {
   await screen.findByRole('heading', { name: 'Teams / Projects' });
   expect(screen.queryByRole('button', { name: 'Add' })).toBeNull();
 });
+// Must run before the cases that endorse api-docs into ssm: the mock backend keeps its endorsed
+// list for the whole file, and once api-docs is in the project it stops being a share candidate.
+it('names the author a foreign folder credits before importing it under your name', async () => {
+  open('#/marketplace/projects/ssm?dialog=add-skills');
+  const dialog = await screen.findByRole('dialog');
+  const row = (await within(dialog).findAllByRole('listitem')).find(item => item.textContent?.startsWith('api-docs'))!;
+  fireEvent.click(within(row).getByRole('checkbox', { name: 'Select api-docs' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Add 1 skills' }));
+  const ask = await screen.findByRole('dialog', { name: 'Share 1 skills first?' });
+  expect(ask).toHaveTextContent('api-docs credits Mira Chen <mira@example.com> — connecting imports it under your name.');
+});
 it('sorts the Add skills picker into endorse, share and already-in-project', async () => {
   open('#/marketplace/projects/terum?dialog=add-skills');
   const dialog = await screen.findByRole('dialog');

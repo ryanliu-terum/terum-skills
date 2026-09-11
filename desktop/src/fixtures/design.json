@@ -222,6 +222,7 @@
       "project": "local",
       "category": "docs",
       "name": "api-docs",
+      "author": "Mira Chen <mira@example.com>",
       "desc": "Generates endpoint docs from the Zod contracts and keeps the examples in sync with fixtures.",
       "size": "1.6k tokens",
       "installs": "0 installs",

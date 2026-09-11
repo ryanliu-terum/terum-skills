@@ -27,7 +27,7 @@ export interface LsSkill { id: string; name: string; author: string; category: s
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
-export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; description: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string; description: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; description: string | null; category: string | null; characters: number | null; otherAuthor: string | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string; description: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
@@ -144,6 +144,10 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
     ...Object.values(config.shared).map(ref => nearestRepoRoot(dirname(ref.source))),
     ...Object.entries(config.placements).filter(([, ref]) => ref.scope.kind === 'project').map(([path]) => nearestRepoRoot(dirname(path))),
   ])).filter((root): root is string => root !== undefined);
+  // The author line connect would stamp. A folder declaring anyone else is credited on the row so
+  // the Library can say whose work is about to be imported under this user's name — disclosure
+  // only; ajay's 2026-09-10 ruling that a foreign id uploads as team-owned is unchanged.
+  const mine = config.display_name && config.email ? normalizeAuthor(`${config.display_name} <${config.email}>`) : null;
   const discovery = await localSkillRoots(home, cwd, config.checkouts ?? [], extraRoots);
   const inventories = await Promise.all(discovery.roots.map(async (root) => ({ ...root, inventory: await localSkills(root.root, config, { scope: root.scope, stateRoot: store.root, ledger }) })));
   const sections: LocalSection[] = [];
@@ -218,7 +222,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
       const inspection = entry.inspection;
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (connect needs --allow-privileged)' : undefined;
-        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: healths.get(entry)!, description: describedBy(inspection), category: entry.category, characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });
+        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: healths.get(entry)!, description: describedBy(inspection), category: entry.category, characters: entry.characters ?? null, otherAuthor: mine !== null && entry.author !== null && normalizeAuthor(entry.author) !== mine ? entry.author : null, ...(problem === undefined ? {} : { problem }) });
       } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail, description: inspection.description ?? null, category: entry.category, characters: entry.characters ?? null });
       if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
     }
