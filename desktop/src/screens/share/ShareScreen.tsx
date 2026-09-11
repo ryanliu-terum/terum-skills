@@ -62,7 +62,7 @@ export function ShareScreen() {
   {syncAction.popup}</ScreenFrame></Shell>;
 }
 function teamSelectionMessage(teams:TeamStatus[]){return teams.length===0?'No team is configured on this machine.':`Choose a team first: this machine has ${teams.map(team=>team.name).join(' and ')}. terum-skills invites one team at a time.`;}
-function MembersHead(){const features=useFeatures();return <div role="row" className="members-head"><div role="columnheader" className="member-name">Name<Icon name="chevron-down" size={12} stroke="2"/></div>{['Status','Joined','Skills installed','Last seen'].map(label=><div role="columnheader" key={label} style={label==='Last seen'&&!features?.lastSeen?{visibility:'hidden'}:undefined}>{label}</div>)}</div>;}
+function MembersHead(){const features=useFeatures();return <div role="row" className="members-head"><div role="columnheader" className="member-name">Name<Icon name="chevron-down" size={12} stroke="2"/></div>{['Status','Joined','Skills','Last seen'].map(label=><div role="columnheader" key={label} style={label==='Last seen'&&!features?.lastSeen?{visibility:'hidden'}:undefined}>{label}</div>)}</div>;}
 // The identity sub-line: the handle (dropped when it just repeats the display name) and the role, without dangling separators around missing data.
 function sub(m:{name:string;handle:string;role:string|null},memberRole:boolean|undefined){return [m.handle===m.name?'':m.handle,memberRole?m.role:''].filter(Boolean).join(' · ');}
 function MemberRow({member:m,index,error,onRemove}:{member:Member;index:number;error:string|null;onRemove:()=>void}){
@@ -74,8 +74,8 @@ function MemberRow({member:m,index,error,onRemove}:{member:Member;index:number;e
   return <div role="row" className="member-row" data-testid={'member-row-'+index}>
     <div role="cell" className="member-name"><Avatar initials={m.initials} size={28}/><div className="member-identity"><span>{m.name}</span><span>{sub(m,features?.memberRole)}</span></div></div>
     <div role="cell">{features?.roles?status?<span className={'member-role '+status}>{status==='admin'?'Admin':'Member'}</span>:'—':null}<IconButton label="Remove from team" icon="x" size={20} iconSize={14} onClick={onRemove}/>{error&&<span role="alert" className="member-error">{error}</span>}</div>
-    {/* Skills installed is what the member's committed people file records, so '—' means the source carried no count — never 0. */}
-    <div role="cell">{m.joined??'—'}</div><div role="cell">{m.installed===null?'—':m.installed}</div><div key={features?.lastSeen?'seen':'hidden'} role="cell" style={features?.lastSeen?undefined:{visibility:'hidden'}}>{features?.lastSeen?m.lastSeen:'—'}</div>
+    {/* Skills is what that member's machine last reported having, so '—' means nobody has reported one — never 0. */}
+    <div role="cell">{m.joined??'—'}</div><div role="cell">{m.skillsTotal===null?'—':m.skillsTotal}</div><div key={features?.lastSeen?'seen':'hidden'} role="cell" style={features?.lastSeen?undefined:{visibility:'hidden'}}>{features?.lastSeen?m.lastSeen:'—'}</div>
   </div>;
 }
 function InvitedRow({member:m}:{member:NonNullable<Roster['invited']>[number]}){const features=useFeatures();return <div role="row" className="member-row" data-testid="invited-row"><div role="cell" className="member-name"><Avatar initials={m.initials} size={28}/><div className="member-identity"><span>{m.name}</span><span>{[sub(m,features?.memberRole),`invited ${m.invited} by ${m.by}`].filter(Boolean).join(' · ')}</span></div></div><div role="cell">Invited</div><div role="cell">—</div><div role="cell">—</div><div key={features?.lastSeen?'seen':'hidden'} role="cell" style={features?.lastSeen?undefined:{visibility:'hidden'}}>—</div></div>;}

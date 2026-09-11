@@ -238,10 +238,11 @@ const cliStatus = z.object({
    z.object({state:z.literal('foreign'),origin:z.string()}),
    z.object({state:z.literal('incomplete'),reason:z.string(),error:z.string().optional()}),
   ]),readable:z.boolean(),
-  // `joined` (the day the people file first landed in the team repo) and `installed` (distinct skill IDs
-  // that people file records) are nullish-tolerant: a CLI older than this app reports neither, and the
-  // roster then shows '—' rather than a zero it never read.
-  members:z.array(z.object({handle:z.string(),displayName:z.string(),joined:z.string().nullish().transform(v=>v??null),installed:z.number().nullish().transform(v=>v??null),...memberMetadata})),memberCount:z.number().nullable(),unreadableMembers:z.number().nullable(),sharedSkills:z.number().nullable(),unreadableSkills:z.number().nullable(),membership:z.enum(['active','inactive','missing']).nullable(),stale:z.boolean(),
+  // `joined` (the day the people file first landed in the team repo) and `skillsTotal` (how many skills
+  // that member's machine last reported having) are nullish-tolerant: a CLI older than this app reports
+  // neither, and a member who has not synced since the field shipped has no total, so the roster shows
+  // '—' rather than a zero nobody reported.
+  members:z.array(z.object({handle:z.string(),displayName:z.string(),joined:z.string().nullish().transform(v=>v??null),skillsTotal:z.number().nullish().transform(v=>v??null),...memberMetadata})),memberCount:z.number().nullable(),unreadableMembers:z.number().nullable(),sharedSkills:z.number().nullable(),unreadableSkills:z.number().nullable(),membership:z.enum(['active','inactive','missing']).nullable(),stale:z.boolean(),
   pending:z.array(z.object({op:z.enum(['install','uninstall']),id:z.string(),scope:cliScope,version:z.string().nullable(),started:z.string()})),
   syncedAt:z.string().nullable(),policy:z.object({publish:z.enum(['pr','push']),skill_license:z.string()}).nullable(),categories:z.array(z.string()).nullable(),clonePath:z.string().nullable(),joinCommand:z.string().nullable(),joinBlock:z.array(z.string()).nullable(),
  })),
@@ -306,9 +307,9 @@ function newestUpdated(skills: InventorySkill[]): InventorySkill | undefined {
 }
 // `status` is the permission chip: host truth from the CLI's per-member `admin` (gh collaborator permission); 'unknown' when gh could not answer — never a defaulted 'member'.
 // `invited` is null, not []: this CLI reports no invitations, and the screen must not assert "0 invitations".
-// `joined` and `installed` are the CLI's own values (the people file's first commit, and the distinct skill IDs it records); null when it reported neither, which the screen draws as '—'.
+// `joined` and `skillsTotal` are the CLI's own values (the people file's first commit, and the skill total that person's machine last reported); null when it reported neither, which the screen draws as '—'.
 function rosterModel(team: CliStatus['teams'][number]): Roster {
-  const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? null, projects: member.projects ?? [], followers: null, joined: member.joined, installed: member.installed, last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
+  const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? null, projects: member.projects ?? [], followers: null, joined: member.joined, skillsTotal: member.skillsTotal, last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
   return { members, invited: null, member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] };
 }
 function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, placements: LedgerPlacements, people: Person[], features: Pick<Features, 'localIdentity'>, home: string, query?: string): Catalog {

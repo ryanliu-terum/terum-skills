@@ -6,7 +6,7 @@ import { reconcileShared, run } from '../connect.js';
 import { run as sync } from '../sync.js';
 import { run as install } from '../install.js';
 import { createConfigStore } from '../../lib/config.js';
-import { temporaryDirectory, TEAM_JSON, bareTeam, cloneWithIdentity, git, originSha, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, ghOnlyRunner, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { temporaryDirectory, TEAM_JSON, bareTeam, cloneWithIdentity, git, originSha, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, ghOnlyRunner, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { canonicalDigest } from '../../lib/skills.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
@@ -426,6 +426,9 @@ describe('connect (§5.3)', () => {
     expect((await run({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const [id] = Object.keys((await store.read()).shared);
     await pushFromSeed(fixture.seed, 'skills/taken/SKILL.md', '---\nname: taken\ndescription: t\nlicense: UNLICENSED\nmetadata:\n  id: 99999999-9999-4999-8999-999999999999\n  author: Other <other@example.com>\n  terum-category: testing\n---\n');
+    // Already reported: sync's library-size pass has nothing to write, so a moved head below can only
+    // mean the refused rename wrote something it should not have.
+    await pushFromSeed(fixture.seed, 'people/seed.json', JSON.stringify(person('seed', { local_skills: 0 })) + '\n');
     const before = await originSha(fixture.bare);
     const baseline = (await store.read()).shared[id!]!.baseline;
     const shared = await readFile(join(source, 'SKILL.md'), 'utf8');
@@ -651,6 +654,9 @@ async function quarantinedFiles(storeRoot: string, suffix: string): Promise<stri
 async function sharedFixture() {
   const fixture = await bareTeam();
   const store = createConfigStore(join(fixture.root, 'state'));
+  // This machine has already reported its (empty) library, so sync's library-size pass writes nothing
+  // and the head-SHA assertions below keep meaning "the skill copy and baseline did not move".
+  await pushFromSeed(fixture.seed, 'people/seed.json', JSON.stringify(person('seed', { local_skills: 0 })) + '\n');
   await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update((config) => { config.display_name = 'Me'; config.email = 'me@example.com'; config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   const source = join(fixture.root, 'sample'); await mkdir(source);

@@ -1422,6 +1422,10 @@ describe('sync --hook keeps shared-source reconciliation off stdout (§8)', () =
 describe('release maintenance after sync', () => {
   async function releaseFixture(remote = 'https://github.com/acme/skills.git') {
     const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'home', '.terum', 'skills'));
+    // This machine has already reported its (empty) library, so the library-size pass has nothing to
+    // write and the runner below can keep refusing every write verb. Release probing is what these
+    // tests are about; the count has its own tests.
+    await pushFromSeed(fixture.seed, 'people/seed.json', JSON.stringify(person('seed', { local_skills: 0 })) + '\n');
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote, handle: 'seed' }; });
     const { denyingRunner } = await import('../../lib/__tests__/fixtures.js');
@@ -1551,7 +1555,10 @@ describe('Library sync destinations', () => {
     expect(io.lines.filter(line => line.startsWith('Skipped '))).toHaveLength(1);
     expect(io.asked).toEqual([]);
     for (const path of paths) expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toBe('do not touch');
-    expect(await readFile(join(f.clone, 'people', 'seed.json'), 'utf8')).toBe(personBefore);
+    // The people file is untouched apart from this machine's own skill-count self-report, which every
+    // sync records once; installed, declined, role and projects must all read exactly as before.
+    const withoutCount = (raw: string) => { const parsed = JSON.parse(raw) as Record<string, unknown>; delete parsed.local_skills; return JSON.stringify(parsed); };
+    expect(withoutCount(await readFile(join(f.clone, 'people', 'seed.json'), 'utf8'))).toBe(withoutCount(personBefore));
     await expect(access(stampPath(f.store.root, 'team'))).resolves.toBeUndefined();
   });
 
@@ -1590,4 +1597,53 @@ it('forwards allowed-tools decision detail through the endorsed batch child prom
   expect(await run({ config: store, noUpdateCheck: true }, io)).toMatchObject({ ok: true, value: { placed: 1 } });
   expect(io.details['Approve these tools for sample?']).toEqual(['sample requests allowed-tools:', 'Bash(ls)', 'Read(*)']);
   expect(io.lines.join('\n')).not.toContain('sample requests allowed-tools:');
+});
+
+describe('the roster skill count (people/<handle>.json local_skills)', () => {
+  const loose = (name: string, declared = name) => `---\nname: ${declared}\ndescription: a local folder\n---\nbody\n`;
+  async function folder(root: string, name: string, declared?: string) {
+    await mkdir(join(root, name), { recursive: true });
+    await writeFile(join(root, name, 'SKILL.md'), loose(name, declared));
+  }
+  /** The value as the team repository actually holds it, not as this machine believes it. */
+  const recorded = async (bare: string) => (JSON.parse(await git(['show', 'main:people/seed.json'], bare)) as { local_skills?: number }).local_skills;
+
+  it('counts the global root and registered checkouts, writes once, and stays quiet while the library is unchanged', async () => {
+    const f = await configuredSkill();
+    await f.store.update(config => { config.auto_share = false; }); // this test is about the count, not about sharing
+    const home = join(f.fixture.root, 'home');
+    const global = join(home, '.claude', 'skills');
+    await folder(global, 'alpha');
+    await folder(global, 'beta');
+    // A folder this product cannot share is still a skill the person has, so it counts.
+    await folder(global, 'mismatch', 'declared-differently');
+    // A project checkout nobody registered is not part of the answer, even when the sync runs inside it.
+    const outside = await temporaryDirectory();
+    await folder(join(outside, '.claude', 'skills'), 'gamma');
+
+    expect((await run({ config: f.store, home, cwd: outside, noUpdateCheck: true }, new ScriptedPrompter([], [], true))).ok).toBe(true);
+    expect(await recorded(f.fixture.bare)).toBe(3);
+
+    const head = await git(['rev-parse', 'main'], f.fixture.bare);
+    expect((await run({ config: f.store, home, cwd: outside, noUpdateCheck: true }, new ScriptedPrompter([], [], true))).ok).toBe(true);
+    expect(await git(['rev-parse', 'main'], f.fixture.bare)).toBe(head); // an unchanged library costs no commit
+
+    await f.store.update(config => { config.checkouts = [outside]; });
+    expect((await run({ config: f.store, home, noUpdateCheck: true }, new ScriptedPrompter([], [], true))).ok).toBe(true);
+    expect(await recorded(f.fixture.bare)).toBe(4); // registering the checkout brought its folder into the total
+  });
+
+  it('never reports a count this machine could not measure', async () => {
+    const f = await configuredSkill();
+    await f.store.update(config => { config.auto_share = false; });
+    const home = join(f.fixture.root, 'unreadable-home');
+    const global = join(home, '.claude', 'skills');
+    await folder(global, 'alpha');
+    await chmod(global, 0o000);
+    try {
+      expect((await run({ config: f.store, home, noUpdateCheck: true }, new ScriptedPrompter([], [], true))).ok).toBe(true);
+      // Not being able to look is not the same as looking and finding nothing: no value, not 0.
+      expect(await recorded(f.fixture.bare)).toBeUndefined();
+    } finally { await chmod(global, 0o700); }
+  });
 });

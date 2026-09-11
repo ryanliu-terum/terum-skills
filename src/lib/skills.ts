@@ -70,9 +70,9 @@ export async function readPerson(clone: string, handle: string): Promise<Person>
 /**
  * `admin` is host truth (GitHub collaborator permission), joined on the person's github login; null when the lookup was unavailable or the person declares no login.
  * `joined` is the day this person's people file first landed in the team repo (`joinDates`); null when the history was not read or does not carry the file.
- * `installed` counts the distinct skill IDs the person's committed people file records as installed — repo truth about that person, never a claim about the machine reading it.
+ * `skillsTotal` is how many skill folders that person's machine last reported having (`people/<handle>.json` `local_skills`, written by their `sync`): null when they have not synced since it shipped, never 0 for "unknown".
  */
-export interface RosterEntry { handle: string; displayName: string; role: string | null; projects: readonly string[]; admin: boolean | null; joined: string | null; installed: number; }
+export interface RosterEntry { handle: string; displayName: string; role: string | null; projects: readonly string[]; admin: boolean | null; joined: string | null; skillsTotal: number | null; }
 
 /**
  * When each people file first landed in the team repo — the join date read from the repository's own
@@ -114,9 +114,7 @@ export async function readRoster(clone: string, options: { adminLogins?: readonl
       const person = await readPerson(clone, handle);
       if (person.handle !== handle) throw new Error(`Declared handle ${person.handle} does not match filename ${file}.`);
       const github = person.github.trim().toLowerCase();
-      // One skill installed globally and again into a project is one skill, so the count is over distinct IDs.
-      const installed = new Set(person.installed.map((entry) => entry.id)).size;
-      if (!team.archived.includes(handle)) roster.push({ handle, displayName: person.display_name, role: person.role ?? null, projects: person.projects ?? [], admin: adminLogins === null || github === '' ? null : adminLogins.includes(github), joined: options.joined?.get(handle) ?? null, installed });
+      if (!team.archived.includes(handle)) roster.push({ handle, displayName: person.display_name, role: person.role ?? null, projects: person.projects ?? [], admin: adminLogins === null || github === '' ? null : adminLogins.includes(github), joined: options.joined?.get(handle) ?? null, skillsTotal: person.local_skills ?? null });
     } catch (error) { problems.push({ file: `people/${file}`, message: error instanceof Error ? error.message : String(error) }); }
   }
   roster.sort((a, b) => a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0);

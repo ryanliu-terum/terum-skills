@@ -78,11 +78,11 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
  /** Endorsements this session opened, so a project's card reflects what the picker did. */
  const endorsed: {project:string;name:string}[] = [];
  const asProject=(q:{name:string;remote:string|null}):Project=>({name:q.name,key:q.name,ico:'folder',desc:'',skills:0,members:0,remote:q.remote??'—',installed:false,favorites:null,updated:null,path:null,admin:null,evaluated:null,memberHandles:[],memberInitials:[],skillsIn:[]});
- // `installed` is null on the mock: the canvas fixture records who authored a skill and how many installs it
- // has team-wide, but never which skills a given member installed, so there is no honest per-member count to
- // draw. The real adapter reads it from each committed people file; the column shows '—' here until the
- // canvas gains the field.
- const roster=():Roster=>({members:design.ROSTER.map(q=>({...q,...(q.handle===design.ME.handle?profileValues:{}),installed:null,lastPublish:q.last_publish,status:design.MEMBER[q.handle]?.[0]??'',projects:q.handle===design.ME.handle?profileValues.projects??design.MEMBER[q.handle]?.[1]??[]:design.MEMBER[q.handle]?.[1]??[],lastSeen:design.MEMBER[q.handle]?.[2]??''})),byAdoption:roster_by_adoption().map(q=>q.handle),invited:design.INVITED,member:Object.fromEntries(Object.entries(design.MEMBER).map(([handle,[status,projects,lastSeen]])=>[handle,{status,projects:handle===design.ME.handle?profileValues.projects??projects:projects,lastSeen}]))});
+ // `skillsTotal` is null on the mock: the canvas fixture records who authored a skill and how many installs
+ // it has team-wide, but never how many skills a member's own machine holds, so there is no honest number to
+ // draw. The real adapter reads each member's self-report from their people file; the column shows '—' here
+ // until the canvas gains the field.
+ const roster=():Roster=>({members:design.ROSTER.map(q=>({...q,...(q.handle===design.ME.handle?profileValues:{}),skillsTotal:null,lastPublish:q.last_publish,status:design.MEMBER[q.handle]?.[0]??'',projects:q.handle===design.ME.handle?profileValues.projects??design.MEMBER[q.handle]?.[1]??[]:design.MEMBER[q.handle]?.[1]??[],lastSeen:design.MEMBER[q.handle]?.[2]??''})),byAdoption:roster_by_adoption().map(q=>q.handle),invited:design.INVITED,member:Object.fromEntries(Object.entries(design.MEMBER).map(([handle,[status,projects,lastSeen]])=>[handle,{status,projects:handle===design.ME.handle?profileValues.projects??projects:projects,lastSeen}]))});
  async function connectPicker(ctx:RunContext,team:string):Promise<Result<ConnectOutcome>>{
   const batch:ConnectBatch={kind:'batch',shared:[],declined:[],refused:[]};
   const remaining=[...design.LOCAL_UNSHARED];

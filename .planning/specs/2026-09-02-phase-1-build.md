@@ -177,6 +177,8 @@ Remote matching: normalize (strip protocol/credentials/`.git`/trailing slash, lo
 
 ### 5.2 `people/<handle>.json`
 
+**Library size (Ryan, 2026-09-10).** `local_skills` (optional, a non-negative integer) is how many skill folders the owner's machine holds across the global root and its **registered** project checkouts — `librarySize()`, the `localSkillCounts().skillFolders` formula the Library already prints, so one machine never reports two different totals, and a folder this product cannot share still counts because the member still has it. It exists because nothing else in a team repository can observe a teammate's library: `installed` records only what they took from this team. Every `sync` counts once for the machine and writes through safeWrite action `sync` **only when the number differs** from the committed one, so an unchanged library costs no commit; it never sets the run's `changed` flag, because bookkeeping about a machine is not a skill moving. Three honest limits, all of which a reader must respect: it is a **self-report** nothing in the repository can verify; it is **absent, never 0**, for a member who has not synced since it shipped (the roster shows "no answer", not "no skills"); and a person who syncs **two machines** against one team records whichever synced last. A machine that cannot read one of its roots writes nothing at all rather than a wrong lower number. It carries no timestamp: the people file's last commit already dates it, and a stamp rewritten every sync would commit for no reason. `status.members` carries it as `skillsTotal`.
+
 **S7b:** `role` (string, at most 32 characters) and `projects` (array of non-empty project names) are optional, owner-written profile fields, never refreshed by sync. Absence stays absent after parsing and unrelated writes; readers expose `role: null` and `projects: []`. These are job labels and registry membership, not permission roles. Reclaim/rejoin preserves both fields. `ls` roster, `ls member` and `status.members` carry both.
 
 ```jsonc
@@ -191,7 +193,8 @@ Remote matching: normalize (strip protocol/credentials/`.git`/trailing slash, lo
     { "id": "b2e4…", "version": null, "since": "2026-09-03",
       "scope": { "kind": "project", "project": "terum-mvp" } }
   ],
-  "declined": ["c9d1…"]                              // suppresses ALL automatic placement of that ID (§6 `uninstall`)
+  "declined": ["c9d1…"],                             // suppresses ALL automatic placement of that ID (§6 `uninstall`)
+  "local_skills": 101                                // optional self-report: how many skill folders this member's machine holds
 }
 ```
 
