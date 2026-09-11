@@ -3,7 +3,7 @@
 I've been searching for best skills and practices for using the amazing AI tools we have today from Claude Code to Cursor. While searching for best practices, I ended up personally evaluating skills I found via social media like superpowers or Matt Pocock by creating my own test framework. Then, when I wanted to share them with my team, I found myself having to manually zip files, send them over from my global folder(which I didn't want to link to my team's shared repo). All of this took quite a while, so I made this project, and hope it saves some time for others. 
 
 ## Quick start
-Core beliefs of the project:
+**Core beliefs of the project:**
 
 - Skills are extremely impactful at increasing efficiency with AI.
 - The most impactful skills only work in the context of the project they were created for
@@ -15,13 +15,13 @@ Our purpose is it make it quick and easy to determine best AI practices through 
 
 ## Why should I use this? Who would find this helpful?
 
-Who would find this helpful?
+**Who would find this helpful?**
 - **Developers in an team** looking to discover and share best practices internally
 - Individuals looking to evaluate the near infinite amount of publicly available skills and decide which ones are best for their own repo.
 
 
 
-Isn't it super easy to share skills by just pushing them to GitHub? 
+**Isn't it super easy to share skills by just pushing them to GitHub? **
 - **Yes, it is**, and you should do that if you only work on one project and don't mind having your .claude in your project.
 - However, if any of the following apply, Terum might be useful:
   - If you're working on multiple projects with specialized skills,
@@ -29,15 +29,15 @@ Isn't it super easy to share skills by just pushing them to GitHub?
   - If you're trying to manage and separate global and project skills while still sharing them easily with teammates 
 
 
-Aren't there open source frameworks for evaluating skills already? 
+**Aren't there open source frameworks for evaluating skills already? **
 - **Yes, there are!** Like Nvidia's SkillEvaluator or the SkillsBench paper. Our evaluation methods are heavily based off of these proven methods. Terum doesn't try to reinvent the wheel, it just adopts the methods so that they are fully plug and play. SkillEvaluator requires Docker and an API key; SkillsBench requires you to bring your own tests. Terum runs using your subscription plan, with one terminal installation, using dynamically generated tests for the specific skill being tested(we're currently looking into dynamic generation along with category-specific tests). 
 
-How are you evaluating skills?
+**How are you evaluating skills?**
 - Answered above. For more specific notes on methodology, scroll to the bottom. 
 
 
-Does any private information including skill usage, metadata, or information get out? 
-- **Nope!** Fully open source, locally hosted. All skill data is yours and your team's. 
+**Does any private information including skill usage, metadata, or information get out?**
+- **Nope!** Fully open source, locally hosted. All skill data is yours and your team's. We're working on a fully open skill marketplace(like skills.sh but with skills ranked by effectiveness, not downloads)
 
 
 
