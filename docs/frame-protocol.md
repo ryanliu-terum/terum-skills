@@ -85,6 +85,26 @@ costs no extra process: `ls` has already resolved each skill's version. A receip
 or whose `skill_id`/`version` disagrees with its path, is reported as that skill's problem and leaves
 the limb null — it never fails the listing.
 
+## What `status` reports about this machine
+
+`status`'s result carries two architecture fields, on success and on a failing read alike:
+
+- `hostArch` — the CPU this machine actually has.
+- `processArch` — the architecture of the Node process running the CLI, i.e. `process.arch`.
+
+They differ only under emulation. A `processArch` of `x64` with a `hostArch` of `arm64` means an x64 build
+of Node is running on an ARM64 machine through Windows emulation, so the CLI, the desktop app it installs,
+and every child that app spawns all pay the emulation tax. A shell should surface that rather than hide it.
+Off Windows the two are always equal: the only signal read is `PROCESSOR_ARCHITEW6432`, which Windows sets
+inside an emulated process and nowhere else. Both fields are plain strings and an unrecognised value passes
+through unchanged, so never switch on them exhaustively.
+
+`app` reports the same condition as `emulation`, either `"win32-arm64-on-x64"` or `null`, and prints one
+line telling the person to install the ARM64 build of Node. It still installs the app: this is a warning,
+not a refusal.
+
+These are additive result fields; protocol stays 1.
+
 ## Verbs added for the desktop app
 
 `eval-report <skill> [--team <team>]` is read-only: it reads the local clone and this machine's run tree without fetching, networking, or prompting. `result.value` is an `EvalReport`:

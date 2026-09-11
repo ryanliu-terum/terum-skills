@@ -55,6 +55,7 @@ export interface AppResult {
   action: 'launched' | 'installed-and-launched' | 'unavailable' | 'declined';
   appPath: string | null;
   statePath: string | null;
+  emulation?: 'win32-arm64-on-x64' | null;
 }
 
 /** `~/.terum/skills/run/app.json`: what desktop/src/backend/tauri/bridge.ts reads (schema 1). */
@@ -65,14 +66,15 @@ const tail = (form: WithForm['form']) => `Everything works from the terminal. Ru
 export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult>> {
   const version = args.version === undefined ? packageVersion() : args.version;
   if (!version) return failure('This copy of terum-skills has no version; the desktop app is published per version.');
-  const platform = detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, procVersion: await readProcVersion() });
+  const evidence = args.evidence ?? { platform: process.platform, arch: process.arch, env: process.env, procVersion: await readProcVersion() };
+  const platform = detectPlatform(evidence);
   const suffix = assetSuffix(platform);
   if (!suffix) {
     // D3: honest and quiet; exit 0 because nothing failed.
     if (platform === 'wsl') io.print('The desktop app runs on the Windows side of this machine, not inside WSL. Install terum-skills there and run this command from a Windows terminal; from here, everything works in the terminal.');
     else if (platform === 'linux') io.print('There is no Linux desktop app yet; everything works from the terminal.');
     else io.print('There is no desktop app for this machine; everything works from the terminal.');
-    return success({ platform, version, action: 'unavailable', appPath: null, statePath: null });
+    return success({ platform, version, action: 'unavailable', appPath: null, statePath: null, emulation: null });
   }
 
   const store = args.config ?? createConfigStore();
@@ -81,7 +83,7 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
     if (!(await io.confirm(APP_QUESTION))) {
       // D4: a no is remembered as a fact, not as a suppression; setup asks again next run.
       await store.update((config) => { config.app = { choice: 'declined', at: new Date().toISOString() }; });
-      return success({ platform, version, action: 'declined', appPath: null, statePath: null });
+      return success({ platform, version, action: 'declined', appPath: null, statePath: null, emulation: null });
     }
   }
   const runner = args.runner ?? systemRunner;
@@ -133,6 +135,8 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
 
     // D1: the app finds Node and this CLI through this file, on every launch, so a relaunch from the Dock a week later still works.
     const statePath = join(root, 'run', 'app.json');
+    const emulation = platform === 'win32-arm64' && evidence.arch === 'x64' ? 'win32-arm64-on-x64' : null;
+    if (emulation) io.print(`This machine has an ARM64 processor but you are running an x64 build of Node, so terum-skills and everything the desktop app starts will run under emulation. Install the ARM64 build of Node from nodejs.org, then run \`${invocation(args.form, 'app')}\` again to record it.`);
     await writeState(statePath, { schema: 1, node: args.node ?? process.execPath, entry: args.entry ?? (args.launch?.path ?? process.argv[1] ?? ''), path: args.path === undefined ? process.env.PATH ?? null : args.path, version, writtenAt: new Date().toISOString(), ...(args.target === undefined ? {} : { target: args.target }), ...(args.intent === undefined ? {} : { intent: args.intent }) });
     // D4: running `app` explicitly is opting in; setup will not ask again.
     await store.update((config) => { config.app = { choice: 'opted-in', at: new Date().toISOString() }; });
@@ -144,7 +148,7 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
       if (opened.code !== 0) return failure(`Could not open ${APP_PRODUCT}: ${(opened.stderr || opened.stdout).trim()} ${tail(args.form)}`.trim());
     }
     io.print(`${installedNow ? 'Installed and opened' : 'Opened'} ${APP_PRODUCT} ${version}.`);
-    return success({ platform, version, action: installedNow ? 'installed-and-launched' : 'launched', appPath, statePath });
+    return success({ platform, version, action: installedNow ? 'installed-and-launched' : 'launched', appPath, statePath, emulation });
   } catch (error) {
     return failure(`${error instanceof Error ? error.message : String(error)} ${tail(args.form)}`);
   }

@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as platformModule from '../../lib/platform.js';
 import { createConfigStore } from '../../lib/config.js';
 import { ScriptedPrompter, ghOnlyRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { assetSuffix, detectPlatform } from '../../lib/platform.js';
@@ -186,5 +188,74 @@ describe('the offer (setup asks through the verb, D4)', () => {
     expect(await run({ config: store, runner, exec: fakeExec().exec, version: V, evidence: mac, offer: true }, yes)).toMatchObject({ ok: true, value: { action: 'installed-and-launched' } });
     expect(runner.calls.some((call) => call.args[0] === 'release')).toBe(true);
     expect((await store.read()).app).toMatchObject({ choice: 'opted-in' });
+  });
+});
+
+
+describe('app host architecture (p-arch)', () => {
+  it.each([
+    ['x64', { PROCESSOR_ARCHITEW6432: 'ARM64' }, 'bare', 'win32-arm64-on-x64'],
+    ['x64', { PROCESSOR_ARCHITEW6432: 'arm64' }, 'npx', 'win32-arm64-on-x64'],
+    ['arm64', {}, 'bare', null],
+    ['x64', {}, 'bare', null],
+  ] as const)('installs for host with process %s, hint %j and form %s; emulation=%s', async (arch, env, form, emulation) => {
+    const root = await temporaryDirectory();
+    const localAppData = join(root, 'LocalAppData');
+    const appPath = join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe');
+    const suffix = arch === 'arm64' || emulation ? 'arm64-setup.exe' : 'x64-setup.exe';
+    const asset = `terum-skills-desktop_${V}_${suffix}`;
+    const runner = ghOnlyRunner(async args => {
+      expect(args.slice(0, 2)).toEqual(['release', 'download']);
+      expect(args).toContain(asset);
+      const dir = args[args.indexOf('--dir') + 1]!;
+      const bytes = Buffer.from('installer');
+      await writeFile(join(dir, asset), bytes);
+      await writeFile(join(dir, `${asset}.sha256`), createHash('sha256').update(bytes).digest('hex'));
+      return ok;
+    });
+    const exec: Exec = async command => {
+      if (command.endsWith('-setup.exe')) {
+        await mkdir(join(localAppData, 'Terum Skills'), { recursive: true });
+        await writeFile(appPath, '');
+      }
+      return ok;
+    };
+    const io = new ScriptedPrompter();
+    const expectedCommand = form === 'bare' ? 'terum-skills app' : 'npx -y terum-skills@latest app';
+    const warning = `This machine has an ARM64 processor but you are running an x64 build of Node, so terum-skills and everything the desktop app starts will run under emulation. Install the ARM64 build of Node from nodejs.org, then run \`${expectedCommand}\` again to record it.`;
+    const print = io.print.bind(io);
+    io.print = line => {
+      if (line === warning) expect(existsSync(join(root, 'run', 'app.json'))).toBe(false);
+      print(line);
+    };
+    const args = { config: createConfigStore(root), runner, exec, version: V, evidence: { platform: 'win32' as const, arch, env }, localAppData, form, node: '/test/node' };
+    const result = await run(args, io);
+    expect(result).toMatchObject({ ok: true, value: { platform: suffix === 'arm64-setup.exe' ? 'win32-arm64' : 'win32-x64', action: 'installed-and-launched', emulation } });
+    expect(io.lines.filter(line => line.includes('emulation'))).toEqual(emulation ? [warning] : []);
+    expect(await readAppState(root)).toMatchObject({ node: '/test/node', version: V });
+    const againIo = new ScriptedPrompter();
+    expect(await run(args, againIo)).toMatchObject({ ok: true, value: { action: 'launched', emulation } });
+    expect(againIo.lines.filter(line => line.includes('emulation'))).toEqual(emulation ? [warning] : []);
+    expect(runner.calls).toHaveLength(1);
+  });
+
+  it('passes the live environment to detection while an injected evidence object wins unchanged', async () => {
+    const detect = vi.spyOn(platformModule, 'detectPlatform').mockReturnValue('linux');
+    try {
+      expect(await run({ version: V }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { emulation: null } });
+      expect(detect.mock.calls[0]?.[0].env).toBe(process.env);
+      const evidence = { platform: 'win32' as const, arch: 'arm64' };
+      await run({ version: V, evidence }, new ScriptedPrompter());
+      expect(detect.mock.calls[1]?.[0]).toBe(evidence);
+      expect(evidence).not.toHaveProperty('env');
+    } finally { detect.mockRestore(); }
+  });
+
+  it('a declined install reports no emulation warning because Node is not recorded', async () => {
+    const root = await temporaryDirectory();
+    const io = new ScriptedPrompter([], [false]);
+    expect(await run({ config: createConfigStore(root), version: V, offer: true, evidence: { platform: 'win32', arch: 'x64', env: { PROCESSOR_ARCHITEW6432: 'ARM64' } } }, io)).toMatchObject({ ok: true, value: { action: 'declined', emulation: null } });
+    expect(io.lines.join(' ')).not.toContain('emulation');
+    expect(await readAppState(root)).toBeNull();
   });
 });
