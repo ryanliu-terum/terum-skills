@@ -9,10 +9,10 @@ export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly 
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;evalCommitChoice:boolean;openInEditor:boolean;clipboard:boolean}
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','checkouts','projects','refresh'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','checkouts','projects','refresh','discover','appUpdate'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
-export interface Surfaces {checkouts:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean}
+export interface Surfaces {checkouts:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
 export interface ReadOptions {signal?:AbortSignal}
 export type Theme='dark'|'light'|'system';
 export type Scope=string;
@@ -67,6 +67,9 @@ export interface RootRemote {url:string;slug:string|null}
 export interface Root {id:string;kind:'global'|'checkout';label:string;root:string;rootState?:'scanned'|'absent'|'unreadable'|undefined;registered:boolean;detected:boolean;count?:string|undefined;remote?:RootRemote|null|undefined}
 export type LibraryScope={kind:'global'}|{kind:'checkout';root:string};
 export type LibraryTeam={kind:'ok';team:string}|{kind:'none'}|{kind:'unreadable';message:string};
+export interface DiscoverCandidate {path:string;skillFolders:number;registered:boolean;repoRoot:boolean}
+export interface DiscoverResult {candidates:DiscoverCandidate[];scanned:number;truncated:boolean;problems:{path:string;reason:string}[]}
+export interface DiscoverArgs {under?:string[];register?:boolean}
 export interface CheckoutAdded {path:string;registered:boolean}
 /** `project create`: the team project as team.json now holds it. A new project is always born with no skills. */
 export interface ProjectCreated {team:string;name:string;remotes:string[];skills:number}
@@ -113,7 +116,7 @@ export interface InviteResult {invited:string[];already:string[];failed:{login:s
 export interface TeamArgs {kind:'create'|'join'|'remove'|'leave';name?:string;team?:string;remote?:string;handle?:string}
 export interface TeamResult {name:string;kind:TeamArgs['kind']}
 export interface SetupArgs {target?:string;offerConnect?:boolean}
-export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','actions','invite','community','hook','wrapper','done'] as const;
+export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','actions','invite','discover','evals','community','hook','wrapper','done'] as const;
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
 export interface SetupResult {team:string;role:'creator'|'joiner';connected?:ConnectOutcome;steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'>>|null}
 export interface EvalArgs {team?:string;ref:string;commit?:boolean;cases?:number}
@@ -121,6 +124,11 @@ export interface EvalResult {name:string;runDir:string;executionStatus:'complete
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
 export interface ValidateResult {name:string;findings:number;warnings:number}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
+export type AppUpdatePhase='waiting'|'installing'|'launched'|'failed';
+export interface AppUpdateMarker {version:string;phase:AppUpdatePhase;at:string;error:string|null}
+/** The app's own update state. `newer` is computed in the adapter from `latest` vs the running build. */
+export interface AppUpdateStatus {appVersion:string;supported:boolean;cliVersion:string|null;latest:string|null;latestAt:string|null;probe:'ok'|'skipped'|'cached'|'failed';probeError:string|null;staged:string|null;installed:string[];lastApply:AppUpdateMarker|null;newer:boolean;ppid:number}
+export interface AppUpdateStaged {version:string;staged:boolean;notPublished:boolean;alreadyStaged:boolean}
 export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void;readonly ready?:Promise<void>;flush?():Promise<void>;subscribe?(listener:()=>void):Subscription}
 export type Subscription=()=>void;
 export type ChangeSource='config'|'clone'|'placed'|'stamp';

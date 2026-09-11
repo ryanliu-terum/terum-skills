@@ -39,6 +39,8 @@ it('keeps errors without value when the failing value cannot be parsed', async (
 });
 
 const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = [
+  ['checkout discover', b => b.checkouts.discover({under:['-x','/two'],register:true}).done, ['checkout','discover','--register','--under=-x','--under=/two']],
+  ['bare checkout discover', b => b.checkouts.discover({}).done, ['checkout','discover']],
   ['profile', b => b.profile({ name: 'A B', bio: '', role: 'Platform', projects: ['terum', 'second'] }).done, ['profile', '--name', 'A B', '--bio', '', '--role', 'Platform', '--project', 'terum', '--project', 'second']],
   ['decline', b => b.decline({ ref: '-x' }).done, ['decline', '--', '-x']],
   ['leading-dash install', b => b.install({ ref: '-x', team: 'acme' }).done, ['install', '--team', 'acme', '--into', 'global', '--', '-x']],
@@ -126,7 +128,7 @@ it.each([true, false])('maps every search field including its real description (
 it('serves status, settings, library, skill, update, roster and catalog while the other three surfaces stay typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, checkouts: true });
+  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, checkouts: true, appUpdate: true });
   for (const result of await Promise.all([b.onboarding(), b.inbox()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }
@@ -313,10 +315,25 @@ it.each(['global','checkout','trailing'] as const)('maps the %s library from loc
   expect(result).toMatchObject({ok:true,value:{title:mode==='global'?'1 skill · 1 shared with acme':'0 skills',root:{id:mode==='global'?'global':'/work/ops',kind:scope.kind,label:mode==='global'?'Global':'ops',count:undefined},team:{kind:'ok',team:'acme'},skills:mode==='global'?[{name:'a',desc:'Live description',project:'Global',installs:'1 install',installsN:1,installed:'placed',placed:true,path:'/home/.claude/skills/a',updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}]:[],overview:{skills:mode==='global'?'1':'0',installs:mode==='global'?'1':'0',evaluated:'—',attention:'0',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:mode==='global'?'1 shared with acme':'',installs_note:''},provenance:null}});
   expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status','--team','acme'],['ls','--team','acme']]);
 });
+it('abbreviates a Library card checkout projectRoots entry under the home directory', async () => {
+  const repoRoot = '/Users/teddy/Documents/Terum/skill-management-software';
+  const path = repoRoot + '/.claude/skills/a';
+  const local = { roster: [], skills: [], problems: [], local: [{
+    root: repoRoot + '/.claude/skills', repoRoot, scope: 'project', rows: [{
+      name: 'a', path, state: 'placement recorded', tracked: true, shared: [],
+      placement: { id: 'id-a', team: 'acme', version: 'a'.repeat(40) }, health: 'up-to-date',
+    }], problems: [],
+  }] };
+  const result = await createTauriBackend(inventoryBridge({ local }).bridge).library({ scope: { kind: 'checkout', root: repoRoot }, team: 'acme' });
+  expect(result.ok).toBe(true);
+  expect(result.value?.skills).toHaveLength(1);
+  expect(result.value?.skills[0]?.projectRoots).toEqual(['~/Documents/Terum/skill-management-software']);
+});
+
 it('maps the detail body, grants and all install records without fabricating missing values',async()=>{
   const f=inventoryBridge();const result=await createTauriBackend(f.bridge).skill({ref:'acme/a'});
   expect(result).toMatchObject({ok:true,value:{desc:'Live description',skillMd:{frontmatter:'',body:[],markdown:'# Live body\n'},favorites:null,lines:1,receipt:null,summary:null,wlt:null,evalEstimate:null,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},hygiene:[],hygieneCaption:null,hygieneStatus:'pass',grants:['Bash','Read'],grants_approved:'',history:[],activity:[],files:null,used_by:['MC'],users:[['mira','MC','Global · since 2026-08-01'],['mira','MC','ops · since 2026-08-02']],path:'/home/.claude/skills/a',repo:'acme/team'}});
-  expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--team','acme'],['ls','--local'],['validate','--team','acme','--','a'],['eval-report','--team','acme','--','a']]);
+  expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--local'],['ls','--team','acme'],['validate','--team','acme','--','a'],['eval-report','--team','acme','--','a']]);
 });
 it('retains null grants/body/date and marks unresolved skills broken, with a failed validation caption',async()=>{
   const f=inventoryBridge({row:{grants:null,grantsHash:null,body:null,updated:'—',unresolved:true} as unknown as Partial<typeof lsRow>,validation:{name:'a',findings:2,warnings:0},validateOk:false});
@@ -337,7 +354,7 @@ it('resolves a name the team does not share against the folder on this machine',
   const f=inventoryBridge({local});
   expect(await createTauriBackend(f.bridge).skill({ref:'diagnose',team:'acme'})).toMatchObject({ok:true,value:{name:'diagnose',team:null,path:'/home/.claude/skills/diagnose',skillRef:'local:/home/.claude/skills/diagnose',project:'Global',teamed:false,placed:false,onDiskOnly:true,installs:'0 installs',flags:['local']}});
   // No validate or eval-report: there is no team skill to validate, and asking would be a lie.
-  expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--team','acme'],['ls','--local']]);
+  expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--local'],['ls','--team','acme']]);
 });
 it('resolves a name whose frontmatter the CLI could not parse',async()=>{
   const local=unsharedLocal([{root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[],notOffered:[{name:'codex-implement',path:'/work/ops/.claude/skills/codex-implement',reason:'invalid-yaml'}],problems:[]}]);
@@ -694,7 +711,7 @@ it.each([[[]],[['one','two']]])('refuses people inventory before ls for teams %j
   }
  });
  expect(await createTauriBackend(f.bridge).roster()).toEqual(teams.length?{ok:false,error:'This machine is configured for teams one, two; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.',reason:'ambiguous-team'}:{ok:false,error:'No team is configured on this machine.',reason:'no-team'});
- expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status']]);
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status','--permissions']]);
 });
 it('syncs with the bare CLI verb and leaves by the supplied team key',async()=>{
  const f=replay(undefined,false),backend=createTauriBackend(f.bridge);
@@ -911,4 +928,56 @@ it('keeps a payload root id verbatim when its trailing separator differs from th
  const backend=createTauriBackend(inventoryBridge({local}).bridge);
  expect(await backend.skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toMatchObject({ok:true,value:{owningRoot:{id:'/work/ops/',label:'ops'}}});
  expect(await backend.library({scope:{kind:'checkout',root:String.raw`\work\ops`},team:'acme'})).toMatchObject({ok:true,value:{root:{id:'/work/ops/'},skills:[{name:'a'}]}});
+});
+
+describe('W-02 overlapping seam reads',()=>{
+  it.each(['head','tail'])('starts independent skill reads together at the %s',async phase=>{
+    const f=inventoryBridge();const spawn=f.bridge.spawn.bind(f.bridge);const pending:string[][]=[];let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
+    f.bridge.spawn=async(id,state,args,cwd,emit)=>{const hold=phase==='head'?(args[0]==='status'||args.includes('--local')):(args[0]==='validate'||args[0]==='eval-report');if(hold){pending.push([...args]);await held;}return spawn(id,state,args,cwd,emit);};
+    const result=createTauriBackend(f.bridge).skill({ref:'acme/a'});
+    await vi.waitFor(()=>expect(pending).toHaveLength(2));expect(pending.map(a=>a[0])).toEqual(phase==='head'?['status','ls']:['validate','eval-report']);release();
+    expect(await result).toEqual(await createTauriBackend(inventoryBridge().bridge).skill({ref:'acme/a'}));
+  });
+});
+
+function catalogBurst(size:number,behavior:(index:number,attempt:number)=>Promise<void> = async()=>{}){
+ const handles=Array.from({length:size},(_,i)=>`member-${String(i).padStart(2,'0')}`);const attempts=new Map<string,number>();let active=0,peak=0;
+ const f=fakeBridge(async(args,emit)=>{
+  const member=args[0]==='ls'&&args[1]==='member';const handle=args.at(-1)!;const index=handles.indexOf(handle);
+  if(member){const attempt=(attempts.get(handle)??0)+1;attempts.set(handle,attempt);peak=Math.max(peak,++active);try{await behavior(index,attempt);}finally{active--;}}
+  const name=args[0]==='status'?'status':args.includes('--local')?'ls-local':member?'ls-member-mira':'ls';
+  for(const line of readFileSync(resolve('../.planning/codex-runs/m7-S7b/frames',name+'.jsonl'),'utf8').trim().split('\n')){
+   const frame=JSON.parse(line) as Record<string,unknown>;
+   if(frame.t==='result'){
+    if(name==='status'){const value=frame.value as {teams:{members:Record<string,unknown>[];memberCount:number}[]};const team=value.teams[0]!;team.members=handles.map(handle=>({...team.members[0],handle,displayName:handle}));team.memberCount=size;}
+    if(member){const value=frame.value as {member:{handle:string}};value.member.handle=handle;}
+   }
+   emit({kind:'stdout',line:JSON.stringify(frame)});
+  }
+ });return {...f,handles,attempts,peak:()=>peak};
+}
+describe('W-02 catalog scheduling',()=>{
+ it('reports the lowest-indexed failing member, not the first to settle',async()=>{
+  const f=catalogBurst(6,async index=>{await new Promise(resolve=>setTimeout(resolve,index===1?30:1));if(index===1||index===4)throw new Error(`member ${index} failed`);});
+  expect(await createTauriBackend(f.bridge).catalog()).toMatchObject({ok:false,error:expect.stringContaining('member 1 failed')});
+ });
+ it('never exceeds four concurrent member reads and returns roster order',async()=>{
+  const f=catalogBurst(12,async index=>{await new Promise(resolve=>setTimeout(resolve,(12-index)*2));});const result=await createTauriBackend(f.bridge).catalog();expect(result.ok).toBe(true);expect(f.peak()).toBe(4);expect(result.value?.people.map(p=>p.handle)).toEqual(f.handles);
+ });
+ it('retries a member once when the bridge refuses a ninth child',async()=>{
+  const f=catalogBurst(12,async(index,attempt)=>{if(index===1&&attempt===1)throw new Error('too many pending terum-skills processes (8); wait for one to finish');await new Promise(resolve=>setTimeout(resolve,2));});
+  expect((await createTauriBackend(f.bridge).catalog()).value?.people.map(p=>p.handle)).toEqual(f.handles);expect(f.attempts.get(f.handles[1]!)).toBe(2);
+ });
+ it('fails the catalog when the retry also fails',async()=>{
+  const message='too many pending terum-skills processes (8); wait for one to finish';const f=catalogBurst(12,async index=>{if(index===1)throw new Error(message);await new Promise(resolve=>setTimeout(resolve,5));});
+  expect(await createTauriBackend(f.bridge).catalog()).toMatchObject({ok:false,error:'Could not start terum-skills: '+message});expect(f.attempts.get(f.handles[1]!)).toBe(2);expect(f.attempts.size).toBeLessThan(12);
+ });
+ it('only roster asks status for permissions',async()=>{
+  const f=catalogBurst(1);const backend=createTauriBackend(f.bridge);await backend.roster();await backend.catalog();expect(f.spawns.filter(s=>s.args[0]==='status').map(s=>s.args)).toEqual([['status','--permissions'],['status']]);
+ });
+});
+it('reads the discover result and rejects a malformed one',async()=>{
+ const value={candidates:[{path:'/a',skillFolders:2,registered:false,repoRoot:true}],scanned:5,truncated:false,problems:[]};
+ expect(await createTauriBackend(replay(value).bridge).checkouts.discover({}).done).toEqual({ok:true,value});
+ expect(await createTauriBackend(replay({candidates:'no'}).bridge).checkouts.discover({}).done).toMatchObject({ok:false,error:expect.stringContaining('could not read the result')});
 });

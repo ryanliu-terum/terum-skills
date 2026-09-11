@@ -87,6 +87,22 @@ global-is-a-placement-target concern (Terum 85c4ebd2) without a separate exclusi
    code path). The verb's help text now says global skills auto-connect via sync's ID
    check unless `auto_share: false`. (The verb was already renamed share→connect on
    2026-09-07.)
+2b. **Which roots the auto-share pass covers.** RESOLVED and BUILT (ajay, 2026-09-10, in-session:
+   "the app should pull from your local folders into the git repo … then everything in the app
+   should point to the versions of the skills in that repo"): the pass runs over the global root
+   AND every **registered** checkout, because this section's model already says an added project's
+   skills "then sync the same way". Registering the checkout (`checkout add` / the app's Add
+   project) IS that root's consent, exactly as setup's blanket y/N is for global — so no new
+   consent surface is added and 52d76c00's terminal-less-hook constraint is still satisfied. The
+   **cwd-detected** repo is deliberately excluded (Terum f4a821f1 keeps project discovery narrow),
+   so running sync inside an unregistered repo can never upload its skills. `autoShareGlobal`
+   became `autoShareRoots` (`src/commands/connect.ts`); every gate is unchanged — candidatesOf,
+   hygiene filter, privileged exclusion, the ID check, safeWrite. Skip notices now name the root
+   beside the folder, since a bare folder name is ambiguous once checkouts are in the pass.
+   *Why this was the gap:* the app's team cards already render from the repo row
+   (`desktop/src/backend/tauri/index.ts:175`), and only unjoined folders fall back to local
+   content (`:117`); a project skill could never join because nothing ever gave it an id.
+
 3. **Fidelity boards.** Removing the Library Connect CTA and adding the Library/Team
    split moves locked boards — canvas change + re-lock required (same queue as the
    existing relabel item).

@@ -1,11 +1,12 @@
+import { packageRoot } from '../lib/package-root.js';
 import { invocation } from '../lib/invocation.js';
 import type { WithForm, InvocationForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { reconcileShared } from './connect.js';
+import { newestReceiptAt } from './receiptCheck.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
@@ -22,7 +23,7 @@ import { type Runner, systemRunner } from '../lib/runner.js';
 import { parseSkillFrontmatter } from '../lib/schema.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { findSkill, readTeam, skillRecords } from '../lib/skills.js';
-import { openTeamRepo, refreshClone, treeText, lockWait } from '../lib/teamRepo.js';
+import { openTeamRepo, refreshClone, treeText, lockWait, skillVersions } from '../lib/teamRepo.js';
 import { materializeVersion, resolveVersion } from '../lib/version.js';
 
 export interface EvalArgs extends WithForm {
@@ -73,7 +74,10 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // generated case sharing the stem would silently evaluate something else (review P2).
     if (args.gen && args.case !== undefined) return failure('--gen cannot be combined with --case: naming a case asserts an authored expectation, and generation would replace the set it selects from.');
     if (args.triggersOnly && args.executionOnly) return failure('--triggers-only and --execution-only cannot be used together.');
-    const k = args.k ?? 3;
+    // Default k=1 (spec rev 18; Ajay, 2026-09-10) — overrides the 2026-09-07 "keep default k=3"
+    // ruling (Terum 5aa9a4b2) on cost: k=3 -> k=1 takes a 3-case run from ~$4.40 to ~$1.50 measured.
+    // A receipt you intend to gate on wants --k 3 or more; §16.6 carries the noise caveat.
+    const k = args.k ?? 1;
     if (!Number.isInteger(k) || k < 1) return failure('--k must be a positive integer.');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
@@ -361,7 +365,8 @@ function generationCommitNotice(args: EvalArgs, form: InvocationForm | undefined
 
 /** Product provenance is read-only and never falls back to the team clone's unrelated HEAD. */
 async function runningEngineCommit(runner: Runner): Promise<string> {
-  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const root = packageRoot();
+  if (root === null) return 'unknown';
   // An npm-installed package sits inside the CONSUMER's repository, and git walks upward — that
   // HEAD is not engine provenance (§5.3: "terum-skills commit of the running CLI"; review P2).
   const toplevel = await runner.run('git', ['rev-parse', '--show-toplevel'], { cwd: root });
@@ -470,4 +475,42 @@ async function latestReceiptedTree(clone: string, skillId: string, candidateTree
     }
   }
   return latest?.tree;
+}
+
+export interface PendingEval { id: string; name: string; version: string }
+/**
+ * Why `pending` is empty matters to the caller: an empty batch because the team shares nothing, because the
+ * version reader failed, and because every skill is already receipted are three different sentences to a person.
+ */
+export interface PendingEvalScan {
+  pending: PendingEval[];
+  /** Shared skills the team has at all. Zero means there is nothing to evaluate, not that everything is receipted. */
+  shared: number;
+  /** Of those, the ones whose current version resolved, so their receipts could actually be looked for. */
+  considered: number;
+  /** Set when the version reader itself failed, so not one skill could be checked. */
+  versionProblem?: string;
+}
+
+/**
+ * Read-only, offline selector for setup's batch: current shared skill versions with no receipt.
+ * An unresolved version or invalid newest receipt is reported and excluded, never automatically rerun.
+ */
+export async function skillsWithoutReceipt(clone: string, team: string, runner: Runner, report: (line: string) => void): Promise<PendingEvalScan> {
+  const records = await skillRecords(clone, team, { onProblem: ({ name, message }) => report(`${name}: ${message}`) });
+  let versionProblem: string | undefined;
+  const versions = await skillVersions(runner, clone).catch((error: unknown) => { versionProblem = error instanceof Error ? error.message : String(error); return new Map<string, string>(); });
+  const pending: PendingEval[] = [];
+  let considered = 0;
+  for (const record of records) {
+    const version = versions.get(record.name);
+    if (version === undefined) { report(`${record.name}: could not resolve the current version${versionProblem === undefined ? ': absent from HEAD:skills' : `: ${versionProblem}`}`); continue; }
+    considered += 1;
+    try {
+      if (await newestReceiptAt(join(clone, 'evals', record.id, version)) === undefined) pending.push({ id: record.id, name: record.name, version });
+    } catch (error) {
+      report(`${record.name}: the newest receipt for the current version is invalid (${error instanceof Error ? error.message : String(error)}); evaluate it on its own when you have time.`);
+    }
+  }
+  return { pending, shared: records.length, considered, ...(versionProblem === undefined ? {} : { versionProblem }) };
 }

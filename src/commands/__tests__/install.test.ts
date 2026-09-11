@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as setup from '../setup.js';
 import { installHook } from '../../lib/hook.js';
 import { placementHome, run } from '../install.js';
+import type { ProgressUpdate } from '../../lib/prompt.js';
 import { run as sync } from '../sync.js';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, temporaryDirectory, wrapRunner, wrapperFor } from '../../lib/__tests__/fixtures.js';
@@ -34,7 +35,10 @@ describe('install (§6 refs)', () => {
     });
     try {
       const io = new NonInteractivePrompter();
-      expect(await run({ ref: 'acme/team/sample', config: store, home, runner, hook }, io)).toMatchObject({ ok: true, value: [{ id }] });
+      // The bundled wrapper is resolved from the package root (W-02), so whether it exists depends on whether this
+      // checkout was built; an unavailable bundle keeps the wrapper step from asking and makes the case build-independent.
+      const wrapper = { skillsRoot: join(home, '.claude', 'skills'), source: join(fixture.root, 'no-bundle', 'SKILL.md') };
+      expect(await run({ ref: 'acme/team/sample', config: store, home, runner, hook, wrapper }, io)).toMatchObject({ ok: true, value: [{ id }] });
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0]![0]).toMatchObject({ quiet: true, offerConnect: false });
       expect(io.asked).toEqual([]);
@@ -544,5 +548,23 @@ describe('Library install destinations', () => {
     await expect(installOne({ team: 'team', id: f.id, destination: { kind: 'checkout', root: alias }, store: f.store, runner: systemRunner }, new ScriptedPrompter())).resolves.toMatchObject({ path: join(alias, '.claude', 'skills', 'sample') });
     expect(Object.keys((await f.store.read()).placements)).toHaveLength(1);
     expect(await readFile(join(alias, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: first');
+  });
+});
+
+
+describe('W-02 install progress', () => {
+  it.each(['success','no-sink','declined','collision'] as const)('reports only reached steps: %s',async mode=>{
+    const f=await bareTeam();const home=join(f.root,'home');const store=createConfigStore(join(f.root,'state'));const id='31313131-3131-4131-8131-313131313131';
+    await pushFromSeed(f.seed,'skills/sample/SKILL.md',`---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools: Bash\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await cloneWithIdentity(f.bare,store.teamClone('team'));await store.update(c=>{c.teams.team={remote:f.bare,handle:'seed'};});
+    if(mode==='collision'){await mkdir(join(home,'.claude/skills/sample'),{recursive:true});await writeFile(join(home,'.claude/skills/sample/foreign'),'foreign');}
+    // Progress rides the prompter (Prompter.progress, the frame channel implements it); a terminal prompter has none.
+    const steps:unknown[]=[];const scripted=new ScriptedPrompter([], [mode!=='declined']);
+    const io=mode==='no-sink'?scripted:Object.assign(scripted,{progress(update:ProgressUpdate){steps.push([update.step,update.current,update.total]);}});
+    const result=await run({ref:'sample',config:store,home},io);
+    expect(result.ok).toBe(mode==='success'||mode==='no-sink');
+    const expected=[['Reading the team clone',1,4],['Placing sample',2,4],['Publishing to the team repository',3,4],['Recording your install',4,4]];
+    expect(steps).toEqual(mode==='no-sink'?[]:expected.slice(0,mode==='declined'?1:mode==='collision'?2:4));
+    if(mode==='declined')expect(result).toMatchObject({cancelled:true});
   });
 });

@@ -6,21 +6,29 @@ import { driveRun } from './drive';
 // CLI keys map to the six drawn tour steps; print-only keys are copy, never placement counters.
 export const SETUP_STEP_TO_BOARD = {
  welcome:'Welcome', app:'Style', role:'Team', github:'Team', team:'Team', actions:'Basics',
- invite:'Team', community:'Feedback', hook:'Done', wrapper:'Done', done:'Done',
+ invite:'Team', discover:'Done', evals:'Done', community:'Feedback', hook:'Done', wrapper:'Done', done:'Done',
 } as const satisfies Record<SetupStep, string>;
 export function printedSetupStep(line:string):SetupStep|null {
  if(line.startsWith('Welcome to terum-skills.')||line.startsWith("Your team's skills")||line.startsWith('This wizard'))return 'welcome';
  if(line.startsWith('GitHub'))return 'github';
  if(line.startsWith('Identity:')||line.startsWith('Team ')||line.startsWith('Joined '))return 'team';
  if(line.startsWith('Next, from any terminal:')||line.startsWith('Connected '))return 'actions';
+ if(line.startsWith('Looking for skill folders')||line.startsWith('No skill folders found')||line.startsWith('Could not look')||/ — \d+ skill folders( · already registered)?$/.test(line))return 'discover';
+ // The four ways the batch can end without running: everything receipted, nothing shared, the version reader
+ // failed, or nothing could be checked. All four are the evals step reporting, not unrecognized copy.
+ if(line.startsWith('Evaluating ')||line.startsWith('Evaluated ')||line.startsWith('Every shared skill already has')||line.startsWith('Skipping the eval')
+  ||line.startsWith('The team has no shared skills yet')||line.startsWith('Could not read the current skill versions')||line.startsWith('No shared skill could be checked'))return 'evals';
  if(line.startsWith('Feedback and requests:'))return 'community';
  if(line.includes('session hook'))return 'hook';
- if(line.includes('/terum-skills')&&line.includes('skill'))return 'wrapper';
+ if(line.includes('/terum-skills Claude Code skill')||line.includes('/terum-skills skill'))return 'wrapper';
  if(line.startsWith('Members:')||line.startsWith('Repository:')||line.startsWith('README:'))return 'done';
  return null;
 }
 export function askedSetupStep(question:string):SetupStep|null {
- return question==='Use this identity?'?'team':null;
+ if(question==='Use this identity?')return 'team';
+ if(question==='Look for skill folders on this machine and add them to your library?'||question==='Look under which folder?'||question.startsWith('Add all ')||/^Add .+\?$/.test(question))return 'discover';
+ if(question.startsWith('Evaluate the '))return 'evals';
+ return null;
 }
 export interface SetupSnapshot {
  attempt: number;

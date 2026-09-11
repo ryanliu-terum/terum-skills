@@ -309,3 +309,45 @@ describe('checkout discovery CLI-1', () => {
     expect(await localSkills(roots[1]!.root, emptyConfig(), { scope: 'project', stateRoot: join(home, 'state') })).toMatchObject({ rootState: 'absent', entries: [] });
   });
 });
+
+
+describe('W-02 parallel folder scan', () => {
+  it('realpaths the root exactly once per call, not once per folder', async () => {
+    const root = await temporaryDirectory();
+    for (let i=0;i<30;i++) await candidate(root, `skill-${i}`);
+    const spy = vi.spyOn(fs, 'realpath');
+    try { await localSkills(root, emptyConfig(), { scope: 'global', stateRoot: join(root, '.state') }); expect(spy.mock.calls).toEqual([[root]]); }
+    finally { spy.mockRestore(); }
+  });
+  it('returns the same entries, in the same order, as a sequential scan', async () => {
+    const root = await temporaryDirectory();
+    const names = ['a','B','a-10','a-2','Z',...Array.from({length:25},(_,i)=>`skill-${i}`)];
+    for (const name of names) await candidate(root,name);
+    await writeFile(join(root,'plain'),'file'); await mkdir(join(root,'empty'));
+    await mkdir(join(root,'directory','SKILL.md'),{recursive:true});
+    await candidate(root,'invalid','---\nname: [\n---\n'); await symlink(join(root,'a'),join(root,'linked'));
+    const inventory = await localSkills(root,emptyConfig(),{scope:'global',stateRoot:join(root,'.state')});
+    expect(inventory.entries.map(e=>e.name)).toEqual((await fs.readdir(root)).sort().filter(n=>!['plain','empty'].includes(n)));
+    const expected = names.sort().map(name=>({skillId:null,category:null,name,path:join(root,name),shared:[],characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
+    expect(inventory).toEqual({root,scope:'global',rootState:'scanned',problems:[],entries:[...expected,
+      {skillId:null,category:null,name:'directory',path:join(root,'directory'),shared:[],inspection:{kind:'rejected',reason:'skill-md-not-a-file',detail:'SKILL.md is not a regular file'}},
+      {skillId:null,category:null,name:'invalid',path:join(root,'invalid'),shared:[],characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
+      {skillId:null,category:null,name:'linked',path:join(root,'linked'),shared:[],inspection:{kind:'rejected',reason:'symlink',detail:'symbolic link'}},
+    ].sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0)});
+  });
+  it('reports a folder whose lstat fails as failed without aborting its siblings', async () => {
+    const root=await temporaryDirectory(); for(let i=0;i<12;i++)await candidate(root,`skill-${i}`);
+    const original=fs.lstat; const spy=vi.spyOn(fs,'lstat').mockImplementation(async (...args)=>{if(args[0]===join(root,'skill-5'))throw Object.assign(new Error('EACCES: permission denied'),{code:'EACCES'});return original(...args);});
+    try {const inventory=await localSkills(root,emptyConfig(),{scope:'global',stateRoot:join(root,'.state')});expect(inventory.entries.find(e=>e.name==='skill-5')?.inspection).toEqual({kind:'failed',reason:'EACCES: permission denied'});expect(inventory.entries.filter(e=>e.inspection.kind==='candidate')).toHaveLength(11);}
+    finally{spy.mockRestore();}
+  });
+  it('keeps the undefined canonical path when the root cannot be realpathed', async () => {
+    const root=await temporaryDirectory();const path=await candidate(root,'placed');const config=emptyConfig();config.placements[path]={id:'placed',team:'team',version:null,scope:{kind:'global'},fingerprint:'',placed_at:''};
+    const original=fs.realpath;const spy=vi.spyOn(fs,'realpath').mockImplementation(async (...args)=>{if(args[0]===root)throw Object.assign(new Error('gone'),{code:'ENOENT'});return original(...args);});
+    try{expect((await localSkills(root,config,{scope:'global',stateRoot:join(root,'.state')})).entries[0]?.placement).toEqual({id:'placed',team:'team',version:null});}finally{spy.mockRestore();}
+  });
+  it('scans a root of 200 folders', async () => {
+    const root=await temporaryDirectory();const names=Array.from({length:200},(_,i)=>`skill-${i}`);for(const name of names)await candidate(root,name);
+    expect((await localSkills(root,emptyConfig(),{scope:'global',stateRoot:join(root,'.state')})).entries.map(e=>e.name)).toEqual(names.sort());
+  });
+});

@@ -103,7 +103,8 @@ What it does, so the user knows what they are buying:
    logged out, or the model is unavailable. Nested `claude -p` works from inside a session.
 4. Trigger evals from `evals/triggers.yaml` (skip with `--execution-only`), then execution cases
    from `evals/cases/*.yaml` (skip with `--triggers-only`, narrow with `--case <stem>`), each case
-   `k` times (default 3) per arm, candidate versus incumbent when a prior tree exists.
+   `k` times (default 1; `--k 3` or more for a receipt you intend to gate on) per arm, candidate
+   versus incumbent when a prior tree exists.
 5. Writes the run tree under `~/.terum/skills/evals/<team>/<id>/<run-id>/` and prints the report.
 
 Rules:

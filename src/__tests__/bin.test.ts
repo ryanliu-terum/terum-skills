@@ -232,7 +232,7 @@ describe('the built bin (dist/index.js)', () => {
     // ESM: the built file uses import/export, so the shipped manifest must say so (the fixture's own manifest above merely mirrors this).
     expect(manifest.type).toBe('module');
     // The lifecycle that produces dist/ on `npm publish`: prepack runs the build, the build compiles this config.
-    expect(manifest.scripts?.build).toBe('tsc -p tsconfig.build.json && node scripts/bundle-skill.mjs');
+    expect(manifest.scripts?.build).toBe('tsc -p tsconfig.build.json && node scripts/bundle-cli.mjs && node scripts/bundle-skill.mjs');
     expect(manifest.scripts?.prepack).toBe('npm run build');
   });
 

@@ -46,8 +46,11 @@ it.each([undefined,null,{Global:'99'}])('treats explicit Shell counts as authori
 it('marks a light frame ready only after the URL theme is applied and status resolves',async()=>{
  useUiStore.getState().setTheme('dark');location.hash='#/frame?theme=light';
  const backend=createMockBackend();const status=await backend.status();
- let resolve!: (value:typeof status)=>void;
- vi.spyOn(backend,'status').mockImplementation(()=>new Promise(done=>{resolve=done;}));
+ // LaunchCoordinator prefetches status alongside the Shell's own query, so hand out one resolver per call
+ // (and settle any later call immediately) instead of keeping only the most recent one.
+ const waiting:((value:typeof status)=>void)[]=[];let settled=false;
+ vi.spyOn(backend,'status').mockImplementation(()=>settled?Promise.resolve(status):new Promise(done=>{waiting.push(done);}));
+ const resolve=(value:typeof status)=>{settled=true;for(const done of waiting.splice(0))done(value);};
  const snapshots:{ready:string|undefined;theme:string|undefined}[]=[];
  function Probe(){useLayoutEffect(()=>{snapshots.push({ready:document.documentElement.dataset.appReady,theme:document.documentElement.dataset.theme});},[]);return null;}
  const root=document.documentElement;
@@ -73,8 +76,11 @@ it('marks a light frame ready only after the URL theme is applied and status res
  }finally{observer.disconnect();}
 });
 it('waits for a rejected status query to settle before marking the frame ready',async()=>{
- location.hash='#/frame';const backend=createMockBackend();let reject!:(reason:Error)=>void;
- vi.spyOn(backend,'status').mockImplementation(()=>new Promise((_resolve,fail)=>{reject=fail;}));
+ location.hash='#/frame';const backend=createMockBackend();
+ // Same as above: the LaunchCoordinator prefetch is a second caller, so every pending call must be rejected.
+ const waiting:((reason:Error)=>void)[]=[];let failure:Error|null=null;
+ vi.spyOn(backend,'status').mockImplementation(()=>failure?Promise.reject(failure):new Promise<never>((_resolve,fail)=>{waiting.push(fail);}));
+ const reject=(reason:Error)=>{failure=reason;for(const fail of waiting.splice(0))fail(reason);};
  render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
  expect(document.documentElement.dataset.appReady).toBeUndefined();
  await act(async()=>reject(new Error('Status unavailable')));

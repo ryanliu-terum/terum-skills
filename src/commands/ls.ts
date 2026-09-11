@@ -1,3 +1,4 @@
+import { mapWithConcurrency } from '../lib/concurrency.js';
 import { invocation } from '../lib/invocation.js';
 import type { WithForm, InvocationForm } from '../lib/invocation.js';
 import { readdir, readFile } from 'node:fs/promises';
@@ -17,6 +18,9 @@ import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from
 import { githubOwnerRepo, repositoryUrl } from '../lib/remote.js';
 
 import { skillVersions } from '../lib/teamRepo.js';
+
+/** Fingerprint walks are latency-bound; overlap them (W-02). */
+const FINGERPRINT_CONCURRENCY = 8;
 
 export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
 export interface LsSkill { id: string; name: string; author: string; category: string; characters: number; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; updated: string; unresolved: boolean; }
@@ -176,8 +180,10 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
       return localChanged ? repoChanged ? 'both' : 'local-changed' : repoChanged ? 'update-available' : 'up-to-date';
     } catch { return 'unknown'; }
   };
-  for (const { inventory, ...root } of inventories) {
-    const local: LocalSection = { ...root, root: inventory.root, rootState: inventory.rootState, label: localRootLabel(root), remote: await originRemote(root.repoRoot, runner), counts: localSkillCounts(inventory), rows: [], notOffered: [], problems: [...inventory.problems] };
+  // Probe origins in one wave before rendering the ordered sections.
+  const remotes = await Promise.all(inventories.map((root) => originRemote(root.repoRoot, runner)));
+  for (const [index, { inventory, ...root }] of inventories.entries()) {
+    const local: LocalSection = { ...root, root: inventory.root, rootState: inventory.rootState, label: localRootLabel(root), remote: remotes[index]!, counts: localSkillCounts(inventory), rows: [], notOffered: [], problems: [...inventory.problems] };
     sections.push(local);
     const registration = root.registered ? '; registered' : root.detected ? `; detected, not registered — \`${invocation(form, 'checkout add', root.repoRoot!)}\` keeps it in your library` : '';
     io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}${registration}):`);
@@ -195,19 +201,24 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
           snapshot.ids = new Set(records.map((record) => record.id));
           snapshot.complete = complete;
           snapshot.fingerprints = new Map();
-          for (const record of records) {
-            try { snapshot.fingerprints.set(record.id, (await snapshotSkillDirectory(record.directory)).fingerprint); }
+          await mapWithConcurrency(records, FINGERPRINT_CONCURRENCY, async (record) => {
+            try { snapshot.fingerprints!.set(record.id, (await snapshotSkillDirectory(record.directory)).fingerprint); }
             catch { /* An unreadable tree has no usable fingerprint. */ }
-          }
+          });
         } catch { /* A ledger fact survives an unavailable clone. */ }
       }
     }
+    // Recursive fingerprint reads dominate latency on UNC roots; retain row order after the wave.
+    const healthNeeded = inventory.entries.filter((entry) => entry.shared.length > 0 || entry.placement !== undefined || entry.inspection.kind === 'candidate');
+    const healths = new Map<LocalEntry, LocalHealth>();
+    const computed = await mapWithConcurrency(healthNeeded, FINGERPRINT_CONCURRENCY, (entry) => healthOf(entry));
+    healthNeeded.forEach((entry, index) => healths.set(entry, computed[index]!));
     for (const entry of inventory.entries) {
       const tracked = entry.shared.length > 0 || entry.placement !== undefined;
       const inspection = entry.inspection;
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (connect needs --allow-privileged)' : undefined;
-        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: await healthOf(entry), description: describedBy(inspection), category: entry.category, characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });
+        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: healths.get(entry)!, description: describedBy(inspection), category: entry.category, characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });
       } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail, description: inspection.description ?? null, category: entry.category, characters: entry.characters ?? null });
       if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
     }

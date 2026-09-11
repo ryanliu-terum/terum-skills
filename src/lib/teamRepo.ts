@@ -1,8 +1,8 @@
+import { packageRoot } from './package-root.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { chmod, lstat, mkdir, realpath, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { packageVersion } from './package.js';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import lockfile from 'proper-lockfile';
 import { mkdirPrivate } from './fs.js';
 import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
@@ -50,6 +50,9 @@ export interface SafeWriteOptions extends GuardContext {
 }
 
 export interface SafeWriteResult<R = void> { changed: boolean; pushedTo: string; returned: R; }
+
+/** Shared contract for the refresh batches; this batch does not wire or implement these options. */
+export interface RefreshOptions { lockWaitMs?: number; onWaiting?: (info: { label: string; elapsedMs: number }) => void; deadlineMs?: number }
 
 export interface TeamRepo {
   readonly root: string;
@@ -166,6 +169,9 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
   // A lock lost after the stale window (another process took it) is recorded and aborts the attempt
   // before anything is pushed, instead of two writers reset-and-committing over one working tree.
   let compromised = false;
+  // A main push commits every created path and leaves local main at the pushed commit. Its cleanup
+  // would be a no-op network round trip; PR branches and every other outcome still need the reset.
+  let pushedToMain = false;
   const release = await acquireCloneLock(root, { lockStale: options.lockStale, label: options.label, lockWaitMs: options.lockWaitMs, onWaiting: options.onWaiting, onCompromised: () => { compromised = true; } });
   // The push budget starts now, with the lock held: the wait above has its own bound (`lockWaitMs`),
   // and charging it here made a long wait fail the write it had just won the lock for.
@@ -219,7 +225,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       if (compromised) throw new Error(lostLock(root));
       pushed = true;
       const outcome = await push(git, branch);
-      if (outcome.ok) return { changed: true, pushedTo: outcome.pushedTo, returned };
+      if (outcome.ok) { pushedToMain = outcome.pushedTo === 'main'; return { changed: true, pushedTo: outcome.pushedTo, returned }; }
       if (!outcome.retryable) {
         const copy = explainGitAccessFailure(origin, outcome.error);
         throw new PushRefused(`The remote refused the push: ${outcome.error.trim()}${copy ? `\n${copy}` : ''}`);
@@ -236,7 +242,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
     // Cleanup can never change the outcome: the next safeWrite fetches and hard-resets anyway. A
     // compromised lock means another writer owns this clone now; resetting it would rewind THAT
     // writer's commit and turn its push into a no-op, so then only the lock is released.
-    if (!compromised) {
+    if (!compromised && !pushedToMain) {
       try {
         await git(['fetch', 'origin']);
         await git(['reset', '--hard', 'origin/main']);
@@ -428,13 +434,15 @@ export async function cloneTeam(remote: string, destination: string, runner: Run
 export interface PushGuardLauncher { node: string; entry: string; }
 
 /**
- * The CLI that is arming the clone, when it runs from a built package (`dist/index.js` beside
- * `dist/lib/`, which is also how `npx` unpacks it); null under the TypeScript sources. A hook
+ * The CLI entry resolved from the package root, for dist/lib, the bundled entry, or TypeScript
+ * sources (where an absent dist/index.js still returns null). A hook
  * armed with an absolute path needs no registry on git's blocking path and runs the rules that
  * armed it, not whatever was published last.
  */
 export function localPushGuardLauncher(): PushGuardLauncher | null {
-  const entry = fileURLToPath(new URL('../index.js', import.meta.url));
+  const root = packageRoot();
+  if (root === null) return null;
+  const entry = join(root, 'dist', 'index.js');
   return existsSync(entry) ? { node: process.execPath, entry } : null;
 }
 
