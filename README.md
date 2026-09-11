@@ -50,60 +50,30 @@ Requires Node 22.12+, `git`, and an authenticated GitHub CLI (`gh auth login`).
 
 ```sh
 npx -y terum-skills@latest setup
+npx -y terum-skills@latest app
 ```
 The default setup command will lead you towards creating a team. To join a team, ask the owner of a team to use `npx -y terum-skills@latest invite <your github username>`. They will receive a command that you can paste into your terminal. Or, if you know the organization name and repo name and have already been invited, you can run:
 
 ```sh
 npx -y terum-skills@latest setup <org name>/<repo name>
+npx -y terum-skills@latest app
 ```
 
 There is no install step — `npx -y` fetches and runs the latest release every time. (Prefer a permanent `terum-skills` binary? See [Installing, updating, uninstalling](#installing-updating-uninstalling).)
 
 Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/skills/terum-skills/`, so Claude Code can run these commands for you inside a session (and hand you the ones that need a terminal). It ships inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes it.
 
-
-## Commands
-
-| Group | Command | What it does |
-|---|---|---|
-| Team | `setup [<org>/<repo>]` | Create-or-join wizard; sequences the verbs below, then offers the session hook and the `/terum-skills` Claude Code skill |
-| | `login` | Check `gh` and record your name, email, and handle |
-| | `team create` / `team join` / `team leave` / `team remove <handle>` | Manage the repo and its roster |
-| | `invite <github-user>…` | Grant repo access and print the join line |
-| | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
-| | `checkout add [<path>]` / `checkout remove <path>` / `checkout list` | Register, forget, or list the checkout folders this machine scans (`ls --local` also shows the current repository, labelled not registered) |
-| | `checkout discover [--under <dir>…] [--depth <n>] [--budget-ms <n>] [--register]` | Find local folders holding `.claude/skills`; optionally register them. Setup offers this search and opt-in evaluation of shared skills with no current receipt (`--no-discover` / `--no-evals` skip the offers) |
-| | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
-| | `project create [<name>] [--remote <url>]` | Create a team project: a name and the repository its skills place into (the skills themselves are added with `publish --project`) |
-| | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
-| Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
-| | `install <ref> [--into global\|<checkout root>]` / `uninstall-skill <ref> [--from global\|<checkout root>]` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |
-| | `sync` | Pull, finish pending installs, mirror connected edits, refresh placed copies; `--auto` runs without prompts, `--fresh-ms <n>` sets its freshness window |
-| | `refresh` | Fetch the team clone to `origin/main` and nothing else — no placement, no sharing, no stamp; the desktop app runs it in the background so a teammate's committed work becomes visible |
-| | `serve` | Answer read requests on one long-lived process instead of starting a new one per call (`--frames` only; the desktop app drives it). Reads only: `status`, `ls`, `eval-report`, `search`, `validate`, `update` |
-| | `publish <skill>` | Endorse a skill for the team: a PR (default policy) or a direct commit |
-| Evals | `validate <path\|name>` | Deterministic safety and formatting checks, no model |
-| | `eval <skill>` | Run the skill's evals on your own Claude Code login; `--commit` files a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes queued versions |
-| | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |
-| Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
-| | `app` | Install and open the desktop app for this CLI version |
-| | `app-update [--check\|--stage\|--apply] [--release <version>] [--reason on-close\|overnight\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes) |
-
-`npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option you are expected to use.
-
-For a program driving the CLI (the desktop app, a script), `--frames` turns any verb into one JSON object per line on stdout and stdin, questions included. See [docs/frame-protocol.md](docs/frame-protocol.md).
-
 ## How it works
 
-**Your library is your folders.** Kind of just like a file explorer but just explicitly for your own skills. This is a direct mirror of your own local system. 
-
-**The team marketplace are your teams shared skills** 
+**Your library are your local folders.** Kind of just like a file explorer but just explicitly for your own skills. This is a direct mirror of your own local system. 
 
 **Local-first, with shared skills in a team Github, created on setup** The team repo holds every skill and their unique versions in GitHub along with each skill's associated eval. Each individual has their own .json detailing their personal profile along with the skills they have published or have installed. 
 
-**Installation of a team's skill** Installing copies the skill from your local clone of the shared team repo into the folder you select. Uninstall removes the copy of that skill from the folder. 
-
 **Sharing skills with a team** To share a skill with a team, you must explicitly publish the skill. If no skill already exists in the shared repo with the same name, creates a Version 1 of that skill as you shared it. Team members get the shared skill on the next git pull from the remote repo(every 1hr, can manually sync on demand). If a skill with the same name already exists, check if any of the versions are identical to the version you are trying to publish. If identical, attach any new local evals you have ran associated with that version to the shared repo. If not identical, create a new version of that skill by incrementally increasing the version number. 
+
+**The team marketplace holds your teams shared skills** Marketplace shows you all of the published skills by your team members along with their evals
+
+**Installation of a team's skill** Installing copies the skill from your local clone of the shared team repo into the folder you select. Uninstall removes the copy of that skill from the folder. 
 
 **Nothing runs anywhere but laptops and the git host.** No HTTP client, no daemon, no API key. The CLI talks to git and, for GitHub teams, to `gh`.
 
@@ -195,35 +165,47 @@ CI never runs a model and never holds an API key; every eval token is a member's
 ## Installing, updating, uninstalling
 
 - **Default (no install):** every documented command runs as `npx -y terum-skills@latest <verb>`. npx fetches the newest release on each run, so there is nothing to install, update, or add to PATH. The forms below are optional alternatives that give you a bare `terum-skills` binary.
-- **Global:** `npm install -g terum-skills`. If `terum-skills: command not found`, add `$(npm prefix -g)/bin` (the prefix itself on Windows) to PATH.
-- **Project-local:** `npm install terum-skills` puts the binary under `node_modules/.bin`; run it as `npx terum-skills …` from that folder.
-- **Update:** `terum-skills update` prints this copy's version, the newest advertised release, and the exact command that updates *this* copy. It never runs a package manager. `npx -y terum-skills@latest` fetches the newest release every run and updates nothing else.
-- **Uninstall:** `terum-skills uninstall` removes your team from this machine (placed skills, clone, cache), the session-start hook, the `/terum-skills` Claude Code skill it placed, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`) and local eval runs (`evals/`); it also removes the downloaded desktop app bundle (`app/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill.
+- **Update:** `npx -y terum-skills@latest update` prints this copy's version, the newest advertised release, and the exact command that updates *this* copy. It never runs a package manager. `npx -y terum-skills@latest` fetches the newest release every run and updates nothing else.
+- **Uninstall:** `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, clone, cache), the session-start hook, the `/terum-skills` Claude Code skill it placed, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`) and local eval runs (`evals/`); it also removes the downloaded desktop app bundle (`app/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill.
 
 Release notices appear last on stderr, at most once per release per day, and are suppressed in CI, when stderr is piped, or when `NO_UPDATE_NOTIFIER` or `TERUM_SKILLS_NO_UPDATE_NOTIFIER` is set. Version checks read git tags from this repository only, never the npm registry, and only when a configured team is on GitHub.
 
-## Desktop app (preview)
-
-`terum-skills app` installs and opens the desktop app for the running CLI version, downloading the bundle
-through `gh` when needed. The shipped Tauri shell drives the CLI over JSON frames; it records the CLI's
-location on launch. The boards render real data as M7 lands, with unavailable read models reported explicitly.
-Browser development still uses the mock backend. The app bundle is separate from the npm package.
-
-Every app-spawned CLI child, including under `tauri dev`, has piped stderr and
-`TERUM_SKILLS_NO_UPDATE_NOTIFIER=1`; `--frames` forces `noUpdateCheck`, and `update` is registered with
-`notices: false`. Background terminal release notices are therefore suppressed in the app. Explicit update
-checks still return release observations and installation-specific advice; and `app-update` gives the app its own channel for the app itself — it checks once per launch against the release advertisement the CLI already caches, downloads through `gh release download`, verifies the published SHA-256, and installs it the way Settings ▸ Updates says to: when you press Install now, when you quit, or overnight while the app is open and idle. It never updates the CLI.
-
-## Releasing (maintainers)
-
-A release is one deliberate action. Bump `version` in `package.json` and both `version` fields in `package-lock.json` in a reviewed PR, merge it, then run **Actions → Release** with the version and the full merged commit SHA (`dry_run` first). The workflow runs the gates, packs once with the commit stamped as `gitHead`, publishes to npm with provenance behind a reviewer-approved environment, verifies the registry serves those exact bytes, and only then creates the `v<version>` tag and a GitHub Release. Tags therefore advertise verified publications and are never moved; `release-drift.yml` checks every tag against the registry daily. A failed run is re-dispatched with the same inputs and finishes whatever step is missing.
-
 ## Troubleshooting
 
-- **Created a team by mistake?** `npx -y terum-skills@latest team leave <accidental>` removes it from this machine, then run the setup command its owner sent you. Delete the repository on GitHub yourself.
-- **git and gh signed in differently?** `gh auth setup-git --hostname github.com` makes git use gh's account.
-- **A never-connected folder fails `validate` on HYG1.** The managed fields (`license`, `metadata.id`, `metadata.author`) are what `connect` adds; connect it first.
-- **`sync` printed a divergence line.** Your source and the repo copy both changed. Pick `connect --keep-source <id>` or `connect --keep-repo <id>`; nothing moves until you do.
+- email ryanliu@terum.ai directly for bugs/feature requests, we'll get back to you within 12 hours.
+
+
+
+## CLI Commands(assuming not using the app)
+
+| Group | Command | What it does |
+|---|---|---|
+| Team | `setup [<org>/<repo>]` | Create-or-join wizard; sequences the verbs below, then offers the session hook and the `/terum-skills` Claude Code skill |
+| | `login` | Check `gh` and record your name, email, and handle |
+| | `team create` / `team join` / `team leave` / `team remove <handle>` | Manage the repo and its roster |
+| | `invite <github-user>…` | Grant repo access and print the join line |
+| | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
+| | `checkout add [<path>]` / `checkout remove <path>` / `checkout list` | Register, forget, or list the checkout folders this machine scans (`ls --local` also shows the current repository, labelled not registered) |
+| | `checkout discover [--under <dir>…] [--depth <n>] [--budget-ms <n>] [--register]` | Find local folders holding `.claude/skills`; optionally register them. Setup offers this search and opt-in evaluation of shared skills with no current receipt (`--no-discover` / `--no-evals` skip the offers) |
+| | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
+| | `project create [<name>] [--remote <url>]` | Create a team project: a name and the repository its skills place into (the skills themselves are added with `publish --project`) |
+| | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
+| Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
+| | `install <ref> [--into global\|<checkout root>]` / `uninstall-skill <ref> [--from global\|<checkout root>]` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |
+| | `sync` | Pull, finish pending installs, mirror connected edits, refresh placed copies; `--auto` runs without prompts, `--fresh-ms <n>` sets its freshness window |
+| | `refresh` | Fetch the team clone to `origin/main` and nothing else — no placement, no sharing, no stamp; the desktop app runs it in the background so a teammate's committed work becomes visible |
+| | `serve` | Answer read requests on one long-lived process instead of starting a new one per call (`--frames` only; the desktop app drives it). Reads only: `status`, `ls`, `eval-report`, `search`, `validate`, `update` |
+| | `publish <skill>` | Endorse a skill for the team: a PR (default policy) or a direct commit |
+| Evals | `validate <path\|name>` | Deterministic safety and formatting checks, no model |
+| | `eval <skill>` | Run the skill's evals on your own Claude Code login; `--commit` files a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes queued versions |
+| | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |
+| Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
+| | `app` | Install and open the desktop app for this CLI version |
+| | `app-update [--check\|--stage\|--apply] [--release <version>] [--reason on-close\|overnight\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes) |
+
+`npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option you are expected to use.
+
+For a program driving the CLI (the desktop app, a script), `--frames` turns any verb into one JSON object per line on stdout and stdin, questions included. See [docs/frame-protocol.md](docs/frame-protocol.md).
 
 ## License
 
