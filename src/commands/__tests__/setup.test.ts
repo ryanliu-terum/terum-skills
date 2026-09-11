@@ -1,4 +1,5 @@
 import * as promptModule from '../../lib/prompt.js';
+import * as packageModule from '../../lib/package.js';
 import { readEvalQueue } from '../../lib/evals/queue.js';
 import { estimateFromReceipts, estimateLine } from '../../lib/evals/estimate.js';
 import { createExecute } from '../../lib/execute.js';
@@ -1121,6 +1122,9 @@ it('snapshots a decorated creator Overnight transcript and emits only headers fo
  const args={...fixture,verbs:{...fixture.verbs,team:createTeam as typeof import('../team.js').run}}; // Fixture implements create only and explicitly rejects all other overloads.
 
  vi.spyOn(promptModule,'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('NO_COLOR',undefined);vi.stubEnv('TERM','xterm');
+ // The session box prints the running version and the box is padded to its widest line, so the real version
+ // would re-record this snapshot on every release. Pin it here; the box's own formatting is covered in banner.test.ts.
+ vi.spyOn(packageModule,'packageVersion').mockReturnValue('9.9.9');
  const input=new PassThrough(),output=new PassThrough();let transcript='';output.on('data',(chunk:Buffer)=>{transcript+=chunk.toString();});
  const terminal=promptModule.terminalPrompter({input,output,interactive:true});
  const io:Prompter={...terminal,
@@ -1128,7 +1132,7 @@ it('snapshots a decorated creator Overnight transcript and emits only headers fo
   text:(q,d,o)=>{const result=terminal.text(q,d,o);queueMicrotask(()=>input.write('\n'));return result;},
   select:(q,c,d,o)=>{const result=terminal.select(q,c,d,o);queueMicrotask(()=>input.write(q.startsWith('Evaluate the ')?'3\n':'1\n'));return result;},
  };
- try {expect(await run(args,io)).toMatchObject({ok:true,value:{steps:{evals:'queued'}}});expect(transcript).toMatchSnapshot();
+ try {expect(await run(args,io)).toMatchObject({ok:true,value:{steps:{evals:'queued'}}});expect(transcript).toContain('>_ terum-skills (v9.9.9)');expect(transcript).toMatchSnapshot();
   const titles=transcript.split('\n').filter(line=>line.startsWith('> \x1b[1m')).map(line=>line.replace(/\x1b\[[0-9]+m/g,''));
   expect(titles).toEqual(['> Welcome','> Role','> GitHub','> Team','> Invite','> Actions','> Find skills','> Evals','> Done']);expect(transcript).not.toMatch(/Step \d|of 13/);
  }finally{vi.restoreAllMocks();vi.unstubAllEnvs();}
