@@ -136,7 +136,7 @@ export async function run(args: ConnectArgs, io: Prompter): Promise<Result<Conne
         const choices = new Map(candidates.map((candidate) => [`Connect ${printable(candidate.name)}${qualify!.has(candidate.name) ? ` (${printable(candidate.label)}${candidates.some(other => other.path !== candidate.path && other.name === candidate.name && other.label === candidate.label) ? `: ${printable(candidate.path)}` : ''})` : ''}`, candidate.path]));
         const exit = batch.shared.length ? 'Done' : 'Skip';
         menuStarted = true;
-        const choice = await io.select(`Connect a local skill folder to team ${printable(team)}?`, [...choices.keys(), exit]);
+        const choice = await io.select(`Connect a local skill folder to team ${printable(team)}?`, [...choices.keys(), exit], undefined, { descriptions: [...candidates.map(candidate => `Connects ${printable(candidate.name)} so the team can install it.`), `Connect skills later with \`${invocation(args.form, 'connect')}\`.`] });
         if (choice === exit) break;
         selectedPath = choices.get(choice);
         if (selectedPath === undefined) throw new Error(`Unknown choice ${printable(choice)}.`);

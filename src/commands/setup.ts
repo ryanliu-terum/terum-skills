@@ -1,3 +1,8 @@
+import { runEvalBatch, EVAL_PARALLEL_DEFAULT, EVAL_LOCK_WAIT_MS } from '../lib/evals/batch.js';
+import { MARK, body, decorate, header, sessionBox, style, welcome } from '../lib/banner.js';
+import { packageVersion } from '../lib/package.js';
+import { estimateFromReceipts, estimateLine } from '../lib/evals/estimate.js';
+import { enqueueEvals } from '../lib/evals/queue.js';
 import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { creatorAuthenticationError, detectOrOfferGh, refuseSecondTeam, teamByRemote } from '../lib/auth.js';
@@ -67,7 +72,7 @@ export interface SetupArgs extends WithForm {
   communityUrl?: string;
   verbs?: Partial<SetupVerbs>;
 }
-export type StepOutcome = 'done' | 'skipped' | 'printed';
+export type StepOutcome = 'done' | 'skipped' | 'printed' | 'queued' | 'batched';
 type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'actions' | 'invite' | 'discover' | 'evals' | 'community' | 'hook' | 'wrapper' | 'done';
 export interface SetupResult {
   role: 'creator' | 'joiner';
@@ -86,7 +91,7 @@ const WELCOME = [
 export const DISCOVER_QUESTION = 'Look for skill folders on this machine and add them to your library?';
 export const DISCOVER_WHERE_QUESTION = 'Look under which folder?';
 export const DISCOVER_START_LINE = 'Looking for skill folders on this machine…';
-/** No estimate is printed: this CLI computes none, and an invented number is forbidden. */
+/** Retained verbatim for frame consumers; the control is now a four-choice select. */
 export function evalsQuestion(count: number): string {
   return `Evaluate the ${count} shared ${count === 1 ? 'skill' : 'skills'} that ${count === 1 ? 'has' : 'have'} no receipt yet? This runs Claude on each one and commits each receipt to the team repo.`;
 }
@@ -136,8 +141,25 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   let teamName = '';
   let remote = '';
 
+  const decorated = decorate(io, args);
+  const titles: Record<Step, string> = { welcome: 'Welcome', app: 'App', role: 'Role', github: 'GitHub', team: 'Team', actions: 'Actions', invite: 'Invite', discover: 'Find skills', evals: 'Evals', community: 'Community', hook: 'Session hook', wrapper: 'Wrapper', done: 'Done' };
+  const output = io;
+  let pendingSection: Step | undefined;
+  const section = (step: Step): void => { pendingSection = step; };
+  const openSection = (): void => { if (decorated && pendingSection) for (const line of header(titles[pendingSection]).split('\n')) output.print(line); pendingSection = undefined; };
+  if (decorated) io = {
+    interactive: output.interactive, ...(output.channel === undefined ? {} : { channel: output.channel }),
+    print: line => { openSection(); for (const part of line.split('\n')) output.print(body(part)); },
+    progress: update => output.progress?.(update),
+    confirm: (question, options) => { openSection(); return output.confirm(question, { ...options, decorated }); },
+    text: (question, fallback, options) => { openSection(); return output.text(question, fallback, { ...options, decorated }); },
+    select: (question, choices, fallback, options) => { openSection(); return output.select(question, choices, fallback, { ...options, decorated }); },
+  };
+  const bullet = (line: string): void => io.print(decorated ? `  • ${line.trimStart()}` : line);
   const say = (line: string): void => { if (!args.quiet) io.print(line); };
   try {
+    if (decorated) { for (const line of MARK.split('\n')) output.print(style('dim', line)); output.print(''); output.print(welcome()); }
+    section('welcome');
     for (const line of WELCOME) say(line);
     steps.welcome = args.quiet ? 'skipped' : 'printed';
     const before = await store.read();
@@ -151,6 +173,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     if (args.quiet || !io.interactive || io.channel === 'frames' || args.app === false || assetSuffix(detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, procVersion: await readProcVersion() })) === null) {
       steps.app = 'skipped';
     } else {
+      section('app');
       const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, target: args.target, intent: 'setup', offer: false }, io);
       if (opened.ok && (opened.value.action === 'launched' || opened.value.action === 'installed-and-launched')) {
         io.print(args.target === undefined ? 'Continuing in the app.' : `Continuing in the app. Join ${args.target} there.`);
@@ -168,10 +191,11 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     // "create" is a private GitHub repository, a wrong "join" is a re-run. "Join" is a success exit
     // that writes nothing; the owner's command creates every piece of local state itself.
     const configured = args.target === undefined ? Object.entries(before.teams)[0] : undefined;
+    if (configured || args.target === undefined) section('role');
     if (configured) say(`Resuming setup for team ${configured[0]}. Terum Skills keeps one team per machine; to move this machine to another team run \`${invocation(args.form, 'team leave', configured[0])}\` first.`);
     else if (args.target === undefined) {
       io.print('Creating a new team creates a private GitHub repository under your account.');
-      const choice = await io.select(ROLE_QUESTION, [CREATE_CHOICE, JOIN_CHOICE]);
+      const choice = await io.select(ROLE_QUESTION, [CREATE_CHOICE, JOIN_CHOICE], undefined, { descriptions: ['Creates a private GitHub repository under your account.', 'Uses an invitation from the team owner.'] });
       steps.role = 'done';
       if (choice === JOIN_CHOICE) {
         for (const line of joinHandoff()) io.print(line);
@@ -180,6 +204,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       }
     }
 
+    section('github');
     const gh = await detectOrOfferGh(io, runner);
     if (role === 'creator') {
       const error = creatorAuthenticationError(gh, args.form);
@@ -190,6 +215,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     else say('GitHub: gh is not installed; you will be asked to accept the invitation in your browser.');
     steps.github = 'done';
 
+    section('team');
     if (role === 'creator') {
       const configured = Object.entries(before.teams)[0];
       if (configured) {
@@ -246,6 +272,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     // `invite` prints is what they send each teammate. Creator only, GitHub remotes only; blank skips;
     // a re-run asks again. A failed Result stops the wizard here (spec §6.1 "Errors"); GitHub, not the
     // wizard, decides whether this account may add collaborators to the carried-forward repository.
+    if (role !== 'joiner') section('invite');
     if (role === 'joiner') steps.invite = 'skipped';
     else if (isGitHubRemote(remote)) {
       const answer = await io.text('Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', '');
@@ -262,6 +289,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       steps.invite = 'skipped';
     }
 
+    if (args.offerConnect !== false || !args.quiet) section('actions');
     if (args.offerConnect !== false) {
       const result = await verbs.connect({ form: args.form, team: teamName, home: args.home, cwd: args.cwd, config: store, runner }, io);
       if (!result.ok) return failed(result, role, teamName, remote, steps);
@@ -279,6 +307,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     // Discovery is optional, never fatal, and only offered where a person can answer.
     if (args.quiet || args.discover === false || !io.interactive) steps.discover = 'skipped';
     else {
+      section('discover');
       io.print(DISCOVER_START_LINE);
       try {
         if (!(await io.confirm(DISCOVER_QUESTION))) steps.discover = 'skipped';
@@ -290,8 +319,8 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
             under: [root], home, checkouts: config.checkouts ?? [], stateRoot: store.root, config,
             onProgress: (progress) => io.progress?.({ step: 'discover', current: progress.scanned }),
           });
-          for (const candidate of found.candidates) io.print(`${printable(candidate.path)} — ${candidate.skillFolders} skill folders${candidate.registered ? ' · already registered' : ''}`);
-          for (const problem of found.problems) io.print(`Could not look in ${printable(problem.path)}: ${printable(problem.reason)}`);
+          for (const candidate of found.candidates) bullet(`${printable(candidate.path)} — ${candidate.skillFolders} skill folders${candidate.registered ? ' · already registered' : ''}`);
+          for (const problem of found.problems) bullet(`Could not look in ${printable(problem.path)}: ${printable(problem.reason)}`);
           if (found.truncated) io.print(`(stopped early; run \`${invocation(args.form, 'checkout discover --budget-ms 60000')}\` to look longer)`);
           const unregistered = found.candidates.filter((candidate) => !candidate.registered);
           if (found.candidates.length === 0) io.print(`No skill folders found under ${printable(root)}.`);
@@ -312,16 +341,17 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       }
     }
 
-    // Default NO; the agent probe runs once, only after the yes, and is reused for the batch.
+    // The default remains Skip. Queuing never probes the paid agent.
     if (args.quiet || args.evals === false || !io.interactive || teamName === '') steps.evals = 'skipped';
     else {
+      section('evals');
       try {
         const handle = (await store.read()).teams[teamName]?.handle;
         if (!handle) {
           io.print('Skipping the eval offer: this machine has no joined handle for the team yet, so a receipt could not be committed.');
           steps.evals = 'skipped';
         } else {
-          const scan = await skillsWithoutReceipt(clone, teamName, runner, (line) => io.print(line));
+          const scan = await skillsWithoutReceipt(clone, teamName, runner, bullet);
           const candidates = scan.pending;
           if (candidates.length === 0) {
             // An empty batch has four different causes and only one of them means "everything is evaluated".
@@ -333,27 +363,51 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
                   ? 'No shared skill could be checked for a receipt; see the lines above.'
                   : 'Every shared skill already has an eval receipt for its current version.');
             steps.evals = 'skipped';
-          } else if (!(await io.confirm(evalsQuestion(candidates.length)))) steps.evals = 'skipped';
-          else {
-            const probe = await (args.preflight ?? verbs.preflight)();
-            if (!probe.ok) {
-              io.print(`Skipping the evals: ${probe.error}`);
-              steps.evals = 'skipped';
-            } else {
-              // One paid agent probe for the whole batch; each run uses the same default model.
-              const reuse: EvalArgs['preflight'] = async () => probe;
-              let evaluated = 0;
-              let failed = 0;
-              for (const [index, candidate] of candidates.entries()) {
-                io.print(`Evaluating ${index + 1} of ${candidates.length} · ${candidate.name}`);
-                io.progress?.({ step: 'evals', current: index + 1, total: candidates.length });
-                const outcome = await verbs.eval({ form: args.form, ref: candidate.name, team: teamName, commit: true, config: store, runner, preflight: reuse }, io);
-                if (outcome.ok) evaluated += 1;
-                else { failed += 1; io.print(outcome.error); }
+          } else {
+            const estimate = estimateLine(candidates.length, await estimateFromReceipts(clone));
+            io.print(estimate);
+            const choice = await io.select(evalsQuestion(candidates.length), ['Now', 'In batches', 'Overnight', 'Skip'], 'Skip', { ...(io.channel === 'frames' ? { detail: [estimate] } : {}), descriptions: [
+              `Runs all ${candidates.length}, ${EVAL_PARALLEL_DEFAULT} at a time, in this terminal.`,
+              'Asks how many at a time and checks in between batches.',
+              'Queues them; the app runs them between 01:00 and 05:00 while it is open and idle.',
+              `Evaluate any skill later with \`${invocation(args.form, 'eval <skill>')}\`.`,
+            ] });
+            const queue = async (remaining: typeof candidates, window: 'overnight' | 'later') => {
+              const requestedAt = new Date().toISOString();
+              await enqueueEvals(store.root, remaining.map(candidate => ({ team: teamName, skill: candidate.name, version: candidate.version, requestedAt, window })));
+              if (window === 'overnight') io.print(`Queued ${remaining.length} evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with \`${invocation(args.form, 'eval --drain')}\`.`);
+              else io.print(`Queued ${remaining.length} evals for later. Run them with \`${invocation(args.form, 'eval --drain')}\`.`);
+            };
+            if (choice === 'Skip') steps.evals = 'skipped';
+            else if (choice === 'Overnight') { await queue(candidates, 'overnight'); steps.evals = 'queued'; }
+            else if (choice === 'Now' || choice === 'In batches') {
+              let batchSize = candidates.length;
+              if (choice === 'In batches') {
+                while (true) {
+                  const answer = (await io.text('How many at a time?', String(EVAL_PARALLEL_DEFAULT))).trim();
+                  if (/^[0-9]+$/.test(answer) && Number.isSafeInteger(Number(answer)) && Number(answer) >= 1) { batchSize = Number(answer); break; }
+                  io.print('Enter a whole number of at least 1.');
+                }
               }
-              io.print(`Evaluated ${evaluated} of ${candidates.length}; ${failed} failed.`);
-              steps.evals = 'done';
-            }
+              const probe = await (args.preflight ?? verbs.preflight)();
+              if (!probe.ok) { io.print(`Skipping the evals: ${probe.error}`); steps.evals = 'skipped'; }
+              else {
+                const reuse: EvalArgs['preflight'] = async () => probe;
+                const parallel = choice === 'In batches' ? batchSize : EVAL_PARALLEL_DEFAULT;
+                const width = choice === 'In batches' ? batchSize : candidates.length;
+                for (let offset = 0; offset < candidates.length; offset += width) {
+                  if (offset > 0) {
+                    const remaining = candidates.length - offset;
+                    if (!(await io.confirm(`Continue with the next ${Math.min(width, remaining)}? (${offset} of ${candidates.length} done, ${remaining} left)`))) { await queue(candidates.slice(offset), 'later'); break; }
+                  }
+                  await runEvalBatch({ items: candidates.slice(offset, offset + width), parallel, io,
+                    run: (candidate, captured) => verbs.eval({ form: args.form, ref: candidate.name, team: teamName, commit: true, config: store, runner, preflight: reuse, lockWaitMs: EVAL_LOCK_WAIT_MS }, captured),
+                  });
+                }
+                steps.evals = choice === 'In batches' ? 'batched' : 'done';
+                if (steps.evals === 'batched') io.print('Evaluated in batches');
+              }
+            } else throw new Error(`Unknown eval choice: ${choice}`);
           }
         }
       } catch (error) {
@@ -364,8 +418,9 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
 
     const communityUrl = args.communityUrl ?? COMMUNITY_URL;
     if (communityUrl === '' || args.quiet) steps.community = 'skipped';
-    else { io.print(`Feedback and requests: ${communityUrl}`); steps.community = 'printed'; }
+    else { section('community'); io.print(`Feedback and requests: ${communityUrl}`); steps.community = 'printed'; }
 
+    section('hook');
     const hookOutcome = await verbs.offerHook(io, resolvedHook(store, args.home, args.hook));
     steps.hook = hookOutcome === 'installed' || hookOutcome === 'replaced' ? 'done' : 'skipped';
 
@@ -374,11 +429,16 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     // here, right after the hook and in the hook's shape: one offer with its own y/N on the same io,
     // a copy the tool recognises by its frontmatter marker (refreshed on a re-run without asking,
     // removed by machine uninstall), and anything else at that path left alone (src/lib/wrapper.ts).
+    section('wrapper');
     const wrapperOutcome = await verbs.offerWrapper(io, { ...defaultWrapperOptions(args.home), ...args.wrapper });
     steps.wrapper = wrapperOutcome === 'installed' || wrapperOutcome === 'replaced' ? 'done' : 'skipped';
 
     if (args.quiet) steps.done = 'skipped';
     else {
+      section('done');
+      const summary: string[] = [];
+      let members: { handle: string; displayName: string }[] = [];
+      const finishLine = (line: string): void => { if (decorated) summary.push(line); else io.print(line); };
       // Every step above is durable by here; this closing summary reads the disposable clone (§4.2),
       // so a read-back problem must not turn a finished wizard into a failure (the rule team join and
       // team leave already follow). Only the clone reads sit inside the try, and the roster is read
@@ -386,16 +446,22 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       // are the payload the user sends teammates — so an unreadable clone must not take them with it.
       try {
         const { roster, problems } = await readRoster(clone);
-        io.print('Members:');
-        for (const person of roster) io.print(`  @${person.handle} — ${person.displayName}`);
-        for (const problem of problems) io.print(`  ${problem.file}: ${problem.message}`);
+        members = roster;
+        finishLine('Members:');
+        for (const person of roster) finishLine(`${decorated ? '  •' : ' '} @${person.handle} — ${person.displayName}`);
+        for (const problem of problems) finishLine(`${decorated ? '  •' : ' '} ${problem.file}: ${problem.message}`);
       } catch (error) {
-        io.print(`Set up, but the team details could not be read from ${clone}: ${error instanceof Error ? error.message : String(error)}`);
+        finishLine(`Set up, but the team details could not be read from ${clone}: ${error instanceof Error ? error.message : String(error)}`);
       }
       const ownerRepo = githubOwnerRepo(remote);
       const url = repositoryUrl(remote);
-      io.print(`Repository: ${url}`);
-      io.print(`README: ${ownerRepo ? `${url}/blob/main/README.md` : url}`);
+      finishLine(`Repository: ${url}`);
+      finishLine(`README: ${ownerRepo ? `${url}/blob/main/README.md` : url}`);
+      if (decorated) {
+        openSection();
+        for (const line of sessionBox({ version: packageVersion() ?? 'unknown', team: teamName, handle: (await store.read()).teams[teamName]?.handle, roster: members, repository: url, readme: ownerRepo ? `${url}/blob/main/README.md` : url, next: invocation(args.form, 'ls') })) output.print(line);
+        for (const line of summary.filter(line => !line.startsWith('Members:') && !line.startsWith('  • @') && !line.startsWith('Repository:') && !line.startsWith('README:'))) io.print(line);
+      }
       steps.done = 'printed';
     }
     return success({ role, team: teamName, remote, steps });

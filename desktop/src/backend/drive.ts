@@ -9,10 +9,10 @@ export async function driveRun<T>(run:Run<T>,answers:Record<string,string|boolea
    if(frame.t==='print')onPrint?.(frame.line);
    if(frame.t==='progress')onProgress?.(frame);
    if(frame.t==='ask'){
-    const question:PromptQuestion={kind:frame.kind,question:frame.question,...(frame.choices===undefined?{}:{choices:frame.choices}),...(frame.default===undefined?{}:{default:frame.default}),...(frame.detail===undefined?{}:{detail:frame.detail})};
+    const question:PromptQuestion={kind:frame.kind,question:frame.question,...(frame.choices===undefined?{}:{choices:frame.choices}),...(frame.default===undefined?{}:{default:frame.default}),...(frame.detail===undefined?{}:{detail:frame.detail}),...(frame.descriptions===undefined?{}:{descriptions:frame.descriptions})};
     onAsk?.(question);
-    const options:[]|[{detail:readonly string[]}]=frame.detail===undefined?[]:[{detail:frame.detail}];
-    const value=frame.kind==='confirm'?await prompter.confirm(frame.question,...options):frame.kind==='select'?await prompter.select(frame.question,frame.choices??[],...options):await prompter.text(frame.question,frame.default,...options);
+    const options = [{ ...(frame.detail===undefined?{}:{detail:frame.detail}), ...(frame.descriptions===undefined?{}:{descriptions:frame.descriptions}), ...(frame.default===undefined?{}:{default:frame.default}) }];
+    const value=frame.kind==='confirm'?await prompter.confirm(frame.question,options[0]):frame.kind==='select'?await prompter.select(frame.question,frame.choices??[],options[0]):await prompter.text(frame.question,frame.default,options[0]);
     run.answer(frame.id,value);
    }
   }

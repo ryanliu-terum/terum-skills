@@ -6,7 +6,7 @@ export const UI_KEY = 'terum-skills-app:ui';
 // The eval defaults are app-owned chrome too: the CLI keeps no defaults of its own, so Settings ▸ Evals
 // stores them here and the adapter passes them as flags on every eval run.
 export function isChromePreference(key: string): boolean {
- return ['ui','appearance:start','appearance:counts','appearance:machine','inbox:badge','inbox:seen','launch:consumedWrittenAt','onboardingSkipped','eval:k','eval:model','eval:judge','eval:commit','updates:app:policy','updates:app:lastShown'].includes(key) || /^inbox:kind:(share|update|alert|eval|review|author|team)$/.test(key);
+ return ['ui','appearance:start','appearance:counts','appearance:machine','inbox:badge','inbox:seen','launch:consumedWrittenAt','onboardingSkipped','eval:k','eval:model','eval:judge','eval:commit','updates:app:policy','updates:app:lastShown','evals:overnight'].includes(key) || /^inbox:kind:(share|update|alert|eval|review|author|team)$/.test(key);
 }
 export type AppUpdatePolicy = 'ask' | 'on-close' | 'overnight';
 export function appUpdatePolicy(value: unknown): AppUpdatePolicy {

@@ -1,3 +1,6 @@
+import * as promptModule from '../../lib/prompt.js';
+import { readEvalQueue } from '../../lib/evals/queue.js';
+import { estimateFromReceipts, estimateLine } from '../../lib/evals/estimate.js';
 import { createExecute } from '../../lib/execute.js';
 import { frameChannel, type Frame, type ResultOutcome } from '../../lib/frames.js';
 import { randomUUID } from 'node:crypto';
@@ -11,7 +14,7 @@ import { createConfigStore } from '../../lib/config.js';
 import { failure, success } from '../../lib/result.js';
 import { offerHook } from '../../lib/hook.js';
 import { bareTeam, cloneWithIdentity, exists, fakeGh, git, mappedRunner, person, pushFromSeed, NonInteractivePrompter, ScriptedPrompter, temporaryDirectory, wrapperFor, wrapRunner } from '../../lib/__tests__/fixtures.js';
-import { seedPending, pendingReceipt } from './pending-eval-fixtures.js';
+import { seedPending, pendingReceipt, pendingSkill } from './pending-eval-fixtures.js';
 import { Prompter, PromptClosedError } from '../../lib/prompt.js';
 import type { EvalArgs } from '../eval.js';
 import { DISCOVER_QUESTION, DISCOVER_WHERE_QUESTION, evalsQuestion, expandTilde, JOIN_CHOICE, ROLE_QUESTION, run } from '../setup.js';
@@ -101,12 +104,12 @@ describe('setup (§6.1)', () => {
       config.teams.team = { remote: 'git.example/team', handle: 'seed' }; config.display_name = 'Seed'; config.email = 'seed@example.com';
       config.placements[join(cwd, '.claude', 'skills', 'endorsed')] = { id: '33333333-3333-4333-8333-333333333333', team: 'team', scope: { kind: 'project', project: cwd }, version: null, fingerprint: '', placed_at: '' };
     });
-    // The two trailing falses answer the discovery and eval-batch offers this wizard now makes on every
+    // The trailing false and Skip answer the discovery and eval-batch offers this wizard now makes on every
     // interactive run; connect has just shared alpha and beta, so both are candidates for an eval receipt.
-    const io = new ScriptedPrompter(['Connect alpha', 'Connect beta'], [true, true, false, false], true);
+    const io = new ScriptedPrompter(['Connect alpha', 'Connect beta', 'Skip'], [true, true, false], true);
     const result = await run({ app: false, target: remote, config: store, home, cwd, runner: mappedRunner(remote, fixture.bare, fakeGh('seed')), wrapper: noBundledWrapper, verbs: { offerHook: async () => 'present' } }, io);
     expect(result, JSON.stringify(result)).toMatchObject({ ok: true, value: { role: 'joiner', steps: { actions: 'done', invite: 'skipped' } } });
-    expect(io.offered).toEqual([['Connect alpha', 'Connect beta', 'Skip'], ['Connect beta', 'Done']]);
+    expect(io.offered).toEqual([['Connect alpha', 'Connect beta', 'Skip'], ['Connect beta', 'Done'], ['Now', 'In batches', 'Overnight', 'Skip']]);
     expect(io.asked).toEqual(['Connect a local skill folder to team team?', 'Connect alpha?', 'Connect a local skill folder to team team?', 'Connect beta?', DISCOVER_QUESTION, evalsQuestion(2)]);
     expect((await store.read()).checkouts).toEqual([await realpath(cwd)]);
     // Alpha registers the canonical checkout; the next picker scan uses that registered root.
@@ -184,8 +187,8 @@ describe('setup (§6.1)', () => {
 
   it('uses the agreed invitation wording and no longer the old one', async () => {
     const args = await freshCreator();
-    // connect yes, discovery no, eval batch no, hook no.
-    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob', 'Connect starter'], [true, false, false, false], true);
+    // connect yes, discovery no, eval select Skip, hook no.
+    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob', 'Connect starter', 'Skip'], [true, false, false], true);
     const result = await run(args, io);
     expect.soft(io.asked).toContain('Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)');
     expect.soft(io.askedAbout('GitHub logins to invite')).toBe(false);
@@ -399,8 +402,8 @@ describe('setup (§6.1)', () => {
       'api -X PUT --include repos/alice/alpha-repo/collaborators/bob': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' },
       'api -X PUT --include repos/alice/alpha-repo/collaborators/carol': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' },
     }));
-    // connect yes, discovery no, eval batch no, hook yes, wrapper yes.
-    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob carol', 'Connect starter'], [true, false, false, true, true], true);
+    // connect yes, discovery no, eval select Skip, hook yes, wrapper yes.
+    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob carol', 'Connect starter', 'Skip'], [true, false, true, true], true);
     const result = await run({ app: false, config: store, home, runner, hook: hookFor(root), wrapper: wrapperFor(home), communityUrl: 'https://example.test/community' }, io);
     if (!result.ok) throw new Error(result.error);
 
@@ -448,8 +451,8 @@ describe('setup (§6.1)', () => {
     const first = new ScriptedPrompter(['Create a new team', 'resume', '', '', 'Alice', 'alice@example.com', 'resume-repo', 'bob']);
     const interrupted = await run({ app: false, config: store, home, runner, hook: hookFor(root), wrapper: noBundledWrapper, verbs: { invite: async () => { throw new Error('stop after team'); } } }, first);
     expect(interrupted).toMatchObject({ ok: false, error: 'stop after team', value: { steps: { team: 'done' } } });
-    // connect yes, discovery no, eval batch no, hook yes.
-    const second = new ScriptedPrompter(['bob', 'Connect starter'], [true, false, false, true], true);
+    // connect yes, discovery no, eval select Skip, hook yes.
+    const second = new ScriptedPrompter(['bob', 'Connect starter', 'Skip'], [true, false, true], true);
     const resumed = await run({ app: false, config: store, home, runner, hook: hookFor(root), wrapper: noBundledWrapper }, second);
     if (!resumed.ok) throw new Error(resumed.error);
     expect(second.askedAbout('Create a team or join one?')).toBe(false);
@@ -500,10 +503,10 @@ describe('setup (§6.1)', () => {
     const source = await readFile(new URL('../setup.ts', import.meta.url), 'utf8');
     // setup still delegates every DURABLE consent question to the real verb that performs the write. The only
     // confirms it owns are the two optional trailing steps, which belong to no verb: the discovery offer, its
-    // folder question and per-candidate adds, and the eval-batch offer. This list is exhaustive and ordered, so
+    // folder question and per-candidate adds, and the eval mode, batch size and continuation questions (f-wizard D2). This list is exhaustive and ordered, so
     // any further prompt added to setup.ts fails here and has to be argued for.
     expect([...source.matchAll(/io\.(?:confirm|select|text)\(/g)].map((match) => match[0]))
-      .toEqual(['io.select(', 'io.text(', 'io.confirm(', 'io.text(', 'io.confirm(', 'io.confirm(', 'io.confirm(']);
+      .toEqual(['io.select(', 'io.text(', 'io.confirm(', 'io.text(', 'io.confirm(', 'io.confirm(', 'io.select(', 'io.text(', 'io.confirm(']);
 
     const fixture = await bareTeam(); const root = join(fixture.root, 'real'); const home = join(root, 'home'); await skillUnder(home);
     const bare = join(fixture.root, 'empty.git'); await git(['init', '-q', '--bare', bare]);
@@ -512,9 +515,9 @@ describe('setup (§6.1)', () => {
       'repo create questions --private': { code: 0, stdout: '', stderr: '' },
       'repo view questions --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/questions\n', stderr: '' },
     }));
-    // connect yes, discovery no, eval batch no, hook no, wrapper yes. (joinedIo below is non-interactive, so
+    // connect yes, discovery no, eval select Skip, hook no, wrapper yes. (joinedIo below is non-interactive, so
     // it is never offered either optional step.)
-    const io = new ScriptedPrompter(['Create a new team', 'questions', '', '', 'Alice', 'alice@example.com', 'questions', '', 'Connect starter'], [true, false, false, false, true], true);
+    const io = new ScriptedPrompter(['Create a new team', 'questions', '', '', 'Alice', 'alice@example.com', 'questions', '', 'Connect starter', 'Skip'], [true, false, false, true], true);
     const created = await run({ app: false, config: createConfigStore(join(root, 'state')), home, runner, hook: hookFor(root), wrapper: wrapperFor(home), communityUrl: '' }, io);
     if (!created.ok) throw new Error(created.error);
     const joinFixture = await bareTeam();
@@ -608,11 +611,11 @@ it('the creator picker omits name-mismatched folders and reports the skipped cou
     'repo create alpha-repo --private': { code: 0, stdout: '', stderr: '' },
     'repo view alpha-repo --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/alpha-repo\n', stderr: '' },
   }));
-  // connect yes, discovery no, eval batch no, hook no.
-  const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', '', 'Connect starter', 'Done'], [true, false, false, false], true);
+  // connect yes, discovery no, eval select Skip, hook no.
+  const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', '', 'Connect starter', 'Done', 'Skip'], [true, false, false], true);
   const result = await run({ app: false, config: store, home, runner, hook: hookFor(root), wrapper: noBundledWrapper, communityUrl: '' }, io);
   if (!result.ok) throw new Error(result.error);
-  expect(io.offered).toEqual([['Create a new team', 'Join an existing team'], ['Connect skip', 'Connect starter', 'Skip'], ['Connect skip', 'Done']]);
+  expect(io.offered).toEqual([['Create a new team', 'Join an existing team'], ['Connect skip', 'Connect starter', 'Skip'], ['Connect skip', 'Done'], ['Now', 'In batches', 'Overnight', 'Skip']]);
   expect(io.lines).toContain('Skipped 1 local folders that cannot be connected. Run `npx -y terum-skills@latest ls --local` for paths and reasons.');
 });
 
@@ -839,7 +842,7 @@ async function optionalSetup(count = 0) {
   return args;
 }
 function optionalAnswers(confirms: Record<string, boolean> = {}, answers: Record<string, string> = {}) {
-  return new AnsweringPrompter({ [DISCOVER_WHERE_QUESTION]: '', ...answers }, { 'Look for skill folders': false, 'Add all ': true, 'Evaluate the ': false, ...confirms });
+  return new AnsweringPrompter({ [DISCOVER_WHERE_QUESTION]: '', 'Evaluate the ': 'Skip', ...answers }, { 'Look for skill folders': false, 'Add all ': true, ...confirms });
 }
 describe('setup discovery', () => {
   it('setup offers discovery, registers every candidate, and records steps.discover done', async () => {
@@ -926,16 +929,16 @@ describe('setup batch evals', () => {
     expect((await run(args, io)).ok).toBe(true); expect(io.events).toContain(`ask:${evalsQuestion(1)}`); expect(io.events).not.toContain(`ask:${evalsQuestion(2)}`);
   });
   it('accepting runs eval once per candidate with commit true and reports the summary', async () => {
-    const args = await optionalSetup(2); const evaluate = vi.fn(successfulEval); const io = optionalAnswers({ 'Evaluate the ': true });
+    const args = await optionalSetup(2); const evaluate = vi.fn(successfulEval); const io = optionalAnswers({}, { 'Evaluate the ': 'Now' });
     const result = await run({ ...args, preflight: async () => success({ ccVersion: 'test' }), verbs: { ...args.verbs, eval: evaluate } }, io);
-    expect(evaluate).toHaveBeenCalledTimes(2); for (const name of ['alpha', 'beta']) expect(evaluate).toHaveBeenCalledWith(expect.objectContaining({ ref: name, commit: true, team: 'team', preflight: expect.any(Function) }), io);
-    expect(io.events).toContain('print:Evaluating 1 of 2 · alpha'); expect(io.events).toContain('print:Evaluated 2 of 2; 0 failed.'); expect(result).toMatchObject({ ok: true, value: { steps: { evals: 'done' } } });
+    expect(evaluate).toHaveBeenCalledTimes(2); for (const name of ['alpha', 'beta']) expect(evaluate).toHaveBeenCalledWith(expect.objectContaining({ ref: name, commit: true, team: 'team', preflight: expect.any(Function), lockWaitMs: 300_000 }), expect.objectContaining({ interactive: io.interactive, print: expect.any(Function) }));
+    expect(io.events).toContain('print:Evaluating 2 skills, 4 at a time…'); expect(io.events).toContain('print:Evaluated 2 of 2; 0 failed.'); expect(result).toMatchObject({ ok: true, value: { steps: { evals: 'done' } } });
   });
   it('a failed eval is printed and the batch continues', async () => {
     const args = await optionalSetup(2); const evaluate = vi.fn<typeof import('../eval.js').run>().mockResolvedValueOnce(failure('eval failed')).mockImplementation(successfulEval);
-    const io = optionalAnswers({ 'Evaluate the ': true });
+    const io = optionalAnswers({}, { 'Evaluate the ': 'Now' });
     expect(await run({ ...args, preflight: async () => success({ ccVersion: 'test' }), verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'done' } } });
-    expect(evaluate).toHaveBeenCalledTimes(2); expect(io.events).toContain('print:eval failed'); expect(io.events).toContain('print:Evaluated 1 of 2; 1 failed.');
+    expect(evaluate).toHaveBeenCalledTimes(2); expect(io.events).toContain('print:✗ alpha: eval failed'); expect(io.events).toContain('print:Evaluated 1 of 2; 1 failed.');
   });
   it('declining the eval offer runs no eval', async () => {
     const args = await optionalSetup(2); const evaluate = vi.fn(successfulEval), preflight = vi.fn(async () => success({ ccVersion: 'test' })); const io = optionalAnswers();
@@ -945,7 +948,7 @@ describe('setup batch evals', () => {
   // reach the real `claude`; production still resolves to the same systemPreflight default.
   it('the probe is taken from the injected verb table when args.preflight is absent', async () => {
     const args = await optionalSetup(2); const preflight = vi.fn(async () => success({ ccVersion: 'stubbed' })); const evaluate = vi.fn(successfulEval);
-    const io = optionalAnswers({ 'Evaluate the ': true });
+    const io = optionalAnswers({}, { 'Evaluate the ': 'Now' });
     expect(await run({ ...args, verbs: { ...args.verbs, eval: evaluate, preflight } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'done' } } });
     expect(preflight).toHaveBeenCalledTimes(1); expect(evaluate).toHaveBeenCalledTimes(2);
   });
@@ -971,12 +974,12 @@ describe('setup batch evals', () => {
     expect(await run({ ...args, ...options }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } }); expect(io.events.some(e => e.startsWith('ask:Evaluate the '))).toBe(false);
   });
   it('a failing preflight after the yes is printed and the step is skipped', async () => {
-    const args = await optionalSetup(2); const evaluate = vi.fn(successfulEval); const io = optionalAnswers({ 'Evaluate the ': true });
+    const args = await optionalSetup(2); const evaluate = vi.fn(successfulEval); const io = optionalAnswers({}, { 'Evaluate the ': 'Now' });
     expect(await run({ ...args, preflight: async () => failure('claude is not runnable'), verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } });
     expect(evaluate).not.toHaveBeenCalled(); expect(io.events).toContain('print:Skipping the evals: claude is not runnable');
   });
   it('the agent probe runs exactly once for the whole batch', async () => {
-    const args = await optionalSetup(2); const probe = success({ ccVersion: 'test' }); const preflight = vi.fn(async () => probe); const io = optionalAnswers({ 'Evaluate the ': true });
+    const args = await optionalSetup(2); const probe = success({ ccVersion: 'test' }); const preflight = vi.fn(async () => probe); const io = optionalAnswers({}, { 'Evaluate the ': 'Now' });
     const evaluate = vi.fn(async (args: EvalArgs) => { expect(await args.preflight?.()).toBe(probe); return successfulEval(); });
     expect((await run({ ...args, preflight, verbs: { ...args.verbs, eval: evaluate } }, io)).ok).toBe(true); expect(preflight).toHaveBeenCalledTimes(1); expect(evaluate).toHaveBeenCalledTimes(2);
   });
@@ -1000,10 +1003,137 @@ describe('setup batch evals', () => {
   });
   it('progress frames name the evals step with current and total', async () => {
     const args = await optionalSetup(2); const input = new PassThrough(), output = new PassThrough(); const frames: Frame[] = [];
-    output.on('data', (data: Buffer) => { const frame = JSON.parse(data.toString()) as Frame; frames.push(frame); if (frame.t === 'ask') input.write(JSON.stringify({ t: 'answer', id: frame.id, value: frame.kind === 'confirm' ? frame.question.startsWith('Evaluate the ') : '' }) + '\n'); });
+    output.on('data', (data: Buffer) => { const frame = JSON.parse(data.toString()) as Frame; frames.push(frame); if (frame.t === 'ask') input.write(JSON.stringify({ t: 'answer', id: frame.id, value: frame.kind === 'select' && frame.question.startsWith('Evaluate the ') ? 'Now' : frame.kind === 'confirm' ? false : '' }) + '\n'); });
     const channel = frameChannel({ input, output });
     expect((await run({ ...args, preflight: async () => success({ ccVersion: 'test' }), verbs: { ...args.verbs, eval: successfulEval } }, channel.io)).ok).toBe(true);
     channel.result({ verb: 'setup', ok: true, exitCode: 0 });
     expect(frames.filter(f => f.t === 'progress')).toEqual([{ t: 'progress', step: 'evals', current: 1, total: 2 }, { t: 'progress', step: 'evals', current: 2, total: 2 }]);
   });
+});
+
+
+describe('f-wizard cost and run choices', () => {
+  it('prints the measured medians across skills and versions before the unchanged question', async () => {
+    const args = await optionalSetup(2);
+    const samples = [{ cost_usd: 1, duration_ms: 60_000 }, { cost_usd: 2, duration_ms: 120_000 }, { cost_usd: 90, duration_ms: 300_000 }, { cost_usd: null, duration_ms: null }];
+    for (const [index, efficiency] of samples.entries()) {
+      const dir = join(args.config.teamClone('team'), 'evals', `historical-${index}`, String(index).repeat(40));
+      await mkdir(dir, { recursive: true }); await writeFile(join(dir, '20260909T000000Z.json'), JSON.stringify({ efficiency }));
+    }
+    const io = optionalAnswers(); await run(args, io);
+    const line = 'print:Evaluating 2 skills, 4 at a time: about $4.00 and 2 min on this machine, from 3 earlier runs (median $2.00 · 2 min each).';
+    expect(io.events).toContain(line); expect(io.events.indexOf(line)).toBeLessThan(io.events.indexOf(`ask:${evalsQuestion(2)}`));
+  });
+  it('does not invent totals from legacy per-arm averages or null measurements', async () => {
+    const args = await optionalSetup(1);
+    for (let i = 0; i < 3; i++) {
+      const dir = join(args.config.teamClone('team'), 'evals', 'historical', String(i).repeat(40)); await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, '20260909T000000Z.json'), JSON.stringify({ efficiency: { candidate: { cost_usd: 1, duration_ms: 2_000 } } }));
+    }
+    expect(await estimateFromReceipts(args.config.teamClone('team'))).toBeNull();
+    const io = optionalAnswers(); await run(args, io);
+    expect(io.events).toContain(`print:${estimateLine(1, null)}`);
+  });
+  it('uses seconds for short runs and averages the middle pair for an even median', async () => {
+    const args = await optionalSetup();
+    for (const [index, cost] of [1, 2, 4, 99].entries()) {
+      const dir = join(args.config.teamClone('team'), 'evals', 'historical', String(index).repeat(40)); await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'run.json'), JSON.stringify({ efficiency: { cost_usd: cost, duration_ms: cost * 1000 } }));
+    }
+    const estimate = await estimateFromReceipts(args.config.teamClone('team'));
+    expect(estimate).toEqual({ runs: 4, costUsd: 3, durationMs: 3000 }); expect(estimateLine(2, estimate)).toContain('$6.00 and 3 s');
+  });
+  it('fewer than three runs and invalid JSON produce no numeric estimate', async () => {
+    const args = await optionalSetup(); const dir = join(args.config.teamClone('team'), 'evals', 'historical', 'a'.repeat(40)); await mkdir(dir, { recursive: true });
+    for (const name of ['one', 'two']) await writeFile(join(dir, `${name}.json`), JSON.stringify({ efficiency: { cost_usd: 1, duration_ms: 2000 } }));
+    await writeFile(join(dir, 'invalid.json'), '{broken');
+    expect(await estimateFromReceipts(args.config.teamClone('team'))).toBeNull();
+  });
+  it('Overnight queues all without probing or evaluating and prints the runtime invocation', async () => {
+    const args = await optionalSetup(2), evaluate = vi.fn(successfulEval), preflight = vi.fn();
+    const io = optionalAnswers({}, { 'Evaluate the ': 'Overnight' });
+    expect(await run({ ...args, form: 'bare', preflight, verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'queued' } } });
+    expect(evaluate).not.toHaveBeenCalled(); expect(preflight).not.toHaveBeenCalled();
+    expect((await readEvalQueue(args.config.root)).items).toMatchObject([{ team: 'team', skill: 'alpha', window: 'overnight' }, { team: 'team', skill: 'beta', window: 'overnight' }]);
+    expect(io.events).toContain('print:Queued 2 evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with `terum-skills eval --drain`.');
+  });
+  it.each([true, false])('batches continue=%s, preserving remaining work when stopped', async more => {
+    const args = await optionalSetup(2), evaluate = vi.fn(successfulEval), preflight = vi.fn(async () => success({ ccVersion: 'test' }));
+    const io = optionalAnswers({ 'Continue with the next ': more }, { 'Evaluate the ': 'In batches', 'How many at a time?': '1' });
+    expect(await run({ ...args, preflight, verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'batched' } } });
+    expect(evaluate).toHaveBeenCalledTimes(more ? 2 : 1); expect(preflight).toHaveBeenCalledTimes(1);
+    expect(io.events).toContain('ask:Continue with the next 1? (1 of 2 done, 1 left)');
+    expect((await readEvalQueue(args.config.root)).items).toHaveLength(more ? 0 : 1);
+    if (!more) expect((await readEvalQueue(args.config.root)).items[0]).toMatchObject({ skill: 'beta', window: 'later' });
+  });
+  it('validates batch size before probing and offers a default of four', async () => {
+    const args = await optionalSetup(2), evaluate = vi.fn(successfulEval); const io = optionalAnswers({}, { 'Evaluate the ': 'In batches' });
+    const answers = ['0', '-1', '1.5', 'no', '9007199254740992', '3']; const original = io.text.bind(io);
+    io.text = async (question, defaultValue) => { if (question !== 'How many at a time?') return original(question, defaultValue); expect(defaultValue).toBe('4'); return answers.shift()!; };
+    expect(await run({ ...args, preflight: async () => success({ ccVersion: 'test' }), verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'batched' } } });
+    expect(io.events.filter(line => line === 'print:Enter a whole number of at least 1.')).toHaveLength(5); expect(evaluate).toHaveBeenCalledTimes(2);
+  });
+  it('frames preserve the undecorated print transcript byte for byte', async () => {
+    const args = await optionalSetup(); const frames = Object.assign(optionalAnswers(), { channel: 'frames' as const });
+    const plain = optionalAnswers();
+    vi.stubEnv('NO_COLOR', undefined); vi.stubEnv('TERM', 'xterm');
+    try {
+      await run(args, frames); vi.stubEnv('NO_COLOR', '1'); await run(args, plain);
+      expect(frames.events).toEqual(plain.events); expect(frames.events.join('\n')).not.toMatch(/── Step|@@@@|╭|\x1b\[/);
+    } finally { vi.unstubAllEnvs(); vi.restoreAllMocks(); }
+  });
+  it.each([{ quiet: true }, { noColor: true }, { dumb: true }])('suppresses furniture for %j', async options => {
+    const args = await optionalSetup(); const io = optionalAnswers();
+    vi.stubEnv('NO_COLOR', options.noColor ? '1' : undefined); vi.stubEnv('TERM', options.dumb ? 'dumb' : 'xterm');
+    try { await run({ ...args, quiet: options.quiet }, io); expect(io.events.join('\n')).not.toMatch(/── Step|@@@@|╭|\x1b\[/); }
+    finally { vi.unstubAllEnvs(); vi.restoreAllMocks(); }
+  });
+  it('decorates interactive terminal sections and the closing summary', async () => {
+    vi.spyOn(promptModule, 'terminalOutputIsTTY').mockReturnValue(true);
+    const args = await optionalSetup(); const io = optionalAnswers();
+    vi.stubEnv('NO_COLOR', undefined); vi.stubEnv('TERM', 'xterm');
+    try { await run(args, io); expect(io.events).toContainEqual(expect.stringContaining('Welcome to ')); expect(io.events).toContainEqual(expect.stringContaining('Evals')); expect(io.events).toContainEqual(expect.stringMatching(/^print:╭─/)); expect(io.events).toContainEqual(expect.stringContaining('@seed')); }
+    finally { vi.unstubAllEnvs(); vi.restoreAllMocks(); }
+  });
+});
+
+
+async function threePending() {
+ const args=await optionalSetup(2),clone=args.config.teamClone('team');
+ await pendingSkill(clone,'gamma','33333333-3333-4333-8333-333333333333');await git(['add','--all'],clone);await git(['commit','-qm','third candidate'],clone);return args;
+}
+it.each(['Now','In batches'])('runs %s concurrently and queues declined remaining batches',async choice=>{
+ const args=await threePending(),io=optionalAnswers({'Continue with the next ':false},{'Evaluate the ':choice,'How many at a time?':'2'});
+ let active=0,peak=0;const releases:(()=>void)[]=[];
+ const evaluate=vi.fn(async (args:EvalArgs)=>{expect(args.lockWaitMs).toBe(300_000);peak=Math.max(peak,++active);await new Promise<void>(resolve=>releases.push(resolve));active--;return successfulEval();});
+ const running=run({...args,preflight:async()=>success({ccVersion:'test'}),verbs:{...args.verbs,eval:evaluate}},io);
+ await vi.waitFor(()=>expect(releases).toHaveLength(choice==='Now'?3:2));for(const release of releases)release();
+ expect((await running).ok).toBe(true);expect(peak).toBe(choice==='Now'?3:2);
+ expect(io.events.filter(event=>event.startsWith('ask:Continue with the next '))).toHaveLength(choice==='Now'?0:1);
+ expect((await readEvalQueue(args.config.root)).items.map(item=>item.skill)).toEqual(choice==='Now'?[]:['gamma']);
+});
+it('snapshots a decorated creator Overnight transcript and emits only headers for sections that print',async()=>{
+ const fixture=await optionalSetup(2),configured=await fixture.config.read();await fixture.config.update(config=>{config.teams={};});
+ const createTeam = async (command:import('../team.js').TeamArgs,io:Prompter) => {
+  if(command.kind!=='create')throw new Error('This creator fixture only accepts team create.');
+  await fixture.config.update(config=>{config.teams=configured.teams;});io.print('Created team team at https://github.com/alice/team.');return success({team:'team',remote:'https://github.com/alice/team.git'});
+ };
+ const args={...fixture,verbs:{...fixture.verbs,team:createTeam as typeof import('../team.js').run}}; // Fixture implements create only and explicitly rejects all other overloads.
+
+ vi.spyOn(promptModule,'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('NO_COLOR',undefined);vi.stubEnv('TERM','xterm');
+ const input=new PassThrough(),output=new PassThrough();let transcript='';output.on('data',(chunk:Buffer)=>{transcript+=chunk.toString();});
+ const terminal=promptModule.terminalPrompter({input,output,interactive:true});
+ const io:Prompter={...terminal,
+  confirm:(q,o)=>{const result=terminal.confirm(q,o);queueMicrotask(()=>input.write('n\n'));return result;},
+  text:(q,d,o)=>{const result=terminal.text(q,d,o);queueMicrotask(()=>input.write('\n'));return result;},
+  select:(q,c,d,o)=>{const result=terminal.select(q,c,d,o);queueMicrotask(()=>input.write(q.startsWith('Evaluate the ')?'3\n':'1\n'));return result;},
+ };
+ try {expect(await run(args,io)).toMatchObject({ok:true,value:{steps:{evals:'queued'}}});expect(transcript).toMatchSnapshot();
+  const titles=transcript.split('\n').filter(line=>line.startsWith('> \x1b[1m')).map(line=>line.replace(/\x1b\[[0-9]+m/g,''));
+  expect(titles).toEqual(['> Welcome','> Role','> GitHub','> Team','> Invite','> Actions','> Find skills','> Evals','> Done']);expect(transcript).not.toMatch(/Step \d|of 13/);
+ }finally{vi.restoreAllMocks();vi.unstubAllEnvs();}
+});
+it('omits the Invite header on a decorated joiner without numbering or empty sections',async()=>{
+ const args=await optionalSetup(),io=optionalAnswers();vi.spyOn(promptModule,'terminalOutputIsTTY').mockReturnValue(true);vi.stubEnv('NO_COLOR',undefined);vi.stubEnv('TERM','xterm');
+ try{expect((await run({...args,target:'alice/team'},io)).ok).toBe(true);expect(io.events.join('\n')).not.toContain('> \x1b[1mInvite');expect(io.events.join('\n')).not.toMatch(/Step \d/);}finally{vi.restoreAllMocks();vi.unstubAllEnvs();}
 });

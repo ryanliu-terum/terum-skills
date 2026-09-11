@@ -16,7 +16,7 @@ export function printedSetupStep(line:string):SetupStep|null {
  if(line.startsWith('Looking for skill folders')||line.startsWith('No skill folders found')||line.startsWith('Could not look')||/ — \d+ skill folders( · already registered)?$/.test(line))return 'discover';
  // The four ways the batch can end without running: everything receipted, nothing shared, the version reader
  // failed, or nothing could be checked. All four are the evals step reporting, not unrecognized copy.
- if(line.startsWith('Evaluating ')||line.startsWith('Evaluated ')||line.startsWith('Every shared skill already has')||line.startsWith('Skipping the eval')
+ if(line.startsWith('✓ ')||line.startsWith('✗ ')||line.startsWith('Queued ')||line==='Queued for overnight'||line.startsWith('Evaluating ')||line.startsWith('Evaluated ')||line.startsWith('Every shared skill already has')||line.startsWith('Skipping the eval')
   ||line.startsWith('The team has no shared skills yet')||line.startsWith('Could not read the current skill versions')||line.startsWith('No shared skill could be checked'))return 'evals';
  if(line.startsWith('Feedback and requests:'))return 'community';
  if(line.includes('session hook'))return 'hook';
@@ -27,7 +27,7 @@ export function printedSetupStep(line:string):SetupStep|null {
 export function askedSetupStep(question:string):SetupStep|null {
  if(question==='Use this identity?')return 'team';
  if(question==='Look for skill folders on this machine and add them to your library?'||question==='Look under which folder?'||question.startsWith('Add all ')||/^Add .+\?$/.test(question))return 'discover';
- if(question.startsWith('Evaluate the '))return 'evals';
+ if(question.startsWith('Evaluate the ')||question==='How many at a time?'||question.startsWith('Continue with the next '))return 'evals';
  return null;
 }
 export interface SetupSnapshot {
@@ -103,7 +103,7 @@ export function setupSession(backend: Backend, launch: LaunchContext): SetupSess
        if (stopped) reject(new PromptCancelledError('Cancelled.'));
        else void ask(question).then(resolve, reject);
       }).finally(() => { rejectPrompt = null; }),
-       line => update({ lines: [...current.lines, line], activeStep: printedSetupStep(line) ?? current.activeStep }), progress => update({ progress }), question => update({ activeStep: askedSetupStep(question.question) ?? current.activeStep }));
+       line => update({ lines: [...current.lines, line], activeStep: printedSetupStep(line) ?? current.activeStep, ...(/^(Queued |Evaluated )/.test(line) ? { progress: null } : {}) }), progress => update({ progress }), question => update({ activeStep: askedSetupStep(question.question) ?? current.activeStep, ...(current.progress?.label === 'evals' ? { progress: null } : {}) }));
      }
      result = stopped ? { ok: false, error: 'Setup was cancelled.', cancelled: true } : driven;
     } catch (error) { result = { ok:false, error:error instanceof Error ? error.message : String(error) }; }
@@ -111,7 +111,7 @@ export function setupSession(backend: Backend, launch: LaunchContext): SetupSess
       try { backend.prefs.set('launch:consumedWrittenAt', launch.writtenAt); await backend.prefs.flush?.(); }
       catch (error) { update({ persistenceError: error instanceof Error ? error.message : String(error) }); }
     }
-    update({ result, outcome: result.ok ? result.value.role === 'joiner' && result.value.team === '' ? 'handoff' : 'finished' : result.cancelled ? 'cancelled' : result.refused ? 'refused' : 'failed' });
+    update({ result, progress: null, outcome: result.ok ? result.value.role === 'joiner' && result.value.team === '' ? 'handoff' : 'finished' : result.cancelled ? 'cancelled' : result.refused ? 'refused' : 'failed' });
    })();
   },
  };

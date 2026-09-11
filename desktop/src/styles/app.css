@@ -143,3 +143,8 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); }
 .update-chip > span { color: var(--tk-brand); }
 .workflow-lines { font-size: 12px; max-height: 220px; overflow: auto; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; }
+
+.prompt-option { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; cursor: pointer; }
+.prompt-option-description { display: block; color: var(--tk-text3); font-size: 12px; }
+.setup-output-ok { color: var(--tk-good); }
+.setup-output-bad { color: var(--tk-bad); }

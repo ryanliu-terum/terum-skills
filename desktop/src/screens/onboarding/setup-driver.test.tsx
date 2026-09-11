@@ -77,10 +77,10 @@ it('requires an explicit select choice and renders a consumed join hand-off',asy
   expect(choice).toBe('Join an existing team');ctx.print('Ask the team owner to invite you.');
   return {ok:true,value:{role:'joiner',team:'',steps:{team:'printed'}}};
  }));
- open(b);const dialog=await screen.findByRole('dialog'),select=within(dialog).getByRole('combobox');
- expect(select).toHaveValue('');expect(within(dialog).getByRole('option',{name:'Choose…'})).toBeDisabled();
+ open(b);const dialog=await screen.findByRole('dialog'),select=within(dialog).getByRole('radio',{name:'Join an existing team'});
+ expect(select).not.toBeChecked();expect(within(dialog).getAllByRole('radio')).toHaveLength(2);
  expect(within(dialog).getByRole('button',{name:'Continue'})).toBeDisabled();
- fireEvent.change(select,{target:{value:'Join an existing team'}});fireEvent.click(within(dialog).getByRole('button',{name:'Continue'}));
+ fireEvent.click(select);fireEvent.click(within(dialog).getByRole('button',{name:'Continue'}));
  await screen.findByRole('heading',{name:'Ask your team owner to invite you'});
  expect(screen.queryByText('Setup finished')).toBeNull();expect(screen.queryByRole('textbox')).toBeNull();
  expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
@@ -196,4 +196,17 @@ it('still shows an unknown progress label as its own row',async()=>{
  const view=open(b);await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('placing'));
  const rows=view.container.querySelectorAll('.onboarding-progress-row');expect(rows).toHaveLength(7);expect(rows[6]).toHaveTextContent('placing');
  await act(async()=>finish());await screen.findByRole('heading',{name:'Setup finished'});
+});
+
+it('shows eval progress and settle colors, clears progress at a check-in, and completes queued work',async()=>{
+ const b=backend();let advance!:()=>void;const gate=new Promise<void>(resolve=>{advance=resolve;});
+ vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{
+  ctx.print('Evaluating 2 skills, 4 at a time…');ctx.print('✓ deploy-check');ctx.progress(1,2,'evals');await gate;
+  ctx.print('✗ release-notes: Hygiene failed for release-notes');ctx.progress(2,2,'evals');await ctx.ask('confirm','Continue with the next 2? (2 of 4 done, 2 left)');
+  ctx.print('Queued 2 evals for later. Run them with `npx -y terum-skills@latest eval --drain`.');return {ok:true,value:{team:'t',role:'creator',steps:{evals:'queued'}}};
+ }));
+ open(b);const row=await screen.findByText('Evaluating shared skills');await waitFor(()=>expect(row.parentElement).toHaveTextContent('1 of 2'));
+ expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow','1');expect(screen.getByText('✓ deploy-check')).toHaveClass('setup-output-ok');
+ await act(async()=>advance());const dialog=await screen.findByRole('dialog');expect(row.parentElement).not.toHaveTextContent('2 of 2');expect(screen.getByText('✗ release-notes: Hygiene failed for release-notes')).toHaveClass('setup-output-bad');
+ fireEvent.click(within(dialog).getByRole('button',{name:'No'}));await screen.findByRole('heading',{name:'Setup finished'});expect(row.parentElement).toHaveAttribute('data-state','done');expect(row.parentElement).toHaveTextContent('Queued');
 });
