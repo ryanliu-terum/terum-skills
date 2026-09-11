@@ -338,3 +338,7 @@ MC-07 (`--team` everywhere as a product feature) is cancelled; its argv half rem
 ### Technical
 
 `src/lib/auth.ts` owns `refuseSecondTeam`, the locked `assertBindable`/`bindTeam` check, and normalized matching through `teamByRemote`. `src/lib/result.ts` adds `RefusedError`; `src/lib/frames.ts` carries `refused` without a protocol bump, and `src/lib/execute.ts` forwards it. Setup, team create/join and install call the shared pre-flight before side effects; setup and install preserve child typed outcomes. Leave clears approvals on the last team and removes the hook inside the team mutex. `src/cli.ts` uses `hideHelp()` for the accepted overrides. Config selection, connect/publish/uninstall hints, README, the bundled skill, frame documentation and regression tests follow the one-team wording. The desktop half is a separate PR.
+
+## Amendments
+
+- 2026-09-10 amendment (D9, f-update-policy): the shell gains a seventh native command, `app_update_on_close`. D9 caps the native surface because every command is a hole in the WebView boundary; this one is allowed because it is the only way an installer can outlive the window that asks for it — by the time it runs, the WebView is gone. It takes a version string and nothing else, is reachable only from the last-window-close and exit-requested handlers, and runs at most once per session. Authority: Teddy, 2026-09-10, "auto update overnight or upon app close".

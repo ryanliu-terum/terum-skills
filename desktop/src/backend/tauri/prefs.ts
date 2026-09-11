@@ -1,7 +1,7 @@
 import { appConfigDir, join } from '@tauri-apps/api/path';
 import { load } from '@tauri-apps/plugin-store';
 import type { PrefStore } from '../types';
-import { isChromePreference, jsonPreference, legacyPreferences, preferenceValue } from '../prefs';
+import { isChromePreference, jsonPreference, legacyPreferences, migrateAppUpdatePolicy, preferenceValue } from '../prefs';
 export interface PreferenceFile { get<T>(key: string): Promise<T | undefined>; set(key: string, value: unknown): Promise<void>; save(): Promise<void> }
 async function openPreferences(): Promise<PreferenceFile> {
  return load(await join(await appConfigDir(), 'preferences.json'), { autoSave: false, defaults: {} });
@@ -19,9 +19,11 @@ export function nativePrefs(open: () => Promise<PreferenceFile> = openPreference
    let loaded = saved ?? {};
    if (saved === undefined) {
     try { loaded = legacyPreferences(legacy()); } catch { /* Unavailable legacy storage uses drawn defaults. */ }
-    await file.set('preferences', loaded); await file.save();
    }
-   values = { ...Object.fromEntries(Object.entries(loaded).filter(([key]) => isChromePreference(key))), ...Object.fromEntries([...dirty].map(key => [key, values[key]])) };
+   const migrated = migrateAppUpdatePolicy(loaded);
+   // Preserve an existing opt-out in memory even when its migration cannot be saved.
+   values = { ...Object.fromEntries(Object.entries(migrated).filter(([key]) => isChromePreference(key))), ...Object.fromEntries([...dirty].map(key => [key, values[key]])) };
+   if (saved === undefined || JSON.stringify(migrated) !== JSON.stringify(loaded)) { await file.set('preferences', values); await file.save(); }
   } catch (error) { failure = error; file = null; }
   notify();
  })();

@@ -192,8 +192,9 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .option('--apply', 'hand the install to a background process and return; the caller must then quit')
     .option('--release <version>', 'which released version to act on (default: this copy’s version)')
     .option('--force', 'with --check, ask GitHub now instead of honouring the once-a-day cap')
+    .addOption(new Option('--reason <reason>', 'record why the app is installing').choices(['on-close', 'overnight', 'manual']))
     .addOption(new Option('--await-pid <pid>', 'wait for this process to exit before installing').hideHelp())
     .addOption(new Option('--apply-now', 'the detached install leg; never run this by hand').hideHelp())
-    .action(async (options: { check?: boolean; stage?: boolean; apply?: boolean; release?: string; force?: boolean; awaitPid?: string; applyNow?: boolean }) => execute((io) => active.appUpdate({ ...options, form: context.form, launch: context.launch }, io), { verb: 'app-update', notices: false }));
+    .action(async (options: { check?: boolean; stage?: boolean; apply?: boolean; release?: string; force?: boolean; awaitPid?: string; applyNow?: boolean; reason?: string }) => execute((io) => active.appUpdate({ ...options, form: context.form, launch: context.launch }, io), { verb: 'app-update', notices: false }));
   return program;
 }

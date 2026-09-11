@@ -7,6 +7,8 @@
 
 #[cfg(target_os = "macos")]
 mod disclaim;
+mod app_update;
+use app_update::CloseUpdate;
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -319,11 +321,12 @@ fn host_platform() -> &'static str {
 pub fn run() {
   let builder = tauri::Builder::default()
     .manage(Bridge::default())
+    .manage(CloseUpdate::default())
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_clipboard_manager::init())
     .plugin(tauri_plugin_dialog::init())
-    .invoke_handler(tauri::generate_handler![cli_spawn, cli_write, cli_kill, read_app_state, host_platform, quit]);
+    .invoke_handler(tauri::generate_handler![cli_spawn, cli_write, cli_kill, read_app_state, host_platform, quit, app_update::app_update_on_close]);
 
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
@@ -336,6 +339,11 @@ pub fn run() {
       Ok(())
     })
     .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { .. } = event {
+        if window.app_handle().webview_windows().len() == 1 {
+          if let Some(update) = window.try_state::<CloseUpdate>() { app_update::on_exit(&update); }
+        }
+      }
       if let tauri::WindowEvent::Destroyed = event {
         if let Some(bridge) = window.try_state::<Bridge>() { kill_all(&bridge); }
       }
@@ -346,6 +354,9 @@ pub fn run() {
       #[cfg(target_os = "macos")]
       if let tauri::RunEvent::Reopen { .. } = event {
         let _ = app.emit("launch:reopen", ());
+      }
+      if let tauri::RunEvent::ExitRequested { .. } = event {
+        if let Some(update) = app.try_state::<CloseUpdate>() { app_update::on_exit(&update); }
       }
       if let tauri::RunEvent::Exit = event {
         if let Some(bridge) = app.try_state::<Bridge>() { kill_all(&bridge); }

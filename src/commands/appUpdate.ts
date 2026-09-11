@@ -15,7 +15,7 @@ import { APP_PRODUCT, APP_REPOSITORY, APP_SLUG, RELEASE_ASSETS_MISSING, explainD
 
 export interface AppUpdateArgs extends WithForm {
   check?: boolean; stage?: boolean; apply?: boolean; applyNow?: boolean;
-  release?: string; force?: boolean; awaitPid?: string | number;
+  release?: string; force?: boolean; awaitPid?: string | number; reason?: string;
   /** Injected seams; identical in shape to AppArgs so both verbs test the same way. */
   config?: ConfigStore; runner?: Runner; exec?: Exec; state?: ReleaseStateStore; probe?: ProbePolicy;
   launch?: Launch; evidence?: PlatformEvidence; now?: () => number;
@@ -25,7 +25,8 @@ export interface AppUpdateArgs extends WithForm {
   alive?: (pid: number) => boolean;
 }
 export type AppUpdatePhase = 'waiting' | 'installing' | 'launched' | 'failed';
-export interface AppUpdateMarker { schema: 1; version: string; phase: AppUpdatePhase; at: string; error: string | null }
+export type AppUpdateReason = 'on-close' | 'overnight' | 'manual';
+export interface AppUpdateMarker { reason?: AppUpdateReason; schema: 1; version: string; phase: AppUpdatePhase; at: string; error: string | null }
 export interface AppUpdateCheck {
   mode: 'check'; platform: AppPlatform; supported: boolean;
   cliVersion: string | null; latest: string | null; latestAt: string | null;
@@ -47,6 +48,7 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 const tail = (form: WithForm['form']) => `Everything works from the terminal. Run \`${invocation(form, 'app-update --stage')}\` later to try again.`;
 
 export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<AppUpdateResult>> {
+  if (args.reason !== undefined && !['on-close', 'overnight', 'manual'].includes(args.reason)) return failure('--reason must be on-close, overnight or manual.');
   if ([args.check, args.stage, args.apply].filter(Boolean).length > 1) return failure('Choose one of --check, --stage or --apply.');
   const store = args.config ?? createConfigStore(); const root = store.root; const appRoot = join(root, 'app');
   const platform = detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, procVersion: await readProcVersion() });
@@ -77,9 +79,13 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
   }
   const version = args.release ?? packageVersion();
   if (version === null) return failure('This copy has no version, so it cannot say which desktop app to download.');
+  const markerPath = join(root, 'run', 'app-update.json');
+  const mark = (phase: AppUpdatePhase, error: string | null = null) => writeJsonPrivate(markerPath, { schema: 1, version, phase, at: new Date().toISOString(), error, ...(args.reason === undefined ? {} : { reason: args.reason }) });
+  const failed = async (error: string) => { await mark('failed', error); return success<AppUpdateApplyNow>({ mode: 'apply-now', version, platform, phase: 'failed', error }); };
+  const rejected = (error: string) => args.applyNow ? failed(error).catch(cause => failure(`${error} Could not record failure: ${message(cause)}`)) : failure(error);
   // The resolved version, not args.release: without --release it comes from packageVersion(), which accepts prereleases.
-  if (!released.test(version)) return failure(`\`${version}\` is not a released version; use three numbers, as in 0.1.11.`);
-  if (!supported) return failure(unsupportedLine(platform));
+  if (!released.test(version)) return rejected(`\`${version}\` is not a released version; use three numbers, as in 0.1.11.`);
+  if (!supported) return rejected(unsupportedLine(platform));
   const versionDir = join(appRoot, version), asset = `${APP_SLUG}_${version}_${suffix}`;
   if (!args.applyNow && !args.apply) {
     try {
@@ -127,19 +133,16 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
       } finally { await rm(staging, { recursive: true, force: true }); }
     } catch (error) { return failure(`${message(error)} ${tail(args.form)}`); }
   }
-  if (!(await exists(join(versionDir, 'staged.json')))) return failure(`Nothing is staged for ${version}; download it first.`);
+  if (!(await exists(join(versionDir, 'staged.json')))) return rejected(`Nothing is staged for ${version}; download it first.`);
   const awaitPid = args.awaitPid !== undefined ? Number(args.awaitPid) : io.channel === 'frames' ? process.ppid : null;
-  if (awaitPid !== null && (!Number.isSafeInteger(awaitPid) || awaitPid <= 0)) return failure('--await-pid must be a process id.');
+  if (awaitPid !== null && (!Number.isSafeInteger(awaitPid) || awaitPid <= 0)) return rejected('--await-pid must be a process id.');
   if (!args.applyNow) {
     const entry = args.entry ?? args.launch?.path ?? process.argv[1];
     if (!entry) return failure('This copy cannot locate its own entry point, so it cannot hand the install off.');
-    try { await exec(args.node ?? process.execPath, [entry, 'app-update', '--apply-now', '--release', version, ...(awaitPid === null ? [] : ['--await-pid', String(awaitPid)])], { detach: true }); }
+    try { await exec(args.node ?? process.execPath, [entry, 'app-update', '--apply-now', '--release', version, ...(args.reason === undefined ? [] : ['--reason', args.reason]), ...(awaitPid === null ? [] : ['--await-pid', String(awaitPid)])], { detach: true }); }
     catch (error) { return failure(`Could not start the installer: ${message(error)}`); }
     return success({ mode: 'apply', version, platform, awaitPid, handedOff: true });
   }
-  const markerPath = join(root, 'run', 'app-update.json');
-  const mark = (phase: AppUpdatePhase, error: string | null = null) => writeJsonPrivate(markerPath, { schema: 1, version, phase, at: new Date().toISOString(), error });
-  const failed = async (error: string) => { await mark('failed', error); return success<AppUpdateApplyNow>({ mode: 'apply-now', version, platform, phase: 'failed', error }); };
   try {
     await mark('waiting');
     const alive = args.alive ?? ((pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; } });
@@ -190,6 +193,7 @@ async function readMarker(path: string): Promise<AppUpdateMarker | null> {
     if (!value || typeof value !== 'object') return null;
     const m = value as Record<string, unknown>;
     if (m.schema !== 1 || typeof m.version !== 'string' || typeof m.at !== 'string' || !['waiting', 'installing', 'launched', 'failed'].includes(String(m.phase)) || (m.error !== null && typeof m.error !== 'string')) return null;
+    if (m.reason !== undefined && (typeof m.reason !== 'string' || !['on-close', 'overnight', 'manual'].includes(m.reason))) return null;
     return m as unknown as AppUpdateMarker;
   } catch { return null; }
 }
