@@ -370,3 +370,32 @@ plus the two CLI-side names §12's `CliVerbs.decline` does not cover (`frames.ts
 the `cli.ts` registration). This is a reading of the spec against itself, not a decision — recorded
 because a reviewer comparing B1's diff to §16.1's one-line scope would otherwise read the four
 untouched bullets as omissions.
+
+---
+
+## Decisions 19–27 — the calls B1's implementation forced (2026-09-11, second session)
+
+**Resolved on Ryan's standing best-call authorization** ("resolve forks yourself against the North Star
+and record the call in the ledger; do not stop to ask"). Every one was forced by making B1 green, and
+each is a place where the spec is silent or where Codex's output had to be adjudicated rather than
+accepted. The full technical write-up of each is in
+`harden-refactor-scratch/b1-review-findings.md`.
+
+| # | Decision | Verdict | Rationale (plain) | Pointer |
+|---|---|---|---|---|
+| 19 | Finish B1's remaining screens work in a fourth Codex stage, or in the orchestrator? (the handoff's Open Decision) | **LOCK — orchestrator** | The 212 failures collapsed to 29 by one diagnosis costing no Codex budget, and what was left was adjudication — *is this test obsolete, or is the app wrong?* — which is exactly the category where all three prior Codex defects landed (an assertion rewritten into something false, two silently dropped catalogue entries, sixteen tests commented out rather than deleted). The cross-model property is worth its cost on generation, not on adjudication | Open Decision in the handoff; Codex window was at 77% against an 80% gate |
+| 20 | Seven more frame-set recordings still carried keys §10/§12 delete. Re-record them all, or strip exactly the dead keys? | **LOCK — strip the dead keys** | Re-recording `personal-library` worked because those verbs are drivable with no team; `installed-state` and `mock-vs-real` encode a populated team repo, a roster, projects and installs that no longer exist anywhere, so re-recording would have rebuilt scenarios from scratch and changed hundreds of unrelated recorded values. The strip is byte-identical apart from the dead keys, round-trip verified line by line before applying, and the *shape* it produces was then checked against a freshly driven CLI | §10.1, §12; 22 files, 44 keys |
+| 21 | The desktop's background fetch spawned `['refresh']`, a verb B1 deletes | **LOCK — spawn `['sync']`** | The collapse is what makes an unattended call safe: §10 guarantees a fetch changes nothing on this machine, which is the entire reason the old code needed a separate verb. Keeping a second fetch-only verb alive purely for the app would recreate the two-paths problem §16.1 forbids | finding 8 |
+| 22 | `cliSync` and `cliRefresh` now mirror the same DTO | **LOCK — one mirror: `cliRefresh`** | `cliSync` described the deleted reconciler (`timings`, and the per-team reason as `message` where the CLI emits `detail`), so the sync popup rendered failed teams with no reason at all. Two mirrors for one DTO is the same defect class as two active code paths | finding 9; CLAUDE.md "never leave two active paths" |
+| 23 | What a fetch-only sync invalidates | **LOCK — `catalog`, `skill`, `roster`, `receipts`; never `library`** | A fetch brings in teammates' people files and their committed receipts — the adapter's own W-08 comment says the fetch exists *so that a teammate's receipt reaches this machine*. `library` is excluded on principle: under the two-mirror model the Library is local files, which a fetch cannot touch. Visibility is the North Star's second half, so a read model that a fetch can change must be invalidated | finding 10 |
+| 24 | `SetupArgs.offerConnect`, never in argv and with no CLI counterpart after D20 | **LOCK — delete it and its eight test pins** | A parameter the adapter accepts and silently ignores tells the next reader that setup still has a connect offer to suppress | finding 11 |
+| 25 | The Inbox `alert`/`missing` and `alert`/`local` primaries ("Re-place from team", "Restore team version") call `backend.sync({})`, which now places nothing | **DEFER — record as OF-20, do not rewire in B1** | The honest fix is `install` (the second with `--force`), but §11.5's ruling deliberately stops at deleting the two kinds *because the surface stays dark* (`surfaces.inbox` is false on the real adapter). Inventing install semantics for a dark surface inside a deletion batch is scope the spec declined. Gate: whoever lights the Inbox | OF-20; §11.5, §13 |
+| 26 | The sidebar's nested `Updates` row survives D22 | **LOCK — leave it, record the debt** | It renders only when `surfaces.inbox` is true, and removing it would move every sidebar fidelity board — 78 rows — for a surface nobody can reach. Recorded in `desktop/FIDELITY.md` so it is not rediscovered as a bug | D22; FIDELITY.md deviations |
+| 27 | `design.json`'s `INBOX_KIND_TEXT` still carries copy for the two deleted kinds, and `fixtures.test.ts` asserts the parse loses no source field | **LOCK — make the two keys optional, record the deviation** | Exactly D23's precedent for `TEAM_POLICY.publish`: the byte-locked fixture keeps its bytes, the schema stops requiring what the CLI can no longer emit, and the real adapter is not forced to fabricate copy for a kind that does not exist | D22, D23, §11.5 |
+
+**Two things in B1's diff are deliberate and would be broken by "fixing" them.** The five re-recorded
+`personal-library` captures are hand-edited twice over — once for the dead keys, once to drop `autoSync`
+from their `hello` after the CLI stopped advertising it — and that is the orchestrator's file to own, not
+Codex's. And `docs/frame-protocol.md`'s `### f-auto-sync` section is *replaced*, not trimmed: every
+sentence in it described `sync --auto`, placement reconciliation, sharing and pending replay. B7's final
+protocol pass inherits the rest of the doc, not this section.
