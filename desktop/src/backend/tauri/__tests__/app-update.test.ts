@@ -80,7 +80,16 @@ it('serializes arming and disarming and disarms before applying overnight',async
 it('does not hand off a second installer if disarming fails',async()=>{
  const h=harness(apply);vi.mocked(invoke).mockRejectedValueOnce(new Error('cannot disarm'));expect(await h.backend.appUpdate.apply('0.1.12')).toEqual({ok:false,error:'cannot disarm'});expect(h.spawns).toEqual([]);
 });
-it.each(['on-close','overnight','manual'] as const)('maps marker reason %s to status and marker',async reason=>{
+it.each(['on-close','overnight','manual'] as const)('maps marker reason %s to its single DTO home',async reason=>{
  const h=harness({...check,lastApply:{schema:1,version:'0.1.12',phase:'failed',at:'2026-09-10T00:00:00Z',error:'failed',reason}});
- expect(await h.backend.appUpdate.check()).toMatchObject({ok:true,value:{reason,lastApply:{reason}}});
+ const result=await h.backend.appUpdate.check();expect(result).toMatchObject({ok:true,value:{reason}});if(result.ok)expect(result.value.lastApply).not.toHaveProperty('reason');
+});
+
+it('sends the explicit manual reason to the CLI',async()=>{
+ const h=harness(apply);expect((await h.backend.appUpdate.apply('0.1.12','manual')).ok).toBe(true);
+ expect(h.spawns[0]?.args).toEqual(['app-update','--apply','--release','0.1.12','--reason','manual']);
+});
+it('accepts the exact native pending marker contract',async()=>{
+ const h=harness({...check,lastApply:{schema:1,version:'0.12.2',phase:'waiting',at:'1970-01-01T00:00:00.000Z',error:null,reason:'on-close'}});
+ expect(await h.backend.appUpdate.check()).toMatchObject({ok:true,value:{reason:'on-close',lastApply:{phase:'waiting',error:null}}});
 });

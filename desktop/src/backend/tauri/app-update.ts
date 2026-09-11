@@ -24,6 +24,9 @@ export function createAppUpdate(deps: AppUpdateDeps): {
   disarmOnClose(): Promise<Result<void>>;
 } {
   const shown = new Set<string>();
+  let acknowledgementError: string | undefined;
+  let desiredArm: string | null = null;
+  let armRevision = 0;
   // Serialize arm/disarm so a slow arm cannot race a policy change or a manual install.
   let pending: Promise<Result<void>> = Promise.resolve({ ok: true, value: undefined });
   function arm(version: string | null): Promise<Result<void>> {
@@ -34,30 +37,39 @@ export function createAppUpdate(deps: AppUpdateDeps): {
     return pending.then(deps.result);
   }
   return {
-    armOnClose: version => arm(version),
-    disarmOnClose: () => arm(null),
+    armOnClose: version => { desiredArm = version; armRevision++; return arm(version); },
+    disarmOnClose: () => { desiredArm = null; armRevision++; return arm(null); },
     check: async (q, options) => {
       await deps.prefs.ready;
-      const checked = await deps.read(deps.run(['app-update', '--check', ...(q?.force ? ['--force'] : [])], cliAppUpdateCheck, value => ({ ...value, appVersion: deps.appVersion, ...(value.lastApply?.reason === undefined ? {} : { reason: value.lastApply.reason }), newer: isNewer(value.latest, deps.appVersion), lastApply: value.lastApply === null ? null : { version: value.lastApply.version, phase: value.lastApply.phase, at: value.lastApply.at, error: value.lastApply.error, ...(value.lastApply.reason === undefined ? {} : { reason: value.lastApply.reason }) } }), []), options);
+      const checked: Result<AppUpdateStatus> = await deps.read(deps.run(['app-update', '--check', ...(q?.force ? ['--force'] : [])], cliAppUpdateCheck, value => ({ ...value, appVersion: deps.appVersion, ...(value.lastApply?.reason === undefined ? {} : { reason: value.lastApply.reason }), newer: isNewer(value.latest, deps.appVersion), lastApply: value.lastApply === null ? null : { version: value.lastApply.version, phase: value.lastApply.phase, at: value.lastApply.at, error: value.lastApply.error } }), []), options);
       if (checked.ok && checked.value.lastApply?.phase === 'launched' && checked.value.lastApply.version === deps.appVersion) {
         const token = `${checked.value.lastApply.version}:${checked.value.lastApply.at}`;
         if (!shown.has(token) && deps.prefs.get('updates:app:lastShown', '') === token) checked.value.lastApply = null;
-        else {
+        else if (!shown.has(token)) {
           shown.add(token);
-          try { deps.prefs.set('updates:app:lastShown', token); await deps.prefs.flush?.(); }
+          try { deps.prefs.set('updates:app:lastShown', token); }
           catch (error) {
-            // Do not pretend the one-session acknowledgement was saved. Settings can retry explicitly.
-            return deps.result({ ok: false, error: `Could not save update acknowledgement: ${String(error)}` });
+            // A cosmetic acknowledgement cannot invalidate the observed update.
+            acknowledgementError = `Could not save update acknowledgement: ${String(error)}`;
           }
         }
       }
+      if (checked.ok && acknowledgementError) checked.value = { ...checked.value, acknowledgementError };
       return deps.result(checked);
     },
     stage: version => deps.run(['app-update', '--stage', '--release', version], cliAppUpdateStage, value => ({ version: value.version, staged: value.staged, notPublished: value.notPublished, alreadyStaged: value.alreadyStaged }), []),
     apply: async (version, reason) => {
+      const restore = desiredArm, revision = armRevision;
       const disarmed = await arm(null);
       if (!disarmed.ok) return disarmed;
-      return deps.run(['app-update', '--apply', '--release', version, ...(reason === undefined ? [] : ['--reason', reason])], cliAppUpdateApply, () => undefined, []).done.then(r => r.ok ? { ok: true as const, value: undefined } : r).then(deps.result);
+      let result: Result<void>;
+      try { result = await deps.run(['app-update', '--apply', '--release', version, ...(reason === undefined ? [] : ['--reason', reason])], cliAppUpdateApply, () => undefined, []).done; }
+      catch (error) { result = { ok: false, error: String(error) }; }
+      if (!result.ok && restore !== null && revision === armRevision) {
+        const restored = await arm(restore);
+        if (!restored.ok) result = { ok: false, error: `${result.error} Could not restore install-on-close: ${restored.error}` };
+      }
+      return deps.result(result);
     },
   };
 }

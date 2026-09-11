@@ -79,9 +79,13 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
   }
   const version = args.release ?? packageVersion();
   if (version === null) return failure('This copy has no version, so it cannot say which desktop app to download.');
+  const markerPath = join(root, 'run', 'app-update.json');
+  const mark = (phase: AppUpdatePhase, error: string | null = null) => writeJsonPrivate(markerPath, { schema: 1, version, phase, at: new Date().toISOString(), error, ...(args.reason === undefined ? {} : { reason: args.reason }) });
+  const failed = async (error: string) => { await mark('failed', error); return success<AppUpdateApplyNow>({ mode: 'apply-now', version, platform, phase: 'failed', error }); };
+  const rejected = (error: string) => args.applyNow ? failed(error).catch(cause => failure(`${error} Could not record failure: ${message(cause)}`)) : failure(error);
   // The resolved version, not args.release: without --release it comes from packageVersion(), which accepts prereleases.
-  if (!released.test(version)) return failure(`\`${version}\` is not a released version; use three numbers, as in 0.1.11.`);
-  if (!supported) return failure(unsupportedLine(platform));
+  if (!released.test(version)) return rejected(`\`${version}\` is not a released version; use three numbers, as in 0.1.11.`);
+  if (!supported) return rejected(unsupportedLine(platform));
   const versionDir = join(appRoot, version), asset = `${APP_SLUG}_${version}_${suffix}`;
   if (!args.applyNow && !args.apply) {
     try {
@@ -129,9 +133,9 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
       } finally { await rm(staging, { recursive: true, force: true }); }
     } catch (error) { return failure(`${message(error)} ${tail(args.form)}`); }
   }
-  if (!(await exists(join(versionDir, 'staged.json')))) return failure(`Nothing is staged for ${version}; download it first.`);
+  if (!(await exists(join(versionDir, 'staged.json')))) return rejected(`Nothing is staged for ${version}; download it first.`);
   const awaitPid = args.awaitPid !== undefined ? Number(args.awaitPid) : io.channel === 'frames' ? process.ppid : null;
-  if (awaitPid !== null && (!Number.isSafeInteger(awaitPid) || awaitPid <= 0)) return failure('--await-pid must be a process id.');
+  if (awaitPid !== null && (!Number.isSafeInteger(awaitPid) || awaitPid <= 0)) return rejected('--await-pid must be a process id.');
   if (!args.applyNow) {
     const entry = args.entry ?? args.launch?.path ?? process.argv[1];
     if (!entry) return failure('This copy cannot locate its own entry point, so it cannot hand the install off.');
@@ -139,9 +143,6 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
     catch (error) { return failure(`Could not start the installer: ${message(error)}`); }
     return success({ mode: 'apply', version, platform, awaitPid, handedOff: true });
   }
-  const markerPath = join(root, 'run', 'app-update.json');
-  const mark = (phase: AppUpdatePhase, error: string | null = null) => writeJsonPrivate(markerPath, { schema: 1, version, phase, at: new Date().toISOString(), error, ...(args.reason === undefined ? {} : { reason: args.reason }) });
-  const failed = async (error: string) => { await mark('failed', error); return success<AppUpdateApplyNow>({ mode: 'apply-now', version, platform, phase: 'failed', error }); };
   try {
     await mark('waiting');
     const alive = args.alive ?? ((pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; } });

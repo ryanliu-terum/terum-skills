@@ -42,3 +42,12 @@ it('browser migration keeps an opt-out when storage is read-only',()=>{
  try {expect(browserPrefs().get('updates:app:policy','on-close')).toBe('ask');expect(localStorage.getItem(PREF_PREFIX+'updates:app:auto')).toBe('false');}
  finally {set.mockRestore();}
 });
+
+it('browser hydration does not persist an unchosen default or write during reads',()=>{
+ const set=vi.spyOn(Storage.prototype,'setItem');try{const prefs=browserPrefs();for(let i=0;i<3;i++)expect(prefs.get('updates:app:policy','on-close')).toBe('on-close');expect(set).not.toHaveBeenCalled();}finally{set.mockRestore();}
+});
+it('browser migration is completed at construction before any snapshot is read',()=>{
+ localStorage.setItem(PREF_PREFIX+'updates:app:auto','false');const prefs=browserPrefs();
+ expect(localStorage.getItem(PREF_PREFIX+'updates:app:policy')).toBe('"ask"');expect(localStorage.getItem(PREF_PREFIX+'updates:app:auto')).toBeNull();
+ const set=vi.spyOn(Storage.prototype,'setItem');try{expect(prefs.get('updates:app:policy','on-close')).toBe('ask');expect(set).not.toHaveBeenCalled();}finally{set.mockRestore();}
+});

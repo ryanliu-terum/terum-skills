@@ -50,7 +50,7 @@ const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeT
 const zeroCopy=overviewCopy;
 const zeroOverview={skills:'0',skills_note:zeroCopy.skills,evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:zeroCopy.evaluated,installs:'0',installs_note:zeroCopy.installs,attention:'0',attention_lines:[zeroCopy.attention],attention_link:design.LIBRARY_OVERVIEW.attention_link,zero:zeroCopy};
 function removalState<T extends SkillCard>(skill:T):T { return removed.has(skill.name)?{...skill,installed:'absent',placed:false,onDiskOnly:false,paths:[]}:skill; }
-export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readonly quitRequested:boolean} {
+export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readonly quitRequested:boolean;readonly appUpdateCalls:readonly (readonly ['armOnClose',string] | readonly ['disarmOnClose'])[]} {
  const identity:Identity=structuredClone({...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login});
  const listeners=new Set<(source:ChangeSource)=>void>();
  const latency=opts.latencyMs??0;
@@ -96,8 +96,10 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    if(await ctx.ask('confirm',`Connect ${name}?`)){batch.shared.push({id:name,name});ctx.print(`Connected ${name}.`);}else batch.declined.push(name);
   }
  }
+ const appUpdateCalls: (readonly ['armOnClose',string] | readonly ['disarmOnClose'])[]=[];
  let quitRequested=false;
- const backend:Backend & {readonly quitRequested:boolean} = {
+ const backend:Backend & {readonly quitRequested:boolean;readonly appUpdateCalls:readonly (readonly ['armOnClose',string] | readonly ['disarmOnClose'])[]} = {
+  get appUpdateCalls(){return appUpdateCalls.slice();},
   get quitRequested(){return quitRequested;},
   async quit(){quitRequested=true;try{window.close();}catch{ /* jsdom / Playwright: no-op */ }},
   async setWindowBackground(){return ok(undefined);},
@@ -200,8 +202,8 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    check:()=>read('settings',()=>ok({appVersion:design.APP_VERSION,supported:false,cliVersion:design.CLI_VERSION,latest:design.CLI_LATEST,latestAt:null,probe:'skipped' as const,probeError:null,staged:null,installed:[],lastApply:null,newer:false,ppid:0})),
    stage:()=>long('settings',async()=>fail('The mock backend does not download or install anything.')),
    apply:async()=>fail('The mock backend does not download or install anything.'),
-   armOnClose:async()=>ok(undefined),
-   disarmOnClose:async()=>ok(undefined),
+   armOnClose:async version=>{appUpdateCalls.push(['armOnClose',version]);return ok(undefined);},
+   disarmOnClose:async()=>{appUpdateCalls.push(['disarmOnClose']);return ok(undefined);},
   },
   diagnostics:()=>long('status',async ctx=>{for(const line of statusLines(design))ctx.print(line);return ok(undefined);}),
   async openInEditor(path){return (path==='~'||path.startsWith('~/')||path.startsWith('/'))?ok(undefined):fail('An editor path is required.');},

@@ -43,7 +43,7 @@ it('disarms when the cached version is installed and when unmounted', async () =
 });
 it('records arming failure for the Settings row without throwing', async () => {
  const h = await setup('on-close', { staged: '0.12.2' }); h.arm.mockResolvedValue({ ok: false, error: 'shell unavailable' }); h.open();
- await waitFor(() => expect(h.client.getQueryData(['app-update-policy-outcome'])).toEqual({ ok: false, error: 'shell unavailable' })); expect(h.apply).not.toHaveBeenCalled();
+ await waitFor(() => expect(h.client.getQueryData(['app-update-policy-outcome'])).toEqual({ arm: 'shell unavailable' })); expect(h.apply).not.toHaveBeenCalled();
 });
 const advance = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 it('overnight stages, waits 30 idle minutes inside the window, then applies and quits once', async () => {
@@ -66,6 +66,35 @@ it.each(['failure', 'throw', 'quit'] as const)('overnight %s is recorded, never 
  const h = await setup('overnight', { staged: '0.12.2' });
  if (mode === 'failure') h.apply.mockResolvedValue({ ok: false, error: 'failed' }); else if (mode === 'throw') h.apply.mockRejectedValue(new Error('failed')); else h.quit.mockRejectedValue(new Error('failed'));
  vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 8, 10, 1)); h.open(); await advance(31 * 60_000);
- expect(h.client.getQueryData(['app-update-policy-outcome'])).toEqual({ ok: false, error: 'failed' }); if (mode !== 'quit') expect(h.quit).not.toHaveBeenCalled();
+ expect(h.client.getQueryData(['app-update-policy-outcome'])).toEqual({ apply: 'failed' }); if (mode !== 'quit') expect(h.quit).not.toHaveBeenCalled();
  await advance(60 * 60_000); expect(h.apply).toHaveBeenCalledOnce();
+});
+
+it.each(['on-close','overnight'] as const)('a failed preference flush does not disable %s',async policy=>{
+ const h=await setup(policy);h.backend.prefs.flush=vi.fn(async()=>{throw new Error('disk full');});
+ vi.useFakeTimers();vi.setSystemTime(new Date(2026,8,10,1));h.open();await advance(100);
+ expect(h.stage).toHaveBeenCalledOnce();expect(h.client.getQueryData(['app-update-policy-outcome'])).toMatchObject({preferences:expect.stringContaining('disk full')});
+ if(policy==='on-close')expect(h.arm).toHaveBeenCalledWith('0.12.2');else{await advance(30*60_000);expect(h.apply).toHaveBeenCalledWith('0.12.2','overnight');expect(h.quit).toHaveBeenCalledOnce();}
+});
+it.each(['surfaces','features'] as const)('records a rejected %s lookup',async method=>{
+ const h=await setup('on-close');vi.mocked(h.backend[method]).mockRejectedValue(new Error('lookup failed'));h.open();
+ await waitFor(()=>expect(h.client.getQueryData(['app-update-policy-outcome'])).toEqual({launch:'lookup failed'}));expect(h.stage).not.toHaveBeenCalled();
+});
+it('retains independent errors beyond five minutes and after successful disarming',async()=>{
+ const h=await setup('on-close');h.backend.prefs.flush=async()=>{throw new Error('prefs failed');};
+ h.stage.mockImplementation(()=>createRun(async()=>({ok:false,error:'download failed'})));h.disarm.mockResolvedValue({ok:false,error:'disarm failed'});
+ vi.useFakeTimers();h.open();await advance(100);
+ expect(h.client.getQueryData(['app-update-policy-outcome'])).toMatchObject({stage:'download failed',arm:'disarm failed',preferences:expect.stringContaining('prefs failed')});
+ h.disarm.mockResolvedValue({ok:true,value:undefined});act(()=>h.backend.prefs.set('updates:app:policy','ask'));await advance(31*60_000);
+ expect(h.client.getQueryData(['app-update-policy-outcome'])).toMatchObject({stage:'download failed',arm:'disarm failed',preferences:expect.stringContaining('prefs failed')});
+});
+it('retains overnight failure when a policy change disarms successfully',async()=>{
+ const h=await setup('overnight',{staged:'0.12.2'});h.apply.mockResolvedValue({ok:false,error:'install failed'});
+ vi.useFakeTimers();vi.setSystemTime(new Date(2026,8,10,1));h.open();await advance(31*60_000);
+ act(()=>h.backend.prefs.set('updates:app:policy','ask'));await advance(100);
+ expect(h.client.getQueryData(['app-update-policy-outcome'])).toEqual({apply:'install failed'});
+});
+it('the mock records close-policy calls without invoking an installer',async()=>{
+ const backend=createMockBackend();await backend.appUpdate.armOnClose('0.12.2');await backend.appUpdate.disarmOnClose();
+ expect(backend.appUpdateCalls).toEqual([['armOnClose','0.12.2'],['disarmOnClose']]);expect(backend.quitRequested).toBe(false);
 });

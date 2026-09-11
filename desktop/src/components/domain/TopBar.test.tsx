@@ -43,13 +43,13 @@ it.each(['absent','available','ready','unsupported','current','checking','mock']
  vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),appUpdate:state!=='mock'});
  const check=vi.spyOn(backend.appUpdate,'check'),client=new QueryClient();
  client.setQueryData(['surfaces'],await backend.surfaces());
- if(state!=='absent')client.setQueryData(['app-update'],{ok:true,value:{supported:state!=='unsupported',newer:state!=='current',latest:'0.12.2',staged:state==='ready'?'0.12.2':null}});
+ if(state!=='absent')client.setQueryData(['app-update'],{ok:true,value:{installed:[],supported:state!=='unsupported',newer:state!=='current',latest:'0.12.2',staged:state==='ready'?'0.12.2':null}});
  if(state==='checking')void client.fetchQuery({queryKey:['app-update'],queryFn:()=>new Promise(()=>{})}).catch(()=>{/* Clearing this deliberately pending check cancels it. */});
  render(<BackendContext value={backend}><TopBar mode="cosmetic"/></BackendContext>,client);
  await waitFor(()=>expect(backend.surfaces).toHaveBeenCalled());
  if(state==='available'||state==='ready'){
   const chip=await screen.findByRole('button',{name:`Update ${state==='ready'?'ready':'available'} · 0.12.2`});
-  expect(chip).toHaveClass('eval-chip','update-chip');fireEvent.click(chip);expect(location.hash).toBe('#/settings/updates');
+  expect(chip).toHaveClass('eval-chip','update-chip');fireEvent.click(chip);expect(location.hash).toBe('#/settings/updates?focus=app');
  }else expect(screen.queryByRole('button',{name:/Update (ready|available)/})).toBeNull();
  expect(check).not.toHaveBeenCalled();
 });
@@ -57,9 +57,24 @@ it.each(['absent','available','ready','unsupported','current','checking','mock']
 it('reflects staging changes in the launch cache without invoking a check',async()=>{
  const backend=createMockBackend(),check=vi.spyOn(backend.appUpdate,'check'),client=new QueryClient();
  client.setQueryData(['surfaces'],{...await backend.surfaces(),appUpdate:true});
- client.setQueryData(['app-update'],{ok:true,value:{supported:true,newer:true,latest:'0.12.2',staged:null}});
+ client.setQueryData(['app-update'],{ok:true,value:{installed:[],supported:true,newer:true,latest:'0.12.2',staged:null}});
  render(<BackendContext value={backend}><TopBar mode="cosmetic"/></BackendContext>,client);
  expect(screen.getByRole('button',{name:'Update available · 0.12.2'})).toBeVisible();
- act(()=>{client.setQueryData(['app-update'],{ok:true,value:{supported:true,newer:true,latest:'0.12.2',staged:'0.12.2'}});});
+ act(()=>{client.setQueryData(['app-update'],{ok:true,value:{installed:[],supported:true,newer:true,latest:'0.12.2',staged:'0.12.2'}});});
  expect(screen.getByRole('button',{name:'Update ready · 0.12.2'})).toBeVisible();expect(check).not.toHaveBeenCalled();
+});
+
+it('an installed version is available, never ready to arm again',async()=>{
+ const backend=createMockBackend(),client=new QueryClient();
+ client.setQueryData(['surfaces'],{...await backend.surfaces(),appUpdate:true});
+ client.setQueryData(['app-update'],{ok:true,value:{supported:true,newer:true,latest:'0.12.2',staged:'0.12.2',installed:['0.12.2']}});
+ render(<BackendContext value={backend}><TopBar mode="cosmetic"/></BackendContext>,client);
+ expect(screen.getByRole('button',{name:'Update available · 0.12.2'})).toBeVisible();
+ expect(screen.queryByRole('button',{name:'Update ready · 0.12.2'})).toBeNull();
+});
+it('registers the close-time application command without introducing a separate app ACL',()=>{
+ const lib=readFileSync('src-tauri/src/lib.rs','utf8');
+ expect(lib).toMatch(/generate_handler!\[[^\]]*app_update::app_update_on_close/);
+ const permissions=JSON.parse(readFileSync('src-tauri/capabilities/default.json','utf8')).permissions;
+ expect(permissions).not.toContain('allow-app-update-on-close');
 });

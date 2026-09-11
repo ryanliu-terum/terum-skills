@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBackend, usePreference } from '../backend';
-import { appUpdatePolicy } from '../backend/prefs';
+import { appUpdatePolicy, stagedAppUpdate, recordAppUpdateError, type AppUpdateErrors } from '../lib/app-update';
 import type { AppUpdateStatus, Result } from '../backend/types';
 import { useOvernightWindow } from './overnightWindow';
 
@@ -15,8 +15,9 @@ export function useAppUpdateCheck(): void {
   const staging = useQuery<string | null>({ queryKey: ['app-update-staging'], enabled: false, queryFn: skipToken });
   const status = observation.data?.ok ? observation.data.value : null;
   const version = ready && status?.supported && status.newer ? status.latest : null;
-  const staged = version !== null && status?.staged === version && !status.installed.includes(version) ? version : null;
-  const recordError = (error: unknown) => client.setQueryData(['app-update-policy-outcome'], { ok: false, error: error instanceof Error ? error.message : String(error) });
+  const staged = ready ? stagedAppUpdate(status) : null;
+  useQuery<AppUpdateErrors>({ queryKey: ['app-update-policy-outcome'], enabled: false, queryFn: skipToken, gcTime: Infinity });
+  const recordError = (error: unknown) => recordAppUpdateError(client, 'apply', error);
   useEffect(() => {
     let disposed = false;
     void (async () => {
@@ -27,38 +28,38 @@ export function useAppUpdateCheck(): void {
         await client.ensureQueryData({ queryKey: ['app-update'], queryFn: () => backend.appUpdate.check(), staleTime: Infinity, gcTime: Infinity, retry: false });
         try { await backend.prefs.flush?.(); }
         catch (error) {
-          client.setQueryData(['app-update-policy-outcome'], { ok: false, error: `Could not read or save update preferences: ${String(error)}` });
-          return;
+          recordAppUpdateError(client, 'preferences', `Could not save update preferences: ${String(error)}`);
         }
         if (!disposed) setReady(true);
-      } catch { /* The cached check error remains available to Settings; launch stays usable. */ }
+      } catch (error) { recordAppUpdateError(client, 'launch', error); }
     })();
     return () => { disposed = true; };
   }, [backend, client]);
   useEffect(() => {
-    if (!version || staged || policy === 'ask' || staging.data || attempted.current.has(version)) return;
+    if (!version || status?.installed.includes(version) || staged || policy === 'ask' || staging.data || attempted.current.has(version)) return;
     attempted.current.add(version);
     client.setQueryData(['app-update-staging'], version);
     void (async () => {
       try {
         const result = await backend.appUpdate.stage(version).done;
-        if (!result.ok) client.setQueryData(['app-update-policy-outcome'], result);
+        if (!result.ok) recordAppUpdateError(client, 'stage', result.error);
         else if (result.value.staged) client.setQueryData<Result<AppUpdateStatus>>(['app-update'], current => current?.ok ? { ok: true, value: { ...current.value, staged: version } } : current);
+        // An advertised release without published assets is a quiet W-01 no-op; Download remains available.
       } catch (error) {
-        client.setQueryData(['app-update-policy-outcome'], { ok: false, error: error instanceof Error ? error.message : String(error) });
+        recordAppUpdateError(client, 'stage', error);
       } finally { client.setQueryData(['app-update-staging'], null); }
     })();
-  }, [backend, client, policy, version, staged, staging.data]);
+  }, [backend, client, policy, version, staged, staging.data, status?.installed]);
   useEffect(() => {
     if (!ready) return;
     const result = policy === 'on-close' && staged ? backend.appUpdate.armOnClose(staged) : backend.appUpdate.disarmOnClose();
-    void result.then(outcome => { client.setQueryData(['app-update-policy-outcome'], outcome); }, error => {
-      client.setQueryData(['app-update-policy-outcome'], { ok: false, error: error instanceof Error ? error.message : String(error) });
+    void result.then(outcome => { if (!outcome.ok) recordAppUpdateError(client, 'arm', outcome.error); }, error => {
+      recordAppUpdateError(client, 'arm', error);
     });
     return () => {
       void backend.appUpdate.disarmOnClose().then(outcome => {
-        if (!outcome.ok) client.setQueryData(['app-update-policy-outcome'], outcome);
-      }, error => { client.setQueryData(['app-update-policy-outcome'], { ok: false, error: String(error) }); });
+        if (!outcome.ok) recordAppUpdateError(client, 'arm', outcome.error);
+      }, error => { recordAppUpdateError(client, 'arm', error); });
     };
   }, [backend, client, policy, ready, staged]);
   useOvernightWindow({
@@ -66,7 +67,7 @@ export function useAppUpdateCheck(): void {
     onFire: async () => {
       if (staged === null) return;
       const result = await backend.appUpdate.apply(staged, 'overnight');
-      client.setQueryData(['app-update-policy-outcome'], result);
+      if (!result.ok) recordAppUpdateError(client, 'apply', result.error);
       if (result.ok) await backend.quit();
     },
     onError: recordError,

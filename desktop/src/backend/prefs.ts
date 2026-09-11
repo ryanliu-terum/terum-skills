@@ -15,6 +15,7 @@ export function appUpdatePolicy(value: unknown): AppUpdatePolicy {
 /** Existing policy wins; consume the boolean only once, even in an already-hydrated native file. */
 export function migrateAppUpdatePolicy(record: Record<string, unknown>): Record<string, unknown> {
  const migrated = { ...record };
+ if (!('updates:app:policy' in migrated) && !('updates:app:auto' in migrated)) return migrated;
  if (migrated['updates:app:policy'] === undefined) migrated['updates:app:policy'] = migrated['updates:app:auto'] === false ? 'ask' : 'on-close';
  else migrated['updates:app:policy'] = appUpdatePolicy(migrated['updates:app:policy']);
  delete migrated['updates:app:auto'];
@@ -38,32 +39,33 @@ export function legacyPreferences(storage: Storage): Record<string, unknown> {
 }
 export function browserPrefs(): PrefStore {
  const listeners = new Set<() => void>();
+ let unsavedPolicy: unknown;
+ try {
+  const key = 'updates:app:policy';
+  const current = localStorage.getItem(PREF_PREFIX + key), legacy = localStorage.getItem(PREF_PREFIX + 'updates:app:auto');
+  if (current !== null || legacy !== null) {
+   const record: Record<string, unknown> = {};
+   if (current !== null) { try { record[key] = JSON.parse(current); } catch { record[key] = 'on-close'; } }
+   else { try { record['updates:app:auto'] = JSON.parse(legacy ?? 'null'); } catch { record['updates:app:auto'] = true; } }
+   unsavedPolicy = migrateAppUpdatePolicy(record)[key];
+   const encoded = JSON.stringify(unsavedPolicy);
+   if (current !== encoded) localStorage.setItem(PREF_PREFIX + key, encoded);
+   if (legacy !== null) localStorage.removeItem(PREF_PREFIX + 'updates:app:auto');
+   unsavedPolicy = undefined;
+  }
+ } catch { /* Keep the hydrated choice in memory if storage cannot persist it. */ }
+
  return {
   get<T>(key: string, fallback: T): T {
    try {
-    if (key === 'updates:app:policy') {
-     const current = localStorage.getItem(PREF_PREFIX + key), legacy = localStorage.getItem(PREF_PREFIX + 'updates:app:auto');
-     const record: Record<string, unknown> = {};
-     if (current !== null) {
-      try { record[key] = JSON.parse(current); } catch { record[key] = 'on-close'; }
-     } else if (legacy !== null) {
-      try { record['updates:app:auto'] = JSON.parse(legacy); } catch { /* Invalid legacy values use the policy default. */ }
-     }
-     const value = migrateAppUpdatePolicy(record)[key];
-     // A read after migration is read-only; a failed write must not erase the legacy opt-out.
-     const encoded = JSON.stringify(value);
-     try {
-      if (current !== encoded) localStorage.setItem(PREF_PREFIX + key, encoded);
-      if (legacy !== null) localStorage.removeItem(PREF_PREFIX + 'updates:app:auto');
-     } catch { /* Keep the observed choice for this read; a later read retries migration without losing the opt-out. */ }
-     return preferenceValue(value, fallback);
-    }
+    if (key === 'updates:app:policy' && unsavedPolicy !== undefined) return preferenceValue(unsavedPolicy, fallback);
     return preferenceValue(JSON.parse(localStorage.getItem(key === 'ui' ? UI_KEY : PREF_PREFIX + key) ?? 'null'), fallback); }
    catch { return fallback; }
   },
   set(key, value) {
    const json = jsonPreference(value);
    localStorage.setItem(key === 'ui' ? UI_KEY : PREF_PREFIX + key, JSON.stringify(json));
+   if (key === 'updates:app:policy') unsavedPolicy = undefined;
    for (const notify of listeners) notify();
   },
   subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
