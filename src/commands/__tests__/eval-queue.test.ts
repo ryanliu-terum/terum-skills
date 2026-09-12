@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { enqueueEvals, readEvalQueue, withEvalQueueLock, type EvalQueueItem } from '../../lib/evals/queue.js';
-import { bareTeam, cloneWithIdentity, pushFromSeed, git, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { failure, success } from '../../lib/result.js';
 import { measuredReceipt } from './pending-eval-fixtures.js';
 import { runQueue, type EvalArgs, type EvalResult } from '../eval.js';

@@ -65,7 +65,8 @@ describe('ls carries each skill\'s current-version receipt (card lift)', () => {
 
   it('reports an unreadable receipt as that skill\'s problem and still lists every skill', async () => {
     const fixture = await team();
-    const version = (await git(['rev-parse', 'HEAD:skills/alpha'], fixture.seed)).trim();
+    // §3.4: receipts are filed under the version FOLDER.
+    const version = 'v1';
     const directory = join(fixture.seed, 'evals', pendingIds[0]!, version);
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, '20260101T000000Z.json'), '{ not json');
@@ -83,7 +84,8 @@ describe('ls carries each skill\'s current-version receipt (card lift)', () => {
     const fixture = await team();
     // The receipt is valid JSON and schema-valid, but filed under alpha while naming beta's id.
     await pendingReceipt(fixture.seed, { scored: true, id: pendingIds[1] });
-    const version = (await git(['rev-parse', 'HEAD:skills/alpha'], fixture.seed)).trim();
+    // §3.4: receipts are filed under the version FOLDER.
+    const version = 'v1';
     await rm(join(fixture.seed, 'evals', pendingIds[1]!, version), { recursive: true, force: true });
     const directory = join(fixture.seed, 'evals', pendingIds[0]!, version);
     await mkdir(directory, { recursive: true });
@@ -97,6 +99,6 @@ describe('ls carries each skill\'s current-version receipt (card lift)', () => {
 
     const { skills, problems } = await skillsOf(await reader(fixture));
     expect(skills.find((skill) => skill.name === 'alpha')!.receipt).toBeNull();
-    expect(problems).toEqual([{ source: `evals/${pendingIds[0]}`, message: expect.stringContaining('does not match the receipt path') }]);
+    expect(problems).toEqual([{ source: `evals/${pendingIds[0]}`, message: expect.stringContaining('misfiled receipt') }]);
   });
 });

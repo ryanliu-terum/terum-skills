@@ -9,7 +9,7 @@ import { staleLine } from '../../lib/hook.js';
 import { denyingRunner, fakeGh, ghOnlyRunner, ScriptedPrompter, TEAM_JSON, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run as install, teamForReference } from '../install.js';
 import { run as uninstall } from '../uninstall.js';
-import { run as evaluate } from '../eval.js';
+import { run as publishSkill } from '../publish.js';
 import { run as team, workflowUpdate, WORKFLOW } from '../team.js';
 import { run as status } from '../status.js';
 import { run as search } from '../search.js';
@@ -32,7 +32,9 @@ describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (f
       expect(await uninstall({ kind, config, form }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`\`${prefix} uninstall-skill ${kind} <${kind === 'member' ? 'handle' : 'name'}>\``) });
     }
     const noHandle = { ...config, read: async () => ({ ...(await config.read()), teams: { team: { remote: 'github.com/acme/team', handle: '' } } }) };
-    expect(await evaluate({ ref: 'sample', config: noHandle, form }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`Team team has no joined handle`) });
+    // D42 made eval best-effort about the team, so the remedy moved to the verb that still needs a
+    // joined handle: publish is the only thing that writes to the team.
+    expect(await publishSkill({ ref: 'sample', config: noHandle, form }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`Team team has no joined handle`) });
     expect(await team({ kind: 'remove', handle: 'other', config: noHandle, form }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`run ${prefix} team join first`) });
     for (const gh of [{ installed: false, authenticated: false }, { installed: true, authenticated: false }]) {
       expect(creatorAuthenticationError(gh, form)).toContain(`\`${prefix} team create <name> --remote <url>\``);
@@ -40,7 +42,10 @@ describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (f
     expect(await workflowUpdate({ form }, new ScriptedPrompter())).toEqual({ ok: false, error: `\`${prefix} team workflow-update\` is print-only; pass --print.` });
     const workflow = new ScriptedPrompter(); await workflowUpdate({ print: true, form }, workflow);
     expect(workflow.lines[0]+'\n').toBe(WORKFLOW);
-    expect(() => guardRawPush({ before: () => undefined, after: () => undefined, changedPaths: ['skills/sample/v1/SKILL.md'] }, { handle: 'seed' }, form)).toThrow(`Run \`${prefix} login\``);
+    // D15 deleted the ownership row and its `login` remedy; what the raw-push guard hints at now is
+    // the verb that CAN mint a version, and re-arming a hook that predates the repository layout.
+    expect(() => guardRawPush({ before: () => undefined, after: () => undefined, changedPaths: ['skills/sample/v1/SKILL.md'] }, { handle: 'seed' }, form)).toThrow(`minted by \`${prefix} publish\``);
+    expect(() => guardRawPush({ before: () => 'a', after: () => 'b', changedPaths: ['.github/workflows/terum-skills.yml'] }, { handle: 'seed' }, form)).toThrow(`re-run \`${prefix} team join '<remote>'\``);
   });
 
   it('routes status, search missing-clone/stale and ls trailer, retaining portable status argument spelling', async () => {

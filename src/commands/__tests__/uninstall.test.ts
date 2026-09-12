@@ -43,7 +43,7 @@ describe('uninstall (§6 pending)', () => {
     const fixture = await bareTeam();
     const first = '11111111-1111-4111-8111-111111111111';
     const second = '22222222-2222-4222-8222-222222222222';
-    for (const [name, id] of [['first', first], ['second', second]] as const) await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    for (const [name, id] of [['first', first], ['second', second]] as const) await pushFromSeed(fixture.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(fixture.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [
       { id: first, version: null, scope: { kind: 'global' }, since: '2026-09-04' },
       { id: second, version: null, scope: { kind: 'global' }, since: '2026-09-04' },
@@ -94,7 +94,7 @@ describe('uninstall (§6 pending)', () => {
     const projectId = '77777777-7777-4777-8777-777777777777';
     const personalId = '88888888-8888-4888-8888-888888888888';
     for (const [name, id] of [['projected', projectId], ['personal', personalId]] as const) {
-      await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+      await pushFromSeed(fixture.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     }
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] }, product: { remotes: [product.bare], skills: [projectId] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home');
@@ -254,7 +254,7 @@ it('unions people scopes and matching ledger scopes without borrowing another te
 async function projectPreviewFixture() {
   const fixture = await bareTeam(), product = await bareTeam();
   const ids = ['91919191-9191-4191-8191-919191919191', '92929292-9292-4292-8292-929292929292'];
-  for (const [index, name] of ['shared', 'projected'].entries()) await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${ids[index]}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+  for (const [index, name] of ['shared', 'projected'].entries()) await pushFromSeed(fixture.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${ids[index]}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
   await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] }, product: { remotes: [product.bare], skills: ids } }, archived: [], policy: { skill_license: 'UNLICENSED' } }));
   const store = createConfigStore(join(fixture.root, 'state')), home = join(fixture.root, 'home');
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -337,7 +337,7 @@ it('fails closed at the non-interactive confirm before any project write', async
 it('removes a member installed list and leaves authored-only skills untouched', async () => {
   const fixture = await bareTeam();
   const authored = '93939393-9393-4393-8393-939393939393', installed = '94949494-9494-4494-8494-949494949494';
-  for (const [name, id, author] of [['authored', authored, 'Member <member@example.com>'], ['used', installed, 'Seed <seed@example.com>']]) await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: ${author}\n  terum-category: testing\n---\n`);
+  for (const [name, id, author] of [['authored', authored, 'Member <member@example.com>'], ['used', installed, 'Seed <seed@example.com>']]) await pushFromSeed(fixture.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: ${author}\n  terum-category: testing\n---\n`);
   await pushFromSeed(fixture.seed, 'people/member.json', JSON.stringify(person('member', { installed: [{ id: installed, scope: { kind: 'global' }, version: null, since: '2026-09-04' }] })));
   const store = createConfigStore(join(fixture.root, 'state')), home = join(fixture.root, 'home');
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -368,10 +368,10 @@ it.each(['member', 'project'] as const)('does not ask, print, or write for an em
   expect(await git(['rev-list', '--count', 'main'], fixture.bare)).toBe(commits);
 });
 
-it('removes only --from and updates the shared record and decline only after the last Global-scope copy', async () => {
+it('removes only --from and updates the shared record only after the last Global-scope copy', async () => {
   const fixture = await bareTeam(); const id = 'acacacac-acac-4cac-8cac-acacacacacac';
   await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-  const team = JSON.parse(await readFile(join(fixture.seed, 'team.json'), 'utf8')); team.global = [id];
+  const team = JSON.parse(await readFile(join(fixture.seed, 'team.json'), 'utf8')); team.projects = { Global: { remotes: [], skills: [id] } };
   await pushFromSeed(fixture.seed, 'team.json', JSON.stringify(team));
   const home = join(fixture.root, 'home'); const store = createConfigStore(join(home, '.terum', 'skills'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -387,6 +387,8 @@ it('removes only --from and updates the shared record and decline only after the
   await expect(access(join(checkout, '.claude', 'skills', 'sample'))).rejects.toMatchObject({ code: 'ENOENT' });
   await expect(access(join(home, '.claude', 'skills', 'sample'))).resolves.toBeUndefined();
   expect(await run({ ref: 'sample', from: 'global', config: store }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true, value: [{ removed: 1 }] });
+  // `declined` is still written here for an endorsed skill. §12 deleted the auto-install it used to
+  // suppress, so nothing reads it any more — vestigial, not wrong, and out of B3's scope to remove.
   expect(JSON.parse(await readFile(personPath, 'utf8'))).toMatchObject({ installed: [], declined: [id] });
   expect(await store.read()).toMatchObject({ pending: [], placements: {} });
 });

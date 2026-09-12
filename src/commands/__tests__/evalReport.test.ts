@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
-import { bareTeam, cloneWithIdentity, git, pushFromSeed, ScriptedPrompter, denyingRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, denyingRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { run } from '../evalReport.js';
 

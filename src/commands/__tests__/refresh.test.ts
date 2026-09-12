@@ -23,7 +23,8 @@ function receipt(version: string, run_id: string) {
 async function setup(names = ['team']) {
   const fixture = await bareTeam();
   await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill);
-  const tree = (await git(['rev-parse', 'HEAD:skills/sample/v1'], fixture.seed)).trim();
+  // §3.4: receipts are filed under the version FOLDER, not a tree hash.
+  const tree = 'v1';
   const store = createConfigStore(join(fixture.root, 'state'));
   for (const name of names) {
     await cloneWithIdentity(fixture.bare, store.teamClone(name));

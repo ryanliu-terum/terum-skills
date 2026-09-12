@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore, type ConfigStore } from '../../lib/config.js';
