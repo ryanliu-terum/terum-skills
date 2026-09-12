@@ -1,22 +1,30 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { format } from '../ls.js';
 import { parseVersionFolder, versionLabel } from '../../lib/versions.js';
 
 /**
  * The capture frames under `.planning/codex-runs/` are the desktop's replay fixtures: the app's
  * tests drive the real adapter against them instead of a process. That makes them an oracle, and an
- * oracle nothing checks is one that can drift without a single test going red — which is exactly
- * what happened when layout 3 re-keyed their DTO halves to version folders and left every printed
- * line speaking layout 2 (`43bf7396`, ` @43bf7396`, a `global` endorsement that `skillEndorsement`
- * can no longer return). 76 frame files across 13 sets were inconsistent with the CLI that produced
- * their shape, and the whole desktop suite stayed green.
+ * oracle nothing checks is one that can drift without a single test going red — which is what
+ * happened when layout 3 re-keyed their DTO halves to version folders and left every printed line
+ * saying the 40-hex tree hash it replaced.
  *
- * This asserts the two properties a recording of a real run cannot violate:
- *   1. a printed skill line is exactly what `format()` makes of the row it describes, and
- *   2. `people[]` rides the bare `ls` branch alone (`ls.ts:149`) — `showMember`, `showProject` and
- *      `showLocal` each return a shape without it.
+ * **These files are RECORDINGS.** Different sets were captured by different CLI builds, so their
+ * printed lines legitimately carry different field sets — an older `search` line ends at the
+ * endorsement where a newer one carries `updated` too. The invariant is therefore NOT "the line
+ * equals today's `format()` of the row": that is false for every older recording, and asserting it
+ * is how the first version of this file came to bake a literal `undefined` into five frame sets
+ * whose DTO has no `updated` field. It was self-consistent — `format()` on both sides — and wrong.
+ *
+ * What actually holds, for a recording of any vintage:
+ *   1. no printed line contains the string `undefined` — a real CLI never interpolates one;
+ *   2. the version token in a printed skill line is the `Version N` of that row's own `latest`;
+ *   3. a local row's printed state carries no ` @<8 hex>` suffix — D1 deleted that spelling;
+ *   4. `people[]` rides the bare `ls` branch alone (`ls.ts:149`) — `showMember` (`:220`),
+ *      `showProject` (`:228`) and `showLocal` (`:348`) each return a shape without it;
+ *   5. `display_name` is the byline `authored[]` and showMember's "Authored:" line are matched on
+ *      (`:121`, `:135-137`, `:215`), which the handle can never satisfy.
  */
 const ROOT = '.planning/codex-runs';
 type Frame = { t: string; verb?: string; ok?: boolean; line?: string; value?: unknown };
@@ -37,24 +45,28 @@ function frameFiles(): { id: string; path: string }[] {
   return out;
 }
 
-function read(path: string): Frame[] {
-  return readFileSync(path, 'utf8').trim().split('\n').flatMap((line) => {
+const read = (path: string): Frame[] =>
+  readFileSync(path, 'utf8').trim().split('\n').flatMap((line) => {
     try { return [JSON.parse(line) as Frame]; } catch { return []; }
   });
-}
-
-/** `ls.ts:278`, the only writer of a local row's state. */
-function stateOf(placement: { team: string; version?: string | null } | null | undefined): string {
-  if (!placement) return 'untracked locally';
-  const ordinal = placement.version === null || placement.version === undefined ? null : parseVersionFolder(placement.version);
-  return `placement recorded from ${placement.team}${ordinal === null ? '' : ` (${versionLabel(ordinal)})`}`;
-}
 
 const files = frameFiles();
 
 describe('capture frames stay consistent with the CLI that recorded them', () => {
   it('has frames to check at all — an empty walk would make every assertion below vacuous', () => {
     expect(files.length).toBeGreaterThan(50);
+  });
+
+  // (1) covers EVERY verb, not only the two below: a `publish` or `status` line can carry an
+  // interpolated hole just as easily, and this is the assertion that catches a bad repair.
+  it('never prints the string `undefined` — no CLI interpolates one', () => {
+    const offenders: string[] = [];
+    for (const { id, path } of files) {
+      for (const row of read(path)) {
+        if (row.t === 'print' && typeof row.line === 'string' && row.line.includes('undefined')) offenders.push(`${id}: ${row.line.slice(0, 120)}`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   for (const { id, path } of files) {
@@ -65,28 +77,20 @@ describe('capture frames stay consistent with the CLI that recorded them', () =>
     if (value === null || value === undefined) continue;
     const skills = (Array.isArray(value) ? value : value['skills']) as Record<string, unknown>[] | undefined;
 
-    it(`${id}: every printed skill line is what format() makes of its row`, () => {
-      const localRows = Array.isArray(value) ? [] : ((value['local'] as { rows?: Record<string, unknown>[]; notOffered?: Record<string, unknown>[] }[] | undefined) ?? [])
-        .flatMap((section) => [...(section.rows ?? []), ...(section.notOffered ?? [])]);
+    it(`${id}: the printed version token is its row's own version, and no local state keeps the @<8 hex> suffix`, () => {
       for (const row of rows) {
         if (row.t !== 'print' || typeof row.line !== 'string') continue;
-        const local = /^(\s*)([A-Za-z0-9._-]+) — (?:placement recorded from |untracked locally)/.exec(row.line);
-        if (local) {
-          const match = localRows.find((candidate) => candidate['name'] === local[2]);
-          if (!match) continue;
-          const rest = /; path: .*$/.exec(row.line);
-          expect(row.line, id).toBe(`${local[1] ?? ''}${local[2]} — ${stateOf(match['placement'] as never)}${rest ? rest[0] : ''}`);
-          continue;
+        const printed = /^\s*([A-Za-z0-9._-]+) — .*?; \d+ installs; ([^;]+)/.exec(row.line);
+        if (printed) {
+          const found = skills?.find((skill) => skill['name'] === printed[1]);
+          const latest = found?.['latest'];
+          const n = typeof latest === 'string' ? parseVersionFolder(latest) : null;
+          // A row whose `latest` is not a version folder is an older recording: nothing to check.
+          if (n !== null) expect(printed[2], `${id} / ${printed[1]}`).toBe(versionLabel(n));
         }
-        const printed = /^(\s*)([A-Za-z0-9._-]+) — .*; \d+ installs; /.exec(row.line);
-        if (!printed) continue;
-        const found = skills?.find((skill) => skill['name'] === printed[2]);
-        if (!found) continue;
-        // `search.ts:61` hands its hit to this same `format()`, mapping `endorsed` to `endorsement`.
-        const skill = found['endorsement'] === undefined ? { ...found, endorsement: found['endorsed'] } : found;
-        // `format()` supplies its own two-space indent; a nested list adds two more in front of it.
-        const indent = printed[1] ?? '';
-        expect(row.line, id).toBe(indent.slice(0, Math.max(0, indent.length - 2)) + format(skill as never));
+        // D1: `Version N` is the only form a version takes in a user-facing string. The suffix
+        // sliced a tree hash, and slicing a version folder would print `@v1`.
+        expect(row.line, id).not.toMatch(/placement recorded from \S+ @[0-9a-f]{8}/);
       }
     });
 

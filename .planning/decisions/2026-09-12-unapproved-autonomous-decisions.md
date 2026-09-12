@@ -262,3 +262,52 @@ needs Ryan, not me** — it is a spec question, not a defect.
 **Every one of the six has a test verified to FAIL on the pre-fix tree** (6 + 1, run with sources
 reverted and tests kept). Gates: root lint, typecheck, **vitest 1689/1689**; desktop typecheck and
 **vitest 1893 passed/90 skipped**.
+
+---
+
+## A10 — I got A7 wrong on the first attempt, the review caught it, and the repair is now surgical
+
+**What happened.** A7's script regenerated each printed line by calling today's `format()` on the
+frame's DTO row. That is wrong for a **recording**: different frame sets were captured by different
+CLI builds, and five of them (`m7-S7ad`, `m7-S7af`, `m7-S7e`, `m7-S7q`, and one `installed-state`
+frame) have a DTO with **no `updated` field**. Today's `format()` interpolates it anyway, so I wrote
+a literal **`undefined`** into the end of every printed hit line in those sets — 12 files.
+
+**How it surfaced.** The `/hybrid-review` run on B3 flagged it within its first few reviewer batches,
+as two separate `high` findings. **My own oracle did not**, because it compared the printed line to
+`format()` of the same DTO — self-consistent, and wrong in exactly the same direction as the bug.
+
+### What the repair is now
+
+The frames were reverted to `085e205` and repaired again, this time **only where B3's diff actually
+changed something**, verified per file against `origin/main`:
+
+- **the version token in a printed skill line** — replaced with `Version N` from the row's own
+  `latest`, and **only** when B3 re-keyed that row. Every other field in the line is left exactly as
+  recorded, so a 5-field older line stays 5 fields.
+- **`ls --local`'s ` @<8 hex>` suffix** — removed, replaced with ` (Version N)` where a placement
+  version exists (`ls.ts:278`).
+- **`people[]` on `ls member` / `ls project` / `ls --local`** — removed, and only after confirming
+  against `origin/main` that **B3's diff added it**. It did.
+- **`display_name`** — corrected to the byline, on the frames where B3 added the limb with the handle.
+
+**Reverted from A7 as over-reach:** the `endorsement: "global" → "project: Global"` rewrite. B3's diff
+never touched that field. `skillEndorsement` can no longer return `global`, but that is what the CLI
+of the day emitted and the frame records it consistently — changing it is re-recording, not repairing.
+
+### The oracle was rewritten, and now fails on the bug it missed
+
+`capture-frames.test.ts` no longer asserts whole-line `format()` equality. It asserts what holds for a
+recording of **any** vintage: **no printed line contains the string `undefined`** (every verb, every
+frame — which also closes the review's medium about the old version skipping `publish` and `status`),
+the printed version token is its own row's `Version N`, no local state keeps the `@<8 hex>` suffix,
+`people[]` only on the bare `ls`, and `display_name` matches the byline.
+
+**Proven both ways:** 86 of 140 fail on the pre-repair frames, and the `undefined` assertion fails
+with all 12 offending lines listed when pointed at my first bad repair. 114 pass on the repair.
+
+**The lesson, for the record:** an oracle built from the same function as the fix cannot catch the
+fix being wrong. The assertion that caught this is the one that describes what a real CLI can never
+emit, independent of how the file was produced.
+
+**Gates:** root lint, typecheck, **vitest 1690/1690**; desktop **vitest 1893 passed / 90 skipped**.
