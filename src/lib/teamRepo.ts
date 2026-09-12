@@ -203,7 +203,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       if (!isGitHubRemote(remote)) {
         // §4.1(d): the generator derives every skill's latest version from the in-memory post-image,
         // so there is no `write-tree` spawn and no git call inside its loop.
-        await regenerateReadmeInTree(tree, remote, runner, root);
+        await regenerateReadmeInTree(tree, remote);
         changed = tree.changedPaths;
         for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
         const readmeChanged = changed.filter((path) => path === 'README.md');
@@ -372,11 +372,6 @@ export async function skillVersions(clone: string, names: readonly string[]): Pr
   return new Map(entries);
 }
 
-async function requireGitResult(git: Git, args: readonly string[]): Promise<CommandResult> {
-  const result = await git(args);
-  if (result.code !== 0) throw new Error(`git ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim()}`);
-  return result;
-}
 
 /** Resolve the parent directory and refuse it if a symlink would carry the write outside the clone. */
 async function assertInsideClone(root: string, realRoot: string, path: string): Promise<string> {

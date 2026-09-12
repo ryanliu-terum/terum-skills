@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { isSkillName, Person, parseJson, parseSkillFrontmatter, personSchema, teamSchema } from './schema.js';
 import { githubOwnerRepo } from './remote.js';
 import { receiptSchema } from './evals/receipt.js';
-import { Runner, systemRunner } from './runner.js';
+import type { Runner } from './runner.js';
 import type { MutableTree } from './teamRepo.js';
 import { listVersions } from './teamRepo.js';
 import { parseVersionFolder, versionLabel, versionsInTree, type SkillVersion } from './versions.js';
@@ -143,7 +143,7 @@ export async function latestChange(runner: Runner, clone: string, name: string):
 }
 
 /** Read one clone without pulling or mutating it; used by the hidden workflow command and ls. */
-export async function readReadmeData(clone: string, remote: string, runner: Runner = systemRunner): Promise<ReadmeData> {
+export async function readReadmeData(clone: string, remote: string): Promise<ReadmeData> {
   const team = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
   const people = await readPeople(clone);
   const names = (await readdir(join(clone, 'skills'), { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
@@ -169,7 +169,7 @@ export async function readPeople(clone: string): Promise<Person[]> {
 }
 
 /** §9 generic-git fallback: derive the README from safeWrite's in-memory tree before it is guarded. */
-export async function regenerateReadmeInTree(tree: MutableTree, remote: string, runner: Runner, clone: string, latestBySkill?: ReadonlyMap<string, string>): Promise<void> {
+export async function regenerateReadmeInTree(tree: MutableTree, remote: string): Promise<void> {
   const source = tree.after('team.json');
   if (source === undefined) throw new Error('Cannot generate README without team.json.');
   const team = parseJson(teamSchema, asText(source), 'team.json');
@@ -237,7 +237,8 @@ function annotate(verdict: string, from: SkillVersion, versions: readonly SkillV
 function receiptVerdict(source: string, id: string, version: string): string | undefined {
   try {
     const receipt = receiptSchema.safeParse(JSON.parse(source));
-    if (!receipt.success || receipt.data.skill_id.toLowerCase() !== id.toLowerCase() || receipt.data.version !== version) return undefined;
+    // A null skill_id means a local run that was never attached; it is not this skill's testimony.
+    if (!receipt.success || receipt.data.skill_id?.toLowerCase() !== id.toLowerCase() || receipt.data.version !== version) return undefined;
     // §5.4: a partial receipt is never silently promoted to a full verdict.
     return receipt.data.execution_status === 'partial'
       ? `${receipt.data.verdict} — partial (${receipt.data.scored_rows}/${receipt.data.expected_rows} scored)`

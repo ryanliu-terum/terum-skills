@@ -239,3 +239,20 @@ export async function librarySize(home: string, config: Pick<Config, 'placements
   }
   return total;
 }
+
+/**
+ * Resolve a bare skill name to a folder in the Library — the global root plus every `config.projects`
+ * root, and nothing else. Shared by `publish` and `eval` (§5.1 step 1, §6.3) so there is exactly one
+ * answer to "which folder does this ref mean"; two resolvers would let the verb that publishes bytes
+ * and the verb that evaluates them disagree about which bytes they mean.
+ */
+export async function resolveLibrarySkill(home: string, config: Pick<Config, 'placements' | 'projects'>, stateRoot: string, ref: string): Promise<{ name: string; path: string; libraryRoot: string } | undefined> {
+  const discovery = await localSkillRoots(home, config.projects ?? []);
+  const ledger = await canonicalLedger(config);
+  for (const root of discovery.roots) {
+    const inventory = await localSkills(root.root, config, { scope: root.scope, stateRoot, ledger });
+    const entry = candidatesOf(inventory).find((candidate) => candidate.name === ref);
+    if (entry) return { name: entry.name, path: entry.path, libraryRoot: root.root };
+  }
+  return undefined;
+}

@@ -6,16 +6,16 @@ import { receiptSchema, type Receipt } from '../lib/evals/receipt.js';
 import type { WithForm } from '../lib/invocation.js';
 import type { Prompter } from '../lib/prompt.js';
 import { failure, fromError, type Result, success } from '../lib/result.js';
-import { type Runner, systemRunner } from '../lib/runner.js';
+import type { Runner } from '../lib/runner.js';
 import { findSkill } from '../lib/skills.js';
-import { resolveVersion } from '../lib/version.js';
+import { listVersions } from '../lib/teamRepo.js';
 import { newestReceiptAt, receiptFiles } from '../lib/evals/receipt-store.js';
 
 export interface EvalReportArgs extends WithForm { ref: string; team?: string; config?: ConfigStore; runner?: Runner; }
 export interface ReceiptView extends Receipt { path: string; }
 export interface EvalReport {
   skill: { id: string; name: string };
-  versions: { placed: string | null; teamCurrent: string; evaluated: string | null };
+  versions: { placed: string | null; teamCurrent: string | null; evaluated: string | null };
   latest: ReceiptView | null;
   latestState: 'ok' | 'none' | 'invalid';
   history: { version: string; run_id: string; verdict: Receipt['verdict']; execution_status: Receipt['execution_status']; model: string; cc_version: string; runner_handle: string; timestamp: string; comparison: { win: number; loss: number; tie: number; net_lift: number; sign_p: number } | null; committed: true }[];
@@ -30,7 +30,9 @@ export async function run(args: EvalReportArgs, io: Prompter): Promise<Result<Ev
     const clone = resolve(store.teamClone(teamName));
     const record = await findSkill(clone, teamName, args.ref);
     if (!record) return failure(`No skill named or identified by ${args.ref} exists in team ${teamName}.`);
-    const teamCurrent = await resolveVersion(clone, record.name, undefined, args.runner ?? systemRunner);
+    // §6.4(1): no published version is an ordinary answer now, not a throw.
+    const teamCurrent = (await listVersions(clone, record.name))[0]?.folder ?? null;
+    if (teamCurrent === null) return failure(`${record.name} has no published version yet.`);
     const root = join(clone, 'evals', record.id);
     const currentDirectory = join(root, teamCurrent);
     let latest: ReceiptView | null = null;
@@ -39,7 +41,7 @@ export async function run(args: EvalReportArgs, io: Prompter): Promise<Result<Ev
       const newest = await newestReceiptAt(currentDirectory);
       if (newest !== undefined) {
         const path = join(currentDirectory, newest.file);
-        if (newest.receipt.skill_id.toLowerCase() !== record.id.toLowerCase() || newest.receipt.version !== teamCurrent) {
+        if (newest.receipt.skill_id?.toLowerCase() !== record.id.toLowerCase() || newest.receipt.version !== teamCurrent) {
           throw new Error(`receipt ${path} does not match the receipt path: its skill ID or version disagrees.`);
         }
         latest = { ...newest.receipt, path };
@@ -56,7 +58,8 @@ export async function run(args: EvalReportArgs, io: Prompter): Promise<Result<Ev
       for (const file of await receiptFiles(join(root, directory))) {
         const receipt = await readReceipt(join(root, directory, file));
         if (receipt === null) continue;
-        history.push({ version: receipt.version, run_id: receipt.run_id, verdict: receipt.verdict, execution_status: receipt.execution_status, model: receipt.provenance.model, cc_version: receipt.provenance.cc_version, runner_handle: receipt.provenance.runner_handle, timestamp: receipt.provenance.timestamp, comparison: receipt.comparisons['candidate-vs-baseline'] ?? null, committed: true });
+        // A committed receipt always carries a version; the null arm is the local-run state.
+        history.push({ version: receipt.version ?? '—', run_id: receipt.run_id, verdict: receipt.verdict, execution_status: receipt.execution_status, model: receipt.provenance.model, cc_version: receipt.provenance.cc_version, runner_handle: receipt.provenance.runner_handle, timestamp: receipt.provenance.timestamp, comparison: receipt.comparisons['candidate-vs-baseline'] ?? null, committed: true });
       }
     }
     history.sort(newestFirst);

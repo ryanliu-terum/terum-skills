@@ -5,9 +5,10 @@ import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
-import { newestReceiptAt } from '../lib/evals/receipt-store.js';
+import { localReceiptsFor, newestReceiptAt } from '../lib/evals/receipt-store.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
@@ -19,16 +20,19 @@ import { packageVersion } from '../lib/package.js';
 import { parseTriggers, runTriggerEvals, type TriggerSummary } from '../lib/evals/triggers.js';
 import { Prompter } from '../lib/prompt.js';
 import { fromError, failure, failureWith, type Result, success } from '../lib/result.js';
-import { normalizeRemote } from '../lib/remote.js';
 import { type Runner, systemRunner } from '../lib/runner.js';
 import { sourceFiles } from '../lib/skill-source.js';
-import { findSkill, readTeam, skillRecords } from '../lib/skills.js';
-import { refreshClone, lockWait, skillVersions } from '../lib/teamRepo.js';
-import { materializeVersion, resolveVersion } from '../lib/version.js';
+import { findSkill, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
+import { parseSkillFrontmatter } from '../lib/schema.js';
+import { resolveLibrarySkill } from '../lib/local-skills.js';
+import { parseVersionFolder, type SkillVersion } from '../lib/versions.js';
+import { refreshClone, lockWait, listVersions, skillVersions } from '../lib/teamRepo.js';
 
 export interface EvalArgs extends WithForm {
   ref: string;
-  /** Queue guard: never bill a different version than the one requested. */
+  /** The home the Library roots derive from (tests); defaults to homedir(). */
+  home?: string;
+  /** Queue guard, re-keyed on the CONTENT HASH (§6.6): never bill bytes other than the queued ones. */
   expectedVersion?: string;
   /** Queue-only: reuse a receipt found after refresh, before any paid work. */
   skipReceipted?: boolean;
@@ -87,6 +91,10 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const clone = store.teamClone(teamName);
     await refreshClone(runner, clone, { label: teamName, ...lockWait(io, args.lockWaitMs) });
     const team = await readTeam(clone);
+    // §6.3: the bytes come from the Library, not the clone. The clone is still read for the incumbent
+    // arm and the policy, but a folder that belongs to no team is evaluable.
+    const local = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.ref);
+    if (!local) return failure(`No local skill folder named \`${args.ref}\` in your library; install it from the marketplace first, or pass \`--path\`.`);
     const record = await findSkill(clone, teamName, args.ref);
     if (!record) return failure(`No skill named or identified by ${args.ref} exists in team ${teamName}.`);
 
@@ -94,22 +102,27 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // skill content: a concurrent sync can refresh the clone mid-run, and the receipt's tree
     // hash must pin the exact skill text AND cases evaluated (§4.1; review P1). A concurrent
     // update may make this an older (but still exact) historical receipt.
-    const originalVersion = await resolveVersion(clone, record.name, undefined, runner);
-    if (args.skipReceipted) {
-      const directory = join('evals', record.id, args.expectedVersion ?? originalVersion);
-      const existing = await newestReceiptAt(join(clone, directory));
-      if (existing) {
-        const path = join(directory, existing.file);
-        io.print(`Already evaluated ${record.name}; using committed receipt ${path}.`);
-        return success({ team: teamName, id: record.id, name: record.name, runDir: '', ccVersion: existing.receipt.provenance.cc_version, executionStatus: existing.receipt.execution_status, receiptPath: path, alreadyEvaluated: true });
-      }
-    }
-    if (args.expectedVersion !== undefined && args.expectedVersion !== originalVersion) return failure(`Queued version ${args.expectedVersion} of ${record.name} is no longer current; dequeue it and run setup again to choose the new version.`);
-    const version = originalVersion;
-    const candidateDir = await materializeVersion(store, teamName, clone, record.name, version, runner);
+    // §6.3: eval targets a LOCAL folder. There is no version number at run time — the skill may never
+    // have been published — so the candidate is identified by its content digest (§6.1) and publish
+    // resolves that to a version when it attaches the run.
+    const candidateDir = local.path;
 
     // This is intentionally before preflight, trigger selection, run-tree creation, or any agent call.
     const candidateFiles = await sourceFiles(candidateDir);
+    const candidateDigest = skillContentDigest(candidateFiles.files);
+    if (args.skipReceipted || args.expectedVersion !== undefined) {
+      // Both queue guards are re-keyed on the content hash (§6.6): the bytes, not an ordinal, are what
+      // a queued item was queued against.
+      if (args.expectedVersion !== undefined && args.expectedVersion !== candidateDigest) {
+        return failure(`The queued bytes of ${record.name} are no longer what is on disk; dequeue it and queue it again.`);
+      }
+      const already = await localReceiptsFor(store.root, candidateDigest);
+      if (args.skipReceipted && already.length) {
+        const newest = already[already.length - 1]!;
+        io.print(`Already evaluated these exact bytes of ${record.name}.`);
+        return success({ team: teamName, id: record.id, name: record.name, runDir: '', ccVersion: newest.receipt.provenance.cc_version, executionStatus: newest.receipt.execution_status, alreadyEvaluated: true });
+      }
+    }
     try {
       reportHygieneWarnings((line) => io.print(line), assessHygiene(record.name, candidateFiles, team.policy.skill_license));
     } catch (error) {
@@ -131,7 +144,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
 
     const runAt = (args.now ?? (() => new Date()))();
     const runId = runIdFrom(runAt);
-    const runDir = join(store.root, 'evals', teamName, record.id, runId);
+    // §6.2: content-keyed, so a skill belonging to NO team can be evaluated at all.
+    const runDir = join(store.root, 'evals', 'local', candidateDigest.replace(/^sha256:/, ''), runId);
     const transcriptDir = join(runDir, 'transcripts');
     const scratch = join(runDir, 'sandboxes');
     await mkdir(transcriptDir, { recursive: true, mode: 0o700 });
@@ -144,8 +158,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     let generated: GeneratedAssets = {};
     const generatedRoot = join(runDir, 'generated');
     if (generateCases || generateTriggers) {
-      const records = await skillRecords(clone, teamName);
-      const catalog = await endorsedCatalog(team, records, record.id, runner);
+      const catalog = await endorsedCatalog(local.libraryRoot, { name: record.name, description: record.frontmatter.description });
       const built = await generate({
         agent: args.agent ?? systemAgent,
         skill: candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '',
@@ -170,8 +183,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       if (source !== undefined) {
         const parsed = parseTriggers(source);
         if (!parsed.ok) return failure(parsed.error);
-        const records = await skillRecords(clone, teamName);
-        const catalog = await endorsedCatalog(team, records, record.id, runner);
+        const catalog = await endorsedCatalog(local.libraryRoot, { name: record.name, description: record.frontmatter.description });
         triggers = await runTriggerEvals(args.agent ?? systemAgent, { skillName: record.name, catalog, spec: parsed.value, model });
       }
     }
@@ -187,7 +199,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       const selected = args.case === undefined ? caseFiles : caseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
       if (args.case !== undefined && selected.length === 0) return failure(`No eval case named ${args.case} for ${record.name}.`);
       caseNames.push(...selected.map((file) => file.replace(/\.ya?ml$/i, '')));
-      const incumbent = await materializeIncumbent(store, teamName, clone, { name: record.name, id: record.id }, version, runner);
+      const incumbent = await incumbentDir(clone, record.name, await listVersions(clone, record.name), record.id, candidateDigest);
       const opponents = incumbent === undefined ? 1 : 2;
       // Includes every selected authored case before requirement probes or setup failures.
       expectedRows = selected.length * k * opponents;
@@ -220,7 +232,11 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const receipt = buildReceipt({
       skill_id: record.id,
       skill_name: record.name,
-      version,
+      // §6.1: a local run has NO version — publish fills it in when it resolves the digest to a
+      // version folder. Identity at run time is the content digest, computed by the same
+      // `skillContentDigest` the publish comparison uses, over the folder exactly as it is on disk.
+      version: null,
+      content_digest: candidateDigest,
       run_id: runId,
       verdict: summary.verdict,
       attribution: summary.attribution,
@@ -328,48 +344,71 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function endorsedCatalog(team: Awaited<ReturnType<typeof readTeam>>, records: Awaited<ReturnType<typeof skillRecords>>, evaluatedId: string, runner: Runner): Promise<string> {
-  const ids = new Set(team.global);
-  const root = await runner.run('git', ['rev-parse', '--show-toplevel']);
-  if (root.code === 0) {
-    const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd: root.stdout.trim() });
-    if (origin.code === 0) {
-      const current = Object.values(team.projects).find((project) => project.remotes.some((remote) => normalizeRemote(remote) === normalizeRemote(origin.stdout.trim())));
-      for (const id of current?.skills ?? []) ids.add(id);
-    }
+/**
+ * §6.3 — the trigger catalog is a purely LOCAL set now: the direct child skill folders of the Library
+ * root that holds the folder under eval. `team.json.global` and `endorsedCandidates` are both deleted,
+ * and a teamless run has the same catalog rule as a team one — no team read, no clone. Eval-engine
+ * §7.2's "endorsed set" is superseded by this.
+ *
+ * The skill under eval is always included, even when it lives outside every registered root.
+ */
+async function endorsedCatalog(libraryRoot: string, evaluated: { name: string; description: string }): Promise<string> {
+  const rows = new Map<string, string>([[evaluated.name, evaluated.description]]);
+  const names = await readdir(libraryRoot, { withFileTypes: true }).catch(() => []);
+  for (const entry of names) {
+    if (!entry.isDirectory() || rows.has(entry.name)) continue;
+    const source = await readFile(join(libraryRoot, entry.name, 'SKILL.md'), 'utf8').catch(() => undefined);
+    if (source === undefined) continue;
+    const parsed = parseSkillFrontmatter(source);
+    // D16: a folder the Library marks rejected or failed is not offered as a trigger.
+    if (parsed.ok) rows.set(entry.name, parsed.data.description);
   }
-  ids.add(evaluatedId);
-  return records.filter((record) => ids.has(record.id)).map((record) => `- ${record.name}: ${record.frontmatter.description}`).join('\n');
+  return [...rows.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, description]) => `- ${name}: ${description}`).join('\n');
 }
 
-async function materializeIncumbent(store: ConfigStore, team: string, clone: string, skill: { name: string; id: string }, candidateTree: string, runner: Runner): Promise<string | undefined> {
-  // §6.1: latest receipted tree by UTC run-id wins. IE2 does not create receipts,
-  // but it must honor receipts already present in a team clone. §5.3 keys the
-  // receipt tree by the skill's uuid, never its folder name.
-  const receipted = await latestReceiptedTree(clone, skill.id, candidateTree);
-  if (receipted !== undefined) return materializeVersion(store, team, clone, skill.name, receipted, runner);
-  // No prior receipt: use origin/main's prior tree, if that skill existed there.
-  const previous = await runner.run('git', ['rev-parse', '--verify', `origin/main^:skills/${skill.name}`], { cwd: clone });
-  const tree = previous.code === 0 ? previous.stdout.trim().toLowerCase() : undefined;
-  if (!tree || !/^[0-9a-f]{40}$/.test(tree) || tree === candidateTree) return undefined;
-  return materializeVersion(store, team, clone, skill.name, tree, runner);
+/**
+ * §6.5 — the incumbent arm. The candidate has **no ordinal** at run time: it is a local folder
+ * identified by its content digest (§6.1), so the incumbent is chosen by receipt recency, not by
+ * ordinal, and read straight from `<clone>/skills/<name>/v<K>/`.
+ *
+ * A version folder is already an immutable checkout inside the clone, so there is nothing to
+ * materialize — which is what made deleting `materializeVersion` safe. **The old `origin/main^`
+ * fallback is deleted, not re-expressed:** with no clone, no team, no receipted version, or nothing
+ * left after excluding the candidate's own bytes, there is simply NO incumbent and the run is
+ * single-arm, exactly as eval-engine §7.1 already names it.
+ */
+async function incumbentDir(clone: string | null, name: string, versions: readonly SkillVersion[], id: string, candidateDigest: string): Promise<string | undefined> {
+  if (clone === null) return undefined;
+  const chosen = await latestReceiptedVersion(clone, id, versions, name, candidateDigest);
+  return chosen === undefined ? undefined : join(clone, 'skills', name, chosen);
 }
 
-async function latestReceiptedTree(clone: string, skillId: string, candidateTree: string): Promise<string | undefined> {
+/**
+ * The receipted version whose newest run-id is most recent, excluding any version whose bytes equal
+ * the candidate's.
+ *
+ * **Ordinal order is deliberately NOT the tie-breaker.** A `v2` re-evaluated today is a more current
+ * comparison than a `v4` evaluated last month; §14.1 pins that.
+ */
+async function latestReceiptedVersion(clone: string, skillId: string, versions: readonly SkillVersion[], name: string, candidateDigest: string): Promise<string | undefined> {
   const root = join(clone, 'evals', skillId);
-  let trees: string[];
-  try { trees = await readdir(root); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
-  let latest: { tree: string; runId: string } | undefined;
-  for (const tree of trees) {
-    if (!/^[0-9a-f]{40}$/.test(tree) || tree === candidateTree) continue;
+  let present: string[];
+  try { present = await readdir(root); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  let latest: { folder: string; runId: string } | undefined;
+  for (const folder of present) {
+    if (parseVersionFolder(folder) === null) continue;
+    if (!versions.some((version) => version.folder === folder)) continue;
+    // Exclude the candidate's own bytes — the version-folder form of "excluding the candidate's hash".
+    const committed = await sourceFiles(join(clone, 'skills', name, folder)).catch(() => undefined);
+    if (committed && skillContentDigest(committed.files) === candidateDigest) continue;
     let files: string[];
-    try { files = await readdir(join(root, tree)); } catch { continue; }
+    try { files = await readdir(join(root, folder)); } catch { continue; }
     for (const file of files) {
       const runId = /^([0-9]{8}T[0-9]{6}Z)\.json$/.exec(file)?.[1];
-      if (runId !== undefined && (latest === undefined || runId > latest.runId)) latest = { tree, runId };
+      if (runId !== undefined && (latest === undefined || runId > latest.runId)) latest = { folder, runId };
     }
   }
-  return latest?.tree;
+  return latest?.folder;
 }
 
 export interface PendingEval { id: string; name: string; version: string }
@@ -391,23 +430,24 @@ export interface PendingEvalScan {
  * Read-only, offline selector for setup's batch: current shared skill versions with no receipt.
  * An unresolved version or invalid newest receipt is reported and excluded, never automatically rerun.
  */
-export async function skillsWithoutReceipt(clone: string, team: string, runner: Runner, report: (line: string) => void): Promise<PendingEvalScan> {
+export async function skillsWithoutReceipt(clone: string, team: string, report: (line: string) => void): Promise<PendingEvalScan> {
   const records = await skillRecords(clone, team, { onProblem: ({ name, message }) => report(`${name}: ${message}`) });
-  let versionProblem: string | undefined;
-  const versions = await skillVersions(runner, clone).catch((error: unknown) => { versionProblem = error instanceof Error ? error.message : String(error); return new Map<string, string>(); });
+  // §6.5: the new `skillVersions` shape — a name with no version folder never reaches `skillRecords`,
+  // so the old "could not resolve the current version" arm has nothing left to report.
+  const versions = await skillVersions(clone, records.map((record) => record.name));
   const pending: PendingEval[] = [];
   let considered = 0;
   for (const record of records) {
-    const version = versions.get(record.name);
-    if (version === undefined) { report(`${record.name}: could not resolve the current version${versionProblem === undefined ? ': absent from HEAD:skills' : `: ${versionProblem}`}`); continue; }
+    const highest = versions.get(record.name)?.[0];
+    if (highest === undefined) continue;
     considered += 1;
     try {
-      if (await newestReceiptAt(join(clone, 'evals', record.id, version)) === undefined) pending.push({ id: record.id, name: record.name, version });
+      if (await newestReceiptAt(join(clone, 'evals', record.id, highest.folder)) === undefined) pending.push({ id: record.id, name: record.name, version: highest.folder });
     } catch (error) {
       report(`${record.name}: the newest receipt for the current version is invalid (${error instanceof Error ? error.message : String(error)}); evaluate it on its own when you have time.`);
     }
   }
-  return { pending, shared: records.length, considered, ...(versionProblem === undefined ? {} : { versionProblem }) };
+  return { pending, shared: records.length, considered };
 }
 
 

@@ -15,8 +15,8 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { adminLogins, paginatedItems } from '../lib/collaborators.js';
 import { githubLoginSchema, GLOBAL_PROJECT, Person, PROJECT_NAME_RULE, projectNameSchema, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
 import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, refreshClone, type SafeWriteOptions, treeText } from '../lib/teamRepo.js';
-import { readTeam, readRoster, RosterEntry } from '../lib/skills.js';
-import { installOne, placementHome, resolveDestination, teamForReference } from './install.js';
+import { readRoster, RosterEntry } from '../lib/skills.js';
+import { teamForReference } from './install.js';
 
 /**
  * §6 `team create` and `team join` (milestone M1). Both are `run(args, io)` over the Prompter.

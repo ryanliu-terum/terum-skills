@@ -325,7 +325,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
           io.print('Skipping the eval offer: this machine has no joined handle for the team yet.');
           steps.evals = 'skipped';
         } else {
-          const scan = await skillsWithoutReceipt(clone, teamName, runner, bullet);
+          const scan = await skillsWithoutReceipt(clone, teamName, bullet);
           const candidates = scan.pending;
           if (candidates.length === 0) {
             // An empty batch has four different causes and only one of them means "everything is evaluated".

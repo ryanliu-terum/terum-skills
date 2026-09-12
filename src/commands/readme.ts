@@ -16,7 +16,7 @@ export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ chan
     const runner = args.runner ?? systemRunner;
     const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd });
     if (origin.code !== 0) throw new Error(`Could not read origin: ${(origin.stderr || origin.stdout).trim()}`);
-    const data = await readReadmeData(cwd, origin.stdout.trim(), runner);
+    const data = await readReadmeData(cwd, origin.stdout.trim());
     if (args.prComment) {
       const base = await runner.run('git', ['show', `${args.prComment}:team.json`], { cwd });
       if (base.code !== 0) throw new Error(`Could not read ${args.prComment}:team.json: ${(base.stderr || base.stdout).trim()}`);

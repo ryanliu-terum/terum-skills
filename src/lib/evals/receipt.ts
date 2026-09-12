@@ -4,6 +4,7 @@
  * redaction at the sharing boundary. Pure (ME1): no I/O.
  */
 import { z } from 'zod';
+import { persistedVersionSchema } from '../schema.js';
 import { describeIssues } from '../schema.js';
 import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
@@ -45,13 +46,31 @@ const efficiencySchema = z.object({
 }).passthrough();
 
 export const RUN_ID_PATTERN = /^\d{8}T\d{6}Z$/;
-const VERSION_PATTERN = /^[0-9a-f]{40}$/;
+
+/** §6.1: the current receipt shape. Schema 1 is read-only history. */
+export const RECEIPT_SCHEMA_VERSION = 2;
 
 export const receiptSchema = z.object({
-  schema_version: z.literal(1),
-  skill_id: z.uuid(),
+  // A union, so no historical receipt becomes unparseable — the whole point of §6.1.
+  schema_version: z.union([z.literal(1), z.literal(2)]),
+  /**
+   * Null for a local run on a folder with no `metadata.id`; publish fills it in when it attaches the
+   * run. A COMMITTED receipt is never null.
+   */
+  skill_id: z.union([z.uuid(), z.null()]),
   skill_name: z.string().min(1),
-  version: z.string().regex(VERSION_PATTERN, 'a version is the 40-char lowercase tree hash'),
+  /**
+   * §3.4 — `'v3'`, the retained read-only 40-hex arm, or null. **Null is the normal state of a local
+   * run:** a local eval happens before the skill has a remote version number at all, so binding it to
+   * an ordinal at run time is impossible. Publish resolves the digest to a version when it attaches.
+   */
+  version: persistedVersionSchema,
+  /**
+   * §6.1 — identity at run time. Computed by the SAME `skillContentDigest` the publish comparison
+   * uses, over the folder exactly as it is on disk, so publish's attach step is provable rather than
+   * trusted. Required at `schema_version: 2`; absent on schema-1 history.
+   */
+  content_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
   run_id: z.string().regex(RUN_ID_PATTERN, 'a run id is a UTC timestamp, YYYYMMDDTHHMMSSZ'),
   verdict: z.enum(['PASS', 'NEUTRAL', 'FAIL']),
   attribution: z.string(),
@@ -84,7 +103,13 @@ export const receiptSchema = z.object({
     timestamp: z.string(),
     runner_handle: z.string(),
   }).passthrough(),
-}).passthrough();
+}).passthrough().superRefine((receipt, ctx) => {
+  // Schema 2 binds a run to the bytes it evaluated. Without this the field is declared and never
+  // enforced, and a schema-2 receipt with no digest would silently never attach at publish.
+  if (receipt.schema_version === 2 && receipt.content_digest === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['content_digest'], message: 'a schema-2 receipt records the content digest of the bytes it evaluated' });
+  }
+});
 export type Receipt = z.infer<typeof receiptSchema>;
 
 /** Rev 5: append-only — one immutable file per committed run, grouped by version. */
@@ -97,7 +122,7 @@ export function receiptPath(skillId: string, version: string, runId: string): st
  * `redact()` before the receipt exists; numbers and enums cannot carry secrets.
  */
 export function buildReceipt(raw: Record<string, unknown>, secrets: readonly string[] = []): Result<Receipt> {
-  const candidate = { ...raw, schema_version: 1, attribution: redact(String(raw['attribution'] ?? ''), secrets) };
+  const candidate = { ...raw, schema_version: RECEIPT_SCHEMA_VERSION, attribution: redact(String(raw['attribution'] ?? ''), secrets) };
   const parsed = receiptSchema.safeParse(candidate);
   if (!parsed.success) return failure(`invalid receipt: ${describeIssues(parsed.error)}`);
   return success(parsed.data);

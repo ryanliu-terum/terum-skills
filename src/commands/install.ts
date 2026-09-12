@@ -17,7 +17,8 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { Config, Destination, Team, describeRaw, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
-import { materializeVersion, resolveVersion } from '../lib/version.js';
+import { listVersions } from '../lib/teamRepo.js';
+import { VERSION_FOLDER } from '../lib/versions.js';
 
 export interface InstallArgs extends WithForm {
   into?: string;
@@ -102,11 +103,17 @@ export async function installOne(input: { team: string; destination: Destination
   const packageProject = input.project && teamJson.projects[input.project]?.skills.includes(skill.id) ? input.project : undefined;
   const scope = input.scope ?? (packageProject ? { kind: 'project' as const, project: packageProject } : { kind: 'global' as const });
   if (input.destination.kind === 'checkout') await assertProjectFolder(input.destination.root);
-  const latest = input.version ? await resolveVersion(clone, skill.name, input.version, input.runner) : null;
+  // §9.1 (B3's forced slice): an install source is `skills/<name>/v<max>/` — already an immutable
+  // checkout inside the clone, so there is nothing to materialize. A `@version` ref is refused: the
+  // marketplace installs the latest, and picking an older one is not a thing this verb offers.
+  if (input.version !== undefined && input.version !== null && !VERSION_FOLDER.test(input.version)) {
+    throw new Error(`${skill.name}@${input.version} is not a version; install takes the latest version of a skill.`);
+  }
+  const latest = (await listVersions(clone, skill.name))[0]?.folder ?? null;
   const pending = { op: 'install' as const, id: skill.id, team: input.team, scope, destination: input.destination, version: latest, started: new Date().toISOString() };
   const pendingAlreadyExists = (await input.store.read()).pending.some((entry) => samePending(entry, pending));
   await input.store.update((fresh) => { const existing = fresh.pending.find((entry) => samePending(entry, pending)); if (existing) existing.version = latest; else fresh.pending.push(pending); });
-  const source = latest ? await materializeVersion(input.store, input.team, clone, skill.name, latest, input.runner) : skill.directory;
+  const source = latest ? join(clone, 'skills', skill.name, latest) : skill.directory;
   const sourceSkill = await skillAtSource(source, skill);
   try {
     await ensureConsent(input.store, sourceSkill, io);

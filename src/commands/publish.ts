@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { canonicalLedger, localRootLabel, candidatesOf, localSkillRoots, localSkills } from '../lib/local-skills.js';
+import { canonicalLedger, localRootLabel, candidatesOf, localSkillRoots, localSkills, resolveLibrarySkill } from '../lib/local-skills.js';
 import type { Config } from '../lib/schema.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
@@ -15,7 +15,7 @@ import { DEFAULT_CATEGORY, declaredCategory, injectManagedFields, readTeam, skil
 import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { teamForReference } from './install.js';
 import { assertNotInsideStateRoot, assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
-import { assessHygiene, formatHygieneWarnings, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
+import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { versionFolderName, versionLabel, versionsInTree } from '../lib/versions.js';
 import { localReceiptsFor } from '../lib/evals/receipt-store.js';
 import { offerProfileEntry } from '../lib/profile-entry.js';
@@ -70,7 +70,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
 
     // 1. Resolve the ref to a LOCAL folder. You publish what is on your machine, never what is in
     //    the clone — that is the whole direction of this refactor.
-    const found = await resolveLocalSkill(args, config, store.root, args.ref);
+    const found = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.ref);
     if (!found) throw new Error(await notFoundLocally(args, config, team, args.ref, store.root));
 
     // 2. Refuse a nested symlink or a non-directory before reading a byte.
@@ -213,17 +213,6 @@ async function chooseProject(args: PublishArgs, teamJson: Awaited<ReturnType<typ
   const names = Object.keys(teamJson.projects).sort();
   if (names.length <= 1) return names[0] ?? GLOBAL_PROJECT;
   return io.select('Which project?', names, GLOBAL_PROJECT);
-}
-
-async function resolveLocalSkill(args: PublishArgs, config: Config, stateRoot: string, ref: string): Promise<{ name: string; path: string } | undefined> {
-  const discovery = await localSkillRoots(args.home ?? homedir(), config.projects ?? []);
-  const ledger = await canonicalLedger(config);
-  for (const root of discovery.roots) {
-    const inventory = await localSkills(root.root, config, { scope: root.scope, stateRoot, ledger });
-    const entry = candidatesOf(inventory).find((candidate) => candidate.name === ref);
-    if (entry) return { name: entry.name, path: entry.path };
-  }
-  return undefined;
 }
 
 /** The miss supplies read-only local discovery guidance, never an import or tracking write. */
