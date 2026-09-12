@@ -1,6 +1,6 @@
 import { packageRoot } from './package-root.js';
 import { existsSync, readFileSync } from 'node:fs';
-import { chmod, lstat, mkdir, realpath, rm, rmdir, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, realpath, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { packageVersion } from './package.js';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
 import lockfile from 'proper-lockfile';
@@ -9,6 +9,7 @@ import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
 import { explainGitAccessFailure, isGitHubRemote, normalizeRemote, remoteToGitUrl, stripRemoteCredentials } from './remote.js';
 import { CommandResult, Runner, systemRunner } from './runner.js';
 import { regenerateReadmeInTree } from './readme.js';
+import { parseVersionFolder, type SkillVersion } from './versions.js';
 
 /**
  * §6.0: every write to the team repo goes through `safeWrite()` — a re-apply model, not a rebase.
@@ -342,6 +343,31 @@ function sameContent(left: string | Buffer | undefined, right: string | Buffer |
 
 /** Decode a tree value only at a text consumer; binary paths stay byte-for-byte in the tree. */
 export function treeText(value: string | Buffer): string { return Buffer.isBuffer(value) ? value.toString('utf8') : value; }
+
+/**
+ * A published skill's version folders, newest first (spec §3.2). The fs-using half of the version
+ * vocabulary: it lives here rather than in `src/lib/versions.ts` so that leaf stays import-free for
+ * the desktop bundle.
+ *
+ * `readdir`, not git: the clone is always a full non-bare checkout that `refreshClone()` hard-resets,
+ * so the working tree is authoritative and a readdir is cheaper than a process spawn. A missing skill
+ * folder is `[]`, not a throw — an unpublished name is an ordinary answer, not an error.
+ *
+ * **Sorted descending by the parsed integer, never lexicographically** — it shares `versionsInTree`'s
+ * parser and sorter, because `['v10','v2'].sort()` would pin every skill past its tenth publish to
+ * the wrong version.
+ */
+export async function listVersions(clone: string, skillName: string): Promise<SkillVersion[]> {
+  const entries = await readdir(join(clone, 'skills', skillName), { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return [];
+    throw error;
+  });
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({ folder: entry.name, n: parseVersionFolder(entry.name) }))
+    .filter((entry): entry is SkillVersion => entry.n !== null)
+    .sort((left, right) => right.n - left.n);
+}
 
 /** Public read-only wrapper around the batched tree reader; never exposes the private Git seam. */
 export async function skillVersions(runner: Runner, clone: string, ref = 'HEAD'): Promise<Map<string, string>> {
