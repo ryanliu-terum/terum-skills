@@ -4,6 +4,7 @@ import type { ChangeSource } from '../backend/types';
 const prefixes: Record<ChangeSource, readonly string[]> = {
   config: ['status', 'settings', 'onboarding', 'library', 'skill', 'catalog', 'features', 'capabilities'],
   clone: ['library', 'skill', 'catalog', 'roster', 'inbox', 'receipts', 'status'],
+  marketplace: ['catalog', 'skill', 'roster', 'receipts'],
   placed: ['library', 'skill', 'settings', 'status', 'catalog'],
   stamp: ['status', 'settings', 'inbox'],
 };

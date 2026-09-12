@@ -6,11 +6,11 @@ import { ScriptedPrompter } from '../lib/__tests__/fixtures.js';
 it.each([undefined, 'bare'] as const)('threads form=%s into every CLI action, including guard-push and nested selectors', async (form) => {
   const calls: object[] = [];
   const stub = async (args: object) => { calls.push(args); return failure('stub'); };
-  const verbs: CliVerbs = { login: stub, team: stub, setup: stub, connect: stub, install: stub, uninstall: stub, uninstallMachine: stub, sync: stub, search: stub, invite: stub, ls: stub, status: stub, readme: stub, publish: stub, leave: stub, guardPush: stub, validate: stub, eval: stub, receiptCheck: stub, update: stub };
+  const verbs: CliVerbs = { login: stub, team: stub, setup: stub, install: stub, uninstall: stub, uninstallMachine: stub, sync: stub, prune: stub, search: stub, invite: stub, ls: stub, status: stub, readme: stub, publish: stub, leave: stub, guardPush: stub, validate: stub, eval: stub, update: stub };
   for (const argv of [
     ['login'], ['setup'], ['team', 'create'], ['team', 'join', 'org/repo'], ['team', 'remove', 'amy'], ['team', 'leave', 'team'], ['team', 'workflow-update'], ['invite', 'amy'],
-    ['ls'], ['ls', 'member', 'amy'], ['ls', 'project', 'app'], ['status'], ['readme'], ['guard-push', 'origin', 'org/repo'], ['publish', 'sample'], ['validate', 'sample'], ['receipt-check'], ['eval', 'sample'], ['connect'],
-    ['install', 'sample'], ['install', 'member', 'amy'], ['install', 'project', 'app'], ['uninstall-skill', 'sample'], ['uninstall-skill', 'member', 'amy'], ['uninstall-skill', 'project', 'app'], ['uninstall'], ['sync'], ['sync', '--hook'], ['search', 'term'], ['update'],
+    ['ls'], ['ls', 'member', 'amy'], ['ls', 'project', 'app'], ['status'], ['readme'], ['guard-push', 'origin', 'org/repo'], ['publish', 'sample'], ['validate', 'sample'], ['eval', 'sample'],
+    ['install', 'sample'], ['install', 'member', 'amy'], ['install', 'project', 'app'], ['uninstall-skill', 'sample'], ['uninstall-skill', 'member', 'amy'], ['uninstall-skill', 'project', 'app'], ['uninstall'], ['sync'], ['sync', '--hook'], ['prune'], ['search', 'term'], ['update'],
   ]) {
     calls.length = 0;
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, verbs, { form });
@@ -18,6 +18,14 @@ it.each([undefined, 'bare'] as const)('threads form=%s into every CLI action, in
     expect(calls, argv.join(' ')).toHaveLength(1);
     expect(calls[0]).toHaveProperty('form', form);
   }
+});
+
+it('keeps receipt-check as a hidden no-op shim', async () => {
+  const io = new ScriptedPrompter();
+  const program = buildProgram(async (invoke) => { await invoke(io); });
+  await program.parseAsync(['receipt-check'], { from: 'user' });
+  expect(io.lines).toEqual(['receipt-check is retired; publish records receipts when it mints a version.']);
+  expect(program.helpInformation()).not.toContain('receipt-check');
 });
 
 it.each([undefined, 'bare'] as const)('routes help and refusal text with form=%s while preserving Usage grammar', async (form) => {
@@ -33,6 +41,6 @@ it.each([undefined, 'bare'] as const)('routes help and refusal text with form=%s
   await program.parseAsync(['share'], { from: 'user' });
   expect(errors).toEqual([
     `To remove a skill, use \`${prefix} uninstall-skill <ref>\`.`,
-    `\`share\` is now \`connect\`: run \`${prefix} connect [<path>]\` (same options: --allow-privileged, --keep-source, --keep-repo, --relocate, --forget).`,
+    `\`share\` is retired; run \`${prefix} publish <skill>\` to publish a skill explicitly.`,
   ]);
 });

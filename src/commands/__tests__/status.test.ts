@@ -109,7 +109,7 @@ describe('status (offline local team summary)', () => {
     const { result, io } = await query(f, { team }, [f.clone], []);
     if (team) { expect(result).toMatchObject({ ok: false, error: 'Team nope is not configured.' }); expect(io.lines).toHaveLength(1); }
     else {
-      expect(result).toEqual({ ok: true, value: { version, teams: [], ledger: { placements: [], approvals: [], shared: [] }, identity: null, tools: { git: true, gh: false }, hostArch: process.arch, processArch: process.arch } });
+      expect(result).toEqual({ ok: true, value: { version, teams: [], ledger: { placements: [], approvals: [] }, identity: null, tools: { git: true, gh: false }, hostArch: process.arch, processArch: process.arch } });
       expect(io.lines.slice(1)).toEqual(['No team is configured on this machine.', '  Create a team: npx -y terum-skills@latest setup', '  Join a team:   npx -y terum-skills@latest setup <org>/<repo>']);
     }
   });
@@ -219,14 +219,13 @@ it('returns the full machine ledger and identity before a missing --team fails',
   const placement = { id, team: 'other', version: 'b'.repeat(40), scope: { kind: 'project' as const, project: 'ops', ignored: 'extra' }, placed_at: '2026-09-01' };
   await f.store.update(config => {
     config.placements['/placed'] = { ...placement, fingerprint: 'private' };
-    config.shared[id] = { source: '/source', team: 'other', baseline: 'private' };
     config.approvals[id] = { grants: 'hash', approved_at: '2026-09-02' };
     config.default_handle = 'seed'; config.github = '';
   });
   const { result } = await query(f, { team: 'missing' }, [f.clone], []);
   expect(result.ok).toBe(false);
   expect(result.value?.identity).toEqual({ default_handle: 'seed', github: '', email: null, display_name: null });
-  expect(result.value?.ledger).toEqual({ placements: [{ ...placement, path: '/placed', scope: { kind: 'project', project: 'ops' } }], shared: [{ id, source: '/source', team: 'other' }], approvals: [{ id, grants: 'hash', approved_at: '2026-09-02' }] });
+  expect(result.value?.ledger).toEqual({ placements: [{ ...placement, path: '/placed', scope: { kind: 'project', project: 'ops' } }], approvals: [{ id, grants: 'hash', approved_at: '2026-09-02' }] });
 });
 it('carries an explicit null version for an unpinned pending operation', async () => {
   const f = await fixture();

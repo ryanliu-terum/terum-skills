@@ -13,7 +13,7 @@ export function EvalRunProvider({children}:PropsWithChildren){
  const live=useRef<EvalRunState|null>(null),inFlight=useRef(false);
  function update(next:EvalRunState|null){live.current=next;setCurrent(next);}
  function assertAvailable(){if(inFlight.current)throw new Error(`An eval is already running for ${live.current?.ref??'another skill'}`);}
- async function track<T extends EvalRunValue>(run:Run<T>,args:{ref:string;name:string;team?:string;commit:boolean;queue?:boolean}):Promise<Result<T>> {
+ async function track<T extends EvalRunValue>(run:Run<T>,args:{ref:string;name:string;team?:string;queue?:boolean}):Promise<Result<T>> {
   inFlight.current=true;
   update({...args,team:args.team,run,lines:[],startedAt:Date.now(),state:'running'});setDialogOpen(true);
   let result:Result<T>;
@@ -30,14 +30,14 @@ export function EvalRunProvider({children}:PropsWithChildren){
  }
  const start:EvalRunApi['start']=args=>{
   assertAvailable();
-  const run=backend.eval({ref:args.ref,...(args.team===undefined?{}:{team:args.team}),commit:args.commit});
+  const run=backend.eval({ref:args.ref,...(args.team===undefined?{}:{team:args.team})});
   void track(run,args);
  };
  async function startQueued(item:EvalQueueItem){
   assertAvailable();
   const service=evalQueueFor(backend);
   if(!service)throw new Error('This backend has no eval queue.');
-  return track(service.drain(),{ref:item.skill,name:item.skill,team:item.team,commit:true,queue:true});
+  return track(service.drain(),{ref:item.skill,name:item.skill,team:item.team,queue:true});
  }
  async function stop(){const active=live.current;if(!active||active.state!=='running')return;update({...active,state:'stopped'});try{await active.run.cancel();}catch(error){if(live.current?.run===active.run)update({...live.current,result:{ok:false,error:String(error)}});}}
  function dismiss(){setDialogOpen(false);if(live.current?.state!=='running')update(null);}

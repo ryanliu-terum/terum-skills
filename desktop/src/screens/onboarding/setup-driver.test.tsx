@@ -11,9 +11,9 @@ const launch={target:'https://github.com/terum/team-skills.git',writtenAt:'2026-
 afterEach(()=>{cleanup();localStorage.clear();location.hash='';vi.restoreAllMocks();});
 function backend(){const b=createMockBackend();vi.spyOn(b,'launchContext').mockResolvedValue(launch);vi.spyOn(b,'refreshLaunch').mockResolvedValue(launch);return b;}
 function open(b:ReturnType<typeof backend>,route='#/'){location.hash=route;return render(<StrictMode><Providers><BackendContext value={b}><App/></BackendContext></Providers></StrictMode>);}
-it('maps every reached CLI step to one of the six drawn tour steps',()=>{
+it('maps every reached CLI step to one of the five drawn tour steps',()=>{
  expect(Object.keys(SETUP_STEP_TO_BOARD)).toEqual(SETUP_STEP_KEYS);
- expect(new Set(Object.values(SETUP_STEP_TO_BOARD))).toEqual(new Set(['Welcome','Style','Team','Basics','Feedback','Done']));
+ expect(new Set(Object.values(SETUP_STEP_TO_BOARD))).toEqual(new Set(['Welcome','Style','Team','Feedback','Done']));
 });
 it('routes a fresh target to Boot, waits for the human, renders prints/progress, and consumes a typed decline once',async()=>{
  const b=backend(),answered=vi.fn(),set=vi.spyOn(b.prefs,'set');
@@ -23,7 +23,7 @@ it('routes a fresh target to Boot, waits for the human, renders prints/progress,
   return {ok:false,error:'Join was declined.',cancelled:true,value:{team:'',role:'joiner',steps:{welcome:'printed',app:'skipped',github:'done'}}};
  }));
  const view=open(b);const dialog=await screen.findByRole('dialog');
- expect(location.hash).toBe('#/onboarding/boot');expect(setup).toHaveBeenCalledTimes(1);expect(setup).toHaveBeenCalledWith({target:launch.target,offerConnect:true});
+ expect(location.hash).toBe('#/onboarding/boot');expect(setup).toHaveBeenCalledTimes(1);expect(setup).toHaveBeenCalledWith({target:launch.target});
  expect(answered).not.toHaveBeenCalled();expect(b.prefs.get('launch:consumedWrittenAt','')).toBe('');
  expect(screen.getByLabelText('Setup output')).toHaveTextContent('GitHub CLI is installed but logged out.');
  expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow','2');expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuemax','4');
@@ -33,11 +33,11 @@ it('routes a fresh target to Boot, waits for the human, renders prints/progress,
  expect(set.mock.calls.filter(([key])=>key==='launch:consumedWrittenAt')).toEqual([['launch:consumedWrittenAt',launch.writtenAt]]);
  view.unmount();open(b);await waitFor(()=>expect(location.hash).toBe('#/library/global'));expect(setup).toHaveBeenCalledTimes(1);
 });
-it('uses six result-driven rows without inventing a progress counter',async()=>{
+it('uses five result-driven rows without inventing a progress counter',async()=>{
  const b=backend();vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{
-  ctx.print('Repository: https://github.com/terum/team-skills.git');return {ok:true,value:{team:'team',role:'joiner',steps:{github:'done',team:'done',actions:'skipped',hook:'skipped',wrapper:'skipped',done:'printed'}}};
+  ctx.print('Repository: https://github.com/terum/team-skills.git');return {ok:true,value:{team:'team',role:'joiner',steps:{github:'done',team:'done',hook:'skipped',wrapper:'skipped',done:'printed'}}};
  }));
- const view=open(b);await screen.findByRole('heading',{name:'Setup finished'});expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(6);
+ const view=open(b);await screen.findByRole('heading',{name:'Setup finished'});expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(5);
  expect(screen.queryByLabelText('Onboarding progress')).toBeNull();expect(screen.getByRole('progressbar',{name:'Setup progress'})).not.toHaveAttribute('aria-valuenow');expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuemax');
  expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
 });
@@ -52,7 +52,7 @@ it('boots a zero-team machine from an unconsumed target-less context',async()=>{
  vi.mocked(b.launchContext).mockResolvedValue(ctx);vi.mocked(b.refreshLaunch).mockResolvedValue(ctx);
  const setup=vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:true,value:{role:'creator',team:'team',steps:{}}})));
  open(b);await screen.findByRole('heading',{name:'Setup finished'});
- expect(location.hash).toBe('#/onboarding/boot');expect(setup).toHaveBeenCalledExactlyOnceWith({offerConnect:true});
+ expect(location.hash).toBe('#/onboarding/boot');expect(setup).toHaveBeenCalledExactlyOnceWith({});
 });
 it('lands on Library when target-less status fails, even with a zero-team partial value',async()=>{
  const b=backend(),base=await b.status(),ctx={writtenAt:launch.writtenAt};
@@ -68,7 +68,7 @@ it.each([false,true])('configured machine boots only with setup intent (%s)',asy
  vi.mocked(b.launchContext).mockResolvedValue(ctx);vi.mocked(b.refreshLaunch).mockResolvedValue(ctx);
  const setup=vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:true,value:{role:'creator',team:'team',steps:{}}})));
  open(b);await waitFor(()=>expect(location.hash).toBe(intent?'#/onboarding/boot':'#/library/global'));
- if(intent){await screen.findByRole('heading',{name:'Setup finished'});expect(setup).toHaveBeenCalledExactlyOnceWith({offerConnect:true});}
+ if(intent){await screen.findByRole('heading',{name:'Setup finished'});expect(setup).toHaveBeenCalledExactlyOnceWith({});}
  else expect(setup).not.toHaveBeenCalled();
 });
 it('requires an explicit select choice and renders a consumed join hand-off',async()=>{
@@ -116,7 +116,7 @@ it.each([false,true])('manual Start setup works regardless of consumption (file=
  b.prefs.set('launch:consumedWrittenAt',launch.writtenAt);
  const set=vi.spyOn(b.prefs,'set'),setup=vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:true,value:{role:'creator',team:'team',steps:{}}})));
  open(b,'#/onboarding/boot?start=1');await screen.findByRole('heading',{name:'Setup finished'});
- expect(setup).toHaveBeenCalledExactlyOnceWith({...hasFile?{target:launch.target}:{},offerConnect:true});
+ expect(setup).toHaveBeenCalledExactlyOnceWith({...hasFile?{target:launch.target}:{}});
  if(!hasFile)expect(set.mock.calls.filter(([key])=>key==='launch:consumedWrittenAt')).toEqual([]);
 });
 it('Back leaves an unconsumed failure on Library until an explicit retry or new request',async()=>{
@@ -148,7 +148,7 @@ it('lets the CLI decide when target pre-flight status fails',async()=>{
  const b=backend();vi.spyOn(b,'status').mockResolvedValue({ok:false,error:'Status unavailable.'});
  const setup=vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:true,value:{role:'joiner',team:'team',steps:{}}})));
  open(b);await screen.findByRole('heading',{name:'Setup finished'});
- expect(setup).toHaveBeenCalledExactlyOnceWith({target:launch.target,offerConnect:true});
+ expect(setup).toHaveBeenCalledExactlyOnceWith({target:launch.target});
 });
 it('consumes a CLI refusal and keeps its outcome distinct from failure',async()=>{
  const b=backend();vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:false,error:'CLI refused this setup.',refused:true})));
@@ -185,7 +185,7 @@ it('shows a discover progress counter on its own row instead of a seventh row',a
   return {ok:true,value:{team:'t',role:'creator',steps:{discover:'done'}}};
  }));
  const view=open(b);await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('Looking for skill folders on this machine'));
- expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(6);
+ expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(5);
  expect([...view.container.querySelectorAll('.onboarding-progress-row')].find(row=>row.textContent?.includes('Looking for skill folders on this machine'))).toHaveAttribute('data-state','current');
  expect(screen.getByRole('status')).not.toHaveTextContent(/^discover$/);expect(view.container.querySelector('.onboarding-progress-row[data-state="current"]>span:last-child')).not.toHaveTextContent('12 of 12');
  await act(async()=>finish());await screen.findByRole('heading',{name:'Setup finished'});
@@ -194,7 +194,7 @@ it('still shows an unknown progress label as its own row',async()=>{
  const b=backend();let finish!:()=>void;const pending=new Promise<void>(resolve=>{finish=resolve;});
  vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{ctx.progress(1,2,'placing');await pending;return {ok:true,value:{team:'t',role:'creator',steps:{}}};}));
  const view=open(b);await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('placing'));
- const rows=view.container.querySelectorAll('.onboarding-progress-row');expect(rows).toHaveLength(7);expect(rows[6]).toHaveTextContent('placing');
+ const rows=view.container.querySelectorAll('.onboarding-progress-row');expect(rows).toHaveLength(6);expect(rows[5]).toHaveTextContent('placing');
  await act(async()=>finish());await screen.findByRole('heading',{name:'Setup finished'});
 });
 

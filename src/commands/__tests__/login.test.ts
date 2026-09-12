@@ -65,10 +65,10 @@ describe('login (§6, rev 9 Decision 4: bare, no team entry, no token)', () => {
 
 
 describe('login --set (MC-11)', () => {
-  const notice = (name: string, email = 'seed@example.com') => `This changes the author line (${name} <${email}>) that the next sync writes into the skills you have connected on this machine; skills you authored elsewhere keep their recorded author.`;
+  const notice = (name: string, email = 'seed@example.com') => `This changes the author line (${name} <${email}>) that publish writes into the skills you publish from this machine; versions already published keep their recorded author.`;
   async function fixture() {
     const store = createConfigStore(await temporaryDirectory());
-    await store.update(config => { config.display_name = 'Seed'; config.email = 'seed@example.com'; config.default_handle = 'seed'; config.github = 'seed'; config.teams.acme = { remote: 'github.com/acme/team', handle: 'seed' }; config.shared.id = { source: '/skills/a', team: 'acme' }; config.extra = { nested: ['a', { name: 'Seed' }], unicode: '雪' }; });
+    await store.update(config => { config.display_name = 'Seed'; config.email = 'seed@example.com'; config.default_handle = 'seed'; config.github = 'seed'; config.teams.acme = { remote: 'github.com/acme/team', handle: 'seed' }; config.extra = { nested: ['a', { name: 'Seed' }], unicode: '雪' }; });
     const path = pathJoin(store.root, 'config.json');
     // Hand formatting, nested matching names and escaped text are all unrelated bytes.
     const raw = JSON.stringify(await store.read()).replace('"Seed"', '"Se\\u0065d"') + '\n';

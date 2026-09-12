@@ -1,106 +1,35 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { run as publish } from '../commands/publish.js';
-import { DISCOVER_QUESTION, evalsQuestion, run as setup } from '../commands/setup.js';
-import { run as sync } from '../commands/sync.js';
+import { DISCOVER_QUESTION, run as setup } from '../commands/setup.js';
 import { createConfigStore } from '../lib/config.js';
 import { HOOK_ENTRY, installHook } from '../lib/hook.js';
 import { fakeGh, git, mappedRunner, ScriptedPrompter, temporaryDirectory, wrapperFor } from '../lib/__tests__/fixtures.js';
 
 const REMOTE = 'https://github.com/alice/team.git';
-const hookFor = (root: string, name: string) => ({ settingsFile: join(root, `${name}.settings.json`), backupDir: join(root, `${name}-backups`) });
-
-async function emptyBare(root: string): Promise<string> {
-  const bare = join(root, 'team.git');
-  await git(['init', '-q', '--bare', bare]);
-  return bare;
-}
+const hookFor = (root: string, name: string) => ({ settingsFile: join(root, `${name}.json`), backupDir: join(root, `${name}-backups`) });
 
 describe('M3 setup walkthrough', () => {
   afterEach(() => vi.unstubAllEnvs());
+
   it('gives each participating machine exactly one canonical session-start entry', async () => {
     const root = await temporaryDirectory('terum-m3-setup-');
-    const alice = { settingsFile: join(root, 'alice.json'), backupDir: join(root, 'alice-backups') };
-    const bob = { settingsFile: join(root, 'bob.json'), backupDir: join(root, 'bob-backups') };
+    const alice = hookFor(root, 'alice'); const bob = hookFor(root, 'bob');
     await installHook(alice); await installHook(bob);
     expect(JSON.parse(await readFile(alice.settingsFile, 'utf8')).hooks.SessionStart).toEqual([HOOK_ENTRY]);
     expect(JSON.parse(await readFile(bob.settingsFile, 'utf8')).hooks.SessionStart).toEqual([HOOK_ENTRY]);
   });
 
-  it('14 connects two skills for Alice, offers Bob his own skills, and resumes without reoffering connected sources', async () => {
-    // Keep this exact transcript walkthrough in the supported plain-text mode; banner behavior has its own tests.
-    vi.stubEnv('NO_COLOR', '1');
+  it('onboards Alice and Bob without publishing either machine’s local skills', async () => {
     const root = await temporaryDirectory('terum-m3-setup-');
-    const bare = await emptyBare(root);
-    const aliceHome = join(root, 'alice-home'); const bobHome = join(root, 'bob-home');
     const aliceStore = createConfigStore(join(root, 'alice-state'));
-    const aliceRunner = mappedRunner(REMOTE, bare, fakeGh('alice', {
-      'repo create team --private': { code: 0, stdout: '', stderr: '' },
-      'repo view team --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/team\n', stderr: '' },
-      'api -X PUT --include repos/alice/team/collaborators/bob': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' },
-    }));
-    const source = join(aliceHome, '.claude', 'skills', 'sample');
-    await mkdir(source, { recursive: true });
-    await writeFile(join(source, 'SKILL.md'), '---\nname: sample\ndescription: setup walkthrough skill\nmetadata:\n  terum-category: testing\n---\n');
-    const second = join(aliceHome, '.claude', 'skills', 'handoff');
-    await mkdir(second, { recursive: true });
-    await writeFile(join(second, 'SKILL.md'), '---\nname: handoff\ndescription: second walkthrough skill\n---\n');
-    // The connect picker is connect's own (issue 9): it offers `Connect <name>` labels and only on an interactive channel.
-    // connect sample, connect handoff, discovery no, eval select Skip, hook, wrapper.
-    const aliceIo = new ScriptedPrompter(['Create a new team', 'team', '', '', 'Alice', 'alice@example.com', 'team', 'bob', 'Connect sample', 'Connect handoff', 'Skip'], [true, true, false, true, true], true);
-    const alice = await setup({ app: false, config: aliceStore, home: aliceHome, runner: aliceRunner, hook: hookFor(root, 'alice'), wrapper: wrapperFor(aliceHome), communityUrl: '' }, aliceIo);
-    if (!alice.ok) throw new Error(alice.error);
-    expect(alice.value.steps).toMatchObject({ team: 'done', actions: 'done', invite: 'done', hook: 'done', wrapper: 'done', done: 'printed' });
-    expect(aliceIo.lines).toContain('  @alice — Alice');
-    expect(aliceRunner.calls.filter((call) => call.command === 'git' && call.args[0] === 'push')).toHaveLength(3);
-    expect(aliceIo.offered).toEqual([['Create a new team', 'Join an existing team'], ['Connect handoff', 'Connect sample', 'Skip'], ['Connect handoff', 'Done'], ['Now', 'In batches', 'Overnight', 'Skip']]);
-    expect(Object.keys((await aliceStore.read()).shared)).toHaveLength(2);
-
-    const bobStore = createConfigStore(join(root, 'bob-state'));
-    const bobRunner = mappedRunner(REMOTE, bare, fakeGh('bob', { 'api user/repository_invitations': { code: 0, stdout: '[]', stderr: '' } }));
-    const bobSource = join(bobHome, '.claude', 'skills', 'bob-local'); await mkdir(bobSource, { recursive: true });
-    const bobBytes = '---\nname: bob-local\ndescription: Bob local skill\n---\n'; await writeFile(join(bobSource, 'SKILL.md'), bobBytes);
-    // discovery no, eval select Skip, hook, wrapper. (Bob answers the connect picker with a select, not a confirm.)
-    const bobIo = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com', 'Skip', 'Skip'], [false, true, true], true);
-    const bob = await setup({ app: false, target: 'alice/team', config: bobStore, home: bobHome, runner: bobRunner, hook: hookFor(root, 'bob'), wrapper: wrapperFor(bobHome), communityUrl: '' }, bobIo);
-    if (!bob.ok) throw new Error(bob.error);
-    expect(bob.value.steps).toMatchObject({ team: 'done', actions: 'skipped', invite: 'skipped', hook: 'done', wrapper: 'done', done: 'printed' });
-    expect(bobIo.countAsked('team-endorsed')).toBe(0);
-    expect(bobIo.countAsked('Install the Claude Code session-start hook')).toBe(1);
-    expect(bobIo.countAsked('Install the /terum-skills Claude Code skill')).toBe(1);
-    for (const home of [aliceHome, bobHome]) expect(await readFile(join(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8')).toBe(await readFile(wrapperFor(home).source, 'utf8'));
-    expect(bobIo.lines).toEqual(expect.arrayContaining(['  @alice — Alice', '  @bob — Bob']));
-    expect(bobRunner.calls.filter((call) => call.command === 'git' && call.args[0] === 'push')).toHaveLength(1);
-    expect(bobIo.offered).toEqual([['Connect bob-local', 'Skip'], ['Now', 'In batches', 'Overnight', 'Skip']]);
-    expect(await readFile(join(bobSource, 'SKILL.md'), 'utf8')).toBe(bobBytes);
-    const resumedIo = new ScriptedPrompter(['', 'Skip'], [false], true);
-    expect(await setup({ app: false, config: aliceStore, home: aliceHome, runner: aliceRunner, hook: hookFor(root, 'alice'), wrapper: wrapperFor(aliceHome), communityUrl: '' }, resumedIo)).toMatchObject({ ok: true, value: { steps: { actions: 'skipped', wrapper: 'skipped' } } });
-    expect(resumedIo.lines).toContain(`The /terum-skills Claude Code skill at ${join(aliceHome, '.claude', 'skills', 'terum-skills')} is current.`);
-    expect(resumedIo.offered).toEqual([['Now', 'In batches', 'Overnight', 'Skip']]);
-    expect(resumedIo.asked).toEqual(['Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', DISCOVER_QUESTION, evalsQuestion(2)]);
-
-    const publishRunner = mappedRunner(REMOTE, bare, (args, options) => args[0] === 'pr'
-      ? { code: 0, stdout: 'https://github.com/alice/team/pull/1\n', stderr: '' }
-      : fakeGh('alice')(args, options));
-    const published = await publish({ ref: 'sample', config: aliceStore, runner: publishRunner }, new ScriptedPrompter());
-    if (!published.ok) throw new Error(published.error);
-    // One fresh branch per publish (R2): the name is minted per run, so the walkthrough follows the result.
-    expect(published.value).toMatchObject({ policy: 'pr', branch: expect.stringMatching(/^publish\/sample-alice-[0-9a-f]{8}$/) });
-    const endorsementBranch = published.value.branch!;
-    await git(['fetch', 'origin'], aliceStore.teamClone('team'));
-    // The host merging the PR, simulated from Alice's clone: --no-verify because her clone now carries the D12 pre-push guard, which would run `npx terum-skills` (M4).
-    await git(['push', '--no-verify', 'origin', `refs/remotes/origin/${endorsementBranch}:main`], aliceStore.teamClone('team'));
-
-    const syncIo = new ScriptedPrompter([], [true], true);
-    // Bob's team is GitHub-shaped and this sync is interactive, so release discovery would run here; it is
-    // covered in sync.test.ts through a denying runner and must never reach the real upstream from a walkthrough.
-    const synchronized = await sync({ config: bobStore, runner: bobRunner, noUpdateCheck: true }, syncIo);
-    if (!synchronized.ok) throw new Error(synchronized.error);
-    expect(syncIo.countAsked('Install 1 newly endorsed skill(s) from team?')).toBe(1);
-    expect((await git(['ls-tree', '--name-only', 'main:people'], bare)).split('\n').filter(Boolean).sort()).toEqual(['alice.json', 'bob.json']);
-    expect(await git(['ls-tree', '--name-only', 'main:skills'], bare)).toContain('sample');
-    expect(await git(['ls-tree', '--name-only', 'main:skills'], bare)).toContain('handoff');
-    for (const name of ['alice', 'bob']) expect(JSON.parse(await readFile(hookFor(root, name).settingsFile, 'utf8')).hooks.SessionStart).toEqual([HOOK_ENTRY]);
+    const bare = join(root, 'team.git'); await git(['init', '-q', '--bare', bare]);
+    const aliceRunner = mappedRunner(REMOTE, bare, fakeGh('alice', { 'repo create team --private': { code: 0, stdout: '', stderr: '' }, 'repo view team --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/team\n', stderr: '' } }));
+    const aliceIo = new ScriptedPrompter(['Create a new team', 'team', '', '', 'Alice', 'alice@example.com', 'team', ''], [false, false, false], true);
+    const alice = await setup({ app: false, config: aliceStore, home: join(root, 'alice-home'), runner: aliceRunner, hook: hookFor(root, 'alice-setup'), wrapper: wrapperFor(join(root, 'alice-home')), communityUrl: '' }, aliceIo);
+    expect(alice).toMatchObject({ ok: true, value: { steps: { team: 'done', invite: 'skipped', done: 'printed' } } });
+    expect(aliceIo.asked).toContain(DISCOVER_QUESTION);
+    // A newly created, empty team has no candidate to offer for evaluation.
+    expect(aliceIo.asked).not.toContain('Evaluate the 0 shared skills that have no receipt yet? This runs Claude on each one and records results locally.');
   });
 });

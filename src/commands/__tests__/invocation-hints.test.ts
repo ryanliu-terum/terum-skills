@@ -1,14 +1,12 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { getStartedLines } from '../../lib/invocation.js';
 import { createConfigStore, selectTeam } from '../../lib/config.js';
 import { creatorAuthenticationError } from '../../lib/auth.js';
 import { guardRawPush } from '../../lib/guard.js';
-import { createExecute } from '../../lib/execute.js';
 import { staleLine } from '../../lib/hook.js';
-import { systemRunner } from '../../lib/runner.js';
-import { bareTeam, cloneWithIdentity, denyingRunner, fakeGh, ghOnlyRunner, ScriptedPrompter, TEAM_JSON, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { denyingRunner, fakeGh, ghOnlyRunner, ScriptedPrompter, TEAM_JSON, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run as install, teamForReference } from '../install.js';
 import { run as uninstall } from '../uninstall.js';
 import { run as evaluate } from '../eval.js';
@@ -16,13 +14,8 @@ import { run as team, workflowUpdate, WORKFLOW } from '../team.js';
 import { run as status } from '../status.js';
 import { run as search } from '../search.js';
 import { run as ls } from '../ls.js';
-import { run as connect, reconcileShared } from '../connect.js';
-import { run as sync } from '../sync.js';
 import { run as setup } from '../setup.js';
 import { run as uninstallMachine } from '../uninstallMachine.js';
-
-const id = '11111111-1111-4111-8111-111111111111';
-const sourceText = '---\nname: sample\ndescription: example\nlicense: UNLICENSED\nmetadata:\n  id: '+id+'\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nbody\n';
 
 describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (form) => {
   const prefix = form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest';
@@ -39,7 +32,7 @@ describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (f
       expect(await uninstall({ kind, config, form }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`\`${prefix} uninstall-skill ${kind} <${kind === 'member' ? 'handle' : 'name'}>\``) });
     }
     const noHandle = { ...config, read: async () => ({ ...(await config.read()), teams: { team: { remote: 'github.com/acme/team', handle: '' } } }) };
-    expect(await evaluate({ ref: 'sample', commit: true, config: noHandle, form }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`run \`${prefix} team join\``) });
+    expect(await evaluate({ ref: 'sample', config: noHandle, form }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`Team team has no joined handle`) });
     expect(await team({ kind: 'remove', handle: 'other', config: noHandle, form }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`run ${prefix} team join first`) });
     for (const gh of [{ installed: false, authenticated: false }, { installed: true, authenticated: false }]) {
       expect(creatorAuthenticationError(gh, form)).toContain(`\`${prefix} team create <name> --remote <url>\``);
@@ -67,45 +60,6 @@ describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (f
     expect(listing.lines.at(-1)).toBe(`Local skills: ${prefix} ls --local`);
   });
 
-  it('routes connect picker and every reconciliation remedy', async () => {
-    const root = await temporaryDirectory(); const home = join(root, 'home'); const config = createConfigStore(join(root, 'state'));
-    await config.update((c) => { c.teams.team = { remote: 'github.com/acme/team', handle: 'seed' }; c.display_name = 'Seed'; c.email = 'seed@example.com'; });
-    const candidate = join(home, '.claude/skills/sample'); await mkdir(candidate, { recursive: true });
-    await writeFile(join(candidate, 'SKILL.md'), '---\nname: sample\ndescription: example\n---\n');
-    const picker = new ScriptedPrompter();
-    expect(await connect({ config, home, form }, picker)).toMatchObject({ ok: false, error: expect.stringContaining(`run \`${prefix} connect\``) });
-    const clone = config.teamClone('team'); await mkdir(join(clone, 'skills/sample'), { recursive: true });
-    await writeFile(join(clone, 'team.json'), JSON.stringify(TEAM_JSON)); await writeFile(join(clone, 'skills/sample/SKILL.md'), sourceText);
-    const source = join(root, 'source');
-    await config.update((c) => { c.shared[id] = { team: 'team', source }; });
-    let io = new ScriptedPrompter(); await reconcileShared(config, systemRunner, io, undefined, undefined, form);
-    expect(io.lines).toEqual([`Connected source for ${id.slice(0, 8)} is missing; keeping the repository copy. Use ${prefix} connect --relocate or ${prefix} connect --forget.`]);
-    await mkdir(source); await writeFile(join(source, 'SKILL.md'), sourceText);
-    await rm(join(clone, 'skills/sample'), { recursive: true });
-    io = new ScriptedPrompter(); await reconcileShared(config, systemRunner, io, undefined, undefined, form);
-    expect(io.lines).toEqual([`Repository copy for connected ${id.slice(0, 8)} is missing; run ${prefix} connect again to restore it.`]);
-    await mkdir(join(clone, 'skills/sample')); await writeFile(join(clone, 'skills/sample/SKILL.md'), sourceText);
-    io = new ScriptedPrompter(); await reconcileShared(config, systemRunner, io, undefined, undefined, form);
-    expect(io.lines.join('\n')).toContain(`choose ${prefix} connect --keep-source '${id}' or ${prefix} connect --keep-repo '${id}'.`);
-    await mkdir(join(source, 'hooks')); await writeFile(join(source, 'hooks/hooks.json'), '{}');
-    io = new ScriptedPrompter(); await reconcileShared(config, systemRunner, io, undefined, undefined, form);
-    expect(io.lines.join('\n')).toContain(`run ${prefix} connect --keep-source '${id}' --allow-privileged`);
-  });
-
-  it('carries sync form to stdout remedies and hook stderr review count, keeping stdout empty', async () => {
-    const fixture = await bareTeam(); const config = createConfigStore(join(fixture.root, 'state'));
-    await cloneWithIdentity(fixture.bare, config.teamClone('team'));
-    await config.update((c) => { c.teams.team = { remote: fixture.bare, handle: 'seed' }; c.shared[id] = { team: 'team', source: join(fixture.root, 'missing') }; });
-    const io = new ScriptedPrompter([], [], true);
-    expect((await sync({ config, form, noUpdateCheck: true }, io)).ok).toBe(true);
-    expect(io.lines.join('\n')).toContain(`Use ${prefix} connect --relocate or ${prefix} connect --forget.`);
-    const hookIo = new ScriptedPrompter(); const stderr: string[] = []; const codes: number[] = [];
-    await createExecute({ form, io: hookIo, stderr: (line) => { stderr.push(line); }, setExitCode: (code) => { codes.push(code); } })(
-      (child) => sync({ hook: true, config, form }, child), { verb: 'sync', notices: false });
-    expect(stderr.join('\n')).toContain(`Use ${prefix} connect --relocate`);
-    expect(stderr.at(-1)).toBe(`1 skills need review — run \`${prefix} sync\``);
-    expect(hookIo.lines).toEqual([]); expect(codes).toEqual([]);
-  });
 
   it.each(['incomplete', 'foreign'])('carries install form through quiet setup %s repair failure', async (state) => {
     const config = createConfigStore(join(await temporaryDirectory(), 'state'));

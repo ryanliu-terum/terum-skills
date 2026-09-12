@@ -13,7 +13,7 @@ import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
 import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, shortHash, skillEndorsement } from '../lib/readme.js';
 import type { Receipt } from '../lib/evals/receipt.js';
-import { newestReceiptAt } from './receiptCheck.js';
+import { newestReceiptAt } from '../lib/evals/receipt-store.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
@@ -45,7 +45,7 @@ export interface LsSkill { id: string; name: string; author: string; category: s
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
-export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; connected: boolean; name: string; path: string; state: string; tracked: boolean; shared: LocalEntry['shared']; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; description: string | null; frontmatter: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string; description: string | null; frontmatter: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; description: string | null; frontmatter: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string; description: string | null; frontmatter: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
@@ -184,34 +184,17 @@ function describedBy(inspection: LocalEntry['inspection']): string | null {
 async function showLocal(store: ConfigStore, home: string, io: Prompter, runner: Runner, cwd?: string, form?: InvocationForm): Promise<Result<LsResult>> {
   const config = await store.read();
   const ledger = await canonicalLedger(config);
-  const extraRoots = (await Promise.all([
-    ...Object.values(config.shared).map(ref => nearestRepoRoot(dirname(ref.source))),
-    ...Object.entries(config.placements).filter(([, ref]) => ref.scope.kind === 'project').map(([path]) => nearestRepoRoot(dirname(path))),
-  ])).filter((root): root is string => root !== undefined);
+  const extraRoots = (await Promise.all(Object.entries(config.placements).filter(([, ref]) => ref.scope.kind === 'project').map(([path]) => nearestRepoRoot(dirname(path))))).filter((root): root is string => root !== undefined);
   const discovery = await localSkillRoots(home, cwd, config.checkouts ?? [], extraRoots);
   const inventories = await Promise.all(discovery.roots.map(async (root) => ({ ...root, inventory: await localSkills(root.root, config, { scope: root.scope, stateRoot: store.root, ledger }) })));
   const sections: LocalSection[] = [];
   const snapshots = new Map<string, { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; fingerprints?: Map<string, string>; complete: boolean }>();
   const stateOf = (entry: LocalEntry): string => {
-    const states = entry.shared.map((ref) => {
-      const snapshot = snapshots.get(ref.team)!;
-      let status = 'repository status unknown';
-      if (snapshot.complete && snapshot.ids && snapshot.teamJson) {
-        if (!snapshot.ids.has(ref.id)) status = 'repository copy missing from local clone';
-        else {
-          // skillEndorsement prioritizes global over the sorted project list.
-          const badge = skillEndorsement(snapshot.teamJson, ref.id);
-          status = badge === '—' ? 'not endorsed in local clone' : `endorsed (${badge})`;
-        }
-      }
-      return `connected source for ${ref.team}; ${status}`;
-    });
-    if (entry.placement) states.push(`placement recorded from ${entry.placement.team}${entry.placement.version === null ? '' : ` @${entry.placement.version.slice(0, 8)}`}`);
-    return states.length > 1 ? `conflicting tracking: ${states.join('; ')}` : states[0] ?? 'untracked locally';
+    return entry.placement ? `placement recorded from ${entry.placement.team}${entry.placement.version === null ? '' : ` @${entry.placement.version.slice(0, 8)}`}` : 'untracked locally';
   };
   const healthOf = async (entry: LocalEntry): Promise<LocalHealth> => {
     if (entry.inspection.kind === 'rejected') return 'unknown';
-    if (!entry.placement) return entry.shared.length ? 'unknown' : 'untracked';
+    if (!entry.placement) return 'untracked';
     const snapshot = snapshots.get(entry.placement.team);
     if (!snapshot?.complete || !snapshot.ids) return 'unknown';
     if (!snapshot.ids.has(entry.placement.id)) return 'gone-from-repo';
@@ -233,7 +216,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
     io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}${registration}):`);
     if (root.repoRoot !== undefined) io.print(`  GitHub: ${local.remote === null ? 'not connected' : local.remote.slug === null ? `not connected (origin is ${printable(local.remote.url)})` : printable(local.remote.slug)}`);
     for (const entry of inventory.entries) {
-      for (const ref of [...entry.shared, ...(entry.placement ? [entry.placement] : [])]) {
+      for (const ref of entry.placement ? [entry.placement] : []) {
         if (snapshots.has(ref.team)) continue;
         const snapshot: { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; fingerprints?: Map<string, string>; complete: boolean } = { complete: false };
         snapshots.set(ref.team, snapshot);
@@ -253,16 +236,16 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
       }
     }
     // Recursive fingerprint reads dominate latency on UNC roots; retain row order after the wave.
-    const healthNeeded = inventory.entries.filter((entry) => entry.shared.length > 0 || entry.placement !== undefined || entry.inspection.kind === 'candidate');
+    const healthNeeded = inventory.entries.filter((entry) => entry.placement !== undefined || entry.inspection.kind === 'candidate');
     const healths = new Map<LocalEntry, LocalHealth>();
     const computed = await mapWithConcurrency(healthNeeded, FINGERPRINT_CONCURRENCY, (entry) => healthOf(entry));
     healthNeeded.forEach((entry, index) => healths.set(entry, computed[index]!));
     for (const entry of inventory.entries) {
-      const tracked = entry.shared.length > 0 || entry.placement !== undefined;
+      const tracked = entry.placement !== undefined;
       const inspection = entry.inspection;
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (connect needs --allow-privileged)' : undefined;
-        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, connected: entry.shared.length > 0, name: entry.name, path: entry.path, state: stateOf(entry), tracked, shared: entry.shared, placement: entry.placement ?? null, health: healths.get(entry)!, description: describedBy(inspection), frontmatter: entry.frontmatter, category: entry.category, characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });
+        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, name: entry.name, path: entry.path, state: stateOf(entry), tracked, placement: entry.placement ?? null, health: healths.get(entry)!, description: describedBy(inspection), frontmatter: entry.frontmatter, category: entry.category, characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });
       } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail, description: inspection.description ?? null, frontmatter: entry.frontmatter, category: entry.category, characters: entry.characters ?? null });
       if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
     }

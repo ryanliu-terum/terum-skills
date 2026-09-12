@@ -25,4 +25,4 @@
 {"t":"print","level":"info","line":"  @seed — Seed"}
 {"t":"print","level":"info","line":"Repository: https://github.com/acme/team"}
 {"t":"print","level":"info","line":"README: https://github.com/acme/team/blob/main/README.md"}
-{"t":"result","verb":"setup","ok":true,"exitCode":0,"value":{"role":"creator","team":"acme","remote":"github.com/acme/team","steps":{"welcome":"printed","app":"skipped","github":"done","team":"skipped","invite":"skipped","actions":"skipped","community":"printed","hook":"skipped","wrapper":"skipped","done":"printed"}}}
+{"t":"result","verb":"setup","ok":true,"exitCode":0,"value":{"role":"creator","team":"acme","remote":"github.com/acme/team","steps":{"welcome":"printed","app":"skipped","github":"done","team":"skipped","invite":"skipped","community":"printed","hook":"skipped","wrapper":"skipped","done":"printed"}}}

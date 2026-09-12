@@ -28,12 +28,10 @@ import { assetSuffix, detectPlatform, type PlatformEvidence } from '../lib/platf
 import { run as runApp } from './app.js';
 import { run as evalRun, skillsWithoutReceipt, type EvalArgs } from './eval.js';
 import { joinCommand, run as invite } from './invite.js';
-import { ConnectArgs, ConnectOutcome, run as connect } from './connect.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
 
 export interface SetupVerbs {
   team: typeof team;
-  connect: (args: ConnectArgs, io: Prompter) => Promise<Result<ConnectOutcome | undefined>>;
   app: typeof runApp;
   invite: typeof invite;
   offerHook: typeof defaultOfferHook;
@@ -60,8 +58,6 @@ export interface SetupArgs extends WithForm {
   launch?: Launch;
   /** §6 install bootstrap: the print-only steps (welcome, hints, community, closing summary) are suppressed; every prompt still happens. */
   quiet?: boolean;
-  /** Offer local skills independently of print-only suppression. */
-  offerConnect?: boolean;
   config?: ConfigStore;
   runner?: Runner;
   home?: string;
@@ -73,7 +69,7 @@ export interface SetupArgs extends WithForm {
   verbs?: Partial<SetupVerbs>;
 }
 export type StepOutcome = 'done' | 'skipped' | 'printed' | 'queued' | 'batched';
-type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'actions' | 'invite' | 'discover' | 'evals' | 'community' | 'hook' | 'wrapper' | 'done';
+type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'invite' | 'discover' | 'evals' | 'community' | 'hook' | 'wrapper' | 'done';
 export interface SetupResult {
   role: 'creator' | 'joiner';
   team: string;
@@ -84,8 +80,8 @@ export interface SetupResult {
 
 const WELCOME = [
   'Welcome to terum-skills.',
-  "Your team's skills live in one private git repository the team controls; each member installs what they want, edits flow back on sync, and the team endorses the ones everyone should have.",
-  'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',
+  "Your team's skills live in one private git repository the team controls; each member installs what they want and publishes local skills explicitly.",
+  'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',
 ];
 
 export const DISCOVER_QUESTION = 'Look for skill folders on this machine and add them to your library?';
@@ -93,7 +89,7 @@ export const DISCOVER_WHERE_QUESTION = 'Look under which folder?';
 export const DISCOVER_START_LINE = 'Looking for skill folders on this machine…';
 /** Retained verbatim for frame consumers; the control is now a four-choice select. */
 export function evalsQuestion(count: number): string {
-  return `Evaluate the ${count} shared ${count === 1 ? 'skill' : 'skills'} that ${count === 1 ? 'has' : 'have'} no receipt yet? This runs Claude on each one and commits each receipt to the team repo.`;
+  return `Evaluate the ${count} shared ${count === 1 ? 'skill' : 'skills'} that ${count === 1 ? 'has' : 'have'} no receipt yet? This runs Claude on each one and records results locally.`;
 }
 
 /**
@@ -136,13 +132,13 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   const role: SetupResult['role'] = args.target === undefined ? 'creator' : 'joiner';
   const store = args.config ?? createConfigStore();
   const runner = args.runner ?? systemRunner;
-  const verbs: SetupVerbs = { team, connect, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, eval: evalRun, preflight: systemPreflight, ...args.verbs };
+  const verbs: SetupVerbs = { team, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, eval: evalRun, preflight: systemPreflight, ...args.verbs };
   const steps: SetupResult['steps'] = {};
   let teamName = '';
   let remote = '';
 
   const decorated = decorate(io, args);
-  const titles: Record<Step, string> = { welcome: 'Welcome', app: 'App', role: 'Role', github: 'GitHub', team: 'Team', actions: 'Actions', invite: 'Invite', discover: 'Find skills', evals: 'Evals', community: 'Community', hook: 'Session hook', wrapper: 'Wrapper', done: 'Done' };
+  const titles: Record<Step, string> = { welcome: 'Welcome', app: 'App', role: 'Role', github: 'GitHub', team: 'Team', invite: 'Invite', discover: 'Find skills', evals: 'Evals', community: 'Community', hook: 'Session hook', wrapper: 'Wrapper', done: 'Done' };
   const output = io;
   let pendingSection: Step | undefined;
   const section = (step: Step): void => { pendingSection = step; };
@@ -288,20 +284,13 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       steps.invite = 'skipped';
     }
 
-    if (args.offerConnect !== false || !args.quiet) section('actions');
-    if (args.offerConnect !== false) {
-      const result = await verbs.connect({ form: args.form, team: teamName, home: args.home, cwd: args.cwd, config: store, runner }, io);
-      if (!result.ok) return failed(result, role, teamName, remote, steps);
-      steps.actions = result.value !== undefined && (!('kind' in result.value) || result.value.shared.length > 0) ? 'done' : 'skipped';
-    } else steps.actions = 'skipped';
     say('Next, from any terminal:');
     say(`  ${invocation(args.form, 'install', { raw: `${teamName}/<skill>` })}   — install a shared skill (add @<version> to pin it)`);
     say(`  ${invocation(args.form, 'ls [--local]')}             — list members and shared skills; --local lists your own`);
     say(`  ${invocation(args.form, 'search <term>')}            — find a skill by name, description, or category`);
-    say(`  ${invocation(args.form, 'sync')}                     — pull updates and finish pending work`);
-    say(`  ${invocation(args.form, 'publish <skill>')} — endorse a skill already connected to the team`);
+    say(`  ${invocation(args.form, 'sync')}                     — fetch the team clone`);
+    say(`  ${invocation(args.form, 'publish <skill>')}          — publish a local skill explicitly`);
     say(`  ${invocation(args.form, 'eval <skill>')}             — evaluate a shared skill locally before publishing`);
-    say(`  ${invocation(args.form, 'connect')}      — connect your local skills to the team (asks which)`);
 
     // Discovery is optional, never fatal, and only offered where a person can answer.
     if (args.quiet || args.discover === false || !io.interactive) steps.discover = 'skipped';
@@ -347,7 +336,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       try {
         const handle = (await store.read()).teams[teamName]?.handle;
         if (!handle) {
-          io.print('Skipping the eval offer: this machine has no joined handle for the team yet, so a receipt could not be committed.');
+          io.print('Skipping the eval offer: this machine has no joined handle for the team yet.');
           steps.evals = 'skipped';
         } else {
           const scan = await skillsWithoutReceipt(clone, teamName, runner, bullet);
@@ -413,7 +402,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
                     print: line => io.print(line), confirm: io.confirm.bind(io), text: io.text.bind(io), select: io.select.bind(io),
                     progress: update => io.progress?.({ ...update, current: offset + (update.current ?? 0), total: candidates.length }),
                   },
-                    run: (candidate, captured) => verbs.eval({ form: args.form, ref: candidate.name, team: teamName, commit: true, config: store, runner, preflight: reuse, lockWaitMs: EVAL_LOCK_WAIT_MS }, captured),
+                    run: (candidate, captured) => verbs.eval({ form: args.form, ref: candidate.name, team: teamName, config: store, runner, preflight: reuse, lockWaitMs: EVAL_LOCK_WAIT_MS }, captured),
                   });
                   ok += batch.ok; failed += batch.failed;
                 }

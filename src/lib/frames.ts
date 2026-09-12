@@ -33,7 +33,7 @@ export type InboundFrame = AnswerFrame | CancelFrame | RequestFrame | ServeCance
 export { SERVE_READ_VERBS } from './serve-verbs.js';
 
 /** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed). */
-export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'project create', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'connect', 'install', 'uninstall-skill', 'uninstall', 'sync', 'search', 'update', 'app', 'profile', 'decline', 'refresh', 'checkout discover', 'app-update', 'serve'] as const;
+export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'project create', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'install', 'uninstall-skill', 'uninstall', 'sync', 'prune', 'search', 'update', 'app', 'profile', 'checkout discover', 'app-update', 'serve'] as const;
 
 /**
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
@@ -52,7 +52,7 @@ export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
   disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: false, progress: true,
   refresh: true, discover: true, appUpdate: true,
-  autoSync: true, serve: true,
+  serve: true,
 });
 
 export const COMMANDER_NON_ERRORS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);

@@ -369,7 +369,8 @@ Release notices appear last on stderr, at most once per release per day, and are
 | | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
 | Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
 | | `install <ref> [--into global\|<checkout root>]` / `uninstall-skill <ref> [--from global\|<checkout root>]` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |
-| | `sync` | Pull, finish pending installs, mirror connected edits, refresh placed copies; `--auto` runs without prompts, `--fresh-ms <n>` sets its freshness window |
+| | `sync` | Fetch each team clone and reset it to `origin/main`; it never places, uploads, or edits local skills |
+| | `prune` | List quarantined items and delete the ones you confirm |
 | | `refresh` | Fetch the team clone to `origin/main` and nothing else — no placement, no sharing, no stamp; the desktop app runs it in the background so a teammate's committed work becomes visible |
 | | `serve` | Answer read requests on one long-lived process instead of starting a new one per call (`--frames` only; the desktop app drives it). Reads only: `status`, `ls`, `eval-report`, `search`, `validate`, `update` |
 | | `publish <skill>` | Endorse a skill for the team: a PR (default policy) or a direct commit |

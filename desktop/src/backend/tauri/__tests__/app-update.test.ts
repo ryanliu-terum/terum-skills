@@ -36,7 +36,7 @@ it('reports the CLI error verbatim when the driving CLI has no such verb',async(
 });
 it('surfaces appUpdate true on the real adapter and capabilities are unchanged',async()=>{
  const h=harness();expect((await h.backend.surfaces()).appUpdate).toBe(true);
- expect(await h.backend.capabilities()).toEqual({appVersion:import.meta.env.VITE_APP_VERSION,windowChrome:'mac-overlay',disablePerMachine:false,inboxEventLog:false,offtargetKind:false,machineRegistry:false,perCaseEvalTables:false,evalCommitChoice:false,openInEditor:true,clipboard:true});
+ expect(await h.backend.capabilities()).toEqual({appVersion:import.meta.env.VITE_APP_VERSION,windowChrome:'mac-overlay',disablePerMachine:false,inboxEventLog:false,offtargetKind:false,machineRegistry:false,perCaseEvalTables:false,openInEditor:true,clipboard:true});
 });
 it('reads features.appUpdate from the hello frame and defaults a missing key to false',async()=>{
  expect((await harness(check,{appUpdate:true}).backend.features()).appUpdate).toBe(true);expect((await harness(check,{}).backend.features()).appUpdate).toBe(false);

@@ -7,9 +7,6 @@ import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
 import { packageVersion } from '../package.js';
 import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, localPushGuardLauncher, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, shellQuote, treeText, withCloneLock, cloneLockPath, lockWait } from '../teamRepo.js';
-import { createConfigStore } from '../config.js';
-import { run as connect } from '../../commands/connect.js';
-import { ScriptedPrompter } from './fixtures.js';
 import { bareTeam, cloneWithIdentity, holdCloneLock, mappedRunner, git, originSha, person, pushFromSeed, temporaryDirectory, wrapRunner } from './fixtures.js';
 
 const exists = (path: string) => access(path).then(() => true, () => false);
@@ -272,26 +269,6 @@ describe('safeWrite (§6.0)', () => {
     expect(observed).toBe(true);
   });
 
-  it('lands eight barrier-released real shares with unique IDs and leaves every clone clean', async () => {
-    const fixture = await bareTeam();
-    const stores = await Promise.all(Array.from({ length: 8 }, async (_, index) => {
-      const store = createConfigStore(join(fixture.root, `state-${index}`));
-      const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'), `User ${index}`, `u${index}@example.com`);
-      await store.update((config) => { config.display_name = `User ${index}`; config.email = `u${index}@example.com`; config.teams.team = { remote: fixture.bare, handle: `u${index}` }; });
-      const source = join(fixture.root, `skill-${index}`); await mkdir(source);
-      await writeFile(join(source, 'SKILL.md'), `---\nname: skill-${index}\ndescription: skill ${index}\nmetadata:\n  terum-category: testing\n---\n`);
-      return { store, clone, source };
-    }));
-    let release!: () => void;
-    const barrier = new Promise<void>((done) => { release = done; });
-    const writes = stores.map(async ({ store, source }) => { await barrier; return connect({ path: source, team: 'team', config: store }, new ScriptedPrompter([], [true])); });
-    release();
-    const results = await Promise.all(writes);
-    expect(results.every((result) => result.ok)).toBe(true);
-    for (const { clone } of stores) expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
-    const ids = await Promise.all(Array.from({ length: 8 }, (_, index) => git(['show', `main:skills/skill-${index}/SKILL.md`], fixture.bare).then((source) => /^\s+id:\s+(.+)$/m.exec(source)?.[1])));
-    expect(new Set(ids).size).toBe(8);
-  });
 
   it('never echoes a credential in the wrong-repository or failed-clone messages', async () => {
     const fixture = await bareTeam();

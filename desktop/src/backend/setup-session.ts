@@ -5,14 +5,13 @@ import { repoIdentity } from './paths';
 import { driveRun } from './drive';
 // CLI keys map to the six drawn tour steps; print-only keys are copy, never placement counters.
 export const SETUP_STEP_TO_BOARD = {
- welcome:'Welcome', app:'Style', role:'Team', github:'Team', team:'Team', actions:'Basics',
+ welcome:'Welcome', app:'Style', role:'Team', github:'Team', team:'Team',
  invite:'Team', discover:'Done', evals:'Done', community:'Feedback', hook:'Done', wrapper:'Done', done:'Done',
 } as const satisfies Record<SetupStep, string>;
 export function printedSetupStep(line:string):SetupStep|null {
  if(line.startsWith('Welcome to terum-skills.')||line.startsWith("Your team's skills")||line.startsWith('This wizard'))return 'welcome';
  if(line.startsWith('GitHub'))return 'github';
  if(line.startsWith('Identity:')||line.startsWith('Team ')||line.startsWith('Joined '))return 'team';
- if(line.startsWith('Next, from any terminal:')||line.startsWith('Connected '))return 'actions';
  if(line.startsWith('Looking for skill folders')||line.startsWith('No skill folders found')||line.startsWith('Could not look')||/ — \d+ skill folders( · already registered)?$/.test(line))return 'discover';
  // The four ways the batch can end without running: everything receipted, nothing shared, the version reader
  // failed, or nothing could be checked. All four are the evals step reporting, not unrecognized copy.
@@ -96,7 +95,7 @@ export function setupSession(backend: Backend, launch: LaunchContext): SetupSess
       }
      }
      if (!driven) {
-      run = backend.setup({ ...(launch.target ? { target: launch.target } : {}), offerConnect: true });
+      run = backend.setup({ ...(launch.target ? { target: launch.target } : {}) });
       if (stopped) await run.cancel();
       driven = await driveRun(run, {}, question => new Promise<string | boolean>((resolve, reject) => {
        rejectPrompt = reject;

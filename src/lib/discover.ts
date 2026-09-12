@@ -39,7 +39,7 @@ export interface DiscoverOptions {
   home: string;
   checkouts: readonly string[];
   stateRoot: string;
-  config: Pick<Config, 'shared' | 'placements'>;
+  config: Pick<Config, 'placements'>;
   maxDepth?: number;
   budgetMs?: number;
   onProgress?: (progress: { scanned: number; found: number; current: string }) => void;

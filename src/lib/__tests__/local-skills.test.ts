@@ -24,7 +24,7 @@ async function candidateSummary(root: string, config: ReturnType<typeof emptyCon
   const inventory = await localSkills(root, config, { scope: 'global', stateRoot: join(root, '.state') });
   return {
     names: candidatesOf(inventory).map((entry) => entry.name),
-    omitted: inventory.entries.flatMap((entry) => !entry.shared.length && !entry.placement && entry.inspection.kind === 'rejected' ? [{ name: entry.name, reason: entry.inspection.detail }] : []),
+    omitted: inventory.entries.flatMap((entry) => !entry.placement && entry.inspection.kind === 'rejected' ? [{ name: entry.name, reason: entry.inspection.detail }] : []),
     unreadable: inventory.problems.length + inventory.entries.filter((entry) => entry.inspection.kind === 'failed').length,
   };
 }
@@ -37,15 +37,6 @@ describe('candidateSummary', () => {
     await candidate(root, 'alpha');
     await mkdir(join(root, 'empty'));
     expect(await candidateSummary(root, emptyConfig())).toEqual({ names: ['alpha', 'zebra'], omitted: [], unreadable: 0 });
-  });
-
-  // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
-  it('excludes a shared source even when it belongs to another team', async () => {
-    const root = await temporaryDirectory();
-    const path = await candidate(root, 'mine');
-    const config = emptyConfig();
-    config.shared['22222222-2222-4222-8222-222222222222'] = { source: join(path, '..', 'mine'), team: 'other', baseline: 'sha256:0' };
-    expect(await candidateSummary(root, config)).toEqual({ names: [], omitted: [], unreadable: 0 });
   });
 
   it('excludes a placement', async () => {
@@ -135,13 +126,11 @@ describe('issue 9 local inventory', () => {
     expect(candidatesOf(inventory, true).map((entry) => entry.name)).toEqual(['privileged', 'stock']);
   });
 
-  it('keeps overlapping ledger references and a tracked source whose SKILL.md vanished', async () => {
+  it('keeps a placement whose SKILL.md vanished', async () => {
     const root = await temporaryDirectory(); const path = join(root, 'missing'); await mkdir(path);
     const config = emptyConfig();
-    config.shared.first = { team: 'one', source: path };
-    config.shared.second = { team: 'two', source: join(path, '..', 'missing') };
     config.placements[path] = { id: '33333333-3333-4333-8333-333333333333', team: 'three', version: null, scope: { kind: 'global' }, placed_at: '', fingerprint: '' };
-    expect((await localSkills(root, config, { scope: 'global', stateRoot: join(root, '.state') })).entries).toEqual([{ frontmatter: null, skillId: null, category: null, name: 'missing', path, shared: [{ id: 'first', team: 'one' }, { id: 'second', team: 'two' }], placement: { id: config.placements[path]!.id, team: 'three', version: null }, placementFingerprint: '', inspection: { kind: 'rejected', reason: 'skill-md-missing', detail: 'SKILL.md missing' } }]);
+    expect((await localSkills(root, config, { scope: 'global', stateRoot: join(root, '.state') })).entries).toEqual([{ frontmatter: null, skillId: null, category: null, name: 'missing', path, placement: { id: config.placements[path]!.id, team: 'three', version: null }, placementFingerprint: '', inspection: { kind: 'rejected', reason: 'skill-md-missing', detail: 'SKILL.md missing' } }]);
   });
 
   it('distinguishes an absent root from a scanned empty root', async () => {
@@ -219,25 +208,24 @@ describe('project local discovery (Ryan 2026-09-06)', () => {
     const aliasRoot = join(alias, '.claude', 'skills');
     const reference = direction === 'real-to-alias' ? path : join(aliasRoot, 'tracked');
     const scannedRoot = direction === 'real-to-alias' ? aliasRoot : root;
-    const config = emptyConfig(); config.shared.id = { source: reference, team: 'one' };
+    const config = emptyConfig();
     config.placements[reference] = { id: 'placed', team: 'two', version: null, scope: { kind: 'global' }, fingerprint: '', placed_at: '' };
     if (direction === 'deduplicated-alias') expect((await localSkillRoots(home, alias)).roots).toEqual([{ root, scope: 'global', registered: false, detected: false }]);
     await symlink(path, join(root, 'child-link'));
     const inventory = await localSkills(scannedRoot, config, { scope: 'global', stateRoot: join(base, 'state') });
-    expect(inventory.entries.find((entry) => entry.name === 'tracked')).toMatchObject({ shared: [{ id: 'id', team: 'one' }], placement: { id: 'placed', team: 'two' } });
-    expect(inventory.entries.find((entry) => entry.name === 'child-link')).toMatchObject({ shared: [], inspection: { kind: 'rejected', reason: 'symlink' } });
+    expect(inventory.entries.find((entry) => entry.name === 'tracked')).toMatchObject({ placement: { id: 'placed', team: 'two' } });
+    expect(inventory.entries.find((entry) => entry.name === 'child-link')).toMatchObject({ inspection: { kind: 'rejected', reason: 'symlink' } });
     expect(candidatesOf(inventory)).toEqual([]);
   });
 
   it('excludes canonical state-root entries but retains tracked provenance and project scope', async () => {
     const home = await temporaryDirectory(); const stateRoot = join(home, 'state'); const root = join(stateRoot, 'sources');
-    await candidate(root, 'untracked'); const path = await candidate(root, 'tracked');
+    await candidate(root, 'untracked'); await candidate(root, 'tracked');
     const alias = join(home, 'alias'); await symlink(root, alias);
-    const config = emptyConfig(); config.shared.id = { source: path, team: 'team' };
+    const config = emptyConfig();
     const inventory = await localSkills(alias, config, { scope: 'project', stateRoot });
     expect(inventory.scope).toBe('project');
     expect(inventory.entries.map((entry) => entry.inspection)).toEqual([0, 1].map(() => ({ kind: 'rejected', reason: 'inside-state-root', detail: `inside the terum-skills state directory ${stateRoot}` })));
-    expect(inventory.entries[0]?.shared).toEqual([{ id: 'id', team: 'team' }]);
     expect(candidatesOf(inventory, true)).toEqual([]);
   });
 });
@@ -328,11 +316,11 @@ describe('W-02 parallel folder scan', () => {
     await candidate(root,'invalid','---\nname: [\n---\n'); await symlink(join(root,'a'),join(root,'linked'));
     const inventory = await localSkills(root,emptyConfig(),{scope:'global',stateRoot:join(root,'.state')});
     expect(inventory.entries.map(e=>e.name)).toEqual((await fs.readdir(root)).sort().filter(n=>!['plain','empty'].includes(n)));
-    const expected = names.sort().map(name=>({frontmatter:`---\nname: ${name}\ndescription: skill\n---`,skillId:null,category:null,name,path:join(root,name),shared:[],characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
+    const expected = names.sort().map(name=>({frontmatter:`---\nname: ${name}\ndescription: skill\n---`,skillId:null,category:null,name,path:join(root,name),characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
     expect(inventory).toEqual({root,scope:'global',rootState:'scanned',problems:[],entries:[...expected,
-      {frontmatter:null,skillId:null,category:null,name:'directory',path:join(root,'directory'),shared:[],inspection:{kind:'rejected',reason:'skill-md-not-a-file',detail:'SKILL.md is not a regular file'}},
-      {frontmatter:'---\nname: [\n---',skillId:null,category:null,name:'invalid',path:join(root,'invalid'),shared:[],characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
-      {frontmatter:null,skillId:null,category:null,name:'linked',path:join(root,'linked'),shared:[],inspection:{kind:'rejected',reason:'symlink',detail:'symbolic link'}},
+      {frontmatter:null,skillId:null,category:null,name:'directory',path:join(root,'directory'),inspection:{kind:'rejected',reason:'skill-md-not-a-file',detail:'SKILL.md is not a regular file'}},
+      {frontmatter:'---\nname: [\n---',skillId:null,category:null,name:'invalid',path:join(root,'invalid'),characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
+      {frontmatter:null,skillId:null,category:null,name:'linked',path:join(root,'linked'),inspection:{kind:'rejected',reason:'symlink',detail:'symbolic link'}},
     ].sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0)});
   });
   it('reports a folder whose lstat fails as failed without aborting its siblings', async () => {
@@ -387,7 +375,7 @@ describe('run-local library inventory reuse', () => {
     } finally { reads.mockRestore(); }
   });
 
-  it('rebinds shared and placement provenance through aliases without rescanning or mutating the snapshot', async () => {
+  it('rebinds placement provenance through aliases without rescanning or mutating the snapshot', async () => {
     const home = await temporaryDirectory();
     const root = join(home, '.claude', 'skills');
     const source = await candidate(root, 'alpha');
@@ -399,7 +387,6 @@ describe('run-local library inventory reuse', () => {
     const [global] = await scan.roots();
     const before = await scan.inventory(global!, config);
     const current = structuredClone(config);
-    current.shared['first'] = { team: 'team', source: join(alias, 'alpha'), baseline: 'sha256:0' };
     current.placements[join(alias, 'beta')] = {
       id: 'second', team: 'team', version: null, fingerprint: 'sha256:0',
       scope: { kind: 'global' }, placed_at: new Date().toISOString(),
@@ -407,9 +394,8 @@ describe('run-local library inventory reuse', () => {
     const reads = vi.spyOn(fs, 'readdir');
     try {
       const inventory = await scan.inventory(global!, current);
-      expect(candidatesOf(inventory)).toEqual([]);
+      expect(candidatesOf(inventory).map(entry => entry.path)).toEqual([source]);
       expect(candidatesOf(before).map(entry => entry.path)).toEqual([source, placed]);
-      expect(inventory.entries[0]?.shared).toEqual([{ id: 'first', team: 'team' }]);
       expect(inventory.entries[1]?.placement).toEqual({ id: 'second', team: 'team', version: null });
       expect(await librarySize(home, current, join(home, '.terum', 'skills'), scan)).toBe(2);
       expect(reads).not.toHaveBeenCalled();

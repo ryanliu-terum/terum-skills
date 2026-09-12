@@ -3,4 +3,4 @@
 {"t":"print","level":"info","line":"No team is configured on this machine."}
 {"t":"print","level":"info","line":"  Create a team: npx -y terum-skills@latest setup"}
 {"t":"print","level":"info","line":"  Join a team:   npx -y terum-skills@latest setup <org>/<repo>"}
-{"t":"result","verb":"status","ok":true,"exitCode":0,"value":{"version":"0.1.7","teams":[],"ledger":{"placements":[],"approvals":[],"shared":[]},"identity":null,"tools":{"git":true,"gh":true}}}
+{"t":"result","verb":"status","ok":true,"exitCode":0,"value":{"version":"0.1.7","teams":[],"ledger":{"placements":[],"approvals":[]},"identity":null,"tools":{"git":true,"gh":true}}}

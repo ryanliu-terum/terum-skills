@@ -17,7 +17,7 @@ it('has no interval or timer-driven query refetch in production source',()=>{
 it.each(['#/marketplace?__mock=error','#/share?__mock=error','#/settings/sync'])('manual sync on %s retains its interactive workflow popup',async route=>{
  const backend=createMockBackend(),sync=vi.spyOn(backend,'sync');location.hash=route;render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
  const button=await screen.findByRole('button',{name:'Sync now'});fireEvent(window,new Event('focus'));expect(sync).not.toHaveBeenCalled();
- fireEvent.click(button);expect(await screen.findByRole('dialog')).toHaveTextContent('Sync also runs by itself at launch and when you come back to the app.');
+ fireEvent.click(button);expect(await screen.findByRole('dialog')).toHaveTextContent('Sync fetches each team clone and leaves your local Library unchanged.');
  await waitFor(()=>expect(sync).toHaveBeenCalledTimes(1));expect(sync).toHaveBeenCalledWith({});
 });
 it('uses only the drawn shortcuts for manual sync',async()=>{

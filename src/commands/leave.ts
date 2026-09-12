@@ -1,6 +1,6 @@
 import type { WithForm } from '../lib/invocation.js';
 import { access, mkdir, rm } from 'node:fs/promises';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { acquireTeamLock, defaultHookOptions, HookOptions, lockPath, removeHook, removeRunArtifacts } from '../lib/hook.js';
 import { moveDirectory } from '../lib/placer.js';
@@ -25,13 +25,11 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
     if (!binding) throw new Error(`Team ${name} is not configured.`);
 
     const matching = Object.entries(config.placements).filter(([, entry]) => entry.team === name);
-    const shared = Object.values(config.shared).filter((entry) => entry.team === name);
     const pending = config.pending.filter((entry) => entry.team === name);
     const clone = store.teamClone(name);
     const clonePresent = await access(clone).then(() => true, () => false);
     if (matching.length) io.print(`${matching.length} placed skill(s) will be removed.`);
     if (clonePresent) io.print(`Local clone at ${clone} will be removed.`);
-    if (shared.length) io.print(`${shared.length} connected skill record(s) will be removed.`);
     if (pending.length) io.print(`${pending.length} pending operation(s) will be removed.`);
     const lastTeam = Object.keys(config.teams).length === 1;
     const approvals = Object.keys(config.approvals).length;
@@ -41,7 +39,7 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
       throw new CancelledError('Leave was cancelled.');
     }
 
-    const { removedPaths, cloneRemoved, kept } = await teardownTeam(store, name, io, args.runner, undefined, async () => {
+    const { removedPaths, cloneRemoved, kept } = await teardownTeam(store, name, io, args.runner, async () => {
       const options = { ...defaultHookOptions(store.root), ...args.hook };
       // The local cleanup above already happened; an unreadable settings.json must not turn it into a failure.
       try { if (await removeHook(options) === 'removed') io.print(`Removed the session hook from ${options.settingsFile}.`); }
@@ -56,11 +54,10 @@ export async function run(args: LeaveArgs, io: Prompter): Promise<Result<LeaveRe
 
 /**
  * Shared, machine-local teardown. Refusals propagate so callers can report partial cleanup.
- * `protectedSources` lets a caller that tears down several teams keep every authoring source safe
- * for the whole run: this team's teardown drops its own `shared` records, so a later team's
- * placement at one of those paths would otherwise no longer be recognised as a source.
+ * Placement removal itself verifies the recorded fingerprint and quarantines a drifted folder;
+ * this is the sole authority for a team teardown to affect a local skill path.
  */
-export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Prompter, 'print' | 'interactive'>, runner: Runner = systemRunner, protectedSources?: readonly string[], onLastTeam?: () => Promise<void>): Promise<{ removedPaths: string[]; cloneRemoved: boolean; kept: string[] }> {
+export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Prompter, 'print' | 'interactive'>, runner: Runner = systemRunner, onLastTeam?: () => Promise<void>): Promise<{ removedPaths: string[]; cloneRemoved: boolean; kept: string[] }> {
   const releaseTeam = await acquireTeamLock(store.root, name);
   if (!releaseTeam) throw new Error(`Another terum-skills sync holds the session lock on ${name} (${lockPath(store.root, name)}); retry when it finishes, or remove that file if no session is syncing.`);
   const kept: string[] = [];
@@ -70,21 +67,7 @@ export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Pr
     // The confirmation is an inventory, not authority to delete stale paths: re-read under the mutex.
     const config = await store.read();
     const current = Object.entries(config.placements).filter(([, entry]) => entry.team === name);
-    const remaining: typeof current = [];
-    const sources = protectedSources ?? Object.values(config.shared).map((entry) => entry.source);
-    for (const [path, entry] of current) {
-      const placement = resolve(path);
-      const shared = sources.find((source) => {
-        const authoring = resolve(source);
-        return placement === authoring || placement.startsWith(authoring + sep) || authoring.startsWith(placement + sep);
-      });
-      if (shared === undefined) { remaining.push([path, entry]); continue; }
-      await store.update((fresh) => { delete fresh.placements[path]; });
-      io.print(`${path} is also the authoring source of ${basename(shared)}; left in place.`);
-      // Dropped from the ledger above, but the folder stays: it is kept, never counted as removed.
-      kept.push(path);
-    }
-    removedPaths.push(...await removePlacements(store, remaining, io));
+    removedPaths.push(...await removePlacements(store, current, io));
     const clone = store.teamClone(name);
     await withCloneLock(clone, async (assertHeld) => {
       const present = await access(clone).then(() => true, () => false);
@@ -115,7 +98,6 @@ export async function teardownTeam(store: ConfigStore, name: string, io: Pick<Pr
     const fresh = await store.update((fresh) => {
       delete fresh.teams[name];
       if (Object.keys(fresh.teams).length === 0) fresh.approvals = {};
-      for (const [id, entry] of Object.entries(fresh.shared)) if (entry.team === name) delete fresh.shared[id];
       fresh.pending = fresh.pending.filter((entry) => entry.team !== name);
       for (const path of removedPaths) delete fresh.placements[path];
     });

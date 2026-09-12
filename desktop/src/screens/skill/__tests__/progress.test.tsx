@@ -55,13 +55,10 @@ function start(kind: Kind = 'install') {
 
 it.each(['install', 'remove', 'manage'] as const)('%s keeps the CLI step visible until the run settles', async kind => {
   const { backend } = await open(kind); const pending = controlledRun();
-  // Connect may succeed without a value; install/remove return result arrays.
+  // Publish and install/remove each return a result object or result arrays.
   if (kind === 'install') vi.spyOn(backend, 'install').mockReturnValue(pending.run);
   else if (kind === 'remove') vi.spyOn(backend, 'uninstallSkill').mockReturnValue(pending.run);
-  else vi.spyOn(backend, 'connect').mockImplementation(() => {
-    const run: Run<undefined> = { ...pending.run, done: pending.run.done.then(result => result.ok ? { ok: true, value: undefined } : { ok: false, error: result.error }) };
-    return run;
-  });
+  else vi.spyOn(backend, 'publish').mockReturnValue(pending.run as never);
   start(kind);
   for (const label of ['Reading the team clone', 'Placing deploy-check', 'Publishing to the team repository', 'Recording your install']) {
     await act(async () => { await Promise.resolve(); pending.step(label); });
@@ -100,7 +97,7 @@ it.each(['install', 'remove', 'manage'] as const)('%s failure closes progress an
     return { ok: false, error: 'The team repository is unavailable.' };
   });
   runs.push(run);
-  vi.spyOn(backend, kind === 'install' ? 'install' : kind === 'remove' ? 'uninstallSkill' : 'connect').mockReturnValue(run);
+  vi.spyOn(backend, kind === 'install' ? 'install' : kind === 'remove' ? 'uninstallSkill' : 'publish').mockReturnValue(run as never);
   start(kind);
   expect(await screen.findByText('Waiting for the team')).toBeVisible();
   await act(async () => { fail(); });

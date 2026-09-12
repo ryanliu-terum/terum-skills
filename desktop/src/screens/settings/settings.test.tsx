@@ -18,18 +18,18 @@ function open(route:string,evalRun?:EvalRunApi){
 }
 beforeEach(()=>{localStorage.clear();useUiStore.getState().setTheme('dark');});
 afterEach(()=>{cleanup();location.hash='';vi.restoreAllMocks();});
-it.each([['account','Account'],['teams','Team'],['machine','This machine'],['sync','Sync'],['updates','Updates'],['inbox','Inbox'],['evals','Evals'],['sharing','Sharing'],['appearance','Appearance'],['advanced','Advanced'],['about','About']])('renders the %s settings head and nav',async(section,title)=>{open('#/settings/'+section);expect(await screen.findByRole('heading',{name:title})).toBeInTheDocument();expect(within(screen.getByRole('navigation',{name:'Settings sections'})).getAllByRole('link')).toHaveLength(11);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(screen.queryByText(/S1b builds this/)).toBeNull();});
+it.each([['account','Account'],['teams','Team'],['machine','This machine'],['sync','Sync'],['updates','Updates'],['inbox','Inbox'],['evals','Evals'],['publishing','Publishing'],['appearance','Appearance'],['advanced','Advanced'],['about','About']])('renders the %s settings head and nav',async(section,title)=>{open('#/settings/'+section);expect(await screen.findByRole('heading',{name:title})).toBeInTheDocument();expect(within(screen.getByRole('navigation',{name:'Settings sections'})).getAllByRole('link')).toHaveLength(11);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(screen.queryByText(/S1b builds this/)).toBeNull();});
 it('defaults unknown sections to Account',async()=>{open('#/settings/no-such-section');expect(await screen.findByRole('heading',{name:'Account'})).toBeInTheDocument();});
 it('renders Leave and asks the CLI confirmation',async()=>{const leave=vi.spyOn(backend,'team');open('#/settings/teams?dialog=leave');const dialog=await screen.findByRole('dialog');expect(within(dialog).getByRole('heading')).toHaveTextContent('Leave Terum on this machine?');expect([...dialog.querySelectorAll('.settings-leave-bullet>span:last-child')].map(node=>node.textContent)).toEqual([
  "Its placed skills on this machine leave ~/.claude/skills and the project checkouts — a copy you edited by hand is moved to quarantine instead of deleted, and a folder that is also a skill's authoring source is left where it is",
  `The clone at ${design.TEAMS[0]?.clone} and this team's entry in config.json — a clone holding uncommitted or unpushed work is moved to quarantine instead`,
- 'Its connected skill records and any pending operations on this machine',
+ 'Any pending operations on this machine',
  'This is your last team here, so the session-start hook is removed from ~/.claude/settings.json; if that file cannot be written the leave still finishes and says so',
  "Consent you gave for skills' tool permissions may need to be given again for a new team",
  `Your people file in the team repo stays: you remain a member (an admin archives that with team remove ${design.ME.handle}), and setup brings this machine back`,
 ]);fireEvent.click(within(dialog).getByRole('button',{name:'Leave'}));const prompt=await screen.findByRole('dialog',{name:`Leave terum? This removes ${design.PLACEMENTS_N} placed skill(s) from this machine.`});fireEvent.click(within(prompt).getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledWith({kind:'leave',name:'terum'});expect(location.hash).toBe('#/settings/teams');});
-it('renders every prune path and asks the CLI before deleting',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/machine?dialog=prune');const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Delete 2 quarantined folders?');for(const [when,name] of design.QUARANTINE)expect(dialog).toHaveTextContent(`quarantine/${when}/${name}`);fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('heading',{name:'Delete 2 quarantined item(s)?'})).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(sync).toHaveBeenCalledWith({prune:true});expect(location.hash).toBe('#/settings/machine');});
-it('keeps failed prune open',async()=>{vi.spyOn(backend,'sync').mockImplementation(()=>createRun(async()=>({ok:false,error:'Prune failed.'})));open('#/settings/machine?dialog=prune');fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('alert')).toHaveTextContent('Prune failed.');expect(screen.getByRole('dialog')).toBeInTheDocument();});
+it('renders every prune path and asks the CLI before deleting',async()=>{const prune=vi.spyOn(backend,'prune');open('#/settings/machine?dialog=prune');const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Delete 2 quarantined folders?');for(const [when,name] of design.QUARANTINE)expect(dialog).toHaveTextContent(`quarantine/${when}/${name}`);fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('heading',{name:'Delete 2 quarantined item(s)?'})).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Yes'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(prune).toHaveBeenCalledWith();expect(location.hash).toBe('#/settings/machine');});
+it('keeps failed prune open',async()=>{vi.spyOn(backend,'prune').mockImplementation(()=>createRun(async()=>({ok:false,error:'Prune failed.'})));open('#/settings/machine?dialog=prune');fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Delete'}));expect(await screen.findByRole('alert')).toHaveTextContent('Prune failed.');expect(screen.getByRole('dialog')).toBeInTheDocument();});
 it('renders the CLI config error line with hidden counts',async()=>{open('#/settings/account?__mock=error');expect(await screen.findByRole('alert')).toHaveTextContent("Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)");expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
 it('diagnoses config.json only when the CLI itself names it, and reveals the file',async()=>{
  const reveal=vi.spyOn(backend,'revealPath');
@@ -50,7 +50,7 @@ it('shows the no-team board when the settings read reports no team',async()=>{
 it('commits the loading skeleton with hidden sidebar counts',async()=>{open('#/settings/account?__mock=loading');expect(screen.getByTestId('settings-skeleton')).toBeInTheDocument();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
 it('changes data-theme from Appearance and updates an existing URL theme',async()=>{open('#/settings/appearance?theme=dark');fireEvent.click(await screen.findByRole('button',{name:'Light'}));await waitFor(()=>expect(document.documentElement.dataset.theme).toBe('light'));expect(useUiStore.getState().theme).toBe('light');expect(location.hash).toContain('theme=light');});
 it('renders the session-start hook read-only until the CLI reports its state',async()=>{open('#/settings/sync');await screen.findByText('Sync at session start');expect(screen.queryByRole('switch',{name:'Sync at session start'})).toBeNull();expect(screen.getByText('Managed by setup')).toBeInTheDocument();expect(screen.getByText(/Setup adds the entry to ~\/\.claude\/settings\.json with your consent/)).toBeInTheDocument();});
-it('persists each inbox kind independently',async()=>{open('#/settings/inbox');const controls=await screen.findAllByRole('checkbox');expect(controls).toHaveLength(7);fireEvent.click(screen.getByRole('checkbox',{name:'Alert'}));expect(backend.prefs.get('inbox:kind:alert',true)).toBe(false);expect(backend.prefs.get('inbox:kind:share',true)).toBe(true);});
+it('persists each inbox kind independently',async()=>{open('#/settings/inbox');const controls=await screen.findAllByRole('checkbox');expect(controls).toHaveLength(5);fireEvent.click(screen.getByRole('checkbox',{name:'Alert'}));expect(backend.prefs.get('inbox:kind:alert',true)).toBe(false);expect(backend.prefs.get('inbox:kind:share',true)).toBe(true);});
 it('writes k without deriving a new statistic',async()=>{open('#/settings/evals');fireEvent.click(await screen.findByRole('combobox',{name:'Repetitions per case'}));const option=await screen.findByRole('option',{name:'10'});fireEvent.pointerDown(option,{pointerType:'mouse'});fireEvent.click(option);expect(backend.prefs.get('eval:k','')).toBe('10');});
 it('runs Sync now without a team selector through the workflow popup from a user action',async()=>{const sync=vi.spyOn(backend,'sync');open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));expect(await screen.findByRole('dialog')).toHaveTextContent('Sync now');await waitFor(()=>expect(sync).toHaveBeenCalledWith({}));});
 it('renders update advice verbatim from the DTO without opening a command in an editor',async()=>{
@@ -104,7 +104,7 @@ it('renders a partial removal failure and allows closing it',async()=>{
 });
 it('refuses removal while an eval is running and offers to show it',async()=>{
  const uninstall=vi.spyOn(backend,'uninstallMachine'),show=vi.fn();
- open('#/settings/advanced',{current:{state:'running',ref:'deploy-check',name:'deploy-check',team:undefined,run:createRun(async()=>({ok:true,value:{name:'deploy-check',runDir:'/eval',executionStatus:'complete',commit:null}})),lines:[],startedAt:0,commit:false},dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},show});
+ open('#/settings/advanced',{current:{state:'running',ref:'deploy-check',name:'deploy-check',team:undefined,run:createRun(async()=>({ok:true,value:{name:'deploy-check',runDir:'/eval',executionStatus:'complete'}})),lines:[],startedAt:0},dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},show});
  fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));
  const dialog=await screen.findByRole('dialog',{name:'Stop the running eval first'});expect(uninstall).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByRole('button',{name:'Show eval'}));expect(show).toHaveBeenCalledOnce();
@@ -200,8 +200,8 @@ it('serves Settings alongside the status error and discloses absent stamps and u
  vi.spyOn(backend,'settings').mockResolvedValue({ok:false,error:'Unreadable clone.',value:settings.value});
  open('#/settings/sync');
  expect(await screen.findByRole('heading',{name:'Sync'})).toBeInTheDocument();
- expect(screen.getByText(/Last sync No sync recorded on this machine/)).toBeInTheDocument();
- expect(screen.getByText('Work left undone; run sync')).toBeInTheDocument();
+ expect(screen.getByText(/Last fetched No sync recorded on this machine/)).toBeInTheDocument();
+ expect(screen.getByText('Work left undone; rerun the matching install or uninstall')).toBeInTheDocument();
  expect(screen.getByText(/without clock-skew correction/)).toBeInTheDocument();
  expect(screen.getAllByText('Unreadable clone.').length).toBeGreaterThan(0);
 });
@@ -434,16 +434,3 @@ it('reports discovery and registration failures without claiming a folder was ad
  expect(within(row).getByRole('button',{name:'Add'})).toBeVisible();expect(row).not.toHaveTextContent('already registered');
 });
 
-it('explains launch/focus automatic sync in the existing Sync row', async()=>{
- open('#/settings/sync');
- expect(await screen.findByText(/Automatic: at launch and when you come back to the app, at most every 10 minutes; one sync covers every team, root and project/)).toBeVisible();
- expect(screen.queryByText(/Last automatic sync failed/)).toBeNull();
-});
-it('shows only the first CLI error line for the last failed automatic sync', async()=>{
- const settings=await backend.settings(); if(!settings.ok)throw new Error(settings.error);
- vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,lastAutomatic:{at:Date.now()-120_000,state:'failed',detail:'Could not fetch team\nLong diagnostics',notices:['Skipping acme: Permission denied (publickey).']}}});
- open('#/settings/sync');
- expect(await screen.findByText(/Last automatic sync failed 2 minutes ago: Could not fetch team\./)).toBeVisible();
- expect(screen.getByText('Skipping acme: Permission denied (publickey).')).toBeVisible();
- expect(screen.queryByText(/Long diagnostics/)).toBeNull();
-});

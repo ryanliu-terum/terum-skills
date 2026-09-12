@@ -70,7 +70,7 @@ describe('desktop read session', () => {
     expect(f.spawns.map(spawn => spawn.args)).toEqual([['status'], ['ls']]); expect(f.writes).toEqual([]);
   });
 
-  it.each(['install', 'sync', 'eval', 'connect', 'publish', 'uninstall'])('%s never enters the shared session', async verb => {
+  it.each(['install', 'sync', 'eval', 'prune', 'publish', 'uninstall'])('%s never enters the shared session', async verb => {
     const f = fixture(); await f.query([verb]);
     expect(f.spawns.map(spawn => spawn.args)).toEqual([[verb]]);
   });

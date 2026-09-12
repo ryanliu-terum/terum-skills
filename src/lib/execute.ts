@@ -1,7 +1,6 @@
 import { fromError } from './result.js';
-import { invocation, type InvocationForm } from './invocation.js';
+import type { InvocationForm } from './invocation.js';
 import type { Execute } from '../cli.js';
-import type { SyncResult } from '../commands/sync.js';
 import type { Prompter } from './prompt.js';
 import type { ResultOutcome } from './frames.js';
 
@@ -19,14 +18,16 @@ export interface ExecuteSink {
 /**
  * The bin's contract (§3): a verb returns a Result and never exits. A failing Result is one
  * stderr line and exit code 1; a verb that throws (a closed prompt, an unexpected error) is the
- * same; success writes nothing here. A hook sync's notices go to stderr on either outcome, followed
- * by the one-line review count, so the hook's stdout stays reserved for the reload directive (§8).
+ * same; success writes nothing here. A hook sync's notices go to stderr so its stdout stays reserved
+ * for the reload directive.
  */
 export function createExecute(sink: ExecuteSink): Execute {
   return async (invoke, meta) => {
     try {
       const outcome = await invoke(sink.io);
-      if (isHookSync(outcome.value)) writeHookNotices(outcome.value, sink);
+      if (isHookSync(outcome.value)) {
+        for (const notice of (outcome.value as { notices: unknown[] }).notices) if (typeof notice === 'string') sink.stderr(notice);
+      }
       if (!outcome.ok) {
         sink.stderr(outcome.error);
         sink.setExitCode(1);
@@ -49,12 +50,6 @@ export function createExecute(sink: ExecuteSink): Execute {
   };
 }
 
-function isHookSync(value: unknown): value is SyncResult {
-  return Boolean(value) && typeof value === 'object' && (value as Partial<SyncResult>).hook === true && Array.isArray((value as Partial<SyncResult>).deferred) && Array.isArray((value as Partial<SyncResult>).notices);
-}
-
-function writeHookNotices(value: SyncResult, sink: ExecuteSink): void {
-  for (const notice of value.notices) sink.stderr(notice);
-  // One skill can be deferred twice in a run (pending replay, then the placement loop): count skills, not deferrals.
-  if (value.deferred.length) sink.stderr(`${new Set(value.deferred).size} skills need review — run \`${invocation(sink.form, 'sync')}\``);
+function isHookSync(value: unknown): value is { hook: true; notices: unknown[] } {
+  return Boolean(value) && typeof value === 'object' && (value as { hook?: unknown }).hook === true && Array.isArray((value as { notices?: unknown }).notices);
 }

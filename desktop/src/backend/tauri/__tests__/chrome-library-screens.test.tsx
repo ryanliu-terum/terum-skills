@@ -74,7 +74,7 @@ it.each([true,false])('keeps the mock meter and gates its attention link on inbo
 function uncCheckout(){
  const UNC=String.raw`\\wsl.localhost\Ubuntu\home\teniroo`;
  const SKILLS=UNC+String.raw`\.claude\skills`;
- const row=(name:string)=>({name,path:SKILLS+'\\'+name,state:'untracked locally',tracked:false,shared:[],placement:null,health:'untracked'});
+ const row=(name:string)=>({name,path:SKILLS+'\\'+name,state:'untracked locally',tracked:false,placement:null,health:'untracked'});
  const fake=chromeLibraryReplay({local:value=>{
   const project=value.local[1]!;
   project.root=SKILLS;project.repoRoot=UNC;

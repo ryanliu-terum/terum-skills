@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildProgram, Execute } from '../cli.js';
 import { failure, success } from '../lib/result.js';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { createExecute } from '../lib/execute.js';
-import { createConfigStore } from '../lib/config.js';
-import { run as connect } from '../commands/connect.js';
-import { NonInteractivePrompter, temporaryDirectory, ScriptedPrompter } from '../lib/__tests__/fixtures.js';
+import { ScriptedPrompter } from '../lib/__tests__/fixtures.js';
 
 describe('CLI wiring (§3: commander wiring only)', () => {
   const harness = () => {
@@ -89,28 +84,28 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     await expect(program.parseAsync(['login', '--team', 'alpha'], { from: 'user' })).rejects.toMatchObject({ code: 'commander.unknownOption' });
   });
 
-  it('wires every M2 verb and hands a missing install member value to the verb as undefined (the verb owns the usage error)', async () => {
+  it('wires the remaining library verbs and hands a missing install member value to the verb as undefined (the verb owns the usage error)', async () => {
     const calls: unknown[] = []; const outcomes: boolean[] = [];
     const execute: Execute = async (invoke) => { outcomes.push((await invoke(new ScriptedPrompter())).ok); };
     const program = buildProgram(execute, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-      connect: async (args) => { calls.push(['connect', args]); return success(undefined); },
       install: async (args) => { calls.push(['install', args]); return success([]); },
       uninstall: async (args) => { calls.push(['uninstall', args]); return success([]); },
-      sync: async (args) => { calls.push(['sync', args]); return success({ placed: 0, deferred: [], notices: [], changed: false, hook: Boolean(args.hook), teams: [] }); },
+      sync: async (args) => { calls.push(['sync', args]); return success({ notices: [], changed: false, teams: [] }); },
+      prune: async (args) => { calls.push(['prune', args]); return success({ deleted: 0, kept: 0, declined: false }); },
       search: async (args) => { calls.push(['search', args]); return success([]); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
-    await program.parseAsync(['connect', 'folder', '--team', 'team'], { from: 'user' });
     await program.parseAsync(['install', 'sample', '--team', 'team'], { from: 'user' });
     await program.parseAsync(['install', 'member'], { from: 'user' });
     await program.parseAsync(['uninstall-skill', 'sample', '--team', 'team'], { from: 'user' });
     await program.parseAsync(['sync', '--hook'], { from: 'user' });
+    await program.parseAsync(['prune'], { from: 'user' });
     await program.parseAsync(['search', 'term', '--category', 'testing'], { from: 'user' });
     expect(calls).toEqual(expect.arrayContaining([
-      ['connect', expect.objectContaining({ path: 'folder', team: 'team' })], ['install', expect.objectContaining({ ref: 'sample', team: 'team' })],
+      ['install', expect.objectContaining({ ref: 'sample', team: 'team' })],
       ['install', expect.objectContaining({ kind: 'member', member: undefined })], ['uninstall', expect.objectContaining({ ref: 'sample', team: 'team' })],
-      ['sync', { hook: true, prune: undefined }], ['search', { term: 'term', category: 'testing' }],
+      ['sync', expect.objectContaining({ hook: true })], ['prune', expect.anything()], ['search', { term: 'term', category: 'testing' }],
     ]));
     expect(outcomes).toEqual([true, true, true, true, true, true]);
   });
@@ -200,12 +195,11 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
       team: async (args) => { calls.push(['team', args]); return success({ workflow: 'yaml' }); },
-      receiptCheck: async (args) => { calls.push(['receipt-check', args]); return success({ endorsed: [], checked: 0 }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     await program.parseAsync(['team', 'workflow-update', '--print'], { from: 'user' });
-    await program.parseAsync(['receipt-check', '--cwd', '/checkout', '--base', 'origin/main'], { from: 'user' });
-    expect(calls).toEqual([['team', { kind: 'workflow-update', print: true }], ['receipt-check', { cwd: '/checkout', base: 'origin/main' }]]);
+    await program.parseAsync(['receipt-check'], { from: 'user' });
+    expect(calls).toEqual([['team', { kind: 'workflow-update', print: true }]]);
     expect(program.helpInformation()).not.toContain('receipt-check');
   });
 
@@ -213,13 +207,13 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-      eval: async (args) => { calls.push(args); return success({ team: 't', id: 'id', name: args.ref, runDir: '/tmp/run', ccVersion: 'stub', executionStatus: 'complete', commit: null }); },
+      eval: async (args) => { calls.push(args); return success({ team: 't', id: 'id', name: args.ref, runDir: '/tmp/run', ccVersion: 'stub', executionStatus: 'complete' }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
-    await program.parseAsync(['eval', 'sample', '--k', '2', '--triggers-only', '--case', 'happy', '--model', 'sonnet', '--judge-model', 'opus', '--working', '--gen', '--save', '--team', 't'], { from: 'user' });
+    await program.parseAsync(['eval', 'sample', '--k', '2', '--triggers-only', '--case', 'happy', '--model', 'sonnet', '--judge-model', 'opus', '--gen', '--team', 't'], { from: 'user' });
     await program.parseAsync(['eval', 'sample', '--no-gen'], { from: 'user' });
     expect(calls).toEqual([
-      { ref: 'sample', k: 2, triggersOnly: true, case: 'happy', model: 'sonnet', judgeModel: 'opus', working: true, gen: true, save: true, team: 't' },
+      { ref: 'sample', k: 2, triggersOnly: true, case: 'happy', model: 'sonnet', judgeModel: 'opus', gen: true, team: 't' },
       { ref: 'sample', noGen: true },
     ]);
   });
@@ -294,11 +288,11 @@ describe('release command eligibility', () => {
     const calls: unknown[] = []; const launch = { kind: 'unknown' as const, path: '/copy/index.js' };
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-      sync: async (args) => { calls.push(args); return success({ placed: 0, deferred: [], notices: [], changed: false, hook: Boolean(args.hook), teams: [] }); },
+      sync: async (args) => { calls.push(args); return success({ notices: [], changed: false, teams: [] }); },
       update: async (args) => { calls.push(args); return success({ running: null, latest: null, observation: 'unknown', launch: 'unknown', description: 'Latest advertised release: unknown', advice: ['Update this copy with the tool that installed it.'], lines: [] }); },
     }, { launch, noUpdateCheck: true });
     await program.parseAsync(['sync', '--hook'], { from: 'user' }); await program.parseAsync(['update'], { from: 'user' });
-    expect(calls).toEqual([{ hook: true, prune: undefined, launch, noUpdateCheck: true }, { launch, noUpdateCheck: true }]);
+    expect(calls).toEqual([{ hook: true }, { launch, noUpdateCheck: true }]);
   });
   it('prints the reader version and never executes help/version/usage paths', async () => {
     const { readFile } = await import('node:fs/promises');
@@ -312,85 +306,6 @@ describe('release command eligibility', () => {
     }
   });
 });
-
-it('issue 9 bare connect reaches the verb with an undefined path', async () => {
-  const calls: unknown[] = []; const io = new ScriptedPrompter();
-  const program = buildProgram(async (invoke) => { await invoke(io); }, {
-    login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-    connect: async (args) => { calls.push(args); return success(undefined); },
-  });
-  await program.parseAsync(['connect'], { from: 'user' });
-  expect(calls).toEqual([{ path: undefined, cwd: process.cwd() }]);
-});
-
-it('issue 9 non-interactive bare connect exits 1 through createExecute', async () => {
-  const home = await temporaryDirectory(); const root = join(home, '.claude', 'skills', 'sample'); await mkdir(root, { recursive: true }); await writeFile(join(root, 'SKILL.md'), '---\nname: sample\ndescription: x\n---\n');
-  const store = createConfigStore(join(home, 'state')); await store.update((config) => { config.teams.team = { remote: 'unused', handle: 'seed' }; });
-  const io = new NonInteractivePrompter(); const errors: string[] = []; const codes: number[] = [];
-  const execute = createExecute({ io, stderr: (line) => { errors.push(line); }, setExitCode: (code) => { codes.push(code); } });
-  await execute((received) => connect({ config: store, home }, received), { verb: 'connect', notices: false });
-  expect(codes).toEqual([1]); expect(errors).toEqual(["No skill selected. In an interactive terminal, run `npx -y terum-skills@latest connect`, or pass an explicit skill folder path."]); expect(io.asked).toEqual([]);
-});
-
-describe('issue 5 connect command contract', () => {
-  it.each([
-    [['connect', 'folder', '--team', 'team'], { path: 'folder', team: 'team' }],
-    [['connect'], { path: undefined }],
-    [['connect', '--keep-source', 'id'], { path: undefined, keepSource: 'id' }],
-    [['connect', '--keep-repo', 'id'], { path: undefined, keepRepo: 'id' }],
-    [['connect', '--relocate', 'id:/p'], { path: undefined, relocate: 'id:/p' }],
-    [['connect', '--forget', 'id'], { path: undefined, forget: 'id' }],
-    [['connect', '--allow-privileged'], { path: undefined, allowPrivileged: true }],
-  ])('routes %j with cwd and update notices enabled', async (argv, expected) => {
-    const calls: unknown[] = []; const metadata: unknown[] = [];
-    const program = buildProgram(async (invoke, meta) => { metadata.push(meta); await invoke(new ScriptedPrompter()); }, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
-      team: async () => success({ team: 't', remote: 'r' }),
-      connect: async (args) => { calls.push(args); return success(undefined); },
-    });
-    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
-    await program.parseAsync(argv as string[], { from: 'user' });
-    expect(calls).toEqual([{ ...expected, cwd: process.cwd() }]);
-    expect(metadata).toEqual([{ verb: 'connect', notices: true }]);
-  });
-
-  it.each([
-    ['share'], ['share', 'x'], ['share', 'x', '--team', 't', '--keep-source', 'id'],
-    ['share', '--relocate', 'id:/a'], ['share', '--forget', 'id'],
-    ['share', '--keep-repo', 'id', '--allow-privileged'], ['share', '--help'],
-    ['share', 'x', '--help'], ['share', '-h'],
-  ])('issue 5 legacy pointer refuses %j without side effects', async (...argv) => {
-    const store = createConfigStore(await temporaryDirectory());
-    await store.update((config) => { config.teams.t = { remote: 'unused', handle: 'me' }; config.shared.legacy = { source: '/untouched', team: 't' }; });
-    const { readFile } = await import('node:fs/promises');
-    const configPath = join(store.root, 'config.json'); const before = await readFile(configPath);
-    const io = new NonInteractivePrompter(); const errors: string[] = []; const stdout: string[] = []; const codes: number[] = [];
-    let afterVerbs = 0; let connected = 0;
-    const execute = createExecute({ io, stderr: (line) => { errors.push(line); }, setExitCode: (code) => { codes.push(code); }, afterVerb: async () => { afterVerbs++; } });
-    // Cast, not annotate: an arrow cannot satisfy `run`'s three overloads directly; the stub forwards every call, so the overloaded type is honest at runtime.
-    const connectStub = (async (args, received) => { connected++; return connect({ ...args, config: store }, received); }) as typeof connect;
-    const program = buildProgram(execute, {
-      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
-      team: async () => success({ team: 't', remote: 'r' }),
-      connect: connectStub,
-    });
-    program.configureOutput({ writeErr: (line) => { errors.push(line); }, writeOut: (line) => { stdout.push(line); } });
-    await program.parseAsync(argv, { from: 'user' });
-    expect(codes).toEqual([1]);
-    expect(errors).toEqual(['`share` is now `connect`: run `npx -y terum-skills@latest connect [<path>]` (same options: --allow-privileged, --keep-source, --keep-repo, --relocate, --forget).']);
-    expect(stdout).toEqual([]); expect(io.lines).toEqual([]); expect(connected).toBe(0);
-    expect(io.asked).toEqual([]); expect(afterVerbs).toBe(0);
-    expect(await readFile(configPath)).toEqual(before);
-  });
-
-  it('advertises connect and hides the legacy pointer in root help', () => {
-    const help = buildProgram(async () => undefined).helpInformation();
-    expect(help).toContain('connect [options] [path]');
-    expect(help).not.toMatch(/^\s+share\b/m);
-    expect(help).not.toContain('connect|share');
-  });
-});
-
 
 it('registers repeatable login --set once with no default and forwards only explicit pairs', async () => {
   for (const pairs of [[], ['name=Ryan Liu'], ['name=Ryan Liu', 'email=ryan@example.com']]) {

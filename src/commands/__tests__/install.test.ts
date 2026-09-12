@@ -1,14 +1,13 @@
 import { createExecute } from '../../lib/execute.js';
 import type { ResultOutcome } from '../../lib/frames.js';
 import { getStartedLines } from '../../lib/invocation.js';
-import { access, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { join, posix, win32 } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as setup from '../setup.js';
 import { installHook } from '../../lib/hook.js';
 import { placementHome, run } from '../install.js';
 import type { ProgressUpdate } from '../../lib/prompt.js';
-import { run as sync } from '../sync.js';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, temporaryDirectory, wrapRunner, wrapperFor } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
@@ -30,7 +29,7 @@ describe('install (§6 refs)', () => {
       await cloneWithIdentity(fixture.bare, store.teamClone('team'));
       await store.update((config) => { config.teams.team = { remote: 'github.com/acme/team', handle: 'seed' }; });
       const result = await realSetup(args, io);
-      expect(result).toMatchObject({ ok: true, value: { steps: { actions: 'skipped' } } });
+      expect(result).toMatchObject({ ok: true });
       return result;
     });
     try {
@@ -40,7 +39,7 @@ describe('install (§6 refs)', () => {
       const wrapper = { skillsRoot: join(home, '.claude', 'skills'), source: join(fixture.root, 'no-bundle', 'SKILL.md') };
       expect(await run({ ref: 'acme/team/sample', config: store, home, runner, hook, wrapper }, io)).toMatchObject({ ok: true, value: [{ id }] });
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy.mock.calls[0]![0]).toMatchObject({ quiet: true, offerConnect: false });
+      expect(spy.mock.calls[0]![0]).toMatchObject({ quiet: true });
       expect(io.asked).toEqual([]);
       expect(await readFile(join(local, 'SKILL.md'), 'utf8')).toBe(bytes);
     } finally { spy.mockRestore(); }
@@ -128,38 +127,6 @@ describe('install (§6 refs)', () => {
     expect((await store.read()).approvals[id]?.grants).toBe(grants.hash);
   });
 
-  it('leaves durable install intent when placement succeeds but the people-file write exhausts, then sync completes it', async () => {
-    const fixture = await bareTeam();
-    const id = '33333333-3333-4333-8333-333333333333';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    const home = join(fixture.root, 'home');
-    const store = createConfigStore(join(home, '.terum', 'skills'));
-    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    let clock = 0;
-    const rejecting = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'push'
-      ? { code: 1, stdout: '', stderr: ' ! [rejected] HEAD -> main (non-fast-forward)' }
-      : next());
-    const first = await run({ ref: 'sample', config: store, runner: rejecting, safeWrite: { deadlineMs: 1, now: () => clock, sleep: async () => { clock = 2; } } }, new ScriptedPrompter());
-    expect(first.ok).toBe(false);
-    const path = join(home, '.claude', 'skills', 'sample');
-    await expect(access(join(path, 'SKILL.md'))).resolves.toBeUndefined();
-    expect((await store.read()).pending).toHaveLength(1);
-    expect((await store.read()).placements[path]).toMatchObject({ id });
-    const { run: sync } = await import('../sync.js');
-    const recovered = await sync({ config: store }, new ScriptedPrompter());
-    if (!recovered.ok) throw new Error(recovered.error);
-    expect(recovered).toMatchObject({ ok: true });
-    expect((await store.read()).pending).toEqual([]);
-    expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).installed).toMatchObject([{ id }]);
-    const personAfterFirstReplay = await readFile(join(clone, 'people', 'seed.json'), 'utf8');
-    const ledgerAfterFirstReplay = JSON.stringify((await store.read()).placements);
-    const folderAfterFirstReplay = await readFile(join(path, 'SKILL.md'), 'utf8');
-    expect((await sync({ config: store }, new ScriptedPrompter())).ok).toBe(true);
-    expect(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).toBe(personAfterFirstReplay);
-    expect(JSON.stringify((await store.read()).placements)).toBe(ledgerAfterFirstReplay);
-    expect(await readFile(join(path, 'SKILL.md'), 'utf8')).toBe(folderAfterFirstReplay);
-  });
 
   it('shows malformed allowed-tools verbatim, requires consent, and leaves no durable intent when declined', async () => {
     const fixture = await bareTeam();
@@ -232,32 +199,6 @@ describe('install (§6 refs)', () => {
     expect(await readFile(join(store.root, 'quarantine', quarantinedSkill!), 'utf8')).toBe('user-owned');
   });
 
-  it('replays pending install intent after a placement failure without duplicating state', async () => {
-    const fixture = await bareTeam();
-    const id = '77777777-7777-4777-8777-777777777777';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    const home = join(fixture.root, 'home'); const store = createConfigStore(join(home, '.terum', 'skills'));
-    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    await mkdir(join(home, '.claude'), { recursive: true }); await writeFile(join(home, '.claude', 'skills'), 'not a directory');
-    const failed = await run({ ref: 'sample', config: store, home }, new ScriptedPrompter());
-    expect(failed.ok).toBe(false);
-    expect((await store.read()).pending).toHaveLength(1);
-    expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
-    await rm(join(home, '.claude', 'skills'));
-    const { run: sync } = await import('../sync.js');
-    expect((await sync({ config: store }, new ScriptedPrompter())).ok).toBe(true);
-    const target = join(home, '.claude', 'skills', 'sample');
-    await expect(access(join(target, 'SKILL.md'))).resolves.toBeUndefined();
-    expect((await store.read()).pending).toEqual([]);
-    const person = await readFile(join(clone, 'people', 'seed.json'), 'utf8');
-    const ledger = JSON.stringify((await store.read()).placements);
-    const placed = await readFile(join(target, 'SKILL.md'), 'utf8');
-    expect((await sync({ config: store }, new ScriptedPrompter())).ok).toBe(true);
-    expect(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).toBe(person);
-    expect(JSON.stringify((await store.read()).placements)).toBe(ledger);
-    expect(await readFile(join(target, 'SKILL.md'), 'utf8')).toBe(placed);
-  });
 
   it('re-places its own target and never consults a foreign global target for a project install', async () => {
     const fixture = await bareTeam(); const product = await bareTeam();
@@ -352,15 +293,6 @@ describe('install (§6 refs)', () => {
     expect(Object.keys((await store.read()).placements)).toEqual(ledgerBeforeOutside);
     await expect(access(join(outside, '.claude', 'skills', 'project-a'))).rejects.toMatchObject({ code: 'ENOENT' });
 
-    expect((await run({ ref: 'global', into: 'global', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
-    const globalPath = join(home, '.claude', 'skills', 'global', 'SKILL.md');
-    const alphaBeforeSync = await readFile(join(alphaOne, '.claude', 'skills', 'project-a', 'SKILL.md'), 'utf8');
-    const betaBeforeSync = await readFile(join(beta, '.claude', 'skills', 'project-b', 'SKILL.md'), 'utf8');
-    await pushFromSeed(fixture.seed, 'skills/global/SKILL.md', `---\nname: global\ndescription: global after\nlicense: UNLICENSED\nmetadata:\n  id: ${globalId}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    expect((await sync({ config: store, home, cwd: outside }, new ScriptedPrompter())).ok).toBe(true);
-    expect(await readFile(globalPath, 'utf8')).toContain('description: global after');
-    expect(await readFile(join(alphaOne, '.claude', 'skills', 'project-a', 'SKILL.md'), 'utf8')).toBe(alphaBeforeSync);
-    expect(await readFile(join(beta, '.claude', 'skills', 'project-b', 'SKILL.md'), 'utf8')).toBe(betaBeforeSync);
   });
 
   it('resolves qualified, self-locating, and unique ID refs while rejecting ambiguous batch versions and prefixes without placement', async () => {

@@ -100,9 +100,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/setup.ts",
-    "line": 54,
+    "line": 84,
     "policy": "prose",
-    "pattern": "'This wizard helps you create a team, join an existing team, or resume setup. It checks GitHub, sets up your team, invites teammates, offers your local skills to connect, and offers the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',"
+    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',"
   },
   {
     "file": "src/commands/setup.ts",
@@ -115,12 +115,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 30,
     "policy": "not-a-hint",
     "pattern": "io.print(version === null ? 'terum-skills (version unknown)' : `terum-skills ${version}`);"
-  },
-  {
-    "file": "src/commands/sync.ts",
-    "line": 138,
-    "policy": "not-a-hint",
-    "pattern": "if (!args.hook) notice(`Skipping ${team}: another terum-skills sync holds its session lock (${lockPath(store.root, team)}); retry when it finishes.`);"
   },
   {
     "file": "src/commands/team.ts",
@@ -136,12 +130,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/team.ts",
-    "line": 97,
-    "policy": "fixed",
-    "pattern": "if (typeof targetRaw.github !== 'string' || targetRaw.github.trim() === '') throw new Error(`${targetHandle} has no GitHub login on the roster, so there is no host access to revoke; run \\`team remove ${targetHandle} --archive-only\\` to archive the membership.`);"
-  },
-  {
-    "file": "src/commands/team.ts",
     "line": 137,
     "policy": "fixed",
     "pattern": "throw new Error(`${targetHandle} is archived; @${login}'s access could not be revoked: ${reason}. Re-run team remove ${targetHandle} to retry.`);"
@@ -153,10 +141,10 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "if (source === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');"
   },
   {
-    "file": "src/commands/team.ts",
-    "line": 348,
-    "policy": "fixed",
-    "pattern": "catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)} Your roster entry people/${identity.handle}.json was already pushed to ${normalized}; run \\`${invocation(args.form, 'team join', args.target)}\\` again to continue under the existing entry, or ask an admin to \\`team remove ${identity.handle}\\` if you did not mean to join twice.`); }"
+    "file": "src/commands/refresh.ts",
+    "line": 91,
+    "policy": "prose",
+    "pattern": "notices.push('Updated your /terum-skills manual for this CLI.');"
   },
   {
     "file": "src/commands/team.ts",
@@ -229,6 +217,18 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 622,
     "policy": "fixed",
     "pattern": "body=$(cat /tmp/terum-skills-comment.md)"
+  },
+{
+    "file": "src/commands/team.ts",
+    "line": 97,
+    "policy": "fixed",
+    "pattern": "if (typeof targetRaw.github !== 'string' || targetRaw.github.trim() === '') throw new Error(`${targetHandle} has no GitHub login on the roster, so there is no host access to revoke; run \\`team remove ${targetHandle} --archive-only\\` to archive the membership.`);"
+  },
+{
+    "file": "src/commands/team.ts",
+    "line": 348,
+    "policy": "fixed",
+    "pattern": "catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)} Your roster entry people/${identity.handle}.json was already pushed to ${normalized}; run \\`${invocation(args.form, 'team join', args.target)}\\` again to continue under the existing entry, or ask an admin to \\`team remove ${identity.handle}\\` if you did not mean to join twice.`); }"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
