@@ -4,7 +4,7 @@ import { applyReadme, generateReadme, ReadmeData, installCounts, installersById,
 const ID_A = '11111111-1111-4111-8111-111111111111';
 const ID_B = '22222222-2222-4222-8222-222222222222';
 const data: ReadmeData = {
-  team: { name: 'team', remote: 'github.com/acme/team', global: [ID_A], projects: { app: { skills: [ID_B] } }, archived: ['bea'] },
+  team: { name: 'team', remote: 'github.com/acme/team', projects: { app: { skills: [ID_A, ID_B] } }, archived: ['bea'] },
   people: [
     { handle: 'amy', display_name: 'Amy', email: 'amy@example.com', github: 'amy', bio: '', installed: [{ id: ID_A, version: null, scope: { kind: 'global' }, since: '2026-09-04' }], declined: [] },
     { handle: 'bea', display_name: 'Bea', email: 'bea@example.com', github: 'bea', bio: '', installed: [{ id: ID_A, version: null, scope: { kind: 'global' }, since: '2026-09-04' }, { id: ID_B, version: null, scope: { kind: 'project', project: 'app' }, since: '2026-09-04' }], declined: [] },
@@ -107,7 +107,7 @@ describe('README generator (§9)', () => {
     // The endorsement column is fed a project key (unvalidated team.json content), not the literal 'global'.
     const hostile: ReadmeData = {
       ...data,
-      team: { ...data.team, name: `team\r\n${marker}`, global: [], projects: { [`app|${marker}`]: { skills: [ID_A] } } },
+      team: { ...data.team, name: `team\r\n${marker}`, projects: { [`app|${marker}`]: { skills: [ID_A] } } },
       people: [{ ...data.people[0]!, display_name: `Amy\n${marker}` }],
       skills: [{ ...data.skills[1]!, name: `first|${marker}`, category: 'test\\ing|x', author: `Amy <amy@example.com> ${marker}`, description: `Ends\rhere ${marker}` }],
     };

@@ -55,7 +55,36 @@ export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
 export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; description: string | null; frontmatter: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string; description: string | null; frontmatter: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
-export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
+/**
+ * §8.4 — one member, whole, from the team read that already parsed `people/<handle>.json`.
+ *
+ * This limb is what replaces the marketplace's per-member fan-out: `catalog()` spawned
+ * `status` + `ls --local` + N × `ls member`, and after this it is two processes regardless of team
+ * size. It is also the ONLY reader `profile[]` has — without it §9.3 curates a list nothing ever
+ * shows, and §14.1's two-children gate is unreachable.
+ *
+ * `installed[]` and `profile[]` are deliberately both here and deliberately different (§3.5):
+ * `installed` is automatic and means *a copy is on a machine*; `profile` is curated and means
+ * *I stand behind this*. A reader that collapses them loses the distinction §8.5's two buckets exist
+ * to show.
+ */
+export interface LsPerson {
+  handle: string;
+  display_name: string;
+  role: string | null;
+  projects: readonly string[];
+  installed: readonly { id: string; version: Person['installed'][number]['version']; scope: Person['installed'][number]['scope']; since: string }[];
+  profile: readonly { id: string; name: string; version: string; added: string; via: 'publish' | 'install' }[];
+  /**
+   * §3.5 — how many skill folders that machine held at its last sync. A SELF-REPORT: null means
+   * "no answer" (never synced since it shipped, or never synced at all) and must never be drawn as
+   * a zero.
+   */
+  local_skills: number | null;
+}
+export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[];
+  /** §8.4: emitted on the `kind:'all'` team read only; `member?` still serves the single-member view. */
+  people?: readonly LsPerson[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
 export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>> {
@@ -73,6 +102,17 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     const report = (source: string, message: string) => { problems.push({ source, message }); io.print(`${source}: ${message}`); };
     const people = (await Promise.all((await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).sort().map((file) => readPerson(clone, file.slice(0, -5)).catch((error: unknown) => { report(`people/${file}`, error instanceof Error ? error.message : String(error)); return undefined; })))).filter((person) => person !== undefined);
     const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived), role: person.role ?? null, projects: person.projects ?? [] }));
+    // §8.4: built from the same parsed people the roster and the install counts come from — no extra
+    // read, no second process, and one shape every marketplace reader shares.
+    const personRows: LsPerson[] = people.map((person) => ({
+      handle: person.handle,
+      display_name: person.display_name,
+      role: person.role ?? null,
+      projects: person.projects ?? [],
+      installed: person.installed.map(({ id, version, scope, since }) => ({ id, version, scope, since })),
+      profile: (person.profile ?? []).map(({ id, name, version, added, via }) => ({ id, name, version, added, via })),
+      local_skills: person.local_skills ?? null,
+    }));
     const skills = await listSkills(team, people, clone, runner, io, teamName, problems);
     // `return await`: a returned promise leaves the try block before it settles, so a throw inside
     // showMember/showProject would reject run() instead of becoming the failure Result every verb returns.
@@ -83,7 +123,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     io.print('Skills:');
     for (const skill of skills) io.print(format(skill));
     io.print(`Local skills: ${invocation(args.form, 'ls --local')}`);
-    return success({ roster, skills, projects, problems });
+    return success({ roster, skills, projects, problems, people: personRows });
   } catch (error) { return fromError(error); }
 }
 

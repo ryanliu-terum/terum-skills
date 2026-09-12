@@ -2,96 +2,156 @@ import { describe, expect, it } from 'vitest';
 import { guard, GuardContext, GuardError, guardRawPush, isMember } from '../guard.js';
 
 const ID = '4e80fd2a-04bc-4d9f-88f7-a849d92879f1';
-const team = (overrides: Record<string, unknown> = {}) => JSON.stringify({ layout_version: 2, name: 't', categories: [], global: [], projects: { p: { remotes: ['github.com/a/p'], skills: [] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' }, ...overrides });
-const skill = (author: string) => `---\nname: x\ndescription: d\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: "${author}"\n  terum-category: docs\n---\n\n# x\n`;
+const ABSENT_ID = '11111111-1111-4111-8111-111111111111';
+const RUN = '20260907T123456Z';
+const HASH = 'a'.repeat(40);
+
+/** Layout 3 (§3.1): `global` is deleted and `policy.publish` with it. */
+const team = (overrides: Record<string, unknown> = {}) => JSON.stringify({ layout_version: 3, name: 't', categories: [], projects: { p: { remotes: ['github.com/a/p'], skills: [] } }, archived: [], policy: { skill_license: 'UNLICENSED' }, ...overrides });
+/** Layout 2 — what row j's pre-image actually is, and what `teamSchema` refuses to parse. */
+const legacyTeam = () => JSON.stringify({ layout_version: 2, name: 't', categories: [], global: [ID], projects: { p: { remotes: ['github.com/a/p'], skills: [] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } });
+const skill = (id = ID, author = 'Me <me@x.test>') => `---\nname: x\ndescription: d\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: "${author}"\n  terum-category: docs\n---\n\n# x\n`;
+
 type Changes = Record<string, [string | undefined, string | undefined]>;
 const tree = (changes: Changes, unchanged: Record<string, string> = {}) => ({
   before: (path: string) => (path in changes ? changes[path]![0] : unchanged[path]),
   after: (path: string) => (path in changes ? changes[path]![1] : unchanged[path]),
   changedPaths: Object.keys(changes),
 });
-const ME = 'Me <me@x.test>';
-const connect: GuardContext = { action: 'connect', handle: 'me', author: ME };
-const receiptPath = (id = ID, hash = 'a'.repeat(40), runId = '20260907T123456Z') => `evals/${id}/${hash}/${runId}.json`;
-const receiptTree = (changes: Changes) => ({
-  ...tree(changes, { 'skills/x/SKILL.md': skill(ME) }),
-  paths: (prefix = '') => ['skills/x/SKILL.md'].filter((path) => path.startsWith(prefix)),
+/**
+ * Row g resolves a receipt's uuid against the POST-IMAGE, so a receipt tree must expose `paths()`
+ * over every version SKILL.md the commit leaves behind — added ones included.
+ */
+const receiptTree = (changes: Changes, unchanged: Record<string, string> = { 'skills/x/v1/SKILL.md': skill() }) => ({
+  ...tree(changes, unchanged),
+  paths: (prefix = '') => [...Object.keys(unchanged), ...Object.keys(changes).filter((path) => changes[path]![1] !== undefined)].filter((path) => path.startsWith(prefix)),
 });
 const refuse = (t: ReturnType<typeof tree>, c: GuardContext, path: string) => expect(() => guard(t, c)).toThrow(new RegExp(`refused ${path.replace(/[.]/g, '\\.')}`));
 
-describe('row a — skill folders, ownership by metadata.author', () => {
-  it('allows the author to edit, add aux files to, and delete their own skill', () => {
-    expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME).replace('# x', '# y')] }), connect)).not.toThrow();
-    expect(() => guard(tree({ 'skills/x/references/a.md': [undefined, 'aux'] }, { 'skills/x/SKILL.md': skill(ME) }), connect)).not.toThrow();
-    expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), undefined] }), connect)).not.toThrow();
-    expect(() => guard(tree({ 'skills/x/SKILL.md': [undefined, skill(ME)] }), { ...connect, action: 'sync' })).not.toThrow();
+const publish: GuardContext = { action: 'publish', handle: 'me' };
+const migrate: GuardContext = { action: 'migrate', handle: 'me' };
+
+describe("row a' — a version folder is add-only, and ownership is never consulted", () => {
+  it('admits every kind of file publish puts in a NEW version folder', () => {
+    expect(() => guard(tree({ 'skills/x/v1/SKILL.md': [undefined, skill()] }), publish)).not.toThrow();
+    expect(() => guard(tree({ 'skills/x/v12/references/deep/a.md': [undefined, 'aux'] }), publish)).not.toThrow();
+    // D9: eval assets inside a version folder are ordinary version bytes. Row h is gone, not re-pointed.
+    expect(() => guard(tree({ 'skills/x/v2/evals/triggers.yaml': [undefined, 'should_trigger: []'], 'skills/x/v2/evals/cases/happy.yaml': [undefined, 'task: t'] }), publish)).not.toThrow();
   });
 
-  it('compares authors after normalization: case, doubled and surrounding whitespace are not identity', () => {
-    for (const spelling of ['me <ME@X.test>', '  Me  <me@x.test>  ', 'ME <ME@X.TEST>']) {
-      expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME).replace('# x', '# y')] }), { ...connect, author: spelling }), spelling).not.toThrow();
-      expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(spelling), skill(spelling).replace('# x', '# y')] }), connect), spelling).not.toThrow();
+  it('refuses a modification or a removal inside a version folder — immutability is an authorization rule, not a convention', () => {
+    refuse(tree({ 'skills/x/v1/SKILL.md': [skill(), skill().replace('# x', '# y')] }), publish, 'skills/x/v1/SKILL.md');
+    refuse(tree({ 'skills/x/v1/SKILL.md': [skill(), undefined] }), publish, 'skills/x/v1/SKILL.md');
+    refuse(tree({ 'skills/x/v1/references/a.md': ['aux', 'edited'] }), publish, 'skills/x/v1/references/a.md');
+  });
+
+  it('refuses anything under skills/ that is not inside a v<N> folder', () => {
+    refuse(tree({ 'skills/x/SKILL.md': [undefined, skill()] }), publish, 'skills/x/SKILL.md');
+    refuse(tree({ 'skills/x/v0/SKILL.md': [undefined, skill()] }), publish, 'skills/x/v0/SKILL.md');
+    refuse(tree({ 'skills/x/v01/SKILL.md': [undefined, skill()] }), publish, 'skills/x/v01/SKILL.md');
+    refuse(tree({ 'skills/x/v1': [undefined, 'not a folder'] }), publish, 'skills/x/v1');
+  });
+
+  it('is publish-only: no other verb may mint bytes', () => {
+    for (const action of ['join', 'install', 'uninstall', 'team-remove', 'profile', 'project'] as const) {
+      refuse(tree({ 'skills/x/v1/SKILL.md': [undefined, skill()] }), { action, handle: 'me' }, 'skills/x/v1/SKILL.md');
     }
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Me <me@x.test>'), skill('Me <me@x.test>')] }), { ...connect, author: 'Me <me@y.test>' }, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Me <me@x.test>'), skill('Me <me@x.test>')] }), { ...connect, author: 'Mel <me@x.test>' }, 'skills/x/SKILL.md');
   });
 
-  it("rejects another author's folder, including aux files and a folder with no SKILL.md", () => {
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Other <o@x.test>'), skill('Other <o@x.test>')] }), connect, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/references/a.md': [undefined, 'aux'] }, { 'skills/x/SKILL.md': skill('Other <o@x.test>') }), connect, 'skills/x/references/a.md');
-    refuse(tree({ 'skills/x/references/a.md': [undefined, 'aux'] }), connect, 'skills/x/references/a.md');
+  it('D15: a version folder authored by someone else is still admitted — there is no committed author to compare against', () => {
+    expect(() => guard(tree({ 'skills/x/v1/SKILL.md': [undefined, skill(ID, 'Other <o@x.test>')] }), publish)).not.toThrow();
+    expect(() => guard(tree({ 'skills/x/v1/SKILL.md': [undefined, skill(ID, 'Other <o@x.test>')] }), { ...publish, handle: 'someoneelse' })).not.toThrow();
+  });
+});
+
+describe('row g — receipts are append-only testimony, written only by publish', () => {
+  it('admits a correctly keyed receipt whose uuid names a skill in the post-image', () => {
+    expect(() => guard(receiptTree({ [`evals/${ID}/v1/${RUN}.json`]: [undefined, '{}'] }), publish)).not.toThrow();
+    // Skill uuids are case-tolerant: callers pass `metadata.id` verbatim.
+    expect(() => guard(receiptTree({ [`evals/${ID.toUpperCase()}/v1/${RUN}.json`]: [undefined, '{}'] }), publish)).not.toThrow();
   });
 
-  it('reads ownership from the committed pre-image: a diff cannot grant itself authorship or hand the folder away', () => {
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Other <o@x.test>'), skill(ME)] }), connect, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/SKILL.md': [skill(ME), skill('Other <o@x.test>')] }), connect, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/SKILL.md': [undefined, skill('Other <o@x.test>')] }), connect, 'skills/x/SKILL.md');
-    const bodyOnly = `# x\n\nauthor: ${ME}\n`;
-    refuse(tree({ 'skills/x/SKILL.md': [bodyOnly, bodyOnly] }), connect, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME)] }), { action: 'connect', handle: 'me' }, 'skills/x/SKILL.md');
+  it('resolves the uuid against a version folder ADDED by this same commit', () => {
+    expect(() => guard(receiptTree({ 'skills/x/v1/SKILL.md': [undefined, skill()], [`evals/${ID}/v1/${RUN}.json`]: [undefined, '{}'] }, {}), publish)).not.toThrow();
   });
 
-  it('a rename that moves a file out of an owned folder is refused, and skills are never writable from join/install', () => {
-    refuse(tree({ 'skills/x/notes.md': ['n', undefined], 'notes.md': [undefined, 'n'] }, { 'skills/x/SKILL.md': skill(ME) }), connect, 'notes.md');
-    refuse(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME)] }), { action: 'join', handle: 'me', author: ME }, 'skills/x/SKILL.md');
+  it('is a PER-PATH predicate: one publish commit legitimately carries a version, team.json, a people file and several receipts', () => {
+    expect(() => guard(receiptTree({
+      'skills/x/v2/SKILL.md': [undefined, skill()],
+      'team.json': [team(), team({ projects: { p: { remotes: ['github.com/a/p'], skills: [ID] } } })],
+      'people/me.json': ['{}', '{"a":1}'],
+      'README.md': ['a', 'b'],
+      [`evals/${ID}/v2/${RUN}.json`]: [undefined, '{}'],
+      [`evals/${ID}/v2/20260907T123457Z.json`]: [undefined, '{}'],
+    }, {}), publish)).not.toThrow();
+  });
+
+  it('refuses modifying or deleting committed evidence', () => {
+    const path = `evals/${ID}/v1/${RUN}.json`;
+    refuse(receiptTree({ [path]: ['{}', '{"changed":true}'] }), publish, path);
+    refuse(receiptTree({ [path]: ['{}', undefined] }), publish, path);
+  });
+
+  it('refuses a malformed key, a uuid absent from the post-image, and the old tree-hash segment', () => {
+    for (const path of [
+      `evals/not-a-uuid/v1/${RUN}.json`,
+      `evals/${ID}/${HASH}/${RUN}.json`,
+      `evals/${ID}/v0/${RUN}.json`,
+      `evals/${ID}/v1/not-a-run-id.json`,
+      `evals/${ID}/../v1/${RUN}.json`,
+      `evals/${ABSENT_ID}/v1/${RUN}.json`,
+      `evals/${ID}/v1/${RUN}.json/extra`,
+    ]) refuse(receiptTree({ [path]: [undefined, '{}'] }), publish, path);
+  });
+
+  it('refuses every other action, and a tree that cannot enumerate its post-image at all', () => {
+    for (const action of ['join', 'install', 'uninstall', 'profile', 'project', 'team-remove'] as const) {
+      refuse(receiptTree({ [`evals/${ID}/v1/${RUN}.json`]: [undefined, '{}'] }), { action, handle: 'me' }, `evals/${ID}/v1/${RUN}.json`);
+    }
+    refuse(tree({ [`evals/${ID}/v1/${RUN}.json`]: [undefined, '{}'] }, { 'skills/x/v1/SKILL.md': skill() }), publish, `evals/${ID}/v1/${RUN}.json`);
   });
 });
 
 describe('row b — people files', () => {
-  it('only your own file, only from join/install/uninstall/sync', () => {
-    for (const action of ['join', 'install', 'uninstall', 'sync'] as const) expect(() => guard(tree({ 'people/me.json': ['{}', '{"a":1}'] }), { action, handle: 'me' })).not.toThrow();
+  it('admits only your own file, and only from the five verbs that write it', () => {
+    for (const action of ['join', 'install', 'uninstall', 'profile', 'publish'] as const) {
+      expect(() => guard(tree({ 'people/me.json': ['{}', '{"a":1}'] }), { action, handle: 'me' }), action).not.toThrow();
+    }
     refuse(tree({ 'people/other.json': ['{}', '{}'] }), { action: 'join', handle: 'me' }, 'people/other.json');
-    refuse(tree({ 'people/me.json': ['{}', '{}'] }), connect, 'people/me.json');
-    refuse(tree({ 'people/me.json': ['{}', '{}'] }), { action: 'publish', handle: 'me' }, 'people/me.json');
+    for (const action of ['project', 'team-remove'] as const) {
+      refuse(tree({ 'people/me.json': ['{}', '{}'] }), { action, handle: 'me' }, 'people/me.json');
+    }
+  });
+
+  it('compares handles lowercase, and refuses an invalid one outright', () => {
+    expect(() => guard(tree({ 'people/me.json': ['{}', '{"a":1}'] }), { action: 'join', handle: 'ME' })).not.toThrow();
+    expect(() => guard(tree({ 'people/me.json': ['{}', '{"a":1}'] }), { action: 'join', handle: 'bad handle' })).toThrow(/invalid handle/);
   });
 });
 
 describe('rows c, d, e — team.json', () => {
-  it('publish may change global and projects[].skills, nothing else', () => {
-    expect(() => guard(tree({ 'team.json': [team(), team({ global: [ID] })] }), { action: 'publish', handle: 'me' })).not.toThrow();
-    expect(() => guard(tree({ 'team.json': [team(), team({ projects: { p: { remotes: ['github.com/a/p'], skills: [ID] } } })] }), { action: 'publish', handle: 'me' })).not.toThrow();
-    refuse(tree({ 'team.json': [team(), team({ projects: { p: { remotes: ['github.com/a/evil'], skills: [] } } })] }), { action: 'publish', handle: 'me' }, 'team.json');
-    refuse(tree({ 'team.json': [team(), team({ projects: {} })] }), { action: 'publish', handle: 'me' }, 'team.json');
-    refuse(tree({ 'team.json': [team(), team({ policy: { publish: 'push', skill_license: 'UNLICENSED' } })] }), { action: 'publish', handle: 'me' }, 'team.json');
-    refuse(tree({ 'team.json': [team(), team({ global: [ID] })] }), { action: 'join', handle: 'me' }, 'team.json');
+  it("row c: publish may change projects[].skills and nothing else", () => {
+    expect(() => guard(tree({ 'team.json': [team(), team({ projects: { p: { remotes: ['github.com/a/p'], skills: [ID] } } })] }), publish)).not.toThrow();
+    refuse(tree({ 'team.json': [team(), team({ projects: { p: { remotes: ['github.com/a/evil'], skills: [] } } })] }), publish, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ projects: {} })] }), publish, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ policy: { skill_license: 'MIT' } })] }), publish, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ categories: ['new'] })] }), publish, 'team.json');
   });
 
-  it('handles are compared lowercase, so a mixed-case caller is not refused and an invalid one is', () => {
-    expect(() => guard(tree({ 'team.json': [team(), team({ archived: ['alice'] })] }), { action: 'team-remove', handle: 'Admin', targetHandle: 'Alice' })).not.toThrow();
-    expect(() => guard(tree({ 'people/me.json': ['{}', '{"a":1}'] }), { action: 'join', handle: 'ME' })).not.toThrow();
-    expect(() => guard(tree({ 'people/me.json': ['{}', '{"a":1}'] }), { action: 'join', handle: 'bad handle' })).toThrow(/invalid handle/);
-  });
-
-  it('team remove appends exactly the target; join removes exactly its own handle — set differences, not length checks', () => {
+  it('row d: team remove appends exactly the target, and never the actor', () => {
     expect(() => guard(tree({ 'team.json': [team({ archived: ['a'] }), team({ archived: ['a', 'x'] })] }), { action: 'team-remove', handle: 'me', targetHandle: 'x' })).not.toThrow();
+    expect(() => guard(tree({ 'team.json': [team(), team({ archived: ['alice'] })] }), { action: 'team-remove', handle: 'Admin', targetHandle: 'Alice' })).not.toThrow();
     refuse(tree({ 'team.json': [team({ archived: ['a'] }), team({ archived: ['x', 'a'] })] }), { action: 'team-remove', handle: 'me', targetHandle: 'x' }, 'team.json');
     refuse(tree({ 'team.json': [team(), team({ archived: ['me'] })] }), { action: 'team-remove', handle: 'me', targetHandle: 'me' }, 'team.json');
     refuse(tree({ 'team.json': [team({ archived: ['x'] }), team({ archived: ['x', 'x'] })] }), { action: 'team-remove', handle: 'me', targetHandle: 'x' }, 'team.json');
-    refuse(tree({ 'team.json': [team(), team({ archived: ['other'] })] }), { action: 'join', handle: 'me' }, 'team.json');
+  });
+
+  it('row e: join removes exactly its own handle — a set difference, not a length check', () => {
     expect(() => guard(tree({ 'team.json': [team({ archived: ['a', 'me', 'b'] }), team({ archived: ['a', 'b'] })] }), { action: 'join', handle: 'me' })).not.toThrow();
+    refuse(tree({ 'team.json': [team(), team({ archived: ['other'] })] }), { action: 'join', handle: 'me' }, 'team.json');
     refuse(tree({ 'team.json': [team({ archived: ['other'] }), team({ archived: [] })] }), { action: 'join', handle: 'me' }, 'team.json');
     refuse(tree({ 'team.json': [team({ archived: ['me', 'x'] }), team({ archived: ['y'] })] }), { action: 'join', handle: 'me' }, 'team.json');
-    refuse(tree({ 'team.json': [team({ archived: ['me'] }), team({ archived: [], global: [ID] })] }), { action: 'join', handle: 'me' }, 'team.json');
+    refuse(tree({ 'team.json': [team({ archived: ['me'] }), team({ archived: [], categories: ['sneaked'] })] }), { action: 'join', handle: 'me' }, 'team.json');
     expect(() => guard(tree({ 'team.json': [team(), undefined] }), { action: 'join', handle: 'me' })).toThrow(/missing team\.json/);
   });
 });
@@ -107,7 +167,7 @@ describe('row i — project create adds one key, born empty', () => {
 
   it('refuses a create that also endorses, edits another project, or renames one', () => {
     refuse(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: [], skills: [ID] } } })] }), create, 'team.json');
-    refuse(tree({ 'team.json': [team(), team({ global: [ID], projects: { p: P, q: { remotes: [], skills: [] } } })] }), create, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ categories: ['c'], projects: { p: P, q: { remotes: [], skills: [] } } })] }), create, 'team.json');
     refuse(tree({ 'team.json': [team(), team({ projects: { p: { remotes: ['github.com/a/other'], skills: [] }, q: { remotes: [], skills: [] } } })] }), create, 'team.json');
     refuse(tree({ 'team.json': [team(), team({ projects: { q: { remotes: [], skills: [] } } })] }), create, 'team.json');
   });
@@ -119,74 +179,77 @@ describe('row i — project create adds one key, born empty', () => {
   });
 
   it('is the only action that may create a key, and creates nothing on its own', () => {
-    refuse(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: [], skills: [] } } })] }), { action: 'publish', handle: 'me' }, 'team.json');
-    refuse(tree({ 'team.json': [team(), team({ global: [ID] })] }), create, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: [], skills: [] } } })] }), publish, 'team.json');
     refuse(tree({ 'team.json': [team(), team({ archived: ['x'] })] }), create, 'team.json');
-    refuse(tree({ 'people/me.json': ['{}', '{"a":1}'] }), create, 'people/me.json');
+  });
+});
+
+describe('row j — the §13 migration', () => {
+  it('MUST run before the team.json branch: the pre-image is layout 2, which teamSchema refuses to parse', () => {
+    expect(() => guard(tree({ 'team.json': [legacyTeam(), team()] }), migrate)).not.toThrow();
+    // The proof that ordering is what admits it: any other action on the same diff dies in parseTeam.
+    expect(() => guard(tree({ 'team.json': [legacyTeam(), team()] }), publish)).toThrow(GuardError);
+  });
+
+  it('admits the moves §13 actually makes, keyed by direction', () => {
+    // step 1 — layout-2 bytes out, v1 in
+    expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(), undefined], 'skills/x/v1/SKILL.md': [undefined, skill()] }), migrate)).not.toThrow();
+    expect(() => guard(tree({ 'skills/x/references/a.md': ['aux', undefined], 'skills/x/v1/references/a.md': [undefined, 'aux'] }), migrate)).not.toThrow();
+    // step 3 — tree-hash receipts re-keyed to v1, or parked in D7's archive
+    expect(() => guard(tree({ [`evals/${ID}/${HASH}/${RUN}.json`]: ['{}', undefined], [`evals/${ID}/v1/${RUN}.json`]: [undefined, '{}'] }), migrate)).not.toThrow();
+    expect(() => guard(tree({ [`evals/${ID}/archive/${HASH}/${RUN}.json`]: [undefined, '{}'] }), migrate)).not.toThrow();
+    // step 5 — EVERY member's people file, not just the actor's, plus the regenerated README
+    expect(() => guard(tree({ 'people/other.json': ['{}', '{"a":1}'], 'people/me.json': ['{}', '{"a":1}'], 'README.md': ['a', 'b'] }), migrate)).not.toThrow();
+  });
+
+  it('does not open immutability: a removal inside a version folder stays refused even here', () => {
+    refuse(tree({ 'skills/x/v1/SKILL.md': [skill(), undefined] }), migrate, 'skills/x/v1/SKILL.md');
+    refuse(tree({ 'skills/x/v2/references/a.md': ['aux', undefined] }), migrate, 'skills/x/v2/references/a.md');
+  });
+
+  it('mints only v1, modifies only the three file shapes it rewrites, and adds no new member', () => {
+    refuse(tree({ 'skills/x/v2/SKILL.md': [undefined, skill()] }), migrate, 'skills/x/v2/SKILL.md');
+    refuse(tree({ 'people/other.json': [undefined, '{}'] }), migrate, 'people/other.json');
+    refuse(tree({ 'skills/x/v1/SKILL.md': [skill(), skill().replace('# x', '# y')] }), migrate, 'skills/x/v1/SKILL.md');
+    refuse(tree({ '.github/workflows/terum-skills.yml': ['a', 'b'] }), migrate, '.github/workflows/terum-skills.yml');
+  });
+
+  it('opens nothing for any other verb', () => {
+    refuse(tree({ 'skills/x/SKILL.md': [skill(), undefined] }), publish, 'skills/x/SKILL.md');
+    refuse(tree({ 'people/other.json': ['{}', '{"a":1}'] }), publish, 'people/other.json');
+    refuse(tree({ [`evals/${ID}/archive/${HASH}/${RUN}.json`]: [undefined, '{}'] }), publish, `evals/${ID}/archive/${HASH}/${RUN}.json`);
   });
 });
 
 describe('row f and everything else', () => {
   it('README is regenerable from any action; any other path is refused', () => {
     expect(() => guard(tree({ 'README.md': ['a', 'b'] }), { action: 'install', handle: 'me' })).not.toThrow();
-    refuse(tree({ 'evals/x.json': [undefined, '{}'] }), connect, 'evals/x.json');
-    refuse(tree({ '.github/workflows/terum-skills.yml': ['a', 'b'] }), { action: 'publish', handle: 'me' }, '.github/workflows/terum-skills.yml');
-    expect(() => guard(tree({ 'outside.txt': [undefined, 'x'] }), connect)).toThrow(GuardError);
+    refuse(tree({ 'evals/x.json': [undefined, '{}'] }), publish, 'evals/x.json');
+    refuse(tree({ '.github/workflows/terum-skills.yml': ['a', 'b'] }), publish, '.github/workflows/terum-skills.yml');
+    expect(() => guard(tree({ 'outside.txt': [undefined, 'x'] }), publish)).toThrow(GuardError);
   });
 });
 
-describe('row g — eval receipts are one-file, append-only testimony', () => {
-  const evalContext: GuardContext = { action: 'eval', handle: 'me' };
-
-  it('allows exactly one newly added, correctly keyed receipt for a post-image skill id', () => {
-    expect(() => guard(receiptTree({ [receiptPath()]: [undefined, '{}'] }), evalContext)).not.toThrow();
+describe('guardRawPush — D12 clone-local half', () => {
+  it('stands open to every row the pusher could have taken as themselves', () => {
+    expect(() => guardRawPush(tree({ 'README.md': ['a', 'b'] }), { handle: 'me' })).not.toThrow();
+    expect(() => guardRawPush(tree({ 'people/me.json': ['{}', '{"a":1}'] }), { handle: 'ME' })).not.toThrow();
+    expect(() => guardRawPush(tree({ 'team.json': [team(), team({ projects: { p: { remotes: ['github.com/a/p'], skills: [ID] } } })] }), { handle: 'me' })).not.toThrow();
+    expect(() => guardRawPush(tree({ 'team.json': [team(), team({ archived: ['someoneelse'] })] }), { handle: 'me' })).not.toThrow();
+    expect(() => guardRawPush(tree({ 'team.json': [team({ archived: ['me'] }), team({ archived: [] })] }), { handle: 'me' })).not.toThrow();
   });
 
-  it('refuses malformed identity directories, hashes, absent ids, and non-eval actions (VE3)', () => {
-    for (const path of [
-      receiptPath('not-a-uuid'),
-      receiptPath(ID, 'a'.repeat(39)),
-      receiptPath(ID, 'a'.repeat(41)),
-      receiptPath(ID, 'A'.repeat(40)),
-      receiptPath('11111111-1111-4111-8111-111111111111'),
-      `evals/${ID}/../${'a'.repeat(40)}/20260907T123456Z.json`,
-      receiptPath(ID, 'a'.repeat(40), 'not-a-run-id'),
-    ]) refuse(receiptTree({ [path]: [undefined, '{}'] }), evalContext, path);
-    refuse(receiptTree({ [receiptPath()]: [undefined, '{}'] }), connect, receiptPath());
+  it("D15: skills/** is refused outright — a version is minted, never written", () => {
+    expect(() => guardRawPush(tree({ 'skills/x/v1/SKILL.md': [undefined, skill()] }), { handle: 'me' })).toThrow(/skill versions are minted by/);
+    // Row h is gone with the rest: a hand-pushed eval asset is a hand-pushed skill byte.
+    expect(() => guardRawPush(tree({ 'skills/x/evals/cases/happy.yaml': [undefined, 'task: t'] }), { handle: 'me' })).toThrow(/skill versions are minted by/);
+    expect(() => guardRawPush(tree({ [`evals/${ID}/v1/${RUN}.json`]: [undefined, '{}'] }), { handle: 'me' })).toThrow(/eval receipts are written by/);
   });
 
-  it('refuses modifying, deleting, or combining receipts — previously committed evidence is immutable', () => {
-    const path = receiptPath();
-    refuse(receiptTree({ [path]: ['{}', '{"changed":true}'] }), evalContext, path);
-    refuse(receiptTree({ [path]: ['{}', undefined] }), evalContext, path);
-    const second = receiptPath(ID, 'b'.repeat(40));
-    refuse(receiptTree({ [path]: [undefined, '{}'], [second]: [undefined, '{}'] }), evalContext, path);
-  });
-});
-
-describe('row h — generated eval assets are append-only additions to an existing skill, by any member', () => {
-  const assetsContext: GuardContext = { action: 'eval-assets', handle: 'me' };
-  const other = { 'skills/x/SKILL.md': skill('Other <o@x.test>') };
-
-  it('allows new cases and triggers on an existing skill without any author identity', () => {
-    expect(() => guard(tree({ 'skills/x/evals/cases/happy-path.yaml': [undefined, 'task: t'], 'skills/x/evals/triggers.yaml': [undefined, 'should_trigger: []'] }, other), assetsContext)).not.toThrow();
-    expect(() => guard(tree({ 'skills/x/evals/cases/a.yml': [undefined, 'task: t'] }, other), assetsContext)).not.toThrow();
-  });
-
-  it('refuses overwrites, deletions, non-asset paths, absent skills, and every other action', () => {
-    refuse(tree({ 'skills/x/evals/cases/happy-path.yaml': ['task: authored', 'task: replaced'] }, other), assetsContext, 'skills/x/evals/cases/happy-path.yaml');
-    refuse(tree({ 'skills/x/evals/triggers.yaml': ['should_trigger: []', undefined] }, other), assetsContext, 'skills/x/evals/triggers.yaml');
-    refuse(tree({ 'skills/x/evals/notes.md': [undefined, 'n'] }, other), assetsContext, 'skills/x/evals/notes.md');
-    refuse(tree({ 'skills/x/evals/cases/deep/a.yaml': [undefined, 'task: t'] }, other), assetsContext, 'skills/x/evals/cases/deep/a.yaml');
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Other <o@x.test>'), skill(ME)] }), assetsContext, 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/ghost/evals/triggers.yaml': [undefined, 'should_trigger: []'] }), assetsContext, 'skills/ghost/evals/triggers.yaml');
-    refuse(tree({ 'skills/x/evals/triggers.yaml': [undefined, 'should_trigger: []'] }, other), { action: 'eval', handle: 'me' }, 'skills/x/evals/triggers.yaml');
-    refuse(tree({ 'skills/x/evals/triggers.yaml': [undefined, 'should_trigger: []'] }, other), connect, 'skills/x/evals/triggers.yaml');
-  });
-
-  it('stands open to a raw push, with no author identity on the machine', () => {
-    expect(() => guardRawPush(tree({ 'skills/x/evals/cases/happy-path.yaml': [undefined, 'task: t'] }, other), { handle: 'me' })).not.toThrow();
-    expect(() => guardRawPush(tree({ 'skills/x/evals/cases/happy-path.yaml': ['task: authored', 'task: replaced'] }, other), { handle: 'me' })).toThrow(GuardError);
+  it('refuses another member, archiving yourself, and names a stale hook for what it is', () => {
+    expect(() => guardRawPush(tree({ 'people/other.json': ['{}', '{}'] }), { handle: 'me' })).toThrow(GuardError);
+    expect(() => guardRawPush(tree({ 'team.json': [team(), team({ archived: ['me'] })] }), { handle: 'me' })).toThrow(/only the skill lists/);
+    expect(() => guardRawPush(tree({ '.github/workflows/terum-skills.yml': ['a', 'b'] }), { handle: 'me' })).toThrow(/predates the repository's layout/);
   });
 });
 
@@ -203,33 +266,4 @@ describe('membership predicate (§4.1)', () => {
     expect(isMember(me, team({ archived: ['me'] }), 'ME')).toBe(false);
     expect(isMember(me, team(), 'bad handle')).toBe(false);
   });
-});
-
-describe('row a — previousAuthor is the §5.3 managed-field refresh, for sync only', () => {
-  it('lets sync replace the committed author with the configured one, but only as a SKILL.md-only canonical refresh', () => {
-    const refresh = (before: string, after: string) => tree({ 'skills/x/SKILL.md': [skill(before), skill(after)] });
-    const ctx = (action: GuardContext['action']): GuardContext => ({ action, handle: 'me', author: 'Me <new@x.test>', previousAuthor: 'Me <old@x.test>' });
-    expect(() => guard(refresh('Me <old@x.test>', 'Me <new@x.test>'), ctx('sync'))).not.toThrow();
-    // Once the refresh has landed, the actor retains ordinary ownership even when the prior
-    // author is still supplied for a replayed mutation.
-    expect(() => guard(tree({ 'skills/x/SKILL.md': [skill('Me <new@x.test>'), skill('Me <new@x.test>').replace('# x', '# changed')] }), ctx('sync'))).not.toThrow();
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Me <old@x.test>'), skill('Me <new@x.test>').replace('# x', '# changed')] }), ctx('sync'), 'skills/x/SKILL.md');
-    refuse(tree({ 'skills/x/SKILL.md': [skill('Me <old@x.test>'), skill('Me <new@x.test>')], 'skills/x/note.md': [undefined, 'extra'] }), ctx('sync'), 'skills/x/SKILL.md');
-    refuse(refresh('Me <old@x.test>', 'Me <new@x.test>'), ctx('connect'), 'skills/x/SKILL.md');
-    refuse(refresh('Them <them@x.test>', 'Me <new@x.test>'), ctx('sync'), 'skills/x/SKILL.md');
-    refuse(refresh('Me <old@x.test>', 'Them <them@x.test>'), ctx('sync'), 'skills/x/SKILL.md');
-  });
-});
-
-it('issue 5 connect authorizes owned skills and names connect in a non-owned refusal', () => {
-  const context: GuardContext = { action: 'connect', handle: 'me', author: ME };
-  expect(() => guard(tree({ 'skills/x/SKILL.md': [skill(ME), skill(ME).replace('# x', '# edited')] }), context)).not.toThrow();
-  expect(() => guard(tree({ 'skills/x/SKILL.md': [skill('Other <other@x.test>'), skill(ME)] }), context))
-    .toThrow('Write guard refused skills/x/SKILL.md for connect by me');
-});
-
-it.each(['profile', 'decline'] as const)('row b grants %s only the caller people path', action => {
-  expect(() => guard(tree({ 'people/me.json': ['{}', '{"role":"Platform"}'] }), { action, handle: 'me' })).not.toThrow();
-  refuse(tree({ 'people/other.json': ['{}', '{}'] }), { action, handle: 'me' }, 'people/other.json');
-  refuse(tree({ 'team.json': [team(), team({ global: [ID] })] }), { action, handle: 'me' }, 'team.json');
 });

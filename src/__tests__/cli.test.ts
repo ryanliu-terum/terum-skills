@@ -16,7 +16,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       status: async (args) => { calls.push({ verb: 'status', ...args }); return success({ version: '0.1.1', teams: [], ledger: { placements: [], approvals: [], shared: [] }, identity: null, tools: { git: true, gh: false }, hostArch: 'arm64', processArch: 'arm64' }); },
       ls: async (args) => { calls.push({ verb: 'ls', ...args }); return success({ roster: [], skills: [], problems: [] }); },
       readme: async (args) => { calls.push({ verb: 'readme', ...args }); return success({ changed: false }); },
-      publish: async (args) => { calls.push({ verb: 'publish', ...args }); return args.ref === 'fail' ? failure('nope') : success({ team: 't', id: 'id', name: args.ref, scope: { kind: 'global' as const }, policy: 'pr' as const, changed: false, branch: null, prUrl: null, compareUrl: null }); },
+      publish: async (args) => { calls.push({ verb: 'publish', ...args }); return args.ref === 'fail' ? failure('nope') : success({ team: 't', id: 'id', name: args.ref, project: 'p', version: 'v1', created: true, identicalTo: null, attachedEvals: 0, profileAdded: false, projectAdded: false }); },
       leave: async (args) => { calls.push({ verb: 'leave', ...args }); return args.name === 'fail' ? failure('nope') : success({ team: args.name, remote: 'r', handle: null, removed: 0, cloneRemoved: false, kept: [] }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
