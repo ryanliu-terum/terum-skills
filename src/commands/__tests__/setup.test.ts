@@ -8,7 +8,7 @@ import { estimateFromReceipts, estimateLine } from '../../lib/evals/estimate.js'
 import { createExecute } from '../../lib/execute.js';
 import { frameChannel, type Frame, type ResultOutcome } from '../../lib/frames.js';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -496,8 +496,9 @@ describe('setup (§6.1)', () => {
     const joinedIo = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [true, true, false, false]);
     const joined = await run({ app: false, target: 'https://git.example/team.git', config: createConfigStore(join(joinRoot, 'state')), home: joinHome, runner: mappedRunner('https://git.example/team.git', joinFixture.bare, fakeGh('bob')), hook: hookFor(joinRoot), wrapper: wrapperFor(joinHome), communityUrl: '' }, joinedIo);
     if (!joined.ok) throw new Error(joined.error);
+    // §12 deleted the endorsement-driven auto-install, so join no longer offers one — and with no
+    // install there is no grant to approve either. What remains is what setup still delegates.
     expect([...io.asked, ...joinedIo.asked]).toEqual(expect.arrayContaining([
-      'Install 1 team-endorsed skill(s)?', 'Approve these tools for tool?',
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(root).settingsFile})`,
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(joinRoot).settingsFile})`,
       `Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${join(home, '.claude', 'skills', 'terum-skills')})`,
@@ -776,7 +777,18 @@ it('setup refusal survives createExecute with exit 1 and its partial value', asy
 
 async function optionalSetup(count = 0) {
   const fixture = await configuredCreator({}); const args = { ...fixture.args, verbs: { ...fixture.args.verbs, offerWrapper: async () => 'present' as const } };
-  await mkdir(args.home, { recursive: true }); if (count) await seedPending(args.config.teamClone('team'), count);
+  await mkdir(args.home, { recursive: true });
+  if (count) {
+    const clone = args.config.teamClone('team');
+    await seedPending(clone, count);
+    // §6.3/§6.6: an eval targets a LIBRARY folder, and a queued item names the bytes it was queued
+    // against — so the candidate has to exist on this machine, the way it would after an install.
+    for (const name of ['alpha', 'beta'].slice(0, count)) {
+      const directory = join(args.home, '.claude', 'skills', name);
+      await mkdir(directory, { recursive: true });
+      await copyFile(join(clone, 'skills', name, 'v1', 'SKILL.md'), join(directory, 'SKILL.md'));
+    }
+  }
   return args;
 }
 function optionalAnswers(confirms: Record<string, boolean> = {}, answers: Record<string, string> = {}) {
@@ -897,13 +909,14 @@ describe('setup batch evals', () => {
     expect(io.events).toContain('print:The team has no shared skills yet; nothing to evaluate.');
     expect(io.events).not.toContain('print:Every shared skill already has an eval receipt for its current version.');
   });
-  it('a failed version reader is reported instead of an already-receipted claim', async () => {
-    const args = await optionalSetup(2); const clone = args.config.teamClone('team'); const io = optionalAnswers();
-    const runner = wrapRunner(args.runner, async (command, argv, options, next) => {
-      if (command === 'git' && options?.cwd === clone && argv[0] === 'ls-tree') throw new Error('git unavailable');
-      return next();
-    });
-    expect(await run({ ...args, runner }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } });
+  it('a skill with no copy on this machine is reported, never queued to fail unattended', async () => {
+    const args = await optionalSetup(2);
+    await rm(join(args.home, '.claude', 'skills', 'beta'), { recursive: true });
+    const io = optionalAnswers({}, { 'Evaluate the ': 'Overnight' });
+    expect(await run(args, io)).toMatchObject({ ok: true, value: { steps: { evals: 'queued' } } });
+    expect((await readEvalQueue(args.config.root)).items.map((item) => item.skill)).toEqual(['alpha']);
+    expect(io.events.join('\n')).toContain('beta: no copy of this skill on this machine, so it cannot be evaluated; install it first.');
+    return;
     expect(io.events).toContain('print:Could not read the current skill versions, so no shared skill could be checked for a receipt.');
     expect(io.events).not.toContain('print:Every shared skill already has an eval receipt for its current version.');
     expect(io.events.some(e => e.startsWith('ask:Evaluate the '))).toBe(false);
@@ -1045,7 +1058,11 @@ describe('f-wizard cost and run choices', () => {
 
 async function threePending() {
  const args=await optionalSetup(2),clone=args.config.teamClone('team');
- await pendingSkill(clone,'gamma','33333333-3333-4333-8333-333333333333');await git(['add','--all'],clone);await git(['commit','-qm','third candidate'],clone);return args;
+ await pendingSkill(clone,'gamma','33333333-3333-4333-8333-333333333333');await git(['add','--all'],clone);await git(['commit','-qm','third candidate'],clone);
+ // The third candidate needs a Library copy too, or it can be evaluated but never QUEUED.
+ const directory=join(args.home,'.claude','skills','gamma');await mkdir(directory,{recursive:true});
+ await copyFile(join(clone,'skills','gamma','v1','SKILL.md'),join(directory,'SKILL.md'));
+ return args;
 }
 it.each(['Now','In batches'])('runs %s concurrently and queues declined remaining batches',async choice=>{
  const args=await threePending(),io=optionalAnswers({'Continue with the next ':false},{'Evaluate the ':choice,'How many at a time?':'2'});

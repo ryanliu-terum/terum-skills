@@ -24,7 +24,7 @@ describe('team create (§6)', () => {
     expect(Object.keys(workflow.jobs)).toEqual(['hygiene', 'receipt-check', 'readme', 'publish-comment']);
     expect(workflow.jobs.hygiene?.steps[0]?.with?.['fetch-depth']).toBe(0);
     expect(WORKFLOW).toContain('git diff --name-only origin/${{ github.base_ref }}...HEAD -- skills/');
-    expect(WORKFLOW).toContain('npx -y terum-skills@latest validate "skills/$name/v1" --cwd .');
+    expect(WORKFLOW).toContain('npx -y terum-skills@latest validate "$name" --cwd .');
     expect(workflow.jobs['receipt-check']?.if).toBe("github.event_name == 'pull_request' && startsWith(github.head_ref, 'publish/')");
     expect(WORKFLOW).toContain('npx -y terum-skills@latest receipt-check --base origin/main');
     expect(workflow.jobs.readme?.if).toBe("github.event_name == 'push'");

@@ -583,7 +583,9 @@ jobs:
             awk -F/ 'NF >= 2 { print $2 }' | sort -u |
             while IFS= read -r name; do
               # A deleted skill folder appears in the diff but has nothing left to validate.
-              [ -z "$name" ] || [ ! -d "skills/$name" ] || npx -y terum-skills@latest validate "skills/$name" --cwd .
+              # A NAME, not a path: under layout 3 the bytes live in the skill's newest version folder,
+              # and validate resolves that itself. A path would hand hygiene a folder holding only v<N>/.
+              [ -z "$name" ] || [ ! -d "skills/$name" ] || npx -y terum-skills@latest validate "$name" --cwd .
             done
   receipt-check:
     if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'publish/')
