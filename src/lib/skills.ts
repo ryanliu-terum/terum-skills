@@ -192,6 +192,28 @@ function categoryOf(metadata: unknown): string | undefined {
 }
 
 /**
+ * The `metadata.id` a frontmatter declares, read the same tolerant way as `declaredCategory`.
+ *
+ * It must NOT go through `skillFrontmatterSchema`: that schema is `.strict()` and requires `license`
+ * plus all three managed `metadata.*` fields, while §5.1 step 4 reads the id BEFORE
+ * `injectManagedFields` writes them. Reading it strictly means a folder that has been published, but
+ * whose user deleted the injected `license:` line, parses as not-ok — so publish mints a FRESH uuid
+ * for a name that already has a lineage, and every receipt, install and profile entry keyed to the
+ * old uuid is orphaned in the shared repo.
+ */
+export function declaredSkillId(source: string): string | undefined {
+  const match = /^---\s*\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(source);
+  if (!match) return undefined;
+  try { return idOf((YAML.parse(match[1]!) as Record<string, unknown> | null)?.metadata); } catch { return undefined; }
+}
+
+function idOf(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
+  const value = (metadata as Record<string, unknown>)['id'];
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+/**
  * Insert/refresh the managed legal frontmatter fields while retaining body text: `license`,
  * `metadata.id`, `metadata.author`, and — only when the file declares none — `metadata.terum-category`
  * as DEFAULT_CATEGORY, so every off-the-shelf SKILL.md (no `metadata:` block at all) becomes a

@@ -11,7 +11,7 @@ import { Prompter } from '../lib/prompt.js';
 import { fromError, CancelledError, Result, success } from '../lib/result.js';
 import { GLOBAL_PROJECT, parseJson, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { DEFAULT_CATEGORY, declaredCategory, injectManagedFields, readTeam, skillContentDigest } from '../lib/skills.js';
+import { DEFAULT_CATEGORY, declaredCategory, declaredSkillId, injectManagedFields, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
 import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { teamForReference } from './install.js';
 import { assertNotInsideStateRoot, assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
@@ -88,7 +88,19 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const declared = declaredCategory(skillMd.toString('utf8'));
     const category = declared ?? args.category ?? DEFAULT_CATEGORY;
     if (declared === undefined) io.print(`metadata.terum-category: ${category} (${args.category ? 'from --category' : 'default'}; edit SKILL.md any time)`);
-    const id = existingId(skillMd) ?? randomUUID();
+    // The REPOSITORY is the authority on which uuid a published name carries, not the local file.
+    // Reading the id only from the folder was wrong in both directions: `existingId` parsed through
+    // the `.strict()` `skillFrontmatterSchema`, so a published folder whose user deleted the injected
+    // `license:` line minted a FRESH uuid and orphaned every receipt, install and profile entry keyed
+    // to the old one; and a folder COPIED from another skill kept that skill's declared uuid, landing
+    // this publish's receipts in that skill's eval history.
+    const catalogue = await skillRecords(clone, team);
+    const published = catalogue.find((record) => record.name === found.name);
+    const declaredId = declaredSkillId(skillMd.toString('utf8'));
+    const id = published?.id
+      // A declared id already belonging to a DIFFERENT name means a copied folder: mint instead of
+      // grafting onto that skill's identity. §5.1 step 4's "minted at v1" is exactly this case.
+      ?? (declaredId !== undefined && !catalogue.some((record) => record.id === declaredId) ? declaredId : randomUUID());
     const author = `${config.display_name ?? binding.handle} <${config.email ?? ''}>`.trim();
     const injected = Buffer.from(injectManagedFields(skillMd.toString('utf8'), { license: teamJson.policy.skill_license, id, author, category }));
     files.set('SKILL.md', injected);
@@ -104,7 +116,11 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
 
     // 6a. The local regression gate (D19). Absence of a receipt never blocks; nothing moves here.
     const local = await localReceiptsFor(store.root, candidate);
-    const failing = local.find((entry) => entry.receipt.verdict === 'FAIL');
+    // D19 asks about the LATEST eval of these exact bytes. `localReceiptsFor` sorts run ids ascending
+    // and run ids are UTC stamps, so `.find(FAIL)` returned the OLDEST failure: once a run failed, no
+    // amount of passing re-runs of the same bytes could ever clear the gate again.
+    const newest = local.at(-1);
+    const failing = newest?.receipt.verdict === 'FAIL' ? newest : undefined;
     if (failing && !args.allowRegression) {
       const against = failing.receipt.version ? versionLabel(Number(failing.receipt.version.slice(1))) : 'the previous version';
       if (!(await io.confirm(`Your latest eval of these exact bytes failed against ${against}. Publish anyway?`))) {
@@ -112,13 +128,17 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       }
     }
 
-    // 6b. The local write-back, AFTER the last refusal (OF-2): a publish refused at any question
+    // 6b. The project question is a REFUSAL, so it belongs ABOVE the write-back: it throws on an
+    //     unknown `--project`, and its `io.select` can be cancelled or throw on a team whose projects
+    //     do not include `Global`. The comment below asserted this ordering while the code had the
+    //     opposite — a mistyped `--project` rewrote the user's SKILL.md on a publish that never ran.
+    const project = await chooseProject(args, teamJson, io);
+
+    // 6c. The local write-back, AFTER the last refusal (OF-2): a publish refused at any question
     //     leaves the folder byte-identical. A safeWrite failure after this point leaves the injected
     //     SKILL.md on disk with nothing published — the safe side of the boundary, and idempotent,
     //     because every injected field is re-derived identically on the next attempt.
     await writeFile(join(found.path, 'SKILL.md'), injected);
-
-    const project = await chooseProject(args, teamJson, io);
 
     const repo = openTeamRepo(clone, binding.remote, runner);
     let outcome: { version: string | null; identicalTo: string | null; attached: number; projectAdded: boolean } = { version: null, identicalTo: null, attached: 0, projectAdded: false };
@@ -131,6 +151,22 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       // 7. Enumerate this name's versions from the TREE, not with listVersions: a pure mutation may
       //    only see the post-image. Walk descending and stop at the first digest equal to candidate.
       const existing = versionsInTree(tree, found.name);
+      // 7a. This name already has a lineage: prove it is THIS skill's before appending to it.
+      //     `origin/main` refused here and the refusal was lost in the layout-3 rewrite. Row a' cannot
+      //     stand in for it — it proves the path is an add and says outright that ownership is not
+      //     consulted. Without this, two members whose Library both hold a folder called `deploy`
+      //     publish into one lineage: `skillRecords` resolves a name to its newest version, so the
+      //     team's `deploy` silently becomes the second member's skill, the first member's uuid stays
+      //     in team.json reachable through no name, their eval history drops out of `ls`, and every
+      //     machine holding their install reads `gone-from-repo`.
+      const incumbent = existing[0];
+      if (incumbent !== undefined) {
+        const head = tree.after(`skills/${found.name}/${incumbent.folder}/SKILL.md`);
+        const parsed = head === undefined ? undefined : parseSkillFrontmatter(treeText(head));
+        if (!parsed?.ok || parsed.data.metadata.id !== id) {
+          throw new Error(`${found.name} is no longer in the repository as ${id.slice(0, 8)}; run sync and retry.`);
+        }
+      }
       let identical: string | null = null;
       for (const version of existing) {
         const prefix = `skills/${found.name}/${version.folder}/`;
@@ -146,7 +182,14 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       }
 
       const target = identical ?? versionFolderName((existing[0]?.n ?? 0) + 1); // never count + 1
-      if (identical === null) for (const [key, contents] of files) tree.set(`skills/${found.name}/${target}/${key}`, contents);
+      // §4.5/D10: carry the mode across with the bytes. `sourceFiles` already detects it
+      // (`skill-source.ts`'s `lstat(next).mode & 0o111`); before this the set was read for hygiene
+      // and then dropped, so every published `scripts/*.sh` arrived 0644 and would not run.
+      if (identical === null) for (const [key, contents] of files) {
+        const path = `skills/${found.name}/${target}/${key}`;
+        tree.set(path, contents);
+        if (executable.has(key)) tree.setExecutable(path, true);
+      }
 
       // 9. Attach every local receipt taken of these exact bytes, as a COPY stamped with the publish
       //    uuid and this version — never a plain file copy. The stamping is what makes §8.1's
@@ -190,7 +233,17 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     if (outcome.version !== null && unmatched > 0) io.print(`${unmatched} local eval run(s) were not attached — they evaluated this folder before its first publish.`);
 
     // 10. Publishing is not installing (D5). The only people-file write here is the profile prompt.
-    const profileAdded = await offerProfileEntry({ store, clone, team, handle: binding.handle, remote: binding.remote, runner, id, name: found.name, version: at, via: 'publish', preAnswered: args.yesProfile }, io);
+    //     It is a SECOND, independent safeWrite that runs after the version is committed and pushed,
+    //     so its failure must not be reported as a failed publish: the version is durable in the
+    //     shared repo and the success lines are already on screen. Before this, a missing people
+    //     file, a lock timeout or a network blip returned a failure Result carrying no
+    //     PublishResult, for a publish that fully succeeded.
+    let profileAdded = false;
+    try {
+      profileAdded = await offerProfileEntry({ store, clone, team, handle: binding.handle, remote: binding.remote, runner, id, name: found.name, version: at, via: 'publish', preAnswered: args.yesProfile }, io);
+    } catch (error) {
+      io.print(`Published ${found.name}, but could not add it to your profile: ${error instanceof Error ? error.message : String(error)}`);
+    }
 
     return success({ team, id, name: found.name, project, version: outcome.version, created: outcome.version !== null, identicalTo: outcome.identicalTo, attachedEvals: outcome.attached, profileAdded, projectAdded: outcome.projectAdded });
   } catch (error) {
@@ -199,10 +252,6 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
   }
 }
 
-function existingId(skillMd: Buffer): string | undefined {
-  const parsed = parseSkillFrontmatter(skillMd.toString('utf8'));
-  return parsed.ok ? parsed.data.metadata.id : undefined;
-}
 
 /** A choice list defaulting to Global when the team has more than one project and --project is absent. */
 async function chooseProject(args: PublishArgs, teamJson: Awaited<ReturnType<typeof readTeam>>, io: Prompter): Promise<string> {

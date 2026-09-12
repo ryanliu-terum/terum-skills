@@ -268,4 +268,56 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     // re-deriving the same managed fields on the next attempt reproduces it byte for byte.
     expect(await readFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('license: UNLICENSED');
   });
+
+  // --- B3 review fixes. Each of these fails on the pre-fix tree; see the comment on each. ---
+
+  it('keeps a published name on its OWN uuid when the local SKILL.md has lost a managed field', async () => {
+    const { fixture, store, home } = await prepared();
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', published());
+    // The author deleted the injected `license:` line. `skillFrontmatterSchema` is .strict(), so the
+    // old `existingId` read this as not-ok and minted a FRESH uuid, orphaning every receipt, install
+    // and profile entry keyed to ID.
+    await librarySkill(home, 'sample', `---\nname: sample\ndescription: useful skill\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n\n# changed\n`);
+    const result = await run({ ref: 'sample', home, config: store }, new ScriptedPrompter([], [false]));
+    expect(result).toMatchObject({ ok: true, value: { id: ID, version: 'v2' } });
+  });
+
+  it('mints a fresh uuid for a folder COPIED from another skill rather than grafting onto its identity', async () => {
+    const { fixture, store, home } = await prepared();
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', published());
+    // `copy` is `sample`'s folder duplicated and renamed — it still declares sample's uuid. Publishing
+    // it under the declared id put this skill's receipts into sample's eval history.
+    await librarySkill(home, 'copy', published('copy'));
+    const result = await run({ ref: 'copy', home, config: store }, new ScriptedPrompter([], [false]));
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value.id).not.toBe(ID);
+    expect(await show(fixture.bare, 'skills/sample/v1/SKILL.md')).toContain(`id: ${ID}`);
+  });
+
+  it('leaves the folder byte-identical when --project names a project that does not exist (OF-2)', async () => {
+    const { store, home } = await prepared();
+    const folder = await librarySkill(home);
+    const before = await readFile(join(folder, 'SKILL.md'), 'utf8');
+    const result = await run({ ref: 'sample', project: 'Nope', home, config: store }, new ScriptedPrompter([], [false]));
+    expect(result.ok).toBe(false);
+    // Pre-fix the write-back ran BEFORE chooseProject, so a typo rewrote the user's file on a publish
+    // that never happened.
+    expect(await readFile(join(folder, 'SKILL.md'), 'utf8')).toBe(before);
+  });
+
+  it('lets a newer PASS clear the D19 regression gate an older FAIL opened', async () => {
+    const { store, home } = await prepared();
+    const folder = await librarySkill(home);
+    // v1 first: only after publish injects the managed fields do later receipts of this folder match
+    // the digest publish computes (the existing §6.1 test above relies on the same ordering).
+    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    await writeFile(join(folder, 'SKILL.md'), `${await readFile(join(folder, 'SKILL.md'), 'utf8')}\nmore\n`);
+    await localReceipt(store, folder, { run_id: '20260101T000000Z', verdict: 'FAIL' });
+    await localReceipt(store, folder, { run_id: '20260202T000000Z', verdict: 'PASS' });
+    // Run ids sort ascending, so the old `.find(FAIL)` matched the OLDEST run: once any eval of these
+    // bytes failed, no passing re-run could clear the gate. The prompter has no scripted confirm, so
+    // if the gate still asks, this fails loudly rather than silently publishing.
+    const result = await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { version: 'v2' } });
+  });
 });

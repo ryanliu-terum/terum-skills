@@ -238,6 +238,46 @@ describe('safeWrite (§6.0)', () => {
     expect(await readFile(join(clone, 'skills', 'binary', 'v1', 'SKILL.md'), 'utf8')).toBe(initial);
   });
 
+  // §4.5/D10, named in §14.1. Before the five touch points landed, `sourceFiles`' executable set was
+  // read for hygiene and then dropped, `applyTree` wrote every path with no chmod, and
+  // `executablePaths` required `tracked.has(path)` — which a path created by `tree.set()` never is.
+  it('carries the executable bit into the team repo, and a mode-only change does not trip the staged-diff proof (D10, §4.5)', async () => {
+    const fixture = await bareTeam();
+    // Real frontmatter: this remote is generic, so safeWrite regenerates the README in-process and
+    // parses the newest version's SKILL.md.
+    const frontmatter = (body: string) => `---\nname: x\ndescription: x\nlicense: UNLICENSED\nmetadata:\n  id: 22222222-2222-4222-8222-222222222222\n  author: Me <me@example.com>\n  terum-category: testing\n---\n${body}\n`;
+    await pushFromSeed(fixture.seed, 'skills/x/v1/SKILL.md', frontmatter('v1'));
+    await pushFromSeed(fixture.seed, 'people/me.json', personJson('me'));
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+
+    await openTeamRepo(clone, fixture.bare).safeWrite((tree) => {
+      tree.set('skills/x/v2/SKILL.md', frontmatter('v2'));
+      tree.set('skills/x/v2/scripts/run.sh', '#!/bin/sh\necho hi\n');
+      tree.setExecutable('skills/x/v2/scripts/run.sh', true);
+    }, { action: 'publish', handle: 'me' });
+
+    // The proof that matters is what a FRESH clone gets — the working copy could be right by luck.
+    const fresh = await cloneWithIdentity(fixture.bare, join(fixture.root, 'fresh'));
+    const listed = await git(['ls-tree', '-r', 'HEAD', '--', 'skills/x/v2'], fresh);
+    expect(listed).toMatch(/^100755 blob \S+\tskills\/x\/v2\/scripts\/run\.sh$/m);
+    expect(listed).toMatch(/^100644 blob \S+\tskills\/x\/v2\/SKILL\.md$/m);
+
+    // Touch point 5, on a path the guard admits for mutation. It cannot be tested inside a version
+    // folder: row a' is add-only, so a mode-only change there is a mutation of a published version
+    // and is refused — correctly, per §3.1's immutability. `applyTree` is shared by every write
+    // path, which is why the mode-only case still has to work somewhere.
+    await openTeamRepo(fresh, fixture.bare).safeWrite((tree) => {
+      tree.setExecutable('people/me.json', true);
+      // Content is untouched: before this landed, `changedPaths` compared bytes only, so it returned
+      // [] while `git diff --cached --name-only` listed the path, and the equality proof threw.
+      expect(tree.changedPaths).toEqual(['people/me.json']);
+    }, { action: 'join', handle: 'me' });
+
+    const after = await cloneWithIdentity(fixture.bare, join(fixture.root, 'after'));
+    expect(await git(['ls-tree', 'HEAD', '--', 'people/me.json'], after))
+      .toMatch(/^100755 blob \S+\tpeople\/me\.json$/m);
+  });
+
   it('lists the tree as mutated, including additions and excluding removals', async () => {
     const fixture = await bareTeam();
     await pushFromSeed(fixture.seed, 'skills/x/v1/SKILL.md', 'skill');

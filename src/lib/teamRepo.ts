@@ -26,9 +26,15 @@ import { mapWithConcurrency } from './concurrency.js';
 export interface MutableTree extends GuardTree {
   set(path: string, content: string | Buffer): void;
   remove(path: string): void;
+  /**
+   * §4.5(1)/D10: declare a path's executable bit. Mode is NOT part of content identity (D2
+   * normalizes it), so this never affects which version a folder's bytes are -- an executable and a
+   * non-executable copy of the same bytes are the same version.
+   */
+  setExecutable(path: string, executable: boolean): void;
   /** Tracked paths in the freshly reset tree. Needed to make a skill-folder update a true mirror. */
   paths(prefix?: string): readonly string[];
-  /** Executable Git entries in the freshly reset pre-image; mutations remain pure. */
+  /** Executable entries in the post-image: the reset pre-image, overridden by `setExecutable`. */
   executablePaths(prefix?: string): ReadonlySet<string>;
 }
 export type Mutate<R = void> = (tree: MutableTree) => R;
@@ -296,12 +302,18 @@ export function assertSafePath(path: string): void {
 function makeTree(root: string, tracked: ReadonlySet<string>, executable: ReadonlySet<string> = new Set()): MutableTree {
   const cache = new Map<string, Buffer>();
   const overlay = new Map<string, string | Buffer | undefined>();
+  // §4.5(2): the mode overlay, parallel to `overlay`. Absent key = "whatever the pre-image says".
+  const modes = new Map<string, boolean>();
   const before = (path: string): string | Buffer | undefined => {
     if (!tracked.has(path)) return undefined;
     let content = cache.get(path);
     if (content === undefined) { content = readFileSync(join(root, path)); cache.set(path, content); }
     return content;
   };
+  // §4.5(3): a path created by `tree.set()` is never in the committed index, so a liveness test that
+  // requires `tracked.has(path)` can never report it executable -- that was the root of the bug.
+  const live = (path: string): boolean => (overlay.has(path) ? overlay.get(path) : before(path)) !== undefined;
+  const isExecutable = (path: string): boolean => (modes.has(path) ? modes.get(path)! : executable.has(path));
   return {
     before,
     after: (path) => {
@@ -309,19 +321,27 @@ function makeTree(root: string, tracked: ReadonlySet<string>, executable: Readon
       return content;
     },
     get changedPaths() {
-      return [...overlay.keys()].filter((path) => !sameContent(overlay.get(path), before(path))).sort();
+      return [...new Set([...overlay.keys(), ...modes.keys()])].filter((path) => {
+        if (overlay.has(path) && !sameContent(overlay.get(path), before(path))) return true;
+        // §4.5(5): `git diff --cached --name-only` reports a mode-only change, so a chmod of a file
+        // whose bytes are unchanged stages a path this getter must also list -- otherwise safeWrite's
+        // staged-diff equality proof throws on an ordinary mode-only write.
+        return live(path) && modes.has(path) && modes.get(path) !== executable.has(path);
+      }).sort();
     },
     set(path, content) { assertSafePath(path); overlay.set(path, content); },
     remove(path) { assertSafePath(path); overlay.set(path, undefined); },
+    setExecutable(path, value) { assertSafePath(path); modes.set(path, value); },
     paths(prefix = '') {
       return [...new Set([...tracked, ...overlay.keys()])]
         .filter((path) => (!overlay.has(path) || overlay.get(path) !== undefined) && path.startsWith(prefix))
         .sort();
     },
-    executablePaths(prefix = '') { return new Set([...executable].filter((path) => treePaths(path) && path.startsWith(prefix))); },
+    executablePaths(prefix = '') {
+      const candidates = new Set([...executable, ...modes.keys()]);
+      return new Set([...candidates].filter((path) => isExecutable(path) && live(path) && path.startsWith(prefix)));
+    },
   };
-
-  function treePaths(path: string): boolean { return (!overlay.has(path) || overlay.get(path) !== undefined) && tracked.has(path); }
 }
 
 function sameContent(left: string | Buffer | undefined, right: string | Buffer | undefined): boolean {
@@ -395,11 +415,18 @@ async function exists(path: string): Promise<boolean> {
 }
 
 async function applyTree(root: string, realRoot: string, tree: MutableTree, changed: readonly string[]): Promise<void> {
+  // §4.5(4): git records only the executable bit, so every written path gets an explicit mode rather
+  // than whatever the umask would leave. Computed once -- `executablePaths()` walks the whole set.
+  const executable = tree.executablePaths();
   for (const path of changed) {
     const destination = await assertInsideClone(root, realRoot, path);
     const next = tree.after(path);
     if (next === undefined) await rm(destination, { force: true });
-    else { await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, next); }
+    else {
+      await mkdir(dirname(destination), { recursive: true });
+      await writeFile(destination, next);
+      await chmod(destination, executable.has(path) ? 0o755 : 0o644);
+    }
   }
 }
 

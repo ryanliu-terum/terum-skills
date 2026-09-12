@@ -703,3 +703,84 @@ nothing reads it any more — vestigial, not wrong, and removing it changes user
 that no §-of this spec governs. Filed here rather than done quietly. Likewise §6.3's miss message
 still points at a `--path` flag that does not exist; the text is spec-pinned, so it is recorded here
 instead of edited.
+
+
+## B4 — clearing the marketplace batch's blockers, and two authorizations (2026-09-12)
+
+The first three are OF-7/OF-8/OF-9 from `.planning/reviews/2026-09-11-refactor-open-findings.md`,
+resolved at B4's start per that file's rule, before the batch was handed to Codex. The last two are
+Ryan's, given in session.
+
+| # | Decision | Resolution | Why |
+|---|---|---|---|
+| 50 | OF-7: does `newestReceiptAt` return a receipt or a wrapper? | **LOCK — a wrapper; §8.1's field access was wrong** | Raised three times across three rounds with three different verdicts, because its citation went stale while its claim stayed true. B1 deleted `src/commands/receiptCheck.ts` and `CheckedReceipt` with it, so every later verifier checked a dead path and refuted it. The type survived the move: `receipt-store.ts:6` declares `StoredReceipt = { file: string; receipt: Receipt }` and `newestReceiptAt` returns it. §8.1's `newest.skill_id` / `newest.version` would have read `undefined` on every marketplace card, misfiling every eval. Fixed to `newest.receipt.*` in the pseudocode and in §5.1 step 9's cross-reference. The `return` line already had it right, which is why the code half was never wrong |
+| 51 | OF-8: the eval-engine spec still states the display rule the fallback reverses | **LOCK — scoped supersession note** | `2026-09-04-eval-engine.md` §12 still said *"an invalid latest receipt is reported as invalid, never replaced by an older one"* as live, which §8.1's fallback walk contradicts. Documentation-only: the reversal was already deliberate and §8.2's mandatory chip is its mitigation. The note is scoped to the **marketplace card** — the clause still stands for the detail view, the Library and per-version receipt lists, and a blanket "superseded" would have quietly widened the reversal |
+| 52 | OF-9: §8.4 targets two CLI children; the adapter spawns three | **LOCK — keep `ls --local`; the gate says three** | Not a counting error but a fork the spec did not see. Two is reachable only by deleting the `ls --local` read (§12 lists it for deletion), but `catalog.scanned` comes from `scannedRoots(local, home)` and `onDisk`'s `localIdentity` branch matches a folder by its frontmatter `skillId` — neither derivable from `status`'s `ledger.placements`, which records what terum *placed*, not what a scan *found*. Deleting it would silently blank the marketplace's "which roots were scanned on this machine" surface. Resolved against the North Star: read retained, §8.4 and §14.1 say three, §12's line reversed. The read-cost win was always the deleted `N × ls member`. **Open for Ryan:** folding scanned-roots + local ids into `status` would restore a real two-process target, at the cost of new CLI surface |
+| 53 | May Claude merge a batch without Ryan? | **LOCK — yes, on green CI **and** a clean hybrid review** (Ryan, 2026-09-12) | Narrow pre-authorization: CI green AND the hybrid review returns zero confirmed critical/high. Any confirmed critical/high, any unresolved fork, or any contradiction against D1–D52 still waits for Ryan. **PR #183 (B3) is excluded and stays his.** Taken to collapse a three-deep PR stack (B5 on unmerged B4 on unmerged B3), which is the configuration where this repo's known-sharp edges live — deleting a base branch auto-closes the PR above it, and merging into an already-merged branch strands work. Unchanged: no direct push to `main`, no `npm publish`, no running §13's migration |
+| 54 | Must a batch's review finish before the next batch builds on it? | **LOCK — pipeline, not gate** (Ryan, 2026-09-12) | B4 builds while B3's review runs, B5 while B4's runs. Bought deliberately against rework risk: if a review confirms a critical defect, the batch stacked above it needs rework. Accepted because the reviewed batch is already CI-green at that point and B4 is partly pre-built by B3's forced slices, and because gating would put the review stage on the critical path and cost roughly one batch across the weekend |
+
+**Not decided here, and owed.** The override for
+`.planning/decisions/2026-09-08-eval-engine-s12-display-rule-draft.md` (§16 of the spec calls for
+one) still has no Terum receipt — the MCP has refused auth (HTTP 401) for ten consecutive sessions,
+so `record_override` and `record_decision` are both unreachable. Recorded here instead; re-file when
+the server is back.
+
+---
+
+## B3 review — the calls that clear the 19 (2026-09-12, walked with Ryan)
+
+B3's hybrid review returned **19 confirmed high, 0 critical**, so the batch fails its acceptance
+clause (*"`/hybrid-review` of the diff returns no confirmed critical/high"*). These are the calls
+that decide what happens to them. D55 is the settling one; D56 and D57 hang off it.
+
+**Ledger provenance note.** Through this session the ledger existed in two forked copies: the B4
+worktree's (D1–D54) and the B3/B8 worktrees' (D1–D49, a strict prefix). D50–D54 existed only on
+`refactor/b4-marketplace`. Reconciled here by copying the complete file onto
+`refactor/b3-versions-keystone`, which under D57 is where the fixes land and therefore where the
+record belongs. The predecessor handoff named the 705-line copy authoritative; it was not — it was
+short by five decisions.
+
+| # | Decision | Resolution | Why |
+|---|---|---|---|
+| 55 | Does PR #183 (B3) merge this weekend at all? | **LOCK — yes: B3 ships, and the 19 highs are fixed on its own branch first** (Ryan, 2026-09-12) | The settling question the predecessor handoff identified and never asked. Ryan chose the costlier of the two forks with the trade restated: fixing on `refactor/b3-versions-keystone` rewrites the branch under his own open PR and forces both #184 and #185 to rebase onto the rewritten base. Taken because the alternative leaves `main` carrying user-visible data defects once #183 merges — `install <name>@v1` passing the guard and then silently installing the newest version, and `eval` digesting the folder before writing generated cases so no generating run is ever attachable, paid `--drain` runs included. Stacking corrections on top of those makes every later diff harder to reason about. §16.1's build order is unaffected: B3 stays the keystone |
+| 56 | Is 19 the real number — close the review's coverage hole first? | **LOCK — targeted replay of `security:22–28` only** (Ryan, 2026-09-12) | The predecessor handoff framed this as *cheap same-session resume (expired) vs. full 270-agent re-run (~2.5 h)*. Both halves were wrong. The run record (`wf_b4717d07-fcf.json`, session `bd0fb0c1`) names the 18 dead reviewers exactly — `invariants:1–11`, `security:22–28`, all killed by one session limit — and `FILES_PER_BATCH = 6` over 167 path-sorted files makes the batching deterministic, so the exact file sets are reconstructible without the cache. They are radically asymmetric. `invariants:1–11` = 66 files, **every one a `.planning/codex-runs/**` capture frame**, zero source; the frame-fabrication defect they would hunt is already the report's fourth headline finding. `security:22–28` = 41 files and it is **the entire `src/` half of the diff** — `publish.ts`, `install.ts`, `guard.ts`, `eval.ts`, `teamRepo.ts`, `receipt-store.ts`, `readme.ts`, `schema.ts`, `versions.ts`, `uninstall.ts`. Because paths sort `.planning/` before `src/`, the Data-loss & integrity lens lost precisely the source code and nothing else — the one dimension whose checklist reads *"progress persisted BEFORE the work succeeds … a missing rollback on a partial multi-write."* Two of the 19 are exactly that shape (publish writing `SKILL.md` before `chooseProject` can still refuse; eval's pre-write digest) and **both were found by other dimensions**. So 19 is a floor and the missing lens is the one most likely to raise it — but closing it costs **7 finder agents, not 18 and not 270**. The 11 invariants batches are deliberately not replayed |
+| 57 | Where do the 19 fixes land? | **LOCK — on `refactor/b3-versions-keystone`** | Settled by D55 rather than decided separately. Both children stack on B3, so the 19 sit underneath them either way; fixing at the bottom keeps the history honest and means #184 and #185 inherit the fix on rebase instead of carrying corrections stacked on top of known defects. The accepted cost is the branch rewrite under #183 and two forced rebases. Retarget both children to `main` before the B3 branch is deleted — deleting a base branch auto-closes the PR above it |
+| 58 | §13.1(a)'s never-blank `applyReadme` invariant — the triage's fork 2 of 2 | **CLOSED by evidence, not decided** | The triage offered Option 1 (spec-literal sentinel refusal) vs Option 2 (also surface skipped names). Neither needed deciding: B8 shipped Option 1 verbatim this session — `src/lib/readme.ts` refuses the substitution and returns `existing` unchanged rather than throwing (`c3d9043`), and `src/commands/readme.ts` adds the loud layout-3 precondition (`c2f7123`). **Residual, and owed:** Option 2's *partial* wipe is still open — four of five skills losing their `v<N>` folder yields a populated block with one row, the `No shared skills yet.` sentinel never appears, the guard stays silent, and the Action commits a catalogue missing four skills. B8's layout precondition does not cover it (it catches layout-2 repos, not layout-3 repos with missing version folders). Filed here as owed rather than closed as done |
+| 59 | §8.1/§8.2's stale-eval disclosure — the triage's fork 1 of 2 | **CLOSED by evidence; one sequencing question left open for Ryan** | Also not a live fork: B4 shipped the triage's recommended Option 1 end to end — `latestEvalState` on `SelectedCardEval` (`receipt-store.ts:36`), `latestVersion`/`evalVersion`/`latestEvalState` on `LsSkill` (`ls.ts:57–59`, emitted at `:186`), the `SkillCard` mirror with `evalStale` (`desktop/src/backend/types.ts:39`), `evalVersionLabel` rendered on the card face (`presentation.ts:7`, `SkillCard.tsx:16`), and tests pinning the exact strings `from Version 3 · latest Version 10` and `from Version 3 · Version 10 unreadable`. **Still open (D-d):** D55 puts #183 on `main` ahead of #185, so between the two merges `main` carries §8.1's fallback with no surface that can disclose it. Whether to cover that window with the one-line gate at `ls.ts:198` — deleted by B4's rebase — is Ryan's, and was deliberately left unanswered |
+
+**Still open, and Ryan's alone.** **D-f (OF-9's open half):** whether folding the scanned-roots list
+and local skill ids into `status` should restore §8.4's genuine two-process `catalog()` target, at
+the cost of CLI surface the spec does not specify and re-recorded `status` frames. B4 shipped the
+conservative reading under D52 (three children, `ls --local` retained). **D-g (the `declined[]`
+record):** the review flags `uninstall` still writing `declined[]` as contradicting §3.5. Verified
+this session: the *code* is correct sequencing — §16.1 assigns §9.1's deletion to **B6** — but the
+*record* is wrong. D49's closing paragraph claims "nothing reads it any more" while three live
+readers exist on this branch (`uninstall.ts:145`, `install.ts:165`, `ls.ts:213`), and it files
+nothing in this walk's `deferred:` frontmatter, so no future batch will pick the deletion up. Both
+were put to Ryan on 2026-09-12 and left unanswered.
+
+**Unchanged and unchecked.** `check_decision` has still never run — the `terum` MCP has refused auth
+(HTTP 401) for **eleven** consecutive sessions. D1–D59 remain unchecked against the team's shared
+record, not cleared against it.
+
+---
+
+## B3 fix scope — the two calls that set it (2026-09-12, walked with Ryan)
+
+Taken after D56's targeted replay returned 34 new findings (2 high, 21 medium, 11 low) on top of the
+original 19, confirming 19 was a floor.
+
+| # | Decision | Resolution | Why |
+|---|---|---|---|
+| 60 | B3 merges to `main` ahead of both children, and twice introduces a hazard whose mitigation lives in a child PR. Must B3 be safe standing alone? | **LOCK — yes, both mitigations land on B3** (Ryan, 2026-09-12) | Two instances of one question, settled once. (a) §8.1's stale-eval fallback is live on B3 while §8.2's disclosure chip is in B4, so a B3-only `main` draws a v3 score beside a v5 install button with nothing saying so. (b) §13.1(a)'s never-blank `applyReadme` guard is in B8, so a B3-only `main` can commit and push a blanked team catalogue — and the replay found B3 *widened* that exposure, because `safeWrite`'s condition lost its `action !== 'eval'` arm and now regenerates the README for every non-GitHub action, `migrate` included. Both are in B3's own scope per the batch table, so the child PRs were only ever covering for B3. Resolution: gate the stale-eval fallback on B3 with the one-line `return null` at `ls.ts:198` (B4's `cardReceipt` rewrite supersedes it on rebase, no conflict to resolve), and port B8's never-blank guard down to B3, **amending `c3d9043` to drop it from B8** so the two do not collide. Ryan took the costlier fork with the trade restated: B8's commit is amended and both children rebase onto a larger B3. Bought because no revision of `main` then carries either hazard, and the README one is irreversible shared-repo data loss |
+| 61 | What happens to the replay's 21 new mediums? | **LOCK — fix the data-loss subset on B3, defer the rest with gates** (Ryan, 2026-09-12) | The triage protocol never auto-applies mediums, and the acceptance clause turns on critical/high alone — so the strict reading is "defer all 21". Rejected because several are exactly the ordinary-input data loss the repo's posture calls a real bug for a well-meaning user: `readEvalQueue` discarding queued paid evals with no message, bare `--dequeue <skill>` cancelling every team's queued runs for that name, `localReceiptsFor` swallowing an unreadable receipt so publish's D19 regression gate fails open, and `setup` recording `steps.evals: 'queued'` when zero items were queued. Those are pulled forward; dead code, stale comments and test-quality gaps are filed as owed with gates rather than enlarging an already-rewritten branch |
+
+**The fix set this produces.** 18 of the original 19 highs (the 19th is the `declined[]` ledger
+contradiction, still open as D-g and Ryan's alone — B3 cannot reach a zero-high review until he
+rules), plus the 2 new highs the replay found and the orchestrator verified directly against the
+code: §4.5/D10's executable-bit preservation is entirely unimplemented (`setExecutable` exists
+nowhere, `executablePaths` is declared and implemented with **zero callers**, `applyTree` carries no
+`chmod`, and `publish` spends its `executable` set only on hygiene), and `publish` lost the
+lineage-ownership refusal `origin/main:publish.ts:93` carried, so a second member's same-named local
+folder now silently becomes the next version of someone else's skill. Plus the data-loss medium
+subset under D61.
