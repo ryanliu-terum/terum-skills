@@ -311,3 +311,42 @@ fix being wrong. The assertion that caught this is the one that describes what a
 emit, independent of how the file was produced.
 
 **Gates:** root lint, typecheck, **vitest 1690/1690**; desktop **vitest 1893 passed / 90 skipped**.
+
+---
+
+## A11 — The last frame contradiction, and a desktop pin that was pinning the broken fixture
+
+**What.** The stopped review's fourth finding: B3 added `people[]` to the bare `ls` frame with every
+person's **`installed[]` empty**, while the same frame's `installedBy` — already there, untouched by
+B3 — named those handles. `ls.ts:117-131` builds both from the *same* parsed people, so they cannot
+disagree, and `b3-real-data/frames/ls.jsonl` shows the pairing exactly. Confirmed against
+`origin/main`: the limb is B3's. **Five frames** (`m7-S7b`, `m7-S7f`, `m7-S7g`, `m7-S7r`,
+`installed-state/real-data-check-ls`), nine person rows, every field derivable from the frame itself.
+
+**The part worth reading.** Repairing it turned a desktop test red:
+
+```
+expect(catalog.value.people[0]).toMatchObject({ …, installable: [], onDisk: [0, 0], adoption: 2 })
+```
+
+`installable` and `onDisk` are **derived from `people[].installed`**. With the limb empty the members
+page showed mira as having installed nothing — and the test pinned that. Repaired, she has her two
+installs, and the derived pair becomes coherent with the rest of the same frame: `deploy-check` is
+`placed` for the viewer and `tdd` is `absent`, so `onDisk` is `[1, 2]` and `installable` is both.
+`adoption: 2` was already right, because it comes from `installedBy` — the half that was never broken.
+**The assertion was pinning the contradiction, and the repair is what made the frame agree with
+itself.** Updated with the reasoning in place.
+
+**Audit, so the bound is known.** I checked every non-`b3-real-data` frame for the rest of this
+family — `installs` vs `installedBy.length`, `roster` vs `people` handles, `authored[]` vs the author
+byline, `versionCount` vs `latest`, and any surviving tree hash in a re-keyed version field.
+**Zero further contradictions.** This was the last one.
+
+**The oracle gained a sixth assertion** for the pairing; it fails on all five files before the repair.
+
+**I restarted the review for this.** It had been running ~10 minutes against `303edc6`. Shipping a
+review that reports "clean" on a tree I already knew was wrong is worse than paying ten minutes
+again.
+
+**Gates:** root lint, typecheck, **vitest 1698/1698**; desktop typecheck, lint, **vitest 1893
+passed / 90 skipped**, `e2e:routes` **137 passed**.

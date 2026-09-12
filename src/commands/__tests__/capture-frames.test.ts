@@ -24,7 +24,9 @@ import { parseVersionFolder, versionLabel } from '../../lib/versions.js';
  *   4. `people[]` rides the bare `ls` branch alone (`ls.ts:149`) — `showMember` (`:220`),
  *      `showProject` (`:228`) and `showLocal` (`:348`) each return a shape without it;
  *   5. `display_name` is the byline `authored[]` and showMember's "Authored:" line are matched on
- *      (`:121`, `:135-137`, `:215`), which the handle can never satisfy.
+ *      (`:121`, `:135-137`, `:215`), which the handle can never satisfy;
+ *   6. `people[].installed` and a skill's `installedBy` agree, because `ls.ts:117-131` builds both
+ *      from the same parsed people — one cannot name a handle the other leaves with nothing.
  */
 const ROOT = '.planning/codex-runs';
 type Frame = { t: string; verb?: string; ok?: boolean; line?: string; value?: unknown };
@@ -99,7 +101,14 @@ describe('capture frames stay consistent with the CLI that recorded them', () =>
       if (scoped) it(`${id}: a scoped ls carries no people[] — only the bare branch returns one`, () => {
         expect(value['people'], id).toBeUndefined();
       });
-      const people = value['people'] as { handle: string; email: string; display_name: string }[] | undefined;
+      const people = value['people'] as { handle: string; email: string; display_name: string; installed?: unknown[] }[] | undefined;
+      if (people) it(`${id}: people[].installed agrees with installedBy — both come from the same read`, () => {
+        for (const person of people) {
+          const installs = (skills ?? []).filter((skill) => ((skill['installedBy'] as { handle: string }[] | undefined) ?? []).some((p) => p.handle === person.handle));
+          if (installs.length === 0) continue;
+          expect(person.installed ?? [], `${id} / ${person.handle} installed ${installs.map((s) => s['name']).join(', ')}`).toHaveLength(installs.length);
+        }
+      });
       if (people) it(`${id}: display_name matches the byline authored[] and "Authored:" are matched on`, () => {
         const byEmail = new Map<string, string>();
         for (const skill of skills ?? []) {

@@ -402,7 +402,12 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   expect(catalog.value.topRated).toEqual(['deploy-check', 'tdd', 'diagnose']);
   expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject({ installed: 'placed', installsN: 2 });
   expect(catalog.value.skills.find(skill => skill.name === 'tdd')).toMatchObject({ installed: 'absent', installsN: 1 });
-  expect(catalog.value.people[0]).toMatchObject({ handle: 'mira', role: 'Platform', projects: ['terum'], skills: ['deploy-check'], declined: [], installable: [], onDisk: [0, 0], adoption: 2 });
+  // `installable` and `onDisk` are derived from `people[].installed`, which the recording left EMPTY
+  // while the same frame's `installedBy` named mira on both skills — the limb and the counts came
+  // from one read in `ls.ts:117-131` and cannot disagree. With the frame repaired, mira's two
+  // installs appear, and the derived pair agrees with the rest of the frame: `deploy-check` is
+  // `placed` for the viewer and `tdd` is `absent`, so one of her two is on this disk.
+  expect(catalog.value.people[0]).toMatchObject({ handle: 'mira', role: 'Platform', projects: ['terum'], skills: ['deploy-check'], declined: [], installable: ['deploy-check', 'tdd'], onDisk: [1, 2], adoption: 2 });
   expect(catalog.value.people.map(person => person.handle)).toEqual(['mira', 'ravi', 'seed']);
   // §12 deleted the auto-install `declined` suppressed, and §8.4's limb does not carry it.
   expect(catalog.value.people.find(person => person.handle === 'seed')?.declined).toEqual([]);
