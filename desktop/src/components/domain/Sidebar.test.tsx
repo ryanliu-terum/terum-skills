@@ -79,28 +79,29 @@ it('renders no Global number when the served status omits its count', async () =
 function openSidebar(backend=createMockBackend(),selected='Global',counts:Record<string,string>|null={Global:'15'}) {
  return backend.status().then(status=>{if(!status.ok)throw new Error(status.error);return render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected={selected} roots={status.value.roots} counts={counts} machine={undefined}/></HashRouter></QueryClientProvider></BackendContext>);});
 }
-it('keys and selects same-label checkouts by canonical root',async()=>{
+it('keys and selects same-label projects by canonical root',async()=>{
  const backend=createMockBackend(),status=await backend.status();if(!status.ok)throw new Error(status.error);
- vi.spyOn(backend,'status').mockResolvedValue({ok:true,value:{...status.value,roots:['/a/app','/b/app'].map(root=>({id:root,kind:'checkout',root,label:'app',registered:true,detected:false}))}});
+ vi.spyOn(backend,'status').mockResolvedValue({ok:true,value:{...status.value,roots:['/a/app','/b/app'].map(root=>({id:root,kind:'checkout',root,label:'app',registered:true}))}});
  await openSidebar(backend,'/b/app');
  const links=screen.getAllByRole('link',{name:'app'});
  expect(links.map(a=>a.getAttribute('href'))).toEqual(['#/library/checkout?root=%2Fa%2Fapp','#/library/checkout?root=%2Fb%2Fapp']);
  expect(links[0]).not.toHaveAttribute('aria-current');expect(links[1]).toHaveAttribute('aria-current','page');
 });
-it('adds a detected root without navigating and shows errors below its row',async()=>{
- location.hash='#/library/global?__mock=detected-root';const backend=createMockBackend();
- const add=vi.spyOn(backend.checkouts,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Cannot register this folder'})));
- await openSidebar(backend);fireEvent.click(await screen.findByRole('button',{name:'Add SSM to your library'}));
- expect(add).toHaveBeenCalledWith('/Users/you/code/ssm');expect(await screen.findByRole('alert')).toHaveTextContent('Cannot register this folder');
- expect(screen.getByRole('alert').previousElementSibling).toHaveTextContent('SSM');
- expect(location.hash).toBe('#/library/global?__mock=detected-root');
+/**
+ * §7.2: nothing can be "detected but not registered" any more, so the per-row "+ Add" is gone. The
+ * only way a project reaches this list is the Add project button, and that is the only control to hide
+ * when the CLI is too old to have `project add`.
+ */
+it('offers no per-row Add, because every row is a project you added',async()=>{
+ await openSidebar();
+ await screen.findByRole('link',{name:'Terum 8'});
+ expect(screen.queryByRole('button',{name:/^Add .+ to your library$/})).toBeNull();
+ expect(await screen.findByRole('button',{name:'Add project'})).toBeVisible();
 });
-it('hides detected Add when the CLI does not support registration',async()=>{
- location.hash='#/library/global?__mock=detected-root';const backend=createMockBackend();
- vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),checkouts:false});
+it('hides Add project when the CLI does not support it',async()=>{
+ const backend=createMockBackend();
+ vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),libraryProjects:false});
  await openSidebar(backend);await screen.findByRole('link',{name:'SSM 3'});
- expect(screen.queryByRole('button',{name:'Add SSM to your library'})).toBeNull();
-
  expect(screen.queryByRole('button',{name:'Add project'})).toBeNull();
 });
 it.each([false,true])('shows an absent root dash only with counts enabled (hidden=%s)',async hidden=>{
@@ -108,7 +109,7 @@ it.each([false,true])('shows an absent root dash only with counts enabled (hidde
  expect(screen.getByRole('link',{name:hidden?'SSM':'SSM —'})).toBeVisible();
  if(hidden)expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
 });
-it('keeps Projects and its Add button with zero checkouts, and says 0 projects',async()=>{
+it('keeps Projects and its Add button with zero projects, and says 0 projects',async()=>{
  location.hash='#/library/global?__mock=no-projects';await openSidebar();
  expect(screen.getByRole('link',{name:'Projects'})).toBeVisible();
  expect(screen.getByText('0 projects')).toBeVisible();
@@ -117,7 +118,7 @@ it('keeps Projects and its Add button with zero checkouts, and says 0 projects',
 });
 it('registers the folder the chooser returns, and leaves the library alone when the chooser is cancelled',async()=>{
  const backend=createMockBackend();
- const add=vi.spyOn(backend.checkouts,'add');
+ const add=vi.spyOn(backend.projects,'add');
  const pick=vi.spyOn(backend,'pickFolder').mockResolvedValue({ok:true,value:null});
  await openSidebar(backend);
  fireEvent.click(await screen.findByRole('button',{name:'Add project'}));
@@ -128,30 +129,31 @@ it('registers the folder the chooser returns, and leaves the library alone when 
  await waitFor(()=>expect(add).toHaveBeenCalledWith('/Users/you/code/new-project'));
 });
 it('clears a failed add error when the next sidebar action starts, even a cancelled chooser',async()=>{
- location.hash='#/library/global?__mock=detected-root';const backend=createMockBackend();
- vi.spyOn(backend.checkouts,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Cannot register this folder'})));
- vi.spyOn(backend,'pickFolder').mockResolvedValue({ok:true,value:null});
+ const backend=createMockBackend();
+ vi.spyOn(backend.projects,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Cannot add this folder'})));
+ const pick=vi.spyOn(backend,'pickFolder').mockResolvedValue({ok:true,value:'/Users/you/code/new-project'});
  await openSidebar(backend);
- fireEvent.click(await screen.findByRole('button',{name:'Add SSM to your library'}));
- expect(await screen.findByRole('alert')).toHaveTextContent('Cannot register this folder');
+ fireEvent.click(await screen.findByRole('button',{name:'Add project'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('Cannot add this folder');
+ pick.mockResolvedValue({ok:true,value:null});
  fireEvent.click(screen.getByRole('button',{name:'Add project'}));
  await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
 });
-it('moves the error to the action that failed last, never stacking two',async()=>{
- location.hash='#/library/global?__mock=detected-root';const backend=createMockBackend();
- vi.spyOn(backend,'pickFolder').mockResolvedValue({ok:false,error:'No folder chooser on this shell'});
- vi.spyOn(backend.checkouts,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Cannot register this folder'})));
+it('replaces the last error rather than stacking two',async()=>{
+ const backend=createMockBackend();
+ const pick=vi.spyOn(backend,'pickFolder').mockResolvedValue({ok:false,error:'No folder chooser on this shell'});
+ vi.spyOn(backend.projects,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Cannot add this folder'})));
  await openSidebar(backend);
  fireEvent.click(await screen.findByRole('button',{name:'Add project'}));
  expect(await screen.findByRole('alert')).toHaveTextContent('No folder chooser on this shell');
- fireEvent.click(screen.getByRole('button',{name:'Add SSM to your library'}));
- await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Cannot register this folder'));
+ pick.mockResolvedValue({ok:true,value:'/Users/you/code/new-project'});
+ fireEvent.click(screen.getByRole('button',{name:'Add project'}));
+ await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Cannot add this folder'));
  expect(screen.getAllByRole('alert')).toHaveLength(1);
- expect(screen.getByRole('alert').previousElementSibling).toHaveTextContent('SSM');
 });
-it('reports a chooser failure below the Add row without calling checkout add',async()=>{
+it('reports a chooser failure below the Add row without calling project add',async()=>{
  const backend=createMockBackend();
- const add=vi.spyOn(backend.checkouts,'add');
+ const add=vi.spyOn(backend.projects,'add');
  vi.spyOn(backend,'pickFolder').mockResolvedValue({ok:false,error:'No folder chooser on this shell'});
  await openSidebar(backend);
  fireEvent.click(await screen.findByRole('button',{name:'Add project'}));

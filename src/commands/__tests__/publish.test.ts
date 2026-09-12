@@ -361,6 +361,8 @@ describe('publish project recovery hints', () => {
   it.each([false, true])('prints the actual project candidate path and scope-labels duplicate names (duplicated: %s)', async (duplicated) => {
     const { fixture, store } = await prepared(); const home = join(fixture.root, 'home'); const cwd = join(fixture.root, 'project');
     await mkdir(join(cwd, '.git'), { recursive: true }); const project = await localSkill(cwd, 'local');
+    // §7.2: publish's candidate scan reads the projects you added, not the folder you are standing in.
+    await store.update((config) => { config.projects = [{ root: cwd, label: 'project' }]; });
     const global = duplicated ? await localSkill(home, 'local') : undefined;
     const runner = mappedRunner(REMOTE, fixture.bare); const io = new ScriptedPrompter();
     const result = await run({ ref: 'local', home, cwd, project: 'p', config: store, runner }, io);
@@ -458,17 +460,18 @@ describe('publish HYG6 warnings', () => {
 });
 
 
-it.each([true, false])('registers a checkout only after successful publish (consent: %s)', async consent => {
+/**
+ * §7.2: publish's silent `register` closure and its three call sites are deleted. Publishing from
+ * inside a repository is not a request to track that repository — "the app never adds a project by
+ * itself", and the only thing that adds one is `project add`.
+ */
+it.each([true, false])('never adds a project, published or not (consent: %s)', async consent => {
   const { fixture, store } = await prepared('push');
   const root = join(await realpath(fixture.root), 'checkout'); const cwd = join(root, 'src');
   await mkdir(cwd, { recursive: true }); await mkdir(join(root, '.git'));
   const args = { ref: 'sample', config: store, runner: mappedRunner(REMOTE, fixture.bare), cwd, home: fixture.root };
   const io = new ScriptedPrompter([], [consent]);
   expect((await run(args, io)).ok).toBe(consent);
-  expect((await store.read()).checkouts ?? []).toEqual(consent ? [root] : []);
-  expect(io.lines.filter(line => line.startsWith('Registered '))).toEqual(consent ? [`Registered ${root} in your library.`] : []);
-  if (consent) {
-    const again = new ScriptedPrompter(); expect((await run(args, again)).ok).toBe(true);
-    expect(again.lines.filter(line => line.startsWith('Registered '))).toEqual([]);
-  }
+  expect((await store.read()).projects ?? []).toEqual([]);
+  expect(io.lines.filter(line => line.startsWith('Added ') || line.startsWith('Registered '))).toEqual([]);
 });

@@ -14,7 +14,7 @@ it('serves the recorded detail metadata without invented file or grant data', as
     hygieneStatus:'pass',hygieneWhen:null,hygieneCaption:null,path:'/Users/teddy/.claude/skills/deploy-check',
   }});
   expect(result.value?.users[0]?.[2]).toBe('Global · since 2026-08-20');
-  expect(await backend.features()).toMatchObject({checkouts:true});
+  expect(await backend.features()).toMatchObject({libraryProjects:true});
 });
 
 it('uses the full team version for an unplaced skill and excludes absent project roots', async () => {

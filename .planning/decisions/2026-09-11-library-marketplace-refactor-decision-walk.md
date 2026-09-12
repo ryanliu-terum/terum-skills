@@ -556,3 +556,90 @@ per asset. There is no overwrite path, so there is nothing to refuse and nothing
 - **Grounding findings:** verified in the B1 tree — `plannedGeneration` at `eval.ts:262-263`;
   `--gen`/`--no-gen` registered at `cli.ts:155`; the two refusals at `eval.ts:315-316`; `--save` and
   `--working` absent from the whole tree after B1; no desktop caller of `gen`.
+
+---
+
+## Decision 30 — Does B2 go to Codex, or straight to the orchestrator?
+
+**Verdict: LOCK — orchestrator throughout. Not on the shape of the work; on the quota arithmetic.**
+
+**Resolved on Ryan's standing best-call authorization (handoff of 2026-09-11), not by Ryan in person.**
+The handoff left this open and leaned weakly toward a Codex stage for the mechanical rename half. The
+free diagnosis it asked for first has now run, and it moves the answer.
+
+### Plain English
+
+- **What's at stake:** who writes B2's `checkouts` → `projects` rename — a Codex run adjudicated by the
+  orchestrator (as B1), or the orchestrator directly.
+- **The argument for Codex is intact and was not defeated.** The rename is genuinely large — **85 files,
+  507 occurrences** of `checkout`/`Checkout` across `src/`, `desktop/src/`, `e2e/` and `docs/` — and it is
+  exactly the enumerable, mechanical shape every counted-target B1 run completed cleanly. It also
+  preserves the cross-model property that is the point of running a Claude-written spec through
+  `codex-implement`.
+- **What defeats it is the budget, measured rather than assumed.** Codex's weekly window is at **77.0%**
+  used and the `codex-implement` preflight stops at **≥80%**. B1's runs on 2026-09-11 took the same
+  window from **62% → 77%** across the day, i.e. **4–5 points per substantial run**. One B2 rename stage
+  therefore crosses the gate *during* the run, not before it — and the contract's own rule is that a
+  quota kill mid-run is worse than a delayed start (it is how B1 run 3 died on 2026-07-23). The window
+  does not reset until **Mon Sep 14 18:30 PDT**, three days out; B2 is not worth stalling three days.
+- **The call:** (b), orchestrator throughout. Recorded so it can be overturned cheaply — if the window
+  resets before B3, the argument for a Codex stage returns unchanged, because nothing about the *shape*
+  of this work counted against it.
+
+### Technical — the capture diagnosis that was supposed to settle it, and what it actually found
+
+The handoff predicted B2 would re-run B1's stale-recording class ("expect exactly this class again").
+It will not. Across **105 recordings** under `.planning/codex-runs/*/frames/*.jsonl`, all of which carry a
+`hello` frame:
+
+| what B2 moves | recordings affected | how it fails |
+| --- | --- | --- |
+| `FRAME_FEATURES.checkouts` → `libraryProjects` | **26** (21 + the 5 hand-edited `personal-library`) | **silently** |
+| `FRAME_VERBS` `checkout add\|remove\|list` → `project …` | the same 26 | silently |
+| `features.discover` dropped, `checkout discover`, `project create` | 5 (`personal-library` only) | silently |
+| setup step `discover` → `projects`, `actions` deleted (§9.2, D20) | **0** | — |
+
+**The staleness is silent, which is the inverse of B1's and the more dangerous direction.** B1's captures
+failed loudly because `cliLocalRow` is `.strict()`. The `hello` frame has no such guard: the desktop
+parses `features` as a bare cast (`desktop/src/backend/tauri/frames.ts:29`,
+`features: f['features'] as Record<string, boolean>`) and reads it as
+`hello?.features[key] ?? false` (`tauri/index.ts:618`). So after the rename, all 26 recordings yield
+`libraryProjects: false`, the sidebar's **Add project** button vanishes, and **no test goes red** — §7.1's
+"reads `false` forever" hazard, realised. This is a fourth instance of B1's gate-green/app-broken class.
+
+Two consequences, both inside B2:
+
+1. **The 26 recordings are re-keyed in-batch**, mechanically and round-trip-verified (the
+   `scratchpad/strip-dead-keys.py` pattern: parse every line, assert byte-exact round-trip, rewrite only
+   the dead keys). No re-record is needed — the rename is a key name, not a shape.
+2. **No setup recording moves at all**, so §9.2's step rename is a pure typecheck exercise
+   (`SETUP_STEP_TO_BOARD` is `satisfies Record<SetupStep, string>`), which is the loud direction.
+
+**Filed, not taken — a `FEATURE_KEYS` ↔ `FRAME_FEATURES` set-equality tripwire.** It is the countermeasure
+the silent failure above argues for, and it is the same class of thing as the mirror type-test the handoff
+reserved for Ryan: new permanent cross-tree test infrastructure. It is therefore **not built here**, and
+joins the mirror type-test as a proposal. B2 closes its own instance by re-keying the recordings.
+
+---
+
+## Decisions 31–37 — the calls B2's implementation forced (2026-09-11, third session)
+
+**Resolved on Ryan's standing best-call authorization (handoff of 2026-09-11), not by Ryan in person.**
+Each surfaced while building B2 and had no answer in rev 8: an implementer reaching them would have had
+to invent one. Recorded here with the reasoning in view so any can be overturned cheaply. Unchecked
+against the team's shared record — the `terum` MCP refused auth again (HTTP 401), a seventh session.
+
+| # | Decision | Verdict | Rationale (plain) |
+|---|---|---|---|
+| 31 | `LocalRoot.detected` after §7.2 deletes both its producers | LOCK — delete it end to end | Nothing can set it once the cwd root and `extraRoots` are gone. It gated two "Add" buttons (the sidebar's per-row `+ Add`, Settings' Add-on-a-detected-row) that the real app could then never show — the dead-control-that-lies class D25 used to delete `eval --working`. The `detected-root` mock scenario went with it; no fidelity board used it |
+| 32 | `added_at` on a project migrated from `checkouts` | LOCK — optional, and the migration omits it | The old shape never recorded when a root was registered. Stamping today's date would put a fact on the Library that is simply false, against "you can always see exactly what's on each". `addLibraryProject` always sets it going forward |
+| 33 | Whose label changes when two project basenames collide | LOCK — relabel the whole set, not just the newcomer | §3.6 gives the rule but not its scope. Labelling `/b/web` as `web (b)` while `/a/web` stays `web` leaves the pair unreadable in exactly the way the rule exists to prevent. `projectLabels()` is positional and pure: basename, parent-qualified on collision, whole root if even that collides |
+| 34 | `destinationSchema`'s `kind: 'checkout'` discriminant | LOCK — leave it; it is B6's | §7.1's naming table does not name it, and it is a **persisted** value (`config.pending[].destination`), so renaming it needs a migration nobody has specified. §9.1 rewrites the destination picker in B6; that is where it belongs, if anywhere |
+| 35 | What an unreadable project root does now | LOCK — stays visible, reports `unreadable` | The old pre-scan permission probe existed only to decide whether to admit an *undetected* cwd root, and it dropped the root and printed a problem line instead. A root the user added must not vanish from the Library because it briefly cannot be read — that would make the Library disagree with `project list`. The scan itself now supplies the state |
+| 36 | B2's projects onboarding fidelity board | LOCK — **owed, not added** | `boards.test.ts` asserts a read-only oracle for **every** `BOARDS` row regardless of status, gated only on `TERUM_DESIGN_DIR`. A row with no artboard passes here (no design dir) and fails on the maintainer's Mac — the worst outcome. The artboard is Teddy's, and the step's only surface is a prompt dialog no route renders. Recorded in `desktop/FIDELITY.md` with what it needs, in order. The 90-row pin is untouched |
+| 37 | Where the `path` ask actually renders | Correction of fact, not a fork | §9.2 names `desktop/src/components/domain/WorkflowControls.tsx`. That file is a 21-line popup shell and renders no ask kinds; the ask renderer is `PromptDialog` in `desktop/src/app/providers.tsx`. Built there: the existing `.prompt-field` input plus a `Choose folder…` button calling `backend.pickFolder()`, in a `.prompt-path` flex row. The typed value stays the answer, so a shell without a chooser is still a working prompt — which is what the protocol promises anyone treating `path` as `text` |
+
+**Also settled by building it, and not a fork:** §9.2's step body needs no "no folder chosen" branch.
+A blank answer to a text question takes the offered default (`frames.ts`'s `answer || defaultValue || ''`),
+and the step always offers one, so the branch was unreachable. Declining is the confirm — the **Skip**
+half of §9.2's drawn control — and that is the only way to leave the step without a project.

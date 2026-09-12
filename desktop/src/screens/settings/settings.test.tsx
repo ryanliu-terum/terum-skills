@@ -358,29 +358,34 @@ it('leaves the keyed team, renders inventory and delegates confirmation to the r
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(leave).toHaveBeenCalledExactlyOnceWith({kind:'leave',name:'acme-key'});expect(completed).toHaveBeenCalledWith(true);expect(location.hash).not.toContain('dialog=');
 });
 
-it('hides Checkouts on the mock machine board',async()=>{
+// "Projects" alone also names the sidebar nav row, so both of these anchor on copy only this group has.
+it('hides the Projects group on the mock machine board',async()=>{
  open('#/settings/machine');await screen.findByRole('heading',{name:'This machine'});
- expect(screen.queryByText('Checkouts')).toBeNull();expect(screen.queryByRole('textbox',{name:'Checkout path'})).toBeNull();
+ expect(screen.queryByText(/Adding a folder is not sharing/)).toBeNull();expect(screen.queryByRole('textbox',{name:'Project path'})).toBeNull();
 });
-it('lists checkout paths and forgets only the selected root',async()=>{
- vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});const remove=vi.spyOn(backend.checkouts,'remove');
- open('#/settings/machine');await screen.findByText('Checkouts');
- for(const name of ['terum','ssm','mrf'])expect(screen.getByText('/Users/you/code/'+name)).toBeVisible();
+it('lists project paths with their labels and forgets only the selected root',async()=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),libraryProjects:true});const remove=vi.spyOn(backend.projects,'remove');
+ open('#/settings/machine');await screen.findByText(/Adding a folder is not sharing/);
+ for(const name of ['terum','ssm','mrf'])expect(screen.getByText(new RegExp('/Users/you/code/'+name))).toBeVisible();
  fireEvent.click(screen.getAllByRole('button',{name:'Remove'})[0]!);await waitFor(()=>expect(remove).toHaveBeenCalledWith('/Users/you/code/terum'));
- expect(screen.getByText(/Registering a folder is not sharing/)).toHaveTextContent('connects nothing and approves no tool grant');
- expect(screen.getByText(/Registering a folder is not sharing/)).toHaveTextContent('Detected · not registered');
+ // §7.2: the note says the list changes only when you change it, and names no detected state — the
+ // app cannot put a folder here, so there is nothing for the copy to offer.
+ expect(screen.getByText(/Adding a folder is not sharing/)).toHaveTextContent('publishes nothing and approves no tool grant');
+ expect(screen.getByText(/Adding a folder is not sharing/)).toHaveTextContent('Nothing is added for you');
+ expect(screen.queryByText(/Detected/)).toBeNull();
 });
-it.each(['click','enter'])('adds a typed checkout by %s and clears the field',async mode=>{
- vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});const add=vi.spyOn(backend.checkouts,'add');
- open('#/settings/machine');const field=await screen.findByRole('textbox',{name:'Checkout path'});fireEvent.change(field,{target:{value:'  /tmp/x  '}});
+it.each(['click','enter'])('adds a typed project by %s and clears the field',async mode=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),libraryProjects:true});const add=vi.spyOn(backend.projects,'add');
+ open('#/settings/machine');const field=await screen.findByRole('textbox',{name:'Project path'});fireEvent.change(field,{target:{value:'  /tmp/x  '}});
  if(mode==='click')fireEvent.click(screen.getByRole('button',{name:'Add'}));else fireEvent.keyDown(field,{key:'Enter'});
  await waitFor(()=>expect(add).toHaveBeenCalledWith('/tmp/x'));await waitFor(()=>expect(field).toHaveValue(''));
 });
-it('adds a detected checkout and reports one action error',async()=>{
- vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});const add=vi.spyOn(backend.checkouts,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Registration denied'})));
- open('#/settings/machine?__mock=detected-root');await screen.findByText('Checkouts');
- fireEvent.click(within(screen.getByText('/Users/you/code/ssm').closest('.setting-row')!).getByRole('button',{name:'Add'}));
- expect(add).toHaveBeenCalledWith('/Users/you/code/ssm');expect(await screen.findByRole('alert')).toHaveTextContent('Registration denied');expect(screen.getAllByRole('alert')).toHaveLength(1);
+it('reports one action error when adding a project fails',async()=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),libraryProjects:true});
+ vi.spyOn(backend.projects,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Could not add this folder'})));
+ open('#/settings/machine');const field=await screen.findByRole('textbox',{name:'Project path'});fireEvent.change(field,{target:{value:'/tmp/x'}});
+ fireEvent.click(screen.getByRole('button',{name:'Add'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('Could not add this folder');expect(screen.getAllByRole('alert')).toHaveLength(1);
 });
 it('keeps the populated mock quarantine, eval defaults and available version copy',async()=>{
  open('#/settings/sync');await screen.findByText('Managed by setup');
@@ -399,38 +404,7 @@ it('draws an empty quarantine and still lets its CLI confirmation determine the 
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
 });
 
-it.each([false,true])('offers Find skills… only when the CLI reports the discover feature (%s)',async discover=>{
- vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});
- vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),discover});
- open('#/settings/machine');await screen.findByText('Checkouts');
- if(discover)expect(await screen.findByRole('button',{name:'Find skills…'})).toBeVisible();
- else expect(screen.queryByRole('button',{name:'Find skills…'})).toBeNull();
-});
-it('lists what discover found and adds one candidate',async()=>{
- vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});
- vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),discover:true});
- const discover=vi.spyOn(backend.checkouts,'discover').mockImplementation(()=>createRun(async()=>({ok:true,value:{candidates:[{path:'/found/new',skillFolders:1,registered:false,repoRoot:false},{path:'/found/old',skillFolders:2,registered:true,repoRoot:true}],scanned:9,truncated:false,problems:[]}})));
- const add=vi.spyOn(backend.checkouts,'add');open('#/settings/machine');fireEvent.click(await screen.findByRole('button',{name:'Find skills…'}));
- const fresh=(await screen.findByText('/found/new')).closest<HTMLElement>('.setting-row')!,old=screen.getByText('/found/old').closest<HTMLElement>('.setting-row')!;
- expect(discover).toHaveBeenCalledExactlyOnceWith({register:false});expect(fresh).toHaveTextContent('1 skill folders');expect(old).toHaveTextContent('2 skill folders · already registered');
- expect(within(old).queryByRole('button',{name:'Add'})).toBeNull();fireEvent.click(within(fresh).getByRole('button',{name:'Add'}));
- await waitFor(()=>expect(add).toHaveBeenCalledWith('/found/new'));await waitFor(()=>expect(within(fresh).queryByRole('button',{name:'Add'})).toBeNull());
-});
-it('says so when discover finds nothing, stops early, or cannot read a folder',async()=>{
- vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});
- vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),discover:true});
- vi.spyOn(backend.checkouts,'discover').mockImplementation(()=>createRun(async()=>({ok:true,value:{candidates:[],scanned:9,truncated:true,problems:[{path:'/x',reason:'EACCES'}]}})));
- open('#/settings/machine');fireEvent.click(await screen.findByRole('button',{name:'Find skills…'}));
- expect(await screen.findByText('No skill folders found. Stopped early; some folders were not looked at. 1 folders could not be read.')).toBeVisible();
-});
-it('reports discovery and registration failures without claiming a folder was added',async()=>{
- vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),checkouts:true});
- vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),discover:true});
- vi.spyOn(backend.checkouts,'discover').mockImplementationOnce(()=>createRun(async()=>({ok:false,error:'Search failed.'}))).mockImplementation(()=>createRun(async()=>({ok:true,value:{candidates:[{path:'/found/retry',skillFolders:1,registered:false,repoRoot:false}],scanned:1,truncated:false,problems:[]}})));
- vi.spyOn(backend.checkouts,'add').mockImplementation(()=>createRun(async()=>({ok:false,error:'Add failed.'})));
- open('#/settings/machine');fireEvent.click(await screen.findByRole('button',{name:'Find skills…'}));expect(await screen.findByRole('alert')).toHaveTextContent('Search failed.');
- fireEvent.click(screen.getByRole('button',{name:'Find skills…'}));const row=(await screen.findByText('/found/retry')).closest<HTMLElement>('.setting-row')!;
- fireEvent.click(within(row).getByRole('button',{name:'Add'}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Add failed.'));
- expect(within(row).getByRole('button',{name:'Add'})).toBeVisible();expect(row).not.toHaveTextContent('already registered');
-});
+// D13 deleted `discover` in full — the scan, its feature key and the "Find skills…" control. A
+// project reaches the Library only by being added, so there is no candidate list left to test.
+
 

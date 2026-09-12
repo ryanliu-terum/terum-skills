@@ -13,13 +13,13 @@ export const FRAMES_FLAG = '--frames';
 export const FRAME_PROTOCOL = 1;
 
 export type FrameLevel = 'info' | 'warn' | 'error';
-export type AskKind = 'confirm' | 'text' | 'select';
+export type AskKind = 'confirm' | 'text' | 'select' | 'path';
 
 /** First line of every frame-mode run: what this CLI is and what it can honour, so a shell never hard-codes it. */
 export interface HelloFrame { t: 'hello'; protocol: typeof FRAME_PROTOCOL; version: string | null; verbs: readonly string[]; features: Readonly<Record<string, boolean>>; }
 export interface PrintFrame { t: 'print'; id?: string; level: FrameLevel; line: string; }
 export interface AskFrame { t: 'ask'; id?: string; kind: AskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[]; descriptions?: readonly string[]; }
-/** Emitted by `install`, `checkout discover` and `setup`'s discover/evals steps; every other verb is silent. One shape, declared once (Prompter.progress). Never ordered against `ask`; a shell may ignore it. */
+/** Emitted by `install` and `setup`'s evals step; every other verb is silent. One shape, declared once (Prompter.progress). Never ordered against `ask`; a shell may ignore it. */
 export interface ProgressFrame extends ProgressUpdate { t: 'progress'; id?: string; }
 export interface ResultFrame { t: 'result'; id?: string; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; refused?: boolean; value?: unknown; }
 export type Frame = HelloFrame | PrintFrame | AskFrame | ProgressFrame | ResultFrame;
@@ -33,7 +33,7 @@ export type InboundFrame = AnswerFrame | CancelFrame | RequestFrame | ServeCance
 export { SERVE_READ_VERBS } from './serve-verbs.js';
 
 /** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed). */
-export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 'project create', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'install', 'uninstall-skill', 'uninstall', 'sync', 'prune', 'search', 'update', 'app', 'profile', 'checkout discover', 'app-update', 'serve'] as const;
+export const FRAME_VERBS = ['project add', 'project remove', 'project list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'team project create', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'install', 'uninstall-skill', 'uninstall', 'sync', 'prune', 'search', 'update', 'app', 'profile', 'app-update', 'serve'] as const;
 
 /**
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
@@ -47,11 +47,11 @@ export const FRAME_VERBS = ['checkout add', 'checkout remove', 'checkout list', 
  * statistic derived across receipts. See .planning/specs/2026-09-04-eval-engine.md §12.
  */
 export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
-  checkouts: true, projects: true,
+  libraryProjects: true, projects: true,
   memberRole: true, localIdentity: true, roles: true,
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
   disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: false, progress: true,
-  refresh: true, discover: true, appUpdate: true,
+  refresh: true, appUpdate: true,
   serve: true,
 });
 
@@ -190,7 +190,7 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
       return typeof answer === 'boolean' ? answer : /^(y|yes|true)$/i.test(String(answer).trim());
     },
     async text(question, defaultValue, options) {
-      const answer = String(await ask('text', question, { ...(defaultValue === undefined || defaultValue === '' ? {} : { default: defaultValue }), ...(options?.detail?.length ? { detail: options.detail } : {}) })).trim();
+      const answer = String(await ask(options?.path === true ? 'path' : 'text', question, { ...(defaultValue === undefined || defaultValue === '' ? {} : { default: defaultValue }), ...(options?.detail?.length ? { detail: options.detail } : {}) })).trim();
       return answer || defaultValue || '';
     },
     async select(question, choices, defaultChoice, options) {

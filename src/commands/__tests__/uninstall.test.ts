@@ -101,7 +101,8 @@ describe('uninstall (§6 pending)', () => {
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    // §7.2: install refuses an --into path that is not already a project, so the fixture adds it.
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = [{ root: checkout, label: 'checkout' }]; });
 
     expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkout, cwd: checkout }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     expect((await install({ ref: 'personal', into: 'global', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
@@ -136,9 +137,11 @@ describe('uninstall (§6 pending)', () => {
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    // Installed globally from outside any checkout, and into the project from its checkout.
-    expect((await install({ ref: 'sample', config: store, home, cwd: await temporaryDirectory() }, new ScriptedPrompter())).ok).toBe(true);
+    // §7.2: install refuses an --into path that is not already a project, so the fixture adds it.
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = [{ root: checkout, label: 'checkout' }]; });
+    // Installed globally, and into the project. §7.2 took cwd out of the destination decision, so a
+    // headless install with a project registered has to name where it goes.
+    expect((await install({ ref: 'sample', into: 'global', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
     expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkout, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
     const globalPath = join(home, '.claude', 'skills', 'sample'); const projectPath = join(checkout, '.claude', 'skills', 'sample');
     // (The project key is git's realpath of the checkout — /private/var on macOS — so count, do not compare it.)
@@ -163,7 +166,7 @@ describe('uninstall (§6 pending)', () => {
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkoutA = await cloneWithIdentity(product.bare, join(product.root, 'checkout-a'));
     const checkoutB = await cloneWithIdentity(product.bare, join(product.root, 'checkout-b'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = [{ root: checkoutA, label: 'a' }, { root: checkoutB, label: 'b' }]; });
     expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkoutA, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
     expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkoutB, cwd: checkoutB }, new ScriptedPrompter())).ok).toBe(true);
     await store.update((config) => {
@@ -256,7 +259,7 @@ async function projectPreviewFixture() {
   const store = createConfigStore(join(fixture.root, 'state')), home = join(fixture.root, 'home');
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   const checkouts = await Promise.all(['a', 'b'].map(name => cloneWithIdentity(product.bare, join(product.root, name))));
-  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = checkouts.map((root, index) => ({ root, label: ['a', 'b'][index]! })); });
   expect((await install({ ref: 'shared', into: 'global', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
   for (const cwd of checkouts) expect((await install({ kind: 'project', project: 'product', config: store, home, into: cwd, cwd }, new ScriptedPrompter())).ok).toBe(true);
   const before = await store.read(), people = await readFile(join(clone, 'people/seed.json'), 'utf8');
@@ -372,8 +375,8 @@ it('removes only --from and updates the shared record and decline only after the
   await pushFromSeed(fixture.seed, 'team.json', JSON.stringify(team));
   const home = join(fixture.root, 'home'); const store = createConfigStore(join(home, '.terum', 'skills'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   const checkout = await temporaryDirectory();
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = [{ root: checkout, label: 'checkout' }]; });
   for (const into of ['global', checkout]) expect((await install({ ref: 'sample', into, config: store }, new ScriptedPrompter())).ok).toBe(true);
   const personPath = join(clone, 'people', 'seed.json'); const before = await readFile(personPath, 'utf8');
   const runner = wrapRunner(systemRunner, async () => { throw new Error('No team write is allowed while another copy remains'); });

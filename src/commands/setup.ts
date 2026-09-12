@@ -6,16 +6,15 @@ import { enqueueEvals } from '../lib/evals/queue.js';
 import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { creatorAuthenticationError, detectOrOfferGh, refuseSecondTeam, teamByRemote } from '../lib/auth.js';
-import { registerCheckout } from '../lib/checkouts.js';
+import { addLibraryProject } from '../lib/projects.js';
+import { nearestRepoRoot } from '../lib/local-skills.js';
 import { COMMUNITY_URL } from '../lib/community.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
-import { discoverSkillRoots } from '../lib/discover.js';
 import { preflight as systemPreflight } from '../lib/evals/agent.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
 import { defaultWrapperOptions, offerWrapper as defaultOfferWrapper, WrapperOptions } from '../lib/wrapper.js';
 import { MAX_SELECT_ATTEMPTS, Prompter } from '../lib/prompt.js';
 import { readRoster } from '../lib/skills.js';
-import { printable } from '../lib/skill-source.js';
 import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
@@ -47,8 +46,8 @@ export interface SetupArgs extends WithForm {
   target?: string;
   /** Desktop app: `false` (--no-app) keeps setup in the terminal; otherwise, where an app exists, setup opens it without asking. `true` is accepted for compatibility. */
   app?: boolean;
-  /** `false` (--no-discover) skips the offer to look for skill folders on this machine. */
-  discover?: boolean;
+  /** `false` (--no-projects) skips the offer to add a project to your library. */
+  projects?: boolean;
   /** `false` (--no-evals) skips the offer to evaluate every shared skill that has no receipt. */
   evals?: boolean;
   /** Test knob for the agent probe; defaults to the real one. Mirrors EvalArgs.preflight. */
@@ -69,7 +68,7 @@ export interface SetupArgs extends WithForm {
   verbs?: Partial<SetupVerbs>;
 }
 export type StepOutcome = 'done' | 'skipped' | 'printed' | 'queued' | 'batched';
-type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'invite' | 'discover' | 'evals' | 'community' | 'hook' | 'wrapper' | 'done';
+type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'invite' | 'projects' | 'evals' | 'community' | 'hook' | 'wrapper' | 'done';
 export interface SetupResult {
   role: 'creator' | 'joiner';
   team: string;
@@ -84,9 +83,9 @@ const WELCOME = [
   'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',
 ];
 
-export const DISCOVER_QUESTION = 'Look for skill folders on this machine and add them to your library?';
-export const DISCOVER_WHERE_QUESTION = 'Look under which folder?';
-export const DISCOVER_START_LINE = 'Looking for skill folders on this machine…';
+export const PROJECTS_QUESTION = 'Add a project?';
+export const PROJECTS_WHERE_QUESTION = 'Which folder?';
+export const PROJECTS_START_LINE = "Terum will track the skills in that project's .claude folder.";
 /** Retained verbatim for frame consumers; the control is now a four-choice select. */
 export function evalsQuestion(count: number): string {
   return `Evaluate the ${count} shared ${count === 1 ? 'skill' : 'skills'} that ${count === 1 ? 'has' : 'have'} no receipt yet? This runs Claude on each one and records results locally.`;
@@ -138,7 +137,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   let remote = '';
 
   const decorated = decorate(io, args);
-  const titles: Record<Step, string> = { welcome: 'Welcome', app: 'App', role: 'Role', github: 'GitHub', team: 'Team', invite: 'Invite', discover: 'Find skills', evals: 'Evals', community: 'Community', hook: 'Session hook', wrapper: 'Wrapper', done: 'Done' };
+  const titles: Record<Step, string> = { welcome: 'Welcome', app: 'App', role: 'Role', github: 'GitHub', team: 'Team', invite: 'Invite', projects: 'Projects', evals: 'Evals', community: 'Community', hook: 'Session hook', wrapper: 'Wrapper', done: 'Done' };
   const output = io;
   let pendingSection: Step | undefined;
   const section = (step: Step): void => { pendingSection = step; };
@@ -292,40 +291,27 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     say(`  ${invocation(args.form, 'publish <skill>')}          — publish a local skill explicitly`);
     say(`  ${invocation(args.form, 'eval <skill>')}             — evaluate a shared skill locally before publishing`);
 
-    // Discovery is optional, never fatal, and only offered where a person can answer.
-    if (args.quiet || args.discover === false || !io.interactive) steps.discover = 'skipped';
+    // D13: one folder picker, never a scan-and-checklist. Optional, never fatal, and only offered
+    // where a person can answer. The second and third project are added from the Library.
+    if (args.quiet || args.projects === false || !io.interactive) steps.projects = 'skipped';
     else {
-      section('discover');
-      io.print(DISCOVER_START_LINE);
+      section('projects');
+      io.print(PROJECTS_START_LINE);
       try {
-        if (!(await io.confirm(DISCOVER_QUESTION))) steps.discover = 'skipped';
+        if (!(await io.confirm(PROJECTS_QUESTION))) steps.projects = 'skipped';
         else {
           const home = args.home ?? homedir();
-          const root = resolve(args.cwd ?? process.cwd(), expandTilde(await io.text(DISCOVER_WHERE_QUESTION, home), home));
-          const config = await store.read();
-          const found = await discoverSkillRoots({
-            under: [root], home, checkouts: config.checkouts ?? [], stateRoot: store.root, config,
-            onProgress: (progress) => io.progress?.({ step: 'discover', current: progress.scanned }),
-          });
-          for (const candidate of found.candidates) bullet(`${printable(candidate.path)} — ${candidate.skillFolders} skill folders${candidate.registered ? ' · already registered' : ''}`);
-          for (const problem of found.problems) bullet(`Could not look in ${printable(problem.path)}: ${printable(problem.reason)}`);
-          if (found.truncated) io.print(`(stopped early; run \`${invocation(args.form, 'checkout discover --budget-ms 60000')}\` to look longer)`);
-          const unregistered = found.candidates.filter((candidate) => !candidate.registered);
-          if (found.candidates.length === 0) io.print(`No skill folders found under ${printable(root)}.`);
-          else if (unregistered.length > 0) {
-            const all = await io.confirm(`Add all ${unregistered.length}?`);
-            for (const candidate of unregistered) {
-              if (!all && !(await io.confirm(`Add ${printable(candidate.path)}?`))) continue;
-              try { await registerCheckout(store, candidate.path, io, { home }); }
-              catch (error) { io.print(`Could not register ${printable(candidate.path)}: ${error instanceof Error ? error.message : String(error)}`); }
-            }
-          }
-          steps.discover = 'done';
+          const cwd = args.cwd ?? process.cwd();
+          // Blank takes the offered default, the way every other text question works; Skip is the
+          // confirm above, which is the one place a person declines.
+          const answer = (await io.text(PROJECTS_WHERE_QUESTION, await nearestRepoRoot(cwd) ?? cwd, { path: true })).trim();
+          await addLibraryProject(store, resolve(cwd, expandTilde(answer, home)), io, { home });
+          steps.projects = 'done';
         }
       } catch (error) {
-        // A wizard that finished every durable step must not fail on an optional search.
-        io.print(`Could not look for skill folders: ${error instanceof Error ? error.message : String(error)}`);
-        steps.discover = 'skipped';
+        // A wizard that finished every durable step must not fail on an optional one.
+        io.print(`Could not add that project: ${error instanceof Error ? error.message : String(error)}`);
+        steps.projects = 'skipped';
       }
     }
 

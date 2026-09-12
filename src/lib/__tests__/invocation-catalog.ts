@@ -63,8 +63,8 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "if (!releaseTeam) throw new Error(`Another terum-skills sync holds the session lock on ${name} (${lockPath(store.root, name)}); retry when it finishes, or remove that file if no session is syncing.`);"
   },
   {
-    "file": "src/commands/project.ts",
-    "line": 55,
+    "file": "src/commands/team.ts",
+    "line": 680,
     "policy": "prose",
     "pattern": "if (source === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');"
   },

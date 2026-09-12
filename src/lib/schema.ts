@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { basename, dirname } from 'node:path';
 import { inspect } from 'node:util';
 import { z } from 'zod';
 import YAML from 'yaml';
@@ -118,8 +119,41 @@ export const destinationSchema = z.discriminatedUnion('kind', [
 ]);
 export type Destination = z.infer<typeof destinationSchema>;
 
+/**
+ * §3.6 L-PROJ: a project root the user explicitly added to their Library. A bare path cannot carry a
+ * name the user reads, and the Library renders these as first-class named things, so a `label` rides
+ * alongside the root.
+ */
+export const libraryProjectSchema = z.object({
+  root: z.string().min(1),
+  label: z.string().min(1),
+  /** Absent on entries migrated from `checkouts`: that shape never recorded when a root was added, and inventing a date would put a false fact on the Library. */
+  added_at: z.string().optional(),
+}).passthrough();
+export type LibraryProject = z.infer<typeof libraryProjectSchema>;
+
+/**
+ * §3.6's label rule, applied to the whole set rather than to one new entry: `basename(root)`,
+ * qualified by the parent when two roots share a basename, and by the whole root when even that
+ * collides. Positional — `projectLabels(roots)[i]` labels `roots[i]`. It is the set that has to be
+ * readable, so adding `/b/web` relabels an existing `/a/web` too; two Library rows reading `web`
+ * would defeat "you can always see exactly what's on each".
+ */
+export function projectLabels(roots: readonly string[]): string[] {
+  const tally = (names: readonly string[]): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+    return counts;
+  };
+  const bases = roots.map((root) => basename(root) || root);
+  const byBase = tally(bases);
+  const qualified = roots.map((root, index) => byBase.get(bases[index]!)! > 1 ? `${bases[index]} (${basename(dirname(root)) || dirname(root)})` : bases[index]!);
+  const byQualified = tally(qualified);
+  return roots.map((root, index) => byQualified.get(qualified[index]!)! > 1 ? root : qualified[index]!);
+}
+
 export const configSchema = z.object({
-  checkouts: z.array(z.string()).optional(),
+  projects: z.array(libraryProjectSchema).optional(),
   app: appChoiceSchema.optional(),
   default_handle: handleSchema.optional(),
   email: emailSchema.optional(),
@@ -131,6 +165,27 @@ export const configSchema = z.object({
   placements: z.record(z.string(), z.object({ id: skillIdSchema, team: z.string(), version: z.string().length(40).nullable(), scope: scopeSchema, placed_at: z.string(), fingerprint: z.string() }).passthrough()),
 }).passthrough();
 export type Config = z.infer<typeof configSchema>;
+
+/**
+ * The on-disk config, migrated on read. Scoped deliberately to this schema and nothing else: §3.4's
+ * claim that `personSchema` shares it was wrong (OF-4) — `personSchema` is team state and is never
+ * parsed through here.
+ *
+ * `checkouts: string[]` becomes `projects: LibraryProject[]` when `projects` is absent, and
+ * `checkouts` is stripped either way. Stripping it before `read()` returns is what keeps `before`
+ * from carrying it, so `patchConfig`'s delete-throw cannot fire; the stale bytes stay inert on disk
+ * until the next write rewrites the file.
+ */
+export const configFileSchema = z.preprocess((value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const source = value as Record<string, unknown>;
+  if (!('checkouts' in source)) return source;
+  const { checkouts, ...rest } = source;
+  if (rest['projects'] !== undefined || !Array.isArray(checkouts)) return rest;
+  const roots = checkouts.filter((root): root is string => typeof root === 'string' && root.length > 0);
+  const labels = projectLabels(roots);
+  return { ...rest, projects: roots.map((root, index) => ({ root, label: labels[index]! })) };
+}, configSchema);
 
 export const emptyConfig = (): Config => ({ teams: {}, approvals: {}, pending: [], placements: {} });
 

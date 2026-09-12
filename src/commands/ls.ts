@@ -1,10 +1,10 @@
 import { mapWithConcurrency } from '../lib/concurrency.js';
 import { invocation } from '../lib/invocation.js';
-import type { WithForm, InvocationForm } from '../lib/invocation.js';
+import type { WithForm } from '../lib/invocation.js';
 import { readdir, readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { canonicalLedger, localSkillCounts, localRootLabel, nearestRepoRoot, localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
+import { canonicalLedger, localSkillCounts, localRootLabel, localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { printable, type SourceProblem } from '../lib/skill-source.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
@@ -54,7 +54,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     if (args.local && (args.kind === 'member' || args.kind === 'project')) throw new Error('--local cannot be combined with member or project.');
     if (args.local && args.team) throw new Error('--local lists every configured team; drop --team.');
     const store = args.config ?? createConfigStore();
-    if (args.local) return await showLocal(store, args.home ?? homedir(), io, args.runner ?? systemRunner, args.cwd, args.form);
+    if (args.local) return await showLocal(store, args.home ?? homedir(), io, args.runner ?? systemRunner);
     const [teamName] = selectTeam((await store.read()).teams, args.team, args.form);
     const clone = store.teamClone(teamName);
     const runner = args.runner ?? systemRunner;
@@ -181,11 +181,12 @@ function describedBy(inspection: LocalEntry['inspection']): string | null {
 }
 
 /** Local discovery is independent of team selection, and only enriches ledger references. */
-async function showLocal(store: ConfigStore, home: string, io: Prompter, runner: Runner, cwd?: string, form?: InvocationForm): Promise<Result<LsResult>> {
+async function showLocal(store: ConfigStore, home: string, io: Prompter, runner: Runner): Promise<Result<LsResult>> {
   const config = await store.read();
   const ledger = await canonicalLedger(config);
-  const extraRoots = (await Promise.all(Object.entries(config.placements).filter(([, ref]) => ref.scope.kind === 'project').map(([path]) => nearestRepoRoot(dirname(path))))).filter((root): root is string => root !== undefined);
-  const discovery = await localSkillRoots(home, cwd, config.checkouts ?? [], extraRoots);
+  // §7.2: no ledger-inferred roots and no cwd root. The Library shows the projects you added, and
+  // nothing else — a placement recorded under a folder you never added is not evidence you want it.
+  const discovery = await localSkillRoots(home, config.projects ?? []);
   const inventories = await Promise.all(discovery.roots.map(async (root) => ({ ...root, inventory: await localSkills(root.root, config, { scope: root.scope, stateRoot: store.root, ledger }) })));
   const sections: LocalSection[] = [];
   const snapshots = new Map<string, { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; fingerprints?: Map<string, string>; complete: boolean }>();
@@ -212,8 +213,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
   for (const [index, { inventory, ...root }] of inventories.entries()) {
     const local: LocalSection = { ...root, root: inventory.root, rootState: inventory.rootState, label: localRootLabel(root), remote: remotes[index]!, counts: localSkillCounts(inventory), rows: [], notOffered: [], problems: [...inventory.problems] };
     sections.push(local);
-    const registration = root.registered ? '; registered' : root.detected ? `; detected, not registered — \`${invocation(form, 'checkout add', root.repoRoot!)}\` keeps it in your library` : '';
-    io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}${registration}):`);
+    io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}${root.registered ? '; registered' : ''}):`);
     if (root.repoRoot !== undefined) io.print(`  GitHub: ${local.remote === null ? 'not connected' : local.remote.slug === null ? `not connected (origin is ${printable(local.remote.url)})` : printable(local.remote.slug)}`);
     for (const entry of inventory.entries) {
       for (const ref of entry.placement ? [entry.placement] : []) {
@@ -260,7 +260,6 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
     io.print(`  ${local.counts.skillFolders} skill ${local.counts.skillFolders === 1 ? 'folder' : 'folders'} (${local.counts.connectable} connectable)`);
   }
   for (const problem of discovery.problems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
-  if (discovery.noRepository !== undefined) io.print(`Project skills: none (${printable(discovery.noRepository)} is not inside a git repository).`);
   io.print('Team status is from local clones and may be stale; open endorsement requests are not checked.');
   return success({ roster: [], skills: [], problems: [], local: sections });
 }

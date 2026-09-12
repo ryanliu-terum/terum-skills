@@ -6,7 +6,6 @@ import { run as runAppUpdate } from './commands/appUpdate.js';
 import { packageVersion } from './lib/package.js';
 import { Command, Option } from 'commander';
 import { run as login } from './commands/login.js';
-import { run as runCheckout } from './commands/checkout.js';
 import { run as runProject } from './commands/project.js';
 import { run as runTeam, type TeamCommand } from './commands/team.js';
 import { run as install } from './commands/install.js';
@@ -35,10 +34,10 @@ import { failure, Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
-export interface CliVerbs { checkout?: typeof runCheckout; project?: typeof runProject; profile?: typeof profile; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; prune?: typeof prune; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; }
+export interface CliVerbs { project?: typeof runProject; profile?: typeof profile; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; prune?: typeof prune; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean; serve?: () => Promise<void> } = {}): Command {
-  const active: Required<CliVerbs> = { checkout: verbs.checkout ?? runCheckout, project: verbs.project ?? runProject, profile: verbs.profile ?? profile, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, prune: verbs.prune ?? prune, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport };
+  const active: Required<CliVerbs> = { project: verbs.project ?? runProject, profile: verbs.profile ?? profile, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, prune: verbs.prune ?? prune, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
@@ -68,30 +67,17 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .description('Onboarding wizard: on a new machine, asks whether to create a team or join one; re-run to resume your team; pass <org>/<repo> or a remote URL to join directly (one team per machine: leave the current team first)')
     .option('--app', 'open the desktop app (the default wherever one exists)')
     .option('--no-app', 'keep setup in the terminal; do not open the desktop app')
-    .option('--no-discover', 'do not offer to look for skill folders on this machine')
+    .option('--no-projects', 'do not offer to add a project to your library')
     .option('--no-evals', 'do not offer to evaluate the shared skills that have no receipt')
-    .action(async (target: string | undefined, options: { app?: boolean; discover?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, discover: options.discover, evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
+    .action(async (target: string | undefined, options: { app?: boolean; projects?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, projects: options.projects, evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
-  const checkout = program.command('checkout').description('Register, forget, or list the checkout folders this machine scans');
-  checkout.command('add [path]').description('Register a folder in your library')
-    .action(async (path: string | undefined) => execute(io => active.checkout({ form: context.form, kind: 'add', path, cwd: process.cwd() }, io), { verb: 'checkout add', notices: true }));
-  checkout.command('remove <path>').description('Forget a checkout; leave its files and ledger unchanged')
-    .action(async (path: string) => execute(io => active.checkout({ form: context.form, kind: 'remove', path, cwd: process.cwd() }, io), { verb: 'checkout remove', notices: true }));
-  checkout.command('list').description('List registered checkout folders')
-    .action(async () => execute(io => active.checkout({ form: context.form, kind: 'list' }, io), { verb: 'checkout list', notices: true }));
-
-  checkout.command('discover').description('Look for folders on this machine that hold Claude Code skills; --register adds the ones that are not in your library yet')
-    .option('--under <dir>', 'folder to look under; repeat for more (default: your home folder)', (value: string, previous: string[] = []) => [...previous, value])
-    .option('--depth <n>', 'how many folder levels below each root to look (default 4)', Number)
-    .option('--budget-ms <n>', 'how long to look, in milliseconds (default 20000)', Number)
-    .option('--register', 'register every folder found that is not already in your library')
-    .action(async (options: { under?: string[]; depth?: number; budgetMs?: number; register?: boolean }) => execute(io => active.checkout({ form: context.form, kind: 'discover', ...options, cwd: process.cwd() }, io), { verb: 'checkout discover', notices: true }));
-
-  const project = program.command('project').description('Create the team projects that place skills inside a repository checkout');
-  project.command('create [name]').description('Create a team project: a name, its repository, and the skills it places')
-    .option('--remote <url>', "the project's repository; its skills place when a teammate syncs inside that checkout")
-    .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
-    .action(async (name: string | undefined, options: { remote?: string; team?: string }) => execute(io => active.project({ form: context.form, kind: 'create', name, ...options }, io), { verb: 'project create', notices: true }));
+  const project = program.command('project').description('Add, forget, or list the projects in your library — the folders this machine reads skills from');
+  project.command('add [path]').description('Add a folder to your library')
+    .action(async (path: string | undefined) => execute(io => active.project({ form: context.form, kind: 'add', path, cwd: process.cwd() }, io), { verb: 'project add', notices: true }));
+  project.command('remove <path>').description('Forget a project; leave its files and ledger unchanged')
+    .action(async (path: string) => execute(io => active.project({ form: context.form, kind: 'remove', path, cwd: process.cwd() }, io), { verb: 'project remove', notices: true }));
+  project.command('list').description('List the projects in your library')
+    .action(async () => execute(io => active.project({ form: context.form, kind: 'list' }, io), { verb: 'project list', notices: true }));
 
   const team = program.command('team').description(`Create, join, leave, and admin settings for a team; run \`${invocation(context.form, 'team')}\` to see all options`);
   team
@@ -116,6 +102,11 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .command('leave <name>')
     .description('Remove this team’s placed skills, its local clone, and its config entry from this machine (your membership is unchanged)')
     .action(async (name: string) => execute((io) => active.leave({ form: context.form, name }, io), { verb: 'team leave', notices: true }));
+  const teamProject = team.command('project').description('Team projects: the cards that group shared skills and name the repository they place into');
+  teamProject.command('create [name]').description('Create a team project: a name, its repository, and the skills it places')
+    .option('--remote <url>', "the project's repository; its skills place when a teammate installs inside that folder")
+    .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
+    .action(async (name: string | undefined, options: { remote?: string; team?: string }) => execute(io => active.team({ form: context.form, kind: 'project-create', name, ...options }, io), { verb: 'team project create', notices: true }));
   team
     .command('workflow-update')
     .description('Print the current workflow scaffold for manual migration; never writes a repository')

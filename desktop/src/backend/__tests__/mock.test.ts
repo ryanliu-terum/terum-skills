@@ -4,7 +4,7 @@ import { design } from '../mock/data';
 import type { Run, Frame } from '../types';
 afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();});
 async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
-it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,checkouts:false,appUpdate:false});expect((await b.library({scope:{kind:'global'}})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:{kind:'global'}});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
+it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,libraryProjects:false,appUpdate:false});expect((await b.library({scope:{kind:'global'}})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:{kind:'global'}});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
 it.each([
  ['library',"EACCES: permission denied, scandir '~/.terum/skills'"],
  ['skill',"ENOENT: no such file or directory, open '~/.claude/skills/deploy-check/SKILL.md'"],
@@ -39,7 +39,7 @@ const expectedTeams=design.TEAMS.map(team=>({...team,policy:design.TEAM_POLICY,c
 it.each(['loading','error','slow','disabled','not-installed','default'])('status resolves immediately with identity during %s',async scenario=>{
  location.hash='#/library/global?__mock='+scenario;vi.useFakeTimers();
  const status=await createMockBackend({latencyMs:500}).status();
- expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true},roots:[{id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,detected:false,count:design.COUNTS.Global,remote:null},...([['Terum','ryanliu-terum/terum-skills'],['SSM','ryanliu-terum/ssm'],['MRF',null]] as const).map(([name,slug])=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:'scanned',registered:true,detected:false,count:design.COUNTS[name],remote:slug===null?null:{url:'https://github.com/'+slug,slug}}))]}});
+ expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true},roots:[{id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,count:design.COUNTS.Global,remote:null},...([['Terum','ryanliu-terum/terum-skills'],['SSM','ryanliu-terum/ssm'],['MRF',null]] as const).map(([name,slug])=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:'scanned',registered:true,count:design.COUNTS[name],remote:slug===null?null:{url:'https://github.com/'+slug,slug}}))]}});
  expect(status.ok&&status.value.machine.gh_login).toBe('teniroo');
  expect(vi.getTimerCount()).toBe(0);
 });
@@ -152,17 +152,15 @@ it('returns the fetch outcome from the fixture names',async()=>{
  expect(await b.sync({team:'terum'}).done).toEqual({ok:true,value:{notices:[],changed:true,teams:[{team:'terum',state:'refreshed'}]}});
 });
 
-it('models the discover and evals questions and reports both step outcomes',async()=>{
+it('models the projects and evals questions and reports both step outcomes',async()=>{
  const b=createMockBackend();
  for(const accepted of [true,false]){
   const questions:string[]=[];
   const result=await answerAll(b.setup({}),frame=>{questions.push(frame.question);return frame.kind==='confirm'?accepted:frame.kind==='select'?(frame.question.startsWith('Evaluate the ')?accepted?'Now':'Skip':'Join an existing team'):'';});
-  expect(result).toMatchObject({ok:true,value:{steps:{discover:accepted?'done':'skipped',evals:accepted?'done':'skipped'}}});
-  expect(questions).toContain('Look for skill folders on this machine and add them to your library?');
+  expect(result).toMatchObject({ok:true,value:{steps:{projects:accepted?'done':'skipped',evals:accepted?'done':'skipped'}}});
+  expect(questions).toContain('Add a project?');
   expect(questions).toContain('Evaluate the 2 shared skills that have no receipt yet? This runs Claude on each one and commits each receipt to the team repo.');
-  expect(questions.includes('Look under which folder?')).toBe(accepted);
+  // D13: the folder question is asked only after the confirm, and it is the only follow-up.
+  expect(questions.includes('Which folder?')).toBe(accepted);
  }
-});
-it('discovers nothing in the mock',async()=>{
- expect(await createMockBackend().checkouts.discover({}).done).toEqual({ok:true,value:{candidates:[],scanned:0,truncated:false,problems:[]}});
 });

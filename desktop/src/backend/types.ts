@@ -4,15 +4,18 @@ export interface LaunchContext { writtenAt: string; target?: string; intent?: 's
 export class PromptCancelledError extends Error { readonly cancelled = true as const; }
 export interface AskOptions {detail?:readonly string[];descriptions?:readonly string[];default?:string}
 export interface Prompter {readonly interactive:boolean;confirm(question:string,options?:AskOptions):Promise<boolean>;text(question:string,defaultValue?:string,options?:AskOptions):Promise<string>;select(question:string,choices:readonly string[],options?:AskOptions):Promise<string>;print(line:string):void}
-export type AskKind='confirm'|'text'|'select';
+/** §9.2/D13: `path` is `text` whose answer is a filesystem path — the shell may offer a folder chooser. */
+export type AskKind='confirm'|'text'|'select'|'path';
 export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[];descriptions?:readonly string[]}
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[];descriptions?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','checkouts','projects','refresh','discover','appUpdate','serve'] as const;
+// §7.1: the local key is `libraryProjects`, not `projects` — `projects` is already the marketplace's
+// team-projects screen, and desktop/AGENTS.md invariant 2 forbids one flag meaning two things.
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','serve'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
-export interface Surfaces {checkouts:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
+export interface Surfaces {libraryProjects:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
 export interface ReadOptions {signal?:AbortSignal}
 export type Theme='dark'|'light'|'system';
 export type Scope=string;
@@ -70,16 +73,14 @@ export type Member=Omit<Design['ROSTER'][number], 'followers'|'role'|'joined'> &
 export interface Roster {members:Member[];invited:Design['INVITED']|null;member:Record<string,{status:string;projects:string[];lastSeen:string}>;byAdoption:string[]}
 /** `slug` is owner/repo on GitHub and null on every other host; `remote` is null when the folder has no origin at all. */
 export interface RootRemote {url:string;slug:string|null}
-export interface Root {id:string;kind:'global'|'checkout';label:string;root:string;rootState?:'scanned'|'absent'|'unreadable'|undefined;registered:boolean;detected:boolean;count?:string|undefined;remote?:RootRemote|null|undefined}
+/** §7.2 removed `detected`: every project root is here because the user added it. */
+export interface Root {id:string;kind:'global'|'checkout';label:string;root:string;rootState?:'scanned'|'absent'|'unreadable'|undefined;registered:boolean;count?:string|undefined;remote?:RootRemote|null|undefined}
 export type LibraryScope={kind:'global'}|{kind:'checkout';root:string};
 export type LibraryTeam={kind:'ok';team:string}|{kind:'none'}|{kind:'unreadable';message:string};
-export interface DiscoverCandidate {path:string;skillFolders:number;registered:boolean;repoRoot:boolean}
-export interface DiscoverResult {candidates:DiscoverCandidate[];scanned:number;truncated:boolean;problems:{path:string;reason:string}[]}
-export interface DiscoverArgs {under?:string[];register?:boolean}
-export interface CheckoutAdded {path:string;registered:boolean}
+export interface ProjectAdded {path:string;label:string;added:boolean}
 /** `project create`: the team project as team.json now holds it. A new project is always born with no skills. */
 export interface ProjectCreated {team:string;name:string;remotes:string[];skills:number}
-export interface CheckoutRemoved {path:string;placementsRemaining:number}
+export interface ProjectRemoved {path:string;placementsRemaining:number}
 export interface Library {scanned:string[]|null;skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;provenance?:string|null;root:Root;team:LibraryTeam;problems?:readonly {source:string;message:string}[]}
 /** attention = failingEvals + updatesAvailable + notEvaluated; counts.Alerts = attention, counts.Updates = updatesAvailable. Absent CLI counters are omitted. */
 export type CloneState = {state:'absent'} | {state:'incomplete';reason:'not-a-repository'|'no-team-json'|'unverifiable';error?:string} | {state:'foreign'|'ok';origin:string};
@@ -121,7 +122,7 @@ export interface InviteResult {invited:string[];already:string[];failed:{login:s
 export interface TeamArgs {kind:'create'|'join'|'remove'|'leave';name?:string;team?:string;remote?:string;handle?:string}
 export interface TeamResult {name:string;kind:TeamArgs['kind']}
 export interface SetupArgs {target?:string}
-export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','discover','evals','community','hook','wrapper','done'] as const;
+export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','projects','evals','community','hook','wrapper','done'] as const;
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
 export interface SetupResult {team:string;role:'creator'|'joiner';steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'|'queued'|'batched'>>|null}
 export interface EvalArgs {team?:string;ref:string;cases?:number}

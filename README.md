@@ -362,10 +362,9 @@ Release notices appear last on stderr, at most once per release per day, and are
 | | `team create` / `team join` / `team leave` / `team remove <handle>` | Manage the repo and its roster |
 | | `invite <github-user>…` | Grant repo access and print the join line |
 | | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
-| | `checkout add [<path>]` / `checkout remove <path>` / `checkout list` | Register, forget, or list the checkout folders this machine scans (`ls --local` also shows the current repository, labelled not registered) |
-| | `checkout discover [--under <dir>…] [--depth <n>] [--budget-ms <n>] [--register]` | Find local folders holding `.claude/skills`; optionally register them. Setup offers this search and opt-in evaluation of shared skills with no current receipt (`--no-discover` / `--no-evals` skip the offers) |
+| | `project add [<path>]` / `project remove <path>` / `project list` | Add, forget, or list the projects in your library — the folders this machine reads local skills from. Nothing is added for you: setup offers one folder at first run (`--no-projects` / `--no-evals` skip the offers), and the Library adds the rest |
 | | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
-| | `project create [<name>] [--remote <url>]` | Create a team project: a name and the repository its skills place into (the skills themselves are added with `publish --project`) |
+| | `team project create [<name>] [--remote <url>]` | Create a team project: a name and the repository its skills place into (the skills themselves are added with `publish --project`) |
 | | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
 | Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
 | | `install <ref> [--into global\|<checkout root>]` / `uninstall-skill <ref> [--from global\|<checkout root>]` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |

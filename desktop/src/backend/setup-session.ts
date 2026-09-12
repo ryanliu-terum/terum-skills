@@ -6,13 +6,14 @@ import { driveRun } from './drive';
 // CLI keys map to the six drawn tour steps; print-only keys are copy, never placement counters.
 export const SETUP_STEP_TO_BOARD = {
  welcome:'Welcome', app:'Style', role:'Team', github:'Team', team:'Team',
- invite:'Team', discover:'Done', evals:'Done', community:'Feedback', hook:'Done', wrapper:'Done', done:'Done',
+ invite:'Team', projects:'Done', evals:'Done', community:'Feedback', hook:'Done', wrapper:'Done', done:'Done',
 } as const satisfies Record<SetupStep, string>;
 export function printedSetupStep(line:string):SetupStep|null {
  if(line.startsWith('Welcome to terum-skills.')||line.startsWith("Your team's skills")||line.startsWith('This wizard'))return 'welcome';
  if(line.startsWith('GitHub'))return 'github';
  if(line.startsWith('Identity:')||line.startsWith('Team ')||line.startsWith('Joined '))return 'team';
- if(line.startsWith('Looking for skill folders')||line.startsWith('No skill folders found')||line.startsWith('Could not look')||/ — \d+ skill folders( · already registered)?$/.test(line))return 'discover';
+ // §9.2/D13: the step prints its one explanatory line, then whatever addLibraryProject says.
+ if(line.startsWith("Terum will track the skills")||line.startsWith('Added ')||line.startsWith('Could not add that project')||/ is already in your library\.$/.test(line))return 'projects';
  // The four ways the batch can end without running: everything receipted, nothing shared, the version reader
  // failed, or nothing could be checked. All four are the evals step reporting, not unrecognized copy.
  if(line.startsWith('✓ ')||line.startsWith('✗ ')||line.startsWith('Queued ')||line.startsWith('Evaluating ')||line.startsWith('Evaluated ')||line.startsWith('Every shared skill already has')||line.startsWith('Skipping the eval')
@@ -25,7 +26,7 @@ export function printedSetupStep(line:string):SetupStep|null {
 }
 export function askedSetupStep(question:string):SetupStep|null {
  if(question==='Use this identity?')return 'team';
- if(question==='Look for skill folders on this machine and add them to your library?'||question==='Look under which folder?'||question.startsWith('Add all ')||/^Add .+\?$/.test(question))return 'discover';
+ if(question==='Add a project?'||question==='Which folder?')return 'projects';
  if(question.startsWith('Evaluate the ')||question==='How many at a time?'||question.startsWith('Continue with the next '))return 'evals';
  return null;
 }
