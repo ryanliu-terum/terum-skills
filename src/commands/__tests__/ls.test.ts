@@ -186,7 +186,7 @@ describe('global and project local sections', () => {
       config.placements[placed] = { id: ID, team: 'team', version: null, scope: { kind: 'project', project: 'app' }, fingerprint: '', placed_at: '' };
     });
     const clone = store.teamClone('team'); await mkdir(join(clone, 'skills', 'global', 'v1'), { recursive: true });
-    await writeFile(join(clone, 'team.json'), JSON.stringify({ ...TEAM_JSON, global: [ID] }));
+    await writeFile(join(clone, 'team.json'), JSON.stringify({ ...TEAM_JSON, projects: { Global: { remotes: [], skills: [ID] } } }));
     await writeFile(join(clone, 'skills', 'global', 'v1', 'SKILL.md'), `---\nname: global\ndescription: stored\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`);
     const teamCalls: string[] = []; const wrapped = { ...store, teamClone: (team: string) => { teamCalls.push(team); return store.teamClone(team); } };
     const runner = ghOnlyRunner(() => ({ code: 0, stdout: '', stderr: '' })); const io = new ScriptedPrompter();

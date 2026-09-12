@@ -61,7 +61,7 @@ describe('guard-push — the clone-local pre-push hook entry (D12)', () => {
   it('holds team.json to the publish, remove and rejoin shapes; checks a new branch against main; refuses every deletion and every non-branch ref; refuses an unjoined remote', async () => {
     const { fixture, store, clone, main } = await prepared();
     const team = JSON.parse(await git(['show', 'origin/main:team.json'], clone));
-    const endorsed = await commitOnMain(clone, 'team.json', `${JSON.stringify({ ...team, global: [MINE] }, null, 2)}\n`);
+    const endorsed = await commitOnMain(clone, 'team.json', `${JSON.stringify({ ...team, projects: { Global: { remotes: [], skills: [MINE] } } }, null, 2)}\n`);
     const io = new ScriptedPrompter();
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/publish/mine', endorsed, 'refs/heads/publish/mine', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: true, value: { checked: 1 } });
     const renamed = await commitOnMain(clone, 'team.json', `${JSON.stringify({ ...team, name: 'hijacked' }, null, 2)}\n`);

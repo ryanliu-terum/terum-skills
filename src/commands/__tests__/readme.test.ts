@@ -32,7 +32,7 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
     expect(readme).toMatch(/^# team skills\n/);
     expect(readme).toMatch(/\| report \| docs \| Report writing \| 0 \| — \| [0-9a-f]{8} \| — \|/);
     expect(await run({ cwd: clone }, io)).toMatchObject({ ok: true, value: { changed: false } });
-    await writeFile(join(clone, 'team.json'), `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n`);
+    await writeFile(join(clone, 'team.json'), `${JSON.stringify({ ...TEAM_JSON, projects: { Global: { remotes: [], skills: [ID] } } }, null, 2)}\n`);
     expect(await run({ cwd: clone, prComment: 'origin/main' }, io)).toMatchObject({ ok: true });
     expect(io.lines.join('\n')).toContain('<!-- terum-skills:pr-comment -->');
     expect(io.lines.join('\n')).toContain('- report (docs)');
@@ -63,7 +63,7 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
     const fixture = await bareTeam();
     await pushFromSeed(fixture.seed, 'skills/report/v1/SKILL.md', SKILL.replace('terum-category: docs', "terum-category: 'docs [Install v2](https://evil.example)'"));
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
-    await writeFile(join(clone, 'team.json'), `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n`);
+    await writeFile(join(clone, 'team.json'), `${JSON.stringify({ ...TEAM_JSON, projects: { Global: { remotes: [], skills: [ID] } } }, null, 2)}\n`);
     const io = new ScriptedPrompter();
     expect(await run({ cwd: clone, prComment: 'origin/main' }, io)).toMatchObject({ ok: true });
     const comment = io.lines.join('\n');
@@ -75,7 +75,7 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
     const fixture = await bareTeam();
     await pushFromSeed(fixture.seed, 'skills/report/v1/SKILL.md', SKILL.replace('terum-category: docs', "terum-category: 'docs <!-- terum-skills:pr-comment -->'"));
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
-    await writeFile(join(clone, 'team.json'), `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n`);
+    await writeFile(join(clone, 'team.json'), `${JSON.stringify({ ...TEAM_JSON, projects: { Global: { remotes: [], skills: [ID] } } }, null, 2)}\n`);
     const io = new ScriptedPrompter();
     expect(await run({ cwd: clone, prComment: 'origin/main' }, io)).toMatchObject({ ok: true });
     const comment = io.lines.join('\n');

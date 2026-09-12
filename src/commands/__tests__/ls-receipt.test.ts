@@ -9,7 +9,7 @@ import { pendingIds, pendingReceipt, seedPending } from './pending-eval-fixtures
 /** A two-skill team (alpha, beta), pushed and cloned, with `ls` ready to read it. */
 async function team() {
   const fixture = await bareTeam();
-  const config = { layout_version: 2, name: 'team', categories: [], global: pendingIds, projects: {}, archived: [] as string[], policy: { publish: 'pr', skill_license: 'UNLICENSED' } };
+  const config = { layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: pendingIds } }, archived: [] as string[], policy: { skill_license: 'UNLICENSED' } };
   await writeFile(join(fixture.seed, 'team.json'), `${JSON.stringify(config, null, 2)}\n`);
   await writeFile(join(fixture.seed, 'people', 'amy.json'), `${JSON.stringify(person('amy', { display_name: 'Amy', installed: [] }), null, 2)}\n`);
   await seedPending(fixture.seed);

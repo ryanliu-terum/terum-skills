@@ -94,7 +94,7 @@ describe('team create (§6)', () => {
     const result = await create({ name: 'new-team', remote: publicRemote, config: store, runner }, io);
     if (!result.ok) throw new Error(result.error);
     const clone = store.teamClone('new-team');
-    expect(JSON.parse(await readFile(pathJoin(clone, 'team.json'), 'utf8'))).toMatchObject({ layout_version: 2, name: 'new-team', global: [], archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } });
+    expect(JSON.parse(await readFile(pathJoin(clone, 'team.json'), 'utf8'))).toMatchObject({ layout_version: 3, name: 'new-team', archived: [], policy: { skill_license: 'UNLICENSED' } });
     expect(JSON.parse(await readFile(pathJoin(clone, 'people', 'me.json'), 'utf8'))).toMatchObject({ handle: 'me', display_name: 'Me', email: 'me@example.com' });
     expect(await readFile(pathJoin(clone, 'README.md'), 'utf8')).toContain('<!-- terum-skills:begin -->');
     expect(await readFile(pathJoin(clone, '.github', 'workflows', 'terum-skills.yml'), 'utf8')).toContain('name: terum-skills');

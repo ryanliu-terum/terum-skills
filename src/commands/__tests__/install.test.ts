@@ -204,7 +204,7 @@ describe('install (§6 refs)', () => {
     const fixture = await bareTeam(); const product = await bareTeam();
     const id = '88888888-8888-4888-8888-888888888888';
     await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: [product.bare], skills: [id] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] }, product: { remotes: [product.bare], skills: [id] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(home, '.terum', 'skills'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
@@ -259,10 +259,10 @@ describe('install (§6 refs)', () => {
     ] as const) {
       await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     }
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: {
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: {
       alpha: { remotes: [productA.bare], skills: [projectAId] },
       beta: { remotes: [productB.bare], skills: [projectBId] },
-    }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home');
     const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
