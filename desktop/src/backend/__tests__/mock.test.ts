@@ -48,7 +48,7 @@ it('clones status and successful long results',async()=>{
  if(!first.ok)throw new Error('Expected eval');
  Reflect.set(first.value,'runDir','mutated');
  const next=await b.eval({ref:'deploy-check'}).done;
- expect(next.ok&&next.value.runDir).toBe('~/.terum/skills/evals/terum/deploy-check/20260906T120000Z');
+ expect(next.ok&&next.value.runDir).toBe('~/.terum/skills/evals/local/0000000000000000000000000000000000000000000000000000000000000000/20260906T120000Z');
  const status=await b.status();if(!status.ok)throw new Error(status.error);status.value.machine.gh_login='mutated';
  const fresh=await b.status();expect(fresh.ok&&fresh.value.machine.gh_login).toBe('teniroo');
 });

@@ -8,14 +8,14 @@ import { Prompter } from '../lib/prompt.js';
 import { fromError, failure, Result, success } from '../lib/result.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { installCounts, latestChange, skillEndorsement } from '../lib/readme.js';
-import { versionLabel } from '../lib/versions.js';
+import { versionFolderName } from '../lib/versions.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { format as formatSkill } from './ls.js';
 
 export interface SearchArgs extends WithForm { term: string; category?: string; author?: string; project?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
 export interface SearchHit {
   team: string; id: string; name: string; author: string; category: string; installs: number;
-  /** `Version 3` — `versionLabel` of the highest version folder, never a tree hash (§4.1, D1). */
+  /** §8.4: the `v<N>` FOLDER of the highest version — data, not the rendered label (see `LsSkill.latest`). */
   latest: string; endorsed: string;
   description: string; grants: string | null; grantsHash: string | null; updated: string;
 }
@@ -56,7 +56,7 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         const endorsed = skillEndorsement(teamJson, skill.id);
         const date = dates[index]!;
         if (date.status === 'rejected') io.print(`${team}/${skill.name}: ${date.reason instanceof Error ? date.reason.message : String(date.reason)}`);
-        const hit: SearchHit = { team, description: skill.frontmatter.description, grants: skill.grants.ok ? skill.grants.normalized : null, grantsHash: skill.grants.ok ? skill.grants.hash : null, updated: date.status === 'fulfilled' ? date.value : '—', id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: versionLabel(skill.latestVersion), endorsed };
+        const hit: SearchHit = { team, description: skill.frontmatter.description, grants: skill.grants.ok ? skill.grants.normalized : null, grantsHash: skill.grants.ok ? skill.grants.hash : null, updated: date.status === 'fulfilled' ? date.value : '—', id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: versionFolderName(skill.latestVersion), endorsed };
         hits.push(hit);
         io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, characters: skill.characters, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed, description: hit.description, grants: hit.grants, grantsHash: hit.grantsHash, installedBy: [], body: null, frontmatter: null, updated: hit.updated, receipt: null, versionCount: skill.versionCount }));
         }

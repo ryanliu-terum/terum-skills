@@ -25,7 +25,9 @@ import { SHORTCUTS } from '../../lib/shortcuts';
 import { abbreviateHome, stripRemote } from '../paths';
 import { scannedRoots } from './scanned-roots';
 import { cliRefresh, createRefreshPolicy, createWorkflowGate } from './refresh';
-import { BRIDGE_BUSY, mapWithConcurrency } from './concurrency';
+// §3.2: the version vocabulary exists once. This leaf imports nothing at all, which is the only
+// shape `cli-tree-imports.test.ts` admits across the tree boundary.
+import { parseVersionFolder, versionLabel } from '../../../../src/lib/versions.js';
 import { overviewCopy } from '../../lib/overview-copy';
 import { bodyExcerpt } from '../../lib/body-excerpt';
 import { samePath } from '../../lib/skill-path';
@@ -219,8 +221,16 @@ function initials(name: string): string { return name.split(/\s+/).filter(Boolea
 function repoSlug(remote: string | null | undefined): string | null {
   return remote ? stripRemote(remote.trim()).replace(/^github\.com\//, '') : null;
 }
+/**
+ * §8.6: the share command drops its `@<version>` suffix, because §9.1 REFUSES a versioned ref — the
+ * command it produced would now fail on the machine it was pasted into. The version itself is still
+ * shown; it is a label (`Version 3`) under D1, so it is never sliced to look like a hash.
+ */
 function detailVersionFields(repo: string | null, name: string, version: string | null): Pick<SkillDetail, 'version' | 'version_full' | 'shareCommand'> {
-  return { version: version?.slice(0, 12) ?? '—', version_full: version, shareCommand: repo ? `npx -y terum-skills@latest install ${repo}/${name}${version ? '@' + version.slice(0, 12) : ''}` : '—' };
+  // D1: what a PERSON reads is `Version 3`. `version_full` keeps the FOLDER, because §8.6 makes it a
+  // path segment in the repository link — one is prose, the other is an address.
+  const ordinal = version === null ? null : parseVersionFolder(version);
+  return { version: ordinal === null ? version ?? '—' : versionLabel(ordinal), version_full: version, shareCommand: repo ? `npx -y terum-skills@latest install ${repo}/${name}` : '—' };
 }
 /** `local` is the presence evidence — restricted to one section for a scoped read. `scopes` is the
  *  full machine inventory the install destinations come from, so restricting presence never
@@ -352,7 +362,6 @@ function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, lo
  */
 export const READ_CACHE_TTL_MS = 60_000;
 /** Four member reads leave headroom under the bridge cap of eight. */
-const CATALOG_CONCURRENCY = 4;
 /** The Settings error board branches on this: a config.json the CLI refused to parse is repairable in place; anything else is a read failure. */
 function readReason(error: string): 'invalid-config' | 'unreadable' {
   return error.includes('Invalid') && error.includes('config.json') ? 'invalid-config' : 'unreadable';

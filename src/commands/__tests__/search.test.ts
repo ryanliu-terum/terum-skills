@@ -84,7 +84,7 @@ describe('search (§6)', () => {
     await freshStamp(store, 'team');
     const io = new ScriptedPrompter();
     const result = await run({ term: 'needle', config: store }, io);
-    expect(result).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'sample', installs: 1, endorsed: 'project: product', latest: 'Version 1' })] });
+    expect(result).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'sample', installs: 1, endorsed: 'project: product', latest: 'v1' })] });
     expect(io.lines).toEqual([`  sample — Seed <seed@example.com>; testing; 1 installs; Version 1; project: product; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/sample/v1'], clone)).trim()}`]);
   });
 
@@ -109,7 +109,7 @@ describe('search (§6)', () => {
     await mkdir(join(clone, 'skills', 'ghost', 'v1'), { recursive: true }); await writeFile(join(clone, 'skills', 'ghost', 'v1', 'SKILL.md'), skillFile({ name: 'ghost', description: 'needle too', category: 'testing', author: 'Seed <seed@example.com>', id: '33333333-3333-4333-8333-333333333333' }));
     await freshStamp(store, 'team');
     const io = new ScriptedPrompter();
-    expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'ghost', latest: 'Version 1', updated: '—' }), expect.objectContaining({ name: 'healthy', latest: 'Version 1' })] });
+    expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'ghost', latest: 'v1', updated: '—' }), expect.objectContaining({ name: 'healthy', latest: 'v1' })] });
     expect(io.lines).toEqual(['  ghost — Seed <seed@example.com>; testing; 0 installs; Version 1; —; —', `  healthy — Seed <seed@example.com>; testing; 0 installs; Version 1; —; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/healthy/v1'], clone)).trim()}`]);
   });
 
@@ -159,7 +159,7 @@ describe('search (§6)', () => {
       },
     };
     const io = new ScriptedPrompter();
-    expect(await run({ term: 'needle', config: store, runner: fake }, io)).toMatchObject({ ok: true, value: names.map((name) => expect.objectContaining({ name, latest: 'Version 1', updated: name === 'skill-09' ? '—' : dateOf(name) })) });
+    expect(await run({ term: 'needle', config: store, runner: fake }, io)).toMatchObject({ ok: true, value: names.map((name) => expect.objectContaining({ name, latest: 'v1', updated: name === 'skill-09' ? '—' : dateOf(name) })) });
     expect(io.lines.filter((line) => line.startsWith('team/'))).toEqual(['team/skill-09: Could not read the latest change of skill-09: not in HEAD']);
     // The only assertion an unbounded Promise.all fails: ten would be in flight at once.
     expect(peak).toBe(8);

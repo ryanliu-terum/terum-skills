@@ -36,7 +36,7 @@ describe('ls (§6)', () => {
     const before = await git(['rev-parse', 'HEAD'], store.teamClone('team'));
     const io = new ScriptedPrompter();
     const result = await run({ config: store }, io);
-    expect(result).toMatchObject({ ok: true, value: { skills: [{ name: 'report', installs: 2, endorsement: 'project: app', latest: 'Version 1', versionCount: 1 }] } });
+    expect(result).toMatchObject({ ok: true, value: { skills: [{ name: 'report', installs: 2, endorsement: 'project: app', latest: 'v1', versionCount: 1 }] } });
     expect(io.lines).toContain('  old (inactive)');
     expect(await git(['rev-parse', 'HEAD'], store.teamClone('team'))).toBe(before);
     expect((await git(['status', '--porcelain'], store.teamClone('team'))).trim()).toBe('');
@@ -56,7 +56,7 @@ describe('ls (§6)', () => {
     // §4.1 deleted the tree-hash lookup and `unresolved` with it: the version is the folder NAME, so
     // it resolves for a folder git has never seen. Only the commit DATE is unknown, and an unknown
     // date is a dash, not a failure — and not a reported line either.
-    expect(result).toMatchObject({ ok: true, value: { skills: [expect.objectContaining({ name: 'ghost', latest: 'Version 1', updated: '—' }), expect.objectContaining({ name: 'healthy', latest: 'Version 1' })] } });
+    expect(result).toMatchObject({ ok: true, value: { skills: [expect.objectContaining({ name: 'ghost', latest: 'v1', updated: '—' }), expect.objectContaining({ name: 'healthy', latest: 'v1' })] } });
     expect(io.lines.filter((line) => line.startsWith('ghost:'))).toHaveLength(0);
     expect(io.lines).toContain('Members:');
     expect(io.lines).toContain(`  healthy — Seed <seed@example.com>; testing; 0 installs; Version 1; —; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/healthy/v1'], clone)).trim()}`);
@@ -298,7 +298,7 @@ it('one malformed folder and one malformed person each cost only their row, with
   await writeFile(join(clone,'people','bad.json'), '{broken');
   const io = new ScriptedPrompter(); const result = await run({config:store},io);
   // §8.4 deleted `unresolved`: an uncommitted folder resolves its version from the folder name.
-  expect(result).toMatchObject({ok:true,value:{skills:[{name:'good',latest:'Version 1',versionCount:1,installs:0}],roster:[{handle:'seed'}]}});
+  expect(result).toMatchObject({ok:true,value:{skills:[{name:'good',latest:'v1',versionCount:1,installs:0}],roster:[{handle:'seed'}]}});
   if(!result.ok)throw new Error(result.error);
   expect(result.value.problems.map(p=>p.source).sort()).toEqual(['people/bad.json','skills/bad','skills/mismatch']);
   expect(io.lines.filter(line=>line.startsWith('people/bad.json:'))).toHaveLength(1);
@@ -319,9 +319,11 @@ it('carries verbatim description, normalized grants, body, installers and date; 
   await git(['add','--all'],clone);await git(['commit','-qm','inventory'],clone);
   const io=new ScriptedPrompter();const result=await run({config:store},io);if(!result.ok)throw new Error(result.error);
   const row=result.value.skills[0]!;const grants=allowedTools(['Read','Bash','Read']);if(!grants.ok)throw new Error('bad grants');
-  expect(row).toMatchObject({description:'A description with <tags> and  spaces',grants:grants.normalized,grantsHash:grants.hash,body:'# Real body\n',installs:1,latest:'Version 1',versionCount:1,updated:(await git(['log','-1','--format=%cI','--','skills/good'],clone)).trim()});
+  expect(row).toMatchObject({description:'A description with <tags> and  spaces',grants:grants.normalized,grantsHash:grants.hash,body:'# Real body\n',installs:1,latest:'v1',versionCount:1,updated:(await git(['log','-1','--format=%cI','--','skills/good'],clone)).trim()});
   expect(row.installedBy.map(p=>p.scope)).toEqual([{kind:'global'},{kind:'project',project:'app'}]);
-  expect(format(row)).toBe(`  good — Seed <seed@example.com>; testing; 1 installs; ${row.latest}; —; ${row.updated}`);
+  // D1: the DTO carries the folder, the printed line carries the label.
+  expect(row.latest).toBe('v1');
+  expect(format(row)).toBe(`  good — Seed <seed@example.com>; testing; 1 installs; Version 1; —; ${row.updated}`);
   expect(io.lines).toContain(format(row));
   await writeFile(join(clone,'skills','good', 'v1','SKILL.md'),inventorySource('good','allowed-tools: {bad: value}'));
   expect(await run({config:store},new ScriptedPrompter())).toMatchObject({ok:true,value:{skills:[{grants:null,grantsHash:null}]}});

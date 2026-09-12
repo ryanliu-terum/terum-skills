@@ -56,7 +56,7 @@ it('retains the recorded status payload when its result frame fails', async () =
 it('serves all three recorded search hits with real metadata and no fabricated descriptions', async () => {
   const lines = recorded('search');
   const resultFrame = lines.map(line => z.object({ t: z.string(), value: z.unknown().optional() }).parse(JSON.parse(line))).find(frame => frame.t === 'result');
-  const hits = z.array(z.object({ description: z.string(), team: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), endorsed: z.string(), unresolved: z.boolean() })).parse(resultFrame?.value);
+  const hits = z.array(z.object({ description: z.string(), team: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), endorsed: z.string() })).parse(resultFrame?.value);
   expect(hits).toHaveLength(3);
   expect(hits.map(hit => hit.team)).toEqual(['acme', 'acme', 'acme']);
   const result = await createTauriBackend(replay(lines).bridge).search({ q: '' });
@@ -141,7 +141,9 @@ it('derives Marketplace metadata and counts from the 0.1.7 recordings', async ()
   for (const person of c.people) expect(person).toMatchObject({ role: null, organization: null, teamsLine: 'On no project yet' });
   for (const skill of c.skills) expect(skill.installs).toMatch(/^\d+ installs?$/);
   expect(c.skills.find(s => s.name === 'tdd')?.installs).toBe('1 install');
-  for (const h of ['mira', 'ravi', 'seed']) expect(f.spawns.some(s => s.args.join(' ') === `ls member --team acme -- ${h}`)).toBe(true);
+  // §8.4: not one per-member read. The recordings still hold the per-member captures; the adapter
+  // no longer asks for them.
+  expect(f.spawns.filter(s => s.args[1] === 'member')).toEqual([]);
   const roster = await backend.roster();
   if (!roster.ok) throw new Error(roster.error);
   expect(roster.value.members.every(m => m.role === null)).toBe(true);
@@ -154,10 +156,14 @@ it.each([['project', 'No project named nope.'], ['member', 'No member named nope
   expect(result.value).toBeUndefined();
 });
 
-it('fails closed when a member detail read fails', async () => {
-  const f = inventoryReplay(name => marketplaceRecorded(name === 'ls-member-mira' ? 'ls-member-nope' : name));
+it('§8.4: fails closed when the team read does not carry a member the roster names', async () => {
+  // There is no per-member read left to fail. What can go wrong is a member `status` names and the
+  // team read does not, and a marketplace quietly missing a person is worse than one that says so.
+  const f = changedInventory((name, value) => {
+    if (name === 'ls') value.people = (value.people ?? []).filter(person => person.handle !== 'mira');
+  });
   const result = await createTauriBackend(f.bridge).catalog();
-  expect(result).toMatchObject({ ok: false, error: 'No member named nope.' });
+  expect(result).toMatchObject({ ok: false, error: 'No member data for mira.' });
   expect(result.value).toBeUndefined();
 });
 
@@ -165,6 +171,8 @@ it('fails closed when a member detail read fails', async () => {
 const mutableInventory = z.object({
   skills: z.array(z.object({ id: z.string(), name: z.string(), updated: z.string(), grants: z.string().nullable() }).passthrough()),
   projects: z.array(z.object({ name: z.string(), skills: z.array(z.string()) }).passthrough()).optional(),
+  // §8.4: the roster limb, mutable so a test can express "this member authored nothing" or drop one.
+  people: z.array(z.object({ handle: z.string(), authored: z.array(z.string()) }).passthrough()).optional(),
   local: z.array(z.object({ root: z.string(), scope: z.string(), repoRoot: z.string().optional(), rootState: z.string().optional(), rows: z.array(z.object({ placement: z.object({ id: z.string(), team: z.string() }).passthrough().nullable() }).passthrough()) }).passthrough()).optional(),
 }).passthrough();
 function changedInventory(change: (name: string, value: z.infer<typeof mutableInventory>) => void) {
@@ -183,8 +191,12 @@ it('selects newest valid authored timestamps and leaves an empty project unknown
       const skill = value.skills[0]!;
       value.skills = [{ ...skill, name: 'older', updated: '2026-09-08T08:33:11Z' }, skill, { ...skill, name: 'invalid', updated: 'unknown' }];
     }
-    if (name === 'ls-member-ravi') value.skills = [];
-    if (name === 'ls') value.projects![0]!.skills = [];
+    // §8.4: authorship is resolved by the CLI and arrives on the team read, so "ravi authored
+    // nothing" is now expressed there rather than by emptying a per-member reply.
+    if (name === 'ls') {
+      value.projects![0]!.skills = [];
+      for (const person of value.people ?? []) if (person.handle === 'ravi') person.authored = [];
+    }
   });
   const result = await createTauriBackend(f.bridge).catalog();
   if (!result.ok) throw new Error(result.error);

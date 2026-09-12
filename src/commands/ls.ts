@@ -12,7 +12,7 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
 import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, skillEndorsement } from '../lib/readme.js';
-import { parseVersionFolder, versionLabel } from '../lib/versions.js';
+import { parseVersionFolder, versionFolderName, versionLabel } from '../lib/versions.js';
 import type { Receipt } from '../lib/evals/receipt.js';
 import { selectCardEval } from '../lib/evals/receipt-store.js';
 import { fromError, Result, success } from '../lib/result.js';
@@ -45,7 +45,12 @@ export interface LsReceipt {
 }
 export interface LsSkill {
   id: string; name: string; author: string; category: string; characters: number; installs: number;
-  /** `Version 3` — never a tree hash (§8.4, D1). */
+/**
+   * §8.4 — the `v<N>` FOLDER of the highest version, never a tree hash and never the rendered label.
+   * It is data: §8.6 puts it in a repository URL as a path segment, and every renderer already has
+   * `versionLabel` for the prose. A DTO carrying `Version 3` would force each reader to parse the
+   * sentence back into an address.
+   */
   latest: string;
   /** How many versions the skill has published. */
   versionCount: number;
@@ -175,7 +180,7 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
         const message = found.reason instanceof Error ? found.reason.message : String(found.reason);
         problems.push({ source: `evals/${id}`, message }); io.print(`${name}: ${message}`);
       }
-      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: versionLabel(record.latestVersion), versionCount: record.versionCount, endorsement: skillEndorsement(team, id), grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, frontmatter: record.rawFrontmatter, updated, receipt: found.status === 'fulfilled' ? found.value : null });
+      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: versionFolderName(record.latestVersion), versionCount: record.versionCount, endorsement: skillEndorsement(team, id), grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, frontmatter: record.rawFrontmatter, updated, receipt: found.status === 'fulfilled' ? found.value : null });
     }
   }
   return skills;
@@ -216,7 +221,11 @@ async function showProject(projectName: string | undefined, team: ReturnType<typ
   return success({ roster, skills: selected, projects, problems });
 }
 /** One skill per line, the §6 `ls` format; `search` prints hits through the same function. */
-export function format(skill: LsSkill): string { return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${skill.latest}; ${skill.endorsement}; ${skill.updated}`; }
+/** D1: the printed line is prose, so the folder is rendered here — the DTO stays an address. */
+export function format(skill: LsSkill): string {
+  const ordinal = parseVersionFolder(skill.latest);
+  return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${ordinal === null ? skill.latest : versionLabel(ordinal)}; ${skill.endorsement}; ${skill.updated}`;
+}
 
 
 /**
