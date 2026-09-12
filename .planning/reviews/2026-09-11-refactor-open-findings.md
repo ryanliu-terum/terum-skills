@@ -110,6 +110,8 @@ the same §6.1/§6.3 area that OF-5 touches.
 ## Blocking B4 — M5 marketplace
 
 ### ✦ OF-7 — `newestReceiptAt` returns a wrapper, not a receipt
+
+> **RESOLVED 2026-09-12 (B4 start).** **The claim holds — the row was right all three times.** Its *citation* went stale (B1 deleted `src/commands/receiptCheck.ts`; `CheckedReceipt` no longer exists anywhere), which is why later rounds refuted it: they checked a dead path. The type moved to `src/lib/evals/receipt-store.ts:6` and kept its shape — `export type StoredReceipt = { file: string; receipt: Receipt }` — and `newestReceiptAt` returns `Promise<StoredReceipt | undefined>`. So §8.1's `newest.skill_id` / `newest.version` would both read `undefined` and every card's eval would misfile. **Applied:** §8.1's pseudocode now reads `newest.receipt.skill_id` / `newest.receipt.version`, and §5.1 step 9's prose cross-reference with it. The `return { eval: {receipt: newest, …} }` line was already correct — `SelectedCardEval` declares `receipt: StoredReceipt` — so only the two field accesses changed.
 *r1 #13 DRIFT (2-1) · r2 #13 DRIFT (refuted 0-3) · r3 #12 DRIFT (unverified) — raised three times, three different verdicts*
 §8.1's `selectCardEval` does `newest := newestReceiptAt(...)` then reads `newest.skill_id` and
 `newest.version` and returns `receipt: newest`. The finder reports `src/commands/receiptCheck.ts:15`
@@ -119,6 +121,8 @@ defines `CheckedReceipt = { file, … }` — a wrapper around the receipt, not t
 strike the row. A wrong answer here makes every marketplace card's eval read `undefined`.
 
 ### OF-8 — the sibling display contract still forbids the older-version fallback
+
+> **RESOLVED 2026-09-12 (B4 start).** Holds, and is documentation-only. `2026-09-04-eval-engine.md` §12 still stated *"an invalid latest receipt is reported as invalid, never replaced by an older one"* as live. **Applied:** a scoped supersession note under that paragraph — reversed **on the marketplace card only**, with §8.2's mandatory version chip named as the mitigation, and the clause explicitly still standing for the detail view, the Library and per-version receipt lists. The override owed on `.planning/decisions/2026-09-08-eval-engine-s12-display-rule-draft.md` is still owed (Terum MCP has been 401 for ten sessions; recorded in the ledger instead).
 *r3 #8 DRIFT (unverified)*
 §8.1's fallback walk and §8.2's "from Version 3 · latest Version 5" chip reverse the ratified s12
 display rule, which §8.2 acknowledges. The finder reports `2026-09-04-eval-engine.md` §12 still
@@ -126,6 +130,8 @@ states the old rule as live. The reversal is already deliberate and recorded —
 sibling-spec supersession note, in the style already used at that spec's head.
 
 ### OF-9 — the catalog call count omits an existing team inventory read
+
+> **RESOLVED 2026-09-12 (B4 start) — a North Star fork, not a counting error.** Verified against the adapter: `peopleInventory` spawns `status` **and** `ls --team <team>`, and `catalog()` adds `ls --local` — three today. The spec's target of **two** is reachable only by deleting that `ls --local` read, which §12 does list for deletion. But two user-visible surfaces depend on it and **the spec never mentions either**: `catalog.scanned` is built by `scannedRoots(local, home)` (`desktop/src/backend/tauri/scanned-roots.ts`), and `onDisk`'s `localIdentity` branch matches a folder by its frontmatter `skillId` — neither is derivable from `status`'s `ledger.placements`, which records what terum *placed*, not what a scan *found*. Deleting the read would silently blank the marketplace's "which roots were scanned on this machine" surface. **Resolved against the North Star** ("you can always see exactly what's on each"): the `ls --local` read is **retained**, §8.4 and §14.1's gate now say **three**, and §12's line for it is reversed. The read-cost win was always the deleted `N × ls member`, not the third read. **Open for Ryan:** folding the scanned-roots list and local skill ids into `status` would restore a genuine two-process target, at the cost of new CLI surface — not assumed here.
 *r2 #15 DRIFT (1-2)*
 §8.4 claims `catalog()` becomes two processes. Verify against the adapter before writing §14.1's
 "exactly two CLI children" gate, or that test pins the wrong number.
