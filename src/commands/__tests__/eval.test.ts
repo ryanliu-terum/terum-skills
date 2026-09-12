@@ -33,9 +33,9 @@ function generationAgent(prompts: string[]): AgentApi {
 describe('eval (§6 / IE2)', () => {
   it('waits out a busy clone, says so, and then runs the eval', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/triggers.yaml', 'should_trigger: [deploy now]\nshould_not_trigger: [chat]\n');
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/triggers.yaml', 'should_trigger: [deploy now]\nshould_not_trigger: [chat]\n');
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
@@ -53,7 +53,7 @@ describe('eval (§6 / IE2)', () => {
   });
 
   it('refuses with the unchanged busy sentence when the wait is exhausted, before anything is paid for', async () => {
-    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     let preflightCalls = 0, agentCalls = 0;
@@ -67,7 +67,7 @@ describe('eval (§6 / IE2)', () => {
   });
 
   it('keeps the non-interactive budget short', async () => {
-    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const release = await holdCloneLock(store.teamClone('team'));
@@ -80,7 +80,7 @@ describe('eval (§6 / IE2)', () => {
   });
 
   it('hard-stops at hygiene before preflight or any agent process', async () => {
-    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('bad\u202Etext'));
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill('bad\u202Etext'));
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     let preflightCalls = 0; let agentCalls = 0;
@@ -92,9 +92,9 @@ describe('eval (§6 / IE2)', () => {
 
   it('writes an inspectable local run tree for trigger plus two-arm execution without editing the clone', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/triggers.yaml', 'should_trigger: [deploy now]\nshould_not_trigger: [chat]\n');
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/triggers.yaml', 'should_trigger: [deploy now]\nshould_not_trigger: [chat]\n');
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
     const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const agent: AgentApi = {
@@ -107,13 +107,13 @@ describe('eval (§6 / IE2)', () => {
     if (!result.ok) return;
     expect(await readFile(join(result.value.runDir, 'run.jsonl'), 'utf8')).toContain('candidate-vs-baseline');
     expect(io.lines.join('\n')).toContain('verdict: PASS');
-    expect(await readFile(join(clone, 'skills', 'sample', 'SKILL.md'), 'utf8')).toBe(skill());
+    expect(await readFile(join(clone, 'skills', 'sample', 'v1', 'SKILL.md'), 'utf8')).toBe(skill());
   });
 
   it('defaults to k=1 (rev 18): one rep per case per arm when --k is absent', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     let runs = 0;
@@ -133,7 +133,7 @@ describe('eval (§6 / IE2)', () => {
 
 
   it('generates missing kinds into the run tree and consumes those assets', async () => {
-    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const prompts: string[] = []; const io = new ScriptedPrompter();
@@ -146,9 +146,9 @@ describe('eval (§6 / IE2)', () => {
   });
 
   it('skips generation for authored assets and retains the prior report flow byte-for-byte', async () => {
-    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/triggers.yaml', 'should_trigger: [deploy]\nshould_not_trigger: [chat]\n');
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/triggers.yaml', 'should_trigger: [deploy]\nshould_not_trigger: [chat]\n');
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const firstPrompts: string[] = []; const first = new ScriptedPrompter();
@@ -161,8 +161,8 @@ describe('eval (§6 / IE2)', () => {
   });
 
   it('generates only the missing kind', async () => {
-    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const prompts: string[] = [];
@@ -172,7 +172,7 @@ describe('eval (§6 / IE2)', () => {
   });
 
   it('--no-gen preserves the zero-asset empty report', async () => {
-    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter(); const prompts: string[] = [];
@@ -181,23 +181,23 @@ describe('eval (§6 / IE2)', () => {
   });
 
   it('--gen leaves authored assets untouched while evaluating a local generated set', async () => {
-    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
     const authoredCase = 'task: authored\nchecks:\n  - transcript_mentions: authored\n'; const authoredTriggers = 'should_trigger: [authored]\nshould_not_trigger: [chat]\n';
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/authored.yaml', authoredCase); await pushFromSeed(fixture.seed, 'skills/sample/evals/triggers.yaml', authoredTriggers);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/authored.yaml', authoredCase); await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/triggers.yaml', authoredTriggers);
     const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    const authoredCasePath = join(clone, 'skills/sample/evals/cases/authored.yaml'); const authoredCaseMtime = (await stat(authoredCasePath)).mtimeMs;
+    const authoredCasePath = join(clone, 'skills/sample/v1/evals/cases/authored.yaml'); const authoredCaseMtime = (await stat(authoredCasePath)).mtimeMs;
     const result = await run({ ref: 'sample', gen: true, config: store, agent: generationAgent([]), k: 1, preflight: async () => success({ ccVersion: 'stub' }) }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: true }); if (!result.ok) return;
     expect(await readFile(authoredCasePath, 'utf8')).toBe(authoredCase); expect((await stat(authoredCasePath)).mtimeMs).toBe(authoredCaseMtime);
-    expect(await readFile(join(clone, 'skills/sample/evals/triggers.yaml'), 'utf8')).toBe(authoredTriggers);
+    expect(await readFile(join(clone, 'skills/sample/v1/evals/triggers.yaml'), 'utf8')).toBe(authoredTriggers);
     expect(await readFile(join(result.value.runDir, 'generated/cases/happy-path.yaml'), 'utf8')).toContain('generated by terum-skills');
   });
 
   it('never prompts when all eval assets are authored', async () => {
-    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
-    await pushFromSeed(fixture.seed, 'skills/sample/evals/triggers.yaml', 'should_trigger: [deploy]\nshould_not_trigger: [chat]\n');
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/triggers.yaml', 'should_trigger: [deploy]\nshould_not_trigger: [chat]\n');
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter([], [], true);
@@ -206,7 +206,7 @@ describe('eval (§6 / IE2)', () => {
   });
 
   it('keeps --case with no authored case as an error and never generates it', async () => {
-    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const prompts: string[] = [];
@@ -222,8 +222,8 @@ describe('eval (§6 / IE2)', () => {
 });
 
 it.each([false, true])('size warning reaches eval preflight unless accompanied by an error (mixed: %s)', async (mixed) => {
-  const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('x'.repeat(20_001) + (mixed ? '\u202E' : '')));
-  await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+  const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill('x'.repeat(20_001) + (mixed ? '\u202E' : '')));
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
   const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   let preflightCalls = 0; let agentCalls = 0;
@@ -240,9 +240,9 @@ it.each([false, true])('size warning reaches eval preflight unless accompanied b
 describe('eval-in-app completion and eligibility', () => {
   async function setup(kind: 'cases' | 'triggers' | 'both') {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
-    if (kind !== 'triggers') await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
-    if (kind !== 'cases') await pushFromSeed(fixture.seed, 'skills/sample/evals/triggers.yaml', 'should_trigger: [deploy]\nshould_not_trigger: [chat]\n');
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
+    if (kind !== 'triggers') await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    if (kind !== 'cases') await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/triggers.yaml', 'should_trigger: [deploy]\nshould_not_trigger: [chat]\n');
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update(c => { c.teams.team = { remote: fixture.bare, handle: 'seed' }; });

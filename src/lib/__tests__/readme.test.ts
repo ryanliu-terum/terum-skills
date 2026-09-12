@@ -148,7 +148,7 @@ it('lists every install record oldest first, including archived members and two 
 it.each([['2026-09-04T10:22:33-07:00\n', '2026-09-04T10:22:33-07:00'], ['', '—']])('latestChange returns a committed date or an empty-history dash', async (stdout, expected) => {
   const calls: unknown[] = [];
   expect(await latestChange({ run: async (...args) => { calls.push(args); return { code: 0, stdout, stderr: '' }; } }, '/clone', 'sample')).toBe(expected);
-  expect(calls).toEqual([['git', ['log', '-1', '--format=%cI', '--', 'skills/sample'], { cwd: '/clone' }]]);
+  expect(calls).toEqual([['git', ['log', '-1', '--format=%cI', '--', 'skills/sample/v1'], { cwd: '/clone' }]]);
 });
 it('latestChange surfaces git failure so the inventory can report the row', async () => {
   await expect(latestChange({ run: async () => ({ code: 1, stdout: '', stderr: 'broken history' }) }, '/clone', 'sample')).rejects.toThrow('broken history');

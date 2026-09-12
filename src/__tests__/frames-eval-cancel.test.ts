@@ -15,8 +15,8 @@ it.skipIf(process.platform === 'win32')('cancel during a built-bin eval kills th
   await promisify(execFile)(process.execPath, [tsc, '-p', join(root, 'tsconfig.build.json'), '--outDir', join(fixture.root, 'dist')], { cwd: root });
   await writeFile(join(fixture.root, 'package.json'), await readFile(join(root, 'package.json')));
   await symlink(join(root, 'node_modules'), join(fixture.root, 'node_modules'), 'dir');
-  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', '---\nname: sample\ndescription: useful\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nbody\n');
-  await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', '---\nname: sample\ndescription: useful\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nbody\n');
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
   const home = join(fixture.root, 'home');
   const store = createConfigStore(join(home, '.terum', 'skills'));
   await cloneWithIdentity(fixture.bare, store.teamClone('team'));

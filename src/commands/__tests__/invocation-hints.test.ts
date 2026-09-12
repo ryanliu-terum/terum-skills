@@ -40,7 +40,7 @@ describe.each([undefined, 'bare'] as const)('current-user remedies, form=%s', (f
     expect(await workflowUpdate({ form }, new ScriptedPrompter())).toEqual({ ok: false, error: `\`${prefix} team workflow-update\` is print-only; pass --print.` });
     const workflow = new ScriptedPrompter(); await workflowUpdate({ print: true, form }, workflow);
     expect(workflow.lines[0]+'\n').toBe(WORKFLOW);
-    expect(() => guardRawPush({ before: () => undefined, after: () => undefined, changedPaths: ['skills/sample/SKILL.md'] }, { handle: 'seed' }, form)).toThrow(`Run \`${prefix} login\``);
+    expect(() => guardRawPush({ before: () => undefined, after: () => undefined, changedPaths: ['skills/sample/v1/SKILL.md'] }, { handle: 'seed' }, form)).toThrow(`Run \`${prefix} login\``);
   });
 
   it('routes status, search missing-clone/stale and ls trailer, retaining portable status argument spelling', async () => {

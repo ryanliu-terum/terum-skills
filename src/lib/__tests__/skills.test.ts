@@ -50,8 +50,8 @@ describe('skills (§5.3 canonical frontmatter)', () => {
 
     const clone = join(root, 'clone');
     for (const [name, id] of [['one', 'deadbeef-0000-4000-8000-000000000001'], ['two', 'deadbeef-0000-4000-8000-000000000002']] as const) {
-      await mkdir(join(clone, 'skills', name), { recursive: true });
-      await writeFile(join(clone, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`);
+      await mkdir(join(clone, 'skills', name, 'v1'), { recursive: true });
+      await writeFile(join(clone, 'skills', name, 'v1', 'SKILL.md'), `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`);
     }
     await expect(findSkill(clone, 'team', 'deadbeef')).rejects.toThrow('ambiguous');
   });
