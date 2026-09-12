@@ -18,7 +18,11 @@ it('keeps completion above the shell after Settings loses CLI state and navigati
  function QueryAccess(){queries=useQueryClient();return null;}
  location.hash='#/settings/advanced?dialog=remove';
  render(<Providers><QueryAccess/><App/></Providers>);
- fireEvent.click(await screen.findByRole('button',{name:'Remove'}));
+ // The Remove button only exists once `?dialog=remove` has driven removal.start() -> uninstallMachine()
+ // -> ask('confirm'), a chain of effects after App's first paint. The default 1000 ms findBy budget
+ // races that chain and lost about one run in three. findBy polls, so a wider budget costs nothing
+ // when the dialog is already up.
+ fireEvent.click(await screen.findByRole('button',{name:'Remove'},{timeout:5000}));
  const region=await screen.findByRole('region',{name:'terum-skills was removed from this machine'});
  const settings=vi.spyOn(backend,'settings').mockResolvedValue({ok:false,error:'The desktop app could not find where terum-skills is installed…'});
  await act(async()=>{await queries.invalidateQueries({queryKey:['settings']});});
