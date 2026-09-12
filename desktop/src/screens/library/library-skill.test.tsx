@@ -166,12 +166,12 @@ it('keeps install and uninstall in the card menu alone, with no button of their 
 
 function openWith(route:string,backend:Backend){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}
 it('preserves checkout root and URL state across search and overview changes',async()=>{
- const root='/Users/you/code/mrf';open('#/library/checkout?root='+encodeURIComponent(root)+'&q=migration&overview=0&__mock=detected-root&theme=light');
+ const root='/Users/you/code/mrf';open('#/library/checkout?root='+encodeURIComponent(root)+'&q=migration&overview=0&__mock=missing-root&theme=light');
  expect(await screen.findByRole('link',{name:'MRF 2'})).toHaveAttribute('aria-current','page');
  await screen.findByText('2 skills');
  fireEvent.change(screen.getByRole('textbox'),{target:{value:'csv'}});
  fireEvent.click(screen.getByRole('button',{name:'Show overview'}));
- await waitFor(()=>{const params=new URLSearchParams(location.hash.split('?')[1]);expect(params.get('root')).toBe(root);expect(params.get('q')).toBe('csv');expect(params.get('overview')).toBeNull();expect(params.get('__mock')).toBe('detected-root');expect(params.get('theme')).toBe('light');});
+ await waitFor(()=>{const params=new URLSearchParams(location.hash.split('?')[1]);expect(params.get('root')).toBe(root);expect(params.get('q')).toBe('csv');expect(params.get('overview')).toBeNull();expect(params.get('__mock')).toBe('missing-root');expect(params.get('theme')).toBe('light');});
  fireEvent.click(screen.getByRole('button',{name:'Hide overview'}));
  await waitFor(()=>expect(new URLSearchParams(location.hash.split('?')[1]).get('overview')).toBe('0'));
 });
@@ -236,10 +236,10 @@ it('reports an unreadable name-route failure with the CLI message and can retry'
  fireEvent.click(screen.getByRole('button',{name:'Try again'}));
  await waitFor(()=>expect(backend.skill).toHaveBeenCalledTimes(2));
 });
-it.each([true,false])('keeps a local error honest and never offers checkout removal (typed=%s)',async typed=>{
+it.each([true,false])('keeps a local error honest and never offers project removal (typed=%s)',async typed=>{
  const backend=createMockBackend(),error='Raw CLI failure for /tmp/a';
  vi.spyOn(backend,'localSkill').mockResolvedValue({ok:false,error,...(typed?{reason:'not-in-library' as const}:{})});
- const remove=vi.spyOn(backend.checkouts,'remove');openWith('#/skill/local?path=%2Ftmp%2Fa',backend);
+ const remove=vi.spyOn(backend.projects,'remove');openWith('#/skill/local?path=%2Ftmp%2Fa',backend);
  expect(await screen.findByText(typed?'Not in your library':"Couldn't read a")).toBeVisible();
  expect(screen.getByRole('alert')).toHaveTextContent(error);
  expect(screen.queryByRole('button',{name:/Remove|Forget/i})).toBeNull();expect(remove).not.toHaveBeenCalled();
@@ -284,8 +284,8 @@ it('resets a local action error when navigating to another path',async()=>{
 // The Library Connect CTA was removed on 2026-09-10 (ratified override, .planning/specs/
 // 2026-09-10-library-mirror-id-sync.md): global skills auto-share at sync by ID check, and the
 // empty state's primary is the manual project path — the sidebar's native Add project flow (#102).
-it('the empty library offers Add project as its primary and drives the chooser into checkout add',async()=>{
- const backend=createMockBackend();const pick=vi.spyOn(backend,'pickFolder');const add=vi.spyOn(backend.checkouts,'add');
+it('the empty library offers Add project as its primary and drives the chooser into project add',async()=>{
+ const backend=createMockBackend();const pick=vi.spyOn(backend,'pickFolder');const add=vi.spyOn(backend.projects,'add');
  openWith('#/library/global?__mock=empty',backend);
  await screen.findByText('No skills in your global library');
  expect(screen.queryByRole('button',{name:'Connect'})).toBeNull();
@@ -293,9 +293,9 @@ it('the empty library offers Add project as its primary and drives the chooser i
  await waitFor(()=>expect(add).toHaveBeenCalledWith('/Users/you/code/new-project'));
  expect(pick).toHaveBeenCalledOnce();
 });
-it('the empty library degrades its primary to the marketplace link when the CLI has no checkout add',async()=>{
+it('the empty library degrades its primary to the marketplace link when the CLI has no project add',async()=>{
  const backend=createMockBackend();const features=await backend.features();
- vi.spyOn(backend,'features').mockResolvedValue({...features,checkouts:false});
+ vi.spyOn(backend,'features').mockResolvedValue({...features,libraryProjects:false});
  openWith('#/library/global?__mock=empty',backend);
  await screen.findByText('No skills in your global library');
  expect(screen.queryByRole('button',{name:'Add project'})).toBeNull();

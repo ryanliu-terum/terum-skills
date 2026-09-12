@@ -619,3 +619,27 @@ Two consequences, both inside B2:
 the silent failure above argues for, and it is the same class of thing as the mirror type-test the handoff
 reserved for Ryan: new permanent cross-tree test infrastructure. It is therefore **not built here**, and
 joins the mirror type-test as a proposal. B2 closes its own instance by re-keying the recordings.
+
+---
+
+## Decisions 31–37 — the calls B2's implementation forced (2026-09-11, third session)
+
+**Resolved on Ryan's standing best-call authorization (handoff of 2026-09-11), not by Ryan in person.**
+Each surfaced while building B2 and had no answer in rev 8: an implementer reaching them would have had
+to invent one. Recorded here with the reasoning in view so any can be overturned cheaply. Unchecked
+against the team's shared record — the `terum` MCP refused auth again (HTTP 401), a seventh session.
+
+| # | Decision | Verdict | Rationale (plain) |
+|---|---|---|---|
+| 31 | `LocalRoot.detected` after §7.2 deletes both its producers | LOCK — delete it end to end | Nothing can set it once the cwd root and `extraRoots` are gone. It gated two "Add" buttons (the sidebar's per-row `+ Add`, Settings' Add-on-a-detected-row) that the real app could then never show — the dead-control-that-lies class D25 used to delete `eval --working`. The `detected-root` mock scenario went with it; no fidelity board used it |
+| 32 | `added_at` on a project migrated from `checkouts` | LOCK — optional, and the migration omits it | The old shape never recorded when a root was registered. Stamping today's date would put a fact on the Library that is simply false, against "you can always see exactly what's on each". `addLibraryProject` always sets it going forward |
+| 33 | Whose label changes when two project basenames collide | LOCK — relabel the whole set, not just the newcomer | §3.6 gives the rule but not its scope. Labelling `/b/web` as `web (b)` while `/a/web` stays `web` leaves the pair unreadable in exactly the way the rule exists to prevent. `projectLabels()` is positional and pure: basename, parent-qualified on collision, whole root if even that collides |
+| 34 | `destinationSchema`'s `kind: 'checkout'` discriminant | LOCK — leave it; it is B6's | §7.1's naming table does not name it, and it is a **persisted** value (`config.pending[].destination`), so renaming it needs a migration nobody has specified. §9.1 rewrites the destination picker in B6; that is where it belongs, if anywhere |
+| 35 | What an unreadable project root does now | LOCK — stays visible, reports `unreadable` | The old pre-scan permission probe existed only to decide whether to admit an *undetected* cwd root, and it dropped the root and printed a problem line instead. A root the user added must not vanish from the Library because it briefly cannot be read — that would make the Library disagree with `project list`. The scan itself now supplies the state |
+| 36 | B2's projects onboarding fidelity board | LOCK — **owed, not added** | `boards.test.ts` asserts a read-only oracle for **every** `BOARDS` row regardless of status, gated only on `TERUM_DESIGN_DIR`. A row with no artboard passes here (no design dir) and fails on the maintainer's Mac — the worst outcome. The artboard is Teddy's, and the step's only surface is a prompt dialog no route renders. Recorded in `desktop/FIDELITY.md` with what it needs, in order. The 90-row pin is untouched |
+| 37 | Where the `path` ask actually renders | Correction of fact, not a fork | §9.2 names `desktop/src/components/domain/WorkflowControls.tsx`. That file is a 21-line popup shell and renders no ask kinds; the ask renderer is `PromptDialog` in `desktop/src/app/providers.tsx`. Built there: the existing `.prompt-field` input plus a `Choose folder…` button calling `backend.pickFolder()`, in a `.prompt-path` flex row. The typed value stays the answer, so a shell without a chooser is still a working prompt — which is what the protocol promises anyone treating `path` as `text` |
+
+**Also settled by building it, and not a fork:** §9.2's step body needs no "no folder chosen" branch.
+A blank answer to a text question takes the offered default (`frames.ts`'s `answer || defaultValue || ''`),
+and the step always offers one, so the branch was unreachable. Declining is the confirm — the **Skip**
+half of §9.2's drawn control — and that is the only way to leave the step without a project.

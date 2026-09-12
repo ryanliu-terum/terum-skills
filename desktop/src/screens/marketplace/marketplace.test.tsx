@@ -59,7 +59,7 @@ it('applies project search and preserves rail state', async () => { open('#/mark
 it('renders no filter button on the marketplace search bar', async () => { open('#/marketplace'); await screen.findByRole('region', { name: 'Top rated' }); expect(screen.queryByRole('button', { name: 'Filter marketplace' })).toBeNull(); expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull(); });
 it.each([['Top rated', 'skills'], ['Teams / Projects', 'projects'], ['People', 'people'], ['Browse by category', 'categories']])('navigates %s pager to the expanded list', async (title, path) => { open('#/marketplace'); fireEvent.click(await screen.findByRole('button', { name: 'View all ' + title })); await waitFor(() => expect(location.hash).toBe('#/marketplace/' + path)); });
 it('creates a team project from the Add button and lands on its card', async () => {
-  const create = vi.spyOn(pickBackend().projects, 'create');
+  const create = vi.spyOn(pickBackend().teamProjects, 'create');
   open('#/marketplace/projects');
   fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
   const dialog = await screen.findByRole('dialog');
@@ -73,7 +73,7 @@ it('creates a team project from the Add button and lands on its card', async () 
   expect(screen.queryByRole('button', { name: /Install 0 skills/ })).toBeNull();
 });
 it('omits the repository from the call when the field is left empty', async () => {
-  const create = vi.spyOn(pickBackend().projects, 'create');
+  const create = vi.spyOn(pickBackend().teamProjects, 'create');
   open('#/marketplace/projects?dialog=new-project');
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Platform' } });
@@ -81,7 +81,7 @@ it('omits the repository from the call when the field is left empty', async () =
   await waitFor(() => expect(create).toHaveBeenCalledWith({ name: 'Platform' }));
 });
 it('refuses a name an existing card already carries, before calling the CLI', async () => {
-  const create = vi.spyOn(pickBackend().projects, 'create');
+  const create = vi.spyOn(pickBackend().teamProjects, 'create');
   open('#/marketplace/projects?dialog=new-project');
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'terum' } });
@@ -92,7 +92,7 @@ it('refuses a name an existing card already carries, before calling the CLI', as
 });
 it('shows the CLI refusal in the dialog and keeps what was typed', async () => {
   const backend = pickBackend();
-  vi.spyOn(backend.projects, 'create').mockReturnValue(createRun(async () => ({ ok: false, error: 'a project name is 1-64 characters: letters, digits, spaces, dot, underscore, or hyphen, and cannot start with a dot or a space' })));
+  vi.spyOn(backend.teamProjects, 'create').mockReturnValue(createRun(async () => ({ ok: false, error: 'a project name is 1-64 characters: letters, digits, spaces, dot, underscore, or hyphen, and cannot start with a dot or a space' })));
   open('#/marketplace/projects?dialog=new-project');
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Billing' } });

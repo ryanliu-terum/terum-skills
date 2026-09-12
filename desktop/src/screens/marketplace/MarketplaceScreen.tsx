@@ -58,7 +58,7 @@ function NewProjectDialog({ catalog, onClose, onCreated }: { catalog: Catalog; o
   const message = problem ?? action.error;
   function create() {
     if (!trimmed || problem || action.busy) return;
-    void action.run(() => backend.projects.create({ name: trimmed, ...(remote.trim() ? { remote: remote.trim() } : {}) }), {}, created => onCreated(created.name));
+    void action.run(() => backend.teamProjects.create({ name: trimmed, ...(remote.trim() ? { remote: remote.trim() } : {}) }), {}, created => onCreated(created.name));
   }
   return <Dialog open onOpenChange={open => { if (!open && !action.busy) onClose(); }}><DialogPopup>
     <DialogTitle>New project</DialogTitle>

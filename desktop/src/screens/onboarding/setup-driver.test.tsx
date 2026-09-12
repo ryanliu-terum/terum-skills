@@ -178,16 +178,20 @@ it('uses identity ask detail for the dialog and the active team cue without tran
  fireEvent.click(within(dialog).getByRole('button',{name:'Yes'}));await screen.findByRole('heading',{name:'Setup finished'});
 });
 
-it('shows a discover progress counter on its own row instead of a seventh row',async()=>{
+// A progress frame whose label names a drawn row folds into that row rather than adding a seventh.
+// `projects` is the row to test it with: the "n of m" counter is deliberately evals-only (SetupBoot:27),
+// so a non-evals known row proves the fold without the counter coming along.
+it('folds a known progress label into its row instead of adding a seventh',async()=>{
  const b=backend();let finish!:()=>void;const pending=new Promise<void>(resolve=>{finish=resolve;});
  vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{
-  ctx.print('Looking for skill folders on this machine…');ctx.progress(12,12,'discover');await pending;
-  return {ok:true,value:{team:'t',role:'creator',steps:{discover:'done'}}};
+  // The step's own opening line, which printedSetupStep maps to `projects` — that is what makes the row current.
+  ctx.print("Terum will track the skills in that project's .claude folder.");ctx.progress(12,12,'projects');await pending;
+  return {ok:true,value:{team:'t',role:'creator',steps:{projects:'done'}}};
  }));
- const view=open(b);await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('Looking for skill folders on this machine'));
+ const view=open(b);await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('Adding a project to your library'));
  expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(5);
- expect([...view.container.querySelectorAll('.onboarding-progress-row')].find(row=>row.textContent?.includes('Looking for skill folders on this machine'))).toHaveAttribute('data-state','current');
- expect(screen.getByRole('status')).not.toHaveTextContent(/^discover$/);expect(view.container.querySelector('.onboarding-progress-row[data-state="current"]>span:last-child')).not.toHaveTextContent('12 of 12');
+ expect([...view.container.querySelectorAll('.onboarding-progress-row')].find(row=>row.textContent?.includes('Adding a project to your library'))).toHaveAttribute('data-state','current');
+ expect(screen.getByRole('status')).not.toHaveTextContent(/^projects$/);expect(view.container.querySelector('.onboarding-progress-row[data-state="current"]>span:last-child')).not.toHaveTextContent('12 of 12');
  await act(async()=>finish());await screen.findByRole('heading',{name:'Setup finished'});
 });
 it('still shows an unknown progress label as its own row',async()=>{

@@ -5,8 +5,8 @@ import { createTauriBackend } from '../index';
 import { fakeBridge } from './fake-bridge';
 
 function recorded(name:string){return readFileSync(resolve('../.planning/codex-runs/personal-library/frames',name+'.jsonl'),'utf8').trim().split('\n');}
-const checkoutResult=JSON.parse(recorded('checkout-add').at(-1)!) as {value:{path:string;registered:boolean}};
-const path=checkoutResult.value.path;
+const addResult=JSON.parse(recorded('project-add').at(-1)!) as {value:{path:string;label:string;added:boolean}};
+const path=addResult.value.path;
 const home=path.slice(0,path.lastIndexOf('/repo/app'))+'/home';
 function replay(name='ls-local') {
  const f=fakeBridge((args,emit)=>{
@@ -16,7 +16,7 @@ function replay(name='ls-local') {
   if(args[0]==='serve') {emit({kind:'stdout',line:JSON.stringify({t:'hello',protocol:1,version:'0.14.0',verbs:[],features:{}})});return;}
   if(args[0]==='sync') {emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{changed:false,notices:[],teams:[]}})});return;}
   if(args[0]==='status') {emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'status',ok:true,exitCode:0,value:{version:'0.1.7',teams:[],identity:null,ledger:{placements:[],approvals:[],},tools:{git:true,gh:true}}})});return;}
-  const file=args[0]==='checkout'?'checkout-'+args[1]:name;
+  const file=args[0]==='project'?'project-'+args[1]:name;
   for(const line of recorded(file))emit({kind:'stdout',line});
  });
  f.bridge.homeDirectory=async()=>home;
@@ -24,7 +24,7 @@ function replay(name='ls-local') {
 }
 it('replays roots and authoritative skill-folder counts, including a name mismatch',async()=>{
  const {backend}=replay();const status=await backend.status();
- expect(status).toMatchObject({ok:true,value:{counts:{Global:'2'},roots:[{id:'global',kind:'global',root:'~/.claude/skills',count:'2'},{id:path,kind:'checkout',label:'app',root:path,registered:true,detected:false,count:'2',rootState:'scanned'}]}});
+ expect(status).toMatchObject({ok:true,value:{counts:{Global:'2'},roots:[{id:'global',kind:'global',root:'~/.claude/skills',count:'2'},{id:path,kind:'checkout',label:'app',root:path,registered:true,count:'2',rootState:'scanned'}]}});
  const library=await backend.library({scope:{kind:'global'}});
  expect(library).toMatchObject({ok:true,value:{root:{id:'global',label:'Global',count:'2'},title:'2 skills',team:{kind:'none'},skills:[{name:'alpha',project:'Global',path:home+'/.claude/skills/alpha',flags:['local'],placed:false},{name:'beta',project:'Global',flags:['broken'],flagText:{broken:'Not connectable · SKILL.md name not-beta does not equal folder beta'}}]}});
  // Re-recorded from the B1 CLI (Ryan's ruling, 2026-09-11), so the capture now carries description and
@@ -34,24 +34,20 @@ it('replays roots and authoritative skill-folder counts, including a name mismat
  expect(checkout.value?.skills.map(s=>s.name)).toEqual(['delta','gamma']);
  expect(checkout.value?.skills.every(s=>!s.placed)).toBe(true);
 });
-it('replays the detected cwd root without implying registration or sharing',async()=>{
- const {backend}=replay('ls-local-detected'),status=await backend.status();
- expect(status.value?.roots[2]).toMatchObject({id:path.replace(/app$/,'other'),label:'other',registered:false,detected:true,count:'1'});
- const result=await backend.library({scope:{kind:'checkout',root:path.replace(/app$/,'other')}});
- expect(result.value?.skills).toMatchObject([{name:'epsilon',flags:['local'],placed:false}]);
-});
-it('replays an absent checkout with zero folders while retaining its registry identity',async()=>{
+// §7.2 deleted the cwd-detected root, so `ls --local` can no longer report a detected, unregistered
+// root at all — the capture that showed one described a state the product no longer has, and went with it.
+it('replays an absent project with zero folders while retaining its registry identity and label',async()=>{
  const {backend}=replay('ls-local-missing');
- expect((await backend.status()).value?.roots[1]).toMatchObject({id:path,registered:true,rootState:'absent',count:'0'});
+ expect((await backend.status()).value?.roots[1]).toMatchObject({id:path,label:'app',registered:true,rootState:'absent',count:'0'});
  expect(await backend.library({scope:{kind:'checkout',root:path}})).toMatchObject({ok:true,value:{root:{id:path,label:'app',rootState:'absent'},skills:[],title:'0 skills'}});
 });
-it('maps both checkout recordings, argv and config notifications',async()=>{
+it('maps both project recordings, argv and config notifications',async()=>{
  const {backend,spawns}=replay(),notify=vi.fn();backend.subscribe(notify);
- expect(await backend.checkouts.add(path).done).toEqual({ok:true,value:{path,registered:true}});
- expect(await backend.checkouts.remove(path).done).toEqual({ok:true,value:{path,placementsRemaining:0}});
- expect(spawns.map(s=>s.args)).toEqual([['checkout','add','--',path],['sync'],['checkout','remove','--',path]]);
+ expect(await backend.projects.add(path).done).toEqual({ok:true,value:{path,label:'app',added:true}});
+ expect(await backend.projects.remove(path).done).toEqual({ok:true,value:{path,placementsRemaining:0}});
+ expect(spawns.map(s=>s.args)).toEqual([['project','add','--',path],['sync'],['project','remove','--',path]]);
  expect(notify.mock.calls).toEqual([['config'],['config']]);
- expect(await backend.surfaces()).toMatchObject({checkouts:true});
+ expect(await backend.surfaces()).toMatchObject({libraryProjects:true});
 });
 it.each(['alpha','beta'])('serves the recorded %s local detail without fabricating markdown',async name=>{
  const {backend}=replay();const folder=home+'/.claude/skills/'+name;

@@ -40,8 +40,6 @@ it('keeps errors without value when the failing value cannot be parsed', async (
 });
 
 const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = [
-  ['checkout discover', b => b.checkouts.discover({under:['-x','/two'],register:true}).done, ['checkout','discover','--register','--under=-x','--under=/two']],
-  ['bare checkout discover', b => b.checkouts.discover({}).done, ['checkout','discover']],
   ['profile', b => b.profile({ name: 'A B', bio: '', role: 'Platform', projects: ['terum', 'second'] }).done, ['profile', '--name', 'A B', '--bio', '', '--role', 'Platform', '--project', 'terum', '--project', 'second']],
   ['leading-dash install', b => b.install({ ref: '-x', team: 'acme' }).done, ['install', '--team', 'acme', '--into', 'global', '--', '-x']],
   ['team create', b => b.team({ kind: 'create', name: '-x', remote: '/repo' }).done, ['team', 'create', '--remote', '/repo', '--', '-x']],
@@ -123,7 +121,7 @@ it.each([true, false])('maps every search field including its real description (
 it('serves status, settings, library, skill, update, roster and catalog while the other three surfaces stay typed gaps', async () => {
   const f = replay(undefined);
   const b = createTauriBackend(f.bridge);
-  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, checkouts: true, appUpdate: true });
+  expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, libraryProjects: true, appUpdate: true });
   for (const result of await Promise.all([b.onboarding(), b.inbox()])) {
     expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
   }
@@ -904,12 +902,6 @@ describe('W-02 catalog scheduling',()=>{
   const f=catalogBurst(1);const backend=createTauriBackend(f.bridge);await backend.roster();await backend.catalog();expect(f.spawns.filter(s=>s.args[0]==='status').map(s=>s.args)).toEqual([['status','--permissions'],['status']]);
  });
 });
-it('reads the discover result and rejects a malformed one',async()=>{
- const value={candidates:[{path:'/a',skillFolders:2,registered:false,repoRoot:true}],scanned:5,truncated:false,problems:[]};
- expect(await createTauriBackend(replay(value).bridge).checkouts.discover({}).done).toEqual({ok:true,value});
- expect(await createTauriBackend(replay({candidates:'no'}).bridge).checkouts.discover({}).done).toMatchObject({ok:false,error:expect.stringContaining('could not read the result')});
-});
-
 
 it.each(['---\r\nname: "deploy-check"\r\n# original comment\r\n---', null, undefined])('maps team frontmatter verbatim, with an empty fallback for %j', async frontmatter => {
   const f = detailReplay((name, value) => {

@@ -25,7 +25,7 @@ function frames(args: readonly string[]) {
     uninstall: { teams: ['acme'], removedPlacements: 1, hookRemoved: true, wrapperRemoved: true, configRemoved: true, kept: [], record: '/backups/1', advice: [] },
   };
   if (args[0] && Object.hasOwn(mutations, args[0])) return [{ t: 'result', verb: args[0], ok: true, exitCode: 0, value: mutations[args[0]] }];
-  if (args[0] === 'checkout') return [{ t: 'result', verb: 'checkout', ok: true, exitCode: 0, value: { path: args[3], registered: true } }];
+  if (args[0] === 'project') return [{ t: 'result', verb: 'project', ok: true, exitCode: 0, value: { path: args[3], label: 'x', added: true } }];
   if (args[0] === 'status') return recorded('status');
   return recorded(args[1] === '--local' ? 'ls-local' : 'ls');
 }
@@ -80,9 +80,9 @@ describe('read cache (BUGS.md L18/M24: one CLI process per read verb per render)
   it('a mutation clears it, so the next read sees the change', async () => {
     const f = bridge(); const backend = createTauriBackend(f.bridge);
     await backend.status();
-    await backend.checkouts.add('/work/x').done;
+    await backend.projects.add('/work/x').done;
     await backend.status();
-    expect(argv(f)).toEqual(['status', 'ls --local', 'checkout add -- /work/x', 'status', 'ls --local']);
+    expect(argv(f)).toEqual(['status', 'ls --local', 'project add -- /work/x', 'status', 'ls --local']);
   });
 
   it('window focus serves the cached value and refreshes it behind the screen', async () => {
@@ -161,7 +161,7 @@ describe('W-02 stale revalidation',()=>{
     const f=bridge({hold:'status',holdAfter:1});const backend=createTauriBackend(f.bridge);await backend.status();window.dispatchEvent(new Event('focus'));window.dispatchEvent(new Event('focus'));await Promise.all([backend.status(),backend.status(),backend.status()]);await vi.waitFor(()=>expect(argv(f).filter(v=>v==='status')).toHaveLength(2));f.release();
   });
   it('a mutation cannot be overwritten by an older background refresh',async()=>{
-    const f=bridge({hold:'status',holdAfter:1});const backend=createTauriBackend(f.bridge);await backend.status();window.dispatchEvent(new Event('focus'));await backend.status();await vi.waitFor(()=>expect(argv(f).filter(v=>v==='status')).toHaveLength(2));await backend.checkouts.add('/work/new').done;f.release();await backend.status();expect(argv(f).filter(v=>v==='status')).toHaveLength(3);
+    const f=bridge({hold:'status',holdAfter:1});const backend=createTauriBackend(f.bridge);await backend.status();window.dispatchEvent(new Event('focus'));await backend.status();await vi.waitFor(()=>expect(argv(f).filter(v=>v==='status')).toHaveLength(2));await backend.projects.add('/work/new').done;f.release();await backend.status();expect(argv(f).filter(v=>v==='status')).toHaveLength(3);
   });
 });
 

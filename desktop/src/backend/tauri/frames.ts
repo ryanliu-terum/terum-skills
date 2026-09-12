@@ -4,7 +4,7 @@
  * format, the seam owns what screens see, and `run.ts` is the only place that maps one to the other.
  */
 export type CliLevel = 'info' | 'warn' | 'error';
-export type CliAskKind = 'confirm' | 'text' | 'select';
+export type CliAskKind = 'confirm' | 'text' | 'select' | 'path';
 export type CliFrame =
   | { t: 'hello'; protocol: number; version: string | null; verbs: readonly string[]; features: Readonly<Record<string, boolean>> }
   | { t: 'print'; level: CliLevel; line: string }

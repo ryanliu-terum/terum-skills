@@ -9,7 +9,7 @@ async function reachEvals(){
  const backend=createMockBackend();vi.spyOn(backend,'launchContext').mockResolvedValue(null);vi.spyOn(backend,'refreshLaunch').mockResolvedValue(null);
  location.hash='#/onboarding/boot?start=1';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
  let dialog=await screen.findByRole('dialog');fireEvent.click(within(dialog).getByRole('radio',{name:'Create a new team'}));fireEvent.click(within(dialog).getByRole('button',{name:'Continue'}));
- dialog=await screen.findByRole('dialog',{name:'Look for skill folders on this machine and add them to your library?'});fireEvent.click(within(dialog).getByRole('button',{name:'No'}));
+ dialog=await screen.findByRole('dialog',{name:'Add a project?'});fireEvent.click(within(dialog).getByRole('button',{name:'No'}));
  return screen.findByRole('dialog',{name:/Evaluate the 2 shared skills/});
 }
 it('replays an explicit overnight choice with estimate, four descriptions and a completed Queued row',async()=>{
