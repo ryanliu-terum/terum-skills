@@ -486,6 +486,8 @@ The receipt JSON is the API. The UI never runs an eval itself: it may hand a run
 
 Reconciliation (2026-09-09, eval-button decision walk D1): PR #68's §12 clauses (a), (c) and (d) stand; clause (b) — the UI composes the command and hands the person to a terminal — is replaced by the sentence above.
 
+> **Superseded for the marketplace card only — 2026-09-11 by `.planning/specs/2026-09-11-library-marketplace-refactor.md` §8.1/§8.2** (OF-8, resolved 2026-09-12). The clause above — *"an invalid latest receipt is reported as invalid, never replaced by an older one"* — is **deliberately reversed on the marketplace card**: §8.1's fallback walks a skill's versions newest-first and shows the newest version that has a usable receipt, and §8.2's **mandatory on-card version chip** ("from Version 3 · latest Version 5") is the mitigation that keeps the reversal honest — the card must never show an older version's number without saying so on the card face. Everywhere else — the skill detail view, the Library, per-version receipt lists — this clause stands unchanged. The ratified decision being reversed is `.planning/decisions/2026-09-08-eval-engine-s12-display-rule-draft.md`; §16 of the refactor spec records that an override is owed for it.
+
 Card (per the D29 resolution, commit `25ff226`):
 
 | Card slot | Source |
