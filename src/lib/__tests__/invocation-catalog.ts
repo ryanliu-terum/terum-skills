@@ -1,4 +1,6 @@
-/** Explicit source literal policy. Exact trimmed line patterns prevent file-wide exemptions.
+/** B4: marketplace reinstall uses install; the retired manage hint now uses publish.
+ * No new CLI verb or root-source package literal is introduced.
+ * Explicit source literal policy. Exact trimmed line patterns prevent file-wide exemptions.
  * Line numbers are informational; the tripwire matches file AND content and checks multiplicity.
  */
 export const invocationLiteralCatalog: readonly { file: string; line: number; policy: 'routed' | 'fixed' | 'prose' | 'not-a-hint'; pattern: string }[] = [

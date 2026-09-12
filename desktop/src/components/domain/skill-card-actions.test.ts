@@ -3,7 +3,7 @@ import { cardActions, detailPath } from './skill-card-actions';
 import type { SkillCard, TeamState } from '../../backend/types';
 
 function card(over:Partial<SkillCard>={}):SkillCard {
- return {teamed:true,path:null,updated:null,grants:null,normalizedGrants:null,grantsHash:null,project:'Terum',category:'infra',name:'deploy-check',desc:'',size:'2k',installs:'3 installs',favorite:false,flags:[],flagText:{},enabled:true,installed:'placed',placed:true,onDiskOnly:false,teamState:'endorsed',paths:[],wlt:null,summary:null,installsN:3,tokensK:2,indicators:{} as SkillCard['indicators'],...over};
+ return {localEval:null,localEvalStale:false,installedVersion:null,latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:true,path:null,updated:null,grants:null,normalizedGrants:null,grantsHash:null,project:'Terum',category:'infra',name:'deploy-check',desc:'',size:'2k',installs:'3 installs',favorite:false,flags:[],flagText:{},enabled:true,installed:'placed',placed:true,onDiskOnly:false,teamState:'endorsed',paths:[],wlt:null,summary:null,installsN:3,tokensK:2,indicators:{} as SkillCard['indicators'],...over};
 }
 function find(skill:SkillCard,key:string){const action=cardActions(skill).find(a=>a.key===key);if(!action)throw new Error('no action '+key);return action;}
 

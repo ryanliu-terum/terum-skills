@@ -15,5 +15,29 @@ export function versionText(version: string | null | undefined, fallback: string
   return /^[0-9a-f]{7,40}$/.test(fallback) ? `v ${fallback.slice(0, 12)}` : fallback;
 }
 
-import type { TokenKey } from '../../backend/types';
+import type { SkillCard, TokenKey } from '../../backend/types';
 export const token=(key:TokenKey)=>`var(--tk-${key})`;
+
+/** The score's version must remain visible on the card face, including an unreadable latest. */
+export function evalVersionLabel(card: Pick<SkillCard, 'evalVersion' | 'latestVersion' | 'evalStale' | 'latestEvalState'>): string | null {
+ if (!card.evalStale || card.evalVersion === null || card.latestVersion === null) return null;
+ const latest = parseVersionFolder(card.latestVersion);
+ if (latest === null) return null;
+ return `from ${versionLabel(card.evalVersion)} · ${card.latestEvalState === 'invalid' ? `${versionLabel(latest)} unreadable` : `latest ${versionLabel(latest)}`}`;
+}
+export function installedVersionBehind(card: Pick<SkillCard, 'installedVersion' | 'latestVersion'>): boolean {
+ const installed = card.installedVersion === null ? null : parseVersionFolder(card.installedVersion);
+ const latest = card.latestVersion === null ? null : parseVersionFolder(card.latestVersion);
+ return installed !== null && latest !== null && installed < latest;
+}
+export function marketplaceVersionLabel(card: Pick<SkillCard, 'installedVersion' | 'latestVersion'>): string | null {
+ const latest = card.latestVersion === null ? null : parseVersionFolder(card.latestVersion);
+ if (latest === null) return null;
+ const installed = card.installedVersion === null ? null : parseVersionFolder(card.installedVersion);
+ return installed === latest ? `${versionLabel(latest)} · installed`
+  : installed !== null && installed < latest ? `${versionLabel(latest)} · you have ${versionLabel(installed)}` : versionLabel(latest);
+}
+export function profileVersionLabel(card: Pick<SkillCard, 'profileVersion'>): string | null {
+ const n = card.profileVersion === null ? null : parseVersionFolder(card.profileVersion);
+ return n === null ? null : `On profile · ${versionLabel(n)}`;
+}

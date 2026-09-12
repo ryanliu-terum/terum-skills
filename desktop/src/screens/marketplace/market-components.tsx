@@ -15,7 +15,7 @@ import { personStatus, plural, pluralWord } from './market-data';
 import { Filters } from './market-filters';
 const CATEGORY_ICONS: Record<string, IconName> = {infra:'box',docs:'book-open',review:'eye',ops:'terminal',testing:'flask',data:'database',git:'git-commit',onboarding:'users',research:'search',security:'shield'};
 function iconName(name: string): IconName { return CATEGORY_ICONS[name] ?? (Object.hasOwn(ICON_PATHS,name)?name as IconName:'tag'); }
-export function CardRow({ names, catalog, cols = 3 }: { names: string[]; catalog: Catalog; cols?: number }) { const available = [...catalog.skills, ...catalog.extras]; return <div className="market-grid" data-columns={cols} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>{names.map(name => { const skill = available.find(s => s.name === name); if (!skill) throw new Error(`Catalog is missing skill ${name}.`); return <MarketplaceSkillCard key={name} skill={skill}/>; })}</div>; }
+export function CardRow({ names, catalog, cols = 3, profileVersions }: { names: string[]; catalog: Catalog; cols?: number; profileVersions?: Record<string,string> | undefined }) { const available = [...catalog.skills, ...catalog.extras]; return <div className="market-grid" data-columns={cols} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>{names.map(name => { const skill = available.find(s => s.name === name); if (!skill) throw new Error(`Catalog is missing skill ${name}.`); return <MarketplaceSkillCard key={name} skill={profileVersions ? {...skill,profileVersion:profileVersions[name]??null} : skill}/>; })}</div>; }
 
 function MarketplaceSkillCard({ skill }: { skill: Card }) {
   // Install lives in the card's ⋯ menu on every surface (Ryan, 2026-09-09): the menu is the only
