@@ -40,6 +40,8 @@ const PEOPLE_ACTIONS: readonly GuardAction[] = ['join', 'install', 'uninstall', 
 
 /** Row a′: a published skill's bytes. Add-only — this is what makes a version immutable at the authorization layer. */
 const VERSION_PATH = /^skills\/([^/]+)\/v[1-9][0-9]*\/.+$/;
+/** The version folder a path lives in, trailing slash included — OF-3's unit of immutability. */
+const VERSION_PREFIX = /^skills\/[^/]+\/v[1-9][0-9]*\//;
 /** The SKILL.md of some version, used by row g to resolve a receipt uuid against a skill's metadata. */
 const VERSION_SKILL_MD = /^skills\/[^/]+\/v[1-9][0-9]*\/SKILL\.md$/;
 // Skill uuids are case-tolerant (z.uuid() admits both; callers pass metadata.id verbatim). The version
@@ -77,7 +79,17 @@ export function guard(tree: GuardTree, rawContext: GuardContext): void {
  */
 function permitsVersionFolder(tree: GuardTree, path: string): boolean {
   if (!VERSION_PATH.test(path)) return false;
-  return tree.before(path) === undefined && tree.after(path) !== undefined;
+  if (tree.before(path) !== undefined || tree.after(path) === undefined) return false;
+  // OF-3: the per-path test above is NOT immutability. It refuses MODIFYING a file that already
+  // exists, but happily ADDS a previously-absent file into a version folder that is already
+  // committed — changing a published version's bytes and therefore its `skillContentDigest`, which
+  // §3.1 calls immutable and which §5.1 step 7 compares against to decide whether to mint a new
+  // ordinal. So the PREFIX, not the path, is the unit: many files added together for a NEW version
+  // are admitted; one file added to an EXISTING version is refused.
+  const prefix = VERSION_PREFIX.exec(path)?.[0];
+  if (prefix === undefined) return false;
+  if (tree.paths === undefined) return false; // fail CLOSED without the accessor, exactly as row g does
+  return !tree.paths(prefix).some((sibling) => tree.before(sibling) !== undefined);
 }
 
 /**

@@ -17,7 +17,17 @@ const tree = (changes: Changes, unchanged: Record<string, string> = {}) => ({
   before: (path: string) => (path in changes ? changes[path]![0] : unchanged[path]),
   after: (path: string) => (path in changes ? changes[path]![1] : unchanged[path]),
   changedPaths: Object.keys(changes),
+  // `makeTree` always supplies this, so a fixture without it models a tree that cannot exist — and
+  // rows a' and g both fail closed without it, so omitting it would refuse every publish.
+  paths: (prefix = '') => [...new Set([...Object.keys(unchanged), ...Object.keys(changes).filter((path) => changes[path]![1] !== undefined)])].filter((path) => path.startsWith(prefix)).sort(),
 });
+/** A tree that cannot enumerate its post-image at all: rows a' and g must both fail CLOSED on it. */
+const pathlessTree = (changes: Changes, unchanged: Record<string, string> = {}) => ({
+  before: (path: string) => (path in changes ? changes[path]![0] : unchanged[path]),
+  after: (path: string) => (path in changes ? changes[path]![1] : unchanged[path]),
+  changedPaths: Object.keys(changes),
+});
+
 /**
  * Row g resolves a receipt's uuid against the POST-IMAGE, so a receipt tree must expose `paths()`
  * over every version SKILL.md the commit leaves behind — added ones included.
@@ -32,6 +42,28 @@ const publish: GuardContext = { action: 'publish', handle: 'me' };
 const migrate: GuardContext = { action: 'migrate', handle: 'me' };
 
 describe("row a' — a version folder is add-only, and ownership is never consulted", () => {
+  // §14.1/OF-3, the clause the rest of this block cannot reach: every case above calls `tree()` with
+  // no `unchanged` map, so the target version is never in the pre-image and the prefix property is
+  // never exercised. Marked RESOLVED rev 8 in the open-findings list, which only ever meant the SPEC
+  // text was corrected — the code shipped the per-path predicate with a comment asserting the
+  // property it did not have.
+  it("refuses adding a previously-absent file to a version that already exists, while admitting many files for a NEW version", () => {
+    const committed = { 'skills/x/v1/SKILL.md': skill() };
+    // The defect: `notes.md` is an ADD, so the per-path test admitted it — mutating a published
+    // version's bytes and therefore its skillContentDigest, which §3.1 calls immutable and which
+    // §5.1 step 7 compares against to decide whether to mint a new ordinal.
+    refuse(tree({ 'skills/x/v1/notes.md': [undefined, 'n'] }, committed), publish, 'skills/x/v1/notes.md');
+    // Eval assets are not a loophole: D9 makes them ordinary version bytes, so the same refusal holds.
+    refuse(tree({ 'skills/x/v1/evals/cases/new.yaml': [undefined, 'task: t'] }, committed), publish, 'skills/x/v1/evals/cases/new.yaml');
+    // And the property that must NOT regress: a whole new version lands in one commit, many files at
+    // once, alongside the version that already exists.
+    expect(() => guard(tree({
+      'skills/x/v2/SKILL.md': [undefined, skill()],
+      'skills/x/v2/references/deep/a.md': [undefined, 'aux'],
+      'skills/x/v2/evals/triggers.yaml': [undefined, 'should_trigger: []'],
+    }, committed), publish)).not.toThrow();
+  });
+
   it('admits every kind of file publish puts in a NEW version folder', () => {
     expect(() => guard(tree({ 'skills/x/v1/SKILL.md': [undefined, skill()] }), publish)).not.toThrow();
     expect(() => guard(tree({ 'skills/x/v12/references/deep/a.md': [undefined, 'aux'] }), publish)).not.toThrow();
@@ -108,7 +140,9 @@ describe('row g — receipts are append-only testimony, written only by publish'
     for (const action of ['join', 'install', 'uninstall', 'profile', 'project', 'team-remove'] as const) {
       refuse(receiptTree({ [`evals/${ID}/v1/${RUN}.json`]: [undefined, '{}'] }), { action, handle: 'me' }, `evals/${ID}/v1/${RUN}.json`);
     }
-    refuse(tree({ [`evals/${ID}/v1/${RUN}.json`]: [undefined, '{}'] }, { 'skills/x/v1/SKILL.md': skill() }), publish, `evals/${ID}/v1/${RUN}.json`);
+    refuse(pathlessTree({ [`evals/${ID}/v1/${RUN}.json`]: [undefined, '{}'] }, { 'skills/x/v1/SKILL.md': skill() }), publish, `evals/${ID}/v1/${RUN}.json`);
+    // OF-3 made row a' depend on the same accessor, so it fails closed on such a tree too.
+    refuse(pathlessTree({ 'skills/x/v9/SKILL.md': [undefined, skill()] }), publish, 'skills/x/v9/SKILL.md');
   });
 });
 
