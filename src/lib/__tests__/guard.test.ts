@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guard, GuardContext, GuardError, guardRawPush, isMember } from '../guard.js';
+import { guard, GuardContext, GuardError, GuardTree, guardRawPush, isMember } from '../guard.js';
 
 const ID = '4e80fd2a-04bc-4d9f-88f7-a849d92879f1';
 const ABSENT_ID = '11111111-1111-4111-8111-111111111111';
@@ -36,7 +36,7 @@ const receiptTree = (changes: Changes, unchanged: Record<string, string> = { 'sk
   ...tree(changes, unchanged),
   paths: (prefix = '') => [...Object.keys(unchanged), ...Object.keys(changes).filter((path) => changes[path]![1] !== undefined)].filter((path) => path.startsWith(prefix)),
 });
-const refuse = (t: ReturnType<typeof tree>, c: GuardContext, path: string) => expect(() => guard(t, c)).toThrow(new RegExp(`refused ${path.replace(/[.]/g, '\\.')}`));
+const refuse = (t: GuardTree, c: GuardContext, path: string) => expect(() => guard(t, c)).toThrow(new RegExp(`refused ${path.replace(/[.]/g, '\\.')}`));
 
 const publish: GuardContext = { action: 'publish', handle: 'me' };
 const migrate: GuardContext = { action: 'migrate', handle: 'me' };
