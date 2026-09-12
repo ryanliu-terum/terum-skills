@@ -168,3 +168,39 @@ the test. The derivation script is at `scratchpad/fix-frames-all.mjs` and is ide
 **Noted, not fixed (out of scope):** `desktop/src/backend/tauri/index.ts:218` still carries a
 `row.endorsement === 'global'` arm for a value the CLI can no longer emit. Harmless — both arms yield
 `'Global'` — but it is dead.
+
+---
+
+## A8 — I rebased B8 rather than amending it, and merged two independent implementations of §4.5 in the write path
+
+**What.** D60 says the never-blank `applyReadme` guard lives on B3 and comes out of B8's `c3d9043`;
+the handoff called this "the single most likely thing to bite the next session." I did it by
+**rebasing `refactor/b8-team-migrate` onto B3's new tip** rather than amending in place — one
+operation that both drops the duplicate and performs the rebase #184 needs anyway.
+
+**Result:** B8 is now a single commit on B3's tip. `c2f7123` became empty and was dropped, correctly:
+its whole content was §13.1(a)'s layout precondition, which B3 already carries from `25619fc`.
+B8's diff over B3 is now 10 files, and touches neither `src/lib/readme.ts` nor `src/commands/readme.ts`.
+
+**The part that deserves a look.** B3's `d5ae1d1` (the executable-bit fix) and B8's `c3d9043` had each
+implemented §4.5's mode overlay **independently**, so the rebase conflicted six times inside
+`src/lib/teamRepo.ts` — the write path. I resolved every one to **B3's** side, then added back the one
+member B8 genuinely introduces and B3 lacks: `beforeTreeId`, which `team migrate` needs to preserve a
+receipt's original tree hash. B8's `treePaths` helper was dropped because B3's `live()` already is it,
+and the interface's duplicated `setExecutable` declaration (both sides added one) was reduced to B3's,
+which carries the D10 doc comment.
+
+**Rejected.** Aborting and leaving it for Ryan. I nearly did: this is the most sensitive code in the
+repo and **#184 has had no review at all.** What decided it was that the resolution is checkable
+rather than a matter of taste — B8's 12 `teamMigrate` tests exercise `beforeTreeId` directly, and they
+pass.
+
+**Gates on the rebased B8:** typecheck clean, lint clean, **root vitest 1694/1694** (B3's 1682 + B8's
+12). Its diff over B3 touches nothing under `desktop/` or `.planning/codex-runs/`, so B3's desktop
+gate run covers it unchanged.
+
+**NOT pushed.** This rewrites the branch behind open PR #184. **Reversal cost while unpushed: zero** —
+`git -C <b8 worktree> reset --hard c2f7123` restores the old tip exactly.
+
+**Still true and unchanged:** #184 needs its own review before D53 makes it merge-eligible, and it
+must be retargeted to `main` before `refactor/b3-versions-keystone` is deleted.
