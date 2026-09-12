@@ -1,13 +1,13 @@
 import { runEvalBatch, EVAL_PARALLEL_DEFAULT, EVAL_LOCK_WAIT_MS } from '../lib/evals/batch.js';
 import { dequeueEvals, queueKey, readEvalQueue, updateEvalQueue, withEvalQueueLock, type EvalQueueItem } from '../lib/evals/queue.js';
 import { packageRoot } from '../lib/package-root.js';
-import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
+import type { Config } from '../lib/schema.js';
 import { localReceiptsFor, newestReceiptAt } from '../lib/evals/receipt-store.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
@@ -21,7 +21,7 @@ import { parseTriggers, runTriggerEvals, type TriggerSummary } from '../lib/eval
 import { Prompter } from '../lib/prompt.js';
 import { fromError, failure, failureWith, type Result, success } from '../lib/result.js';
 import { type Runner, systemRunner } from '../lib/runner.js';
-import { sourceFiles } from '../lib/skill-source.js';
+import { inspectSkillSource, sourceFiles } from '../lib/skill-source.js';
 import { findSkill, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
 import { parseSkillFrontmatter } from '../lib/schema.js';
 import { resolveLibrarySkill } from '../lib/local-skills.js';
@@ -43,7 +43,6 @@ export interface EvalArgs extends WithForm {
   model?: string;
   judgeModel?: string;
   noGen?: boolean;
-  gen?: boolean;
   team?: string;
   config?: ConfigStore;
   runner?: Runner;
@@ -56,8 +55,12 @@ export interface EvalArgs extends WithForm {
 
 export interface EvalResult {
   alreadyEvaluated?: boolean;
-  team: string;
-  id: string;
+  /** §6.3: null when the folder belongs to no team — the local-folder resolve has neither. */
+  team: string | null;
+  /** §6.1: the folder's declared `metadata.id` when it has one; null before its first publish. */
+  id: string | null;
+  /** §6.3: the caller's cue for "To share these results, publish the skill again." */
+  shareHint?: true;
   name: string;
   runDir: string;
   ccVersion: string;
@@ -74,9 +77,6 @@ export interface EvalResult {
  */
 export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResult>> {
   try {
-    // A named case asserts an authored expectation; forcing regeneration contradicts it, and a
-    // generated case sharing the stem would silently evaluate something else (review P2).
-    if (args.gen && args.case !== undefined) return failure('--gen cannot be combined with --case: naming a case asserts an authored expectation, and generation would replace the set it selects from.');
     if (args.triggersOnly && args.executionOnly) return failure('--triggers-only and --execution-only cannot be used together.');
     // Default k=1 (spec rev 18; Ajay, 2026-09-10) — overrides the 2026-09-07 "keep default k=3"
     // ruling (Terum 5aa9a4b2) on cost: k=3 -> k=1 takes a 3-case run from ~$4.40 to ~$1.50 measured.
@@ -86,17 +86,24 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
-    const [teamName, binding] = selectTeam(config.teams, args.team, args.form);
-    if (!binding.handle) return failure(`Team ${teamName} has no joined handle; run \`${invocation(args.form, 'team join')}\` first.`);
-    const clone = store.teamClone(teamName);
-    await refreshClone(runner, clone, { label: teamName, ...lockWait(io, args.lockWaitMs) });
-    const team = await readTeam(clone);
+    // §6.3 / D42: eval targets a LOCAL folder, so the team is best-effort. It supplies exactly three
+    // things — the incumbent arm (§6.5), the hygiene license policy, and the receipt's `skill_id`/
+    // `team` — and a machine with no team configured evaluates single-arm rather than being turned
+    // away, which is the whole reason §6.2 re-keyed the local store by content. `selectTeam` still
+    // throws on an ambiguous --team-less multi-team machine: that is a machine the user can
+    // disambiguate with one flag, not a skill that belongs to nobody.
+    const selected = args.team !== undefined || Object.keys(config.teams).length > 0 ? selectTeam(config.teams, args.team, args.form) : null;
+    const teamName = selected === null ? null : selected[0];
+    const handle = selected === null ? null : selected[1].handle;
+    const clone = teamName === null ? null : store.teamClone(teamName);
+    if (clone !== null && teamName !== null) await refreshClone(runner, clone, { label: teamName, ...lockWait(io, args.lockWaitMs) });
+    const team = clone === null ? null : await readTeam(clone);
     // §6.3: the bytes come from the Library, not the clone. The clone is still read for the incumbent
     // arm and the policy, but a folder that belongs to no team is evaluable.
     const local = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.ref);
     if (!local) return failure(`No local skill folder named \`${args.ref}\` in your library; install it from the marketplace first, or pass \`--path\`.`);
-    const record = await findSkill(clone, teamName, args.ref);
-    if (!record) return failure(`No skill named or identified by ${args.ref} exists in team ${teamName}.`);
+    // Best-effort, never a gate: a folder the team has never seen is still evaluable (§6.3).
+    const record = clone === null || teamName === null ? undefined : await findSkill(clone, teamName, args.ref);
 
     // Pin the evaluated version and materialize its immutable snapshot BEFORE anything reads
     // skill content: a concurrent sync can refresh the clone mid-run, and the receipt's tree
@@ -110,25 +117,35 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // This is intentionally before preflight, trigger selection, run-tree creation, or any agent call.
     const candidateFiles = await sourceFiles(candidateDir);
     const candidateDigest = skillContentDigest(candidateFiles.files);
+    // §6.1: the id is the FOLDER's declared `metadata.id` when it has one — never the team record's,
+    // which may not exist — and null before the folder's first publish. Read through the lenient
+    // inspector, because an unpublished folder legitimately carries no managed fields at all (§6.3).
+    const inspected = inspectSkillSource(candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '');
+    const skillId = (inspected.ok ? inspected.id : null) ?? record?.id ?? null;
+    const description = (inspected.ok ? inspected.description : inspected.description) ?? record?.frontmatter.description ?? '';
     if (args.skipReceipted || args.expectedVersion !== undefined) {
       // Both queue guards are re-keyed on the content hash (§6.6): the bytes, not an ordinal, are what
       // a queued item was queued against.
       if (args.expectedVersion !== undefined && args.expectedVersion !== candidateDigest) {
-        return failure(`The queued bytes of ${record.name} are no longer what is on disk; dequeue it and queue it again.`);
+        return failure(`The queued bytes of ${local.name} are no longer what is on disk; dequeue it and queue it again.`);
       }
       const already = await localReceiptsFor(store.root, candidateDigest);
       if (args.skipReceipted && already.length) {
         const newest = already[already.length - 1]!;
-        io.print(`Already evaluated these exact bytes of ${record.name}.`);
-        return success({ team: teamName, id: record.id, name: record.name, runDir: '', ccVersion: newest.receipt.provenance.cc_version, executionStatus: newest.receipt.execution_status, alreadyEvaluated: true });
+        io.print(`Already evaluated these exact bytes of ${local.name}.`);
+        return success({ team: teamName, id: skillId, name: local.name, runDir: '', ccVersion: newest.receipt.provenance.cc_version, executionStatus: newest.receipt.execution_status, alreadyEvaluated: true });
       }
     }
     try {
-      reportHygieneWarnings((line) => io.print(line), assessHygiene(record.name, candidateFiles, team.policy.skill_license));
+      // §6.3: the folder as it is on disk — eval never injects — so HYG1 treats `license` and the
+      // three managed `metadata.*` fields as optional. Every other HYG1 clause and every HYG2–HYG6
+      // predicate stay unchanged and fail-closed. With no team there is no policy license to conform
+      // to, so HYG5 compares the frontmatter against the bundled LICENSE files alone.
+      reportHygieneWarnings((line) => io.print(line), assessHygiene(local.name, candidateFiles, team?.policy.skill_license ?? null, false, true));
     } catch (error) {
       if (!(error instanceof HygieneRefused)) throw error;
       reportHygieneWarnings((line) => io.print(line), error.assessment);
-      return failure(`Hygiene failed for ${record.name}:\n${error.message}`);
+      return failure(`Hygiene failed for ${local.name}:\n${error.message}`);
     }
 
     const wantsCases = !args.triggersOnly;
@@ -136,7 +153,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const authoredCasesDir = join(candidateDir, 'evals', 'cases');
     const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
     const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
-    const assets = { name: record.name, wantsCases, wantsTriggers, authoredCaseFiles, authoredTrigger };
+    const assets = { name: local.name, wantsCases, wantsTriggers, authoredCaseFiles, authoredTrigger };
 
     const model = args.model ?? DEFAULT_MODEL;
     const preflight = await (args.preflight ?? systemPreflight)(model);
@@ -153,12 +170,12 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
 
     const authoredSelected = args.case === undefined ? authoredCaseFiles : authoredCaseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
     // A named case is an authored assertion; it intentionally never causes a model call.
-    if (wantsCases && args.case !== undefined && authoredSelected.length === 0) return failure(`No eval case named ${args.case} for ${record.name}.`);
+    if (wantsCases && args.case !== undefined && authoredSelected.length === 0) return failure(`No eval case named ${args.case} for ${local.name}.`);
     const { generateCases, generateTriggers } = plannedGeneration(args, assets);
     let generated: GeneratedAssets = {};
     const generatedRoot = join(runDir, 'generated');
     if (generateCases || generateTriggers) {
-      const catalog = await endorsedCatalog(local.libraryRoot, { name: record.name, description: record.frontmatter.description });
+      const catalog = await endorsedCatalog(local.libraryRoot, { name: local.name, description });
       const built = await generate({
         agent: args.agent ?? systemAgent,
         skill: candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '',
@@ -173,6 +190,16 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       if (!built.ok) return failure(built.error);
       generated = built.value;
       await writeGeneratedAssets(generatedRoot, generated);
+      // §6.3/D9: the write-back into the LOCAL skill folder — the only route by which a generated
+      // eval asset ever reaches anywhere. It only ever runs for an asset that was MISSING, so it
+      // cannot overwrite authored work. With `--gen` deleted the user never asked for it, so this
+      // line naming the path and the consequence is the only signal they get. It is a PRINT, not a
+      // prompt: nothing leaves the machine here, publish still asks before anything does, and
+      // publish already writes into this same folder (§5.1 step 6b).
+      const written = [generated.cases === undefined ? null : 'evals/cases/', generated.triggers === undefined ? null : 'evals/triggers.yaml'].filter((entry): entry is string => entry !== null);
+      io.print(`Writing generated ${written.join(' and ')} into ${candidateDir} — they were missing, so this run made them. That changes the skill's content: the next publish mints a new version and the current local eval score blanks. To regenerate, delete evals/cases/ and run eval again.`);
+      const saved = await saveGeneratedAssets(candidateDir, generated);
+      if (!saved.ok) return failure(saved.error);
     }
 
     const casesDir = generated.cases === undefined ? authoredCasesDir : join(generatedRoot, 'cases');
@@ -183,8 +210,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       if (source !== undefined) {
         const parsed = parseTriggers(source);
         if (!parsed.ok) return failure(parsed.error);
-        const catalog = await endorsedCatalog(local.libraryRoot, { name: record.name, description: record.frontmatter.description });
-        triggers = await runTriggerEvals(args.agent ?? systemAgent, { skillName: record.name, catalog, spec: parsed.value, model });
+        const catalog = await endorsedCatalog(local.libraryRoot, { name: local.name, description });
+        triggers = await runTriggerEvals(args.agent ?? systemAgent, { skillName: local.name, catalog, spec: parsed.value, model });
       }
     }
 
@@ -197,9 +224,11 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     if (wantsCases) {
       const caseFiles = generated.cases === undefined ? authoredCaseFiles : (await optionalDirectory(casesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
       const selected = args.case === undefined ? caseFiles : caseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
-      if (args.case !== undefined && selected.length === 0) return failure(`No eval case named ${args.case} for ${record.name}.`);
+      if (args.case !== undefined && selected.length === 0) return failure(`No eval case named ${args.case} for ${local.name}.`);
       caseNames.push(...selected.map((file) => file.replace(/\.ya?ml$/i, '')));
-      const incumbent = await incumbentDir(clone, record.name, await listVersions(clone, record.name), record.id, candidateDigest);
+      // §6.5: no clone, no team, no id, no receipted version — every one of them means NO incumbent
+      // and a single-arm run, exactly as eval-engine §7.1 already names it.
+      const incumbent = clone === null || skillId === null ? undefined : await incumbentDir(clone, local.name, await listVersions(clone, local.name), skillId, candidateDigest);
       const opponents = incumbent === undefined ? 1 : 2;
       // Includes every selected authored case before requirement probes or setup failures.
       expectedRows = selected.length * k * opponents;
@@ -210,7 +239,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const output = await runCase(
           { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
           parsed.value,
-          { k, skillName: record.name, caseDir: casesDir, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir },
+          { k, skillName: local.name, caseDir: casesDir, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir },
         );
         rows.push(...output.rows); arms.push(...output.arms);
         if (output.skipped) environmentSkips[name] = output.skipped;
@@ -218,7 +247,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     }
     const summary = aggregate(rows, arms, expectedRows, environmentSkips);
     await writeRunTree(runDir, {
-      team: teamName, skill_id: record.id, skill_name: record.name, run_id: runId,
+      team: teamName, skill_id: skillId, skill_name: local.name, run_id: runId,
       cc_version: preflight.value.ccVersion, model, judge_model: args.judgeModel ?? model,
       expected_rows: expectedRows,
       arm_skill_lists: Object.fromEntries([...new Set(arms.map((arm) => arm.arm))].map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null])),
@@ -230,8 +259,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // in that case the explicit unknown is more honest than a team-repo commit.
     const engineCommit = await runningEngineCommit(runner);
     const receipt = buildReceipt({
-      skill_id: record.id,
-      skill_name: record.name,
+      skill_id: skillId,
+      skill_name: local.name,
       // §6.1: a local run has NO version — publish fills it in when it resolves the digest to a
       // version folder. Identity at run time is the content digest, computed by the same
       // `skillContentDigest` the publish comparison uses, over the folder exactly as it is on disk.
@@ -258,7 +287,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         cases: caseNames,
         arm_skill_lists: armSkillLists,
         timestamp: runAt.toISOString(),
-        runner_handle: binding.handle ?? 'local',
+        runner_handle: handle ?? 'local',
       },
     });
     if (!receipt.ok) return failure(receipt.error);
@@ -267,7 +296,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     if (generated.cases !== undefined || generated.triggers !== undefined) announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, join(runDir, 'generated'));
     io.print(renderReport(summary, triggers));
 
-    return success({ team: teamName, id: record.id, name: record.name, runDir, ccVersion: preflight.value.ccVersion, executionStatus: summary.execution_status });
+    return success({ team: teamName, id: skillId, name: local.name, runDir, ccVersion: preflight.value.ccVersion, executionStatus: summary.execution_status, shareHint: true });
   } catch (error) { return fromError(error); }
 }
 
@@ -275,8 +304,11 @@ interface PlannedAssets { name: string; wantsCases: boolean; wantsTriggers: bool
 
 /** The one derivation of what this run would generate, shared by the run body and both pre-run builders. */
 function plannedGeneration(args: EvalArgs, assets: PlannedAssets): { generateCases: boolean; generateTriggers: boolean } {
-  const generateCases = assets.wantsCases && !args.noGen && (Boolean(args.gen) || assets.authoredCaseFiles.length === 0);
-  const generateTriggers = assets.wantsTriggers && !args.noGen && (Boolean(args.gen) || !assets.authoredTrigger);
+  // D29: use the assets that are there, generate only the ones that are missing — per asset. With
+  // `--gen` deleted nothing can ever overwrite an authored file, which is what makes §6.3's
+  // write-back into the user's own skill folder safe.
+  const generateCases = assets.wantsCases && !args.noGen && assets.authoredCaseFiles.length === 0;
+  const generateTriggers = assets.wantsTriggers && !args.noGen && !assets.authoredTrigger;
   return { generateCases, generateTriggers };
 }
 
@@ -307,7 +339,7 @@ function announceGeneratedAssets(io: Prompter, wantsCases: boolean, wantsTrigger
     wantsTriggers ? `triggers: ${generated.triggers === undefined ? 'authored' : 'generated'}` : null,
   ].filter((line): line is string => line !== null);
   io.print(`eval assets: ${sets.join(' · ')}`);
-  io.print(`Generated assets: ${root} — review before trusting; save or copy reviewed files into the skill before committing a receipt.`);
+  io.print(`Generated assets: ${root} — this run's copy, kept for the record; the skill folder now holds them too. Review before trusting them.`);
 }
 
 
@@ -324,24 +356,15 @@ async function writeGeneratedAssets(root: string, generated: GeneratedAssets): P
   }
 }
 
-/** The sole source-write seam: explicit --working --save, and the confirmed commit path when the runner has this skill connected. All targets are checked before any write. */
+/**
+ * §6.3 — the one write-back into the user's own skill folder. `plannedGeneration` only ever asks for
+ * an asset that is MISSING (D29 deleted `--gen`, the only thing that could force a regeneration), so
+ * the two `--save refused:` guards this used to carry became unreachable and went with the flag.
+ * Regenerating is deleting `evals/cases/` and re-running.
+ */
 export async function saveGeneratedAssets(source: string, generated: GeneratedAssets): Promise<Result> {
-  const cases = join(source, 'evals', 'cases');
-  const triggers = join(source, 'evals', 'triggers.yaml');
-  if (generated.cases !== undefined && await pathExists(cases)) return failure(`--save refused: ${cases} already exists; generated cases never overwrite authored assets.`);
-  if (generated.triggers !== undefined && await pathExists(triggers)) return failure(`--save refused: ${triggers} already exists; generated triggers never overwrite authored assets.`);
   await writeGeneratedAssets(join(source, 'evals'), generated);
   return success(undefined);
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try { await readFile(path); return true; }
-  catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return false;
-    if (code === 'EISDIR') return true;
-    throw error;
-  }
 }
 
 /**
@@ -451,6 +474,31 @@ export async function skillsWithoutReceipt(clone: string, team: string, report: 
 }
 
 
+/**
+ * §6.6 — the producer side of the queue. A queued eval names the BYTES it was queued against, so
+ * queueing resolves each skill to a folder on this machine and digests it now.
+ *
+ * A team skill with no copy here cannot be evaluated at all after §6.3, so it is reported and left
+ * OUT rather than queued as a paid run that would fail at 01:00 with nobody watching.
+ */
+export async function queueItemsFor(
+  input: { home: string; config: Pick<Config, 'placements' | 'projects'>; stateRoot: string; team?: string; names: readonly string[]; requestedAt: string; window: 'overnight' | 'later' },
+  report: (line: string) => void,
+): Promise<EvalQueueItem[]> {
+  const items: EvalQueueItem[] = [];
+  for (const name of input.names) {
+    const local = await resolveLibrarySkill(input.home, input.config, input.stateRoot, name);
+    if (local === undefined) { report(`${name}: no copy of this skill on this machine, so it cannot be evaluated; install it first.`); continue; }
+    const files = await sourceFiles(local.path);
+    items.push({
+      skill: local.name, path: local.path, contentHash: skillContentDigest(files.files),
+      requestedAt: input.requestedAt, window: input.window,
+      ...(input.team === undefined ? {} : { team: input.team }),
+    });
+  }
+  return items;
+}
+
 export interface EvalQueueArgs extends Omit<EvalArgs, 'ref'> {
   ref?: string;
   parallel?: number;
@@ -478,12 +526,13 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
     if (args.parallel !== undefined && (!Number.isSafeInteger(args.parallel) || args.parallel < 1)) return failure('--parallel must be a positive integer.');
     if (modes === 0) return failure('Provide a skill, --queue-list, --drain, or --dequeue.');
     if (args.ref !== undefined) return failure('Queue modes do not accept a skill argument.');
-    if (args.gen || args.noGen || args.case !== undefined || args.triggersOnly || args.executionOnly || args.expectedVersion !== undefined || args.team !== undefined) return failure('Queue modes use the queued team and the full committed skill; per-skill selection flags are unavailable.');
+    if (args.noGen || args.case !== undefined || args.triggersOnly || args.executionOnly || args.expectedVersion !== undefined || args.team !== undefined) return failure('Queue modes use the queued team and the full committed skill; per-skill selection flags are unavailable.');
     const store = args.config ?? createConfigStore();
     if (args.queueList || args.dequeue !== undefined) {
       const queue = args.dequeue === undefined ? await readEvalQueue(store.root) : await dequeueEvals(store.root, args.dequeue);
       if (queue.items.length === 0) io.print('No queued evals.');
-      for (const item of queue.items) io.print(`${item.team}/${item.skill}@${item.version} · ${item.window} · ${item.requestedAt}${item.lastError === undefined ? '' : ` · ${item.lastError}`}`);
+      // §6.6: a queued item is keyed on the BYTES it was queued against, and its team is optional.
+      for (const item of queue.items) io.print(`${item.team === undefined ? '' : `${item.team}/`}${item.skill}@${item.contentHash} · ${item.window} · ${item.requestedAt}${item.lastError === undefined ? '' : ` · ${item.lastError}`}`);
       return success({ items: queue.items });
     }
     return await withEvalQueueLock(store.root, 'drain', async assertHeld => {
@@ -496,7 +545,9 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
       const byId = new Map(pending.map(item => [queueKey(item), item]));
       io.print(`Evaluating ${pending.length} skills, ${args.parallel ?? EVAL_PARALLEL_DEFAULT} at a time…`);
       const batch = await runEvalBatch({
-        items: pending.map(item => ({ id: queueKey(item), name: item.skill, version: item.version })),
+        // `version` is only a label here; §6.6 re-keyed the queue on content, so the content hash is
+        // what identifies the queued bytes.
+        items: pending.map(item => ({ id: queueKey(item), name: item.skill, version: item.contentHash })),
         parallel: args.parallel ?? EVAL_PARALLEL_DEFAULT, io,
         run: async (candidate, captured) => {
           const item = byId.get(candidate.id)!;
@@ -504,7 +555,7 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
           if (!(await readEvalQueue(store.root)).items.some(current => queueKey(current) === queueKey(item) && current.requestedAt === item.requestedAt)) return failure('Item was dequeued before it started.');
           attempted += 1;
           let outcome: Result<EvalResult>;
-          try { outcome = await (args.evaluate ?? run)({ ...args, config: store, ref: item.skill, team: item.team, expectedVersion: item.version, skipReceipted: true, preflight, lockWaitMs: EVAL_LOCK_WAIT_MS }, captured); }
+          try { outcome = await (args.evaluate ?? run)({ ...args, config: store, ref: item.skill, ...(item.team === undefined ? {} : { team: item.team }), expectedVersion: item.contentHash, skipReceipted: true, preflight, lockWaitMs: EVAL_LOCK_WAIT_MS }, captured); }
           catch (error) { outcome = fromError(error); }
           const error = !outcome.ok ? outcome.error : undefined;
           if (outcome.ok && outcome.value.executionStatus !== 'complete') captured.print(`Eval completed with ${outcome.value.executionStatus} results.`);

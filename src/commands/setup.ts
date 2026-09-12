@@ -25,7 +25,7 @@ import { join, resolve } from 'node:path';
 import type { Launch } from '../lib/launch.js';
 import { assetSuffix, detectPlatform, type PlatformEvidence } from '../lib/platform.js';
 import { run as runApp } from './app.js';
-import { run as evalRun, skillsWithoutReceipt, type EvalArgs } from './eval.js';
+import { run as evalRun, queueItemsFor, skillsWithoutReceipt, type EvalArgs } from './eval.js';
 import { joinCommand, run as invite } from './invite.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
 
@@ -350,11 +350,16 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
               'Queues them; the app runs them between 01:00 and 05:00 while it is open and idle.',
               `Evaluate any skill later with \`${invocation(args.form, 'eval <skill>')}\`.`,
             ] });
+            // §6.6: a queued eval names the bytes it was queued against, and §6.3 made eval target a
+            // LOCAL folder — so queueing resolves and digests each skill here, and a skill with no
+            // copy on this machine is reported and left out rather than queued to fail unattended.
             const queue = async (remaining: typeof candidates, window: 'overnight' | 'later') => {
               const requestedAt = new Date().toISOString();
-              await enqueueEvals(store.root, remaining.map(candidate => ({ team: teamName, skill: candidate.name, version: candidate.version, requestedAt, window })));
-              if (window === 'overnight') io.print(`Queued ${remaining.length} evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with \`${invocation(args.form, 'eval --drain')}\`.`);
-              else io.print(`Queued ${remaining.length} evals for later. Run them with \`${invocation(args.form, 'eval --drain')}\`.`);
+              const items = await queueItemsFor({ home: args.home ?? homedir(), config: await store.read(), stateRoot: store.root, team: teamName, names: remaining.map(candidate => candidate.name), requestedAt, window }, bullet);
+              if (items.length === 0) { io.print('None of those skills has a copy on this machine, so none could be queued.'); return; }
+              await enqueueEvals(store.root, items);
+              if (window === 'overnight') io.print(`Queued ${items.length} evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with \`${invocation(args.form, 'eval --drain')}\`.`);
+              else io.print(`Queued ${items.length} evals for later. Run them with \`${invocation(args.form, 'eval --drain')}\`.`);
             };
             if (choice === 'Skip') steps.evals = 'skipped';
             else if (choice === 'Overnight') { await queue(candidates, 'overnight'); steps.evals = 'queued'; }

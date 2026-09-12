@@ -1,7 +1,7 @@
 /** Deterministic, in-memory skill hygiene checks (eval spec §9). */
 import YAML from 'yaml';
 import { CREDENTIAL_PATTERNS } from './receipt.js';
-import { allowedTools, describeRaw, FRONTMATTER, skillFrontmatterSchema } from '../schema.js';
+import { allowedTools, describeRaw, FRONTMATTER, localSkillFrontmatterSchema, skillFrontmatterSchema } from '../schema.js';
 
 export type HygieneCode = 'HYG1' | 'HYG2' | 'HYG3' | 'HYG4' | 'HYG5' | 'HYG6';
 export interface HygieneFinding { code: HygieneCode; path: string; line?: number; message: string; }
@@ -12,7 +12,17 @@ export interface HygieneInput {
   frontmatter: unknown;
   files: Map<string, Buffer>;
   executable: ReadonlySet<string>;
-  policy: { skill_license: string };
+  /** Null when there is no team to conform to: a local eval on a folder belonging to no team (§6.3). */
+  policy: { skill_license: string | null };
+  /**
+   * §6.3 local-eval mode. `eval` never injects managed fields, so the folder it reads legitimately
+   * carries no `license` and no `metadata` at all before its first publish. Under this flag HYG1's
+   * strict parse treats `license` and the three managed `metadata.*` fields as OPTIONAL — and
+   * nothing else changes: no unknown top-level keys, folder name must equal `name`, `allowedTools()`
+   * must grant, and every HYG2–HYG6 predicate stays fail-closed. Publish never uses it: publish
+   * injects first (§5.1 step 4) and assesses the finished bytes.
+   */
+  managedFieldsAbsent?: boolean;
   /** Explicit `--allow-privileged` consent (or content whose repository copy already carries the
    *  consented form): waives HYG4's exec-bit and shebang findings only — the extension allowlist
    *  and every other check still apply (walk D5, Ryan 2026-09-07). */
@@ -39,7 +49,7 @@ export function inspectHygiene(input: HygieneInput): HygieneAssessment {
   const errors: HygieneFinding[] = [];
   const warnings: HygieneFinding[] = [];
   const skill = input.files.get('SKILL.md');
-  const parsed = skillFrontmatterSchema.safeParse(input.frontmatter);
+  const parsed = (input.managedFieldsAbsent ? localSkillFrontmatterSchema : skillFrontmatterSchema).safeParse(input.frontmatter);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const where = issue !== undefined && issue.path.length ? `field ${issue.path.join('.')}` : 'frontmatter';
@@ -54,7 +64,7 @@ export function inspectHygiene(input: HygieneInput): HygieneAssessment {
     }
   }
 
-  const author = parsed.success ? authorEmail(parsed.data.metadata.author) : undefined;
+  const author = parsed.success ? authorEmail(parsed.data.metadata?.author) : undefined;
   for (const [path, contents] of input.files) {
     const text = decodeText(contents);
     if (text !== undefined) {
@@ -81,7 +91,9 @@ export function inspectHygiene(input: HygieneInput): HygieneAssessment {
   }
 
   if (parsed.success) {
-    const licenses = [normalizeLicense(parsed.data.license), normalizeLicense(input.policy.skill_license)];
+    // An absent declared license (§6.3 local mode) and an absent team policy are each "nothing to
+    // conform to", never a mismatch; every license actually present must still agree.
+    const licenses = [parsed.data.license, input.policy.skill_license].filter((value): value is string => typeof value === 'string').map(normalizeLicense);
     for (const [path, contents] of input.files) if (/^LICENSE[^/]*$/i.test(path)) {
       const text = decodeText(contents);
       const detected = text === undefined ? undefined : detectLicense(text);
@@ -117,9 +129,9 @@ export class HygieneRefused extends Error {
 }
 
 /** The single pure gate shared by every hygiene caller. */
-export function assessHygiene(name: string, input: { files: Map<string, Buffer>; executable: ReadonlySet<string> }, license: string, allowExecutable = false): HygieneAssessment {
+export function assessHygiene(name: string, input: { files: Map<string, Buffer>; executable: ReadonlySet<string> }, license: string | null, allowExecutable = false, managedFieldsAbsent = false): HygieneAssessment {
   const skill = input.files.get('SKILL.md');
-  const assessment = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable });
+  const assessment = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable, managedFieldsAbsent });
   if (assessment.errors.length) throw new HygieneRefused(assessment);
   return assessment;
 }
@@ -161,7 +173,8 @@ function credentialOffset(text: string): number | undefined {
   for (const pattern of CREDENTIAL_PATTERNS) { const match = new RegExp(pattern.source, pattern.flags).exec(text); if (match) return match.index; }
   return undefined;
 }
-function authorEmail(author: string): string | undefined { return /<([^<>]+)>/.exec(author)?.[1]; }
+/** §6.3: a local-eval folder legitimately declares no `metadata.author` at all — HYG3 then has no author to exempt. */
+function authorEmail(author: string | undefined): string | undefined { return author === undefined ? undefined : /<([^<>]+)>/.exec(author)?.[1]; }
 function recordValue(value: unknown, key: string): unknown { return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>)[key] : undefined; }
 function emailOffset(text: string, author: string | undefined): number | undefined {
   for (const match of text.matchAll(EMAIL)) {

@@ -286,6 +286,20 @@ export const skillFrontmatterSchema = z.object({
 }).strict();
 export type SkillFrontmatter = z.infer<typeof skillFrontmatterSchema>;
 
+/**
+ * §6.3 — the same schema with the four MANAGED fields optional. `license` and the three
+ * `metadata.*` fields are written by publish's injection (§5.1 step 4); a folder that has never been
+ * published carries none of them, and `eval` reads the folder exactly as it is on disk. Still
+ * `.strict()`: an unknown top-level key is as wrong locally as it is in the repo.
+ */
+export const localSkillFrontmatterSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  license: z.string().optional(),
+  metadata: z.object({ id: skillIdSchema.optional(), author: z.string().optional(), 'terum-category': z.string().optional() }).passthrough().optional(),
+  'allowed-tools': z.unknown().optional(),
+}).strict();
+
 export type AllowedTools = { ok: true; normalized: string; hash: string } | { ok: false; raw: unknown };
 
 /**

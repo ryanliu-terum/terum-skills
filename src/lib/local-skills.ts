@@ -251,7 +251,13 @@ export async function resolveLibrarySkill(home: string, config: Pick<Config, 'pl
   const ledger = await canonicalLedger(config);
   for (const root of discovery.roots) {
     const inventory = await localSkills(root.root, config, { scope: root.scope, stateRoot, ledger });
-    const entry = candidatesOf(inventory).find((candidate) => candidate.name === ref);
+    // Deliberately NOT `candidatesOf`: that filter answers "what may the picker offer to connect",
+    // which excludes an already-placed folder and a privileged one. This answers "which folder does
+    // this ref mean" — and an installed skill the user then edited is the commonest thing both
+    // `publish` and `eval` are pointed at. Telling them no such folder exists when it is plainly
+    // there is the opposite of "you can always see exactly what's on each"; the privilege and
+    // hygiene gates still fire afterwards, with a message that says what is actually wrong.
+    const entry = inventory.entries.find((candidate) => candidate.inspection.kind === 'candidate' && candidate.name === ref);
     if (entry) return { name: entry.name, path: entry.path, libraryRoot: root.root };
   }
   return undefined;
