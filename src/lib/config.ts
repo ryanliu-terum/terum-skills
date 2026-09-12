@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import lockfile from 'proper-lockfile';
 import { mkdirPrivate } from './fs.js';
-import { Config, configSchema, emptyConfig, parseJson, parseOrExplain, teamNameSchema } from './schema.js';
+import { Config, configFileSchema, emptyConfig, parseJson, parseOrExplain, teamNameSchema } from './schema.js';
 
 /** §5.4 `~/.terum/skills/config.json` — never committed, mode 0600 (it names your teams, identity, and every placed path); deleted only through `remove`, by `uninstall`. */
 export interface ConfigStore {
@@ -37,7 +37,7 @@ export interface ConfigStoreOptions {
 export function createConfigStore(root = join(homedir(), '.terum', 'skills'), options: ConfigStoreOptions = {}): ConfigStore {
   const path = join(root, 'config.json');
   const read = async (): Promise<Config> => {
-    try { return parseJson(configSchema, await readFile(path, 'utf8'), path); }
+    try { return parseJson(configFileSchema, await readFile(path, 'utf8'), path); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyConfig();
       throw error;

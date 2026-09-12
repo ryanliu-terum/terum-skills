@@ -1,7 +1,7 @@
 import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { access, mkdir, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { defaultHookOptions, HookOptions, hookInstalled, removeHook } from '../lib/hook.js';
 import { defaultWrapperOptions, inspectWrapper, removeWrapper, wrapperDestination, WrapperOptions } from '../lib/wrapper.js';
@@ -26,9 +26,6 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     const runner = args.runner ?? systemRunner;
     const bindings = Object.entries(config.teams);
     const placements = Object.keys(config.placements);
-    const shared = Object.values(config.shared);
-    // Every authoring source stays protected for the whole run, not only until its team's records go.
-    const protectedSources = shared.map(({ source }) => source);
     const clones: string[] = [];
     for (const [name] of bindings) { const clone = store.teamClone(name); if (await exists(clone)) clones.push(clone); }
     let hookPresent: boolean;
@@ -76,7 +73,6 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     if (quarantineCount) kept.push(quarantine);
     kept.push(backups);
     if (evalsPresent) kept.push(evals);
-    if (shared.length) detail.push(`Connected-skill sources stay where they are: ${shared.map(({ source }) => `${basename(source)}: ${source}`).join(', ')}`);
     detail.push('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');
     detail.push('The package itself is not removed by this command; the last line tells you how.');
     if (!(await io.confirm('Remove terum-skills from this machine?', { detail }))) return cancelled('Uninstall was cancelled.');
@@ -123,7 +119,7 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
       if (name === undefined) break;
       io.print(`Leaving ${name}…`);
       try {
-        const removed = await teardownTeam(store, name, io, runner, protectedSources);
+        const removed = await teardownTeam(store, name, io, runner);
         kept.push(...removed.kept); removedPlacements += removed.removedPaths.length;
       } catch (error) {
         const report = await reportRemaining();
@@ -132,14 +128,13 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
       teams.push(name); io.print(`Left ${name}.`);
     }
 
-    const removal = await store.remove((c) => Object.keys(c.teams).length === 0 && Object.keys(c.placements).length === 0 && c.pending.length === 0 && Object.keys(c.shared).length === 0);
+    const removal = await store.remove((c) => Object.keys(c.teams).length === 0 && Object.keys(c.placements).length === 0 && c.pending.length === 0);
     if (removal === 'kept') {
       const fresh = await store.read();
       const what = [
         Object.keys(fresh.teams).length ? `teams: ${Object.keys(fresh.teams).join(', ')}` : '',
         Object.keys(fresh.placements).length ? `placements: ${Object.keys(fresh.placements).length}` : '',
         fresh.pending.length ? `pending: ${fresh.pending.length}` : '',
-        Object.keys(fresh.shared).length ? `connected: ${Object.keys(fresh.shared).length}` : '',
       ].filter(Boolean).join(', ');
       return failure(`Kept ${configPath}: still configured — ${what}. Re-run \`${invocation(args.form, 'uninstall')}\` to continue.`);
     }

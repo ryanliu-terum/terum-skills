@@ -41,15 +41,15 @@ it.each(['placed','placed-problem'])('shows placement actions and status for %s'
 it('abbreviates the real detail labels while Edit and Manage keep the absolute occurrence path',async()=>{
  const {backend}=open('none','#/skill/deploy-check');
  const edit=vi.spyOn(backend,'openInEditor').mockResolvedValue({ok:true,value:undefined});
- const connect=vi.spyOn(backend,'connect');
+ const publish=vi.spyOn(backend,'publish');
  await screen.findByText('Installed · on this machine');
  expect(document.querySelector('.skill-md-meta')).toHaveTextContent('read from ~/.claude/skills/deploy-check');
- expect(document.querySelector('.detail-rail')).toHaveTextContent('Connected: no · ~/.claude/skills/deploy-check');
+ expect(document.querySelector('.detail-rail')).toHaveTextContent('This copy is yours, not placed by Terum · ~/.claude/skills/deploy-check');
  fireEvent.click(screen.getByRole('button',{name:'Open in editor'}));
  expect(edit).toHaveBeenCalledWith('/Users/teddy/.claude/skills/deploy-check');
  fireEvent.click(screen.getByRole('button',{name:'Manage with Terum…'}));
  fireEvent.click(await screen.findByRole('button',{name:'Continue'}));
- await waitFor(()=>expect(connect).toHaveBeenCalledWith({path:'/Users/teddy/.claude/skills/deploy-check',team:'acme'}));
+ await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:'deploy-check',team:'acme'}));
 });
 it('uses the resolved path label in the real Global Remove dialog',async()=>{
  open('none','#/skill/deploy-check?dialog=remove','placed');

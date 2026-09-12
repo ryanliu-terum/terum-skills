@@ -4,7 +4,7 @@ import { design } from '../mock/data';
 import type { Run, Frame } from '../types';
 afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();});
 async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
-it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,evalCommitChoice:false,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,checkouts:false,appUpdate:false});expect((await b.library({scope:{kind:'global'}})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:{kind:'global'}});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
+it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,libraryProjects:false,appUpdate:false});expect((await b.library({scope:{kind:'global'}})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:{kind:'global'}});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
 it.each([
  ['library',"EACCES: permission denied, scandir '~/.terum/skills'"],
  ['skill',"ENOENT: no such file or directory, open '~/.claude/skills/deploy-check/SKILL.md'"],
@@ -27,10 +27,8 @@ it('returns disabled and not-installed details without changing fixture data',as
 it('keeps a catalog-only skill detail consistent with its marketplace card: not installed, not placed',async()=>{const b=createMockBackend();location.hash='#/skill/a11y-audit?root=marketplace';const detail=await b.skill({ref:'a11y-audit'});expect(detail.ok).toBe(true);if(!detail.ok)throw new Error(detail.error);expect(detail.value).toMatchObject({installed:'absent',placed:false});const catalog=await b.catalog();expect(catalog.value?.skills.find(s=>s.name==='a11y-audit')).toMatchObject({installed:'absent'});});
 it('treats any requested skill as not installed under the not-installed scenario',async()=>{const b=createMockBackend();location.hash='#/skill/a11y-audit?__mock=not-installed&dialog=install&root=marketplace';const absent=await b.skill({ref:'a11y-audit'});expect(absent.ok).toBe(true);if(!absent.ok)throw new Error(absent.error);expect(absent.value).toMatchObject({name:'a11y-audit',installed:'absent',placed:false,onDiskOnly:false,root:'Marketplace',flags:[]});location.hash='#/skill/a11y-audit';const catalogOnly=await b.skill({ref:'a11y-audit'});expect(catalogOnly.ok&&catalogOnly.value.installed).toBe('absent');location.hash='#/skill/deploy-check';const present=await b.skill({ref:'deploy-check'});expect(present.ok&&present.value.installed).toBe('placed');});
 it('honours latency, slow, and deliberately pending loading reads',async()=>{vi.useFakeTimers();const b=createMockBackend({latencyMs:50});const resolved=vi.fn();void b.inbox().then(resolved);await vi.advanceTimersByTimeAsync(49);expect(resolved).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(resolved).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=slow';const slow=vi.fn();void b.inbox().then(slow);await vi.advanceTimersByTimeAsync(1999);expect(slow).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(slow).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=loading';const loading=vi.fn();void b.inbox().then(loading);await vi.advanceTimersByTimeAsync(10000);expect(loading).not.toHaveBeenCalled();});
-it('models connect selection, a declined skill, an accepted skill and Done',async()=>{const run=createMockBackend().connect({});let selected=0;const result=await answerAll(run,frame=>frame.kind==='select'?(selected++===0?'api-docs':selected===2?'handoff-note':'Done'):frame.question==='Connect handoff-note?');expect(result).toEqual({ok:true,value:{kind:'batch',shared:[{id:'handoff-note',name:'handoff-note'}],declined:['api-docs'],refused:[]}});});
-it('returns the required decline for Skip and a single result for path connect',async()=>{const b=createMockBackend();expect(await answerAll(b.connect({}),()=> 'Skip')).toEqual({ok:false,error:'Connect was declined.',cancelled:true});expect(await answerAll(b.connect({path:'/skills/api-docs'}),()=>true)).toEqual({ok:true,value:{id:'api-docs',name:'api-docs'}});});
 it('marks declines for install, removal and team leave',async()=>{const b=createMockBackend();for(const run of [b.install({ref:'deploy-check'}),b.uninstallSkill({ref:'deploy-check'}),b.uninstallMachine({}),b.team({kind:'leave'})]){expect(await answerAll<unknown>(run,()=>false)).toMatchObject({ok:false,cancelled:true});}});
-it('returns fixture-shaped results for successful verbs',async()=>{const b=createMockBackend();expect((await answerAll(b.install({ref:'deploy-check',scope:'Terum'}),()=>true))).toEqual({ok:true,value:[{id:'deploy-check',name:'deploy-check',scope:'Terum'}]});expect((await b.invite({logins:['sam']}).done)).toEqual({ok:true,value:{invited:['sam'],already:[],failed:[]}});expect((await b.publish({ref:'deploy-check'}).done).ok).toBe(true);expect((await b.eval({ref:'deploy-check'}).done).ok).toBe(true);expect(await b.validate({ref:'deploy-check'})).toEqual({ok:true,value:{name:'deploy-check',findings:0,warnings:0}});expect((await answerAll(b.setup({offerConnect:false}),frame=>frame.kind==='confirm'?false:frame.question.startsWith('Evaluate the ')?'Overnight':'Join an existing team')).ok).toBe(true);});
+it('returns fixture-shaped results for successful verbs',async()=>{const b=createMockBackend();expect((await answerAll(b.install({ref:'deploy-check',scope:'Terum'}),()=>true))).toEqual({ok:true,value:[{id:'deploy-check',name:'deploy-check',scope:'Terum'}]});expect((await b.invite({logins:['sam']}).done)).toEqual({ok:true,value:{invited:['sam'],already:[],failed:[]}});expect((await b.publish({ref:'deploy-check'}).done).ok).toBe(true);expect((await b.eval({ref:'deploy-check'}).done).ok).toBe(true);expect(await b.validate({ref:'deploy-check'})).toEqual({ok:true,value:{name:'deploy-check',findings:0,warnings:0}});expect((await answerAll(b.setup({}),frame=>frame.kind==='confirm'?false:frame.question.startsWith('Evaluate the ')?'Overnight':'Join an existing team')).ok).toBe(true);});
 it('handles unknown refs, invalid preferences, storage corruption and unavailable clipboard',async()=>{const b=createMockBackend();expect((await b.install({ref:'missing'}).done).ok).toBe(false);b.prefs.set('theme','light');expect(b.prefs.get('theme','dark')).toBe('light');localStorage.setItem('terum-skills-app:pref:bad','{broken');expect(b.prefs.get('bad',42)).toBe(42);expect(()=>b.prefs.set('bad',undefined)).toThrow();expect(()=>b.prefs.set('bad',NaN)).toThrow();expect(await b.copyToClipboard('text')).toEqual({ok:false,error:'Clipboard unavailable.'});expect(await b.copyImage(new Blob(['x'],{type:'text/plain'}))).toEqual({ok:false,error:'Expected a PNG image.'});});
 
 it('filters project scopes and isolates returned data from the source fixtures',async()=>{const b=createMockBackend();const mrf=await b.library({scope:{kind:'checkout',root:'/Users/you/code/mrf'}});expect(mrf.ok&&mrf.value.skills.every(s=>['migration-guard','csv-profiler'].includes(s.name))).toBe(true);expect(mrf.ok&&mrf.value.skills.length).toBeGreaterThan(0);const first=await b.library({scope:{kind:'global'}});if(!first.ok)throw new Error(first.error);const n=first.value.skills.length;first.value.skills.pop();const next=await b.library({scope:{kind:'global'}});expect(next.ok&&next.value.skills.length).toBe(n);});
@@ -41,17 +39,16 @@ const expectedTeams=design.TEAMS.map(team=>({...team,policy:design.TEAM_POLICY,c
 it.each(['loading','error','slow','disabled','not-installed','default'])('status resolves immediately with identity during %s',async scenario=>{
  location.hash='#/library/global?__mock='+scenario;vi.useFakeTimers();
  const status=await createMockBackend({latencyMs:500}).status();
- expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true},roots:[{id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,detected:false,count:design.COUNTS.Global,remote:null},...([['Terum','ryanliu-terum/terum-skills'],['SSM','ryanliu-terum/ssm'],['MRF',null]] as const).map(([name,slug])=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:'scanned',registered:true,detected:false,count:design.COUNTS[name],remote:slug===null?null:{url:'https://github.com/'+slug,slug}}))]}});
+ expect(status).toEqual({ok:true,value:{machine:expectedMachine,me:expectedMe,teams:expectedTeams,counts:design.COUNTS,tools:{git:true,gh:true},roots:[{id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,count:design.COUNTS.Global,remote:null},...([['Terum','ryanliu-terum/terum-skills'],['SSM','ryanliu-terum/ssm'],['MRF',null]] as const).map(([name,slug])=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:'scanned',registered:true,count:design.COUNTS[name],remote:slug===null?null:{url:'https://github.com/'+slug,slug}}))]}});
  expect(status.ok&&status.value.machine.gh_login).toBe('teniroo');
  expect(vi.getTimerCount()).toBe(0);
 });
-it('clones status and successful long results, including nested commit outcomes',async()=>{
- const b=createMockBackend();const first=await b.eval({ref:'deploy-check',commit:true}).done;
- if(!first.ok||!first.value.commit)throw new Error('Expected commit');
- const original=structuredClone(first.value.commit);
- Reflect.set(first.value.commit,'receiptPath','mutated');
- const next=await b.eval({ref:'deploy-check',commit:true}).done;
- expect(next.ok&&next.value.commit).toEqual(original);
+it('clones status and successful long results',async()=>{
+ const b=createMockBackend();const first=await b.eval({ref:'deploy-check'}).done;
+ if(!first.ok)throw new Error('Expected eval');
+ Reflect.set(first.value,'runDir','mutated');
+ const next=await b.eval({ref:'deploy-check'}).done;
+ expect(next.ok&&next.value.runDir).toBe('~/.terum/skills/evals/terum/deploy-check/20260906T120000Z');
  const status=await b.status();if(!status.ok)throw new Error(status.error);status.value.machine.gh_login='mutated';
  const fresh=await b.status();expect(fresh.ok&&fresh.value.machine.gh_login).toBe('teniroo');
 });
@@ -101,18 +98,12 @@ it('returns CLI fixture versions and the complete update report', async () => {
   const advice = ['Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'];
   expect(await createMockBackend().update()).toEqual({ ok: true, value: { running: design.CLI_VERSION, latest: design.CLI_LATEST, observation: 'newer', launch: 'npx', description: `${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`, advice, lines: [`terum-skills ${design.CLI_VERSION}`, `Latest advertised release: ${design.CLI_LATEST}`, ...advice] } });
 });
-it('keeps a declined prune on the success path and emits the CLI line', async()=>{
- const run=createMockBackend().sync({prune:true});
- expect(await answerAll(run,()=>false)).toEqual({ok:true,value:{placed:0,deferred:[],notices:[],changed:false,teams:[]}});
+it('keeps a declined prune on the cancellation path and emits the CLI line', async()=>{
+ const run=createMockBackend().prune();
+ expect(await answerAll(run,()=>false)).toEqual({ok:false,error:'Prune was cancelled.',cancelled:true});
  const frames=[];for await(const frame of run.frames)frames.push(frame);
  expect(frames).toContainEqual({t:'print',line:'Prune cancelled; nothing deleted.'});
- expect(frames.at(-1)).toEqual({t:'result',ok:true});
-});
-it('marks a mock connect decline on both the result and the terminal frame',async()=>{
- const run=createMockBackend().connect({path:'/skills/api-docs'});
- expect(await answerAll(run,()=>false)).toEqual({ok:false,error:'Connect was declined.',cancelled:true});
- const frames=[];for await(const frame of run.frames)frames.push(frame);
- expect(frames.at(-1)).toEqual({t:'result',ok:false,error:'Connect was declined.',declined:true});
+ expect(frames.at(-1)).toEqual({t:'result',ok:false,error:'Prune was cancelled.',declined:true});
 });
 it('has no launch target in the mock',async()=>{expect(await createMockBackend().launchContext()).toBeNull();});
 
@@ -156,22 +147,20 @@ it('records a mock quit request and closes the window',async()=>{
  expect(backend.quitRequested).toBe(true);expect(close).toHaveBeenCalledOnce();
 });
 
-it('returns the count-based sync outcome from the fixture names',async()=>{
+it('returns the fetch outcome from the fixture names',async()=>{
  const b=createMockBackend();
- expect(await b.sync({team:'terum'}).done).toEqual({ok:true,value:{placed:design.SKILLS.length,deferred:[],notices:[],changed:true,teams:[{team:'terum',state:'synced'}]}});
+ expect(await b.sync({team:'terum'}).done).toEqual({ok:true,value:{notices:[],changed:true,teams:[{team:'terum',state:'refreshed'}]}});
 });
 
-it('models the discover and evals questions and reports both step outcomes',async()=>{
+it('models the projects and evals questions and reports both step outcomes',async()=>{
  const b=createMockBackend();
  for(const accepted of [true,false]){
   const questions:string[]=[];
-  const result=await answerAll(b.setup({offerConnect:false}),frame=>{questions.push(frame.question);return frame.kind==='confirm'?accepted:frame.kind==='select'?(frame.question.startsWith('Evaluate the ')?accepted?'Now':'Skip':'Join an existing team'):'';});
-  expect(result).toMatchObject({ok:true,value:{steps:{discover:accepted?'done':'skipped',evals:accepted?'done':'skipped'}}});
-  expect(questions).toContain('Look for skill folders on this machine and add them to your library?');
+  const result=await answerAll(b.setup({}),frame=>{questions.push(frame.question);return frame.kind==='confirm'?accepted:frame.kind==='select'?(frame.question.startsWith('Evaluate the ')?accepted?'Now':'Skip':'Join an existing team'):'';});
+  expect(result).toMatchObject({ok:true,value:{steps:{projects:accepted?'done':'skipped',evals:accepted?'done':'skipped'}}});
+  expect(questions).toContain('Add a project?');
   expect(questions).toContain('Evaluate the 2 shared skills that have no receipt yet? This runs Claude on each one and commits each receipt to the team repo.');
-  expect(questions.includes('Look under which folder?')).toBe(accepted);
+  // D13: the folder question is asked only after the confirm, and it is the only follow-up.
+  expect(questions.includes('Which folder?')).toBe(accepted);
  }
-});
-it('discovers nothing in the mock',async()=>{
- expect(await createMockBackend().checkouts.discover({}).done).toEqual({ok:true,value:{candidates:[],scanned:0,truncated:false,problems:[]}});
 });

@@ -7,8 +7,6 @@ import { createMockBackend } from '../../backend/mock';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
-import { fakeBridge } from '../../backend/tauri/__tests__/fake-bridge';
-import { createTauriBackend } from '../../backend/tauri';
 import { Mark } from '../../screens/marketplace/market-components';
 
 beforeEach(()=>{localStorage.clear();useUiStore.setState({railOpen:true,overviewHidden:false,theme:'dark'});});
@@ -91,33 +89,6 @@ it('opens the project remote, with no hard-coded repository target',async()=>{
  const {backend}=await open('/marketplace/projects/terum');const call=vi.spyOn(backend,'openUrl').mockResolvedValue({ok:true,value:undefined});
  const anchor=document.querySelector<HTMLAnchorElement>('.market-repo a')!;expect(anchor.href).toBe('https://github.com/terum/terum');fireEvent.click(anchor);expect(call).toHaveBeenCalledWith(anchor.href);
 });
-// The Library Connect CTA and its workflow dialog were removed on 2026-09-10 (ratified override,
-// .planning/specs/2026-09-10-library-mirror-id-sync.md): global skills auto-share at sync by ID
-// check. Connect's remaining app surface is Settings ▸ Sharing's per-folder Share, tested here.
-// The two #109 silent-success regression tests (a bare-picker batch with nothing connected still
-// surfaced its printed lines and a "Nothing was connected." status in the Library workflow dialog)
-// are deleted with the dialog they exercised: Settings ▸ Sharing has no bare picker and no
-// outcome-status surface, so there is nothing left to point them at.
-it('the Library draws no Connect CTA; Settings Sharing hands the named folder to connect through the Prompter',async()=>{
- location.hash='#/library/global';const backend=createMockBackend(),call=vi.spyOn(backend,'connect');
- render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
- await screen.findByTestId('skill-card-deploy-check');
- expect(screen.queryByRole('button',{name:'Connect'})).toBeNull();
- location.hash='#/settings/sharing';
- fireEvent.click((await screen.findAllByRole('button',{name:'Share'}))[0]!);
- expect(await screen.findByRole('dialog',{name:'Connect api-docs?'})).toBeVisible();expect(call).toHaveBeenCalledWith({path:'~/.claude/skills/api-docs'});
-});
-it('renders the recorded gh-login PRINT as a highlighted workflow popup even when no question is asked',async()=>{
- const line='GitHub CLI is installed but logged out. Run `gh auth login` in a terminal, then try again.';
- const recorded=JSON.stringify({t:'print',level:'info',line});
- const f=fakeBridge((_args,emit)=>{emit({kind:'stdout',line:recorded});emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'connect',ok:false,error:'GitHub CLI is logged out.'})});});
- const backend=createMockBackend();backend.connect=createTauriBackend(f.bridge).connect;
- location.hash='#/settings/sharing';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
- fireEvent.click((await screen.findAllByRole('button',{name:'Share'}))[0]!);
- const popup=await screen.findByRole('dialog',{name:'Terminal action needed'});expect(within(popup).getByRole('alert')).toHaveTextContent(line);expect(within(popup).getByRole('alert')).toHaveStyle({color:'var(--tk-warn)'});
- await waitFor(()=>expect(document.querySelector('.settings-action-error')).toHaveTextContent('GitHub CLI is logged out.'));
- expect(screen.queryByRole('combobox')).toBeNull();
-});
 it('unknown category icons render the neutral tag without throwing',()=>{const {container}=render(<Mark name="new-category"/>);expect(container.querySelector('svg path')).toHaveAttribute('d','M3 3h7l11 11-7 7L3 10Z');});
 it('Settings and footer consume the same clone-state copy',async()=>{
  const backend=createMockBackend(),status=await backend.status();if(!status.ok)throw new Error(status.error);
@@ -127,7 +98,7 @@ it('Settings and footer consume the same clone-state copy',async()=>{
 });
 it('Onboarding Eval is receipt-only even with runEvalInApp false, retaining its terminal hint',async()=>{
  const {client}=await open('/onboarding/basics?tab=eval');await act(async()=>{client.setQueryData(['features'],{...client.getQueryData<Features>(['features']),runEvalInApp:false});});
- expect(screen.queryByRole('button',{name:'Run eval'})).toBeNull();expect(document.querySelector('.onboarding-hint-slot')).toHaveTextContent('npx -y terum-skills@latest eval deploy-check --commit');
+ expect(screen.queryByRole('button',{name:'Run eval'})).toBeNull();expect(document.querySelector('.onboarding-hint-slot')).toHaveTextContent('npx -y terum-skills@latest eval deploy-check');
 });
 
 it('Account sign-in hands the command to the user without opening it as a file or changing credentials',async()=>{

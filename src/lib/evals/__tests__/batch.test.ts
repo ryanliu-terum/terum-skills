@@ -4,7 +4,7 @@ import { ScriptedPrompter } from '../../__tests__/fixtures.js';
 import { success, failure } from '../../result.js';
 import type { EvalResult } from '../../../commands/eval.js';
 const items=Array.from({length:8},(_,i)=>({id:String(i),name:`skill-${i}`,version:'a'.repeat(40)}));
-const result=():EvalResult=>({team:'t',id:'id',name:'n',runDir:'r',ccVersion:'c',executionStatus:'complete',commit:null});
+const result=():EvalResult=>({team:'t',id:'id',name:'n',runDir:'r',ccVersion:'c',executionStatus:'complete'});
 it('keeps four in flight, survives thrown and returned failures, and emits one progress frame per settle',async()=>{
  const io=new ScriptedPrompter();const progress=vi.fn();let active=0,peak=0;const gates:(()=>void)[]=[];
  const running=runEvalBatch({items,parallel:4,io:{...io,print:io.print.bind(io),confirm:io.confirm.bind(io),text:io.text.bind(io),select:io.select.bind(io),progress},run:async item=>{peak=Math.max(peak,++active);await new Promise<void>(resolve=>gates.push(resolve));active--;if(item.id==='1')throw new Error('rate limit');return item.id==='2'?failure('bad'):success(result());}});

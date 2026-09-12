@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { PropsWithChildren } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
-import { BackendContext, PrintContext, PromptContext, pickBackend } from '../backend';
+import { BackendContext, PrintContext, PromptContext, pickBackend, useBackend } from '../backend';
 import type { PromptQuestion } from '../backend/types';
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from '../components/ui/Dialog';
 import { WorkflowPopup } from '../components/domain/WorkflowPopup';
@@ -35,7 +35,19 @@ function PromptProvider({children}:PropsWithChildren){
  const first=pending[0];
  return <PrintContext value={print}><PromptContext value={ask}>{children}{first?<PromptDialog key={first.id} question={first.question} answer={finish} cancel={cancel}/>:null}</PromptContext>{notice?<Dialog open onOpenChange={open=>{if(!open)setNotice(null);}}><WorkflowPopup><DialogTitle>Terminal action needed</DialogTitle><div role="alert" style={{color:'var(--tk-warn)'}}>{notice}</div><Button onClick={()=>setNotice(null)}>Close</Button></WorkflowPopup></Dialog>:null}</PrintContext>;
 }
+/**
+ * §9.2 / D13: `path` is `text` with a folder chooser beside it. The field stays editable and the
+ * typed answer is what is submitted, so a shell that cannot open a chooser is still a working prompt —
+ * which is exactly what the protocol promises a consumer that treats `path` as `text`.
+ */
 function PromptDialog({question,answer,cancel}:{question:PromptQuestion;answer:(value:string|boolean)=>void;cancel:()=>void}){
  const [value,setValue]=useState(question.default??'');const descriptionPrefix=useId();
- return <Dialog open onOpenChange={open=>{if(!open&&question.kind!=='confirm')cancel();}}><DialogPopup><DialogTitle>{question.question}</DialogTitle>{question.detail?.length?<DialogDescription render={<div/>}>{question.detail.map((line,i)=><div key={i}>{line}</div>)}</DialogDescription>:null}<form onSubmit={event=>{event.preventDefault();if(question.kind==='select'&&!question.choices?.includes(value))return;answer(question.kind==='confirm'?true:value);}}>{question.kind==='text'?<input aria-label={question.question} value={value} onChange={event=>setValue(event.target.value)} className="prompt-field"/>:question.kind==='select'?<div role="radiogroup" aria-label={question.question}>{question.choices?.map((choice,index)=><label key={choice} className="prompt-option"><input type="radio" name={question.question} aria-label={choice} aria-describedby={question.descriptions?.[index]?`${descriptionPrefix}-${index}`:undefined} value={choice} checked={value===choice} onChange={()=>setValue(choice)}/><span>{choice}{question.descriptions?.[index]&&<span id={`${descriptionPrefix}-${index}`} className="prompt-option-description">{question.descriptions[index]}</span>}</span></label>)}</div>:null}<div className="prompt-actions"><Button onClick={cancel}>{question.kind==='confirm'?'No':'Cancel'}</Button><Button kind="primary" type="submit" disabled={question.kind==='select'&&!question.choices?.includes(value)}>{question.kind==='confirm'?'Yes':'Continue'}</Button></div></form></DialogPopup></Dialog>;
+ const backend=useBackend();const [pickError,setPickError]=useState<string|null>(null);
+ async function choose(){
+  setPickError(null);
+  const picked=await backend.pickFolder();
+  if(!picked.ok){setPickError(picked.error);return;}
+  if(picked.value!==null)setValue(picked.value);
+ }
+ return <Dialog open onOpenChange={open=>{if(!open&&question.kind!=='confirm')cancel();}}><DialogPopup><DialogTitle>{question.question}</DialogTitle>{question.detail?.length?<DialogDescription render={<div/>}>{question.detail.map((line,i)=><div key={i}>{line}</div>)}</DialogDescription>:null}<form onSubmit={event=>{event.preventDefault();if(question.kind==='select'&&!question.choices?.includes(value))return;answer(question.kind==='confirm'?true:value);}}>{question.kind==='path'?<><div className="prompt-path"><input aria-label={question.question} value={value} onChange={event=>setValue(event.target.value)} className="prompt-field"/><Button onClick={()=>{void choose();}}>Choose folder…</Button></div>{pickError?<div role="alert" style={{fontSize:12,color:'var(--tk-bad)'}}>{pickError}</div>:null}</>:question.kind==='text'?<input aria-label={question.question} value={value} onChange={event=>setValue(event.target.value)} className="prompt-field"/>:question.kind==='select'?<div role="radiogroup" aria-label={question.question}>{question.choices?.map((choice,index)=><label key={choice} className="prompt-option"><input type="radio" name={question.question} aria-label={choice} aria-describedby={question.descriptions?.[index]?`${descriptionPrefix}-${index}`:undefined} value={choice} checked={value===choice} onChange={()=>setValue(choice)}/><span>{choice}{question.descriptions?.[index]&&<span id={`${descriptionPrefix}-${index}`} className="prompt-option-description">{question.descriptions[index]}</span>}</span></label>)}</div>:null}<div className="prompt-actions"><Button onClick={cancel}>{question.kind==='confirm'?'No':'Cancel'}</Button><Button kind="primary" type="submit" disabled={question.kind==='select'&&!question.choices?.includes(value)}>{question.kind==='confirm'?'Yes':'Continue'}</Button></div></form></DialogPopup></Dialog>;
 }

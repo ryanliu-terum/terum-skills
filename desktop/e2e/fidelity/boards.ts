@@ -255,13 +255,6 @@ export const BOARDS:readonly Board[]=[
     "height": 900
   },
   {
-    "name": "InboxUpdate",
-    "route": "#/inbox/update-pr-review",
-    "klass": "screen",
-    "width": 1440,
-    "height": 900
-  },
-  {
     "name": "InboxAlert",
     "route": "#/inbox/alert-offtarget-deploy-check",
     "klass": "screen",
@@ -510,8 +503,8 @@ export const BOARDS:readonly Board[]=[
     "height": 900
   },
   {
-    "name": "SettingsSharing",
-    "route": "#/settings/sharing",
+    "name": "SettingsPublishing",
+    "route": "#/settings/publishing",
     "klass": "screen",
     "width": 1440,
     "height": 900

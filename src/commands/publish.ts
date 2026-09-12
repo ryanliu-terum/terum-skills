@@ -3,7 +3,6 @@ import type { WithForm } from '../lib/invocation.js';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { canonicalLedger, localRootLabel, candidatesOf, localSkillRoots, localSkills } from '../lib/local-skills.js';
-import { registerCheckout, writableCheckout } from '../lib/checkouts.js';
 import type { Config } from '../lib/schema.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { ghState } from '../lib/auth.js';
@@ -13,7 +12,7 @@ import { fromError, CancelledError, failure, Result, success } from '../lib/resu
 import { parseJson, parseSkillFrontmatter, Team, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { findSkill, readTeam } from '../lib/skills.js';
-import { openTeamRepo, refreshClone, SafeWriteOptions, shellQuote, treeText, lockWait } from '../lib/teamRepo.js';
+import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { parseRef, teamForReference } from './install.js';
 import { sourceFiles } from '../lib/skill-source.js';
 import { assessHygiene, formatHygieneWarnings, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
@@ -39,10 +38,6 @@ export interface PublishResult {
 export async function run(args: PublishArgs, io: Prompter): Promise<Result<PublishResult>> {
   try {
     const store = args.config ?? createConfigStore();
-    const register = async (): Promise<void> => {
-      const root = await writableCheckout(args.cwd, args.home ?? homedir(), store.root);
-      if (root) await registerCheckout(store, root, io, { home: args.home ?? homedir() });
-    };
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const reference = parseRef(args.ref);
@@ -123,7 +118,6 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     if (!written.changed) return alreadyEndorsed(base, scopeLabel, io);
     reportHygieneWarnings((line) => { if (!preflightWarnings.has(line)) io.print(line); }, written.returned);
     if (teamJson.policy.publish === 'push') {
-      await register();
       io.print(`Published ${record.name} to ${team} (${scopeLabel}).`);
       return success({ ...base, changed: true, branch: null, prUrl: null, compareUrl: null });
     }
@@ -138,7 +132,6 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
         '--body', `Endorse ${record.name} (${record.id.slice(0, 8)}) for ${team}: ${scopeLabel}.\n\nOpened by terum-skills publish; merge to endorse.`,
       ]);
       if (created.code === 0) {
-        await register();
         const prUrl = created.stdout.trim();
         io.print(prUrl);
         return success({ ...base, changed: true, branch, prUrl, compareUrl: null });
@@ -146,7 +139,6 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       io.print(compareUrl!);
       return failure(`The endorsement branch ${branch} was pushed but gh could not open the pull request: ${commandMessage(created.stderr, created.stdout)}. Open it at ${compareUrl}.`, { ...base, changed: true, branch, prUrl: null, compareUrl });
     }
-    await register();
     io.print(`Pushed ${branch}. Open a pull request from ${branch} into main to complete the endorsement:`);
     io.print(compareUrl ?? `${stripRemoteCredentials(binding.remote)} — branch ${branch}`);
     return success({ ...base, changed: true, branch, prUrl: null, compareUrl });
@@ -226,15 +218,14 @@ function printCard(record: Awaited<ReturnType<typeof findSkill>> & {}, scopeLabe
 
 /** The miss supplies read-only local discovery guidance, never an import or tracking write. */
 async function notInTeam(args: PublishArgs, config: Config, team: string, name: string, stateRoot: string): Promise<string> {
-  const discovery = await localSkillRoots(args.home ?? homedir(), args.cwd, config.checkouts ?? []);
+  const discovery = await localSkillRoots(args.home ?? homedir(), config.projects ?? []);
   const ledger = await canonicalLedger(config);
   const inventories = await Promise.all(discovery.roots.map((root) => localSkills(root.root, config, { scope: root.scope, stateRoot, ledger })));
   const found = inventories.flatMap((inventory, index) => candidatesOf(inventory).filter((entry) => entry.name === name).map((entry) => ({ ...entry, scope: inventory.scope, label: localRootLabel(discovery.roots[index]!), repoRoot: discovery.roots[index]!.repoRoot })));
   const unreadable = discovery.problems.length + inventories.reduce((count, inventory) => count + inventory.problems.length + inventory.entries.filter((entry) => entry.inspection.kind === 'failed').length, 0);
-  const retry = invocation(args.form, 'publish', args.ref) + (args.project === undefined ? '' : ` --project ${shellQuote(args.project)}`);
   const note = unreadable ? ` (${unreadable} local folder(s) under ${discovery.roots.map((root) => root.root).join(' or ')} could not be read.)` : '';
   if (found.length) {
-    return found.map(({ path, scope }) => `No skill ${args.ref} in team ${team}. Found a local folder at ${path}${found.length > 1 ? ` (${scope})` : ''} that is not tracked as a connected source or placement on this machine. To connect it to ${team}, run \`${invocation(args.form, 'connect', path)}\`, then retry \`${retry}\`.`).join('\n') + note;
+    return found.map(({ path, scope }) => `No skill ${args.ref} in team ${team}. Found a local folder at ${path}${found.length > 1 ? ` (${scope})` : ''}. Inspect local skills with \`${invocation(args.form, 'ls --local')}\`; publish local skills explicitly from the Library.`).join('\n') + note;
   }
-  return `No skill ${args.ref} in team ${team}. Run \`${invocation(args.form, 'ls')}\` to check the team's skill names. To add a local skill, run \`${invocation(args.form, 'connect', { raw: '<path-to-skill>' })}\`, then publish its name.${note}`;
+  return `No skill ${args.ref} in team ${team}. Run \`${invocation(args.form, 'ls')}\` to check the team's skill names. Inspect local folders with \`${invocation(args.form, 'ls --local')}\`; publish local skills explicitly from the Library.${note}`;
 }

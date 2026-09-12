@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext } from '../../index';
@@ -9,7 +9,6 @@ import { createTauriBackend } from '../index';
 import { shareSettingsReplay, type LocalValue, type StatusValue as WireStatus } from './share-settings-fixture';
 import { ICON_PATHS } from '../../../components/ui/icon-paths';
 import { StatusValue } from '../../../screens/settings/SettingsParts';
-import { fakeBridge } from './fake-bridge';
 
 afterEach(()=>{cleanup();location.hash='';localStorage.clear();});
 function open(route:string,change?:Parameters<typeof shareSettingsReplay>[0]) {
@@ -48,20 +47,14 @@ it('does not offer or describe unknown eval defaults',async()=>{
  expect(screen.queryByRole('option',{name:'—'})).toBeNull();expect(screen.queryByText(/k = —/)).toBeNull();
  expect(screen.getByText('The app passes no eval flags; terum-skills uses its own defaults.')).toBeVisible();
 });
-it('renders a reported shared name and abbreviated source',async()=>{
- open('#/settings/sharing');expect(await screen.findByText('tdd')).toBeVisible();
- expect(screen.getByText('~/code/seed/skills/tdd · acme')).toBeVisible();
- expect(screen.queryByText('22222222-2222-4222-8222-222222222222')).toBeNull();
-});
 it('renders generic settings errors without diagnosing invalid JSON',async()=>{
  open('#/settings/account',(frame,name)=>{if(frame.t==='result'&&name==='status'){Object.assign(frame,{ok:false,error:'Permission denied.',exitCode:1});delete frame.value;}});
  expect(await screen.findByText("terum-skills could not read your settings, so this page shows nothing rather than stale values. The message below is the CLI's own.")).toBeVisible();
  expect(screen.queryByText(/not valid JSON/)).toBeNull();
 });
-it('draws empty placement and shared collections',async()=>{
- const change=(frame:Record<string,unknown>,name:string)=>{if(frame.t==='result'&&name==='status'){const value=frame.value as WireStatus;value.ledger.placements=[];value.ledger.shared=[];}};
- open('#/settings/machine',change);expect(await screen.findByText('Nothing placed on this machine yet.')).toBeVisible();cleanup();
- open('#/settings/sharing',change);expect(await screen.findByText('Nothing shared from this machine yet.')).toBeVisible();
+it('draws an empty placement collection',async()=>{
+ const change=(frame:Record<string,unknown>,name:string)=>{if(frame.t==='result'&&name==='status'){const value=frame.value as WireStatus;value.ledger.placements=[];}};
+ open('#/settings/machine',change);expect(await screen.findByText('Nothing placed on this machine yet.')).toBeVisible();
 });
 it('draws unknown status with a muted alert icon',()=>{
  const {container}=render(<StatusValue kind="unknown">—</StatusValue>);
@@ -69,15 +62,6 @@ it('draws unknown status with a muted alert icon',()=>{
  expect(container.querySelector('svg')).toHaveStyle({color:'var(--tk-text3)'});
  expect(container.querySelector('svg')?.innerHTML).toBe(ICON_PATHS.alert);
 });
-it('shows sync outcome counts, deferred grants, notices and unsynced teams',async()=>{
- const backend=open('#/settings/sync');await screen.findByText('Managed by setup');
- const f=fakeBridge((_args,emit)=>emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{placed:2,deferred:['a','b'],notices:['Review notice'],changed:true,teams:[{team:'acme',state:'skipped',message:'m'},{team:'other',state:'gone'},{team:'quiet',state:'synced'}]}})}));
- backend.sync=createTauriBackend(f.bridge).sync;
- fireEvent.click(screen.getByRole('button',{name:'Sync now'}));
- expect(await screen.findByText('2 placed')).toBeVisible();expect(screen.getByText('Waiting for tool review: a, b')).toBeVisible();
- expect(screen.getByText('Review notice')).toBeVisible();expect(screen.getByText('acme: skipped · m')).toBeVisible();expect(screen.getByText('other: gone')).toBeVisible();expect(screen.queryByText('quiet: synced')).toBeNull();
-});
-
 it.each([
  ['newer','0.1.8','0.1.7 installed · 0.1.8 available'],
  ['older','0.1.6','0.1.7 installed · newer than the advertised 0.1.6'],

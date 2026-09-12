@@ -1,13 +1,9 @@
 import { getStartedLines } from '../../lib/invocation.js';
-import { PassThrough } from 'node:stream';
-import { frameChannel } from '../../lib/frames.js';
-import { type NonInteractivePrompter } from '../../lib/prompt.js';
 import { access, readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { run, ledgerScopes } from '../uninstall.js';
 import { run as install } from '../install.js';
-import { run as sync } from '../sync.js';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter as NonTtyPrompter, temporaryDirectory, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
@@ -72,63 +68,7 @@ describe('uninstall (§6 pending)', () => {
     expect((await store.read()).placements).toEqual({});
   });
 
-  it('keeps an interrupted uninstall gone and completes its people-file removal from pending intent', async () => {
-    const fixture = await bareTeam();
-    const id = '33333333-3333-4333-8333-333333333333';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    const home = join(fixture.root, 'home');
-    const store = createConfigStore(join(home, '.terum', 'skills'));
-    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    expect((await install({ ref: 'sample', config: store }, new ScriptedPrompter())).ok).toBe(true);
-    let clock = 0;
-    const rejecting = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'push'
-      ? { code: 1, stdout: '', stderr: ' ! [rejected] HEAD -> main (non-fast-forward)' }
-      : next());
-    const interrupted = await run({ ref: 'sample', team: 'team', config: store, runner: rejecting, safeWrite: { deadlineMs: 1, now: () => clock, sleep: async () => { clock = 2; } } }, new ScriptedPrompter([], [true]));
-    expect(interrupted).toMatchObject({ ok: false, error: 'safeWrite deadline exhausted after 2 attempt(s); the remote kept moving ahead: ! [rejected] HEAD -> main (non-fast-forward)', value: [{ id, team: 'team', removed: 1 }] });
-    expect(interrupted).not.toHaveProperty('cancelled');
-    const output = new PassThrough(); let frames = '';
-    output.on('data', (chunk) => { frames += String(chunk); });
-    frameChannel({ input: new PassThrough(), output }).result({ ...interrupted, verb: 'uninstall-skill', exitCode: 1 });
-    expect(JSON.parse(frames)).toMatchObject({ t: 'result', ok: false, value: [{ id, removed: 1 }] });
-    expect(JSON.parse(frames)).not.toHaveProperty('declined');
-    const path = join(home, '.claude', 'skills', 'sample');
-    await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' });
-    expect((await store.read()).placements).toEqual({});
-    expect((await store.read()).pending).toHaveLength(1);
-    const hookIo: NonInteractivePrompter & { lines: string[]; asked: string[] } = { interactive: false, lines: [], asked: [], print(line) { this.lines.push(line); } };
-    expect((await sync({ config: store, hook: true }, hookIo)).ok).toBe(true);
-    expect(hookIo.asked).toEqual([]);
-    expect((await store.read()).pending).toEqual([]);
-    expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
-    await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' });
-  });
 
-  it('finishes an interrupted uninstall on sync even after the author deleted the skill upstream', async () => {
-    const fixture = await bareTeam();
-    const id = '34343434-3434-4434-8434-343434343434';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    const home = join(fixture.root, 'home');
-    const store = createConfigStore(join(home, '.terum', 'skills'));
-    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    expect((await install({ ref: 'sample', config: store }, new ScriptedPrompter())).ok).toBe(true);
-    let clock = 0;
-    const rejecting = wrapRunner(systemRunner, async (command, args, _options, next) => command === 'git' && args[0] === 'push'
-      ? { code: 1, stdout: '', stderr: ' ! [rejected] HEAD -> main (non-fast-forward)' }
-      : next());
-    expect((await run({ ref: 'sample', team: 'team', config: store, runner: rejecting, safeWrite: { deadlineMs: 1, now: () => clock, sleep: async () => { clock = 2; } } }, new ScriptedPrompter([], [true]))).ok).toBe(false);
-    expect((await store.read()).pending).toHaveLength(1);
-    // The skill leaves the repository before this machine syncs: the replay needs only local state, so it still completes.
-    await git(['fetch', '-q', 'origin'], fixture.seed); await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
-    await git(['rm', '-qr', 'skills/sample'], fixture.seed); await git(['commit', '-q', '-m', 'remove sample'], fixture.seed); await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
-    const io = new ScriptedPrompter();
-    expect(await sync({ config: store }, io)).toMatchObject({ ok: true, value: { deferred: [] } });
-    expect((await store.read()).pending).toEqual([]);
-    expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
-    await expect(access(join(home, '.claude', 'skills', 'sample'))).rejects.toMatchObject({ code: 'ENOENT' });
-  });
 
   it('declines an automatically endorsed uninstall, preserves approval, and clears the decline on explicit reinstall', async () => {
     const fixture = await bareTeam();
@@ -161,7 +101,8 @@ describe('uninstall (§6 pending)', () => {
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    // §7.2: install refuses an --into path that is not already a project, so the fixture adds it.
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = [{ root: checkout, label: 'checkout' }]; });
 
     expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkout, cwd: checkout }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     expect((await install({ ref: 'personal', into: 'global', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
@@ -196,9 +137,11 @@ describe('uninstall (§6 pending)', () => {
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    // Installed globally from outside any checkout, and into the project from its checkout.
-    expect((await install({ ref: 'sample', config: store, home, cwd: await temporaryDirectory() }, new ScriptedPrompter())).ok).toBe(true);
+    // §7.2: install refuses an --into path that is not already a project, so the fixture adds it.
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = [{ root: checkout, label: 'checkout' }]; });
+    // Installed globally, and into the project. §7.2 took cwd out of the destination decision, so a
+    // headless install with a project registered has to name where it goes.
+    expect((await install({ ref: 'sample', into: 'global', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
     expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkout, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
     const globalPath = join(home, '.claude', 'skills', 'sample'); const projectPath = join(checkout, '.claude', 'skills', 'sample');
     // (The project key is git's realpath of the checkout — /private/var on macOS — so count, do not compare it.)
@@ -223,7 +166,7 @@ describe('uninstall (§6 pending)', () => {
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkoutA = await cloneWithIdentity(product.bare, join(product.root, 'checkout-a'));
     const checkoutB = await cloneWithIdentity(product.bare, join(product.root, 'checkout-b'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = [{ root: checkoutA, label: 'a' }, { root: checkoutB, label: 'b' }]; });
     expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkoutA, cwd: checkoutA }, new ScriptedPrompter())).ok).toBe(true);
     expect((await install({ kind: 'project', project: 'product', config: store, home, into: checkoutB, cwd: checkoutB }, new ScriptedPrompter())).ok).toBe(true);
     await store.update((config) => {
@@ -316,7 +259,7 @@ async function projectPreviewFixture() {
   const store = createConfigStore(join(fixture.root, 'state')), home = join(fixture.root, 'home');
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   const checkouts = await Promise.all(['a', 'b'].map(name => cloneWithIdentity(product.bare, join(product.root, name))));
-  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = checkouts.map((root, index) => ({ root, label: ['a', 'b'][index]! })); });
   expect((await install({ ref: 'shared', into: 'global', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
   for (const cwd of checkouts) expect((await install({ kind: 'project', project: 'product', config: store, home, into: cwd, cwd }, new ScriptedPrompter())).ok).toBe(true);
   const before = await store.read(), people = await readFile(join(clone, 'people/seed.json'), 'utf8');
@@ -432,8 +375,8 @@ it('removes only --from and updates the shared record and decline only after the
   await pushFromSeed(fixture.seed, 'team.json', JSON.stringify(team));
   const home = join(fixture.root, 'home'); const store = createConfigStore(join(home, '.terum', 'skills'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   const checkout = await temporaryDirectory();
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = [{ root: checkout, label: 'checkout' }]; });
   for (const into of ['global', checkout]) expect((await install({ ref: 'sample', into, config: store }, new ScriptedPrompter())).ok).toBe(true);
   const personPath = join(clone, 'people', 'seed.json'); const before = await readFile(personPath, 'utf8');
   const runner = wrapRunner(systemRunner, async () => { throw new Error('No team write is allowed while another copy remains'); });

@@ -70,17 +70,6 @@ it('renders the installed/team version mismatch through the App using CLI invent
  render(createElement(BackendContext,{value:createTauriBackend(f.bridge)},createElement(QueryClientProvider,{client:new QueryClient({defaultOptions:{queries:{retry:false}}})},createElement(Tooltip.Provider,null,createElement(App)))));
  expect(await screen.findByText("Your installed copy is a1b2c3d4; the team's current version is 5f0e12ab. The receipt below is for the team's version.")).toBeVisible();
 });
-it('preserves a failed eval commit value and notifies clone subscribers',async()=>{
- const value={name:'deploy-check',runDir:'/tmp/run',executionStatus:'complete',commit:{ok:false,error:'push refused'}};
- const f=fakeBridge((args,emit)=>emit({kind:'stdout',line:JSON.stringify({t:'result',verb:args[0],ok:false,exitCode:1,error:'push refused',value})}));
- const backend=createTauriBackend(f.bridge),listener=vi.fn();backend.subscribe(listener);
- expect(await backend.eval({ref:'deploy-check',commit:true}).done).toEqual({ok:false,error:'push refused',value});expect(listener).toHaveBeenCalledWith('clone');
-});
-
-it.each([true,false])('takes evalCommitChoice=%s only from the CLI feature',async enabled=>{
- const f=fakeBridge((args,emit)=>{emit({kind:'stdout',line:JSON.stringify({t:'hello',protocol:1,verbs:[],features:{runEvalInApp:enabled}})});emit({kind:'stdout',line:JSON.stringify({t:'result',verb:args[0],ok:true,exitCode:0,value:{}})});});
- expect((await createTauriBackend(f.bridge).capabilities()).evalCommitChoice).toBe(enabled);
-});
 
 it('does not label an already committed local receipt as an uncommitted run',async()=>{
  const r=await adapter({...report(),latestState:'none',latest:null,localRuns:[{run_id:'20260909T010000Z',run_dir:'/tmp/run',execution_status:'complete',committed:true,receipt:receipt()}]}).backend.evalReport({ref:'deploy-check'});

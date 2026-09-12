@@ -2,7 +2,7 @@ import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
-import { checkoutPath } from '../lib/checkouts.js';
+import { projectPath } from '../lib/projects.js';
 import { AGENT_PATHS, checkoutRootOf } from '../lib/placer/agent-paths.js';
 import type { Config, Destination } from '../lib/schema.js';
 import { exists } from '../lib/fs.js';
@@ -94,14 +94,14 @@ export async function selectCopies(input: UninstallInput & { targets: readonly U
   let destination = input.destination;
   if (input.from !== undefined) {
     if (input.from !== 'global' && !isAbsolute(input.from)) throw new Error('Pass --from global or --from <checkout root>');
-    destination = input.from === 'global' ? { kind: 'global' } : { kind: 'checkout', root: await checkoutPath(input.from) };
+    destination = input.from === 'global' ? { kind: 'global' } : { kind: 'checkout', root: await projectPath(input.from) };
   }
-  const selectedRoot = destination ? await checkoutPath(destination.kind === 'global' ? AGENT_PATHS['claude-code'].global(home) : AGENT_PATHS['claude-code'].project(destination.root)) : undefined;
+  const selectedRoot = destination ? await projectPath(destination.kind === 'global' ? AGENT_PATHS['claude-code'].global(home) : AGENT_PATHS['claude-code'].project(destination.root)) : undefined;
   const selections: CopySelection[] = [];
   for (const target of input.targets) {
     let matching = Object.entries(config.placements).filter(([, entry]) => entry.id === target.id && entry.team === input.team && sameScope(entry.scope, target.scope));
     if (selectedRoot !== undefined) {
-      const matches = await Promise.all(matching.map(async ([path]) => await checkoutPath(dirname(path)) === selectedRoot));
+      const matches = await Promise.all(matching.map(async ([path]) => await projectPath(dirname(path)) === selectedRoot));
       matching = matching.filter((_, index) => matches[index]);
     }
     if (!destination && matching.length > 1) {
@@ -112,7 +112,7 @@ export async function selectCopies(input: UninstallInput & { targets: readonly U
     }
     const path = matching[0]?.[0];
     const checkout = path ? checkoutRootOf(path) : undefined;
-    const copyDestination: Destination = destination ?? (checkout && await checkoutPath(checkout) !== await checkoutPath(home) ? { kind: 'checkout', root: await checkoutPath(checkout) } : { kind: 'global' });
+    const copyDestination: Destination = destination ?? (checkout && await projectPath(checkout) !== await projectPath(home) ? { kind: 'checkout', root: await projectPath(checkout) } : { kind: 'global' });
     selections.push({ target, matching, destination: copyDestination });
   }
   return selections;

@@ -34,7 +34,6 @@ export interface StatusResult {
   ledger: {
     placements: { path: string; id: string; team: string; version: string | null; scope: Config['pending'][number]['scope']; placed_at: string }[];
     approvals: { id: string; grants: string; approved_at: string }[];
-    shared: { id: string; source: string; team: string }[];
   };
   identity: { default_handle: string | null; email: string | null; display_name: string | null; github: string | null } | null;
   tools: { git: boolean; gh: boolean };
@@ -45,7 +44,7 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
   const version = packageVersion();
   const architecture = { hostArch: hostArch({ platform: process.platform, arch: process.arch, env: process.env }), processArch: process.arch };
   const teams: TeamStatus[] = [];
-  const ledger: StatusResult['ledger'] = { placements: [], approvals: [], shared: [] };
+  const ledger: StatusResult['ledger'] = { placements: [], approvals: [] };
   let identity: StatusResult['identity'] = null;
   const tools = { git: false, gh: false };
   try {
@@ -54,7 +53,6 @@ export async function run(args: StatusArgs, io: Prompter): Promise<Result<Status
     const config = await store.read();
     ledger.placements = Object.entries(config.placements).map(([path, e]) => ({ path, id: e.id, team: e.team, version: e.version ?? null, scope: e.scope.kind === 'global' ? { kind: 'global' } : { kind: 'project', project: e.scope.project }, placed_at: e.placed_at }));
     ledger.approvals = Object.entries(config.approvals).map(([id, e]) => ({ id, grants: e.grants, approved_at: e.approved_at }));
-    ledger.shared = Object.entries(config.shared).map(([id, e]) => ({ id, source: e.source, team: e.team }));
     if ([config.default_handle, config.email, config.display_name, config.github].some(value => value !== undefined)) {
       identity = { default_handle: config.default_handle ?? null, email: config.email ?? null, display_name: config.display_name ?? null, github: config.github ?? null };
     }

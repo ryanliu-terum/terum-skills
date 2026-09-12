@@ -15,6 +15,9 @@ const keys = ['status', 'settings', 'onboarding', 'library', 'skill', 'receipts'
 const cases: [ChangeSource, string[]][] = [
   ['config', ['status', 'settings', 'onboarding', 'library', 'skill', 'catalog', 'features', 'capabilities']],
   ['clone', ['library', 'skill', 'catalog', 'roster', 'inbox', 'receipts', 'status']],
+  // A fetch-only sync cannot touch local files, so 'library' is deliberately absent; it can bring in a
+  // teammate's people file and receipts, so 'roster' and 'receipts' are deliberately present.
+  ['marketplace', ['catalog', 'skill', 'roster', 'receipts']],
   ['placed', ['library', 'skill', 'settings', 'status', 'catalog']],
   ['stamp', ['status', 'settings', 'inbox']],
 ];
@@ -30,7 +33,7 @@ it.each(cases)('invalidates exactly the read-model prefixes affected by %s', (so
 
 it('uses the focus lifecycle policy and invalidates mapped queries after a settled run, unsubscribing on unmount', async () => {
   const f = fakeBridge((_args, emit) => {
-    emit({ kind: 'stdout', line: JSON.stringify({ t: 'result', verb: 'sync', ok: true, exitCode: 0, value: { placed: 1, deferred: [], notices: [], changed: true, teams: [] } }) });
+    emit({ kind: 'stdout', line: JSON.stringify({ t: 'result', verb: 'sync', ok: true, exitCode: 0, value: { notices: [], changed: true, teams: [] } }) });
   });
   const backend = createTauriBackend(f.bridge);
   vi.spyOn(backendModule, 'pickBackend').mockReturnValue(backend);
@@ -41,13 +44,12 @@ it('uses the focus lifecycle policy and invalidates mapped queries after a settl
   expect(client.getDefaultOptions().queries).toEqual({ retry: false, staleTime: 30_000, refetchOnWindowFocus: true, refetchOnReconnect: false, refetchOnMount: 'always' });
   for (const key of keys) client.setQueryData([key, 'acme'], 'cached');
   await act(async () => { await backend.sync({}).done; });
-  expect(invalidate).toHaveBeenCalledTimes(4);
-  // sync writes the config ledgers too, so it broadcasts 'config' alongside the three it always did.
-  for (const key of keys) expect(client.getQueryState([key, 'acme'])?.isInvalidated).toBe(['config', 'clone', 'placed', 'stamp'].some(source => affects(source as ChangeSource, [key])));
+  expect(invalidate).toHaveBeenCalledTimes(2);
+  for (const key of keys) expect(client.getQueryState([key, 'acme'])?.isInvalidated).toBe(['marketplace', 'stamp'].some(source => affects(source as ChangeSource, [key])));
   expect(client.getQueryData(['library', 'acme'])).toBe('cached');
   view.unmount();
   await backend.sync({}).done;
-  expect(invalidate).toHaveBeenCalledTimes(4);
+  expect(invalidate).toHaveBeenCalledTimes(2);
 });
 
 it('does not invalidate after a failed run', async () => {

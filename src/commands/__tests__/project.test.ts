@@ -1,117 +1,95 @@
+import { mkdir, realpath, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, mappedRunner, originSha, pushFromSeed, ScriptedPrompter, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
-import type { Runner } from '../../lib/runner.js';
+import { configSchema } from '../../lib/schema.js';
+import { ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run } from '../project.js';
 
-const REMOTE = 'https://github.com/acme/team.git';
-
-async function prepared(projects: Record<string, { remotes: string[]; skills: string[] }> = {}) {
-  const fixture = await bareTeam();
-  if (Object.keys(projects).length) await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ ...TEAM_JSON, projects })}\n`);
-  const store = createConfigStore(join(fixture.root, 'state'));
-  await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-  await store.update((config) => { config.teams.team = { remote: REMOTE, handle: 'seed' }; });
-  return { fixture, store, runner: mappedRunner(REMOTE, fixture.bare) };
+async function fixture() {
+  const home = await realpath(await temporaryDirectory()); const config = createConfigStore(join(home, 'state'));
+  const root = join(home, 'repo'); const cwd = join(root, 'src');
+  await mkdir(cwd, { recursive: true }); await mkdir(join(root, '.git'));
+  return { home, config, root, cwd };
 }
 
-/** `team.json` as it stands on the bare origin, read without disturbing the seed clone's worktree. */
-async function teamOnOrigin(seed: string): Promise<{ projects: Record<string, { remotes: string[]; skills: string[] }> }> {
-  await git(['fetch', '-q', 'origin'], seed);
-  return JSON.parse(await git(['show', 'origin/main:team.json'], seed)) as { projects: Record<string, { remotes: string[]; skills: string[] }> };
-}
-
-describe('project create (spec §3)', () => {
-  it('commits a new empty project straight to main', async () => {
-    const { fixture, store, runner } = await prepared();
-    const before = await originSha(fixture.bare);
+describe('project registry (§7.1)', () => {
+  it('asks for the nearest repository, stores a realpath, and adds idempotently without a team', async () => {
+    const args = await fixture(); const io = new ScriptedPrompter(['']);
+    expect(await run({ ...args, kind: 'add' }, io)).toMatchObject({ ok: true, value: { path: args.root, label: 'repo', added: true } });
+    expect(io.asked).toEqual(['Which folder?']);
+    expect(io.lines).toEqual([`Added ${args.root} to your library.`]);
+    const alias = join(args.home, 'alias'); await symlink(args.root, alias);
+    const again = new ScriptedPrompter();
+    expect(await run({ ...args, kind: 'add', path: alias }, again)).toMatchObject({ ok: true, value: { path: args.root, added: false } });
+    expect(again.lines).toEqual([`${args.root} is already in your library.`]);
+    const stored = (await args.config.read()).projects;
+    expect(stored).toMatchObject([{ root: args.root, label: 'repo' }]);
+    expect(stored![0]!.added_at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+  it('adds a non-git folder through an alias', async () => {
+    const args = await fixture(); const root = join(args.home, 'plain'); await mkdir(root);
+    const alias = join(args.home, 'alias'); await symlink(root, alias);
+    expect(await run({ ...args, kind: 'add', path: alias }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { path: root } });
+    expect((await args.config.read()).projects).toMatchObject([{ root, label: 'plain' }]);
+  });
+  it.each(['state', 'home', 'missing'])('refuses %s without writing', async (kind) => {
+    const args = await fixture(); await args.config.update(() => undefined);
+    const before = await readFile(join(args.config.root, 'config.json'), 'utf8');
+    const path = kind === 'state' ? args.config.root : kind === 'home' ? args.home : join(args.home, 'missing');
+    const result = await run({ ...args, kind: 'add', path }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(kind === 'missing' ? 'does not exist' : kind === 'state' ? 'state directory' : 'Global') });
+    expect(await readFile(join(args.config.root, 'config.json'), 'utf8')).toBe(before);
+  });
+  /** §3.6: two roots that share a basename are both qualified — one Library row per readable name. */
+  it('qualifies a colliding label by its parent, and relabels the project already stored', async () => {
+    const args = await fixture();
+    const first = join(args.home, 'alpha', 'web'); const second = join(args.home, 'beta', 'web');
+    await mkdir(first, { recursive: true }); await mkdir(second, { recursive: true });
+    await run({ ...args, kind: 'add', path: first }, new ScriptedPrompter());
+    expect((await args.config.read()).projects).toMatchObject([{ root: first, label: 'web' }]);
+    await run({ ...args, kind: 'add', path: second }, new ScriptedPrompter());
+    expect((await args.config.read()).projects).toMatchObject([{ root: first, label: 'web (alpha)' }, { root: second, label: 'web (beta)' }]);
+  });
+  it('removes only registry membership, retaining the empty key and ledger', async () => {
+    const args = await fixture(); const target = join(args.root, '.claude', 'skills', 'one');
+    await args.config.update(c => {
+      c.projects = [{ root: args.root, label: 'repo' }];
+      c.placements[target] = { id: '11111111-1111-4111-8111-111111111111', team: 'team', version: null, scope: { kind: 'project', project: 'app' }, placed_at: '', fingerprint: '' };
+    });
+    const before = (await args.config.read()).placements; const io = new ScriptedPrompter();
+    expect(await run({ ...args, kind: 'remove', path: args.root }, io)).toMatchObject({ ok: true, value: { path: args.root, placementsRemaining: 1 } });
+    expect(io.lines).toEqual([`Removed ${args.root} from your library.`, `1 placements recorded under ${args.root} stay in the ledger; uninstall-skill removes them.`]);
+    const after = configSchema.parse(JSON.parse(await readFile(join(args.config.root, 'config.json'), 'utf8')));
+    expect(after.projects).toEqual([]); expect(after.placements).toEqual(before);
+    expect(await run({ ...args, kind: 'remove', path: args.root }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `${args.root} is not in your library.` });
+  });
+  it('lists scanned and absent roots with their labels and skill-folder counts', async () => {
+    const args = await fixture(); const absent = join(args.home, 'missing');
+    const skill = join(args.root, '.claude', 'skills', 'one'); await mkdir(skill, { recursive: true });
+    await writeFile(join(skill, 'SKILL.md'), '---\nname: mismatch\ndescription: x\n---\n');
+    await args.config.update(c => { c.projects = [{ root: absent, label: 'missing' }, { root: args.root, label: 'repo' }]; });
     const io = new ScriptedPrompter();
-
-    const result = await run({ kind: 'create', name: 'Payments', remote: 'https://github.com/acme/payments', config: store, runner }, io);
-
-    expect(result).toMatchObject({ ok: true, value: { team: 'team', name: 'Payments', skills: 0 } });
-    expect(await originSha(fixture.bare)).not.toBe(before);
-    const team = await teamOnOrigin(fixture.seed);
-    expect(team.projects.Payments).toEqual({ remotes: ['github.com/acme/payments'], skills: [] });
-    expect(io.lines).toContain('Created project Payments in team.');
+    expect(await run({ ...args, kind: 'list' }, io)).toMatchObject({ ok: true, value: { projects: [
+      { path: absent, label: 'missing', rootState: 'absent', skillFolders: 0 }, { path: args.root, label: 'repo', rootState: 'scanned', skillFolders: 1 },
+    ] } });
+    expect(io.lines).toEqual([`missing — ${absent}; absent; 0 skill folders`, `repo — ${args.root}; scanned; 1 skill folders`]);
+    expect(io.asked).toEqual([]);
+    await args.config.update(c => { c.projects = []; });
+    const empty = new ScriptedPrompter(); await run({ ...args, kind: 'list' }, empty); expect(empty.lines).toEqual(['none']);
   });
+});
 
-  it('accepts a project with no repository yet', async () => {
-    const { fixture, store, runner } = await prepared();
-    const io = new ScriptedPrompter();
-
-    const result = await run({ kind: 'create', name: 'Platform', config: store, runner }, io);
-
-    expect(result.ok).toBe(true);
-    const team = await teamOnOrigin(fixture.seed);
-    expect(team.projects.Platform).toEqual({ remotes: [], skills: [] });
-    expect(io.lines).toContain('No repository yet — its skills place nowhere automatically until it has one.');
+it('preserves unrelated formatting and counts missing placements by lexical registry evidence', async () => {
+  const args = await fixture(); const alias = join(args.home, 'alias'); await symlink(args.root, alias);
+  const target = join(alias, '.claude', 'skills', 'missing');
+  await args.config.update(c => {
+    c.projects = [{ root: alias, label: 'alias' }]; c.extra = { kept: true };
+    c.placements[target] = { id: '11111111-1111-4111-8111-111111111111', team: 'team', version: null, scope: { kind: 'project', project: 'app' }, placed_at: '', fingerprint: '' };
   });
-
-  it('refuses a name that differs only in case, because every reader matches exactly', async () => {
-    const { fixture, store, runner } = await prepared({ Payments: { remotes: [], skills: [] } });
-    const before = await originSha(fixture.bare);
-
-    const result = await run({ kind: 'create', name: 'payments', config: store, runner }, new ScriptedPrompter());
-
-    expect(result).toMatchObject({ ok: false, error: 'team already has a project named Payments.' });
-    expect(await originSha(fixture.bare)).toBe(before);
-  });
-
-  it('refuses a repository another project already claims', async () => {
-    const { fixture, store, runner } = await prepared({ Payments: { remotes: ['github.com/acme/payments'], skills: [] } });
-    const before = await originSha(fixture.bare);
-
-    const result = await run({ kind: 'create', name: 'Billing', remote: 'git@github.com:acme/payments.git', config: store, runner }, new ScriptedPrompter());
-
-    expect(result).toMatchObject({ ok: false, error: 'Payments already claims github.com/acme/payments; a repository belongs to one project.' });
-    expect(await originSha(fixture.bare)).toBe(before);
-  });
-
-  it('refuses a malformed name and a malformed remote before writing', async () => {
-    const { fixture, store, runner } = await prepared();
-    const before = await originSha(fixture.bare);
-
-    const bad = await run({ kind: 'create', name: '.hidden', config: store, runner }, new ScriptedPrompter());
-    expect(bad).toMatchObject({ ok: false });
-    expect(bad.ok ? '' : bad.error).toContain('a project name is 1-64 characters');
-
-    const badRemote = await run({ kind: 'create', name: 'Payments', remote: 'not a url', config: store, runner }, new ScriptedPrompter());
-    expect(badRemote.ok).toBe(false);
-
-    expect(await originSha(fixture.bare)).toBe(before);
-  });
-
-  it('asks for the name only when it is interactive, and refuses otherwise', async () => {
-    const { store, runner } = await prepared();
-
-    const closed = await run({ kind: 'create', config: store, runner }, new ScriptedPrompter());
-    expect(closed).toMatchObject({ ok: false, error: 'Specify a project name.' });
-
-    const io = new ScriptedPrompter(['Payments'], [], true);
-    const asked = await run({ kind: 'create', config: store, runner }, io);
-    expect(asked).toMatchObject({ ok: true, value: { name: 'Payments' } });
-    expect(io.askedAbout('Project name?')).toBe(true);
-  });
-
-  it('sees a project another member created while this one was running', async () => {
-    const { fixture, store, runner } = await prepared();
-    let raced = false;
-    const racing: Runner = {
-      run: async (command, args, options) => {
-        // Land a competing Payments on origin between the refresh and the push, so the re-apply
-        // must re-read team.json rather than replay its own decision.
-        if (!raced && command === 'git' && args[0] === 'push') {
-          raced = true;
-          await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ ...TEAM_JSON, projects: { Payments: { remotes: [], skills: [] } } })}\n`);
-        }
-        return runner.run(command, args, options);
-      },
-    };
-
-    const result = await run({ kind: 'create', name: 'Payments', config: store, runner: racing }, new ScriptedPrompter());
-
-    expect(result).toMatchObject({ ok: false, error: 'team already has a project named Payments.' });
-  });
+  const file = join(args.config.root, 'config.json');
+  const original = (await readFile(file, 'utf8')).replace('"kept": true', '"kept"  :  true'); await writeFile(file, original);
+  const result = await run({ ...args, kind: 'remove', path: args.root }, new ScriptedPrompter());
+  expect(result).toMatchObject({ ok: true, value: { placementsRemaining: 1 } });
+  expect(await readFile(file, 'utf8')).toContain('"kept"  :  true');
 });

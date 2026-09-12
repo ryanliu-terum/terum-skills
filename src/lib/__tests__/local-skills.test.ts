@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import YAML from 'yaml';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { candidatesOf, createLibraryScan, librarySize, localSkills, localSkillRoots } from '../local-skills.js';
+import { candidatesOf, createLibraryScan, librarySize, localSkills, localSkillRoots, nearestRepoRoot } from '../local-skills.js';
 import { emptyConfig } from '../schema.js';
 import { assertSkillSource } from '../skill-source.js';
 import { BUNDLED_SKILL_SOURCE, temporaryDirectory } from './fixtures.js';
@@ -24,7 +24,7 @@ async function candidateSummary(root: string, config: ReturnType<typeof emptyCon
   const inventory = await localSkills(root, config, { scope: 'global', stateRoot: join(root, '.state') });
   return {
     names: candidatesOf(inventory).map((entry) => entry.name),
-    omitted: inventory.entries.flatMap((entry) => !entry.shared.length && !entry.placement && entry.inspection.kind === 'rejected' ? [{ name: entry.name, reason: entry.inspection.detail }] : []),
+    omitted: inventory.entries.flatMap((entry) => !entry.placement && entry.inspection.kind === 'rejected' ? [{ name: entry.name, reason: entry.inspection.detail }] : []),
     unreadable: inventory.problems.length + inventory.entries.filter((entry) => entry.inspection.kind === 'failed').length,
   };
 }
@@ -37,15 +37,6 @@ describe('candidateSummary', () => {
     await candidate(root, 'alpha');
     await mkdir(join(root, 'empty'));
     expect(await candidateSummary(root, emptyConfig())).toEqual({ names: ['alpha', 'zebra'], omitted: [], unreadable: 0 });
-  });
-
-  // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
-  it('excludes a shared source even when it belongs to another team', async () => {
-    const root = await temporaryDirectory();
-    const path = await candidate(root, 'mine');
-    const config = emptyConfig();
-    config.shared['22222222-2222-4222-8222-222222222222'] = { source: join(path, '..', 'mine'), team: 'other', baseline: 'sha256:0' };
-    expect(await candidateSummary(root, config)).toEqual({ names: [], omitted: [], unreadable: 0 });
   });
 
   it('excludes a placement', async () => {
@@ -135,13 +126,11 @@ describe('issue 9 local inventory', () => {
     expect(candidatesOf(inventory, true).map((entry) => entry.name)).toEqual(['privileged', 'stock']);
   });
 
-  it('keeps overlapping ledger references and a tracked source whose SKILL.md vanished', async () => {
+  it('keeps a placement whose SKILL.md vanished', async () => {
     const root = await temporaryDirectory(); const path = join(root, 'missing'); await mkdir(path);
     const config = emptyConfig();
-    config.shared.first = { team: 'one', source: path };
-    config.shared.second = { team: 'two', source: join(path, '..', 'missing') };
     config.placements[path] = { id: '33333333-3333-4333-8333-333333333333', team: 'three', version: null, scope: { kind: 'global' }, placed_at: '', fingerprint: '' };
-    expect((await localSkills(root, config, { scope: 'global', stateRoot: join(root, '.state') })).entries).toEqual([{ frontmatter: null, skillId: null, category: null, name: 'missing', path, shared: [{ id: 'first', team: 'one' }, { id: 'second', team: 'two' }], placement: { id: config.placements[path]!.id, team: 'three', version: null }, placementFingerprint: '', inspection: { kind: 'rejected', reason: 'skill-md-missing', detail: 'SKILL.md missing' } }]);
+    expect((await localSkills(root, config, { scope: 'global', stateRoot: join(root, '.state') })).entries).toEqual([{ frontmatter: null, skillId: null, category: null, name: 'missing', path, placement: { id: config.placements[path]!.id, team: 'three', version: null }, placementFingerprint: '', inspection: { kind: 'rejected', reason: 'skill-md-missing', detail: 'SKILL.md missing' } }]);
   });
 
   it('distinguishes an absent root from a scanned empty root', async () => {
@@ -165,51 +154,50 @@ describe('issue 9 local inventory', () => {
 
 
 describe('project local discovery (Ryan 2026-09-06)', () => {
-  it.each(['directory', 'file'])('walks up from a subdirectory to a .git %s without reading the marker', async (kind) => {
+  // §7.2 deleted the cwd-detected Library root, so localSkillRoots no longer walks. `nearestRepoRoot`
+  // survives — it is what `project add` and setup's folder picker default to — and keeps its own tests.
+  it.each(['directory', 'file'])('nearestRepoRoot walks up from a subdirectory to a .git %s without reading the marker', async (kind) => {
     const home = await temporaryDirectory(); const repo = join(home, 'repo'); const cwd = join(repo, 'src', 'deep');
     await mkdir(cwd, { recursive: true });
     if (kind === 'file') await writeFile(join(repo, '.git'), 'not a readable gitdir reference');
     else await mkdir(join(repo, '.git'));
-    expect(await localSkillRoots(home, cwd)).toEqual({ roots: [
-      { root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false },
-      { root: join(repo, '.claude', 'skills'), scope: 'project', repoRoot: repo, registered: false, detected: true },
-    ], problems: [] });
+    expect(await nearestRepoRoot(cwd)).toBe(repo);
   });
 
-  it('stops at the inner repository instead of scanning intermediate ancestor skills', async () => {
+  it('nearestRepoRoot stops at the inner repository', async () => {
     const home = await temporaryDirectory(); const outer = join(home, 'outer'); const inner = join(outer, 'inner'); const cwd = join(inner, 'src');
     await mkdir(cwd, { recursive: true }); await mkdir(join(outer, '.git')); await writeFile(join(inner, '.git'), 'gitdir: ignored');
-    await candidate(join(cwd, '.claude', 'skills'), 'intermediate');
-    expect((await localSkillRoots(home, cwd)).roots).toEqual([
-      { root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false }, { root: join(inner, '.claude', 'skills'), scope: 'project', repoRoot: inner, registered: false, detected: true },
-    ]);
+    expect(await nearestRepoRoot(cwd)).toBe(inner);
   });
 
-  it('reports the explicitly supplied cwd when no ancestor is a repository', async () => {
+  it('nearestRepoRoot reports nothing when no ancestor is a repository', async () => {
     const home = await temporaryDirectory(); const cwd = join(home, 'outside'); await mkdir(cwd);
-    expect(await localSkillRoots(home, cwd)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false }], noRepository: cwd, problems: [] });
+    expect(await nearestRepoRoot(cwd)).toBeUndefined();
   });
 
-  it('keeps undefined cwd global-only (regression: never uses the process cwd)', async () => {
+  it('is global-only with no registered projects (regression: never uses the process cwd)', async () => {
     const home = await temporaryDirectory(); await mkdir(join(home, '.git'));
-    expect(await localSkillRoots(home)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false }], problems: [] });
+    expect(await localSkillRoots(home)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false }], problems: [] });
   });
 
-  it('reports EACCES in the upward walk without a project or no-repository claim', async () => {
+  it('nearestRepoRoot reports EACCES in the upward walk without claiming a repository', async () => {
     const home = await temporaryDirectory(); const cwd = join(home, 'private'); await mkdir(cwd);
     const original = fs.lstat; const marker = join(cwd, '.git');
+    const problems: { path: string; reason: string }[] = [];
     const spy = vi.spyOn(fs, 'lstat').mockImplementation(async (...args) => {
       if (args[0] === marker) throw Object.assign(new Error('EACCES: blocked marker'), { code: 'EACCES' });
       return original(...args);
     });
-    try { expect(await localSkillRoots(home, cwd)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false }], problems: [{ path: marker, reason: 'EACCES: blocked marker' }] }); }
-    finally { spy.mockRestore(); }
+    try {
+      expect(await nearestRepoRoot(cwd, problems)).toBeUndefined();
+      expect(problems).toEqual([{ path: marker, reason: 'EACCES: blocked marker' }]);
+    } finally { spy.mockRestore(); }
   });
 
-  it('deduplicates a home repository with global precedence', async () => {
+  it('deduplicates a home project with global precedence', async () => {
     const home = await temporaryDirectory(); await mkdir(join(home, '.git'));
     await candidate(join(home, '.claude', 'skills'), 'local');
-    expect(await localSkillRoots(home, home)).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false }], problems: [] });
+    expect(await localSkillRoots(home, [{ root: home, label: 'home' }])).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false }], problems: [] });
   });
 
   it.each(['alias-to-real', 'real-to-alias', 'deduplicated-alias'])('joins both ledgers through canonical parents: %s', async (direction) => {
@@ -219,25 +207,24 @@ describe('project local discovery (Ryan 2026-09-06)', () => {
     const aliasRoot = join(alias, '.claude', 'skills');
     const reference = direction === 'real-to-alias' ? path : join(aliasRoot, 'tracked');
     const scannedRoot = direction === 'real-to-alias' ? aliasRoot : root;
-    const config = emptyConfig(); config.shared.id = { source: reference, team: 'one' };
+    const config = emptyConfig();
     config.placements[reference] = { id: 'placed', team: 'two', version: null, scope: { kind: 'global' }, fingerprint: '', placed_at: '' };
-    if (direction === 'deduplicated-alias') expect((await localSkillRoots(home, alias)).roots).toEqual([{ root, scope: 'global', registered: false, detected: false }]);
+    if (direction === 'deduplicated-alias') expect((await localSkillRoots(home, [{ root: alias, label: 'alias' }])).roots).toEqual([{ root, scope: 'global', registered: false }]);
     await symlink(path, join(root, 'child-link'));
     const inventory = await localSkills(scannedRoot, config, { scope: 'global', stateRoot: join(base, 'state') });
-    expect(inventory.entries.find((entry) => entry.name === 'tracked')).toMatchObject({ shared: [{ id: 'id', team: 'one' }], placement: { id: 'placed', team: 'two' } });
-    expect(inventory.entries.find((entry) => entry.name === 'child-link')).toMatchObject({ shared: [], inspection: { kind: 'rejected', reason: 'symlink' } });
+    expect(inventory.entries.find((entry) => entry.name === 'tracked')).toMatchObject({ placement: { id: 'placed', team: 'two' } });
+    expect(inventory.entries.find((entry) => entry.name === 'child-link')).toMatchObject({ inspection: { kind: 'rejected', reason: 'symlink' } });
     expect(candidatesOf(inventory)).toEqual([]);
   });
 
   it('excludes canonical state-root entries but retains tracked provenance and project scope', async () => {
     const home = await temporaryDirectory(); const stateRoot = join(home, 'state'); const root = join(stateRoot, 'sources');
-    await candidate(root, 'untracked'); const path = await candidate(root, 'tracked');
+    await candidate(root, 'untracked'); await candidate(root, 'tracked');
     const alias = join(home, 'alias'); await symlink(root, alias);
-    const config = emptyConfig(); config.shared.id = { source: path, team: 'team' };
+    const config = emptyConfig();
     const inventory = await localSkills(alias, config, { scope: 'project', stateRoot });
     expect(inventory.scope).toBe('project');
     expect(inventory.entries.map((entry) => entry.inspection)).toEqual([0, 1].map(() => ({ kind: 'rejected', reason: 'inside-state-root', detail: `inside the terum-skills state directory ${stateRoot}` })));
-    expect(inventory.entries[0]?.shared).toEqual([{ id: 'id', team: 'team' }]);
     expect(candidatesOf(inventory, true)).toEqual([]);
   });
 });
@@ -288,23 +275,22 @@ describe('a rejected folder reports the description its frontmatter parsed to', 
   });
 });
 
-describe('checkout discovery CLI-1', () => {
-  it('orders registered roots before detected cwd and deduplicates aliases and home', async () => {
+describe('project roots CLI-1 (§7.1)', () => {
+  it('lists the added projects in order, carrying their labels, and deduplicates aliases and home', async () => {
     const home = await temporaryDirectory();
-    const a = join(home, 'a'), b = join(home, 'b'), cwd = join(home, 'cwd');
-    for (const root of [a, b, cwd]) await mkdir(join(root, '.git'), { recursive: true });
+    const a = join(home, 'a'), b = join(home, 'b');
+    for (const root of [a, b]) await mkdir(join(root, '.git'), { recursive: true });
     const alias = join(home, 'alias'); await symlink(a, alias);
-    const roots = (await localSkillRoots(home, cwd, [a, home, alias, b])).roots;
+    const roots = (await localSkillRoots(home, [a, home, alias, b].map((root) => ({ root, label: root })))).roots;
     expect(roots).toEqual([
-      { root: join(home, '.claude', 'skills'), scope: 'global', registered: false, detected: false },
-      ...[a, b].map(repoRoot => ({ root: join(repoRoot, '.claude', 'skills'), scope: 'project', repoRoot, registered: true, detected: false })),
-      { root: join(cwd, '.claude', 'skills'), scope: 'project', repoRoot: cwd, registered: false, detected: true },
+      { root: join(home, '.claude', 'skills'), scope: 'global', registered: false },
+      ...[a, b].map(repoRoot => ({ root: join(repoRoot, '.claude', 'skills'), scope: 'project', repoRoot, registered: true, label: repoRoot })),
     ]);
   });
-  it.each([false, true])('retains an absent registered skills root (checkout exists: %s)', async (exists) => {
-    const home = await temporaryDirectory(); const repo = join(home, 'checkout');
+  it.each([false, true])('retains an absent project root (folder exists: %s)', async (exists) => {
+    const home = await temporaryDirectory(); const repo = join(home, 'project');
     if (exists) await mkdir(repo);
-    const roots = (await localSkillRoots(home, undefined, [repo])).roots;
+    const roots = (await localSkillRoots(home, [{ root: repo, label: 'project' }])).roots;
     expect(roots).toHaveLength(2);
     expect(await localSkills(roots[1]!.root, emptyConfig(), { scope: 'project', stateRoot: join(home, 'state') })).toMatchObject({ rootState: 'absent', entries: [] });
   });
@@ -328,11 +314,11 @@ describe('W-02 parallel folder scan', () => {
     await candidate(root,'invalid','---\nname: [\n---\n'); await symlink(join(root,'a'),join(root,'linked'));
     const inventory = await localSkills(root,emptyConfig(),{scope:'global',stateRoot:join(root,'.state')});
     expect(inventory.entries.map(e=>e.name)).toEqual((await fs.readdir(root)).sort().filter(n=>!['plain','empty'].includes(n)));
-    const expected = names.sort().map(name=>({frontmatter:`---\nname: ${name}\ndescription: skill\n---`,skillId:null,category:null,name,path:join(root,name),shared:[],characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
+    const expected = names.sort().map(name=>({frontmatter:`---\nname: ${name}\ndescription: skill\n---`,skillId:null,category:null,name,path:join(root,name),characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
     expect(inventory).toEqual({root,scope:'global',rootState:'scanned',problems:[],entries:[...expected,
-      {frontmatter:null,skillId:null,category:null,name:'directory',path:join(root,'directory'),shared:[],inspection:{kind:'rejected',reason:'skill-md-not-a-file',detail:'SKILL.md is not a regular file'}},
-      {frontmatter:'---\nname: [\n---',skillId:null,category:null,name:'invalid',path:join(root,'invalid'),shared:[],characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
-      {frontmatter:null,skillId:null,category:null,name:'linked',path:join(root,'linked'),shared:[],inspection:{kind:'rejected',reason:'symlink',detail:'symbolic link'}},
+      {frontmatter:null,skillId:null,category:null,name:'directory',path:join(root,'directory'),inspection:{kind:'rejected',reason:'skill-md-not-a-file',detail:'SKILL.md is not a regular file'}},
+      {frontmatter:'---\nname: [\n---',skillId:null,category:null,name:'invalid',path:join(root,'invalid'),characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
+      {frontmatter:null,skillId:null,category:null,name:'linked',path:join(root,'linked'),inspection:{kind:'rejected',reason:'symlink',detail:'symbolic link'}},
     ].sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0)});
   });
   it('reports a folder whose lstat fails as failed without aborting its siblings', async () => {
@@ -360,7 +346,7 @@ describe('run-local library inventory reuse', () => {
     const project = join(checkout, '.claude', 'skills');
     const stateRoot = join(home, '.terum', 'skills');
     const config = emptyConfig();
-    config.checkouts = [checkout, join(home, 'absent')];
+    config.projects = [{ root: checkout, label: 'project' }, { root: join(home, 'absent'), label: 'absent' }];
     await candidate(global, 'alpha');
     await candidate(global, 'bad-frontmatter', '---\nname: different\ndescription: skill\n---\n');
     await candidate(project, 'beta');
@@ -372,7 +358,7 @@ describe('run-local library inventory reuse', () => {
       return original(...args);
     });
     try {
-      const scan = createLibraryScan(home, config.checkouts, stateRoot);
+      const scan = createLibraryScan(home, config.projects ?? [], stateRoot);
       expect(reads).not.toHaveBeenCalled();
       const roots = await scan.roots();
       for (const root of roots) await scan.inventory(root, config);
@@ -387,7 +373,7 @@ describe('run-local library inventory reuse', () => {
     } finally { reads.mockRestore(); }
   });
 
-  it('rebinds shared and placement provenance through aliases without rescanning or mutating the snapshot', async () => {
+  it('rebinds placement provenance through aliases without rescanning or mutating the snapshot', async () => {
     const home = await temporaryDirectory();
     const root = join(home, '.claude', 'skills');
     const source = await candidate(root, 'alpha');
@@ -399,7 +385,6 @@ describe('run-local library inventory reuse', () => {
     const [global] = await scan.roots();
     const before = await scan.inventory(global!, config);
     const current = structuredClone(config);
-    current.shared['first'] = { team: 'team', source: join(alias, 'alpha'), baseline: 'sha256:0' };
     current.placements[join(alias, 'beta')] = {
       id: 'second', team: 'team', version: null, fingerprint: 'sha256:0',
       scope: { kind: 'global' }, placed_at: new Date().toISOString(),
@@ -407,9 +392,8 @@ describe('run-local library inventory reuse', () => {
     const reads = vi.spyOn(fs, 'readdir');
     try {
       const inventory = await scan.inventory(global!, current);
-      expect(candidatesOf(inventory)).toEqual([]);
+      expect(candidatesOf(inventory).map(entry => entry.path)).toEqual([source]);
       expect(candidatesOf(before).map(entry => entry.path)).toEqual([source, placed]);
-      expect(inventory.entries[0]?.shared).toEqual([{ id: 'first', team: 'team' }]);
       expect(inventory.entries[1]?.placement).toEqual({ id: 'second', team: 'team', version: null });
       expect(await librarySize(home, current, join(home, '.terum', 'skills'), scan)).toBe(2);
       expect(reads).not.toHaveBeenCalled();

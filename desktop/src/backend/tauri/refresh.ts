@@ -12,9 +12,25 @@
 import { z } from 'zod';
 import type { Result } from '../types';
 
-/** The CLI's `refresh` result (terum-skills src/commands/refresh.ts). Only the fields the adapter reads. */
+/** Tracks foreground workflows so a background refresh waits until no write is active. */
+export function createWorkflowGate(onIdle: () => void) {
+  let active = 0;
+  const verbs = new Set(['sync', 'setup', 'team', 'install', 'uninstall', 'publish', 'eval', 'validate', 'invite', 'profile', 'login', 'checkout', 'project', 'uninstall-skill', 'prune', 'app-update', 'diagnostics']);
+  return {
+    busy: () => active > 0,
+    start(argv: readonly (string | Promise<string>)[]): () => void {
+      if (!verbs.has(String(argv[0])) || (argv[0] === 'app-update' && argv.includes('--check'))) return () => undefined;
+      active++;
+      let finished = false;
+      return () => { if (finished) return; finished = true; active--; if (active === 0) onIdle(); };
+    },
+  };
+}
+
+/** The CLI's `sync` result (terum-skills src/commands/refresh.ts, registered as `sync` since B1). */
 export const cliRefresh = z.object({
   changed: z.boolean(),
+  notices: z.array(z.string()),
   teams: z.array(z.object({
     team: z.string(),
     state: z.enum(['refreshed', 'busy', 'unreachable', 'no-clone', 'error']),

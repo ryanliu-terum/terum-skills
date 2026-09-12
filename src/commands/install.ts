@@ -2,7 +2,7 @@ import { invocation, type InvocationForm } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
-import { checkoutPath, registerCheckout, writableCheckout } from '../lib/checkouts.js';
+import { projectPath } from '../lib/projects.js';
 import { canonicalParentPath } from '../lib/local-skills.js';
 import { checkoutRootOf } from '../lib/placer/agent-paths.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
@@ -46,7 +46,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const operation = parseOperation(args);
-    const destinationFor = async (team: string, project?: string) => resolveDestination(store, await readTeam(store.teamClone(team)), project, io, io.interactive, { into: args.into, cwd: args.cwd, runner, home: args.home ?? placementHome(store) });
+    const destinationFor = async (team: string, project?: string) => resolveDestination(store, await readTeam(store.teamClone(team)), project, io, io.interactive, { into: args.into, cwd: args.cwd, runner, home: args.home ?? placementHome(store), form: args.form });
     if (operation.kind === 'member') {
       const [team] = selectTeam(config.teams, args.team, args.form);
       const person = await readPerson(store.teamClone(team), operation.member);
@@ -77,7 +77,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       // built on team, which is built on this module.
       if (!(error instanceof NotJoinedError) || Object.keys(config.teams).length > 0) throw error;
       const { run: setup } = await import('./setup.js');
-      const bootstrapped = await setup({ form: args.form, target: error.remote.replace(/^github\.com\//, ''), quiet: true, offerConnect: false, config: store, runner, home: args.home, hook: args.hook, wrapper: args.wrapper }, io);
+      const bootstrapped = await setup({ form: args.form, target: error.remote.replace(/^github\.com\//, ''), quiet: true, config: store, runner, home: args.home, hook: args.hook, wrapper: args.wrapper }, io);
       if (!bootstrapped.ok) {
         if (bootstrapped.refused) throw new RefusedError(bootstrapped.error);
         if (bootstrapped.cancelled) throw new CancelledError(bootstrapped.error);
@@ -101,7 +101,7 @@ export async function installOne(input: { team: string; destination: Destination
   const teamJson = await readTeam(clone);
   const packageProject = input.project && teamJson.projects[input.project]?.skills.includes(skill.id) ? input.project : undefined;
   const scope = input.scope ?? (packageProject ? { kind: 'project' as const, project: packageProject } : { kind: 'global' as const });
-  if (input.destination.kind === 'checkout') await assertCheckoutFolder(input.destination.root);
+  if (input.destination.kind === 'checkout') await assertProjectFolder(input.destination.root);
   const latest = input.version ? await resolveVersion(clone, skill.name, input.version, input.runner) : null;
   const pending = { op: 'install' as const, id: skill.id, team: input.team, scope, destination: input.destination, version: latest, started: new Date().toISOString() };
   const pendingAlreadyExists = (await input.store.read()).pending.some((entry) => samePending(entry, pending));
@@ -118,7 +118,7 @@ export async function installOne(input: { team: string; destination: Destination
   const repoRoot = input.destination.kind === 'checkout' ? input.destination.root : undefined;
   const root = resolveTarget('claude-code', repoRoot ? { kind: 'project', project: packageProject ?? '' } : { kind: 'global' }, repoRoot, input.home ?? placementHome(input.store));
   const destination = join(root, skill.name);
-  if (repoRoot) await assertCheckoutFolder(repoRoot);
+  if (repoRoot) await assertProjectFolder(repoRoot);
   io.progress?.({ step: `Placing ${skill.name}`, current: 2, total: 4 });
   const release = await lockTarget(root, skill.name);
   let placed: { path: string; snapshot: { fingerprint: string }; notices: string[] };
@@ -240,24 +240,26 @@ export async function teamForReference(config: Config, explicit: string | undefi
   return selectTeam(config.teams, explicit, form)[0];
 }
 /** Validate before pending intent or a target lock can create directories. */
-export async function assertCheckoutFolder(root: string): Promise<void> {
-  if (!isAbsolute(root) || !(await stat(root).catch(() => undefined))?.isDirectory()) throw new Error(`Checkout folder ${root} is missing`);
+export async function assertProjectFolder(root: string): Promise<void> {
+  if (!isAbsolute(root) || !(await stat(root).catch(() => undefined))?.isDirectory()) throw new Error(`Project folder ${root} is missing`);
 }
 
-export async function resolveDestination(store: ConfigStore, teamJson: Team, packageProject: string | undefined, io: Prompter, interactive: boolean, opts: { into?: string; cwd?: string; runner: Runner; home: string }): Promise<Destination> {
+export async function resolveDestination(store: ConfigStore, teamJson: Team, packageProject: string | undefined, io: Prompter, interactive: boolean, opts: { into?: string; cwd?: string; runner: Runner; home: string; form?: InvocationForm }): Promise<Destination> {
   if (opts.into === 'global') return { kind: 'global' };
+  const projects = (await store.read()).projects ?? [];
+  const roots = [...new Set(await Promise.all(projects.map((project) => projectPath(project.root))))];
   if (opts.into !== undefined) {
-    await assertCheckoutFolder(opts.into);
-    const { path } = await registerCheckout(store, opts.into, io, { home: opts.home });
+    await assertProjectFolder(opts.into);
+    // §7.2: install never adds a project. An untracked --into refuses and names the verb that would.
+    const path = await projectPath(opts.into);
+    if (!roots.includes(path)) throw new Error(`${path} is not a project in your library. Add it with \`${invocation(opts.form, 'project add', path)}\`, or pass --into global.`);
     return { kind: 'checkout', root: path };
   }
-  const roots = [...new Set(await Promise.all(((await store.read()).checkouts ?? []).map(checkoutPath)))];
   if (!roots.length) return { kind: 'global' };
-  if (!interactive) throw new Error('Pass --into global or --into <checkout root>');
-  const current = await writableCheckout(opts.cwd, opts.home, store.root);
-  const currentPath = current ? await checkoutPath(current) : undefined;
+  if (!interactive) throw new Error('Pass --into global or --into <project root>');
   const global = 'Global (~/.claude/skills)';
-  const choices = [global, ...roots.map(root => `${basename(root)} · ${root}${root === currentPath ? ' · current repository' : ''}`)];
+  const labels = new Map(await Promise.all(projects.map(async (project) => [await projectPath(project.root), project.label] as const)));
+  const choices = [global, ...roots.map(root => `${labels.get(root) ?? basename(root)} · ${root}`)];
   const remotes = packageProject ? teamJson.projects[packageProject]?.remotes ?? [] : [];
   const matches: number[] = [];
   for (const [index, root] of roots.entries()) {

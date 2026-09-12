@@ -138,6 +138,9 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .tab-list {display:flex;gap:20px;}.tab {position:relative;display:flex;align-items:center;gap:6px;height:36px;padding:0 2px;color:var(--tk-text3);font-size:13px;font-weight:500;border-bottom:2px solid transparent;white-space:nowrap;}.tab[data-active] {color:var(--tk-text1);border-color:var(--tk-text1);}.tab:hover {color:var(--tk-text1);}
 
 .prompt-field {width:100%;height:30px;padding:0 8px;background:var(--tk-bg2);border:1px solid var(--tk-border2);border-radius:6px;color:var(--tk-text1);font-size:13px;}
+/* §9.2 `path` ask: the field stays the answer; the chooser only fills it in. */
+.prompt-path {display:flex;gap:8px;align-items:center;}
+.prompt-path .prompt-field {flex:1 1 auto;min-width:0;}
 .prompt-actions {display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
 
 .eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); }

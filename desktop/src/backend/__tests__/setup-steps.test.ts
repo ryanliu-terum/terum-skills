@@ -1,20 +1,24 @@
 import { expect, it } from 'vitest';
 import { askedSetupStep, printedSetupStep, SETUP_STEP_TO_BOARD } from '../setup-session';
 it.each([
- ['Looking for skill folders on this machine…','Done'],['No skill folders found under ~.','Done'],
- ['/Users/you/code/mrf — 3 skill folders','Done'],['/Users/you/code/mrf — 1 skill folders · already registered','Done'],
- ['Could not look in /Users/you/Library: EACCES','Done'],['Evaluating 1 of 2 · deploy-check','Done'],['Evaluated 2 of 2; 0 failed.','Done'],
+ ["Terum will track the skills in that project's .claude folder.",'Done'],['Added /Users/you/code/mrf to your library.','Done'],
+ ['/Users/you/code/mrf is already in your library.','Done'],['Could not add that project: /x does not exist.','Done'],
+ ['Evaluating 1 of 2 · deploy-check','Done'],['Evaluated 2 of 2; 0 failed.','Done'],
  ['Welcome to terum-skills.','Welcome'],['GitHub: gh is not installed.','Team'],['Identity: @seed','Team'],
- ['Team acme is already configured on this machine.','Team'],['Connected tdd.','Basics'],['Next, from any terminal:','Basics'],
+ ['Team acme is already configured on this machine.','Team'],
  ['Feedback and requests: https://example.com','Feedback'],['Skipped the session hook; re-run setup to install it later.','Done'],
  ['Installed the /terum-skills Claude Code skill at /fixture.','Done'],['Repository: /fixture/team.git','Done'],['Members:','Done'],['README: /fixture/team.git','Done'],
 ])('maps printed step %s to its drawn tour step',(line,board)=>{const step=printedSetupStep(line);expect(step&&SETUP_STEP_TO_BOARD[step]).toBe(board);});
 it('keeps unrecognized CLI output as copy without inventing a step outcome',()=>{expect(printedSetupStep('An unexpected diagnostic.')).toBeNull();});
+// B1 deletes the actions step, so the terminal-hint block setup still prints after invite belongs to no
+// step: it is copy in the output pane, and no tour row may claim it.
+it('claims no step for the terminal hint block setup still prints',()=>{expect(printedSetupStep('Next, from any terminal:')).toBeNull();expect(printedSetupStep('  npx -y terum-skills@latest publish <skill>          — publish a local skill explicitly')).toBeNull();});
 
 it('maps the identity ask to team without treating unrelated asks as setup steps',()=>{expect(askedSetupStep('Use this identity?')).toBe('team');expect(askedSetupStep('Join this team?')).toBeNull();});
 
-it('maps the discover and evals questions to their steps',()=>{
- for(const question of ['Look for skill folders on this machine and add them to your library?','Look under which folder?','Add all 2?','Add /Users/you/code/mrf?'])expect(askedSetupStep(question)).toBe('discover');
+// D13 replaced the scan's four questions with one confirm and one folder picker.
+it('maps the projects and evals questions to their steps',()=>{
+ for(const question of ['Add a project?','Which folder?'])expect(askedSetupStep(question)).toBe('projects');
  expect(askedSetupStep('Evaluate the 3 shared skills that have no receipt yet? …')).toBe('evals');expect(askedSetupStep('Join this team?')).toBeNull();
 });
 it('maps every way the eval batch can end without running to the evals step',()=>{
@@ -26,13 +30,12 @@ it('maps every way the eval batch can end without running to the evals step',()=
   'Skipping the eval offer: this machine has no joined handle for the team yet, so a receipt could not be committed.',
   'Skipping the evals: claude is not runnable',
  ])expect(printedSetupStep(line),line).toBe('evals');
- // The discover rules are checked first and must not claim any of them.
- expect(printedSetupStep('Could not look in /x: EACCES')).toBe('discover');
- expect(printedSetupStep('No skill folders found under /x.')).toBe('discover');
+ // The projects rules are checked first and must not claim any of them.
+ expect(printedSetupStep('Could not add that project: /x does not exist.')).toBe('projects');
+ expect(printedSetupStep('Added /x to your library.')).toBe('projects');
 });
-it('does not mistake a discovered folder path for the wrapper step',()=>{
- expect(printedSetupStep('/home/teniroo/Projects/SSM/terum-skills — 4 skill folders')).toBe('discover');
- expect(printedSetupStep('Registered /home/teniroo/Projects/SSM/terum-skills in your library.')).toBeNull();
+it('does not mistake an added project path for the wrapper step',()=>{
+ expect(printedSetupStep('Added /home/teniroo/Projects/SSM/terum-skills to your library.')).toBe('projects');
  expect(printedSetupStep('Evaluating 1 of 1 · terum-skills')).toBe('evals');
  for(const line of [
   'The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at /x); skipped.',

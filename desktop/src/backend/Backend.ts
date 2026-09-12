@@ -1,4 +1,4 @@
-import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, DiscoverArgs, DiscoverResult, ReadOptions, Catalog, ChangeSource, ConnectArgs, ConnectOutcome, EvalArgs, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, CheckoutAdded, CheckoutRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   quit(): Promise<void>;
@@ -18,10 +18,10 @@ export interface Backend {
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;
   library(q: { scope: LibraryScope; team?: string }, options?: ReadOptions): Promise<Result<Library>>;
   localSkill(q: { path: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
-  /** `discover` looks for folders holding `.claude/skills`; it is available only where `features().discover` is true. */
-  checkouts: { add(path:string):Run<CheckoutAdded>; remove(path:string):Run<CheckoutRemoved>; discover(args:DiscoverArgs):Run<DiscoverResult> };
-  /** Team projects (team.json), not the local checkout folders above: `create` names one and commits it to the team's main. */
-  projects: { create(args:{name:string;remote?:string}):Run<ProjectCreated> };
+  /** §7.1 L-PROJ: the folders this machine reads local skills from. Nothing else adds one. */
+  projects: { add(path:string):Run<ProjectAdded>; remove(path:string):Run<ProjectRemoved> };
+  /** Team projects (team.json), not the local folders above: `create` names one and commits it to the team's main. */
+  teamProjects: { create(args:{name:string;remote?:string}):Run<ProjectCreated> };
   /** `at` restricts the answer to one Library root: presence, path, scope and version describe the
    *  copy in that root, while the install destinations still list every root on the machine.
    *  Omitted keeps the machine-wide answer a deep link, a bookmark or the marketplace needs. */
@@ -33,14 +33,13 @@ export interface Backend {
   roster(q?: undefined, options?: ReadOptions): Promise<Result<Roster>>;
   search(args: SearchArgs, options?: ReadOptions): Promise<Result<SearchHit[]>>;
   profile(args: { name?: string; bio?: string; role?: string; projects?: string[] }): Run<{ handle: string; changed: string[] }>;
-  decline(args: { ref: string }): Run<{ id: string }>;
   setIdentity(args: IdentityArgs): Run<IdentityWrite>;
   install(args: InstallArgs): Run<InstalledResult[]>;
   uninstallSkill(args: UninstallArgs): Run<UninstalledResult[]>;
   uninstallMachine(args: Record<string, never>): Run<MachineUninstallResult>;
-  connect(args: ConnectArgs): Run<ConnectOutcome | undefined>;
   publish(args: PublishArgs): Run<PublishResult>;
   sync(args: SyncArgs): Run<SyncResult>;
+  prune(): Run<void>;
   invite(args: InviteArgs): Run<InviteResult>;
   team(args: TeamArgs): Run<TeamResult>;
   setup(args: SetupArgs): Run<SetupResult>;

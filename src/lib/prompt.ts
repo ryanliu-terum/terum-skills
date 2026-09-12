@@ -3,7 +3,14 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as processStdin, stdout as processStdout } from 'node:process';
 
 /** Lines the person needs in order to answer; a terminal prints them once, immediately before the question; frame mode carries them on the ask frame. */
-export interface AskOptions { detail?: readonly string[]; descriptions?: readonly string[]; /** Internal terminal presentation; never changes frame question text. */ decorated?: boolean; }
+export interface AskOptions {
+  detail?: readonly string[];
+  descriptions?: readonly string[];
+  /** Internal terminal presentation; never changes frame question text. */
+  decorated?: boolean;
+  /** §9.2/D13: the answer is a filesystem path. A shell may offer a folder chooser; a terminal ignores it and reads a line. Applies to `text` only. */
+  path?: boolean;
+}
 
 /** A verb's report that a long step has moved on. A terminal ignores it; frame mode writes one `progress` frame. */
 export interface ProgressUpdate { step: string; current?: number; total?: number; }

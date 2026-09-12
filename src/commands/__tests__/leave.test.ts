@@ -13,7 +13,7 @@ async function prepared() {
   const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   const source = join(fixture.root, 'source'); await mkdir(source); await writeFile(join(source, 'SKILL.md'), '---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: 22222222-2222-4222-8222-222222222222\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n');
   const root = join(fixture.root, 'home', '.claude', 'skills'); const placed = await place(source, root, 'sample');
-  await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.placements[placed.path] = { id: '22222222-2222-4222-8222-222222222222', team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-01-01', fingerprint: placed.snapshot.fingerprint }; config.shared.sample = { source, team: 'team' }; config.pending.push({ op: 'install', id: '22222222-2222-4222-8222-222222222222', team: 'team', scope: { kind: 'global' }, started: '2026-01-01' }); config.approvals.keep = { grants: 'sha256:x', approved_at: '2026-01-01' }; });
+  await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.placements[placed.path] = { id: '22222222-2222-4222-8222-222222222222', team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-01-01', fingerprint: placed.snapshot.fingerprint }; config.pending.push({ op: 'install', id: '22222222-2222-4222-8222-222222222222', team: 'team', scope: { kind: 'global' }, started: '2026-01-01' }); config.approvals.keep = { grants: 'sha256:x', approved_at: '2026-01-01' }; });
   return { fixture, store, clone, placed };
 }
 
@@ -32,14 +32,13 @@ describe('team leave (§6)', () => {
     await writeFile(`${lock}.stale-neighbour.stamp`, 'another team synced');
     const io = new ScriptedPrompter([], [true]);
     await expect(run({ name: 'team', config: store }, io)).resolves.toMatchObject({ ok: true, value: { removed: 1, cloneRemoved: true } });
-    expect(io.lines).toContain('1 connected skill record(s) will be removed.');
     expect(io.lines).toContain('Skill consent records will be cleared (1); the next team asks again for skills that need tool permissions.');
     expect(io.asked[0]).toContain('skill consent records');
     await expect(access(placed.path)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(cache)).rejects.toMatchObject({ code: 'ENOENT' }); await expect(access(stamp)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(access(lock)).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await readdir(join(store.root, 'run'))).filter((name) => name.startsWith('team.')).sort()).toEqual(['team.lock.stale-neighbour.lock', 'team.lock.stale-neighbour.stamp']);
-    const config = await store.read(); expect(config.teams).toEqual({}); expect(config.placements).toEqual({}); expect(config.pending).toEqual([]); expect(config.shared).toEqual({}); expect(config.approvals).toEqual({});
+    const config = await store.read(); expect(config.teams).toEqual({}); expect(config.placements).toEqual({}); expect(config.pending).toEqual([]); expect(config.approvals).toEqual({});
     expect(await originSha(fixture.bare)).toBe(before);
     expect(await git(['show', 'main:people/seed.json'], fixture.bare)).toBe(personBefore);
   });
@@ -190,23 +189,11 @@ it('a clone with an untracked file is moved to quarantine, not deleted', async (
   await expect(access(clone)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
-it('a placement that is also a shared source is dropped from the ledger and left on disk', async () => {
-  const { fixture, store, placed } = await prepared();
-  await store.update((c) => { c.shared.sample!.source = placed.path; });
-  const io = new ScriptedPrompter([], [true]);
-  const result = await run({ name: 'team', config: store, hook: { settingsFile: join(fixture.root, 'settings.json'), backupDir: join(store.root, 'backups') } }, io);
-  // Kept placements are not removed: the two lists are disjoint.
-  expect(result).toMatchObject({ ok: true, value: { removed: 0, kept: [placed.path] } });
-  await expect(access(join(placed.path, 'SKILL.md'))).resolves.toBeUndefined();
-  expect((await store.read()).placements).toEqual({});
-  expect(io.lines).toContain(`${placed.path} is also the authoring source of sample; left in place.`);
-});
-
 it('last-team cleanup runs after the config update while the team mutex is still held', async () => {
   const store = createConfigStore(await temporaryDirectory());
   await store.update(config => { config.teams.team = { remote: 'github.com/acme/team', handle: 'me' }; });
   let called = false;
-  await teardownTeam(store, 'team', new ScriptedPrompter(), undefined, undefined, async () => {
+  await teardownTeam(store, 'team', new ScriptedPrompter(), undefined, async () => {
     called = true;
     expect((await store.read()).teams).toEqual({});
     expect(await acquireTeamLock(store.root, 'team')).toBeNull();
@@ -215,18 +202,4 @@ it('last-team cleanup runs after the config update while the team mutex is still
   const released = await acquireTeamLock(store.root, 'team');
   expect(released).not.toBeNull();
   await released?.();
-});
-
-it('counts removed and kept placements disjointly when one placement is kept and another is removed', async () => {
-  const { fixture, store, placed } = await prepared();
-  await store.update((c) => { c.shared.sample!.source = placed.path; });
-  const otherSource = join(fixture.root, 'other-source'); await mkdir(otherSource);
-  await writeFile(join(otherSource, 'SKILL.md'), '---\nname: other\ndescription: x\n---\n');
-  const other = await place(otherSource, join(fixture.root, 'home', '.claude', 'skills'), 'other');
-  await store.update((c) => { c.placements[other.path] = { id: '33333333-3333-4333-8333-333333333333', team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-01-01', fingerprint: other.snapshot.fingerprint }; });
-  const result = await run({ name: 'team', config: store, hook: { settingsFile: join(fixture.root, 'settings.json'), backupDir: join(store.root, 'backups') } }, new ScriptedPrompter([], [true]));
-  expect(result).toMatchObject({ ok: true, value: { removed: 1, kept: [placed.path] } });
-  await expect(access(join(placed.path, 'SKILL.md'))).resolves.toBeUndefined();
-  await expect(access(other.path)).rejects.toMatchObject({ code: 'ENOENT' });
-  expect((await store.read()).placements).toEqual({});
 });

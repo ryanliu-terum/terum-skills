@@ -201,7 +201,7 @@ describe('publish (§6)', () => {
     const other = await bareTeam();
     await store.update((config) => { config.teams.other = { remote: other.bare, handle: 'seed' }; });
     const runner = mappedRunner(REMOTE, fixture.bare);
-    await expect(run({ ref: 'team/missing', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: `No skill team/missing in team team. Run \`${V} ls\` to check the team's skill names. To add a local skill, run \`${V} connect <path-to-skill>\`, then publish its name.` });
+    await expect(run({ ref: 'team/missing', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: `No skill team/missing in team team. Run \`${V} ls\` to check the team's skill names. Inspect local folders with \`${V} ls --local\`; publish local skills explicitly from the Library.` });
     await expect(run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('A bare skill ref is ambiguous across configured teams') });
     await expect(run({ ref: 'sample', team: 'team', config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: true, value: { team: 'team' } });
   });
@@ -303,7 +303,7 @@ describe('publish (§6)', () => {
 
 describe.each([undefined, 'bare'] as const)('publish local recovery hints (form=%s)', (form) => {
   const V = form === 'bare' ? 'terum-skills' : 'npx -y terum-skills@latest';
-  it('a miss with an untracked local folder names the absolute connect and retry commands without hidden flags, and writes nothing', async () => {
+  it('a miss with an untracked local folder names the local-library route and writes nothing', async () => {
     const { fixture, store } = await prepared();
     const home = join(fixture.root, 'home with space');
     const local = await localSkill(home, 'local');
@@ -312,23 +312,24 @@ describe.each([undefined, 'bare'] as const)('publish local recovery hints (form=
     const sourceBefore = await readFile(join(local, 'SKILL.md'), 'utf8');
     const io = new ScriptedPrompter([], [], true);
     await expect(run({ form, ref: 'local', home, project: 'p', config: store, runner }, io)).resolves.toMatchObject({ ok: false,
-      error: `No skill local in team team. Found a local folder at ${local} that is not tracked as a connected source or placement on this machine. To connect it to team, run \`${V} connect '${local}'\`, then retry \`${V} publish 'local' --project 'p'\`.` });
+      error: `No skill local in team team. Found a local folder at ${local}. Inspect local skills with \`${V} ls --local\`; publish local skills explicitly from the Library.` });
     expect(io.asked).toEqual([]);
     expect(await readFile(join(local, 'SKILL.md'), 'utf8')).toBe(sourceBefore);
-    expect((await store.read()).shared).toEqual({});
     expect(await originSha(fixture.bare)).toBe(before);
     expect(runner.calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false);
   });
 
-  it('a miss with no candidate — no folder, a name-mismatched folder, a tracked source — gets the ls/connect hint', async () => {
+  it('a miss with no candidate gets the team and local-library hints', async () => {
     const { fixture, store } = await prepared();
     const home = join(fixture.root, 'home');
     await localSkill(home, 'gsd-x', 'gsd:x');
-    const tracked = await localSkill(home, 'mine');
-    await store.update((c) => { c.shared['22222222-2222-4222-8222-222222222222'] = { source: tracked, team: 'other', baseline: 'sha256:0' }; });
+    const placed = await localSkill(home, 'mine');
+    await store.update((config) => {
+      config.placements[placed] = { id: '22222222-2222-4222-8222-222222222222', team: 'other', version: null, fingerprint: '', scope: { kind: 'global' }, placed_at: '' };
+    });
     const runner = mappedRunner(REMOTE, fixture.bare);
     const before = await originSha(fixture.bare);
-    const generic = (ref: string) => `No skill ${ref} in team team. Run \`${V} ls\` to check the team's skill names. To add a local skill, run \`${V} connect <path-to-skill>\`, then publish its name.`;
+    const generic = (ref: string) => `No skill ${ref} in team team. Run \`${V} ls\` to check the team's skill names. Inspect local folders with \`${V} ls --local\`; publish local skills explicitly from the Library.`;
     for (const ref of ['missing', 'gsd-x', 'mine']) await expect(run({ form, ref, home, config: store, runner }, new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: generic(ref) });
     expect(await originSha(fixture.bare)).toBe(before);
   });
@@ -341,7 +342,7 @@ describe.each([undefined, 'bare'] as const)('publish local recovery hints (form=
     const local = await localSkill(home, 'local');
     const result = await run({ form, ref: 'team/local', home, config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: false,
-      error: `No skill team/local in team team. Found a local folder at ${local} that is not tracked as a connected source or placement on this machine. To connect it to team, run \`${V} connect '${local}'\`, then retry \`${V} publish 'team/local'\`.` });
+      error: `No skill team/local in team team. Found a local folder at ${local}. Inspect local skills with \`${V} ls --local\`; publish local skills explicitly from the Library.` });
   });
 
   it('an existing team skill with the same name as a local folder is endorsed, never re-shared', async () => {
@@ -352,7 +353,6 @@ describe.each([undefined, 'bare'] as const)('publish local recovery hints (form=
     const result = await run({ form, ref: 'sample', home, config: store, runner: mappedRunner(REMOTE, fixture.bare) }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: true, value: { branch: expect.stringMatching(FRESH) } });
     expect(await originSha(fixture.bare)).toBe(before);
-    expect((await store.read()).shared).toEqual({});
   });
 });
 
@@ -361,15 +361,17 @@ describe('publish project recovery hints', () => {
   it.each([false, true])('prints the actual project candidate path and scope-labels duplicate names (duplicated: %s)', async (duplicated) => {
     const { fixture, store } = await prepared(); const home = join(fixture.root, 'home'); const cwd = join(fixture.root, 'project');
     await mkdir(join(cwd, '.git'), { recursive: true }); const project = await localSkill(cwd, 'local');
+    // §7.2: publish's candidate scan reads the projects you added, not the folder you are standing in.
+    await store.update((config) => { config.projects = [{ root: cwd, label: 'project' }]; });
     const global = duplicated ? await localSkill(home, 'local') : undefined;
     const runner = mappedRunner(REMOTE, fixture.bare); const io = new ScriptedPrompter();
     const result = await run({ ref: 'local', home, cwd, project: 'p', config: store, runner }, io);
     expect(result.ok).toBe(false); if (result.ok) throw new Error('Expected recovery hint');
-    expect(result.error).toContain(`Found a local folder at ${project}${duplicated ? ' (project)' : ''} that`);
-    expect(result.error).toContain(`${V} connect '${project}'`);
-    expect(result.error).toContain(`${V} publish 'local' --project 'p'`);
-    if (duplicated) { expect(result.error).toContain(`Found a local folder at ${global} (global) that`); expect(result.error).toContain(`${V} connect '${global}'`); }
-    expect(io.asked).toEqual([]); expect((await store.read()).shared).toEqual({});
+    expect(result.error).toContain(`Found a local folder at ${project}${duplicated ? ' (project)' : ''}.`);
+    expect(result.error).toContain(`${V} ls --local`);
+    expect(result.error).toContain('publish local skills explicitly from the Library.');
+    if (duplicated) expect(result.error).toContain(`Found a local folder at ${global} (global).`);
+    expect(io.asked).toEqual([]);
     expect(runner.calls.some((call) => call.args[0] === 'push')).toBe(false);
   });
 });
@@ -458,17 +460,18 @@ describe('publish HYG6 warnings', () => {
 });
 
 
-it.each([true, false])('registers a checkout only after successful publish (consent: %s)', async consent => {
+/**
+ * §7.2: publish's silent `register` closure and its three call sites are deleted. Publishing from
+ * inside a repository is not a request to track that repository — "the app never adds a project by
+ * itself", and the only thing that adds one is `project add`.
+ */
+it.each([true, false])('never adds a project, published or not (consent: %s)', async consent => {
   const { fixture, store } = await prepared('push');
   const root = join(await realpath(fixture.root), 'checkout'); const cwd = join(root, 'src');
   await mkdir(cwd, { recursive: true }); await mkdir(join(root, '.git'));
   const args = { ref: 'sample', config: store, runner: mappedRunner(REMOTE, fixture.bare), cwd, home: fixture.root };
   const io = new ScriptedPrompter([], [consent]);
   expect((await run(args, io)).ok).toBe(consent);
-  expect((await store.read()).checkouts ?? []).toEqual(consent ? [root] : []);
-  expect(io.lines.filter(line => line.startsWith('Registered '))).toEqual(consent ? [`Registered ${root} in your library.`] : []);
-  if (consent) {
-    const again = new ScriptedPrompter(); expect((await run(args, again)).ok).toBe(true);
-    expect(again.lines.filter(line => line.startsWith('Registered '))).toEqual([]);
-  }
+  expect((await store.read()).projects ?? []).toEqual([]);
+  expect(io.lines.filter(line => line.startsWith('Added ') || line.startsWith('Registered '))).toEqual([]);
 });
