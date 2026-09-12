@@ -13,10 +13,10 @@ import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, normaliz
 import { fromError, CancelledError, Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { adminLogins, paginatedItems } from '../lib/collaborators.js';
-import { githubLoginSchema, Person, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
-import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, treeText } from '../lib/teamRepo.js';
+import { githubLoginSchema, Person, PROJECT_NAME_RULE, projectNameSchema, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
+import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, refreshClone, type SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { endorsedCandidates, readTeam, readRoster, RosterEntry } from '../lib/skills.js';
-import { installOne, placementHome, resolveDestination } from './install.js';
+import { installOne, placementHome, resolveDestination, teamForReference } from './install.js';
 
 /**
  * §6 `team create` and `team join` (milestone M1). Both are `run(args, io)` over the Prompter.
@@ -27,13 +27,25 @@ export interface CreateArgs extends TeamDependencies { name?: string; org?: stri
 export interface JoinArgs extends TeamDependencies { target: string; as?: string; offerHook?: boolean; }
 export interface RemoveArgs extends TeamDependencies { handle: string; team?: string; archiveOnly?: boolean; }
 export interface WorkflowUpdateArgs extends WithForm { print?: boolean; }
-export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs) | ({ kind: 'workflow-update' } & WorkflowUpdateArgs);
+/** §7.1: the team-project creator moved here from `project create`, which is now the Library's local registry. */
+export interface ProjectCreateArgs extends WithForm {
+  /** Prompted when absent and interactive; a non-interactive caller must pass it. */
+  name?: string;
+  /** The repository whose project roots this project's skills place into. Optional: a project may be named before it has a home. */
+  remote?: string;
+  team?: string;
+  config?: ConfigStore;
+  runner?: Runner;
+  safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
+}
+export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs) | ({ kind: 'workflow-update' } & WorkflowUpdateArgs) | ({ kind: 'project-create' } & ProjectCreateArgs);
 export type CreateResult = { team: string; remote: string };
 export type JoinResult = { team: string; handle: string; rejoined: boolean; roster: RosterEntry[] };
 export type { RosterEntry } from '../lib/skills.js';
 export interface RemoveResult { team: string; handle: string; archiveOnly: boolean; }
 export interface WorkflowUpdateResult { workflow: string; }
-export type TeamRunResult = CreateResult | JoinResult | RemoveResult | WorkflowUpdateResult;
+export interface ProjectCreated { team: string; name: string; remotes: string[]; skills: number; }
+export type TeamRunResult = CreateResult | JoinResult | RemoveResult | WorkflowUpdateResult | ProjectCreated;
 export type TeamCommand = (args: TeamArgs, io: Prompter) => Promise<Result<TeamRunResult>>;
 
 export class HandleCollisionError extends Error {
@@ -50,11 +62,13 @@ export function run(args: { kind: 'create' } & CreateArgs, io: Prompter): Promis
 export function run(args: { kind: 'join' } & JoinArgs, io: Prompter): Promise<Result<JoinResult>>;
 export function run(args: { kind: 'remove' } & RemoveArgs, io: Prompter): Promise<Result<RemoveResult>>;
 export function run(args: { kind: 'workflow-update' } & WorkflowUpdateArgs, io: Prompter): Promise<Result<WorkflowUpdateResult>>;
+export function run(args: { kind: 'project-create' } & ProjectCreateArgs, io: Prompter): Promise<Result<ProjectCreated>>;
 export function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunResult>>;
 export async function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunResult>> {
   if (args.kind === 'create') return create(args, io);
   if (args.kind === 'join') return join(args, io);
   if (args.kind === 'remove') return remove(args, io);
+  if (args.kind === 'project-create') return projectCreate(args, io);
   return workflowUpdate(args, io);
 }
 
@@ -630,3 +644,77 @@ jobs:
             gh api -X POST "repos/\${{ github.repository }}/issues/$PR/comments" -f body="$body"
           fi
 `;
+
+/**
+ * `team project create` — the act that names a team project. Guard row (i): one new key, born empty.
+ * §7.1 moved it under `team`: `project` is now the Library's local registry, and one word could not
+ * mean both "a folder on this machine" and "a card in the team repo".
+ *
+ * Direct to `main`, never a pull request, under either publish policy (spec §2 D1, Ryan 2026-09-09):
+ * a project with no skills endorses nothing, so there is nothing for a reviewer to weigh, and the
+ * card has to exist before anyone can add to it. Endorsing into it stays on `publish` and keeps the
+ * team's `policy.publish`.
+ */
+async function projectCreate(args: ProjectCreateArgs, io: Prompter): Promise<Result<ProjectCreated>> {
+  try {
+    const store = args.config ?? createConfigStore();
+    const runner = args.runner ?? systemRunner;
+    const config = await store.read();
+    const team = await teamForReference(config, args.team, undefined, undefined, args.form);
+    const binding = config.teams[team]!;
+    if (!binding.handle) throw new Error(`Team ${team} has no joined handle.`);
+    const clone = store.teamClone(team);
+    // The clone is where the collision check reads from, so it is refreshed before anything is asked.
+    await refreshClone(runner, clone, { label: team, ...lockWait(io) });
+
+    const typed = args.name ?? (io.interactive ? await io.text('Project name?') : undefined);
+    if (typed === undefined || typed.trim() === '') throw new Error('Specify a project name.');
+    const parsed = projectNameSchema.safeParse(typed);
+    if (!parsed.success) throw new Error(PROJECT_NAME_RULE);
+    const name = parsed.data;
+    const remotes = args.remote === undefined || args.remote.trim() === '' ? [] : [normalizeRemote(args.remote)];
+
+    const repo = openTeamRepo(clone, binding.remote, runner);
+    const written = await repo.safeWrite((tree) => {
+      const source = tree.before('team.json');
+      if (source === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');
+      // Re-read inside the loop: a project another member created between the refresh above and this
+      // attempt must be seen, or safeWrite's re-apply would push a second card with the same name.
+      const fresh = parseJson(teamSchema, treeText(source), 'team.json');
+      const clash = Object.keys(fresh.projects).find((key) => key.toLowerCase() === name.toLowerCase());
+      if (clash !== undefined) throw new Error(`${team} already has a project named ${clash}.`);
+      const claimed = claimant(fresh, remotes[0]);
+      if (claimed !== undefined) throw new Error(`${claimed} already claims ${remotes[0]}; a repository belongs to one project.`);
+      fresh.projects[name] = { remotes, skills: [] };
+      tree.set('team.json', `${JSON.stringify(fresh, null, 2)}\n`);
+    }, {
+      action: 'project',
+      handle: binding.handle,
+      message: `${binding.handle}: create project ${name}`,
+      ...args.safeWrite,
+      ...lockWait(io),
+    });
+    // The mutation either writes or throws, so an unchanged tree here is a bug, not a no-op create.
+    if (!written.changed) throw new Error(`Nothing was written for project ${name}; rerun the command.`);
+
+    io.print(`Created project ${name} in ${team}.`);
+    io.print(remotes.length
+      ? `Its skills place when a teammate syncs inside ${remotes[0]}.`
+      : 'No repository yet — its skills place nowhere automatically until it has one.');
+    return success({ team, name, remotes, skills: 0 });
+  } catch (error) {
+    return fromError(error);
+  }
+}
+
+/**
+ * The project already listing this remote, if any. Two projects on one repository is not a tie the
+ * readers arbitrate: `install` (destination preselection) and `eval` (which project am I inside)
+ * both take the first match, so the second project would be silently unreachable.
+ */
+function claimant(team: Team, remote: string | undefined): string | undefined {
+  if (remote === undefined) return undefined;
+  return Object.entries(team.projects).find(([, project]) => project.remotes.some((candidate) => {
+    try { return normalizeRemote(candidate) === remote; } catch { return false; }
+  }))?.[0];
+}

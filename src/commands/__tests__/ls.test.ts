@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, git, person, pushFromSeed, ScriptedPrompter, temporaryDirectory, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
@@ -165,6 +165,13 @@ describe('issue 9 local ls', () => {
 });
 
 
+/** §7.2: nothing is scanned unless it was added, so a project fixture has to add it. */
+async function withProject(stateRoot: string, ...roots: string[]) {
+  const store = createConfigStore(stateRoot);
+  await store.update((config) => { config.projects = roots.map((root) => ({ root, label: basename(root) })); });
+  return store;
+}
+
 describe('global and project local sections', () => {
   it('lists both roots, retains project placements and malformed YAML, and caches team snapshots across roots with no runner call beyond each checkout\'s origin probe', async () => {
     const home = await temporaryDirectory(); const repo = join(home, 'repo'); await mkdir(join(repo, '.git'), { recursive: true });
@@ -172,6 +179,8 @@ describe('global and project local sections', () => {
     await localSource(home, 'global'); await localSource(repo, 'project'); const placed = await localSource(repo, 'placed');
     const invalid = await localSource(repo, 'invalid', '---\nname: invalid\ndescription: a: b\n---\n');
     await store.update((config) => {
+      // §7.2: the Library shows the projects you added. A cwd inside a repository adds nothing.
+      config.projects = [{ root: repo, label: 'repo' }];
       config.placements[placed] = { id: ID, team: 'team', version: null, scope: { kind: 'project', project: 'app' }, fingerprint: '', placed_at: '' };
     });
     const clone = store.teamClone('team'); await mkdir(join(clone, 'skills', 'global'), { recursive: true });
@@ -186,7 +195,7 @@ describe('global and project local sections', () => {
       { root: join(repo, '.claude', 'skills'), scope: 'project', repoRoot: repo, rows: [{ name: 'placed', state: 'placement recorded from team' }, { name: 'project' }], notOffered: [{ name: 'invalid', path: invalid, reason: 'invalid-yaml', detail: expect.stringContaining('not valid YAML') }] },
     ] } });
     expect(io.lines.filter((line) => line.startsWith('Local Claude Code skills'))).toEqual([
-      `Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `Local Claude Code skills (${join(repo, '.claude', 'skills')}; project; detected, not registered — \`npx -y terum-skills@latest checkout add '${repo}'\` keeps it in your library):`,
+      `Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `Local Claude Code skills (${join(repo, '.claude', 'skills')}; project; registered):`,
     ]);
     expect(io.lines).toContain(`  placed — placement recorded from team; path: ${placed}`);
     expect(io.lines).toContain('Cannot be connected:');
@@ -198,60 +207,68 @@ describe('global and project local sections', () => {
 
   it('renders an absent project root as its own empty section', async () => {
     const home = await temporaryDirectory(); const repo = join(home, 'repo'); await mkdir(join(repo, '.git'), { recursive: true });
-    const io = new ScriptedPrompter();
-    expect(await run({ local: true, home, cwd: repo, config: createConfigStore(join(home, 'state')) }, io)).toMatchObject({ ok: true, value: { local: [{ scope: 'global' }, { scope: 'project', rows: [] }] } });
-    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `  none (${join(home, '.claude', 'skills')} does not exist)`, '  0 skill folders (0 connectable)', `Local Claude Code skills (${join(repo, '.claude', 'skills')}; project; detected, not registered — \`npx -y terum-skills@latest checkout add '${repo}'\` keeps it in your library):`, '  GitHub: not connected', `  none (${join(repo, '.claude', 'skills')} does not exist)`, '  0 skill folders (0 connectable)', FOOTER]);
+    const io = new ScriptedPrompter(); const store = createConfigStore(join(home, 'state'));
+    await store.update((config) => { config.projects = [{ root: repo, label: 'repo' }]; });
+    expect(await run({ local: true, home, cwd: repo, config: store }, io)).toMatchObject({ ok: true, value: { local: [{ scope: 'global' }, { scope: 'project', rows: [] }] } });
+    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `  none (${join(home, '.claude', 'skills')} does not exist)`, '  0 skill folders (0 connectable)', `Local Claude Code skills (${join(repo, '.claude', 'skills')}; project; registered):`, '  GitHub: not connected', `  none (${join(repo, '.claude', 'skills')} does not exist)`, '  0 skill folders (0 connectable)', FOOTER]);
   });
 
   it("names each checkout's GitHub origin, and says not connected for every other origin", async () => {
     const originRunner = (stdout: string): Runner => ({ async run(command, args) { return command === 'git' && args.join(' ') === 'remote get-url origin' ? { code: 0, stdout, stderr: '' } : { code: 1, stdout: '', stderr: '' }; } });
     const github = await temporaryDirectory(); await mkdir(join(github, 'repo', '.git'), { recursive: true });
-    const githubIo = new ScriptedPrompter();
-    expect(await run({ local: true, home: github, cwd: join(github, 'repo'), config: createConfigStore(join(github, 'state')), runner: originRunner('git@github.com:ryanliu-terum/terum-skills.git\n') }, githubIo))
+    const githubIo = new ScriptedPrompter(); const githubStore = await withProject(join(github, 'state'), join(github, 'repo'));
+    expect(await run({ local: true, home: github, cwd: join(github, 'repo'), config: githubStore, runner: originRunner('git@github.com:ryanliu-terum/terum-skills.git\n') }, githubIo))
       .toMatchObject({ ok: true, value: { local: [{ scope: 'global', remote: null }, { scope: 'project', remote: { url: 'https://github.com/ryanliu-terum/terum-skills', slug: 'ryanliu-terum/terum-skills' } }] } });
     expect(githubIo.lines).toContain('  GitHub: ryanliu-terum/terum-skills');
 
     const elsewhere = await temporaryDirectory(); await mkdir(join(elsewhere, 'repo', '.git'), { recursive: true });
-    const elsewhereIo = new ScriptedPrompter();
-    expect(await run({ local: true, home: elsewhere, cwd: join(elsewhere, 'repo'), config: createConfigStore(join(elsewhere, 'state')), runner: originRunner('https://gitlab.com/acme/tools.git\n') }, elsewhereIo))
+    const elsewhereIo = new ScriptedPrompter(); const elsewhereStore = await withProject(join(elsewhere, 'state'), join(elsewhere, 'repo'));
+    expect(await run({ local: true, home: elsewhere, cwd: join(elsewhere, 'repo'), config: elsewhereStore, runner: originRunner('https://gitlab.com/acme/tools.git\n') }, elsewhereIo))
       .toMatchObject({ ok: true, value: { local: [{ scope: 'global' }, { scope: 'project', remote: { url: 'https://gitlab.com/acme/tools.git', slug: null } }] } });
     expect(elsewhereIo.lines).toContain('  GitHub: not connected (origin is https://gitlab.com/acme/tools.git)');
 
     const bare = await temporaryDirectory(); await mkdir(join(bare, 'repo', '.git'), { recursive: true });
-    const bareIo = new ScriptedPrompter();
-    expect(await run({ local: true, home: bare, cwd: join(bare, 'repo'), config: createConfigStore(join(bare, 'state')), runner: originRunner('') }, bareIo))
+    const bareIo = new ScriptedPrompter(); const bareStore = await withProject(join(bare, 'state'), join(bare, 'repo'));
+    expect(await run({ local: true, home: bare, cwd: join(bare, 'repo'), config: bareStore, runner: originRunner('') }, bareIo))
       .toMatchObject({ ok: true, value: { local: [{ scope: 'global' }, { scope: 'project', remote: null }] } });
     expect(bareIo.lines).toContain('  GitHub: not connected');
   });
 
-  it('keeps outside-repository listing successful (regression) and adds the explicit cwd line before the footer', async () => {
+  // §7.2: cwd no longer selects a root, so there is no "not inside a git repository" line to print —
+  // a listing run from anywhere shows Global plus the projects you added, and nothing about where you stand.
+  it('lists Global alone from outside any repository, with no cwd line', async () => {
     const home = await temporaryDirectory(); const cwd = join(home, 'outside\nrepo'); await mkdir(cwd);
     const io = new ScriptedPrompter();
-    expect(await run({ local: true, home, cwd, config: createConfigStore(join(home, 'state')) }, io)).toMatchObject({ ok: true });
-    expect(io.lines.slice(-2)).toEqual([`Project skills: none (${cwd.replace('\n', '?')} is not inside a git repository).`, FOOTER]);
+    expect(await run({ local: true, home, cwd, config: createConfigStore(join(home, 'state')) }, io)).toMatchObject({ ok: true, value: { local: [{ scope: 'global' }] } });
+    expect(io.lines.at(-1)).toBe(FOOTER);
+    expect(io.lines.join('')).not.toContain('is not inside a git repository');
   });
 
-  it('does not print a no-repository message for a deduplicated home repository', async () => {
+  it('ignores the cwd even when it is a repository the user never added', async () => {
     const home = await temporaryDirectory(); await mkdir(join(home, '.git'));
     const io = new ScriptedPrompter(); const result = await run({ local: true, home, cwd: home, config: createConfigStore(join(home, 'state')) }, io);
     expect(result).toMatchObject({ ok: true, value: { local: [{ scope: 'global' }] } });
     expect(io.lines.filter((line) => line.startsWith('Local Claude'))).toHaveLength(1);
-    expect(io.lines.join('')).not.toContain('not inside a git repository');
   });
 
-  it('prints project-root EACCES as an inspection problem and still succeeds', async () => {
+  /**
+   * §7.1/§7.2: a project you added stays visible even when it cannot be read — dropping the row would
+   * make the Library disagree with `project list`, which is the opposite of what it is for. The
+   * unreadable state now comes from the scan itself (`localSkills` reads the folder), because the
+   * pre-scan permission probe existed only to decide whether to admit an *undetected* cwd root.
+   */
+  it('keeps an unreadable project root visible and says so, and still succeeds', async () => {
     const home = await temporaryDirectory(); const repo = join(home, 'repo'); await mkdir(join(repo, '.git'), { recursive: true });
     const root = join(repo, '.claude', 'skills'); await mkdir(root, { recursive: true });
-    const original = fs.access;
-    const spy = vi.spyOn(fs, 'access').mockImplementation(async (...args) => {
-      if (args[0] === root) throw Object.assign(new Error('EACCES: project skills'), { code: 'EACCES' });
+    const original = fs.readdir;
+    const spy = vi.spyOn(fs, 'readdir').mockImplementation((...args) => {
+      if (args[0] === root) return Promise.reject(Object.assign(new Error('EACCES: project skills'), { code: 'EACCES' }));
       return original(...args);
     });
     try {
-      const io = new ScriptedPrompter();
-      expect(await run({ local: true, home, cwd: repo, config: createConfigStore(join(home, 'state')) }, io)).toMatchObject({ ok: true, value: { local: [{ scope: 'global' }] } });
-      expect(io.lines.slice(-2)).toEqual([`Could not inspect ${root}: EACCES: project skills`, FOOTER]);
-      expect(io.lines.join('')).not.toContain('; project):');
+      const io = new ScriptedPrompter(); const store = await withProject(join(home, 'state'), repo);
+      expect(await run({ local: true, home, cwd: repo, config: store }, io)).toMatchObject({ ok: true, value: { local: [{ scope: 'global' }, { scope: 'project', rootState: 'unreadable' }] } });
+      expect(io.lines.some((line) => line.includes('; project; registered):'))).toBe(true);
     } finally { spy.mockRestore(); }
   });
 });
@@ -413,7 +430,7 @@ it('returns recorded member install ids even when no skills were authored',async
 });
 
 
-it('lists registered and detected roots with typed counts without registering on reads', async () => {
+it('lists the added projects with typed counts and writes nothing on reads', async () => {
   const home = await temporaryDirectory(); const config = createConfigStore(join(home, 'state'));
   const repoA = join(home, 'repoA'), repoB = join(home, 'repoB');
   for (const root of [repoA, repoB]) await mkdir(join(root, '.git'), { recursive: true });
@@ -423,36 +440,38 @@ it('lists registered and detected roots with typed counts without registering on
     await writeFile(join(root, name, 'SKILL.md'), `---\nname: ${name === 'bad' ? 'mismatch' : name}\ndescription: x\n---\n`);
   }
   await fs.symlink(join(root, 'good'), join(root, 'link'));
-  await config.update(c => { c.checkouts = [repoA]; });
+  await config.update(c => { c.projects = [{ root: repoA, label: 'repoA' }, { root: repoB, label: 'repoB' }]; });
   const before = await readFile(join(config.root, 'config.json'), 'utf8'); const io = new ScriptedPrompter();
   const result = await run({ local: true, home, cwd: repoB, config }, io);
   expect(result).toMatchObject({ ok: true, value: { local: [
-    { label: 'Global', registered: false, detected: false, rootState: 'absent', counts: { skillFolders: 0, connectable: 0 } },
-    { label: 'repoA', registered: true, detected: false, rootState: 'scanned', counts: { skillFolders: 2, connectable: 1 }, notOffered: [
+    { label: 'Global', registered: false, rootState: 'absent', counts: { skillFolders: 0, connectable: 0 } },
+    { label: 'repoA', registered: true, rootState: 'scanned', counts: { skillFolders: 2, connectable: 1 }, notOffered: [
       { name: 'bad', reason: 'name-mismatch', detail: expect.any(String) }, { name: 'link', reason: 'symlink', detail: expect.any(String) },
     ] },
-    { label: 'repoB', registered: false, detected: true, rootState: 'absent' },
+    { label: 'repoB', registered: true, rootState: 'absent' },
   ] } });
   expect(io.lines).toContain(`Local Claude Code skills (${root}; project; registered):`);
-  expect(io.lines).toContain(`Local Claude Code skills (${join(repoB, '.claude', 'skills')}; project; detected, not registered — \`npx -y terum-skills@latest checkout add '${repoB}'\` keeps it in your library):`);
+  expect(io.lines).toContain(`Local Claude Code skills (${join(repoB, '.claude', 'skills')}; project; registered):`);
   expect(io.lines).toContain('  2 skill folders (1 connectable)');
   expect(await readFile(join(config.root, 'config.json'), 'utf8')).toBe(before);
 });
 
 
-it('detects a project-placement repository without cwd or config writes', async () => {
+/**
+ * §7.2 deleted `ls`'s ledger-inferred `extraRoots`. A placement recorded under a folder is not
+ * evidence the user wants that folder in their Library — the ledger row stays, the row does not.
+ */
+it('never infers a project root from a placement, and writes nothing', async () => {
   const home = await temporaryDirectory(); const config = createConfigStore(join(home, 'state'));
-  const roots = [join(home, 'placed')];
-  for (const root of roots) await mkdir(join(root, '.git'), { recursive: true });
+  const placedRoot = join(home, 'placed');
+  await mkdir(join(placedRoot, '.git'), { recursive: true });
   await config.update(c => {
-    c.placements[join(roots[0]!, '.claude', 'skills', 'missing')] = { id: ID, team: 'unavailable', scope: { kind: 'project', project: 'app' }, version: null, placed_at: '', fingerprint: '' };
+    c.placements[join(placedRoot, '.claude', 'skills', 'missing')] = { id: ID, team: 'unavailable', scope: { kind: 'project', project: 'app' }, version: null, placed_at: '', fingerprint: '' };
   });
   const before = await readFile(join(config.root, 'config.json'), 'utf8');
   const result = await run({ local: true, home, config }, new ScriptedPrompter());
-  expect(result).toMatchObject({ ok: true, value: { local: [
-    { label: 'Global', registered: false, detected: false },
-    ...roots.map(repoRoot => ({ repoRoot, registered: false, detected: true, rootState: 'absent' })),
-  ] } });
+  expect(result).toMatchObject({ ok: true, value: { local: [{ label: 'Global', registered: false }] } });
+  expect(result.ok && result.value.local).toHaveLength(1);
   expect(await readFile(join(config.root, 'config.json'), 'utf8')).toBe(before);
 });
 
@@ -477,20 +496,20 @@ describe('W-02 local read stability', () => {
     }
     const io = new ScriptedPrompter(); const result = await run({ local: true, home, config: store }, io);
     expect(result.ok).toBe(true);
-    expect(JSON.stringify({ value: result.value, lines: io.lines }).replaceAll(home, '<HOME>')).toMatchInlineSnapshot(`"{"value":{"roster":[],"skills":[],"problems":[],"local":[{"root":"<HOME>/.claude/skills","scope":"global","registered":false,"detected":false,"rootState":"scanned","label":"Global","remote":null,"counts":{"skillFolders":6,"connectable":0},"rows":[{"skillId":"33333333-3333-4333-8333-000000000000","placed":true,"name":"skill-0","path":"<HOME>/.claude/skills/skill-0","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000000","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-0\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000000\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000001","placed":true,"name":"skill-1","path":"<HOME>/.claude/skills/skill-1","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000001","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-1\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000001\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000002","placed":true,"name":"skill-2","path":"<HOME>/.claude/skills/skill-2","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000002","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-2\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000002\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000003","placed":true,"name":"skill-3","path":"<HOME>/.claude/skills/skill-3","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000003","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-3\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000003\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000004","placed":true,"name":"skill-4","path":"<HOME>/.claude/skills/skill-4","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000004","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-4\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000004\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000005","placed":true,"name":"skill-5","path":"<HOME>/.claude/skills/skill-5","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000005","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-5\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000005\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180}],"notOffered":[],"problems":[]}]},"lines":["Local Claude Code skills (<HOME>/.claude/skills; global):","  skill-0 — placement recorded from team; path: <HOME>/.claude/skills/skill-0","  skill-1 — placement recorded from team; path: <HOME>/.claude/skills/skill-1","  skill-2 — placement recorded from team; path: <HOME>/.claude/skills/skill-2","  skill-3 — placement recorded from team; path: <HOME>/.claude/skills/skill-3","  skill-4 — placement recorded from team; path: <HOME>/.claude/skills/skill-4","  skill-5 — placement recorded from team; path: <HOME>/.claude/skills/skill-5","  6 skill folders (0 connectable)","Team status is from local clones and may be stale; open endorsement requests are not checked."]}"`);
+    expect(JSON.stringify({ value: result.value, lines: io.lines }).replaceAll(home, '<HOME>')).toMatchInlineSnapshot(`"{"value":{"roster":[],"skills":[],"problems":[],"local":[{"root":"<HOME>/.claude/skills","scope":"global","registered":false,"rootState":"scanned","label":"Global","remote":null,"counts":{"skillFolders":6,"connectable":0},"rows":[{"skillId":"33333333-3333-4333-8333-000000000000","placed":true,"name":"skill-0","path":"<HOME>/.claude/skills/skill-0","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000000","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-0\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000000\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000001","placed":true,"name":"skill-1","path":"<HOME>/.claude/skills/skill-1","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000001","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-1\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000001\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000002","placed":true,"name":"skill-2","path":"<HOME>/.claude/skills/skill-2","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000002","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-2\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000002\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000003","placed":true,"name":"skill-3","path":"<HOME>/.claude/skills/skill-3","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000003","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-3\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000003\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000004","placed":true,"name":"skill-4","path":"<HOME>/.claude/skills/skill-4","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000004","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-4\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000004\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180},{"skillId":"33333333-3333-4333-8333-000000000005","placed":true,"name":"skill-5","path":"<HOME>/.claude/skills/skill-5","state":"placement recorded from team","tracked":true,"placement":{"id":"33333333-3333-4333-8333-000000000005","team":"team","version":null},"health":"up-to-date","description":"stable","frontmatter":"---\\nname: skill-5\\ndescription: stable\\nlicense: UNLICENSED\\nmetadata:\\n  id: 33333333-3333-4333-8333-000000000005\\n  author: Seed <seed@example.com>\\n  terum-category: testing\\n---","category":"testing","characters":180}],"notOffered":[],"problems":[]}]},"lines":["Local Claude Code skills (<HOME>/.claude/skills; global):","  skill-0 — placement recorded from team; path: <HOME>/.claude/skills/skill-0","  skill-1 — placement recorded from team; path: <HOME>/.claude/skills/skill-1","  skill-2 — placement recorded from team; path: <HOME>/.claude/skills/skill-2","  skill-3 — placement recorded from team; path: <HOME>/.claude/skills/skill-3","  skill-4 — placement recorded from team; path: <HOME>/.claude/skills/skill-4","  skill-5 — placement recorded from team; path: <HOME>/.claude/skills/skill-5","  6 skill folders (0 connectable)","Team status is from local clones and may be stale; open endorsement requests are not checked."]}"`);
   });
 });
 
 
 describe('W-02 local read failure isolation',()=>{
   it('asks each root for its origin remote once, before the section loop',async()=>{
-    const home=await temporaryDirectory();const store=createConfigStore(join(home,'state'));const roots=[join(home,'a'),join(home,'b')];for(const root of roots){await mkdir(join(root,'.git'),{recursive:true});await localSource(root,'sample');}await store.update(c=>{c.checkouts=roots;});
+    const home=await temporaryDirectory();const store=createConfigStore(join(home,'state'));const roots=[join(home,'a'),join(home,'b')];for(const root of roots){await mkdir(join(root,'.git'),{recursive:true});await localSource(root,'sample');}await store.update(c=>{c.projects=roots.map(root=>({root,label:basename(root)}));});
     const calls:{args:readonly string[];cwd:string|undefined}[]=[];let release!:()=>void;const both=new Promise<void>(resolve=>{release=resolve;});
     const runner:Runner={run:async(_command,args,options)=>{calls.push({args,cwd:options?.cwd});if(calls.length===2)release();await both;return {code:0,stdout:'https://github.com/acme/team.git',stderr:''};}};
     const result=await run({local:true,home,config:store,runner},new ScriptedPrompter());expect(result.ok).toBe(true);expect(calls).toEqual(roots.map(cwd=>({args:['remote','get-url','origin'],cwd})));
   },5000);
   it.skipIf(process.platform==='win32'||process.getuid?.()===0)('still yields the other root when one root is unreadable',async()=>{
-    const home=await temporaryDirectory();const store=createConfigStore(join(home,'state'));await localSource(home,'healthy');const repo=join(home,'repo');const path=await localSource(repo,'blocked');await store.update(c=>{c.checkouts=[repo];});const root=join(path,'..');await chmod(root,0);
+    const home=await temporaryDirectory();const store=createConfigStore(join(home,'state'));await localSource(home,'healthy');const repo=join(home,'repo');const path=await localSource(repo,'blocked');await store.update(c=>{c.projects=[{root:repo,label:basename(repo)}];});const root=join(path,'..');await chmod(root,0);
     try{const io=new ScriptedPrompter();const result=await run({local:true,home,config:store,runner:ghOnlyRunner(()=>({code:0,stdout:'',stderr:''}))},io);expect(result.value?.local?.[0]?.rows.map(r=>r.name)).toEqual(['healthy']);expect(result.value?.local?.[1]).toMatchObject({rootState:'unreadable',problems:[{reason:expect.stringContaining('EACCES')}]});expect(io.lines.some(l=>l.includes('Could not inspect')&&l.includes('EACCES'))).toBe(true);}finally{await chmod(root,0o700);}
   });
   it('reports health unknown for a placed folder whose fingerprint walk throws',async()=>{

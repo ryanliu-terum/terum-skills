@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { configSchema, emptyConfig, allowedTools, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, teamNameSchema, teamSchema } from '../schema.js';
+import { configFileSchema, configSchema, emptyConfig, allowedTools, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, teamNameSchema, teamSchema } from '../schema.js';
 
 const FRONT = (extra = '') => `---\nname: x\ndescription: x\nlicense: x\nmetadata:\n  id: 4e80fd2a-04bc-4d9f-88f7-a849d92879f1\n  author: A <a@b.test>\n  terum-category: docs\n${extra}---\n\n# Title\n\nBody: with a colon\n- and a list\n`;
 
@@ -85,10 +85,38 @@ it('keeps optional people metadata absent on round trip and validates present va
 });
 
 
-it('accepts optional checkout arrays and refuses a scalar', () => {
+it('accepts optional project arrays and refuses a scalar', () => {
   expect(configSchema.safeParse(emptyConfig()).success).toBe(true);
-  expect(configSchema.parse({ ...emptyConfig(), checkouts: ['/a'] }).checkouts).toEqual(['/a']);
-  expect(configSchema.safeParse({ ...emptyConfig(), checkouts: 'x' }).success).toBe(false);
+  expect(configSchema.parse({ ...emptyConfig(), projects: [{ root: '/a', label: 'a' }] }).projects).toEqual([{ root: '/a', label: 'a' }]);
+  expect(configSchema.safeParse({ ...emptyConfig(), projects: 'x' }).success).toBe(false);
+  expect(configSchema.safeParse({ ...emptyConfig(), projects: ['/a'] }).success).toBe(false);
+});
+
+/** §3.6's read-time migration: `checkouts` becomes `projects`, and is stripped either way. */
+describe('config migration, checkouts -> projects', () => {
+  it('labels migrated roots by basename and drops the old key', () => {
+    const parsed = configFileSchema.parse({ ...emptyConfig(), checkouts: ['/a/web', '/b/api'] });
+    expect(parsed.projects).toEqual([{ root: '/a/web', label: 'web' }, { root: '/b/api', label: 'api' }]);
+    expect('checkouts' in parsed).toBe(false);
+  });
+  it('qualifies colliding basenames by their parent', () => {
+    expect(configFileSchema.parse({ ...emptyConfig(), checkouts: ['/a/web', '/b/web'] }).projects)
+      .toEqual([{ root: '/a/web', label: 'web (a)' }, { root: '/b/web', label: 'web (b)' }]);
+  });
+  it('falls back to the whole root when even the parent collides', () => {
+    expect(configFileSchema.parse({ ...emptyConfig(), checkouts: ['/x/a/web', '/y/a/web'] }).projects)
+      .toEqual([{ root: '/x/a/web', label: '/x/a/web' }, { root: '/y/a/web', label: '/y/a/web' }]);
+  });
+  it('leaves an existing projects array alone and still strips checkouts', () => {
+    const parsed = configFileSchema.parse({ ...emptyConfig(), checkouts: ['/stale'], projects: [{ root: '/a', label: 'kept' }] });
+    expect(parsed.projects).toEqual([{ root: '/a', label: 'kept' }]);
+    expect('checkouts' in parsed).toBe(false);
+  });
+  it('ignores a non-array checkouts value rather than failing the whole config', () => {
+    const parsed = configFileSchema.parse({ ...emptyConfig(), checkouts: 'x' });
+    expect(parsed.projects).toBeUndefined();
+    expect('checkouts' in parsed).toBe(false);
+  });
 });
 
 

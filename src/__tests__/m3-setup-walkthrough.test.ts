@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DISCOVER_QUESTION, run as setup } from '../commands/setup.js';
+import { PROJECTS_QUESTION, run as setup } from '../commands/setup.js';
 import { createConfigStore } from '../lib/config.js';
 import { HOOK_ENTRY, installHook } from '../lib/hook.js';
 import { fakeGh, git, mappedRunner, ScriptedPrompter, temporaryDirectory, wrapperFor } from '../lib/__tests__/fixtures.js';
@@ -28,7 +28,7 @@ describe('M3 setup walkthrough', () => {
     const aliceIo = new ScriptedPrompter(['Create a new team', 'team', '', '', 'Alice', 'alice@example.com', 'team', ''], [false, false, false], true);
     const alice = await setup({ app: false, config: aliceStore, home: join(root, 'alice-home'), runner: aliceRunner, hook: hookFor(root, 'alice-setup'), wrapper: wrapperFor(join(root, 'alice-home')), communityUrl: '' }, aliceIo);
     expect(alice).toMatchObject({ ok: true, value: { steps: { team: 'done', invite: 'skipped', done: 'printed' } } });
-    expect(aliceIo.asked).toContain(DISCOVER_QUESTION);
+    expect(aliceIo.asked).toContain(PROJECTS_QUESTION);
     // A newly created, empty team has no candidate to offer for evaluation.
     expect(aliceIo.asked).not.toContain('Evaluate the 0 shared skills that have no receipt yet? This runs Claude on each one and records results locally.');
   });

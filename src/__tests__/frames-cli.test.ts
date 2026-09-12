@@ -21,8 +21,8 @@ const asking = (async (_args: unknown, io: Prompter) => {
 }) as never;
 
 const INVOCATIONS: Record<string, string[]> = {
-  'checkout add': ['checkout', 'add'], 'checkout remove': ['checkout', 'remove', '/checkout'], 'checkout list': ['checkout', 'list'], 'checkout discover': ['checkout', 'discover'],
-  'project create': ['project', 'create', 'Payments'],
+  'project add': ['project', 'add'], 'project remove': ['project', 'remove', '/project'], 'project list': ['project', 'list'],
+  'team project create': ['team', 'project', 'create', 'Payments'],
   'app-update': ['app-update', '--check'],
   app: ['app'], profile: ['profile', '--role', 'Platform'],
   login: ['login'], setup: ['setup'], 'team create': ['team', 'create', 'x'], 'team join': ['team', 'join', 'o/r'], 'team remove': ['team', 'remove', 'h'], 'team leave': ['team', 'leave', 'n'], 'team workflow-update': ['team', 'workflow-update'],
@@ -52,7 +52,7 @@ function harness(verbs: CliVerbs) {
 }
 
 describe('frame mode through commander — every public verb', () => {
-  const verbs: CliVerbs = { checkout: asking, project: asking, app: asking, profile: asking, login: asking, team: asking, setup: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, prune: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, evalReport: asking, update: asking, appUpdate: asking };
+  const verbs: CliVerbs = { project: asking, app: asking, profile: asking, login: asking, team: asking, setup: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, prune: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, evalReport: asking, update: asking, appUpdate: asking };
 
   /**
    * `serve` is a session, not a one-shot verb: it holds stdin open, answers many requests, and writes one
@@ -67,7 +67,16 @@ describe('frame mode through commander — every public verb', () => {
   it('FRAME_VERBS names only registered commands, and every one is covered here', () => {
     const program = buildProgram(async () => undefined, verbs, {});
     const names = new Set<string>();
-    for (const command of program.commands) { names.add(command.name()); for (const sub of command.commands) names.add(`${command.name()} ${sub.name()}`); }
+    // Recursive, not two deep: §7.1 made `team project create` a three-segment verb, and `attemptedVerb`
+    // matches the longest leading prefix at any depth, so the registration check must reach as far.
+    const walk = (parent: { commands: readonly { name(): string; commands: readonly unknown[] }[] }, prefix = ''): void => {
+      for (const command of parent.commands as readonly { name(): string; commands: readonly unknown[] }[]) {
+        const path = prefix ? `${prefix} ${command.name()}` : command.name();
+        names.add(path);
+        walk(command as never, path);
+      }
+    };
+    walk(program as never);
     for (const verb of FRAME_VERBS) expect(names.has(verb), verb).toBe(true);
     for (const verb of ONE_SHOT_VERBS) expect(INVOCATIONS[verb], `no invocation for ${verb}`).toBeDefined();
     // The exemption cannot rot into a blanket one: every name in it must still be a real public verb.

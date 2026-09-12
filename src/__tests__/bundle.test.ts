@@ -62,9 +62,9 @@ describe('the bundled bin (W-02)',()=>{
   it('resolves the bundled wrapper SKILL.md',async()=>{expect(await readFile(join(out,'dist/claude/skills/terum-skills/SKILL.md'),'utf8')).toContain('name: terum-skills');expect(JSON.stringify(await framed(['status']))).not.toMatch(/wrapper source missing/i);});
   it('produces the same frames as the unbundled tree for a read verb',async()=>{expect(await framed(['ls','--local'])).toEqual(await framed(['ls','--local'],join(tree,'dist/index.js')));});
   it('runs a verb that needs proper-lockfile, yaml, zod and commander from the bundle',async()=>{
-    const checkout=join(out,'checkout');await mkdir(checkout);await mkdir(join(checkout,'.git'));
-    expect((await framed(['checkout','add','--',checkout])).at(-1)).toMatchObject({t:'result',ok:true});
-    expect(JSON.stringify(await framed(['checkout','list']))).toContain(checkout);
+    const project=join(out,'project');await mkdir(project);await mkdir(join(project,'.git'));
+    expect((await framed(['project','add','--',project])).at(-1)).toMatchObject({t:'result',ok:true});
+    expect(JSON.stringify(await framed(['project','list']))).toContain(project);
     const skill=join(home,'.claude/skills/example');await mkdir(skill,{recursive:true});await writeFile(join(skill,'SKILL.md'),'---\nname: example\ndescription: YAML from the bundle\n---\n');
     expect(JSON.stringify(await framed(['ls','--local']))).toContain('YAML from the bundle');
   });

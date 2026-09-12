@@ -1,8 +1,7 @@
 import { mapWithConcurrency } from './concurrency.js';
-import { access, lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { FRONTMATTER, type Config } from './schema.js';
+import { FRONTMATTER, type Config, type LibraryProject } from './schema.js';
 import { AGENT_PATHS } from './placer/agent-paths.js';
 import { assertNotInsideStateRoot, inspectSkillSource, scanSkillFolder, type SourceProblem } from './skill-source.js';
 
@@ -22,7 +21,12 @@ export interface LocalInventory {
   entries: LocalEntry[];
   problems: { path: string; reason: string }[];
 }
-export interface LocalRoot { root: string; scope: 'global' | 'project'; repoRoot?: string; registered: boolean; detected: boolean; }
+/**
+ * §7.2: a project root is here because the user added it, so there is no `detected` any more — the
+ * two things that produced it (the cwd-detected root and `ls`'s ledger-inferred `extraRoots`) were
+ * the app adding a project by itself. `label` is the user-facing name carried on `config.projects`.
+ */
+export interface LocalRoot { root: string; scope: 'global' | 'project'; repoRoot?: string; registered: boolean; label?: string; }
 
 /**
  * Discovery is filesystem-only: the nearest .git file or directory selects the project root.
@@ -48,43 +52,28 @@ export async function nearestRepoRoot(cwd: string, problems: { path: string; rea
   }
 }
 
-export async function localSkillRoots(home: string, cwd?: string, checkouts: readonly string[] = [], extraRoots: readonly string[] = []): Promise<{ roots: LocalRoot[]; noRepository?: string; problems: { path: string; reason: string }[] }> {
-  const roots: LocalRoot[] = [{ root: AGENT_PATHS['claude-code'].global(home), scope: 'global', registered: false, detected: false }];
+export async function localSkillRoots(home: string, projects: readonly LibraryProject[] = []): Promise<{ roots: LocalRoot[]; problems: { path: string; reason: string }[] }> {
+  const roots: LocalRoot[] = [{ root: AGENT_PATHS['claude-code'].global(home), scope: 'global', registered: false }];
   const problems: { path: string; reason: string }[] = [];
   const canonicalHome = await realpath(home).catch(() => resolve(home));
   const seenRepos = new Set([canonicalHome]);
   const seenSkills = new Set([await realpath(roots[0]!.root).catch(() => resolve(roots[0]!.root))]);
-  const append = async (dir: string, registered: boolean): Promise<void> => {
+  // A root the user added stays visible even when it is unreadable: hiding it would make the Library
+  // disagree with the list the user can see in Settings, which is the opposite of what it is for.
+  const append = async (dir: string, label: string): Promise<void> => {
     const canonical = await realpath(dir).catch(() => resolve(dir));
     const project = AGENT_PATHS['claude-code'].project(dir);
-    // Retain cwd discovery's permission diagnostics. Registered roots stay visible even unreadable.
-    if (!registered) {
-      try { await access(project, constants.R_OK | constants.X_OK); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          problems.push({ path: project, reason: error instanceof Error ? error.message : String(error) });
-          return;
-        }
-      }
-    }
     const projectPath = await realpath(project).catch(() => AGENT_PATHS['claude-code'].project(canonical));
     if (seenRepos.has(canonical) || seenSkills.has(projectPath)) return;
     seenRepos.add(canonical); seenSkills.add(projectPath);
-    roots.push({ root: project, scope: 'project', repoRoot: dir, registered, detected: !registered });
+    roots.push({ root: project, scope: 'project', repoRoot: dir, registered: true, label });
   };
-  for (const root of checkouts) await append(root, true);
-  let noRepository: string | undefined;
-  if (cwd !== undefined) {
-    const before = problems.length;
-    const repo = await nearestRepoRoot(cwd, problems);
-    if (repo) await append(repo, false);
-    else if (before === problems.length) noRepository = cwd;
-  }
-  for (const root of extraRoots) await append(root, false);
-  return { roots, ...(noRepository === undefined ? {} : { noRepository }), problems };
+  for (const project of projects) await append(project.root, project.label);
+  return { roots, problems };
 }
 
-export function localRootLabel(root: LocalRoot): string { return root.repoRoot === undefined ? 'Global' : basename(root.repoRoot); }
+/** §7.1: the label the user chose the project by. `basename` remains the fallback for a root with no stored label. */
+export function localRootLabel(root: LocalRoot): string { return root.repoRoot === undefined ? 'Global' : root.label ?? basename(root.repoRoot); }
 
 export async function canonicalLedger(config: Pick<Config, 'placements'>) {
   const placementPaths = await Promise.all(Object.entries(config.placements).map(async ([target, ref]) => ({ target, ref, canonical: await canonicalParentPath(resolve(target)) })));
@@ -196,12 +185,12 @@ export interface LibraryScan {
   inventory(root: LocalRoot, config: Pick<Config, 'placements'>): Promise<LocalInventory>;
 }
 
-export function createLibraryScan(home: string, checkouts: readonly string[], stateRoot: string): LibraryScan {
+export function createLibraryScan(home: string, projects: readonly LibraryProject[], stateRoot: string): LibraryScan {
   let roots: Promise<LocalRoot[]> | undefined;
   const ledgers = new WeakMap<Pick<Config, 'placements'>, ReturnType<typeof canonicalLedger>>();
   const inventories = new Map<string, Promise<LocalInventory>>();
   return {
-    roots: () => roots ??= localSkillRoots(home, undefined, checkouts).then(discovery => discovery.roots),
+    roots: () => roots ??= localSkillRoots(home, projects).then(discovery => discovery.roots),
     async inventory(root, config) {
       let ledger = ledgers.get(config);
       if (!ledger) { ledger = canonicalLedger(config); ledgers.set(config, ledger); }
@@ -240,7 +229,7 @@ export function createLibraryScan(home: string, checkouts: readonly string[], st
  * as looking and finding nothing, and the caller must leave the last known total alone rather than
  * publish a wrong zero. This is a best-effort self-report, not an audit.
  */
-export async function librarySize(home: string, config: Pick<Config, 'placements' | 'checkouts'>, stateRoot: string, scan = createLibraryScan(home, config.checkouts ?? [], stateRoot)): Promise<number | null> {
+export async function librarySize(home: string, config: Pick<Config, 'placements' | 'projects'>, stateRoot: string, scan = createLibraryScan(home, config.projects ?? [], stateRoot)): Promise<number | null> {
   let total = 0;
   for (const root of await scan.roots()) {
     if (root.scope !== 'global' && !root.registered) continue;

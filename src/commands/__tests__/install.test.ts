@@ -2,7 +2,7 @@ import { createExecute } from '../../lib/execute.js';
 import type { ResultOutcome } from '../../lib/frames.js';
 import { getStartedLines } from '../../lib/invocation.js';
 import { access, mkdir, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
-import { join, posix, win32 } from 'node:path';
+import { basename, join, posix, win32 } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as setup from '../setup.js';
 import { installHook } from '../../lib/hook.js';
@@ -217,6 +217,9 @@ describe('install (§6 refs)', () => {
     await expect(access(quarantine)).rejects.toMatchObject({ code: 'ENOENT' });
     const projectHome = join(fixture.root, 'project-home'); const foreign = join(projectHome, '.claude', 'skills', 'sample');
     await mkdir(foreign, { recursive: true }); await writeFile(join(foreign, 'SKILL.md'), 'user-owned');
+    // Added only now: the two Global installs above are headless with no --into, and §9.1's headless
+    // default only reaches Global while the library has no projects to choose between.
+    await store.update((config) => { config.projects = [{ root: checkout, label: 'checkout' }]; });
     expect((await run({ kind: 'project', project: 'product', config: store, home: projectHome, into: checkout, cwd: checkout }, new ScriptedPrompter())).ok).toBe(true);
     expect(await readFile(join(foreign, 'SKILL.md'), 'utf8')).toBe('user-owned');
     await expect(access(join(checkout, '.claude', 'skills', 'sample', 'SKILL.md'))).resolves.toBeUndefined();
@@ -266,7 +269,7 @@ describe('install (§6 refs)', () => {
     const alphaOne = await cloneWithIdentity(productA.bare, join(productA.root, 'alpha-one'));
     const alphaTwo = await cloneWithIdentity(productA.bare, join(productA.root, 'alpha-two'));
     const beta = await cloneWithIdentity(productB.bare, join(productB.root, 'beta'));
-    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = [alphaOne, alphaTwo, beta].map((root) => ({ root, label: basename(root) })); });
 
     expect((await run({ kind: 'project', project: 'alpha', config: store, home, into: alphaOne, cwd: alphaOne }, new ScriptedPrompter())).ok).toBe(true);
     await expect(access(join(alphaOne, '.claude', 'skills', 'project-a', 'SKILL.md'))).resolves.toBeUndefined();
@@ -410,32 +413,44 @@ async function destinationFixture() {
   const home = join(fixture.root, 'home');
   const store = createConfigStore(join(home, '.terum', 'skills'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
-  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   const checkout = join(fixture.root, 'checkout'); await mkdir(checkout);
+  // §7.2: install never adds a project, so a destination has to be in the library beforehand.
+  await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; config.projects = [{ root: checkout, label: 'checkout' }]; });
   return { ...fixture, id, content, home, store, clone, checkout };
 }
 
 describe('Library install destinations', () => {
-  it('places a Global package in a checkout, registers it exactly once, and keeps Global scope', async () => {
+  it('places a Global package in a project, adds nothing to the library, and keeps Global scope', async () => {
     const f = await destinationFixture(); const io = new ScriptedPrompter();
+    const before = (await f.store.read()).projects;
     for (let i = 0; i < 2; i++) expect(await run({ ref: 'sample', config: f.store, home: f.home, into: f.checkout }, io)).toMatchObject({ ok: true });
     const root = await realpath(f.checkout); const config = await f.store.read();
-    expect(config.checkouts).toEqual([root]);
+    expect(config.projects).toEqual(before);
     expect(config.placements[join(root, '.claude', 'skills', 'sample')]).toMatchObject({ id: f.id, scope: { kind: 'global' } });
-    expect(io.lines.filter(line => line === `Registered ${root} in your library.`)).toHaveLength(1);
+    expect(io.lines.some(line => line.startsWith('Added '))).toBe(false);
     await expect(access(join(f.home, '.claude', 'skills', 'sample'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  /** §7.2: "the app never adds a project by itself" — an untracked --into refuses and names `project add`. */
+  it('refuses an --into path that is not a project, naming project add, and writes nothing', async () => {
+    const f = await destinationFixture(); const outside = join(f.root, 'outside'); await mkdir(outside);
+    const result = await run({ ref: 'sample', config: f.store, home: f.home, into: outside }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('project add') });
+    expect(result.ok ? '' : result.error).toContain(await realpath(outside));
+    expect(await f.store.read()).toMatchObject({ pending: [], placements: {}, projects: [{ root: f.checkout }] });
+    await expect(access(join(outside, '.claude'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('refuses a missing destination without creating it, intent, or a placement', async () => {
     const f = await destinationFixture(); const missing = join(f.root, 'missing');
-    expect(await run({ ref: 'sample', config: f.store, into: missing }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `Checkout folder ${missing} is missing` });
+    expect(await run({ ref: 'sample', config: f.store, into: missing }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `Project folder ${missing} is missing` });
     await expect(access(missing)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await f.store.read()).toMatchObject({ pending: [], placements: {} });
   });
 
   it('offers both matching checkouts without a default or an unregistered cwd choice', async () => {
     const f = await destinationFixture(); const other = join(f.root, 'other'); await mkdir(other);
-    await f.store.update(config => { config.checkouts = [f.checkout, other]; });
+    await f.store.update(config => { config.projects = [{ root: f.checkout, label: 'checkout' }, { root: other, label: 'other' }]; });
     const { resolveDestination } = await import('../install.js'); const { readTeam } = await import('../../lib/skills.js');
     const team = await readTeam(f.clone); team.projects.alpha = { remotes: ['git@github.com:acme/product.git'], skills: [f.id] };
     const runner = wrapRunner(systemRunner, async () => ({ code: 0, stdout: 'https://github.com/acme/product.git\n', stderr: '' }));
@@ -447,7 +462,7 @@ describe('Library install destinations', () => {
   });
 
   it('keeps Global first and defaults to the sole origin match; Global packages still ask', async () => {
-    const f = await destinationFixture(); await f.store.update(config => { config.checkouts = [f.seed]; });
+    const f = await destinationFixture(); await f.store.update(config => { config.projects = [{ root: f.seed, label: 'seed' }]; });
     const { resolveDestination } = await import('../install.js'); const { readTeam } = await import('../../lib/skills.js');
     const team = await readTeam(f.clone); team.projects.alpha = { remotes: [f.bare], skills: [f.id] };
     const io = new ScriptedPrompter(['', ''], [], true);
@@ -455,9 +470,10 @@ describe('Library install destinations', () => {
     expect(await resolveDestination(f.store, team, 'alpha', io, true, opts)).toEqual({ kind: 'checkout', root: await realpath(f.seed) });
     expect(await resolveDestination(f.store, team, undefined, io, true, opts)).toEqual({ kind: 'global' });
     expect(io.offered[0]?.[0]).toBe('Global (~/.claude/skills)');
-    expect(io.offeredDefaults).toEqual([`seed · ${await realpath(f.seed)} · current repository`, 'Global (~/.claude/skills)']);
+    // §7.2 deleted writableCheckout, so no choice is marked "current repository" any more.
+    expect(io.offeredDefaults).toEqual([`seed · ${await realpath(f.seed)}`, 'Global (~/.claude/skills)']);
     expect(io.countAsked('Install to')).toBe(2);
-    expect(await run({ ref: 'sample', config: f.store }, new NonInteractivePrompter())).toMatchObject({ ok: false, error: 'Pass --into global or --into <checkout root>' });
+    expect(await run({ ref: 'sample', config: f.store }, new NonInteractivePrompter())).toMatchObject({ ok: false, error: 'Pass --into global or --into <project root>' });
   });
 
   it('updates the version of matching pending intent in place and retains its destination', async () => {

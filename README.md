@@ -65,10 +65,9 @@ npx -y terum-skills@latest setup <org name>/<repo name>
 | | `team create` / `team join` / `team leave` / `team remove <handle>` | Manage the repo and its roster |
 | | `invite <github-user>…` | Grant repo access and print the join line |
 | | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
-| | `checkout add [<path>]` / `checkout remove <path>` / `checkout list` | Register, forget, or list the checkout folders this machine scans (`ls --local` also shows the current repository, labelled not registered) |
-| | `checkout discover [--under <dir>…] [--depth <n>] [--budget-ms <n>] [--register]` | Find local folders holding `.claude/skills`; optionally register them. Setup offers this search and opt-in evaluation of shared skills with no current receipt (`--no-discover` / `--no-evals` skip the offers) |
+| | `project add [<path>]` / `project remove <path>` / `project list` | Add, forget, or list the projects in your library — the folders this machine reads local skills from. Nothing is added for you: setup offers one folder at first run (`--no-projects` / `--no-evals` skip the offers), and the Library adds the rest |
 | | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
-| | `project create [<name>] [--remote <url>]` | Create a team project: a name and the repository its skills place into (the skills themselves are added with `publish --project`) |
+| | `team project create [<name>] [--remote <url>]` | Create a team project: a name and the repository its skills place into (the skills themselves are added with `publish --project`) |
 | | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
 | Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
 | | `install <ref> [--into global\|<checkout root>]` / `uninstall-skill <ref> [--from global\|<checkout root>]` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |
@@ -90,13 +89,13 @@ For a program driving the CLI (the desktop app, a script), `--frames` turns any 
 
 ## How it works
 
-**Your library is your folders.** `ls --local` scans `~/.claude/skills` (Global), every checkout registered with `checkout add`, and the repository you run it from. Each checkout also reports its `origin`, so the listing (and the app's Library header) says whether the folder has a GitHub home and which repository it is. Registering a folder only tells this machine to scan and refresh it; connecting a skill or approving a tool grant is still a separate yes.
+**Your library is your folders.** `ls --local` scans `~/.claude/skills` (Global) and every project added with `project add` — and nothing else: the folder you happen to be standing in is not a project until you say so. Each project also reports its `origin`, so the listing (and the app's Library header) says whether the folder has a GitHub home and which repository it is. Adding a folder only tells this machine to read it; publishing a skill from it is still a separate yes.
 
 **One repo, one copy of each skill.** The team repo holds `skills/<name>/` (the flat store, folder name equals frontmatter `name`, unique repo-wide), `team.json` (endorsed lists and policy), `people/<handle>.json` (each member's identity and installed list, the only file that member's installs touch), and `evals/` (committed receipts, keyed by skill id). A generated GitHub workflow runs the eval checks on PRs.
 
 **Ownership is metadata.** Only the author named in a skill's `metadata.author` may change its folder; only you may write your people file; endorsed lists change through `publish` PRs. A pre-push guard enforces all of this, and every write goes through one `safeWrite` path that fetches, resets to `origin/main`, re-applies the change, and pushes, so two members writing at once never produce a merge conflict in generated files.
 
-**Placement is a plain copy.** `install --into global` copies the skill into `~/.claude/skills/<name>`; `--into <checkout root>` chooses and registers a checkout’s `.claude/skills/`. `uninstall-skill --from global` or `--from <checkout root>` names the copy to remove. Each copy has a per-file fingerprint, and `sync` refreshes Global and registered checkouts from anywhere when the store changes. Hand-edited placed copies are moved to `~/.terum/skills/quarantine/`, never silently overwritten. `sync --prune` empties the quarantine.
+**Placement is a plain copy.** `install --into global` copies the skill into `~/.claude/skills/<name>`; `--into <project root>` chooses a project’s `.claude/skills/`, and refuses a folder that is not already a project. `uninstall-skill --from global` or `--from <checkout root>` names the copy to remove. Each copy has a per-file fingerprint, and `sync` refreshes Global and registered checkouts from anywhere when the store changes. Hand-edited placed copies are moved to `~/.terum/skills/quarantine/`, never silently overwritten. `sync --prune` empties the quarantine.
 
 **Connecting is consent.** `connect` shows the fields it will add to your SKILL.md (license, id, author, category) and asks y/N before writing anything. After that, `sync` mirrors your edits into the repo. If the repo copy and your source diverge, `sync` prints the remedy (`connect --keep-source <id>` or `--keep-repo <id>`) and does nothing until you choose. Skills containing hooks or plugin definitions need `--allow-privileged`.
 

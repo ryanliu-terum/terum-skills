@@ -61,9 +61,9 @@ describe('CLI wiring (§3: commander wiring only)', () => {
   it.each([[['--app'],true],[['--no-app'],false],[[],undefined]] as const)('forwards setup desktop choice %j as %s',async(flags,app)=>{
     const {program,calls}=harness();
     await program.parseAsync(['setup',...flags],{from:'user'});
-    // --no-discover/--no-evals are lone negated options, so commander defaults both to true and setup
+    // --no-projects/--no-evals are lone negated options, so commander defaults both to true and setup
     // forwards them on every run; --app stays undefined because --app/--no-app are a pair.
-    expect(calls).toStrictEqual([{verb:'setup',form:undefined,target:undefined,cwd:process.cwd(),app,discover:true,evals:true}]);
+    expect(calls).toStrictEqual([{verb:'setup',form:undefined,target:undefined,cwd:process.cwd(),app,projects:true,evals:true}]);
   });
 
   it('passes an optional setup target through unchanged', async () => {
@@ -71,8 +71,8 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     await program.parseAsync(['setup'], { from: 'user' });
     await program.parseAsync(['setup', 'acme/team'], { from: 'user' });
     expect(calls).toEqual([
-      { verb: 'setup', cwd: process.cwd(), target: undefined, discover: true, evals: true },
-      { verb: 'setup', cwd: process.cwd(), target: 'acme/team', discover: true, evals: true },
+      { verb: 'setup', cwd: process.cwd(), target: undefined, projects: true, evals: true },
+      { verb: 'setup', cwd: process.cwd(), target: 'acme/team', projects: true, evals: true },
     ]);
   });
 
@@ -174,20 +174,32 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(help).toContain('Deterministic and offline');
   });
 
-  it('wires project create with its optional remote and team selection', async () => {
+  it('wires team project create with its optional remote and team selection', async () => {
+    const calls: unknown[] = [];
+    const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
+      team: async (args) => { calls.push(args); return success({ team: 't', name: 'name' in args ? args.name ?? '' : '', remotes: 'remote' in args && args.remote ? [args.remote] : [], skills: 0 }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['team', 'project', 'create', 'Payments', '--remote', 'https://github.com/a/p'], { from: 'user' });
+    await program.parseAsync(['team', 'project', 'create', '--team', 't'], { from: 'user' });
+    expect(calls).toEqual([
+      { form: undefined, kind: 'project-create', name: 'Payments', remote: 'https://github.com/a/p' },
+      { form: undefined, kind: 'project-create', name: undefined, team: 't' },
+    ]);
+    expect(program.helpInformation()).toContain('project');
+  });
+
+  /** §7.1: `project` is now the Library's local registry, and never reaches the team verb. */
+  it('wires the local project registry to the project verb', async () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-      project: async (args) => { calls.push(args); return success({ team: 't', name: args.name ?? '', remotes: args.remote ? [args.remote] : [], skills: 0 }); },
+      project: async (args) => { calls.push(args.kind); return success({ projects: [] }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
-    await program.parseAsync(['project', 'create', 'Payments', '--remote', 'https://github.com/a/p'], { from: 'user' });
-    await program.parseAsync(['project', 'create', '--team', 't'], { from: 'user' });
-    expect(calls).toEqual([
-      { kind: 'create', name: 'Payments', remote: 'https://github.com/a/p' },
-      { kind: 'create', name: undefined, team: 't' },
-    ]);
-    expect(program.helpInformation()).toContain('project');
+    for (const argv of [['project', 'add', '/a'], ['project', 'remove', '/a'], ['project', 'list']]) await program.parseAsync(argv, { from: 'user' });
+    expect(calls).toEqual(['add', 'remove', 'list']);
   });
 
   it('wires workflow-update as print-only and keeps receipt-check hidden like readme', async () => {
