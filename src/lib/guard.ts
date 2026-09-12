@@ -153,7 +153,7 @@ function permitsMigration(tree: GuardTree, path: string): boolean {
  *
  * Accidents, not abuse: the hook is bypassable and the bypass is attributed.
  */
-export function guardRawPush(tree: GuardTree, identity: { handle: string; author?: string }, form?: InvocationForm): void {
+export function guardRawPush(tree: GuardTree, identity: { handle: string }, form?: InvocationForm): void {
   const handle = normalizeHandle(identity.handle);
   for (const path of tree.changedPaths) {
     if (path === 'README.md') continue;

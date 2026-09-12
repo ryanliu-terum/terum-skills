@@ -7,6 +7,7 @@ import { Prompter } from '../lib/prompt.js';
 import { fromError, failure, Result, success } from '../lib/result.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { readTeam } from '../lib/skills.js';
+import { listVersions } from '../lib/teamRepo.js';
 
 export interface ValidateArgs extends WithForm { target: string; team?: string; cwd?: string; config?: ConfigStore; }
 export interface ValidateResult { name: string; findings: number; warnings: number; }
@@ -28,14 +29,23 @@ export async function run(args: ValidateArgs, io: Prompter): Promise<Result<Vali
       policy = (await readTeam(clone)).policy;
     }
     const absolute = resolve(args.target);
-    let directory: string;
+    // §3.1: inside a clone a skill's BYTES live in its newest version folder. Resolving to
+    // `skills/<name>` would hand hygiene a folder whose only entry is `v1/`, and every run would
+    // report the same two findings about a skill that is perfectly fine.
+    const inClone = async (): Promise<{ directory: string; name: string }> => {
+      const root = resolve(clone, 'skills', args.target);
+      const latest = (await listVersions(clone, args.target))[0];
+      if (latest === undefined) throw new Error(`skills/${args.target} holds no v<N> folder.`);
+      return { directory: resolve(root, latest.folder), name: args.target };
+    };
+    let target: { directory: string; name: string };
     try {
       const details = await lstat(absolute);
-      directory = details.isDirectory() ? absolute : resolve(clone, 'skills', args.target);
-    } catch { directory = resolve(clone, 'skills', args.target); }
+      target = details.isDirectory() ? { directory: absolute, name: basename(absolute) } : await inClone();
+    } catch { target = await inClone(); }
+    const { directory, name } = target;
     await assertSkillDirectory(directory);
     const input = await sourceFiles(directory);
-    const name = basename(directory);
     let assessment;
     try { assessment = assessHygiene(name, input, policy.skill_license); }
     catch (error) { if (!(error instanceof HygieneRefused)) throw error; assessment = error.assessment; }

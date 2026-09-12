@@ -219,13 +219,15 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-      eval: async (args) => { calls.push(args); return success({ team: 't', id: 'id', name: args.ref, runDir: '/tmp/run', ccVersion: 'stub', executionStatus: 'complete' }); },
+      eval: async (args) => { calls.push(args); return success({ team: 't', id: 'id', name: args.ref, runDir: '/tmp/run', ccVersion: 'stub', executionStatus: 'complete', shareHint: true as const }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
-    await program.parseAsync(['eval', 'sample', '--k', '2', '--triggers-only', '--case', 'happy', '--model', 'sonnet', '--judge-model', 'opus', '--gen', '--team', 't'], { from: 'user' });
+    await program.parseAsync(['eval', 'sample', '--k', '2', '--triggers-only', '--case', 'happy', '--model', 'sonnet', '--judge-model', 'opus', '--team', 't'], { from: 'user' });
     await program.parseAsync(['eval', 'sample', '--no-gen'], { from: 'user' });
     expect(calls).toEqual([
-      { ref: 'sample', k: 2, triggersOnly: true, case: 'happy', model: 'sonnet', judgeModel: 'opus', gen: true, team: 't' },
+      // D29 deleted `--gen`; commander still models `--no-gen` as `gen: false`, and false is now the
+      // only value it can carry, so the absent case passes nothing at all.
+      { ref: 'sample', k: 2, triggersOnly: true, case: 'happy', model: 'sonnet', judgeModel: 'opus', team: 't' },
       { ref: 'sample', noGen: true },
     ]);
   });

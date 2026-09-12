@@ -4,14 +4,15 @@ import { applyReadme, generateReadme, ReadmeData, installCounts, installersById,
 const ID_A = '11111111-1111-4111-8111-111111111111';
 const ID_B = '22222222-2222-4222-8222-222222222222';
 const data: ReadmeData = {
-  team: { name: 'team', remote: 'github.com/acme/team', projects: { app: { skills: [ID_A, ID_B] } }, archived: ['bea'] },
+  // §4.1 folded `global` into an ordinary project, so every endorsement is now `project: <key>`.
+  team: { name: 'team', remote: 'github.com/acme/team', projects: { Global: { skills: [ID_A] }, app: { skills: [ID_B] } }, archived: ['bea'] },
   people: [
     { handle: 'amy', display_name: 'Amy', email: 'amy@example.com', github: 'amy', bio: '', installed: [{ id: ID_A, version: null, scope: { kind: 'global' }, since: '2026-09-04' }], declined: [] },
     { handle: 'bea', display_name: 'Bea', email: 'bea@example.com', github: 'bea', bio: '', installed: [{ id: ID_A, version: null, scope: { kind: 'global' }, since: '2026-09-04' }, { id: ID_B, version: null, scope: { kind: 'project', project: 'app' }, since: '2026-09-04' }], declined: [] },
   ],
   skills: [
-    { id: ID_B, name: 'second', description: 'Second skill', category: 'docs', author: 'Bea <bea@example.com>', latest: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
-    { id: ID_A, name: 'first', description: 'First skill', category: 'testing', author: 'Amy <amy@example.com>', latest: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+    { id: ID_B, name: 'second', description: 'Second skill', category: 'docs', author: 'Bea <bea@example.com>', latest: 'v2' },
+    { id: ID_A, name: 'first', description: 'First skill', category: 'testing', author: 'Amy <amy@example.com>', latest: 'v1' },
   ],
 };
 
@@ -20,8 +21,9 @@ describe('README generator (§9)', () => {
     const first = generateReadme(data);
     expect(generateReadme(data)).toBe(first);
     expect(first).toContain('### Amy <amy@example.com>');
-    expect(first).toContain('| first | testing | First skill | 2 | global | aaaaaaaa | — | `npx -y terum-skills@latest install acme/team/first` |');
-    expect(first).toContain('| second | docs | Second skill | 1 | project: app | bbbbbbbb | — | `npx -y terum-skills@latest install acme/team/second` |');
+    // D1: the Latest column is the version LABEL, never a tree hash.
+    expect(first).toContain('| first | testing | First skill | 2 | project: Global | Version 1 | — | `npx -y terum-skills@latest install acme/team/first` |');
+    expect(first).toContain('| second | docs | Second skill | 1 | project: app | Version 2 | — | `npx -y terum-skills@latest install acme/team/second` |');
     expect(first).not.toContain('- @bea — Bea');
   });
 
@@ -33,7 +35,7 @@ describe('README generator (§9)', () => {
         { id: ID_A, version: null, scope: { kind: 'project', project: 'app' }, since: '2026-09-04' },
       ] }],
     });
-    expect(twoScopes).toContain('| first | testing | First skill | 1 | global | aaaaaaaa |');
+    expect(twoScopes).toContain('| first | testing | First skill | 1 | project: Global | Version 1 |');
   });
 
   it('shows a crafted folder name as data in the Skill cell: neither a Markdown link nor an HTML anchor renders', () => {
@@ -148,7 +150,9 @@ it('lists every install record oldest first, including archived members and two 
 it.each([['2026-09-04T10:22:33-07:00\n', '2026-09-04T10:22:33-07:00'], ['', '—']])('latestChange returns a committed date or an empty-history dash', async (stdout, expected) => {
   const calls: unknown[] = [];
   expect(await latestChange({ run: async (...args) => { calls.push(args); return { code: 0, stdout, stderr: '' }; } }, '/clone', 'sample')).toBe(expected);
-  expect(calls).toEqual([['git', ['log', '-1', '--format=%cI', '--', 'skills/sample/v1'], { cwd: '/clone' }]]);
+  // The date is the SKILL's, across every version: a new version folder is a new path, so pinning
+  // the newest one would report each publish as the skill's first change.
+  expect(calls).toEqual([['git', ['log', '-1', '--format=%cI', '--', 'skills/sample'], { cwd: '/clone' }]]);
 });
 it('latestChange surfaces git failure so the inventory can report the row', async () => {
   await expect(latestChange({ run: async () => ({ code: 1, stdout: '', stderr: 'broken history' }) }, '/clone', 'sample')).rejects.toThrow('broken history');
