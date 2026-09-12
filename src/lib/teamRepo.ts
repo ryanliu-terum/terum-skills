@@ -36,6 +36,8 @@ export interface MutableTree extends GuardTree {
   paths(prefix?: string): readonly string[];
   /** Executable entries in the post-image: the reset pre-image, overridden by `setExecutable`. */
   executablePaths(prefix?: string): ReadonlySet<string>;
+  /** Migration-only snapshot of HEAD's directory identities, refreshed before each pure attempt. */
+  beforeTreeId(path: string): string | undefined;
 }
 export type Mutate<R = void> = (tree: MutableTree) => R;
 
@@ -190,10 +192,22 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       for (const entry of index) {
         const tab = entry.indexOf('\t'); const path = tab < 0 ? undefined : entry.slice(tab + 1);
         if (path === undefined) continue;
+        if (options.action === 'migrate' && /^(?:skills\/|evals\/|people\/|team\.json$)/.test(path) && !/^100(?:644|755) /.test(entry)) {
+          throw new Error(`Migration refused: ${path} is not a regular file; resolve it before retrying.`);
+        }
         tracked.add(path);
         if (entry.startsWith('100755 ')) executable.add(path);
       }
-      const tree = makeTree(root, tracked, executable);
+      const treeIds = new Map<string, string>();
+      if (options.action === 'migrate') {
+        const entries = (await requireGit(['ls-tree', '-r', '-d', '-z', 'HEAD', '--', 'skills'])).stdout.split('\0').filter(Boolean);
+        for (const entry of entries) {
+          const match = /^040000 tree ([0-9a-f]{40})\t(.+)$/.exec(entry);
+          if (!match) throw new Error('Could not read the migration tree identities from HEAD.');
+          treeIds.set(match[2]!, match[1]!);
+        }
+      }
+      const tree = makeTree(root, tracked, executable, treeIds);
       const returned = mutate(tree);
       // Authorize the caller's own pure mutation before deriving any files from it. This keeps a
       // forbidden skill write from being reported as a frontmatter/README generation error.
@@ -299,7 +313,7 @@ export function assertSafePath(path: string): void {
 }
 
 /** The tree handed to a mutation: lazy reads of the reset checkout plus an overlay of its edits. */
-function makeTree(root: string, tracked: ReadonlySet<string>, executable: ReadonlySet<string> = new Set()): MutableTree {
+function makeTree(root: string, tracked: ReadonlySet<string>, executable: ReadonlySet<string> = new Set(), treeIds: ReadonlyMap<string, string> = new Map()): MutableTree {
   const cache = new Map<string, Buffer>();
   const overlay = new Map<string, string | Buffer | undefined>();
   // §4.5(2): the mode overlay, parallel to `overlay`. Absent key = "whatever the pre-image says".
@@ -341,6 +355,7 @@ function makeTree(root: string, tracked: ReadonlySet<string>, executable: Readon
       const candidates = new Set([...executable, ...modes.keys()]);
       return new Set([...candidates].filter((path) => isExecutable(path) && live(path) && path.startsWith(prefix)));
     },
+    beforeTreeId: (path) => treeIds.get(path),
   };
 }
 

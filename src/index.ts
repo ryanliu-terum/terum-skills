@@ -101,7 +101,7 @@ try {
       report({ verb: 'sync', ok: false, error: '`sync --hook` is the session hook and is not available over frames; run plain `sync`.', exitCode: 1 });
       process.exitCode = 1;
     } else {
-      await buildProgram(execute, undefined, { launch, form, noUpdateCheck }).parseAsync(argv);
+      await buildProgram(execute, undefined, { launch, form, noUpdateCheck, frames: true }).parseAsync(argv);
     }
   } else {
     await buildProgram(execute, undefined, { launch, form, noUpdateCheck }).parseAsync();
