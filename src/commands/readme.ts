@@ -16,6 +16,13 @@ export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ chan
     const runner = args.runner ?? systemRunner;
     const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd });
     if (origin.code !== 0) throw new Error(`Could not read origin: ${(origin.stderr || origin.stdout).trim()}`);
+    // §13.1(a): refuse loudly on a pre-migration repo instead of regenerating a catalogue from a
+    // layout this reader cannot see. `readReadmeData` skips any `skills/<name>/` with no `v<N>` folder
+    // (under layout 2 the SKILL.md files sit at the skill root), which renders as "No shared skills
+    // yet" — and the committed Action runs the latest CLI with `contents: write`. `applyReadme`'s
+    // never-blank refusal is the second, independent guard; this one makes the failure loud and
+    // non-zero, carrying `layoutVersionSchema`'s own `team migrate` remedy.
+    parseJson(teamSchema, await readFile(join(cwd, 'team.json'), 'utf8'), 'team.json');
     const data = await readReadmeData(cwd, origin.stdout.trim());
     if (args.prComment) {
       const base = await runner.run('git', ['show', `${args.prComment}:team.json`], { cwd });

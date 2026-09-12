@@ -130,6 +130,16 @@ export function applyReadme(existing: string, block: string): string {
     }
   }
   const expression = new RegExp(`${escapeRegExp(README_BEGIN)}[\\s\\S]*?${escapeRegExp(README_END)}`);
+  // §13.1(a), load-bearing: only this function sees both sides, so the never-blank invariant belongs
+  // here and not in `generateReadme`. `readReadmeData` skips any `skills/<name>/` holding no `v<N>`
+  // folder, so a half-migrated repo renders "No shared skills yet." — and the committed Action is the
+  // only job with `contents: write`, so it would commit and push that over the team's whole
+  // catalogue. Refuse the replacement and leave the block untouched; do NOT throw, because a throw
+  // fires identically when a team legitimately removes its last shared skill and would wedge README
+  // regeneration for them permanently. A stale catalogue is recoverable; a blanked, pushed one is not.
+  const previous = existing.match(expression)?.[0].replace(README_BEGIN, '').replace(README_END, '').trim();
+  const emptyCatalogue = /^No shared skills yet\.$/m;
+  if (previous && !emptyCatalogue.test(previous) && emptyCatalogue.test(block)) return existing;
   if (expression.test(existing)) return existing.replace(expression, () => block.trimEnd()); // function form: `$&`/`$1` in skill text must not be interpreted
   const suffix = existing.length === 0 ? '' : existing.endsWith('\n') ? '\n' : '\n\n';
   return `${existing}${suffix}${block}`;

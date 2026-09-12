@@ -195,7 +195,14 @@ async function cardReceipt(clone: string, id: string, versions: readonly SkillVe
   // corrupt newest file fails closed for that version only and the walk continues, so one bad file
   // cannot blank a skill with three good older evals.
   const selected = await selectCardEval(clone, id, versions, onProblem);
-  if (selected.eval === null) return null;
+  // D60: §8.2 makes the "from Version N" label on the card face mandatory — "a card showing v3's score
+  // next to a v5 install button is a claim about bytes the user will not receive", and the label "is
+  // the only thing that keeps the reversal honest". That label and the DTO limbs that carry it ship
+  // with B4 (§8.1's `evalVersion`/`latestVersion`/`latestEvalState` on `LsSkill`), so until B4 lands
+  // there is nowhere for the disclosure to go. `main` must never carry the reversal without it, so a
+  // stale receipt renders "—" here exactly as it does today. B4 deletes this clause in the same
+  // commit that adds `evalVersionLabel`; the README half (`annotate`) already discloses honestly.
+  if (selected.eval === null || selected.eval.stale) return null;
   const found = selected.eval.receipt.receipt;
   const { model, k, cc_version, timestamp, runner_handle } = found.provenance;
   return { run_id: found.run_id, verdict: found.verdict, execution_status: found.execution_status, expected_rows: found.expected_rows, scored_rows: found.scored_rows, comparisons: found.comparisons, arm_scores: found.arm_scores, provenance: { model, k, cc_version, timestamp, runner_handle } };

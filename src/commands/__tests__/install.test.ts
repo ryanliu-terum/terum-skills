@@ -105,7 +105,13 @@ describe('install (§6 refs)', () => {
     // The marketplace installs the latest; picking an older one is not a thing this verb offers, and
     // a tree hash is not a version at all any more.
     expect(await run({ ref: `sample@${tree.slice(0, 8)}`, config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter()))
-      .toMatchObject({ ok: false, error: expect.stringContaining('is not a version; install takes the latest version of a skill.') });
+      .toMatchObject({ ok: false, error: expect.stringContaining('Installing a previous version is not supported yet') });
+    expect((await store.read()).placements).toEqual({});
+    // The spelling the new §3.2 vocabulary actually teaches. The old guard tested the SHAPE, so this
+    // passed it and was then silently discarded in favour of the latest — the user asked for one
+    // version and got another with nothing on screen saying so.
+    expect(await run({ ref: 'sample@v1', config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter()))
+      .toMatchObject({ ok: false, error: expect.stringContaining('Installing a previous version is not supported yet') });
     expect((await store.read()).placements).toEqual({});
 
     const result = await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter());
@@ -303,6 +309,25 @@ describe('install (§6 refs)', () => {
     expect(Object.keys((await store.read()).placements)).toEqual(ledgerBeforeOutside);
     await expect(access(join(outside, '.claude', 'skills', 'project-a'))).rejects.toMatchObject({ code: 'ENOENT' });
 
+  });
+
+  it('installs a member batch whose installed[] carries a legacy 40-hex version, instead of aborting the whole batch', async () => {
+    const fixture = await bareTeam();
+    const id = '11111111-1111-4111-8111-111111111111';
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    // `persistedVersionSchema` still admits a 40-hex tree hash, so this is ordinary data on any
+    // machine that installed before layout 3. The old guard tested the SHAPE of a forwarded version
+    // and threw on it, aborting every skill in the batch — for a field install never even read.
+    await pushFromSeed(fixture.seed, 'people/mira.json', `${JSON.stringify(person('mira', { installed: [{ id, version: 'a'.repeat(40), scope: { kind: 'global' }, since: '2026-09-04' }] }))}\n`);
+    const home = join(fixture.root, 'home');
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+
+    const result = await run({ kind: 'member', member: 'mira', config: store, home }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true });
+    // Installed at the LATEST version, which is what §9.1 says install always does.
+    expect(Object.values((await store.read()).placements)).toMatchObject([{ id, version: 'v1' }]);
   });
 
   it('resolves qualified, self-locating, and unique ID refs while rejecting ambiguous batch versions and prefixes without placement', async () => {

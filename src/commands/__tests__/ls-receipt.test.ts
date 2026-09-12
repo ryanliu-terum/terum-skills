@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, git, person, ScriptedPrompter } from '../../lib/__tests__/fixtures.js';
 import { run } from '../ls.js';
-import { pendingIds, pendingReceipt, seedPending } from './pending-eval-fixtures.js';
+import { pendingIds, pendingReceipt, pendingSkill, seedPending } from './pending-eval-fixtures.js';
 
 /** A two-skill team (alpha, beta), pushed and cloned, with `ls` ready to read it. */
 async function team() {
@@ -33,6 +33,23 @@ const skillsOf = async (store: Awaited<ReturnType<typeof reader>>, io = new Scri
 };
 
 describe('ls carries each skill\'s current-version receipt (card lift)', () => {
+  // D60/§8.2. The real stale walk: a receipt under v1 while the skill's latest version is v3. The
+  // existing `older` fixture parks its receipt under `evals/<id>/archive/<40-hex>/`, a folder the
+  // version walk never visits, so nothing exercised this branch before.
+  it('renders no receipt when the newest usable eval belongs to an older version, until B4 ships the disclosure', async () => {
+    const fixture = await team();
+    await pendingSkill(fixture.seed, 'alpha', pendingIds[0]!, 'v3');
+    await git(['add', '--all'], fixture.seed); await git(['commit', '-q', '-m', 'alpha v3'], fixture.seed);
+    await pendingReceipt(fixture.seed, { version: 'v1', scored: true });
+    const { skills } = await skillsOf(await reader(fixture));
+    const alpha = skills.find((skill) => skill.name === 'alpha');
+    expect(alpha).toMatchObject({ latest: 'v3' });
+    // §8.2: "a card showing v3's score next to a v5 install button is a claim about bytes the user
+    // will not receive", and the version label is the only thing that keeps the reversal honest. That
+    // label ships with B4, so on this branch the honest render is the same "—" main shows today.
+    expect(alpha?.receipt).toBeNull();
+  });
+
   it('reports the receipt\'s own comparison, arm scores and provenance for the evaluated skill, and null for the unevaluated one', async () => {
     const fixture = await team();
     await pendingReceipt(fixture.seed, { scored: true });

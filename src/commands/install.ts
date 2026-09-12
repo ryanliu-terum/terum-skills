@@ -18,7 +18,6 @@ import { Config, Destination, Team, describeRaw, handleSchema, parseJson, parseO
 import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { listVersions } from '../lib/teamRepo.js';
-import { VERSION_FOLDER } from '../lib/versions.js';
 
 export interface InstallArgs extends WithForm {
   into?: string;
@@ -54,7 +53,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       const destination = await destinationFor(team);
       const results: InstalledResult[] = [];
       for (const item of person.installed) {
-        const result = await installOne({ team, destination, id: item.id, version: item.version ?? undefined, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io);
+        const result = await installOne({ team, destination, id: item.id, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io);
         results.push(result);
       }
       return success(results);
@@ -87,12 +86,20 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       return bootstrapped.value.team;
     });
     const destination = await destinationFor(team);
-    return success([await installOne({ team, destination, reference: reference.name, version: reference.version, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
+    // §9.1: a `@version` in a ref is refused HERE, where it is genuinely a ref the user typed. The
+    // old guard lived inside installOne and tested the spelling, so `@v2` — the exact vocabulary §3.2
+    // teaches — passed it and was then silently discarded in favour of the latest version, while a
+    // legacy 40-hex version that `persistedVersionSchema` still admits aborted a whole `install
+    // member` batch. Neither reached the user as a sentence.
+    if (reference.version !== undefined) {
+      throw new Error(`Installing a previous version is not supported yet; install installs the latest version of ${reference.name}.`);
+    }
+    return success([await installOne({ team, destination, reference: reference.name, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
   } catch (error) { return fromError(error); }
 }
 
 /** Shared by team join and sync: exactly one install/consent/placement path. */
-export async function installOne(input: { team: string; destination: Destination; reference?: string; id?: string; version?: string; project?: string; scope?: { kind: 'global' } | { kind: 'project'; project: string }; force?: boolean; store: ConfigStore; runner: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'> }, io: Prompter): Promise<InstalledResult> {
+export async function installOne(input: { team: string; destination: Destination; reference?: string; id?: string; project?: string; scope?: { kind: 'global' } | { kind: 'project'; project: string }; force?: boolean; store: ConfigStore; runner: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'> }, io: Prompter): Promise<InstalledResult> {
   const config = await input.store.read();
   const binding = config.teams[input.team];
   if (!binding?.handle) throw new Error(`Team ${input.team} has no joined handle.`);
@@ -104,11 +111,9 @@ export async function installOne(input: { team: string; destination: Destination
   const scope = input.scope ?? (packageProject ? { kind: 'project' as const, project: packageProject } : { kind: 'global' as const });
   if (input.destination.kind === 'checkout') await assertProjectFolder(input.destination.root);
   // §9.1 (B3's forced slice): an install source is `skills/<name>/v<max>/` — already an immutable
-  // checkout inside the clone, so there is nothing to materialize. A `@version` ref is refused: the
-  // marketplace installs the latest, and picking an older one is not a thing this verb offers.
-  if (input.version !== undefined && input.version !== null && !VERSION_FOLDER.test(input.version)) {
-    throw new Error(`${skill.name}@${input.version} is not a version; install takes the latest version of a skill.`);
-  }
+  // checkout inside the clone, so there is nothing to materialize. The `@version` refusal lives at
+  // the ref site in `run`; nothing here ever read a caller-supplied version, which is why a pin was
+  // accepted and then ignored.
   const latest = (await listVersions(clone, skill.name))[0]?.folder ?? null;
   const pending = { op: 'install' as const, id: skill.id, team: input.team, scope, destination: input.destination, version: latest, started: new Date().toISOString() };
   const pendingAlreadyExists = (await input.store.read()).pending.some((entry) => samePending(entry, pending));

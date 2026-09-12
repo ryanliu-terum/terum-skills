@@ -76,6 +76,23 @@ describe('README generator (§9)', () => {
     expect(empty).toContain('No shared skills yet.');
   });
 
+  // §13.1(a)/§14.1. A derived artifact may not silently delete a repo's catalogue: the Action is the
+  // only job with `contents: write`, so an empty render would be committed and PUSHED over it.
+  it('refuses to replace a non-empty catalogue with the empty fallback, and leaves the block untouched', () => {
+    const populated = applyReadme('Intro\n', generateReadme(data));
+    expect(populated).not.toContain('No shared skills yet.');
+    // The half-migrated case: `readReadmeData` skips any skills/<name>/ holding no v<N> folder, so
+    // every name can vanish and the generator emits the empty fallback over a real catalogue.
+    expect(applyReadme(populated, generateReadme({ ...data, skills: [] }))).toBe(populated);
+    // But it must REFUSE, not throw: a team legitimately removing its last shared skill would hit the
+    // same path, and a throw would wedge README regeneration for them permanently.
+    expect(() => applyReadme(populated, generateReadme({ ...data, skills: [] }))).not.toThrow();
+    // First generation into a README that has no catalogue yet is still allowed.
+    expect(applyReadme('Intro\n', generateReadme({ ...data, skills: [] }))).toContain('No shared skills yet.');
+    // And a populated catalogue still replaces a populated catalogue normally.
+    expect(applyReadme(populated, generateReadme(data))).toBe(populated);
+  });
+
   it('replaces only the generated markers and preserves every surrounding byte', () => {
     const existing = 'Intro with two spaces  \n\n<!-- terum-skills:begin -->\nold\n<!-- terum-skills:end -->\n\nHand written footer\n';
     const next = applyReadme(existing, generateReadme(data));
