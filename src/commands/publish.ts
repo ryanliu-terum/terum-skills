@@ -115,7 +115,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const candidate = skillContentDigest(files);
 
     // 6a. The local regression gate (D19). Absence of a receipt never blocks; nothing moves here.
-    const local = await localReceiptsFor(store.root, candidate);
+    const local = await localReceiptsFor(store.root, candidate, line => io.print(line));
     // D19 asks about the LATEST eval of these exact bytes. `localReceiptsFor` sorts run ids ascending
     // and run ids are UTC stamps, so `.find(FAIL)` returned the OLDEST failure: once a run failed, no
     // amount of passing re-runs of the same bytes could ever clear the gate again.

@@ -1014,6 +1014,20 @@ describe('f-wizard cost and run choices', () => {
     expect((await readEvalQueue(args.config.root)).items).toMatchObject([{ team: 'team', skill: 'alpha', window: 'overnight' }, { team: 'team', skill: 'beta', window: 'overnight' }]);
     expect(io.events).toContain('print:Queued 2 evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with `terum-skills eval --drain`.');
   });
+  it('D61: reports Overnight as skipped when nothing could actually be queued', async () => {
+    // `steps.evals` is what the app renders back as this step's outcome. The queue helper already
+    // prints that nothing could be queued — a candidate with no copy on this machine cannot be —
+    // but the outcome was set to `queued` regardless, so the app told the user paid runs were
+    // waiting overnight when the queue was empty.
+    const args = await optionalSetup(2), evaluate = vi.fn(successfulEval), preflight = vi.fn();
+    // Same candidates, no copies on this machine: exactly the state the early return exists for.
+    await rm(join(args.home, '.claude', 'skills'), { recursive: true, force: true });
+    const io = optionalAnswers({}, { 'Evaluate the ': 'Overnight' });
+    expect(await run({ ...args, form: 'bare', preflight, verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } });
+    expect(io.events).toContain('print:None of those skills has a copy on this machine, so none could be queued.');
+    expect((await readEvalQueue(args.config.root)).items).toEqual([]);
+    expect(evaluate).not.toHaveBeenCalled();
+  });
   it.each([true, false])('batches continue=%s, preserving remaining work when stopped', async more => {
     const args = await optionalSetup(2), evaluate = vi.fn(successfulEval), preflight = vi.fn(async () => success({ ccVersion: 'test' }));
     const io = optionalAnswers({ 'Continue with the next ': more }, { 'Evaluate the ': 'In batches', 'How many at a time?': '1' });

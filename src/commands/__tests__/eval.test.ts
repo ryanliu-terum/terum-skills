@@ -9,7 +9,7 @@ import { bareTeam, cloneWithIdentity, holdCloneLock, pushFromSeed, ScriptedPromp
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { skillContentDigest } from '../../lib/skills.js';
 import { sourceFiles } from '../../lib/skill-source.js';
-import { run } from '../eval.js';
+import { run, saveGeneratedAssets } from '../eval.js';
 import { run as publishRun } from '../publish.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -218,6 +218,38 @@ describe('eval (§6 / IE2)', () => {
     // …and the consequence the digest exists for: §5.1 resolves it and attaches the run to v1.
     const published = await publishRun({ ref: 'sample', home, config: store }, new ScriptedPrompter([], [false]));
     expect(published).toMatchObject({ ok: true, value: { version: 'v1', attachedEvals: 1 } });
+  });
+
+  it('D61: a generated asset never lands on an authored file, whatever the volume spells it', async () => {
+    // The pre-refactor verb refused both writes outright; this branch deleted the refusals, on the
+    // reasoning that generation "only ever runs for an asset that was MISSING". That holds only for
+    // the EXACT spelling. `authoredTrigger` is a case-SENSITIVE lookup in the sourceFiles map, and
+    // the write lands on whatever the volume does — on macOS's case-insensitive APFS an authored
+    // `evals/Triggers.yaml` is invisible to the lookup and its BYTES are replaced by model output,
+    // while the directory still lists the authored name. That last part is what makes it silent.
+    const { store, home, folder } = await evalFixture();
+    await writeFile(join(folder, 'evals', 'triggers.yaml'), TRIGGERS).catch(async () => {
+      await mkdir(join(folder, 'evals'), { recursive: true });
+      await writeFile(join(folder, 'evals', 'triggers.yaml'), TRIGGERS);
+    });
+    const saved = await saveGeneratedAssets(folder, { triggers: generatedTriggers } as never);
+    expect(saved).toMatchObject({ ok: false, error: expect.stringContaining('a generated asset never overwrites an authored one') });
+    expect(await readFile(join(folder, 'evals', 'triggers.yaml'), 'utf8')).toBe(TRIGGERS);
+    void store; void home;
+  });
+
+  it('D61: the refusal asks the FILESYSTEM, so a case-only difference is caught where it matters', async () => {
+    const { folder } = await evalFixture();
+    await mkdir(join(folder, 'evals'), { recursive: true });
+    await writeFile(join(folder, 'evals', 'Triggers.yaml'), TRIGGERS);
+    const saved = await saveGeneratedAssets(folder, { triggers: generatedTriggers } as never);
+    // On a case-insensitive volume (macOS) the write would have clobbered the authored file, so the
+    // guard must fire. On a case-sensitive one they are genuinely different files and generation is
+    // correct to proceed — the same code is right on both, which is why the check is a real read.
+    const caseInsensitive = existsSync(join(folder, 'evals', 'triggers.yaml'));
+    if (caseInsensitive) expect(saved).toMatchObject({ ok: false });
+    else expect(saved).toMatchObject({ ok: true });
+    expect(await readFile(join(folder, 'evals', 'Triggers.yaml'), 'utf8')).toBe(TRIGGERS);
   });
 
   it('D29: authored assets are never regenerated and never overwritten — per asset', async () => {

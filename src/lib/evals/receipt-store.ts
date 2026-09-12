@@ -96,18 +96,25 @@ export async function selectCardEval(
  * `<digest>` is the bare 64 hex characters, so the `sha256:` prefix is stripped here.
  * Newest run last, since `RUN_ID_PATTERN` keeps lexicographic order chronological.
  */
-export async function localReceiptsFor(stateRoot: string, contentDigest: string): Promise<{ runId: string; receipt: Receipt }[]> {
+export async function localReceiptsFor(stateRoot: string, contentDigest: string, report?: (line: string) => void): Promise<{ runId: string; receipt: Receipt }[]> {
   const root = join(stateRoot, 'evals', 'local', contentDigest.replace(/^sha256:/, ''));
   let runIds: string[];
   try { runIds = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort(); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
   const found: { runId: string; receipt: Receipt }[] = [];
+  const unreadable: string[] = [];
   for (const runId of runIds) {
     let raw: unknown;
     try { raw = JSON.parse(await readFile(join(root, runId, 'receipt.json'), 'utf8')); }
-    catch { continue; } // an unreadable local run is skipped, never fatal to a publish
+    catch { unreadable.push(runId); continue; } // an unreadable local run is skipped, never fatal to a publish
     const parsed = receiptSchema.safeParse(raw);
     if (parsed.success) found.push({ runId, receipt: parsed.data });
+    else unreadable.push(runId);
   }
+  // Skipping stays — a bad file must never be fatal to a publish. The SILENCE was the defect: D19's
+  // gate reads the NEWEST receipt for these bytes, so if that one is the unreadable one, the gate
+  // simply does not fire and a known regression is published without the question ever being asked.
+  // Fail open, but never quietly: the caller is told what it did not get to see.
+  if (unreadable.length > 0 && report) report(`${unreadable.length} local eval run(s) of these exact bytes could not be read (${unreadable.join(', ')}), so they were not considered.`);
   return found;
 }

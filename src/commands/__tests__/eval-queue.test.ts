@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
@@ -6,7 +6,7 @@ import { enqueueEvals, readEvalQueue, withEvalQueueLock, type EvalQueueItem } fr
 import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { failure, success } from '../../lib/result.js';
 import { measuredReceipt } from './pending-eval-fixtures.js';
-import { runQueue, type EvalArgs, type EvalResult } from '../eval.js';
+import { queueItemsFor, runQueue, type EvalArgs, type EvalResult } from '../eval.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { skillContentDigest } from '../../lib/skills.js';
 import { sourceFiles } from '../../lib/skill-source.js';
@@ -188,4 +188,64 @@ it('§6.2/§6.6: bytes that already carry a LOCAL receipt are dropped before pro
 it('an empty window selection preserves other queued items and prints no zero-size batch',async()=>{
  const {config,io}=await fixture();await enqueueEvals(config.root,[item('later','later')]);const evaluate=vi.fn();
  expect(await runQueue({config,drain:true,window:'overnight',evaluate},io)).toEqual(success({items:[item('later','later')],attempted:0,completed:0,failures:[]}));expect(io.lines).toEqual(['No queued evals.']);expect(evaluate).not.toHaveBeenCalled();
+});
+
+it('D61: a dropped queue item is named, not silently discarded', async () => {
+  // §6.6's DROP is deliberate — a pre-upgrade item carries a 40-hex tree hash the v2 shape rejects,
+  // and rethrowing took the whole drainer down. The SILENCE was not: each item is a paid run the
+  // user asked for, and it vanished without a word, leaving them waiting for a result.
+  const { config, io } = await fixture();
+  await enqueueEvals(config.root, [item('alpha')]);
+  const path = join(config.root, 'run', 'eval-queue.json');
+  const file = JSON.parse(await readFile(path, 'utf8')) as { schema: number; items: unknown[] };
+  file.items.push({ skill: 'beta', path: '/library/beta', contentHash: 'a'.repeat(40), requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' });
+  await writeFile(path, JSON.stringify(file));
+  const lines: string[] = [];
+  const queue = await readEvalQueue(config.root, line => lines.push(line));
+  expect(queue.items).toHaveLength(1);
+  expect(lines).toEqual(['1 queued eval could not be read and was dropped from the queue (beta); queue them again if you still want them.']);
+  // The reporter stays optional, so every internal read is unchanged.
+  expect((await readEvalQueue(config.root)).items).toHaveLength(1);
+  void io;
+});
+
+it('D61: a bare --dequeue never reaches past the teamless item it exists for', async () => {
+  // Before this, the bare form matched on the NAME alone, so one `--dequeue deploy-check` cancelled
+  // every team's queued run of that name at once — each a paid run the user never named, cancelled
+  // silently and finally. `main` had no bare form at all; this branch introduced it.
+  const { config, io } = await fixture();
+  const teamless: EvalQueueItem = { skill: 'alpha', path: '/library/alpha', contentHash: DIGEST_B, requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' };
+  await enqueueEvals(config.root, [item('alpha'), { ...item('alpha'), team: 'other', contentHash: DIGEST_A + '' }, teamless]);
+  await expect(runQueue({ config, dequeue: 'alpha' } as unknown as EvalArgs, io)).resolves.toMatchObject({ ok: false, error: expect.stringContaining('nothing was cancelled') });
+  expect((await readEvalQueue(config.root)).items).toHaveLength(2);
+  // Name a team and exactly that item goes; the teamless one is then reachable by the bare form.
+  expect(await runQueue({ config, dequeue: 'team/alpha' } as unknown as EvalArgs, io)).toMatchObject({ ok: true });
+  expect((await readEvalQueue(config.root)).items).toEqual([teamless]);
+  expect(await runQueue({ config, dequeue: 'alpha' } as unknown as EvalArgs, io)).toMatchObject({ ok: true });
+  expect((await readEvalQueue(config.root)).items).toEqual([]);
+});
+
+it('D61: one unreadable folder costs that folder, not the whole batch', async () => {
+  // `resolveLibrarySkill`'s miss was already reported-and-skipped; the digest read beside it was not
+  // guarded at all, so a single unreadable directory threw out of the loop and every other skill the
+  // user asked to queue went with it, silently.
+  const { config } = await fixture();
+  const home = await temporaryDirectory();
+  for (const name of ['alpha', 'beta']) {
+    const path = join(home, '.claude', 'skills', name);
+    await mkdir(path, { recursive: true });
+    await writeFile(join(path, 'SKILL.md'), SKILL.replace('name: alpha', `name: ${name}`));
+  }
+  // Readable folder, readable SKILL.md, one unreadable FILE beside it: the inventory still resolves
+  // the ref (it reads SKILL.md), and `sourceFiles` — which reads every file to digest them — is what
+  // throws. That ordering is what made this lose the batch rather than the one folder.
+  const blocked = join(home, '.claude', 'skills', 'beta', 'notes.md');
+  await writeFile(blocked, 'notes');
+  await chmod(blocked, 0o000);
+  try {
+    const lines: string[] = [];
+    const items = await queueItemsFor({ home, config: await config.read(), stateRoot: config.root, names: ['beta', 'alpha'], requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' }, line => lines.push(line));
+    expect(items.map(entry => entry.skill)).toEqual(['alpha']);
+    expect(lines.join('\n')).toContain('so it was not queued; the rest were.');
+  } finally { await chmod(blocked, 0o644); }
 });

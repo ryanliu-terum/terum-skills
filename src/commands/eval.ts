@@ -379,8 +379,33 @@ async function writeGeneratedAssets(root: string, generated: GeneratedAssets): P
  * Regenerating is deleting `evals/cases/` and re-running.
  */
 export async function saveGeneratedAssets(source: string, generated: GeneratedAssets): Promise<Result> {
+  const cases = join(source, 'evals', 'cases');
+  const triggers = join(source, 'evals', 'triggers.yaml');
+  // Restored from the pre-refactor verb, which had both refusals. The write-back's claim that it
+  // "only ever runs for an asset that was MISSING" holds only for the EXACT spelling: `authoredTrigger`
+  // is a case-SENSITIVE lookup in the `sourceFiles` map, while the write lands on a case-INSENSITIVE
+  // volume. On macOS an authored `evals/Triggers.yaml` is invisible to that lookup, so generation
+  // proceeds and the write replaces its contents — with the directory still listing the authored
+  // name, which is what makes it silent. Verified on this repo's own APFS volume: after writing
+  // `triggers.yaml` the listing still reads `['Triggers.yaml']` and its bytes are the model's.
+  // The check asks the FILESYSTEM, so it is correct on both kinds of volume: on a case-sensitive one
+  // the two names are different files and generation proceeds as it should.
+  if (generated.cases !== undefined && await pathExists(cases)) return failure(`${cases} already exists, so the generated eval cases were not written — a generated asset never overwrites an authored one. Rename or delete it, then run eval again.`);
+  if (generated.triggers !== undefined && await pathExists(triggers)) return failure(`${triggers} already exists, so the generated triggers were not written — a generated asset never overwrites an authored one. Rename or delete it, then run eval again.`);
   await writeGeneratedAssets(join(source, 'evals'), generated);
   return success(undefined);
+}
+
+/** Existence as the FILESYSTEM resolves it, which on a case-insensitive volume is the question that
+ *  matters: `readFile` finds `Triggers.yaml` when asked for `triggers.yaml`, and so would the write. */
+async function pathExists(path: string): Promise<boolean> {
+  try { await readFile(path); return true; }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return false;
+    if (code === 'EISDIR') return true;
+    throw error;
+  }
 }
 
 /**
@@ -505,7 +530,12 @@ export async function queueItemsFor(
   for (const name of input.names) {
     const local = await resolveLibrarySkill(input.home, input.config, input.stateRoot, name);
     if (local === undefined) { report(`${name}: no copy of this skill on this machine, so it cannot be evaluated; install it first.`); continue; }
-    const files = await sourceFiles(local.path);
+    // Symmetrical with the miss above: one folder that cannot be read costs that folder, not the
+    // whole batch. Unguarded, a single unreadable directory threw out of the loop and every other
+    // skill the user asked to queue was silently lost with it.
+    let files;
+    try { files = await sourceFiles(local.path); }
+    catch (error) { report(`${name}: could not read ${local.path} (${error instanceof Error ? error.message : String(error)}), so it was not queued; the rest were.`); continue; }
     items.push({
       skill: local.name, path: local.path, contentHash: skillContentDigest(files.files),
       requestedAt: input.requestedAt, window: input.window,
@@ -545,14 +575,14 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
     if (args.noGen || args.case !== undefined || args.triggersOnly || args.executionOnly || args.expectedVersion !== undefined || args.team !== undefined) return failure('Queue modes use the queued team and the full committed skill; per-skill selection flags are unavailable.');
     const store = args.config ?? createConfigStore();
     if (args.queueList || args.dequeue !== undefined) {
-      const queue = args.dequeue === undefined ? await readEvalQueue(store.root) : await dequeueEvals(store.root, args.dequeue);
+      const queue = args.dequeue === undefined ? await readEvalQueue(store.root, line => io.print(line)) : await dequeueEvals(store.root, args.dequeue);
       if (queue.items.length === 0) io.print('No queued evals.');
       // §6.6: a queued item is keyed on the BYTES it was queued against, and its team is optional.
       for (const item of queue.items) io.print(`${item.team === undefined ? '' : `${item.team}/`}${item.skill}@${item.contentHash} · ${item.window} · ${item.requestedAt}${item.lastError === undefined ? '' : ` · ${item.lastError}`}`);
       return success({ items: queue.items });
     }
     return await withEvalQueueLock(store.root, 'drain', async assertHeld => {
-      const pending = (await readEvalQueue(store.root)).items.filter(item => args.window === undefined || item.window === args.window).slice(0, args.max);
+      const pending = (await readEvalQueue(store.root, line => io.print(line))).items.filter(item => args.window === undefined || item.window === args.window).slice(0, args.max);
       if (!pending.length) { io.print('No queued evals.'); return success({ items: (await readEvalQueue(store.root)).items, attempted: 0, completed: 0, failures: [] }); }
       let attempted = 0, completed = 0;
       const failures: { item: EvalQueueItem; error: string }[] = [];

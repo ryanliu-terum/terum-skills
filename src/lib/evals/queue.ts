@@ -41,7 +41,7 @@ export const queueKey = (item: EvalQueueItem): string => JSON.stringify([item.sk
  * spend money later, not data — and the old rethrow took the whole drainer down on the first read
  * after an upgrade, because every pre-upgrade item carries a 40-hex tree hash the new shape rejects.
  */
-export async function readEvalQueue(root: string): Promise<EvalQueue> {
+export async function readEvalQueue(root: string, report?: (line: string) => void): Promise<EvalQueue> {
   let raw: string;
   try { raw = await readFile(queuePath(root), 'utf8'); }
   catch (error) {
@@ -51,10 +51,16 @@ export async function readEvalQueue(root: string): Promise<EvalQueue> {
   // A file that is not a queue at all is still never silently replaced: that throws as it always did.
   const file = looseSchema.parse(JSON.parse(raw));
   const items: EvalQueueItem[] = [];
+  const dropped: string[] = [];
   for (const item of file.items) {
     const parsed = itemSchema.safeParse(item);
     if (parsed.success) items.push(parsed.data);
+    // The DROP is §6.6 and stays. The SILENCE is not: each of these is a paid run the user asked
+    // for, and vanishing without a word leaves them waiting for a result that will never come.
+    // Naming it is all a caller can do — the item is unparseable, so it cannot be repaired here.
+    else dropped.push(typeof (item as { skill?: unknown } | null)?.skill === 'string' ? (item as { skill: string }).skill : 'an unnamed item');
   }
+  if (dropped.length > 0 && report) report(`${dropped.length} queued eval${dropped.length === 1 ? '' : 's'} could not be read and ${dropped.length === 1 ? 'was' : 'were'} dropped from the queue (${dropped.join(', ')}); queue them again if you still want them.`);
   return { schema: file.schema, items };
 }
 
@@ -110,5 +116,13 @@ export async function dequeueEvals(root: string, ref: string): Promise<EvalQueue
   const parts = ref.split('/');
   if (parts.length > 2 || parts.some(part => !part.trim())) throw new Error('--dequeue requires <skill> or <team>/<skill>.');
   const [team, skill] = parts.length === 2 ? parts : [undefined, parts[0]];
-  return updateEvalQueue(root, items => items.filter(item => item.skill !== skill || (team !== undefined && item.team !== team)));
+  if (team !== undefined) return updateEvalQueue(root, items => items.filter(item => item.skill !== skill || item.team !== team));
+  // The bare form exists for the one item the two-part form cannot name: a teamless folder (§6.3).
+  // It must not reach past it. Matching on the name alone cancelled every team's queued run for that
+  // name at once — each of those is a paid run the user never named, and cancelling one is silent and
+  // final. Where the name is ambiguous, refuse and say which forms to use; nothing is cancelled.
+  const queue = await readEvalQueue(root);
+  const teamed = [...new Set(queue.items.filter(item => item.skill === skill && item.team !== undefined).map(item => item.team!))].sort();
+  if (teamed.length > 0) throw new Error(`${skill} is queued for ${teamed.length === 1 ? 'team' : 'teams'} ${teamed.join(', ')}; nothing was cancelled. Name one: ${teamed.map(name => `--dequeue ${name}/${skill}`).join(' or ')}.`);
+  return updateEvalQueue(root, items => items.filter(item => item.skill !== skill || item.team !== undefined));
 }

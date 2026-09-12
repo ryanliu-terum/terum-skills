@@ -320,4 +320,20 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     const result = await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: true, value: { version: 'v2' } });
   });
+
+  it('D61: says so when a local receipt could not be read, instead of failing the D19 gate open in silence', async () => {
+    const { store, home } = await prepared();
+    const folder = await librarySkill(home);
+    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    await writeFile(join(folder, 'SKILL.md'), `${await readFile(join(folder, 'SKILL.md'), 'utf8')}\nmore\n`);
+    const digest = await localReceipt(store, folder, { run_id: '20260101T000000Z', verdict: 'PASS' });
+    // The NEWEST run for these bytes, and it is corrupt. D19 asks about the newest, so skipping it
+    // silently is what decides whether the gate fires at all: a FAIL here would never be asked about.
+    const broken = join(store.root, 'evals', 'local', digest.replace(/^sha256:/, ''), '20260303T000000Z');
+    await mkdir(broken, { recursive: true });
+    await writeFile(join(broken, 'receipt.json'), '{not json');
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v2' } });
+    expect(io.lines).toContain('1 local eval run(s) of these exact bytes could not be read (20260303T000000Z), so they were not considered.');
+  });
 });

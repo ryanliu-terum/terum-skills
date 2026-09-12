@@ -204,3 +204,61 @@ gate run covers it unchanged.
 
 **Still true and unchanged:** #184 needs its own review before D53 makes it merge-eligible, and it
 must be retargeted to `main` before `refactor/b3-versions-keystone` is deleted.
+
+---
+
+## A9 — D61's medium subset: I pinned the membership at six of the seven, and verified each before fixing it
+
+**What.** Ryan locked the *rule* — fix the ones that lose or silently discard user work — but never
+pinned the list. The handoff's draft had seven and said "leaning: take all seven", with the caveat
+that they are single-finder reports that never went through the Codex panel. I verified each against
+the code first, as the handoff suggested, and **took six.**
+
+| # | finding | verdict |
+|---|---|---|
+| `eval.ts:365` | `saveGeneratedAssets` lost both overwrite refusals | **TAKEN — proven empirically** |
+| `queue.ts:113` | bare `--dequeue <skill>` cancels every team's queued runs | **TAKEN — B3 introduced it** |
+| `queue.ts:53` | schema-failing queue items dropped with no message | **TAKEN — drop kept, silence removed** |
+| `eval.ts:492` | `queueItemsFor` aborts the whole batch on one unreadable folder | **TAKEN — reachability proven** |
+| `receipt-store.ts:108` | `localReceiptsFor` swallows unreadable receipts, D19 fails open | **TAKEN — fail-open kept, silence removed** |
+| `setup.ts:365` | `steps.evals: 'queued'` when zero items were queued | **TAKEN** |
+| `eval.ts:201` | generated assets written before the run, no rollback on failure | **DECLINED — see below** |
+
+### The one I proved rather than argued
+
+`eval.ts:365`'s case-insensitivity claim was the one the handoff singled out as deserving
+verification. **It is real, and I ran it on this machine:** write `Triggers.yaml`, then write
+`triggers.yaml`; the listing still reads `['Triggers.yaml']` and its bytes are the second write's.
+An authored trigger file is destroyed *under its own name*, which is what makes it silent.
+`main` had two explicit refusals here and this branch deleted both, on the reasoning that generation
+"only ever runs for an asset that was MISSING" — true only of the exact spelling, because
+`authoredTrigger` is a case-sensitive lookup in the `sourceFiles` map while the write lands on the
+volume. The restored check asks the **filesystem**, so it is correct on case-sensitive volumes too,
+where the two names are genuinely different files and generation should proceed.
+
+### `queue.ts:113` is worse than the list says
+
+It is not pre-existing. On `main` `--dequeue` **required** `<team>/<skill>`; this branch added the
+bare form for teamless items (§6.3) and matched on the name alone, so one `--dequeue deploy-check`
+cancelled every team's queued run of that name. I scoped the bare form to teamless items and made an
+ambiguous name **refuse and name the forms**, cancelling nothing — rather than silently picking.
+
+### Where I kept behaviour and removed only the silence
+
+`queue.ts:53`'s drop is §6.6 and load-bearing (the old rethrow took the whole drainer down after an
+upgrade). `receipt-store.ts:108`'s skip must never be fatal to a publish. **Both stay.** Each gained
+an optional `report` callback, wired at the user-facing caller — additive, so no internal read
+changed. D19's gate reads the NEWEST receipt for the bytes, so an unreadable newest meant a known
+regression could be published without the question ever being asked; now the user is told.
+
+### The one I declined, and why
+
+**`eval.ts:201`** — the write-back into the user's folder before the run. It is D9's specified
+behaviour, and the verb prints a line naming the folder and the consequence *before* writing. A
+failed run leaving a generated asset behind is therefore disclosed, not silent, and "rolling it
+back" would contradict D9, which makes the asset ordinary skill content once written. **This one
+needs Ryan, not me** — it is a spec question, not a defect.
+
+**Every one of the six has a test verified to FAIL on the pre-fix tree** (6 + 1, run with sources
+reverted and tests kept). Gates: root lint, typecheck, **vitest 1689/1689**; desktop typecheck and
+**vitest 1893 passed/90 skipped**.
