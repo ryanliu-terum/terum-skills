@@ -91,7 +91,7 @@ it.each([
 
 it('the real eval engine refuses a changed queued version before any paid probe', async () => {
   const fixture = await bareTeam();
-  await pushFromSeed(fixture.seed, 'skills/alpha/SKILL.md', `---\nname: alpha\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+  await pushFromSeed(fixture.seed, 'skills/alpha/v1/SKILL.md', `---\nname: alpha\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
   const config = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, config.teamClone('team'));
   await config.update(state => { state.teams.team = { remote: fixture.bare, handle: 'seed' }; });
   await enqueueEvals(config.root, [item()]); const preflight = vi.fn(async () => success({ ccVersion: 'test' }));
@@ -118,9 +118,9 @@ it.each(['partial','failed'] as const)('removes a completed %s eval and never bi
 });
 
 it('refreshes and removes an already receipted queued version before probing or creating a paid run',async()=>{
- const f=await bareTeam();await pushFromSeed(f.seed,'skills/alpha/SKILL.md',`---\nname: alpha\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+ const f=await bareTeam();await pushFromSeed(f.seed,'skills/alpha/v1/SKILL.md',`---\nname: alpha\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
  const config=createConfigStore(join(f.root,'state'));await cloneWithIdentity(f.bare,config.teamClone('team'));await config.update(state=>{state.teams.team={remote:f.bare,handle:'seed'};});
- const version=(await git(['rev-parse','HEAD:skills/alpha'],f.seed)).trim();await enqueueEvals(config.root,[{...item(),version}]);
+ const version=(await git(['rev-parse','HEAD:skills/alpha/v1'],f.seed)).trim();await enqueueEvals(config.root,[{...item(),version}]);
  const receipt={...measuredReceipt(1,1000),version,execution_status:'partial'};
  await pushFromSeed(f.seed,`evals/${receipt.skill_id}/${version}/${receipt.run_id}.json`,JSON.stringify(receipt));
  const preflight=vi.fn(async()=>failure('Unexpected preflight: this receipt must prevent all paid work.')),io=new ScriptedPrompter();

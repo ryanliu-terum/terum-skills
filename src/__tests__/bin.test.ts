@@ -274,8 +274,8 @@ describe('the built bin (dist/index.js)', () => {
 
   it('the clone-local pre-push guard (D12) makes a raw `git push` of another author\'s skill fail with the path named, lets your own edit through, judges every ref of a multi-ref push, and fails open when its launcher is gone', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/theirs/SKILL.md', skillOf('theirs', THEIRS, 'Other <other@example.com>'));
-    await pushFromSeed(fixture.seed, 'skills/mine/SKILL.md', skillOf('mine', MINE, 'Seed <seed@example.com>'));
+    await pushFromSeed(fixture.seed, 'skills/theirs/v1/SKILL.md', skillOf('theirs', THEIRS, 'Other <other@example.com>'));
+    await pushFromSeed(fixture.seed, 'skills/mine/v1/SKILL.md', skillOf('mine', MINE, 'Seed <seed@example.com>'));
     const home = resolve(out, 'guard-home');
     const store = createConfigStore(resolve(home, '.terum', 'skills'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'), 'Seed', 'seed@example.com');
@@ -297,7 +297,7 @@ describe('the built bin (dist/index.js)', () => {
     await git(['commit', '-q', '-am', 'meddle'], clone);
     const refused = await push();
     expect(refused.code).not.toBe(0);
-    expect(refused.stderr).toContain('Push guard refused skills/theirs/SKILL.md');
+    expect(refused.stderr).toContain('Push guard refused skills/theirs/v1/SKILL.md');
     expect((await git(['rev-parse', 'main'], fixture.bare)).trim()).toBe(main);
     await git(['reset', '-q', '--hard', 'origin/main'], clone);
     await writeFile(resolve(clone, 'skills', 'mine', 'SKILL.md'), skillOf('mine', MINE, 'Seed <seed@example.com>', 'edited'));
@@ -314,7 +314,7 @@ describe('the built bin (dist/index.js)', () => {
     await git(['commit', '-q', '-am', 'meddle again'], clone);
     const two = await push('main', 'meddle:refs/heads/publish/meddle');
     expect(two.code).not.toBe(0);
-    expect(two.stderr).toContain('Push guard refused skills/theirs/SKILL.md');
+    expect(two.stderr).toContain('Push guard refused skills/theirs/v1/SKILL.md');
     expect((await git(['rev-parse', 'main'], fixture.bare)).trim()).toBe(advanced);
     // The launcher is gone (an npx cache pruned): the push goes through, and says it was not checked.
     await installPushGuard(clone, systemRunner, { node: process.execPath, entry: resolve(out, 'pruned', 'index.js') });

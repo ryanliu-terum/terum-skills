@@ -23,7 +23,7 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
 
   it('regenerates README.md in the current clone, is idempotent, and renders the publish preview against a base ref', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/report/SKILL.md', SKILL);
+    await pushFromSeed(fixture.seed, 'skills/report/v1/SKILL.md', SKILL);
     await pushFromSeed(fixture.seed, 'README.md', '# team skills\n\n<!-- terum-skills:begin -->\n<!-- terum-skills:end -->\n');
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     const io = new ScriptedPrompter();
@@ -40,8 +40,8 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
 
   it('uses the lexicographically newest receipt for the current skill tree in the eval column', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/report/SKILL.md', SKILL);
-    const version = (await git(['rev-parse', 'HEAD:skills/report'], fixture.seed)).trim();
+    await pushFromSeed(fixture.seed, 'skills/report/v1/SKILL.md', SKILL);
+    const version = (await git(['rev-parse', 'HEAD:skills/report/v1'], fixture.seed)).trim();
     await pushFromSeed(fixture.seed, `evals/${ID}/${version}/20260907T010000Z.json`, receipt(version, '20260907T010000Z', 'PASS'));
     await pushFromSeed(fixture.seed, `evals/${ID}/${version}/20260907T020000Z.json`, receipt(version, '20260907T020000Z', 'FAIL'));
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
@@ -51,8 +51,8 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
 
   it('never promotes a partial receipt to a full verdict (§5.4)', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/report/SKILL.md', SKILL);
-    const version = (await git(['rev-parse', 'HEAD:skills/report'], fixture.seed)).trim();
+    await pushFromSeed(fixture.seed, 'skills/report/v1/SKILL.md', SKILL);
+    const version = (await git(['rev-parse', 'HEAD:skills/report/v1'], fixture.seed)).trim();
     await pushFromSeed(fixture.seed, `evals/${ID}/${version}/20260907T010000Z.json`, receipt(version, '20260907T010000Z', 'PASS', { execution_status: 'partial', expected_rows: 9, scored_rows: 7 }));
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     expect(await run({ cwd: clone }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { changed: true } });
@@ -61,7 +61,7 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
 
   it('the PR comment cannot carry a link whose label lies either (R14)', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/report/SKILL.md', SKILL.replace('terum-category: docs', "terum-category: 'docs [Install v2](https://evil.example)'"));
+    await pushFromSeed(fixture.seed, 'skills/report/v1/SKILL.md', SKILL.replace('terum-category: docs', "terum-category: 'docs [Install v2](https://evil.example)'"));
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     await writeFile(join(clone, 'team.json'), `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n`);
     const io = new ScriptedPrompter();
@@ -73,7 +73,7 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
 
   it('neutralizes a skill field that spells the PR-comment anchor, so a poisoned PR cannot aim the Action at a comment of its own', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/report/SKILL.md', SKILL.replace('terum-category: docs', "terum-category: 'docs <!-- terum-skills:pr-comment -->'"));
+    await pushFromSeed(fixture.seed, 'skills/report/v1/SKILL.md', SKILL.replace('terum-category: docs', "terum-category: 'docs <!-- terum-skills:pr-comment -->'"));
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     await writeFile(join(clone, 'team.json'), `${JSON.stringify({ ...TEAM_JSON, global: [ID] }, null, 2)}\n`);
     const io = new ScriptedPrompter();

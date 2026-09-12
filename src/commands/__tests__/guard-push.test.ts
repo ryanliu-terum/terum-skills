@@ -14,9 +14,9 @@ const ZERO_SHA256 = '0'.repeat(64); // git's null OID in an --object-format=sha2
 
 async function prepared() {
   const fixture = await bareTeam();
-  await pushFromSeed(fixture.seed, 'skills/mine/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>'));
-  await pushFromSeed(fixture.seed, 'skills/theirs/SKILL.md', skill('theirs', THEIRS, 'Other <other@example.com>'));
-  await pushFromSeed(fixture.seed, 'skills/theirs/references/note.md', 'their aux file\n');
+  await pushFromSeed(fixture.seed, 'skills/mine/v1/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>'));
+  await pushFromSeed(fixture.seed, 'skills/theirs/v1/SKILL.md', skill('theirs', THEIRS, 'Other <other@example.com>'));
+  await pushFromSeed(fixture.seed, 'skills/theirs/v1/references/note.md', 'their aux file\n');
   await pushFromSeed(fixture.seed, 'people/other.json', `${JSON.stringify(person('other'), null, 2)}\n`);
   const store = createConfigStore(join(fixture.root, 'state'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'), 'Seed', 'seed@example.com');
@@ -45,15 +45,15 @@ async function commitOnMain(clone: string, path: string, content: string): Promi
 describe('guard-push — the clone-local pre-push hook entry (D12)', () => {
   it('lets your own skill edit and your own people file through, refuses another author\'s skill and someone else\'s people file, and names the path', async () => {
     const { fixture, store, clone, main } = await prepared();
-    const own = await commitOnMain(clone, 'skills/mine/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>', 'edited'));
+    const own = await commitOnMain(clone, 'skills/mine/v1/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>', 'edited'));
     const io = new ScriptedPrompter();
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: true, value: { team: 'team', checked: 1 } });
     const ownPeople = await commitOnMain(clone, 'people/seed.json', `${JSON.stringify(person('seed', { bio: 'hi' }), null, 2)}\n`);
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', ownPeople, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: true, value: { checked: 1 } });
-    const foreign = await commitOnMain(clone, 'skills/theirs/SKILL.md', skill('theirs', THEIRS, 'Other <other@example.com>', 'meddled'));
-    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', foreign, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/SKILL.md') });
-    const aux = await commitOnMain(clone, 'skills/theirs/references/note.md', 'an aux file in a folder that is not mine');
-    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', aux, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/references/note.md') });
+    const foreign = await commitOnMain(clone, 'skills/theirs/v1/SKILL.md', skill('theirs', THEIRS, 'Other <other@example.com>', 'meddled'));
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', foreign, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/v1/SKILL.md') });
+    const aux = await commitOnMain(clone, 'skills/theirs/v1/references/note.md', 'an aux file in a folder that is not mine');
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', aux, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/v1/references/note.md') });
     const otherPeople = await commitOnMain(clone, 'people/other.json', `${JSON.stringify(person('other', { bio: 'rewritten by seed' }), null, 2)}\n`);
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', otherPeople, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused people/other.json') });
   });
@@ -84,14 +84,14 @@ describe('guard-push — the clone-local pre-push hook entry (D12)', () => {
 
   it('judges a new branch from its fork point, so main advancing under it with a teammate\'s commit is not charged to the pusher; an existing branch is judged against what it replaces; no base at all is a refusal', async () => {
     const { fixture, store, clone } = await prepared();
-    const own = await commitOnMain(clone, 'skills/mine/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>', 'edited'));
-    await pushFromSeed(fixture.seed, 'skills/theirs/SKILL.md', skill('theirs', THEIRS, 'Other <other@example.com>', 'moved on'));
+    const own = await commitOnMain(clone, 'skills/mine/v1/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>', 'edited'));
+    await pushFromSeed(fixture.seed, 'skills/theirs/v1/SKILL.md', skill('theirs', THEIRS, 'Other <other@example.com>', 'moved on'));
     await git(['fetch', '-q', 'origin'], clone);
     const advanced = (await git(['rev-parse', 'origin/main'], clone)).trim();
     const io = new ScriptedPrompter();
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/publish/mine', own, 'refs/heads/publish/mine', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: true, value: { checked: 1 } });
     // Pushing the same commit OVER the advanced main would undo the teammate's commit: that is what a force-push replaces, and it is refused by name.
-    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', advanced], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/SKILL.md') });
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', advanced], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/v1/SKILL.md') });
     await git(['update-ref', '-d', 'refs/remotes/origin/main'], clone);
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/publish/mine', own, 'refs/heads/publish/mine', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringMatching(/origin\/main could not be resolved[\s\S]*git push --no-verify/) });
     // git hands the hook the push target as `$1` — the credentialed URL itself when someone pushes by URL — and neither a refusal nor a git argument may echo it.
@@ -106,7 +106,7 @@ describe('guard-push — the clone-local pre-push hook entry (D12)', () => {
 
   it('re-voices a failure that is not a verdict — a corrupt config.json — so the blocked push still names the guard and the attributed bypass', async () => {
     const { fixture, store, clone, main } = await prepared();
-    const own = await commitOnMain(clone, 'skills/mine/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>', 'edited'));
+    const own = await commitOnMain(clone, 'skills/mine/v1/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>', 'edited'));
     await writeFile(join(store.root, 'config.json'), '{ this is not json');
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main], cwd: clone, config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringMatching(/^Push guard could not run: Invalid[\s\S]*git push --no-verify/) });
   });
@@ -115,26 +115,26 @@ describe('guard-push — the clone-local pre-push hook entry (D12)', () => {
     const { fixture, store, clone, main } = await prepared();
     const io = new ScriptedPrompter();
     const taken = await commitChange(clone, async () => {
-      await git(['mv', 'skills/theirs', 'skills/theirs-taken'], clone);
-      await writeFile(join(clone, 'skills', 'theirs-taken', 'SKILL.md'), skill('theirs-taken', THEIRS, 'Seed <seed@example.com>'));
+      await git(['mv', 'skills/theirs/v1', 'skills/theirs-taken/v1'], clone);
+      await writeFile(join(clone, 'skills', 'theirs-taken', 'v1', 'SKILL.md'), skill('theirs-taken', THEIRS, 'Seed <seed@example.com>'));
     });
-    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', taken, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/SKILL.md') });
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', taken, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/v1/SKILL.md') });
     const moved = await commitChange(clone, async () => {
-      await mkdir(join(clone, 'skills', 'mine', 'references'), { recursive: true });
-      await git(['mv', 'skills/theirs/references/note.md', 'skills/mine/references/note.md'], clone);
+      await mkdir(join(clone, 'skills', 'mine', 'v1', 'references'), { recursive: true });
+      await git(['mv', 'skills/theirs/v1/references/note.md', 'skills/mine/v1/references/note.md'], clone);
     });
-    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', moved, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/references/note.md') });
-    const accented = await commitOnMain(clone, 'skills/mine/references/café.md', 'notes with an accent in the file name\n');
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', moved, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/v1/references/note.md') });
+    const accented = await commitOnMain(clone, 'skills/mine/v1/references/café.md', 'notes with an accent in the file name\n');
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', accented, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: true, value: { checked: 1 } });
   });
 
   it('judges every group of a multi-ref push, accumulating the count, and names the missing local identity rather than ownership when the config has no name and email', async () => {
     const { fixture, store, clone, main } = await prepared();
-    const own = await commitOnMain(clone, 'skills/mine/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>', 'edited'));
+    const own = await commitOnMain(clone, 'skills/mine/v1/SKILL.md', skill('mine', MINE, 'Seed <seed@example.com>', 'edited'));
     const ownPeople = await commitOnMain(clone, 'people/seed.json', `${JSON.stringify(person('seed', { bio: 'hi' }), null, 2)}\n`);
-    const foreign = await commitOnMain(clone, 'skills/theirs/SKILL.md', skill('theirs', THEIRS, 'Other <other@example.com>', 'meddled'));
+    const foreign = await commitOnMain(clone, 'skills/theirs/v1/SKILL.md', skill('theirs', THEIRS, 'Other <other@example.com>', 'meddled'));
     const io = new ScriptedPrompter();
-    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main, 'refs/heads/publish/x', foreign, 'refs/heads/publish/x', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/SKILL.md') });
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main, 'refs/heads/publish/x', foreign, 'refs/heads/publish/x', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused skills/theirs/v1/SKILL.md') });
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main, 'refs/heads/publish/x', ownPeople, 'refs/heads/publish/x', ZERO], cwd: clone, config: store }, io)).toMatchObject({ ok: true, value: { checked: 2 } });
     await store.update((config) => { delete config.display_name; delete config.email; });
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', own, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringMatching(/no name and email[\s\S]*npx -y terum-skills@latest login/) });

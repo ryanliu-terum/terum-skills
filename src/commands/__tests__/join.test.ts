@@ -331,8 +331,8 @@ describe('team join (§6, §5.4 identity)', () => {
     const { fixture, store, runner } = await setup();
     const plain = '77777777-7777-4777-8777-777777777777';
     const tool = '88888888-8888-4888-8888-888888888888';
-    await pushFromSeed(fixture.seed, 'skills/plain/SKILL.md', `---\nname: plain\ndescription: plain\nlicense: UNLICENSED\nmetadata:\n  id: ${plain}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'skills/tool/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${tool}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/plain/v1/SKILL.md', `---\nname: plain\ndescription: plain\nlicense: UNLICENSED\nmetadata:\n  id: ${plain}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/tool/v1/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${tool}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [plain, tool], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
     await store.update(config => { config.checkouts = [fixture.seed]; });
     const io = new ScriptedPrompter([...answers(), ''], [true, true], true);
@@ -349,7 +349,7 @@ describe('team join (§6, §5.4 identity)', () => {
   it('does not re-offer an endorsed skill the member declined', async () => {
     const { fixture, store, runner } = await setup();
     const id = '99999999-9999-4999-8999-999999999999';
-    await pushFromSeed(fixture.seed, 'skills/declined/SKILL.md', `---\nname: declined\ndescription: declined\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/declined/v1/SKILL.md', `---\nname: declined\ndescription: declined\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [id], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
     expect((await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers(), [false]))).ok).toBe(true);
     await pushFromSeed(fixture.seed, 'people/me.json', `${JSON.stringify(person('me', { display_name: 'Me', declined: [id] }), null, 2)}\n`);
@@ -362,8 +362,8 @@ describe('team join (§6, §5.4 identity)', () => {
     const { fixture, store, runner } = await setup();
     const plain = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const tool = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-    await pushFromSeed(fixture.seed, 'skills/plain/SKILL.md', `---\nname: plain\ndescription: plain\nlicense: UNLICENSED\nmetadata:\n  id: ${plain}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'skills/tool/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${tool}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/plain/v1/SKILL.md', `---\nname: plain\ndescription: plain\nlicense: UNLICENSED\nmetadata:\n  id: ${plain}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/tool/v1/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${tool}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [plain, tool], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
     const io = new ScriptedPrompter(answers(), [true, false]);
     expect(await join({ target: REMOTE, config: store, runner }, io)).toMatchObject({ ok: true });

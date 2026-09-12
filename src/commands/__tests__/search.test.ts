@@ -83,9 +83,9 @@ describe('search (§6)', () => {
     await freshStamp(store, 'team');
     const io = new ScriptedPrompter();
     const result = await run({ term: 'needle', config: store }, io);
-    const tree = (await git(['rev-parse', 'HEAD:skills/sample'], clone)).trim().slice(0, 8);
+    const tree = (await git(['rev-parse', 'HEAD:skills/sample/v1'], clone)).trim().slice(0, 8);
     expect(result).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'sample', installs: 1, endorsed: 'global', latest: tree })] });
-    expect(io.lines).toEqual([`  sample — Seed <seed@example.com>; testing; 1 installs; ${tree}; global; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/sample'], clone)).trim()}`]);
+    expect(io.lines).toEqual([`  sample — Seed <seed@example.com>; testing; 1 installs; ${tree}; global; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/sample/v1'], clone)).trim()}`]);
   });
 
   it('matches a skill name even when the term is absent from its description and category', async () => {
@@ -103,20 +103,20 @@ describe('search (§6)', () => {
   it('a skill folder present on disk but not in HEAD costs one row and one reported line, never the team\'s other hits', async () => {
     const { store, clone } = await searchFixture('team', [{ name: 'healthy', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
     // A safeWrite that lost its clone lock skips its cleanup, and `reset --hard` never removes an untracked folder.
-    await mkdir(join(clone, 'skills', 'ghost')); await writeFile(join(clone, 'skills', 'ghost', 'SKILL.md'), skillFile({ name: 'ghost', description: 'needle too', category: 'testing', author: 'Seed <seed@example.com>', id: '33333333-3333-4333-8333-333333333333' }));
+    await mkdir(join(clone, 'skills', 'ghost', 'v1')); await writeFile(join(clone, 'skills', 'ghost', 'v1', 'SKILL.md'), skillFile({ name: 'ghost', description: 'needle too', category: 'testing', author: 'Seed <seed@example.com>', id: '33333333-3333-4333-8333-333333333333' }));
     await freshStamp(store, 'team');
     const io = new ScriptedPrompter();
-    const tree = (await git(['rev-parse', 'HEAD:skills/healthy'], clone)).trim().slice(0, 8);
+    const tree = (await git(['rev-parse', 'HEAD:skills/healthy/v1'], clone)).trim().slice(0, 8);
     // Both halves of the title are counts, so both are pinned exactly: two rows in filter order
     // (`ghost` sorts first) and one report line. An extra or duplicated row, a report printed per
     // skill, or a dropped `formatSkill` row for the degraded hit has to fail here.
     expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'ghost', latest: '—', unresolved: true }), expect.objectContaining({ name: 'healthy', latest: tree, unresolved: false })] });
-    expect(io.lines).toEqual([expect.stringContaining('team/ghost: Could not resolve the latest version of ghost'), '  ghost — Seed <seed@example.com>; testing; 0 installs; —; —; —', `  healthy — Seed <seed@example.com>; testing; 0 installs; ${tree}; —; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/healthy'], clone)).trim()}`]);
+    expect(io.lines).toEqual([expect.stringContaining('team/ghost: Could not resolve the latest version of ghost'), '  ghost — Seed <seed@example.com>; testing; 0 installs; —; —; —', `  healthy — Seed <seed@example.com>; testing; 0 installs; ${tree}; —; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/healthy/v1'], clone)).trim()}`]);
   });
 
   it('fails instead of returning a page of dashes when no team could resolve any hit', async () => {
     const { store, clone } = await searchFixture('team', [{ name: 'healthy', description: 'plain description', category: 'testing', author: 'Seed <seed@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
-    await mkdir(join(clone, 'skills', 'ghost')); await writeFile(join(clone, 'skills', 'ghost', 'SKILL.md'), skillFile({ name: 'ghost', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '33333333-3333-4333-8333-333333333333' }));
+    await mkdir(join(clone, 'skills', 'ghost', 'v1')); await writeFile(join(clone, 'skills', 'ghost', 'v1', 'SKILL.md'), skillFile({ name: 'ghost', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '33333333-3333-4333-8333-333333333333' }));
     // The only match is the folder git cannot resolve, so the team resolved nothing at all: a
     // script gating on the exit code must not read that as a clean search.
     expect(await run({ term: 'needle', config: store }, new ScriptedPrompter())).toMatchObject({ ok: false });
@@ -130,8 +130,8 @@ describe('search (§6)', () => {
     // a row reading another skill's hash across the slice boundary cannot pass.
     const names = Array.from({ length: 10 }, (_, index) => `skill-${String(index + 1).padStart(2, '0')}`);
     for (const [index, name] of names.entries()) {
-      await mkdir(join(clone, 'skills', name));
-      await writeFile(join(clone, 'skills', name, 'SKILL.md'), skillFile({ name, description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: `${(index + 1).toString(16).repeat(8)}-1111-4111-8111-111111111111` }));
+      await mkdir(join(clone, 'skills', name, 'v1'));
+      await writeFile(join(clone, 'skills', name, 'v1', 'SKILL.md'), skillFile({ name, description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: `${(index + 1).toString(16).repeat(8)}-1111-4111-8111-111111111111` }));
     }
     await freshStamp(store, 'team');
     let inFlight = 0; let peak = 0;
@@ -155,7 +155,7 @@ describe('search (§6)', () => {
 
   it('skips and reports a malformed skill folder while returning healthy matches', async () => {
     const { store, clone } = await searchFixture('team', [{ name: 'healthy', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id: '11111111-1111-4111-8111-111111111111' }]);
-    await mkdir(join(clone, 'skills', 'broken')); await writeFile(join(clone, 'skills', 'broken', 'README.md'), 'no skill frontmatter');
+    await mkdir(join(clone, 'skills', 'broken', 'v1')); await writeFile(join(clone, 'skills', 'broken', 'v1', 'README.md'), 'no skill frontmatter');
     const io = new ScriptedPrompter();
     expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'healthy' })] });
     expect(io.lines.join('\n')).toContain('team/broken:');
@@ -222,9 +222,9 @@ it('returns verbatim long descriptions, normalized grants and committed dates on
   const {allowedTools}=await import('../../lib/schema.js');
   const description=('needle '+ 'long '.repeat(5000)).trimEnd();
   const {store,clone}=await searchFixture('team',[{name:'sample',description,category:'testing',author:'Seed <seed@example.com>',id:'11111111-1111-4111-8111-111111111111'}]);
-  const path=join(clone,'skills','sample','SKILL.md');
+  const path=join(clone,'skills','sample', 'v1','SKILL.md');
   const {readFile}=await import('node:fs/promises');await writeFile(path,(await readFile(path,'utf8')).replace('license:','allowed-tools: [Read, Bash]\nlicense:'));
   const result=await run({term:'needle',config:store},new ScriptedPrompter());
   const grants=allowedTools(['Read','Bash']);if(!grants.ok)throw new Error('invalid grant');
-  expect(result).toMatchObject({ok:true,value:[{description,grants:grants.normalized,grantsHash:grants.hash,updated:(await git(['log','-1','--format=%cI','--','skills/sample'],clone)).trim()}]});
+  expect(result).toMatchObject({ok:true,value:[{description,grants:grants.normalized,grantsHash:grants.hash,updated:(await git(['log','-1','--format=%cI','--','skills/sample/v1'],clone)).trim()}]});
 });

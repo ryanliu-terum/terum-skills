@@ -49,10 +49,10 @@ describe('safeWrite (§6.0)', () => {
       return next();
     });
     const skill = '---\nname: new\ndescription: New\nlicense: UNLICENSED\nmetadata:\n  id: 55555555-5555-4555-8555-555555555555\n  author: Me <me@example.com>\n  terum-category: docs\n---\n';
-    await openTeamRepo(clone, fixture.bare, runner).safeWrite((tree) => tree.set('skills/new/SKILL.md', skill), { action: 'connect', handle: 'me', author: 'Me <me@example.com>' });
+    await openTeamRepo(clone, fixture.bare, runner).safeWrite((tree) => tree.set('skills/new/v1/SKILL.md', skill), { action: 'connect', handle: 'me', author: 'Me <me@example.com>' });
     await git(['fetch', '-q', 'origin'], fixture.seed);
     await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
-    const latest = (await git(['rev-parse', 'main:skills/new'], fixture.bare)).trim();
+    const latest = (await git(['rev-parse', 'main:skills/new/v1'], fixture.bare)).trim();
     expect(await readFile(join(fixture.seed, 'README.md'), 'utf8')).toContain(`| new | docs | New | 0 | — | ${latest.slice(0, 8)} |`);
     expect(lsTrees).toBe(1);
   });
@@ -111,10 +111,10 @@ describe('safeWrite (§6.0)', () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     const before = await originSha(fixture.bare);
-    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/new/SKILL.md', '---\nname: new\n---\n'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
+    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/new/v1/SKILL.md', '---\nname: new\n---\n'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
     expect(await originSha(fixture.bare)).toBe(before);
     expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
-    expect(await exists(join(clone, 'skills', 'new'))).toBe(false);
+    expect(await exists(join(clone, 'skills', 'new', 'v1'))).toBe(false);
   });
 
   it('stages only the mutation: an untracked file in the clone is neither pushed nor deleted', async () => {
@@ -144,8 +144,8 @@ describe('safeWrite (§6.0)', () => {
   it('refuses unsafe paths inside the mutation and refuses a clone that points at a different remote', async () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
-    for (const bad of ['../escape.json', '/etc/passwd', '.git/config', '.Git/config', '.GIT/hooks/pre-commit', 'skills/x/.git/config', 'skills/x/GIT~1/config', 'people/../team.json', 'a/./b', 'a//b', 'people\\me.json', 'people/', '']) expect(() => assertSafePath(bad), bad).toThrow(GuardError);
-    for (const good of ['people/me.json', 'skills/x/SKILL.md', 'skills/x/.gitkeep', 'team.json']) expect(() => assertSafePath(good), good).not.toThrow();
+    for (const bad of ['../escape.json', '/etc/passwd', '.git/config', '.Git/config', '.GIT/hooks/pre-commit', 'skills/x/v1/.git/config', 'skills/x/v1/GIT~1/config', 'people/../team.json', 'a/./b', 'a//b', 'people\\me.json', 'people/', '']) expect(() => assertSafePath(bad), bad).toThrow(GuardError);
+    for (const good of ['people/me.json', 'skills/x/v1/SKILL.md', 'skills/x/v1/.gitkeep', 'team.json']) expect(() => assertSafePath(good), good).not.toThrow();
     await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('../escape.json', '{}'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
     let mutated = false;
     await expect(openTeamRepo(clone, 'https://github.com/someone/else.git').safeWrite(() => { mutated = true; }, { action: 'join', handle: 'me' })).rejects.toThrow('wrong repository');
@@ -159,8 +159,8 @@ describe('safeWrite (§6.0)', () => {
     const configBefore = await readFile(join(clone, '.git', 'config'), 'utf8');
     await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('.Git/config', '[core]\n'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
     expect(await readFile(join(clone, '.git', 'config'), 'utf8')).toBe(configBefore);
-    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/new/SKILL.md', 'x'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
-    expect(await exists(join(clone, 'skills', 'new'))).toBe(false);
+    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/new/v1/SKILL.md', 'x'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
+    expect(await exists(join(clone, 'skills', 'new', 'v1'))).toBe(false);
   });
 
   it('never writes or deletes through a symlinked parent that leaves the clone', async () => {
@@ -247,23 +247,23 @@ describe('safeWrite (§6.0)', () => {
     const fixture = await bareTeam();
     const id = '11111111-1111-4111-8111-111111111111';
     const initial = `---\nname: binary\ndescription: binary\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`;
-    await pushFromSeed(fixture.seed, 'skills/binary/SKILL.md', initial);
+    await pushFromSeed(fixture.seed, 'skills/binary/v1/SKILL.md', initial);
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     const payload = Buffer.concat([Buffer.from(initial), Buffer.from([0xff, 0xfe, 0x80])]);
-    await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/binary/SKILL.md', payload), { action: 'sync', handle: 'me', author: 'Me <me@example.com>' });
-    expect(await readFile(join(clone, 'skills', 'binary', 'SKILL.md'))).toEqual(payload);
+    await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/binary/v1/SKILL.md', payload), { action: 'sync', handle: 'me', author: 'Me <me@example.com>' });
+    expect(await readFile(join(clone, 'skills', 'binary', 'v1', 'SKILL.md'))).toEqual(payload);
   });
 
   it('lists the tree as mutated, including additions and excluding removals', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/x/SKILL.md', 'skill');
+    await pushFromSeed(fixture.seed, 'skills/x/v1/SKILL.md', 'skill');
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     let observed = false;
     await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => {
       tree.set('people/new.json', personJson('new'));
-      tree.remove('skills/x/SKILL.md');
+      tree.remove('skills/x/v1/SKILL.md');
       expect(tree.paths('people/')).toContain('people/new.json');
-      expect(tree.paths('skills/x/')).not.toContain('skills/x/SKILL.md');
+      expect(tree.paths('skills/x/v1/')).not.toContain('skills/x/v1/SKILL.md');
       observed = true;
     }, { action: 'join', handle: 'new' })).rejects.toThrow(GuardError);
     expect(observed).toBe(true);

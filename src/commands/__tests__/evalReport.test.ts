@@ -20,14 +20,14 @@ function receipt(version: string, run_id: string) {
 }
 async function setup(newest?: string, receipts = true) {
   const fixture = await bareTeam();
-  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill);
-  const tree = (await git(['rev-parse', 'HEAD:skills/sample'], fixture.seed)).trim();
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill);
+  const tree = (await git(['rev-parse', 'HEAD:skills/sample/v1'], fixture.seed)).trim();
   if (receipts) for (const id of ids) await pushFromSeed(fixture.seed, `evals/${ID}/${tree}/${id}.json`, JSON.stringify(receipt(tree, id)));
   if (newest !== undefined) await pushFromSeed(fixture.seed, `evals/${ID}/${tree}/20260907T030000Z.json`, newest);
   const store = createConfigStore(join(fixture.root, 'state'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update(c => { c.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-  const runner = denyingRunner([{ command: 'git', argsPrefix: ['rev-parse', '--verify', 'HEAD:skills/sample'] }], systemRunner);
+  const runner = denyingRunner([{ command: 'git', argsPrefix: ['rev-parse', '--verify', 'HEAD:skills/sample/v1'] }], systemRunner);
   return { store, clone, tree, runner };
 }
 

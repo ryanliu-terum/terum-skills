@@ -4,7 +4,7 @@ import { git } from '../../lib/__tests__/fixtures.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 export const pendingIds = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
 export async function pendingSkill(clone: string, name: string, id: string) {
-  const dir = join(clone, 'skills', name); await mkdir(dir, { recursive: true });
+  const dir = join(clone, 'skills', name, 'v1'); await mkdir(dir, { recursive: true });
   await writeFile(join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: useful skill\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
 }
 export async function seedPending(clone: string, count = 2) {
