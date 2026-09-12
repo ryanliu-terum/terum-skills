@@ -12,7 +12,7 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
 import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, skillEndorsement } from '../lib/readme.js';
-import { versionLabel } from '../lib/versions.js';
+import { parseVersionFolder, versionLabel } from '../lib/versions.js';
 import type { Receipt } from '../lib/evals/receipt.js';
 import { selectCardEval } from '../lib/evals/receipt-store.js';
 import { fromError, Result, success } from '../lib/result.js';
@@ -235,7 +235,13 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
   const sections: LocalSection[] = [];
   const snapshots = new Map<string, { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; fingerprints?: Map<string, string>; complete: boolean }>();
   const stateOf = (entry: LocalEntry): string => {
-    return entry.placement ? `placement recorded from ${entry.placement.team}${entry.placement.version === null ? '' : ` @${entry.placement.version.slice(0, 8)}`}` : 'untracked locally';
+    if (!entry.placement) return 'untracked locally';
+    // D1: `Version N` is the only form a version takes in a user-facing string. The old ` @<8 hex>`
+    // suffix sliced a tree hash; slicing a version FOLDER would print `@v1`, the one spelling D1
+    // forbids. A null version (no ordinal recorded, or a legacy tree hash the config read mapped to
+    // null) simply says nothing rather than inventing one.
+    const ordinal = entry.placement.version === null ? null : parseVersionFolder(entry.placement.version);
+    return `placement recorded from ${entry.placement.team}${ordinal === null ? '' : ` (${versionLabel(ordinal)})`}`;
   };
   const healthOf = async (entry: LocalEntry): Promise<LocalHealth> => {
     if (entry.inspection.kind === 'rejected') return 'unknown';
