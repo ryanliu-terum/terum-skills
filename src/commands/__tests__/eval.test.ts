@@ -232,7 +232,7 @@ describe('eval (§6 / IE2)', () => {
       await mkdir(join(folder, 'evals'), { recursive: true });
       await writeFile(join(folder, 'evals', 'triggers.yaml'), TRIGGERS);
     });
-    const saved = await saveGeneratedAssets(folder, { triggers: generatedTriggers } as never);
+    const saved = await saveGeneratedAssets(folder, { triggers: TRIGGERS });
     expect(saved).toMatchObject({ ok: false, error: expect.stringContaining('a generated asset never overwrites an authored one') });
     expect(await readFile(join(folder, 'evals', 'triggers.yaml'), 'utf8')).toBe(TRIGGERS);
     void store; void home;
@@ -242,11 +242,13 @@ describe('eval (§6 / IE2)', () => {
     const { folder } = await evalFixture();
     await mkdir(join(folder, 'evals'), { recursive: true });
     await writeFile(join(folder, 'evals', 'Triggers.yaml'), TRIGGERS);
-    const saved = await saveGeneratedAssets(folder, { triggers: generatedTriggers } as never);
+    // Probe the volume BEFORE the call: on a case-sensitive one the write below legitimately creates
+    // `triggers.yaml`, so asking afterwards would report every volume as case-insensitive.
+    const caseInsensitive = existsSync(join(folder, 'evals', 'triggers.yaml'));
+    const saved = await saveGeneratedAssets(folder, { triggers: TRIGGERS });
     // On a case-insensitive volume (macOS) the write would have clobbered the authored file, so the
     // guard must fire. On a case-sensitive one they are genuinely different files and generation is
     // correct to proceed — the same code is right on both, which is why the check is a real read.
-    const caseInsensitive = existsSync(join(folder, 'evals', 'triggers.yaml'));
     if (caseInsensitive) expect(saved).toMatchObject({ ok: false });
     else expect(saved).toMatchObject({ ok: true });
     expect(await readFile(join(folder, 'evals', 'Triggers.yaml'), 'utf8')).toBe(TRIGGERS);
