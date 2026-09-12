@@ -139,7 +139,9 @@ async function previewUninstall(store: ConfigStore, team: string, selections: re
   const lastCopies = selections.map((selection) => selection.target).filter((target) => !remaining.some((entry) => entry.id === target.id && entry.team === team && sameScope(entry.scope, target.scope)));
   const records = person.installed.filter((entry) => lastCopies.some((target) => entry.id === target.id && sameScope(entry.scope, target.scope)));
   const survivingInstalled = person.installed.filter((entry) => !records.includes(entry));
-  const isAuto = (id: string): boolean => endorsed.global.includes(id) || Object.values(endorsed.projects).some((project) => project.skills.includes(id));
+  // `team.json.global` is deleted (§4.1); `Global` is now an ordinary project key, so the projects
+  // walk alone answers the same question it always did.
+  const isAuto = (id: string): boolean => Object.values(endorsed.projects).some((project) => project.skills.includes(id));
   const declining = [...new Set(lastCopies.map((target) => target.id))].filter((id) => isAuto(id) && !survivingInstalled.some((entry) => entry.id === id) && !person.declined.includes(id));
   const ids = [...new Set([...placements.map(([, entry]) => entry.id), ...records.map((entry) => entry.id)])];
   const names = new Map((await skillRecords(clone, team)).map((record) => [record.id, record.name]));
@@ -200,7 +202,7 @@ export async function uninstallMany(input: UninstallInput & { targets: readonly 
       const person = parseJson(personSchema, treeText(raw), path);
       const teamJson = tree.before('team.json');
       const endorsed = teamJson === undefined ? undefined : parseJson(teamSchema, treeText(teamJson), 'team.json');
-      const isAuto = (id: string): boolean => endorsed ? endorsed.global.includes(id) || Object.values(endorsed.projects).some((project) => project.skills.includes(id)) : false;
+      const isAuto = (id: string): boolean => endorsed ? Object.values(endorsed.projects).some((project) => project.skills.includes(id)) : false;
       const installed = person.installed.filter((entry) => !lastCopies.some((target) => entry.id === target.id && sameScope(entry.scope, target.scope)));
       const declined = [...person.declined];
       // `declined` is keyed by skill id with no scope: a scope-targeted uninstall must not write an

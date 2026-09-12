@@ -13,9 +13,9 @@ import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, normaliz
 import { fromError, CancelledError, Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { adminLogins, paginatedItems } from '../lib/collaborators.js';
-import { githubLoginSchema, Person, PROJECT_NAME_RULE, projectNameSchema, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
+import { githubLoginSchema, GLOBAL_PROJECT, Person, PROJECT_NAME_RULE, projectNameSchema, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
 import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, refreshClone, type SafeWriteOptions, treeText } from '../lib/teamRepo.js';
-import { endorsedCandidates, readTeam, readRoster, RosterEntry } from '../lib/skills.js';
+import { readTeam, readRoster, RosterEntry } from '../lib/skills.js';
 import { installOne, placementHome, resolveDestination, teamForReference } from './install.js';
 
 /**
@@ -374,17 +374,9 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     } catch (error) {
       io.print(`Joined, but the member list could not be read: ${error instanceof Error ? error.message : String(error)}`);
     }
-    // M2: the post-join endorsement offer deliberately reuses installOne, including its
-    // individual allowed-tools consent and persisted approval record. The set prompt itself is
-    // one question, as §6 requires.
-    const endorsed = await endorsedCandidates(clone, team, identity.handle, { onProblem: (problem) => io.print(`Skipping ${problem.name}: ${problem.message}`) });
-    if (endorsed.length && await io.confirm(`Install ${endorsed.length} team-endorsed skill(s)?`)) {
-      const destination = await resolveDestination(store, await readTeam(clone), undefined, io, io.interactive, { runner, home: placementHome(store) });
-      for (const skill of endorsed) {
-        try { await installOne({ team, destination, id: skill.id, store, runner }, io); }
-        catch (error) { io.print(`Could not install endorsed skill ${skill.name}: ${error instanceof Error ? error.message : String(error)}`); }
-      }
-    }
+    // The post-join endorsement offer is deleted with `endorsedCandidates` and `team.json.global`
+    // (spec §4.1, §12). Nothing installs on your behalf any more: the North Star is that nothing
+    // moves between your machine and the team unless you ask, and joining is not asking.
     // Same rule as the roster read-back above: the join is durable, the hook offer is decoration.
     await offerHookAfterDurableWork(io, args, store.root);
     return success({ team, handle: identity.handle, rejoined, roster });
@@ -538,7 +530,7 @@ async function bootstrap(remote: string, clone: string, teamName: string, identi
     await git('remote', 'add', 'origin', '--', remoteToGitUrl(remote));
     await git('config', 'user.name', identity.displayName);
     await git('config', 'user.email', identity.email);
-    const team: Team = { layout_version: 2, name: teamName, categories: CATEGORIES, global: [], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } };
+    const team: Team = { layout_version: 3, name: teamName, categories: CATEGORIES, projects: { [GLOBAL_PROJECT]: { remotes: [], skills: [] } }, archived: [], policy: { skill_license: 'UNLICENSED' } };
     const person: Person = { handle: identity.handle, display_name: identity.displayName, email: identity.email, github: identity.github, bio: '', installed: [], declined: [] };
     await writeFile(pathJoin(staging, 'team.json'), `${JSON.stringify(team, null, 2)}\n`);
     await mkdir(pathJoin(staging, 'people'), { recursive: true });

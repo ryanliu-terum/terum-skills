@@ -5,6 +5,8 @@ import { githubOwnerRepo } from './remote.js';
 import { receiptSchema } from './evals/receipt.js';
 import { Runner, systemRunner } from './runner.js';
 import type { MutableTree } from './teamRepo.js';
+import { listVersions } from './teamRepo.js';
+import { parseVersionFolder, versionLabel, versionsInTree, type SkillVersion } from './versions.js';
 
 /** The tree may hold Buffers (binary skill assets); README generation reads only text paths, decoded here. */
 const asText = (value: string | Buffer): string => (Buffer.isBuffer(value) ? value.toString('utf8') : value);
@@ -24,12 +26,12 @@ export interface ReadmeSkill {
 }
 
 export interface ReadmeData {
-  team: { name: string; remote: string; global: readonly string[]; projects: Record<string, { skills: readonly string[] }>; archived?: readonly string[] };
+  team: { name: string; remote: string; projects: Record<string, { skills: readonly string[] }>; archived?: readonly string[] };
   people: readonly Person[];
   skills: readonly ReadmeSkill[];
 }
 
-type EndorsementTeam = Pick<ReadmeData['team'], 'global' | 'projects'>;
+type EndorsementTeam = Pick<ReadmeData['team'], 'projects'>;
 
 /**
  * Install totals include archived people: they are historical installs, not active membership.
@@ -57,9 +59,13 @@ export function installersById(people: readonly Person[]): Map<string, Installer
   return installers;
 }
 
+/**
+ * Simplified in place, not deleted (§4.1c): `team.global` is gone and `Global` is now an ordinary
+ * project key, so the projects list alone answers it — `Global` among them.
+ */
 export function skillEndorsement(team: EndorsementTeam, id: string): string {
   const projects = Object.entries(team.projects).filter(([, project]) => project.skills.includes(id)).map(([name]) => name).sort();
-  return team.global.includes(id) ? 'global' : projects.length ? `project: ${projects.join(', ')}` : '—';
+  return projects.length ? `project: ${projects.join(', ')}` : '—';
 }
 
 export function activePeople(people: readonly Person[], archived: readonly string[] = []): Person[] {
@@ -98,7 +104,7 @@ export function generateReadme(data: ReadmeData): string {
       // already defanged a link label (every cell has, per R14); an angle bracket could still spell an
       // HTML anchor, so those become entities here. A no-op for every name the CLI accepts.
       const shownName = cell(skill.name).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      lines.push(`| ${shownName} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | ${cell(skill.eval ?? '—')} | ${command} |`);
+      lines.push(`| ${shownName} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${cell(latestLabel(skill.latest))} | ${cell(skill.eval ?? '—')} | ${command} |`);
     }
   }
   if (byAuthor.size === 0) lines.push('', '### Skills', '', 'No shared skills yet.');
@@ -129,13 +135,6 @@ export function applyReadme(existing: string, block: string): string {
   return `${existing}${suffix}${block}`;
 }
 
-/** §M3 bridge for ls; M2 moves this single helper into version.ts at integration. */
-export async function latestTree(runner: Runner, clone: string, name: string): Promise<string> {
-  const result = await runner.run('git', ['rev-parse', `HEAD:skills/${name}`], { cwd: clone });
-  if (result.code !== 0) throw new Error(`Could not resolve the latest version of ${name}: ${(result.stderr || result.stdout).trim()}`);
-  return result.stdout.trim();
-}
-
 /** Last committed change; a successful empty log means this folder has no history. */
 export async function latestChange(runner: Runner, clone: string, name: string): Promise<string> {
   const result = await runner.run('git', ['log', '-1', '--format=%cI', '--', `skills/${name}`], { cwd: clone });
@@ -150,14 +149,18 @@ export async function readReadmeData(clone: string, remote: string, runner: Runn
   const names = (await readdir(join(clone, 'skills'), { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   const skills: ReadmeSkill[] = [];
   for (const name of names) {
-    const source = await readFile(join(clone, 'skills', name, 'SKILL.md'), 'utf8');
+    const versions = await listVersions(clone, name);
+    // A name with no version folder is skipped rather than thrown on: this function runs inside
+    // safeWrite through its sibling below, and one half-migrated folder must not wedge every write.
+    if (versions.length === 0) continue;
+    const latest = versions[0]!;
+    const source = await readFile(join(clone, 'skills', name, latest.folder, 'SKILL.md'), 'utf8');
     const parsed = parseSkillFrontmatter(source);
-    if (!parsed.ok) throw new Error(`Invalid skills/${name}/SKILL.md: ${parsed.error}`);
-    if (parsed.data.name !== name) throw new Error(`skills/${name}/SKILL.md names ${parsed.data.name}; folder name must match`);
-    const latest = await latestTree(runner, clone, name);
-    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest, eval: await latestReceiptVerdict(clone, parsed.data.metadata.id, latest) });
+    if (!parsed.ok) throw new Error(`Invalid skills/${name}/${latest.folder}/SKILL.md: ${parsed.error}`);
+    if (parsed.data.name !== name) throw new Error(`skills/${name}/${latest.folder}/SKILL.md names ${parsed.data.name}; folder name must match`);
+    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest: latest.folder, eval: await latestReceiptVerdict(clone, parsed.data.metadata.id, versions) });
   }
-  return { team: { name: team.name, remote, global: team.global, projects: team.projects, archived: team.archived }, people, skills };
+  return { team: { name: team.name, remote, projects: team.projects, archived: team.archived }, people, skills };
 }
 
 export async function readPeople(clone: string): Promise<Person[]> {
@@ -175,39 +178,60 @@ export async function regenerateReadmeInTree(tree: MutableTree, remote: string, 
     if (value === undefined) throw new Error(`Cannot generate README: ${path} was removed from the tree.`);
     return parseJson(personSchema, asText(value), path);
   });
-  const names = tree.paths().filter((path) => /^skills\/[^/]+\/SKILL\.md$/.test(path)).map((path) => path.split('/')[1]!).sort();
+  // §4.1(d): the name -> highest v<N> map comes from the in-memory post-image, so the generator adds
+  // no git call inside the loop and sees exactly the tree that is about to be committed.
+  const names = [...new Set(tree.paths('skills/').filter((path) => /^skills\/[^/]+\/v[1-9][0-9]*\/SKILL\.md$/.test(path)).map((path) => path.split('/')[1]!))].sort();
   const skills: ReadmeSkill[] = [];
   for (const name of names) {
-    const source = tree.after(`skills/${name}/SKILL.md`);
-    if (source === undefined) throw new Error(`Cannot generate README: skills/${name}/SKILL.md was removed from the tree.`);
-    const parsed = parseSkillFrontmatter(asText(source));
-    if (!parsed.ok) throw new Error(`Invalid skills/${name}/SKILL.md: ${parsed.error}`);
-    const latest = latestBySkill === undefined ? await latestTree(runner, clone, name) : latestBySkill.get(name);
+    const latest = versionsInTree(tree, name)[0];
     if (latest === undefined) throw new Error(`Cannot generate README: skills/${name} is absent from the written tree.`);
-    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest, eval: latestReceiptVerdictInTree(tree, parsed.data.metadata.id, latest) });
+    const source = tree.after(`skills/${name}/${latest.folder}/SKILL.md`);
+    if (source === undefined) throw new Error(`Cannot generate README: skills/${name}/${latest.folder}/SKILL.md was removed from the tree.`);
+    const parsed = parseSkillFrontmatter(asText(source));
+    if (!parsed.ok) throw new Error(`Invalid skills/${name}/${latest.folder}/SKILL.md: ${parsed.error}`);
+    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest: latest.folder, eval: latestReceiptVerdictInTree(tree, parsed.data.metadata.id, versionsInTree(tree, name)) });
   }
-  tree.set('README.md', applyReadme(asText(tree.after('README.md') ?? ''), generateReadme({ team: { name: team.name, remote, global: team.global, projects: team.projects, archived: team.archived }, people, skills })));
+  tree.set('README.md', applyReadme(asText(tree.after('README.md') ?? ''), generateReadme({ team: { name: team.name, remote, projects: team.projects, archived: team.archived }, people, skills })));
 }
 
-/** §5.4 / §12: display only the lexicographically newest valid receipt for this exact version. */
-async function latestReceiptVerdict(clone: string, id: string, version: string): Promise<string | undefined> {
-  const directory = join(clone, 'evals', id, version);
-  let names: string[];
-  try { names = await readdir(directory); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
-  const newest = names.filter((name) => name.endsWith('.json')).sort().at(-1);
-  if (newest === undefined) return undefined;
-  const source = await readFile(join(directory, newest), 'utf8');
-  return receiptVerdict(source, id, version);
+/**
+ * §4.1(e): walk the skill's versions newest-first and show the newest that carries a usable receipt,
+ * annotating it with the version it came from when that is not the latest — the README's form of
+ * §8.1's fallback and §8.2's mandatory disclosure. A stale score presented bare would be a claim
+ * about bytes the reader will not receive when they install.
+ */
+async function latestReceiptVerdict(clone: string, id: string, versions: readonly SkillVersion[]): Promise<string | undefined> {
+  for (const version of versions) {
+    const directory = join(clone, 'evals', id, version.folder);
+    let names: string[];
+    try { names = await readdir(directory); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
+    const newest = names.filter((name) => name.endsWith('.json')).sort().at(-1);
+    if (newest === undefined) continue;
+    const verdict = receiptVerdict(await readFile(join(directory, newest), 'utf8'), id, version.folder);
+    // A schema-invalid or misfiled newest receipt fails closed FOR THAT VERSION ONLY and the walk
+    // continues — one corrupt file must not blank a skill with three good older evals (§8.1).
+    if (verdict !== undefined) return annotate(verdict, version, versions);
+  }
+  return undefined;
 }
 
 /** The safeWrite fallback must derive README exclusively from the in-memory post-image. */
-function latestReceiptVerdictInTree(tree: MutableTree, id: string, version: string): string | undefined {
-  const prefix = `evals/${id}/${version}/`;
-  const newest = tree.paths(prefix).filter((path) => path.endsWith('.json')).sort().at(-1);
-  if (newest === undefined) return undefined;
-  const source = tree.after(newest);
-  return source === undefined ? undefined : receiptVerdict(asText(source), id, version);
+function latestReceiptVerdictInTree(tree: MutableTree, id: string, versions: readonly SkillVersion[]): string | undefined {
+  for (const version of versions) {
+    const newest = tree.paths(`evals/${id}/${version.folder}/`).filter((path) => path.endsWith('.json')).sort().at(-1);
+    if (newest === undefined) continue;
+    const source = tree.after(newest);
+    if (source === undefined) continue;
+    const verdict = receiptVerdict(asText(source), id, version.folder);
+    if (verdict !== undefined) return annotate(verdict, version, versions);
+  }
+  return undefined;
+}
+
+/** `PASS` at parity; `PASS (Version 3)` when the newest usable receipt is older than the latest version. */
+function annotate(verdict: string, from: SkillVersion, versions: readonly SkillVersion[]): string {
+  return from.n === versions[0]?.n ? verdict : `${verdict} (${versionLabel(from.n)})`;
 }
 
 function receiptVerdict(source: string, id: string, version: string): string | undefined {
@@ -243,6 +267,12 @@ function noLinkLabel(value: string): string { return value.replace(/[[\]]/g, '\\
 function cell(value: string): string { return noLinkLabel(oneLine(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|')); }
 
 export function shortHash(value: string): string { return value === '—' ? value : value.slice(0, 8); }
+
+/** The README's `Latest` column. `versionLabel` is the ONLY UI form of a version (D1). */
+function latestLabel(latest: string): string {
+  const n = parseVersionFolder(latest);
+  return n === null ? latest : versionLabel(n);
+}
 
 function installRepository(remote: string): string | null { return githubOwnerRepo(remote); }
 function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }

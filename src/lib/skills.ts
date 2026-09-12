@@ -4,12 +4,18 @@ import { join, sep } from 'node:path';
 import YAML from 'yaml';
 import { allowedTools, parseJson, parseSkillFrontmatter, Person, SkillFrontmatter, Team, personSchema, teamSchema } from './schema.js';
 import { CommandResult, Runner, systemRunner } from './runner.js';
+import { listVersions } from './teamRepo.js';
 
 export interface SkillRecord {
   id: string;
   name: string;
   team: string;
+  /** The **version folder** under layout 3: `<clone>/skills/<name>/v<max>/`, where SKILL.md lives. */
   directory: string;
+  /** The ordinal of that folder — `3` for `v3`. */
+  latestVersion: number;
+  /** How many version folders the skill has. Gaps are possible, so this is not the latest ordinal. */
+  versionCount: number;
   frontmatter: SkillFrontmatter;
   rawFrontmatter: string;
   body: string;
@@ -21,7 +27,15 @@ export interface SkillRecord {
 export interface SkillProblem { name: string; message: string; }
 export interface SkillRecordOptions { onProblem?: (problem: SkillProblem) => void; }
 
-/** Enumerate usable skills without allowing one bad folder to poison the whole team. */
+/**
+ * Enumerate usable skills without allowing one bad folder to poison the whole team.
+ *
+ * Under layout 3 a skill's bytes live at `skills/<name>/v<N>/`, so the record describes the
+ * **latest** version: `directory` is that version folder, and §3.1's "`<name>` must equal the `name`
+ * frontmatter of the latest version" is checked against it alone. A name holding no `v<N>` folder is
+ * reported through `onProblem` and skipped — the same shape as today's invalid-frontmatter path, so
+ * one half-migrated folder cannot empty a team's catalogue.
+ */
 export async function skillRecords(clone: string, team: string, options: SkillRecordOptions = {}): Promise<SkillRecord[]> {
   const root = join(clone, 'skills');
   let names: string[];
@@ -30,12 +44,15 @@ export async function skillRecords(clone: string, team: string, options: SkillRe
   const result: SkillRecord[] = [];
   for (const name of names) {
     try {
-      const directory = join(root, name);
+      const versions = await listVersions(clone, name);
+      const latest = versions[0];
+      if (!latest) throw new Error(`skills/${name} holds no v<N> folder.`);
+      const directory = join(root, name, latest.folder);
       const source = await readFile(join(directory, 'SKILL.md'), 'utf8');
       const parsed = parseSkillFrontmatter(source);
-      if (!parsed.ok) throw new Error(`Invalid skills/${name}/SKILL.md: ${parsed.error}`);
+      if (!parsed.ok) throw new Error(`Invalid skills/${name}/${latest.folder}/SKILL.md: ${parsed.error}`);
       if (parsed.data.name !== name) throw new Error(`Skill folder ${name} does not match frontmatter name ${parsed.data.name}.`);
-      result.push({ id: parsed.data.metadata.id, name, team, directory, frontmatter: parsed.data, rawFrontmatter: parsed.frontmatter, body: parsed.body, characters: source.length, grants: parsed.grants });
+      result.push({ id: parsed.data.metadata.id, name, team, directory, latestVersion: latest.n, versionCount: versions.length, frontmatter: parsed.data, rawFrontmatter: parsed.frontmatter, body: parsed.body, characters: source.length, grants: parsed.grants });
     } catch (error) {
       options.onProblem?.({ name, message: error instanceof Error ? error.message : String(error) });
     }
@@ -54,15 +71,6 @@ export async function findSkill(clone: string, team: string, reference: string):
   const matches = records.filter((record) => record.id.toLowerCase().startsWith(lower));
   if (matches.length > 1) throw new Error(`Skill ID prefix ${reference} is ambiguous.`);
   return matches[0];
-}
-
-/** Team-endorsed skills that this member has neither installed nor explicitly declined. */
-export async function endorsedCandidates(clone: string, team: string, handle: string, options: SkillRecordOptions = {}): Promise<SkillRecord[]> {
-  const [teamJson, person, records] = await Promise.all([readTeam(clone), readPerson(clone, handle), skillRecords(clone, team, options)]);
-  return teamJson.global
-    .filter((id) => !person.installed.some((entry) => entry.id === id) && !person.declined.includes(id))
-    .map((id) => records.find((record) => record.id === id))
-    .filter((record): record is SkillRecord => Boolean(record));
 }
 
 export async function readTeam(clone: string): Promise<Team> { return parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json'); }
@@ -124,10 +132,29 @@ export async function readRoster(clone: string, options: { adminLogins?: readonl
 
 /** Canonical §5.3 digest: all bytes count except the three Terum-managed YAML fields. */
 export async function canonicalDigest(root: string): Promise<string> {
-  const files = await walk(root);
+  const files = new Map<string, Buffer>();
+  for (const relative of await walk(root)) files.set(relative, await readFile(join(root, relative)));
+  return skillContentDigest(files);
+}
+
+/**
+ * The same digest over an in-memory file map, so publish can take it of a tree inside `safeWrite`'s
+ * pure mutation without touching the filesystem (§3.3). **One implementation, not two** —
+ * `canonicalDigest` reads the folder and delegates here, so the two entry points cannot drift.
+ *
+ * Keys are skill-folder-relative, exactly as `walk()` produces them. A caller digesting a version
+ * folder out of a tree must strip the `skills/<name>/v<K>/` prefix first: `tree.paths(prefix)` returns
+ * full repo-relative paths and does not strip, and feeding them unstripped makes every version compare
+ * unequal forever — which would make publish's identical-republish refusal unreachable (§5.1 step 7).
+ *
+ * The record stream is frozen: `` `${digestKey(relative)}:${sha256hex(content)}\n` ``, ascending by
+ * unescaped path, `SKILL.md` passed through `canonicalSkillMd` first, result prefixed `sha256:`.
+ * It is persisted in receipts, so it is frozen the day it ships — `skills.test.ts` pins it in hex.
+ */
+export function skillContentDigest(files: Map<string, Buffer>): string {
   const aggregate = createHash('sha256');
-  for (const relative of files) {
-    let content = await readFile(join(root, relative));
+  for (const relative of [...files.keys()].sort()) {
+    let content = files.get(relative)!;
     if (relative === 'SKILL.md') content = Buffer.from(canonicalSkillMd(content.toString('utf8')));
     aggregate.update(`${digestKey(relative)}:${createHash('sha256').update(content).digest('hex')}\n`);
   }
@@ -146,11 +173,6 @@ export async function canonicalDigest(root: string): Promise<string> {
  */
 function digestKey(relative: string): string {
   return relative.replace(/[\\\n]/g, (char) => (char === '\n' ? '\\n' : `\\${char}`));
-}
-
-/** Canonical digest for a single SKILL.md, used to authorize a managed-field-only refresh. */
-export function canonicalSkillDigest(source: string | Buffer): string {
-  return `sha256:${createHash('sha256').update(canonicalSkillMd(Buffer.isBuffer(source) ? source.toString('utf8') : source)).digest('hex')}`;
 }
 
 /** The category written when a SKILL.md carries none: the starter list's catch-all (rulings walk R1, 2026-09-06). */
@@ -213,11 +235,22 @@ function canonicalSkillMd(source: string): string {
   return `---\n${YAML.stringify(record)}---${match[2] || '\n'}${source.slice(match[0].length)}`;
 }
 
+/**
+ * D2's ignore list. `.git` and `.skillhub` are matched on the FIRST segment only — a `.git` directory
+ * nested inside the skill's own content is content — while the two junk basenames are matched anywhere.
+ * **`evals/` is deliberately NOT skipped (D9):** eval cases are ordinary version bytes and part of the
+ * skill's identity, so regenerating them mints a new version.
+ */
+const IGNORED_BASENAMES = new Set(['.DS_Store', 'Thumbs.db']);
+const IGNORED_ROOT_SEGMENTS = new Set(['.git', '.skillhub']);
+
 async function walk(root: string, base = root): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const result: string[] = [];
   for (const entry of entries) {
     const absolute = join(root, entry.name);
+    if (IGNORED_BASENAMES.has(entry.name)) continue;
+    if (root === base && IGNORED_ROOT_SEGMENTS.has(entry.name)) continue;
     if (entry.isDirectory()) result.push(...await walk(absolute, base));
     // Separators are rewritten to '/' only on Windows: on POSIX a backslash is a legal filename
     // character, and folding it would give `docs\readme.md` and `docs/readme.md` one digest key
