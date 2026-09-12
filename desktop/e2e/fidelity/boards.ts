@@ -655,5 +655,6 @@ export const BOARDS:readonly Board[]=[
     "klass": "state",
     "width": 1440,
     "height": 900
-  }
+  },
+  { name: "MarketplaceStaleEval", route: "#/marketplace?__mock=stale-eval", klass: "screen", width: 1440, height: 900 }
 ];

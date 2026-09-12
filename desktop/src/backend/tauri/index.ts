@@ -64,10 +64,10 @@ const cliCardComparison = z.object({ win: z.number(), loss: z.number(), tie: z.n
 // S7?/card-lift: the newest receipt at this skill's current version, or null. A CLI that predates the
 // limb omits it, and the card falls back to the honest '—' exactly as it did before.
 export const cliCardReceipt = z.object({ version: z.string().nullish().transform(v => v ?? null), content_digest: z.string().nullish().transform(v => v ?? null), run_id: z.string(), verdict: z.enum(['PASS','NEUTRAL','FAIL']), execution_status: z.enum(['complete','partial','failed']), expected_rows: z.number(), scored_rows: z.number(), comparisons: z.record(z.string(), cliCardComparison), arm_scores: z.record(z.string(), z.number().nullable()), provenance: z.object({ model: z.string(), k: z.number(), cc_version: z.string(), timestamp: z.string(), runner_handle: z.string() }).passthrough() }).passthrough();
-export const cliLsSkill = z.object({ id: z.string(), name: z.string(), author: z.string(), category: z.string(), characters: z.number().nullish().transform(value => value ?? null), installs: z.number(), latest: z.string(), versionCount: z.number().nullish().transform(value => value ?? null), endorsement: z.string(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string(), body: z.string().nullable(), frontmatter: z.string().nullish(), receipt: cliCardReceipt.nullish().transform(value => value ?? null), installedBy: z.array(z.object({ handle: z.string(), displayName: z.string(), scope: cliScope, since: z.string().nullish() })) });
+export const cliLsSkill = z.object({ id: z.string(), name: z.string(), author: z.string(), category: z.string(), characters: z.number().nullish().transform(value => value ?? null), installs: z.number(), latest: z.string(), latestVersion: z.string().nullable().optional(), evalVersion: z.number().nullable().optional(), latestEvalState: z.enum(['ok','none','invalid']).nullable().optional(), versionCount: z.number().nullish().transform(value => value ?? null), endorsement: z.string(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string(), body: z.string().nullable(), frontmatter: z.string().nullish(), receipt: cliCardReceipt.nullish().transform(value => value ?? null), installedBy: z.array(z.object({ handle: z.string(), displayName: z.string(), scope: cliScope, since: z.string().nullish() })) });
 /**
  * §8.4 — the whole roster in one read. This limb is what replaced the marketplace's per-member
- * fan-out: `catalog()` used to spawn `status` + `ls --local` + N × `ls member`, and is now two
+ * fan-out: `catalog()` used to spawn `status` + `ls --local` + N × `ls member`, and is now three
  * processes regardless of team size. `.passthrough()` per convention.
  */
 /** §8.4: a CLI too old to report the roster in one read. Named so the message is not buried in a branch. */
@@ -87,12 +87,12 @@ export const cliLs = z.object({
   // §8.4: emitted on the `kind:'all'` team read. Optional so a CLI that predates the limb parses.
   people: z.array(cliPerson).optional(),
 });
-export const cliStatusTeams = z.object({ version: z.string().nullable(), teams: z.array(z.object({ team: z.string(), handle: z.string(), repository: z.string().nullable(), readable: z.boolean(), sharedSkills: z.number().nullable(), memberCount: z.number().nullable(), members: z.array(z.object({ handle: z.string(), displayName: z.string() })).optional() })), ledger: z.object({ placements: z.array(z.object({ id: z.string(), team: z.string() }).passthrough()) }).nullish() });
+export const cliStatusTeams = z.object({ version: z.string().nullable(), teams: z.array(z.object({ team: z.string(), handle: z.string(), repository: z.string().nullable(), readable: z.boolean(), sharedSkills: z.number().nullable(), memberCount: z.number().nullable(), members: z.array(z.object({ handle: z.string(), displayName: z.string() })).optional() })), ledger: z.object({ placements: z.array(z.object({ id: z.string(), team: z.string(), version: z.string().nullable().optional() }).passthrough()) }).nullish() });
 type Inventory = z.infer<typeof cliLs>;
 type InventorySkill = z.infer<typeof cliLsSkill>;
 type InventoryTeam = z.infer<typeof cliStatusTeams>['teams'][number];
 /** The unfiltered status ledger's placements: a fallback presence source that still sees project-scope placements `ls --local` cannot scan (no registered checkout). */
-type LedgerPlacements = readonly { id: string; team: string }[];
+type LedgerPlacements = readonly { id: string; team: string; version?: string | null | undefined }[];
 
 type LocalSection=z.infer<typeof cliLocalSection>;
 type LocalRow=z.infer<typeof cliLocalRow>;
@@ -148,11 +148,9 @@ function joinedSkill(row:LocalRow,inventory:Inventory,team:string,features:Pick<
 }
 function localCard(row:LocalRow,section:LocalSection,home:string):SkillCard {
   const placed=row.placed??row.placement!==null,local=!placed;
-  // A folder nobody has shared genuinely has no installs; 0 is the fact, and the 'local' flag beside
-  // it says why. A placed row only reaches here when its team could not be read (the screen says so
-  // above the grid), and there 0 would be a claim we cannot back, so it stays a dash.
+  // A local card makes no claim about team installs; all new team fields are neutral.
   // The identity line names the root the folder lives in, never the word 'local'.
-  return {teamed:false,path:row.path,name:row.name,desc:row.description??'',project:labelOf(section),category:row.category??'—',installs:local?'0 installs':'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:'unknown',paths:[[abbreviateHome(row.path,home),section.scope]],flags:row.problem!==undefined?['broken']:local?['local']:[],flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:null,summary:null,favorite:false,favorites:null,enabled:true,updated:null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};}
+  return {localEval:null,localEvalStale:false,installedVersion:null,latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:false,path:row.path,name:row.name,desc:row.description??'',project:labelOf(section),category:row.category??'—',installs:'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:'unknown',paths:[[abbreviateHome(row.path,home),section.scope]],flags:row.problem!==undefined?['broken']:local?['local']:[],flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:null,summary:null,favorite:false,favorites:null,enabled:true,updated:null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};}
 function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):SkillCard {
   return localCard({name:entry.name,path:entry.path,state:'',tracked:false,placement:null,health:'unknown',category:entry.category,description:entry.description,characters:entry.characters,problem:'Not connectable · '+(entry.detail??entry.reason)},section,home);
 }
@@ -215,7 +213,14 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
   const summary = receiptSummary(row.receipt);
   const provenance = row.receipt ? { model: row.receipt.provenance.model, k: row.receipt.provenance.k, ccVersion: row.receipt.provenance.cc_version, runner: row.receipt.provenance.runner_handle, when: row.receipt.provenance.timestamp.slice(0, 10) } : null;
   const problem = placements.find(r => r.problem !== undefined || r.health === 'unknown' || r.health === 'gone-from-repo');
-  return { teamed:true, path:null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), desc: bodyExcerpt(row.body) ?? row.description, grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: summary ? [summary.w, summary.l, summary.t] : null, summary, provenance, favorite: false, favorites: null, enabled: true, flags: problem ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The placed copy could not be inspected.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
+  // Only ledger versions may annotate the catalogue. Multiple differing placements have no
+  // single truthful version; keep the annotation null until a per-root display is specified.
+  const recordedVersions = ledger.filter(p => p.id === row.id && p.team === team).map(p => p.version ?? null);
+  const installedVersion = recordedVersions.length > 0 && recordedVersions.every(v => v === recordedVersions[0])
+    && recordedVersions[0] != null && parseVersionFolder(recordedVersions[0]) !== null ? recordedVersions[0] : null;
+  const latestVersion = row.latestVersion ?? (parseVersionFolder(row.latest) === null ? null : row.latest);
+  const latestN = latestVersion === null ? null : parseVersionFolder(latestVersion);
+  return { localEval:null, localEvalStale:false, installedVersion, latestVersion, evalVersion:row.evalVersion ?? null, evalStale:row.evalVersion != null && latestN !== null && row.evalVersion !== latestN, latestEvalState:row.latestEvalState ?? null, profileVersion:null, teamed:true, path:rows[0]?.path ?? null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), desc: bodyExcerpt(row.body) ?? row.description, grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: summary ? [summary.w, summary.l, summary.t] : null, summary, provenance, favorite: false, favorites: null, enabled: true, flags: problem ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The placed copy could not be inspected.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
 /** `owner/repo` as the team remote spells it (case kept; any host); null when the team has no remote. */
 function repoSlug(remote: string | null | undefined): string | null {
@@ -341,8 +346,12 @@ function newestUpdated(skills: InventorySkill[]): InventorySkill | undefined {
 // `status` is the permission chip: host truth from the CLI's per-member `admin` (gh collaborator permission); 'unknown' when gh could not answer — never a defaulted 'member'.
 // `invited` is null, not []: this CLI reports no invitations, and the screen must not assert "0 invitations".
 // `joined` and `skillsTotal` are the CLI's own values (the people file's first commit, and the skill total that person's machine last reported); null when it reported neither, which the screen draws as '—'.
-function rosterModel(team: CliStatus['teams'][number]): Roster {
-  const members = team.members.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? null, projects: member.projects ?? [], followers: null, joined: member.joined, skillsTotal: member.skillsTotal, last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
+function rosterModel(team: CliStatus['teams'][number], inventory: Inventory): Roster {
+  const source = inventory.people?.map(person => {
+    const status = team.members.find(member => member.handle === person.handle);
+    return { ...status, handle: person.handle, displayName: person.display_name, role: person.role, projects: person.projects, skillsTotal: person.local_skills, joined: status?.joined ?? null };
+  }) ?? team.members;
+  const members = source.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? null, projects: member.projects ?? [], followers: null, joined: member.joined, skillsTotal: member.skillsTotal, last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
   return { members, invited: null, member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] };
 }
 function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, placements: LedgerPlacements, people: Person[], features: Pick<Features, 'localIdentity'>, home: string, query?: string): Catalog {
@@ -369,7 +378,6 @@ function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, lo
  * so a tab switch does not turn into a cold chain (W-02).
  */
 export const READ_CACHE_TTL_MS = 60_000;
-/** Four member reads leave headroom under the bridge cap of eight. */
 /** The Settings error board branches on this: a config.json the CLI refused to parse is repairable in place; anything else is a read failure. */
 function readReason(error: string): 'invalid-config' | 'unreadable' {
   return error.includes('Invalid') && error.includes('config.json') ? 'invalid-config' : 'unreadable';
@@ -683,7 +691,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         if(seen.has(row.path))continue;seen.add(row.path);
         if(row.health==='update-available'||row.health==='both')updatesAvailable++;
         const skill = enrichment.team.kind==='ok' ? joinedSkill(row,enrichment.inventory!,enrichment.team.team,features) : undefined;
-        if(skill && enrichment.team.kind==='ok') {joined++;skills.push({...inventoryCard(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.team.team,features,directory,enrichment.selected?.handle??'',enrichment.selected?.placements??[]),path:row.path});}
+        if(skill && enrichment.team.kind==='ok') {joined++;skills.push({...inventoryCard(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.team.team,features,directory,enrichment.selected?.handle??'',enrichment.selected?.placements??[]),installedVersion:null,latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,path:row.path});}
         else skills.push(localCard(row,section,directory));
       }
       for(const entry of section.notOffered??[]) {
@@ -781,8 +789,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async roster(_, options) {
       const data = await peopleInventory(options, true);
       if (!data.ok) return {ok:false,error:data.error,...(data.reason?{reason:data.reason}:{})};
-      const { team } = data.value;
-      return { ok: true, value: rosterModel(team) };
+      const { team, inventory } = data.value;
+      return { ok: true, value: rosterModel(team, inventory) };
     },
     async catalog(query, options) {
       const data = await peopleInventory(options);
@@ -790,13 +798,14 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const { team, inventory, placements } = data.value;
       const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return fail(local.error);
-      const members = rosterModel(team).members;
+      const members = rosterModel(team, inventory).members;
       // §8.4: the per-member fan-out is deleted. `catalog()` spawned `status` + `ls --local` + N × `ls
-      // member`; the team read now carries every member whole, so this is two processes regardless of
+      // member`; the team read now carries every member whole, so this is three processes regardless of
       // team size. A CLI that predates the `people[]` limb is REPORTED rather than silently drawn as a
       // team with no members — the only thing worse than a slow marketplace is a wrong one.
       const roster = new Map((inventory.people ?? []).map(person => [person.handle, person]));
       if (inventory.people === undefined && members.length) return fail(STALE_CLI_ROSTER);
+      for (const member of team.members) if (!roster.has(member.handle)) return fail(`No member data for ${member.handle}.`);
       const people: Person[] = [];
       for (const member of members) {
         const detail = roster.get(member.handle);
@@ -811,7 +820,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         const latest = newestUpdated(authored);
         const lastPublish = latest ? `${relativeTime(latest.updated)} · ${latest.name}` : '—';
         const disk: Person['onDisk'] = [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length];
-        people.push({ ...member, joined: member.joined ?? '—', role: detail.role, lastPublish, last_publish: lastPublish, organization: null, declined: [], skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: names.length ? [['Authored', names]] : [], placeNote: personPlaceNote(disk), onDisk: disk });
+        people.push({ ...member, joined: member.joined ?? '—', role: detail.role, lastPublish, last_publish: lastPublish, organization: null, declined: [], skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: [['On their profile', detail.profile.map(entry => entry.name)], ['Installed', installable.map(skill => skill.name)]], profileVersions: Object.fromEntries(detail.profile.map(entry => [entry.name, entry.version])), placeNote: personPlaceNote(disk), onDisk: disk });
       }
       return { ok: true, value: catalogModel(team, inventory, local.value, placements, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
     },

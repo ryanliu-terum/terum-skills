@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 type Kind = 'install' | 'remove' | 'manage';
-const confirm = { install: 'Install', remove: 'Remove', manage: 'Continue' };
+const confirm = { install: 'Install', remove: 'Remove', manage: 'Publish' };
 async function open(kind: Kind = 'install', prompts = false) {
   const backend = createMockBackend();
   const detail = await backend.skill({ ref: 'deploy-check' });

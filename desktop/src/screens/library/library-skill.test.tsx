@@ -65,8 +65,20 @@ it.each([
  expect(await screen.findByRole('status')).toHaveTextContent(text);
 });
 
-it('refuses the publish dialog for a skill the team has already endorsed',async()=>{
+// §8.6: `publishAction` loses all three `teamState` branches -- the gate is the local folder alone.
+// A skill the team already has IS publishable: that is how its next version ships (§5.1 step 9 mints
+// highest+1, and identical bytes mint nothing). The old endorsement-era refusal is gone with §12.
+it('opens the publish dialog for a skill the team already has, gating on the local folder',async()=>{
  openWith('#/skill/deploy-check?dialog=publish',createMockBackend());
+ expect(await screen.findByRole('dialog',{name:'Publish deploy-check to the team?'})).toBeInTheDocument();
+});
+
+it('refuses the publish dialog for a skill with no folder on this machine',async()=>{
+ const backend=createMockBackend();
+ const detail=await backend.skill({ref:'deploy-check'});
+ if(!detail.ok)throw new Error('fixture detail unavailable');
+ vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...detail.value,path:null}});
+ openWith('#/skill/deploy-check?dialog=publish',backend);
  expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeInTheDocument();
  expect(screen.queryByRole('dialog')).toBeNull();
 });

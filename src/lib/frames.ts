@@ -32,7 +32,8 @@ export type InboundFrame = AnswerFrame | CancelFrame | RequestFrame | ServeCance
 /** Shared by the CLI session and desktop adapter; mutations always keep their own process. */
 export { SERVE_READ_VERBS } from './serve-verbs.js';
 
-/** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed). */
+/** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed).
+ * B4 marketplace uses existing ls/status/install/publish entries; reinstall is install, not a verb. */
 export const FRAME_VERBS = ['project add', 'project remove', 'project list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team workflow-update', 'team project create', 'invite', 'ls', 'status', 'publish', 'validate', 'eval', 'eval-report', 'install', 'uninstall-skill', 'uninstall', 'sync', 'prune', 'search', 'update', 'app', 'profile', 'app-update', 'serve'] as const;
 
 /**

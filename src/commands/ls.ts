@@ -28,10 +28,10 @@ const FINGERPRINT_CONCURRENCY = 8;
 
 export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
 /**
- * The display facts of the newest valid receipt at a skill's current tree hash — a strict subset of
+ * The display facts of the selected receipt at a published skill version — a strict subset of
  * the receipt, under the receipt's own field names so a shell maps it with the same code it already
  * maps `eval-report` with. Never derived across receipts and never combined (eval-engine spec §12).
- * `null` is the honest "no receipt at this version" state a shell draws as "—".
+ * `null` is the honest "no usable receipt in this history" state a shell draws as "—".
  */
 export interface LsReceipt {
   run_id: string;
@@ -54,6 +54,9 @@ export interface LsSkill {
   latest: string;
   /** How many versions the skill has published. */
   versionCount: number;
+  latestVersion: string | null;
+  evalVersion: number | null;
+  latestEvalState: 'ok' | 'none' | 'invalid';
   endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; frontmatter: string | null; updated: string; receipt: LsReceipt | null;
 }
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
@@ -180,7 +183,7 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
         const message = found.reason instanceof Error ? found.reason.message : String(found.reason);
         problems.push({ source: `evals/${id}`, message }); io.print(`${name}: ${message}`);
       }
-      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: versionFolderName(record.latestVersion), versionCount: record.versionCount, endorsement: skillEndorsement(team, id), grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, frontmatter: record.rawFrontmatter, updated, receipt: found.status === 'fulfilled' ? found.value : null });
+      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: versionFolderName(record.latestVersion), versionCount: record.versionCount, endorsement: skillEndorsement(team, id), grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, frontmatter: record.rawFrontmatter, updated, latestVersion: versionFolderName(record.latestVersion), ...(found.status === 'fulfilled' ? found.value : { receipt: null, evalVersion: null, latestEvalState: 'invalid' as const }) });
     }
   }
   return skills;
@@ -190,22 +193,16 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
  * receipt directory is not a problem — it is the "—" state. The identity check is `eval-report`'s
  * own (evalReport.ts), so the two verbs cannot disagree about which receipt is this version's.
  */
-async function cardReceipt(clone: string, id: string, versions: readonly SkillVersion[], onProblem?: (message: string) => void): Promise<LsReceipt | null> {
+async function cardReceipt(clone: string, id: string, versions: readonly SkillVersion[], onProblem?: (message: string) => void): Promise<Pick<LsSkill, 'receipt' | 'evalVersion' | 'latestEvalState'>> {
   // §8.1's fallback, shared with the README: show the newest version carrying a usable receipt. A
   // corrupt newest file fails closed for that version only and the walk continues, so one bad file
   // cannot blank a skill with three good older evals.
   const selected = await selectCardEval(clone, id, versions, onProblem);
-  // D60: §8.2 makes the "from Version N" label on the card face mandatory — "a card showing v3's score
-  // next to a v5 install button is a claim about bytes the user will not receive", and the label "is
-  // the only thing that keeps the reversal honest". That label and the DTO limbs that carry it ship
-  // with B4 (§8.1's `evalVersion`/`latestVersion`/`latestEvalState` on `LsSkill`), so until B4 lands
-  // there is nowhere for the disclosure to go. `main` must never carry the reversal without it, so a
-  // stale receipt renders "—" here exactly as it does today. B4 deletes this clause in the same
-  // commit that adds `evalVersionLabel`; the README half (`annotate`) already discloses honestly.
-  if (selected.eval === null || selected.eval.stale) return null;
+  const fields = { evalVersion: selected.eval?.version ?? null, latestEvalState: selected.latestEvalState };
+  if (selected.eval === null) return { ...fields, receipt: null };
   const found = selected.eval.receipt.receipt;
   const { model, k, cc_version, timestamp, runner_handle } = found.provenance;
-  return { run_id: found.run_id, verdict: found.verdict, execution_status: found.execution_status, expected_rows: found.expected_rows, scored_rows: found.scored_rows, comparisons: found.comparisons, arm_scores: found.arm_scores, provenance: { model, k, cc_version, timestamp, runner_handle } };
+  return { ...fields, receipt: { run_id: found.run_id, verdict: found.verdict, execution_status: found.execution_status, expected_rows: found.expected_rows, scored_rows: found.scored_rows, comparisons: found.comparisons, arm_scores: found.arm_scores, provenance: { model, k, cc_version, timestamp, runner_handle } } };
 }
 async function showMember(handle: string | undefined, people: Awaited<ReturnType<typeof readPeople>>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems']): Promise<Result<LsResult>> {
   if (!handle) throw new Error('Specify a member handle.');
@@ -229,7 +226,7 @@ async function showProject(projectName: string | undefined, team: ReturnType<typ
 }
 /** One skill per line, the §6 `ls` format; `search` prints hits through the same function. */
 /** D1: the printed line is prose, so the folder is rendered here — the DTO stays an address. */
-export function format(skill: LsSkill): string {
+export function format<T extends Pick<LsSkill, 'name' | 'author' | 'category' | 'installs' | 'latest' | 'endorsement' | 'updated'>>(skill: T): string {
   const ordinal = parseVersionFolder(skill.latest);
   return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${ordinal === null ? skill.latest : versionLabel(ordinal)}; ${skill.endorsement}; ${skill.updated}`;
 }
