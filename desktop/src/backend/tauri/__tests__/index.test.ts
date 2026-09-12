@@ -91,9 +91,15 @@ it('maps a minted version, never inventing one', async () => {
   expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 2 - 2, profileAdded: false, projectAdded: true } });
 });
 
-it('§5.3: an identical republish reports the version it MATCHED, not a null the screen would draw as "no version"', async () => {
+it('§5.3: an identical republish carries version NULL through — the match is `identicalTo`', async () => {
+  // The adapter used to coerce `version: value.version ?? value.identicalTo`, on the theory that a
+  // null would be drawn as "no version". Nothing draws it: the one reader
+  // (`SkillScreen.tsx:130`) branches on `created && version` and reaches for `identicalTo` on both
+  // of the other arms. The coercion only destroyed the distinction §5.3 defines — a DTO where
+  // `version` names what was MINTED and `identicalTo` what was MATCHED — leaving `created` as the
+  // sole way to tell a fresh v2 from a republish of it.
   const f = replay(publishFrame({ version: null, created: false, identicalTo: 'v2', projectAdded: false }));
-  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: 'v2', created: false, identicalTo: 'v2', attachedEvals: 0, profileAdded: false, projectAdded: false } });
+  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: null, created: false, identicalTo: 'v2', attachedEvals: 0, profileAdded: false, projectAdded: false } });
 });
 
 it('carries the attached-eval count and the profile answer through', async () => {

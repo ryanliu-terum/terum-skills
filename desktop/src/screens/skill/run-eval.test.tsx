@@ -44,6 +44,23 @@ it('stops once and retains a Stopped result with Close',async()=>{
  expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Close'})).toBeVisible();
  expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Run eval again'})).toBeVisible();
 });
+it('§11.4: refuses to offer a run for a skill that is not on this machine, and claims no local copy',async()=>{
+ // The defect: the dialog offered Run eval for any skill once the flag was on, and its running-state
+ // line said "Evaluates the copy on this machine" when `path` is null — which means no copy exists.
+ // The CLI refuses such a run outright, so every one of those clicks was a guaranteed failure.
+ const backend=createMockBackend();
+ const detail=await backend.skill({ref:'deploy-check'});if(!detail.ok)throw new Error(detail.error);
+ vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...detail.value,path:null,pathLabel:'—'}});
+ const evalSpy=vi.spyOn(backend,'eval');
+ const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+ location.hash='#/skill/deploy-check?tab=evals&dialog=run-eval';
+ render(<BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><PromptContext value={vi.fn(async()=>true)}><PrintContext value={vi.fn()}><EvalRunProvider><App/></EvalRunProvider></PrintContext></PromptContext></Tooltip.Provider></QueryClientProvider></BackendContext>);
+ const dialog=await screen.findByRole('dialog');
+ expect(within(dialog).getByText('Install it first — evals run against the copy on your machine.')).toBeVisible();
+ expect(within(dialog).queryByRole('button',{name:'Run eval'})).toBeNull();
+ expect(within(dialog).queryByText(/Evaluates the copy on this machine/)).toBeNull();
+ expect(evalSpy).not.toHaveBeenCalled();
+});
 it('uses the exact honest cost sentence without an estimate',async()=>{
  await open('');expect(screen.getByText('No previous run to estimate from. This uses your Claude account and can take a while.')).toBeVisible();
 });

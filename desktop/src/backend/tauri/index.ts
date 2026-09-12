@@ -226,6 +226,14 @@ function repoSlug(remote: string | null | undefined): string | null {
  * command it produced would now fail on the machine it was pasted into. The version itself is still
  * shown; it is a label (`Version 3`) under D1, so it is never sliced to look like a hash.
  */
+/** §3.2: `placements[].version` is a version FOLDER (`v1`) since the forced M6 slice — the 12-char
+ *  slice below it was the layout-2 tree hash. Anything that does not parse keeps the old rendering,
+ *  so a config written by an older CLI still shows something. */
+function placementVersionLabel(version: string | null | undefined): string | null {
+  if (version === null || version === undefined) return null;
+  const n = parseVersionFolder(version);
+  return n === null ? version.slice(0, 12) : versionLabel(n);
+}
 function detailVersionFields(repo: string | null, name: string, version: string | null): Pick<SkillDetail, 'version' | 'version_full' | 'shareCommand'> {
   // D1: what a PERSON reads is `Version 3`. `version_full` keeps the FOLDER, because §8.6 makes it a
   // path segment in the repository link — one is prose, the other is an address.
@@ -316,7 +324,7 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
   INVITE_TIP:"GitHub emails the invitation; the block runs the joiner&#39;s wizard",
   JOIN_BLOCK_NOTE:"GitHub emails the invitation. The block runs the joiner&#39;s wizard: with gh signed in it accepts the pending invitation, otherwise it asks them to accept it in the browser, and git must have access to this repository.",
   TEAM_POLICY:{license:policy?.license??null,categories:status.teams.length===1?status.teams[0]?.categories??null:null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'}, // one team per machine — legacy 2+ shows a hint, not a projection
-  PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [abbreviateHome(p.path,home),row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,row?.tracked===true?null:p.version?.slice(0,12)??null,p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
+  PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [abbreviateHome(p.path,home),row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,row?.tracked===true?null:placementVersionLabel(p.version),p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
   QUARANTINE:null,HOOK:null,
   APP_VERSION:import.meta.env.VITE_APP_VERSION,AGENT_CLI:'—',AGENT_CLI_AUTH:'unknown',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
@@ -832,7 +840,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     // profile writes the clone's people file and, for --name, config.display_name.
     profile: args => run(['profile', ...(args.name === undefined ? [] : ['--name', args.name]), ...(args.bio === undefined ? [] : ['--bio', args.bio]), ...(args.role === undefined ? [] : ['--role', args.role]), ...(args.projects ?? []).flatMap(project => ['--project', project])], cliProfile, value => value, args.name === undefined ? ['clone'] : ['config', 'clone']),
     // publish writes clone team.json/PR branches and registers the current checkout in config.
-    publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), ...(args.project ? ['--project', args.project] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, project: value.project, version: value.version ?? value.identicalTo, created: value.created, identicalTo: value.identicalTo, attachedEvals: value.attachedEvals, profileAdded: value.profileAdded, projectAdded: value.projectAdded }), ['config', 'clone']),
+    publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), ...(args.project ? ['--project', args.project] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, project: value.project, version: value.version, created: value.created, identicalTo: value.identicalTo, attachedEvals: value.attachedEvals, profileAdded: value.profileAdded, projectAdded: value.projectAdded }), ['config', 'clone']),
     // Sync fetches team clones; it never changes the local Library or places a skill.
     sync: (args: SyncArgs) => run(['sync', ...(args.team ? ['--team', args.team] : [])], cliRefresh, (value): SyncResult => ({ notices:value.notices,changed:value.changed,teams:value.teams.map(team=>({team:team.team,state:team.state,...(team.detail===undefined?{}:{detail:team.detail})})) }), ['marketplace', 'stamp']),
     prune: () => run(['prune'], z.unknown(), () => undefined, ['placed']),
