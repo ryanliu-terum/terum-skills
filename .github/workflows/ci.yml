@@ -34,6 +34,31 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  # The desktop's zod mirrors of CLI result shapes, checked against the CLI's own exported types.
+  # It lives here, not in desktop-ci.yml, because that workflow only triggers on `desktop/**` — and the
+  # drift this catches is usually a rename on the CLI side, in a batch that never opens the desktop tree.
+  # Needs both trees installed: the contract imports desktop's schemas and the root commands' types.
+  mirrors:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run typecheck:mirrors
+        working-directory: desktop
+
   package:
     runs-on: ubuntu-latest
     permissions:

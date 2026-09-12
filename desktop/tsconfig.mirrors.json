@@ -1,0 +1,12 @@
+{
+  // The mirror contract only. It imports types from the root CLI tree, which is compiled under
+  // neither `exactOptionalPropertyTypes` nor `verbatimModuleSyntax` (see the root tsconfig.json);
+  // leaving them on here reports ~26 errors in root source that say nothing about the mirrors.
+  // Everything that makes the assertions meaningful — `strict`, `noUncheckedIndexedAccess` — stays on.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "exactOptionalPropertyTypes": false,
+    "verbatimModuleSyntax": false
+  },
+  "include": ["contracts/**/*.ts"]
+}

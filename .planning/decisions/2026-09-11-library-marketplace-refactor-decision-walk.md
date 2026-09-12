@@ -643,3 +643,38 @@ against the team's shared record — the `terum` MCP refused auth again (HTTP 40
 A blank answer to a text question takes the offered default (`frames.ts`'s `answer || defaultValue || ''`),
 and the step always offers one, so the branch was unreachable. Declining is the confirm — the **Skip**
 half of §9.2's drawn control — and that is the only way to leave the step without a project.
+
+## Decisions 38–41 — the two cross-tree disciplines, and the third (2026-09-12, fourth session)
+
+**D38–D40 resolved on Ryan's standing best-call authorization; D41 is Ryan's own, carried out.** The
+handoff of 2026-09-12 recorded Ryan's ruling to build **both** disciplines that two earlier handoffs had
+reserved for him, and left the third — the Open Decision — to be settled by writing the first two.
+Still unchecked against the team's shared record: the `terum` MCP refused auth again (HTTP 401), an
+eighth consecutive session, so `check_decision` has never run against D1–D41.
+
+| # | Decision | Verdict | Rationale (plain) |
+|---|---|---|---|
+| 38 | Where the `FEATURE_KEYS` ↔ `FRAME_FEATURES` tripwire lives | LOCK — the **root** suite, `src/lib/__tests__/feature-keys-tripwire.test.ts` | The handoff assumed desktop. But `desktop-ci.yml` triggers only on `paths: ['desktop/**']`, and the break this catches is normally a **CLI-side** rename (B2's `checkouts` → `libraryProjects`) made in a batch that never opens the desktop tree — precisely when desktop CI does not run. `ci.yml` has no paths filter, so the root suite runs on every change. Reading `desktop/src/backend/types.ts` as text is the repo's existing cross-tree pattern (`invocation-tripwire.test.ts`, `frames.test.ts` CP-19) and sidesteps the leaf-import rule, exactly as the handoff designed |
+| 39 | How the mirror type-test compiles, given the two trees disagree on compiler options | LOCK — its own `desktop/tsconfig.mirrors.json`, and the contract file lives **outside** `desktop/src` | The handoff's design — `import type` from the root tree, exempt from `cli-tree-imports.test.ts` — passes that rule but **does not typecheck**. Desktop sets `exactOptionalPropertyTypes` and `verbatimModuleSyntax`; root is compiled under neither and does not satisfy them, so pulling root types into desktop's normal `tsc` reports ~26 errors in root source that say nothing about the mirrors (measured, not predicted). A second tsconfig relaxes exactly those two and keeps `strict` and `noUncheckedIndexedAccess` on. The file sits in `desktop/contracts/` because `desktop/tsconfig.json` includes `src` wholesale and would otherwise pick it back up |
+| 40 | Which CI job runs the mirror gate | LOCK — a new `mirrors` job in **`ci.yml`**, not a step in `desktop-ci.yml` | Same trigger argument as D38, plus a measured fact: the contract needs **both** trees installed. With root `node_modules` absent it fails on `proper-lockfile` type declarations, so the desktop job — which installs only `desktop/` — cannot host it. A separate job installing both runs in parallel and slows no existing gate |
+| 41 | The Open Decision: a third discipline for class 1 (desktop spawns a verb the CLI no longer registers) | **LOCK — build it** (the handoff's option (b)) | The handoff's own test was whether the extraction generalises "in under ~20 lines". It does, in about six: every CLI child goes through one function (`run(argv, …)`, with `cached()` wrapping it), and matching only the **opening run of quoted literals** after `run([` stops naturally at the first spread — which is exactly where the verb prefix ends, so no bracket matching is needed. It then reuses `attemptedVerb()`'s longest-prefix rule against `FRAME_VERBS`. Class 1 is the one of the four that actually **shipped**: B1 left the adapter spawning `run(['refresh'], …)` after folding `refresh` into `sync`, and it ran on every launch and every window focus with a green suite. Verified to catch that exact defect |
+
+**Class 3 stays knowingly uncovered and is recorded as owed.** An invalidation list that misses a
+`ChangeSource` (the background fetch that stopped invalidating roster and receipts) has no cheap
+mechanical form — it needs to know which reads *should* be invalidated by a write, which is a
+product judgement, not a set comparison. Left for a later batch rather than approximated badly.
+
+**Known gap in D39, stated rather than hidden.** The mirror contract closes one direction — a mirror
+that requires a field the CLI no longer emits, or reads it under the wrong name. It does **not** catch
+the opposite: a CLI type growing a field a `.strict()` mirror would reject, because TypeScript flags
+excess properties only on object literals. `cliLocalRow` is the `.strict()` one, and that direction
+already fails **loudly** at runtime (it turned 212 desktop failures into 29 in B1), which is why it is
+the cheaper one to leave open.
+
+**Each discipline was proved to fail before being kept.** A discipline that cannot be shown to go red
+is not yet a discipline: the feature-key tripwire was verified red on a desktop-side rename, a CLI-side
+rename, and a `FEATURE_KEYS` that is no longer a bracketed literal; the verb tripwire on the real B1
+`refresh` defect and on a CLI-side verb removal; the mirror contract on a mirror requiring a dead field,
+on a mirror reading a renamed key, and on a mismatched enum member. All three then went green again on
+restore, and both tripwires carry a minimum-count assertion so a regex that quietly matches nothing
+cannot pass vacuously.
