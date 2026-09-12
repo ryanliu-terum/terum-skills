@@ -235,22 +235,34 @@ function canonicalSkillMd(source: string): string {
   return `---\n${YAML.stringify(record)}---${match[2] || '\n'}${source.slice(match[0].length)}`;
 }
 
+const IGNORED_BASENAMES = new Set(['.DS_Store', 'Thumbs.db']);
+const IGNORED_ROOT_SEGMENTS = new Set(['.git', '.skillhub']);
+
 /**
- * D2's ignore list. `.git` and `.skillhub` are matched on the FIRST segment only — a `.git` directory
- * nested inside the skill's own content is content — while the two junk basenames are matched anywhere.
+ * D2's ignore list, as ONE predicate over a skill-folder-relative POSIX key.
+ *
+ * **Every walker that feeds a digest must use this**, or two walkers produce two digests of the same
+ * folder and publish's identical-republish refusal (§5.1 step 8) can never fire — `sourceFiles` feeds
+ * `skillContentDigest` on the publish path while `walk()` feeds `canonicalDigest` elsewhere.
+ *
+ * `.git` and `.skillhub` are matched on the FIRST segment only — a `.git` directory nested inside the
+ * skill's own content is content — while the two junk basenames are matched anywhere.
  * **`evals/` is deliberately NOT skipped (D9):** eval cases are ordinary version bytes and part of the
  * skill's identity, so regenerating them mints a new version.
  */
-const IGNORED_BASENAMES = new Set(['.DS_Store', 'Thumbs.db']);
-const IGNORED_ROOT_SEGMENTS = new Set(['.git', '.skillhub']);
+export function ignoredByDigest(key: string): boolean {
+  const segments = key.split('/');
+  if (IGNORED_ROOT_SEGMENTS.has(segments[0]!)) return true;
+  return IGNORED_BASENAMES.has(segments[segments.length - 1]!);
+}
 
 async function walk(root: string, base = root): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const result: string[] = [];
   for (const entry of entries) {
     const absolute = join(root, entry.name);
-    if (IGNORED_BASENAMES.has(entry.name)) continue;
-    if (root === base && IGNORED_ROOT_SEGMENTS.has(entry.name)) continue;
+    const key = absolute.slice(base.length + 1);
+    if (ignoredByDigest(sep === '\\' ? key.split('\\').join('/') : key)) continue;
     if (entry.isDirectory()) result.push(...await walk(absolute, base));
     // Separators are rewritten to '/' only on Windows: on POSIX a backslash is a legal filename
     // character, and folding it would give `docs\readme.md` and `docs/readme.md` one digest key

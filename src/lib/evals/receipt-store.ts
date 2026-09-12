@@ -84,3 +84,30 @@ export async function selectCardEval(
   }
   return { eval: null, latestEvalState };
 }
+
+/**
+ * §6.2's local store, content-keyed: `~/.terum/skills/evals/local/<64-hex>/<runId>/receipt.json`.
+ *
+ * Re-keyed from `evals/<team>/<skill-id>/` so a skill belonging to NO team can be evaluated — the
+ * common case now that the Library is a local mirror. Content-keying is also what makes publish's
+ * attach step provable rather than trusted: it matches on the digest it just computed, not on a name
+ * or a timestamp.
+ *
+ * `<digest>` is the bare 64 hex characters, so the `sha256:` prefix is stripped here.
+ * Newest run last, since `RUN_ID_PATTERN` keeps lexicographic order chronological.
+ */
+export async function localReceiptsFor(stateRoot: string, contentDigest: string): Promise<{ runId: string; receipt: Receipt }[]> {
+  const root = join(stateRoot, 'evals', 'local', contentDigest.replace(/^sha256:/, ''));
+  let runIds: string[];
+  try { runIds = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort(); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
+  const found: { runId: string; receipt: Receipt }[] = [];
+  for (const runId of runIds) {
+    let raw: unknown;
+    try { raw = JSON.parse(await readFile(join(root, runId, 'receipt.json'), 'utf8')); }
+    catch { continue; } // an unreadable local run is skipped, never fatal to a publish
+    const parsed = receiptSchema.safeParse(raw);
+    if (parsed.success) found.push({ runId, receipt: parsed.data });
+  }
+  return found;
+}

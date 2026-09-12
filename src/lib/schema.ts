@@ -113,6 +113,15 @@ export const personSchema = z.object({
   bio: z.string(),
   role: z.string().max(32).optional(),
   installed: z.array(installedSchema),
+  /**
+   * §3.5 — curated, and deliberately NOT `installed[]`. `installed[]` is automatic and means *a copy
+   * is on a machine*; this means *I stand behind this*. Written only on an explicit yes at publish or
+   * install, and by `profile --add/--remove`. One entry per id: a re-add updates in place.
+   *
+   * Optional so every people file written before it shipped still parses.
+   */
+  profile: z.array(z.object({ id: skillIdSchema, name: z.string().min(1), version: z.string().regex(VERSION_FOLDER), added: z.string(), via: z.enum(['publish', 'install']) }).passthrough()).optional(),
+  /** Retained so existing files parse, but no longer written: its only job was suppressing the endorsement-driven auto-install §12 deletes. */
   declined: z.array(skillIdSchema),
   projects: z.array(z.string().min(1)).optional(),
   /**
