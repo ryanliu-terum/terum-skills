@@ -161,19 +161,12 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
 
     const runAt = (args.now ?? (() => new Date()))();
     const runId = runIdFrom(runAt);
-    // §6.2: content-keyed, so a skill belonging to NO team can be evaluated at all.
-    const runDir = join(store.root, 'evals', 'local', candidateDigest.replace(/^sha256:/, ''), runId);
-    const transcriptDir = join(runDir, 'transcripts');
-    const scratch = join(runDir, 'sandboxes');
-    await mkdir(transcriptDir, { recursive: true, mode: 0o700 });
-    await mkdir(scratch, { recursive: true, mode: 0o700 });
 
     const authoredSelected = args.case === undefined ? authoredCaseFiles : authoredCaseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
     // A named case is an authored assertion; it intentionally never causes a model call.
     if (wantsCases && args.case !== undefined && authoredSelected.length === 0) return failure(`No eval case named ${args.case} for ${local.name}.`);
     const { generateCases, generateTriggers } = plannedGeneration(args, assets);
     let generated: GeneratedAssets = {};
-    const generatedRoot = join(runDir, 'generated');
     if (generateCases || generateTriggers) {
       const catalog = await endorsedCatalog(local.libraryRoot, { name: local.name, description });
       const built = await generate({
@@ -189,7 +182,6 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       });
       if (!built.ok) return failure(built.error);
       generated = built.value;
-      await writeGeneratedAssets(generatedRoot, generated);
       // §6.3/D9: the write-back into the LOCAL skill folder — the only route by which a generated
       // eval asset ever reaches anywhere. It only ever runs for an asset that was MISSING, so it
       // cannot overwrite authored work. With `--gen` deleted the user never asked for it, so this
@@ -201,6 +193,30 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       const saved = await saveGeneratedAssets(candidateDir, generated);
       if (!saved.ok) return failure(saved.error);
     }
+
+    // §6.1/D9: the run has to be keyed on the bytes that were actually EVALUATED, and the write-back
+    // above is part of them — `evals/` is inside `skillContentDigest` by D9, and the candidate arm below
+    // runs `candidateDir` as it now stands on disk. Digesting before the write-back gave every
+    // generating run a `content_digest` naming a folder state that no longer existed anywhere, so
+    // publish could never resolve it to a version: NO generating run was ever attachable, paid
+    // `--drain` runs included. Re-read rather than merge `generated` in by hand, so the digest has the
+    // same oracle publish uses — the folder.
+    //
+    // The PRE-write digest above deliberately stays the key for the two queue guards at the top: what
+    // was queued is what was on disk when it was queued, and re-checking `--skipReceipted` after
+    // generation would mean paying for the model call before discovering the bytes were receipted.
+    // The next run of an already-generated folder reads the written-back bytes and matches this one.
+    const regenerated = generated.cases !== undefined || generated.triggers !== undefined;
+    const evaluatedDigest = regenerated ? skillContentDigest((await sourceFiles(candidateDir)).files) : candidateDigest;
+
+    // §6.2: content-keyed, so a skill belonging to NO team can be evaluated at all.
+    const runDir = join(store.root, 'evals', 'local', evaluatedDigest.replace(/^sha256:/, ''), runId);
+    const transcriptDir = join(runDir, 'transcripts');
+    const scratch = join(runDir, 'sandboxes');
+    await mkdir(transcriptDir, { recursive: true, mode: 0o700 });
+    await mkdir(scratch, { recursive: true, mode: 0o700 });
+    const generatedRoot = join(runDir, 'generated');
+    if (regenerated) await writeGeneratedAssets(generatedRoot, generated);
 
     const casesDir = generated.cases === undefined ? authoredCasesDir : join(generatedRoot, 'cases');
     const triggerPath = generated.triggers === undefined ? join(candidateDir, 'evals', 'triggers.yaml') : join(generatedRoot, 'triggers.yaml');
@@ -228,7 +244,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       caseNames.push(...selected.map((file) => file.replace(/\.ya?ml$/i, '')));
       // §6.5: no clone, no team, no id, no receipted version — every one of them means NO incumbent
       // and a single-arm run, exactly as eval-engine §7.1 already names it.
-      const incumbent = clone === null || skillId === null ? undefined : await incumbentDir(clone, local.name, await listVersions(clone, local.name), skillId, candidateDigest);
+      const incumbent = clone === null || skillId === null ? undefined : await incumbentDir(clone, local.name, await listVersions(clone, local.name), skillId, evaluatedDigest);
       const opponents = incumbent === undefined ? 1 : 2;
       // Includes every selected authored case before requirement probes or setup failures.
       expectedRows = selected.length * k * opponents;
@@ -265,7 +281,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       // version folder. Identity at run time is the content digest, computed by the same
       // `skillContentDigest` the publish comparison uses, over the folder exactly as it is on disk.
       version: null,
-      content_digest: candidateDigest,
+      content_digest: evaluatedDigest,
       run_id: runId,
       verdict: summary.verdict,
       attribution: summary.attribution,
