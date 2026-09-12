@@ -37,7 +37,9 @@ export function EvalRunProvider({children}:PropsWithChildren){
   assertAvailable();
   const service=evalQueueFor(backend);
   if(!service)throw new Error('This backend has no eval queue.');
-  return track(service.drain(),{ref:item.skill,name:item.skill,team:item.team,queue:true});
+  // §6.6: a queued item may carry no team at all; under exactOptionalPropertyTypes an absent team
+  // has to be absent, not `undefined`.
+  return track(service.drain(),{ref:item.skill,name:item.skill,...(item.team===undefined?{}:{team:item.team}),queue:true});
  }
  async function stop(){const active=live.current;if(!active||active.state!=='running')return;update({...active,state:'stopped'});try{await active.run.cancel();}catch(error){if(live.current?.run===active.run)update({...live.current,result:{ok:false,error:String(error)}});}}
  function dismiss(){setDialogOpen(false);if(live.current?.state!=='running')update(null);}

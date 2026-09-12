@@ -1,7 +1,13 @@
 import type { Backend } from './Backend';
 import type { Result, Run } from './types';
 
-export interface EvalQueueItem { team: string; skill: string; version: string; requestedAt: string; window: 'overnight' | 'later'; lastError?: string | undefined; }
+/**
+ * §6.6 — a queued eval names the BYTES it was queued against. `version` is gone because a local
+ * folder has no version number at queue time, and `team` is optional because §6.3 made a folder
+ * belonging to no team evaluable. Both were REQUIRED here, so every item failed the parse after the
+ * CLI changed, `list()` returned ok:false and the drainer silently scheduled nothing.
+ */
+export interface EvalQueueItem { skill: string; path: string; contentHash: string; requestedAt: string; window: 'overnight' | 'later'; team?: string | undefined; lastError?: string | undefined; }
 export interface EvalQueueResult { items: EvalQueueItem[]; attempted?: number | undefined; completed?: number | undefined; failures?: { item: EvalQueueItem; error: string }[] | undefined; }
 export interface EvalQueueService {
   list(): Promise<Result<EvalQueueResult>>;

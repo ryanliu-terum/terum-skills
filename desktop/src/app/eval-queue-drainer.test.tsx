@@ -15,7 +15,7 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 8, 10, 1)
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 function harness({ enabled = true, failure = false, deferred = false } = {}) {
   const backend = createMockBackend(); backend.prefs.set('evals:overnight', enabled);
-  const items: EvalQueueItem[] = ['alpha', 'beta'].map(skill => ({ team: 'team', skill, version: 'a'.repeat(40), requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' }));
+  const items: EvalQueueItem[] = ['alpha', 'beta'].map(skill => ({ team: 'team', skill, path: `/library/${skill}`, contentHash: `sha256:${'a'.repeat(64)}`, requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' }));
   let release: (() => void) | undefined;
   const cancelled = vi.fn();
   const drain = vi.fn(() => {

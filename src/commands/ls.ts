@@ -71,6 +71,15 @@ export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent
 export interface LsPerson {
   handle: string;
   display_name: string;
+  /** The byline half of `metadata.author`: without it no reader can reproduce `ls member`s authorship join. */
+  email: string;
+  /**
+   * The ids of the skills whose `metadata.author` is this member's byline — the same join
+   * `ls member <handle>` makes, resolved HERE so it has exactly one implementation. A reader that
+   * re-derived it would need `normalizeAuthor`, and the desktop bundle may only import root modules
+   * that import nothing at all (`cli-tree-imports.test.ts`).
+   */
+  authored: readonly string[];
   role: string | null;
   projects: readonly string[];
   installed: readonly { id: string; version: Person['installed'][number]['version']; scope: Person['installed'][number]['scope']; since: string }[];
@@ -104,16 +113,25 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived), role: person.role ?? null, projects: person.projects ?? [] }));
     // §8.4: built from the same parsed people the roster and the install counts come from — no extra
     // read, no second process, and one shape every marketplace reader shares.
+    const bylines = new Map(people.map((person) => [normalizeAuthor(`${person.display_name} <${person.email}>`), person.handle]));
     const personRows: LsPerson[] = people.map((person) => ({
       handle: person.handle,
       display_name: person.display_name,
+      email: person.email,
       role: person.role ?? null,
       projects: person.projects ?? [],
       installed: person.installed.map(({ id, version, scope, since }) => ({ id, version, scope, since })),
       profile: (person.profile ?? []).map(({ id, name, version, added, via }) => ({ id, name, version, added, via })),
       local_skills: person.local_skills ?? null,
+      authored: [],
     }));
     const skills = await listSkills(team, people, clone, runner, io, teamName, problems);
+    const byHandle = new Map(personRows.map((row) => [row.handle, row]));
+    for (const skill of skills) {
+      const handle = bylines.get(normalizeAuthor(skill.author));
+      const row = handle === undefined ? undefined : byHandle.get(handle);
+      if (row) (row.authored as string[]).push(skill.id);
+    }
     // `return await`: a returned promise leaves the try block before it settles, so a throw inside
     // showMember/showProject would reject run() instead of becoming the failure Result every verb returns.
     if (args.kind === 'member') return await showMember(args.value, people, skills, io, roster, projects, problems);

@@ -8,7 +8,7 @@ import { createRun } from '../../backend/mock/run';
 import type { EvalResult, Run } from '../../backend/types';
 import { App } from '../../app/App';
 import { EvalRunProvider } from '../../app/EvalRunProvider';
-const value:EvalResult={name:'deploy-check',runDir:'/tmp/run',executionStatus:'complete'};
+const value:EvalResult={name:'deploy-check',runDir:'/tmp/run',executionStatus:'complete',team:null,id:null,shareHint:true};
 const runs:Run<EvalResult>[]=[];
 afterEach(async()=>{for(const run of runs.splice(0))await run.cancel();cleanup();location.hash='';localStorage.clear();vi.restoreAllMocks();});
 async function open(estimate?:string){

@@ -17,7 +17,7 @@ const runs: Run<EvalQueueResult>[] = [];
 afterEach(async () => { for (const run of runs.splice(0)) await run.cancel(); cleanup(); localStorage.clear(); });
 it('queued runs are visible, dismissible, reopenable and stoppable without needing a skill read', async () => {
   const backend = createMockBackend(), readSkill = vi.spyOn(backend, 'skill');
-  const item = { team: 'team', skill: 'alpha', version: 'a'.repeat(40), requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' as const };
+  const item = { team: 'team', skill: 'alpha', path: '/library/alpha', contentHash: `sha256:${'a'.repeat(64)}`, requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' as const };
   const run = createRun<EvalQueueResult>(async ctx => { ctx.print('Evaluating alpha'); ctx.progress(1,2,'evals'); await ctx.sleep(60_000); return { ok: true, value: { items: [], completed: 1 } }; });
   runs.push(run); const cancel = vi.spyOn(run, 'cancel');
   registerEvalQueue(backend, { list: async () => ({ ok: true, value: { items: [item] } }), drain: () => run });
