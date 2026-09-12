@@ -10,6 +10,7 @@ import { explainGitAccessFailure, isGitHubRemote, normalizeRemote, remoteToGitUr
 import { CommandResult, Runner, systemRunner } from './runner.js';
 import { regenerateReadmeInTree } from './readme.js';
 import { parseVersionFolder, type SkillVersion } from './versions.js';
+import { mapWithConcurrency } from './concurrency.js';
 
 /**
  * §6.0: every write to the team repo goes through `safeWrite()` — a re-apply model, not a rebase.
@@ -33,8 +34,6 @@ export interface MutableTree extends GuardTree {
 export type Mutate<R = void> = (tree: MutableTree) => R;
 
 export interface SafeWriteOptions extends GuardContext {
-  /** Destination ref. Defaults to `main`; PR-policy `publish` passes a fresh `publish/<name>-<handle>-<id8>` (§6.0 step 4). A non-main branch is created, never replaced. */
-  branch?: string;
   /** Commit message; defaults to `<handle>: <action>`. */
   message?: string;
   deadlineMs?: number;
@@ -88,9 +87,7 @@ const wait = (milliseconds: number) => new Promise<void>((done) => setTimeout(do
 /** git's non-fast-forward vocabulary: the only `main` push failures a retry can fix. */
 const RETRYABLE = /fetch first|non-fast-forward|cannot lock ref|failed to lock|stale info|incorrect old value|remote ref updated since checkout/i;
 /** The lease (CAS) vocabulary: the named ref moved since we read it — never retried against the same ref. */
-const STALE_LEASE = /stale info|incorrect old value|remote ref updated since checkout/i;
 /** Server-side ref-lock contention: transient, and the lease still stands, so the same ref is retried. */
-const REF_LOCK = /cannot lock ref|failed to lock/i;
 const lostLock = (root: string): string => `Lost the safeWrite lock on ${root} to another process; nothing was pushed — retry the command.`;
 
 /** How long a caller waits for another process's clone lock before failing: today's ladder, for anything nobody is watching. */
@@ -161,7 +158,6 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
 
   const now = options.now ?? Date.now;
   const budgetMs = options.deadlineMs ?? DEFAULT_DEADLINE_MS;
-  const branch = options.branch ?? 'main';
   const created = new Set<string>();
   let attempt = 0;
   let lastError = 'push rejected';
@@ -195,7 +191,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       const returned = mutate(tree);
       // Authorize the caller's own pure mutation before deriving any files from it. This keeps a
       // forbidden skill write from being reported as a frontmatter/README generation error.
-      if (tree.changedPaths.length === 0) return { changed: false, pushedTo: branch, returned };
+      if (tree.changedPaths.length === 0) return { changed: false, pushedTo: 'main', returned };
       guard(tree, options);
       // §9: Actions own GitHub README commits; generic remotes regenerate as a derived safeWrite path.
       // §6.0's eval exception is narrower: its receipt is immutable testimony and its commit must
@@ -204,12 +200,10 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
       await applyTree(root, realRoot, tree, changed);
       await requireGit(['add', '-A', '--', ...changed]);
-      if (!isGitHubRemote(remote) && options.action !== 'eval') {
-        // The index is the exact tree about to be committed, including the caller's mutation.
-        // Resolve every skill version from it in one git call before deriving README.md.
-        const writtenTree = (await requireGit(['write-tree'])).stdout.trim();
-        const latestBySkill = await skillTrees(git, writtenTree);
-        await regenerateReadmeInTree(tree, remote, runner, root, latestBySkill);
+      if (!isGitHubRemote(remote)) {
+        // §4.1(d): the generator derives every skill's latest version from the in-memory post-image,
+        // so there is no `write-tree` spawn and no git call inside its loop.
+        await regenerateReadmeInTree(tree, remote, runner, root);
         changed = tree.changedPaths;
         for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
         const readmeChanged = changed.filter((path) => path === 'README.md');
@@ -225,7 +219,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       await requireGit(['commit', '-q', '-m', options.message ?? `${options.handle}: ${options.action}`]);
       if (compromised) throw new Error(lostLock(root));
       pushed = true;
-      const outcome = await push(git, branch);
+      const outcome = await push(git);
       if (outcome.ok) { pushedToMain = outcome.pushedTo === 'main'; return { changed: true, pushedTo: outcome.pushedTo, returned }; }
       if (!outcome.retryable) {
         const copy = explainGitAccessFailure(origin, outcome.error);
@@ -281,17 +275,13 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<str
  * arbitrates (rulings walk R2, 2026-09-06). Ref-lock contention is transient and the name still
  * must not exist, so it is retried; a stale lease means the name now exists — terminal.
  */
-async function push(git: Git, branch: string): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
-  if (branch === 'main') {
-    const result = await git(['push', '-q', '--no-verify', 'origin', 'HEAD:refs/heads/main']);
-    if (result.code === 0) return { ok: true, pushedTo: 'main' };
-    const error = result.stderr || result.stdout || 'push rejected';
-    return { ok: false, retryable: RETRYABLE.test(error), error };
-  }
-  const result = await git(['push', '-q', '--no-verify', `--force-with-lease=refs/heads/${branch}:`, 'origin', `HEAD:refs/heads/${branch}`]);
-  if (result.code === 0) return { ok: true, pushedTo: branch };
+async function push(git: Git): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
+  // Main only (§4.1). The PR-policy branch arm went with `policy.publish`: publish appends an
+  // immutable version folder, so there is nothing for a reviewer to hold open and no branch to lease.
+  const result = await git(['push', '-q', '--no-verify', 'origin', 'HEAD:refs/heads/main']);
+  if (result.code === 0) return { ok: true, pushedTo: 'main' };
   const error = result.stderr || result.stdout || 'push rejected';
-  return { ok: false, retryable: REF_LOCK.test(error) && !STALE_LEASE.test(error), error };
+  return { ok: false, retryable: RETRYABLE.test(error), error };
 }
 
 /** Repo-relative POSIX paths only: no absolute paths, no `..`, no `.git` anywhere (any case, NTFS short names included), no empty segments. */
@@ -369,30 +359,17 @@ export async function listVersions(clone: string, skillName: string): Promise<Sk
     .sort((left, right) => right.n - left.n);
 }
 
-/** Public read-only wrapper around the batched tree reader; never exposes the private Git seam. */
-export async function skillVersions(runner: Runner, clone: string, ref = 'HEAD'): Promise<Map<string, string>> {
-  const git: Git = async (args) => {
-    const result = await runner.run('git', args, { cwd: clone });
-    // git uses the same missing-object diagnostic for an absent skills tree and an invalid ref.
-    // Verify the ref only on that exceptional path; a normal listing is exactly one child.
-    if (result.code !== 0 && result.stderr.includes(`Not a valid object name ${ref}:skills`)) {
-      const exists = await runner.run('git', ['rev-parse', '--verify', ref], { cwd: clone });
-      if (exists.code === 0) return { code: 0, stdout: '', stderr: '' };
-    }
-    return result;
-  };
-  return skillTrees(git, ref);
-}
-
-/** Every direct child in `skills/` is a skill tree; one ls-tree call resolves all latest versions. */
-async function skillTrees(git: Git, writtenTree: string): Promise<Map<string, string>> {
-  const listed = await requireGitResult(git, ['ls-tree', `${writtenTree}:skills`]);
-  const versions = new Map<string, string>();
-  for (const line of listed.stdout.split('\n')) {
-    const match = /^\d+\s+tree\s+([0-9a-f]{40})\t(.+)$/.exec(line);
-    if (match) versions.set(match[2]!, match[1]!);
-  }
-  return versions;
+/**
+ * Every named skill's version folders, newest first. Replaces the `git ls-tree` tree-hash reader:
+ * under layout 3 a version is a directory, so this is `listVersions` per name and takes neither a
+ * `Runner` nor a `ref`.
+ *
+ * Two readdirs per skill in place of one process spawn. On local disk that is a win, and the fan-out
+ * is bounded at 8 the way every other batched clone read here is.
+ */
+export async function skillVersions(clone: string, names: readonly string[]): Promise<Map<string, SkillVersion[]>> {
+  const entries = await mapWithConcurrency(names, 8, async (name) => [name, await listVersions(clone, name)] as const);
+  return new Map(entries);
 }
 
 async function requireGitResult(git: Git, args: readonly string[]): Promise<CommandResult> {

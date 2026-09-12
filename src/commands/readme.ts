@@ -22,8 +22,10 @@ export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ chan
       if (base.code !== 0) throw new Error(`Could not read ${args.prComment}:team.json: ${(base.stderr || base.stdout).trim()}`);
       const before = parseJson(teamSchema, base.stdout, `${args.prComment}:team.json`);
       const current = parseJson(teamSchema, await readFile(join(cwd, 'team.json'), 'utf8'), 'team.json');
-      const beforeIds = new Set([...before.global, ...Object.values(before.projects).flatMap((project) => project.skills)]);
-      const added = new Set([...current.global, ...Object.values(current.projects).flatMap((project) => project.skills)].filter((id) => !beforeIds.has(id)));
+      // `team.json.global` is deleted (§4.1); `Global` is an ordinary project key, so the projects
+      // walk alone covers what the union used to.
+      const beforeIds = new Set(Object.values(before.projects).flatMap((project) => project.skills));
+      const added = new Set(Object.values(current.projects).flatMap((project) => project.skills).filter((id) => !beforeIds.has(id)));
       const skills = data.skills.filter((skill) => added.has(skill.id));
       // The Action finds its own comment by the anchor below, so skill text must not be able to forge a second one.
       const comment = ['<!-- terum-skills:pr-comment -->', '## terum-skills publish preview', ...(skills.length ? skills.map((skill) => `- ${inlineText(skill.name)} (${inlineText(skill.category)})`) : ['- No new endorsements.'])].join('\n');

@@ -7,15 +7,17 @@ import { staleLine } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { fromError, failure, Result, success } from '../lib/result.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
-import { installCounts, latestChange, latestTree, shortHash, skillEndorsement } from '../lib/readme.js';
+import { installCounts, latestChange, skillEndorsement } from '../lib/readme.js';
+import { versionLabel } from '../lib/versions.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { format as formatSkill } from './ls.js';
 
 export interface SearchArgs extends WithForm { term: string; category?: string; author?: string; project?: string; config?: ConfigStore; runner?: Runner; now?: () => number; }
 export interface SearchHit {
-  team: string; id: string; name: string; author: string; category: string; installs: number; latest: string; endorsed: string;
-  /** The `HEAD:skills/<name>` lookup failed — the folder is on disk but not in HEAD, or git would not run — so `latest` is `—`. The row stays (search's corpus is the working tree); a UI greys out Install from this, not from the dash (rulings walk R12, 2026-09-06). */
-  unresolved: boolean; description: string; grants: string | null; grantsHash: string | null; updated: string;
+  team: string; id: string; name: string; author: string; category: string; installs: number;
+  /** `Version 3` — `versionLabel` of the highest version folder, never a tree hash (§4.1, D1). */
+  latest: string; endorsed: string;
+  description: string; grants: string | null; grantsHash: string | null; updated: string;
 }
 
 /** Read-only clone search: git reads only (the latest tree hash), no prompts, no placement, no safeWrite. */
@@ -44,24 +46,19 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
           && (!args.author || author.toLowerCase().includes(args.author.toLowerCase())) && Boolean(inProject);
       });
         if (many && filtered.length) io.print(`${team}:`);
-        // Each hit's latest tree, eight at a time (the fan-out is the size of the match list, so it is
-        // bounded rather than one child per hit at once); one unresolvable folder — present on disk but
-        // not in HEAD — costs one row and one reported line, never the team's other hits. The print
-        // order is the filter order.
-        const latest: PromiseSettledResult<string>[] = [];
-        for (let index = 0; index < filtered.length; index += 8) latest.push(...await Promise.allSettled(filtered.slice(index, index + 8).map((skill) => latestTree(runner, clone, skill.name))));
+        // `unresolved` is deleted with the tree-hash lookup (§4.1): `skillRecords` already drops any
+        // name holding no `v<N>` folder, so a hit that cannot resolve a version never reaches search.
+        // `latestVersion` rides along on the record; no second read, no fan-out, no per-row failure.
         const dates: PromiseSettledResult<string>[] = [];
         for (let index = 0; index < filtered.length; index += 8) dates.push(...await Promise.allSettled(filtered.slice(index, index + 8).map((skill) => latestChange(runner, clone, skill.name))));
         const counts = installCounts(people);
         for (const [index, skill] of filtered.entries()) {
         const endorsed = skillEndorsement(teamJson, skill.id);
-        const settled = latest[index]!;
-        if (settled.status === 'rejected') io.print(`${team}/${skill.name}: ${settled.reason instanceof Error ? settled.reason.message : String(settled.reason)}`);
         const date = dates[index]!;
         if (date.status === 'rejected') io.print(`${team}/${skill.name}: ${date.reason instanceof Error ? date.reason.message : String(date.reason)}`);
-        const hit: SearchHit = { team, description: skill.frontmatter.description, grants: skill.grants.ok ? skill.grants.normalized : null, grantsHash: skill.grants.ok ? skill.grants.hash : null, updated: date.status === 'fulfilled' ? date.value : '—', id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: settled.status === 'fulfilled' ? shortHash(settled.value) : '—', endorsed, unresolved: settled.status === 'rejected' };
+        const hit: SearchHit = { team, description: skill.frontmatter.description, grants: skill.grants.ok ? skill.grants.normalized : null, grantsHash: skill.grants.ok ? skill.grants.hash : null, updated: date.status === 'fulfilled' ? date.value : '—', id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: versionLabel(skill.latestVersion), endorsed };
         hits.push(hit);
-        io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, characters: skill.characters, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed, description: hit.description, grants: hit.grants, grantsHash: hit.grantsHash, installedBy: [], body: null, frontmatter: null, unresolved: hit.unresolved, updated: hit.updated, receipt: null }));
+        io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, characters: skill.characters, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed, description: hit.description, grants: hit.grants, grantsHash: hit.grantsHash, installedBy: [], body: null, frontmatter: null, updated: hit.updated, receipt: null, versionCount: skill.versionCount }));
         }
         const stale = await staleLine(store.root, team, args.now, args.form);
         if (stale) io.print(stale);
@@ -69,7 +66,7 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         // resolve, the git side itself is unusable — git not on PATH, an unborn HEAD, a corrupt object
         // store — and the team is as unsearched as the catch below would have called it, so the exit
         // gate must still see it rather than exiting 0 on a page of '—' rows.
-        if (filtered.length && latest.every((settled) => settled.status === 'rejected')) failures.push(`${team}: no skill version could be read; see the per-skill reasons above.`);
+        if (filtered.length && dates.every((settled) => settled.status === 'rejected')) failures.push(`${team}: no skill history could be read; see the per-skill reasons above.`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         failures.push(`${team}: ${message}`);

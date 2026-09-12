@@ -11,15 +11,17 @@ import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
-import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, shortHash, skillEndorsement } from '../lib/readme.js';
+import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, skillEndorsement } from '../lib/readme.js';
+import { versionLabel } from '../lib/versions.js';
 import type { Receipt } from '../lib/evals/receipt.js';
-import { newestReceiptAt } from '../lib/evals/receipt-store.js';
+import { selectCardEval } from '../lib/evals/receipt-store.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
 import { githubOwnerRepo, repositoryUrl } from '../lib/remote.js';
 
 import { skillVersions } from '../lib/teamRepo.js';
+import type { SkillVersion } from '../lib/versions.js';
 
 /** Fingerprint walks are latency-bound; overlap them (W-02). */
 const FINGERPRINT_CONCURRENCY = 8;
@@ -41,7 +43,14 @@ export interface LsReceipt {
   arm_scores: Receipt['arm_scores'];
   provenance: Pick<Receipt['provenance'], 'model' | 'k' | 'cc_version' | 'timestamp' | 'runner_handle'>;
 }
-export interface LsSkill { id: string; name: string; author: string; category: string; characters: number; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; frontmatter: string | null; updated: string; unresolved: boolean; receipt: LsReceipt | null; }
+export interface LsSkill {
+  id: string; name: string; author: string; category: string; characters: number; installs: number;
+  /** `Version 3` — never a tree hash (§8.4, D1). */
+  latest: string;
+  /** How many versions the skill has published. */
+  versionCount: number;
+  endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; frontmatter: string | null; updated: string; receipt: LsReceipt | null;
+}
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
@@ -83,22 +92,18 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
   await readdir(join(clone, 'skills'));
   const records = await skillRecords(clone, teamName, { onProblem: ({ name, message }) => { problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`); } });
   const counts = installCounts(people), installers = installersById(people);
-  let versionProblem: string | undefined;
-  const versions = await skillVersions(runner, clone).catch((error: unknown) => { versionProblem = error instanceof Error ? error.message : String(error); return new Map<string, string>(); });
+  // §8.4: `skillRecords` already resolved each skill's latest version folder, and a name holding none
+  // never reaches here — so the old `skillVersions` spawn and the `unresolved` row it fed are gone.
+  const versions = await skillVersions(clone, records.map((record) => record.name));
   const skills: LsSkill[] = [];
   for (let index = 0; index < records.length; index += 8) {
     const chunk = records.slice(index, index + 8);
     const dates = await Promise.allSettled(chunk.map((record) => latestChange(runner, clone, record.name)));
     // The version this chunk resolved is already in hand, so the card's receipt costs one readdir and
     // one readFile per skill — no extra process and no second version resolution (card-lift override).
-    const receipts = await Promise.allSettled(chunk.map((record) => cardReceipt(clone, record.id, versions.get(record.name))));
+    const receipts = await Promise.allSettled(chunk.map((record) => cardReceipt(clone, record.id, versions.get(record.name) ?? [], (message) => { problems.push({ source: `evals/${record.id}`, message }); io.print(`${record.name}: ${message}`); })));
     for (const [offset, record] of chunk.entries()) {
       const { id, name, frontmatter, grants } = record;
-      const latest = versions.get(name);
-      if (latest === undefined) {
-        const message = versionProblem ?? `Could not resolve the latest version of ${name}: absent from HEAD:skills`;
-        problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`);
-      }
       const date = dates[offset]!;
       const updated = date.status === 'fulfilled' ? date.value : '—';
       if (date.status === 'rejected') {
@@ -112,7 +117,7 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
         const message = found.reason instanceof Error ? found.reason.message : String(found.reason);
         problems.push({ source: `evals/${id}`, message }); io.print(`${name}: ${message}`);
       }
-      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: shortHash(latest ?? '—'), endorsement: skillEndorsement(team, id), unresolved: latest === undefined, grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, frontmatter: record.rawFrontmatter, updated, receipt: found.status === 'fulfilled' ? found.value : null });
+      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: versionLabel(record.latestVersion), versionCount: record.versionCount, endorsement: skillEndorsement(team, id), grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, frontmatter: record.rawFrontmatter, updated, receipt: found.status === 'fulfilled' ? found.value : null });
     }
   }
   return skills;
@@ -122,14 +127,13 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
  * receipt directory is not a problem — it is the "—" state. The identity check is `eval-report`'s
  * own (evalReport.ts), so the two verbs cannot disagree about which receipt is this version's.
  */
-async function cardReceipt(clone: string, id: string, version: string | undefined): Promise<LsReceipt | null> {
-  if (version === undefined) return null;
-  const newest = await newestReceiptAt(join(clone, 'evals', id, version));
-  if (newest === undefined) return null;
-  const found = newest.receipt;
-  if (found.skill_id.toLowerCase() !== id.toLowerCase() || found.version !== version) {
-    throw new Error(`newest receipt ${newest.file} does not match the receipt path: its skill ID or version disagrees.`);
-  }
+async function cardReceipt(clone: string, id: string, versions: readonly SkillVersion[], onProblem?: (message: string) => void): Promise<LsReceipt | null> {
+  // §8.1's fallback, shared with the README: show the newest version carrying a usable receipt. A
+  // corrupt newest file fails closed for that version only and the walk continues, so one bad file
+  // cannot blank a skill with three good older evals.
+  const selected = await selectCardEval(clone, id, versions, onProblem);
+  if (selected.eval === null) return null;
+  const found = selected.eval.receipt.receipt;
   const { model, k, cc_version, timestamp, runner_handle } = found.provenance;
   return { run_id: found.run_id, verdict: found.verdict, execution_status: found.execution_status, expected_rows: found.expected_rows, scored_rows: found.scored_rows, comparisons: found.comparisons, arm_scores: found.arm_scores, provenance: { model, k, cc_version, timestamp, runner_handle } };
 }
