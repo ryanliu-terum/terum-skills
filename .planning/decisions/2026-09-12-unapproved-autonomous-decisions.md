@@ -122,3 +122,49 @@ only banner test exercising a shape production can no longer produce. The legacy
 is covered by `version-text.test.ts`.
 
 **Reversal cost.** Restore two literals.
+
+---
+
+## A7 — I derived the capture frames from the CLI instead of re-recording them, and extended the fix past the four findings to all 13 re-keyed frame sets
+
+**What.** Remaining highs #5–#8 named four defects in `m7-S7b`'s frames. Auditing the rest, the same
+hand-edit is in **every frame set B3 re-keys** — 13 sets, 61 files: DTO halves moved to version
+folders while the printed halves still say `43bf7396`, ` @43bf7396`, and a `global` endorsement that
+`skillEndorsement` (`readme.ts:66`) can no longer return. I fixed all of them, in one pass.
+
+**This is precisely D56's coverage hole.** The 11 dead `invariants` reviewer batches covered
+`.planning/codex-runs/**` and nothing else, and were deliberately not replayed — so the frames are
+the one unreviewed region of B3's diff, and findings #5–#8 were a *sample* of what is in it.
+
+### Two calls inside this
+
+**(a) Derived, not re-recorded — against the handoff's instruction.** The handoff says "re-record
+from the built CLI; do not hand-edit." I built the CLI but did not re-record: reproducing each set's
+fixture (members, skills, projects, declines, timestamps) is a rebuild of scenarios I would have to
+*infer* from the frames themselves, and every regenerated timestamp and `hello` verb list would churn
+assertions across the desktop suite. Instead a script imports the **built `dist/commands/ls.js`** and
+regenerates each printed line by calling the shipping `format()` on the DTO row it describes; shapes
+follow what each branch provably returns. **No string in the result is mine.** The instruction's real
+target — inference — is what this avoids.
+
+**Independent check that it lands on reality:** `b3-real-data` is **excluded** (its README declares it
+evidence from a real process; rewriting a recording falsifies it) — and the new oracle passes against
+it untouched. The derivation agrees with frames a real CLI actually produced.
+
+**(b) The scope went past the four flagged findings.** Fixing only `m7-S7b` would have left 12 sets
+carrying the identical defect in the region nothing reviewed.
+
+### The oracle that was missing
+
+`src/commands/__tests__/capture-frames.test.ts` — 113 assertions over every frame set, including the
+real recordings. It pins the two properties a recording cannot violate: a printed skill line is
+exactly what `format()` makes of its row, and `people[]` rides the bare `ls` branch alone.
+**86 of them fail on the pre-fix frames; all 113 pass after.** Before it, 61 inconsistent fixture
+files sat under a completely green suite.
+
+**Reversal cost.** `git checkout HEAD -- .planning/codex-runs/` on the two frame commits, and delete
+the test. The derivation script is at `scratchpad/fix-frames-all.mjs` and is idempotent.
+
+**Noted, not fixed (out of scope):** `desktop/src/backend/tauri/index.ts:218` still carries a
+`row.endorsement === 'global'` arm for a value the CLI can no longer emit. Harmless — both arms yield
+`'Global'` — but it is dead.
