@@ -4,7 +4,7 @@ import type { WithForm } from '../lib/invocation.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { canonicalLedger, localSkillCounts, localRootLabel, localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
+import { canonicalLedger, isSkillFolder, localSkillCounts, localRootLabel, localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { printable, type SourceProblem } from '../lib/skill-source.js';
 import { canonicalDigest, readPerson, skillRecords } from '../lib/skills.js';
@@ -315,6 +315,13 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
     for (const [entryIndex, entry] of inventory.entries.entries()) {
       const tracked = entry.placement !== undefined;
       const inspection = entry.inspection;
+      // §7.4(b) / D16: a plain file is not a skill folder — no row, no card, no count (isSkillFolder). A
+      // ledger row that points at one is reported the way a missing folder is, so the stale placement
+      // stays visible without drawing a card for a file.
+      if (!isSkillFolder(entry)) {
+        if (tracked) local.problems.push({ path: entry.path, reason: 'placement recorded in the ledger but the path is not a folder' });
+        continue;
+      }
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions' : undefined;
         local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, name: entry.name, path: entry.path, state: stateOf(entry), tracked, placement: entry.placement ?? null, health: healths.get(entry)!, edited: healths.get(entry) === 'local-changed', ...evals[entryIndex]!, description: describedBy(inspection), frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });
@@ -330,7 +337,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
       for (const entry of local.notOffered) io.print(`  ${printable(entry.name)} — ${printable(entry.detail)}; path: ${printable(entry.path)}`);
     }
     if (inventory.rootState === 'absent') io.print(`  none (${printable(inventory.root)} does not exist)`);
-    else if (inventory.rootState === 'scanned' && !inventory.entries.length) io.print('  none');
+    else if (inventory.rootState === 'scanned' && !inventory.entries.some(isSkillFolder)) io.print('  none');
     for (const problem of local.problems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
     io.print(`  ${local.counts.skillFolders} skill ${local.counts.skillFolders === 1 ? 'folder' : 'folders'} (${local.counts.connectable} connectable)`);
   }

@@ -213,8 +213,11 @@ model suggestion")`, threaded into `ConnectArgs`.
 - `HygieneCode` gains `'HYG7'`. A new code rather than a warning under HYG1, because HYG1
   emits only errors today and the two would be indistinguishable in output.
 - `HygieneInput` gains `categories?: readonly string[]`.
-- `assessHygiene(name, input, license, allowExecutable = false, categories?: readonly string[])`
-  — a fifth optional positional keeps all four existing call sites compiling unchanged.
+- `assessHygiene(name, input, license, allowExecutable = false, managedFieldsAbsent = false, categories?: readonly string[])`
+  — the fifth positional is already `managedFieldsAbsent` (`src/lib/evals/hygiene.ts:132` on `main`), so
+  `categories?` is the **sixth** optional positional, and the three surviving call sites (`publish`,
+  `eval`, `validate` — §8 step 4) keep compiling unchanged. (Corrected 2026-09-13: this line said
+  "fifth" and "four call sites" while §8 step 4 said sixth; the code is the sixth.)
 - The check emits **one warning** when `categories` is provided and non-empty, the
   frontmatter parses, and its `metadata.terum-category` is a non-empty string that is not in
   the list (case-insensitive). It **no-ops when the list is unknown** — `validate <path>` on
@@ -305,7 +308,10 @@ lint, typecheck, and the full suite yourself before trusting the diff (CLAUDE.md
 - A fourth confirmation state for `--category`. The walk locked only "distinguish success
   from failure"; telling the user the value came from their own flag is the same principle
   applied to the same line.
-- A fifth optional positional on `assessHygiene` rather than converting it to an options
-  object. Minimal diff over four call sites; convert it later if a sixth parameter appears.
+- A **sixth** optional positional on `assessHygiene` rather than converting it to an options
+  object. This bullet's own threshold — *convert it later if a sixth parameter appears* — is met by
+  `categories` itself. B9 (`refactor/b9-auto-category`) ships it positional so the three call sites
+  keep compiling; the options-object conversion is **owed**, not waived, and falls to whoever merges
+  B9 forward (reconciled 2026-09-13, hybrid review r1).
 - `HYG7` as its own code rather than a warning-flavoured HYG1.
 - Canonicalising the model's answer to the team's spelling, so `Review` lands as `review`.

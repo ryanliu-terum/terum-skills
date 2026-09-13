@@ -371,6 +371,25 @@ it.each([true,false])('follows the moved folder by path from either Library root
  fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));fireEvent.click(await within(dialog).findByRole('button',{name:'Done'}));
  await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
 });
+// hybrid review r1 (high): after a successful move the dialog showed Done, but Escape or an outside
+// click fired onClose, so the page stayed on ?path=<old> and reported the moved folder as not in the
+// Library. Any dismissal of a finished dialog is Done.
+it('hands a finished file operation on when the dialog is dismissed with Escape',async()=>{
+ const backend=createMockBackend(),dialog=await openMove(backend);fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
+ await within(dialog).findByRole('button',{name:'Done'});
+ fireEvent.keyDown(document.activeElement??document.body,{key:'Escape'});
+ await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
+});
+// A cancelled or refused CLI result lands in useWorkflow.notice and closes the dialog; the dialog owned
+// the workflow, so the notice unmounted with it and the user saw nothing (AGENTS.md: a Result.ok===false
+// renders the board's error state). The page owns the workflow now and renders the notice.
+it('shows the CLI notice when a file operation is cancelled or refused',async()=>{
+ const backend=createMockBackend();vi.spyOn(backend.skillFile,'delete').mockImplementation(()=>createRun(async()=>({ok:false,cancelled:true,error:'The name did not match; nothing changed.'})));
+ openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-delete',backend);
+ const dialog=await screen.findByRole('dialog');fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));
+ expect(await screen.findByText('The name did not match; nothing changed.')).toBeVisible();
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+});
 it('cancels a move before it starts and stays on the source page',async()=>{
  const backend=createMockBackend(),move=vi.spyOn(backend.skillFile,'move'),dialog=await openMove(backend);
  fireEvent.click(within(dialog).getByRole('button',{name:'Cancel'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(move).not.toHaveBeenCalled();expect(new URLSearchParams(location.hash.split('?')[1]).get('path')).toBe('~/.claude/skills/deploy-check');

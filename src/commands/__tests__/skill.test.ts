@@ -6,7 +6,7 @@ import YAML from 'yaml';
 import { run, type SkillArgs } from '../skill.js';
 import { run as list } from '../ls.js';
 import { createConfigStore } from '../../lib/config.js';
-import { fsForTests } from '../../lib/placer.js';
+import { fsForTests, lockTarget } from '../../lib/placer.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { bareTeam, cloneWithIdentity, person, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>() }));
@@ -48,6 +48,17 @@ describe('D6 Library file operations',()=>{
   expect((await f.store.read()).placements).toEqual({[dest]:expect.objectContaining({id,fingerprint:f.fingerprint})});
   const result=await list({local:true,config:f.store,home:f.home},new ScriptedPrompter());
   expect(result.ok&&result.value.local?.[0]?.rows[0]).toMatchObject({name:'beta',edited:true});
+ });
+ it('D75 locks the externally-renamed sibling before repairing it: a busy folder refuses instead of moving',async()=>{
+  // Ledger says alpha, the folder is now gamma, the request is alpha→beta: gamma is the one folder the
+  // literal-name lock set never covered (hybrid review r1, high), yet it is the folder that gets moved.
+  const f=await fixture(),gamma=join(f.root,'gamma'),dest=join(f.root,'beta');await fs.rename(f.path,gamma);
+  const release=await lockTarget(f.root,'gamma');
+  try{expect(await f.invoke('rename','beta')).toMatchObject({ok:false});}finally{await release();}
+  expect(await fs.readdir(f.root)).toEqual(['gamma']);
+  expect((await f.store.read()).placements).toEqual({[f.path]:expect.objectContaining({id})});
+  expect(await f.invoke('rename','beta')).toMatchObject({ok:true,value:{destination:dest}});
+  expect((await f.store.read()).placements).toEqual({[dest]:expect.objectContaining({id,fingerprint:f.fingerprint})});
  });
  it('drops a missing ledger row only when no sibling has the stable ID',async()=>{const f=await fixture();await fs.rm(f.path,{recursive:true});expect(await f.invoke('rename','beta')).toMatchObject({ok:false});expect((await f.store.read()).placements).toEqual({});});
  it.each(['directory','ledger'] as const)('move re-runs after the %s write',async point=>{
@@ -111,6 +122,15 @@ it('permits a case-only rename when both spellings address the same directory',a
  vi.spyOn(fs,'lstat').mockImplementation(async(...args)=>{try{return await original(...args);}catch(error){if(args[0]===f.path&&(error as NodeJS.ErrnoException).code==='ENOENT')return original(source);throw error;}});
  expect(await run({kind:'rename',path:source,to:'alpha',config:f.store,home:f.home},new ScriptedPrompter(['Alpha']))).toMatchObject({ok:true});
  expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toContain('name: alpha');
+});
+
+it('accepts a registered project reached through a symlink as the move destination',async()=>{
+ // hybrid review r1 (high): config.projects[].root is stored realpath'd while --to arrived verbatim, so
+ // a project behind any symlink component was refused as unregistered.
+ const f=await fixture(false),alias=join(await temporaryDirectory(),'proj');await fs.symlink(f.project,alias,'dir');
+ const dest=join(f.project,'.claude','skills','alpha');
+ expect(await run({kind:'move',path:f.path,to:alias,home:f.home,config:f.store},new ScriptedPrompter(['alpha']))).toMatchObject({ok:true,value:{destination:dest}});
+ expect(await fs.readFile(join(dest,'SKILL.md'),'utf8')).toBe(raw());
 });
 
 it('rekeys ledger provenance when the registered root is reached through an alias',async()=>{

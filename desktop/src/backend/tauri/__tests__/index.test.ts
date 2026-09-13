@@ -1113,6 +1113,16 @@ it('D16 draws and opens all four cards and counts them without a team read',asyn
  for(const rejectedCard of rejected)expect(library.value.skills.find(c=>c.name===rejectedCard.name)?.desc).toContain(rejectedCard.detail);
  expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local']]);
 });
+// hybrid review r1 (high): localCard skipped bodyExcerpt while inventoryCard used it, so the same
+// skill read one way in the Library and another in the Marketplace (body-excerpt.ts's ratified rule).
+it('summarizes a Library card from the body, falling back to frontmatter, as the Marketplace card does',async()=>{
+ const row=(name:string,extra:Record<string,unknown>)=>({name,path:'/library/'+name,state:'',tracked:false,placement:null,health:'unknown',...extra});
+ const rows=[row('bodied',{body:'# Title\n\nUse this when a deploy needs a checklist.\n\nMore.\n',description:'frontmatter text'}),row('bare',{body:null,description:'frontmatter only'}),row('broken',{body:'A body that must not win.',description:'d',problem:'SKILL.md name x does not equal folder broken'})];
+ const local={roster:[],skills:[],problems:[],local:[{root:'/library',scope:'global',counts:{skillFolders:3,connectable:2},rows,notOffered:[],problems:[]}]};
+ const backend=createTauriBackend(inventoryBridge({local}).bridge),library=await backend.library({scope:{kind:'global'}});
+ expect(library.value?.skills.map(card=>[card.name,card.desc])).toEqual([['bodied','Use this when a deploy needs a checklist.'],['bare','frontmatter only'],['broken','/library/broken · SKILL.md name x does not equal folder broken']]);
+ expect(await backend.localSkill({path:'/library/bodied'})).toMatchObject({ok:true,value:{desc_long:'Use this when a deploy needs a checklist.'}});
+});
 it.each(['move','rename','delete'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
  const value={kind,path:'/library/a',destination:kind==='delete'?null:'/library/b',quarantined:null,installed:false,notices:[]},f=replay(value),backend=createTauriBackend(f.bridge),changed=vi.fn();backend.subscribe(changed);
  const result=await (kind==='delete'?backend.skillFile.delete({path:value.path}):backend.skillFile[kind]({path:value.path,to:'b'})).done;

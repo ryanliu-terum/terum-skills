@@ -9,6 +9,7 @@ import { writeJsonPrivate } from '../lib/fs.js';
 import { canonicalLedger, localSkillRoots } from '../lib/local-skills.js';
 import { appendExclude, lockTarget, moveDirectory, moveToQuarantine } from '../lib/placer.js';
 import { isSkillsRoot } from '../lib/placer/agent-paths.js';
+import { projectPath } from '../lib/projects.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import type { Prompter } from '../lib/prompt.js';
 import { cancelled, fromError, success, type Result } from '../lib/result.js';
@@ -51,8 +52,8 @@ async function rewriteName(path: string): Promise<void> {
   fm.document.set('name', basename(path));
   await writeFile(join(path, 'SKILL.md'), `---\n${fm.document.toString()}---\n${fm.raw.slice(fm.end)}`);
 }
-/** D75: recovery joins ONLY by stable id. Never refresh the fingerprint: an edit stays edited. */
-async function recoverSibling(store: ConfigStore, oldPath: string, row: Config['placements'][string]): Promise<string | undefined> {
+/** D75: recovery joins ONLY by stable id. A read: the caller locks the match before `repairSibling` writes to it. */
+async function findSibling(oldPath: string, row: Config['placements'][string]): Promise<string | undefined> {
   const matches: string[] = [];
   for (const entry of await readdir(dirname(oldPath), { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
@@ -61,8 +62,11 @@ async function recoverSibling(store: ConfigStore, oldPath: string, row: Config['
     if (fm?.document.getIn(['metadata', 'id']) === row.id) matches.push(path);
   }
   if (matches.length > 1) throw new Error(`Several sibling folders carry ${row.id}; cannot safely repair ${oldPath}.`);
-  if (!matches.length) { await store.update(c => { delete c.placements[oldPath]; }); return undefined; }
-  const path = matches[0]!;
+  return matches[0];
+}
+/** D75: re-point the row at the sibling, or drop it when none carries the id. Never refresh the fingerprint: an edit stays edited. */
+async function repairSibling(store: ConfigStore, oldPath: string, row: Config['placements'][string], path: string | undefined): Promise<string | undefined> {
+  if (path === undefined) { await store.update(c => { delete c.placements[oldPath]; }); return undefined; }
   await plainFolder(path);
   await rewriteName(path);
   await store.update(c => { c.placements[path] = row; delete c.placements[oldPath]; });
@@ -71,6 +75,9 @@ async function recoverSibling(store: ConfigStore, oldPath: string, row: Config['
 
 export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillResult>> {
   const releases: Array<() => Promise<void>> = [];
+  const locked = new Set<string>();
+  // One non-waiting lock per folder (retries: 0): a second acquire on a folder this run already holds would refuse itself.
+  const lock = async (path: string): Promise<void> => { if (locked.has(path)) return; locked.add(path); releases.push(await lockTarget(dirname(path), basename(path))); };
   try {
     const store = args.config ?? createConfigStore(), home = args.home ?? homedir(), runner = args.runner ?? systemRunner;
     const config = await store.read();
@@ -86,8 +93,15 @@ export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillRe
       if (!args.to || !isSkillName(args.to)) throw new Error('The new name must be 1–64 lowercase alphanumerics or single hyphens.');
       destination = join(parent, args.to);
     } else if (args.kind === 'move') {
-      targetRoot = roots.find(r => args.to === 'global' ? r.scope === 'global' : r.repoRoot === resolve(args.to ?? ''))!;
-      if (!targetRoot || !args.to) throw new Error('Choose global or a registered project root; add the project with project add first.');
+      // hybrid review r1 (high): `config.projects[].root` is stored realpath'd (addLibraryProject) while
+      // `--to` arrives verbatim, so a registered project reached through a symlink (`~/dev -> /Volumes/…`)
+      // was refused as unregistered. Match the way the source root is matched above: literal first, then
+      // realpath on both sides — a hand-edited config may hold the alias, and a realpath'd `--to` the target.
+      const to = args.to === undefined || args.to === 'global' ? undefined : await projectPath(args.to);
+      const found = roots.find(r => args.to === 'global' ? r.scope === 'global' : r.repoRoot !== undefined && r.repoRoot === resolve(args.to ?? ''))
+        ?? (to === undefined ? undefined : (await Promise.all(roots.map(async r => ({ r, path: r.repoRoot === undefined ? undefined : await projectPath(r.repoRoot) })))).find(r => r.path === to)?.r);
+      if (!found || !args.to) throw new Error('Choose global or a registered project root; add the project with project add first.');
+      targetRoot = found;
       destination = join(targetRoot.root, name);
     }
     if (destination === source) throw new Error('The source and destination are the same folder.');
@@ -95,7 +109,7 @@ export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillRe
     if (destination && await present(destination) && !(args.kind === 'rename' && await present(source) && await sameFolder(source, destination))) await plainFolder(destination);
     if (await io.text(`Type ${name} to ${args.kind} this folder`) !== name) return cancelled('The name did not match; nothing changed.');
     // Lock in deterministic order. uninstallMany owns the delete lock itself.
-    if (args.kind !== 'delete') for (const path of [...new Set([source, destination!])].sort()) releases.push(await lockTarget(dirname(path), basename(path)));
+    if (args.kind !== 'delete') for (const path of [...new Set([source, destination!])].sort()) await lock(path);
     const journal = join(store.root, 'run', 'skill-files', createHash('sha256').update(JSON.stringify([args.kind, source, destination])).digest('hex') + '.json');
     let op: Operation | undefined;
     try { op = JSON.parse(await readFile(journal, 'utf8')) as Operation; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
@@ -106,13 +120,24 @@ export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillRe
       const recorded = (await canonicalLedger(config)).placementPaths.find(row => row.target === source || row.canonical === join(canonical, name));
       const placement = recorded?.ref;
       let actual = source;
-      if (!(await present(source)) && placement) actual = await recoverSibling(store, recorded!.target, placement) ?? source;
+      if (!(await present(source)) && placement) {
+        const sibling = await findSibling(recorded!.target, placement);
+        // hybrid review r1 (high): the lock set above is keyed by the request's literal names, so a
+        // sibling the user renamed to a third name (ledger `alpha`, folder now `gamma`, request
+        // `rename alpha beta`) is a folder no lock covers — yet the repair rewrites its SKILL.md and
+        // the rename/move body moves it. Lock it before the first write; released in the same
+        // `finally`. Delete stays out: uninstallMany takes that folder's lock itself, and a second
+        // acquire here would refuse it.
+        if (sibling !== undefined && args.kind !== 'delete') await lock(sibling);
+        actual = await repairSibling(store, recorded!.target, placement, sibling) ?? source;
+      }
       if (!(await present(actual))) {
         if (args.kind !== 'delete') throw new Error(`${source} no longer exists and no sibling has its recorded metadata.id.`);
       }
       op = { source: actual, destination, ...(placement ? { placement, ledgerPath: actual === source ? recorded!.target : actual } : {}), destinationExisted: destination !== null && await present(destination), fingerprint: await present(actual) ? (await snapshotSkillDirectory(actual)).fingerprint : null, kept: null, done: false };
       await writeJsonPrivate(journal, op);
-    }
+    // A journaled re-run resumes on the folder the first run resolved, which the literal names may not cover either.
+    } else if (args.kind !== 'delete') await lock(op.source);
     const notices: string[] = [];
     let quarantined: string | null = null;
     if (args.kind === 'delete' && op.placement) {

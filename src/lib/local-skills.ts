@@ -172,8 +172,20 @@ export function candidatesOf(inventory: LocalInventory, allowPrivileged = false)
 }
 
 
+/**
+ * D16 draws a card for every direct child FOLDER and §7.4(b) counts "direct child directories". A plain
+ * file (`.DS_Store`, `README.md`) is neither: it is still scanned, so `entries` mirrors `readdir` and a
+ * ledger row pointing at it can be reported, but it is not a skill and must not draw a broken card or
+ * inflate every printed and sidebar count (hybrid review r1, high — A20 #4). The scan rejects exactly
+ * that entry as `not-a-directory`; a symlink is rejected as `symlink` first and stays a (refused)
+ * card, because the agent that follows it sees a skill folder there, so it stays counted too.
+ */
+export function isSkillFolder(entry: Pick<LocalEntry, 'inspection'>): boolean {
+  return !(entry.inspection.kind === 'rejected' && entry.inspection.reason === 'not-a-directory');
+}
+
 export function localSkillCounts(inventory: LocalInventory): { skillFolders: number; connectable: number } {
-  const skillFolders = inventory.entries.length;
+  const skillFolders = inventory.entries.filter(isSkillFolder).length;
   return { skillFolders, connectable: candidatesOf(inventory).length };
 }
 

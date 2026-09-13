@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import YAML from 'yaml';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { candidatesOf, createLibraryScan, librarySize, localSkills, localSkillRoots, nearestRepoRoot, resolveLibrarySkill, unusableSkillFolder } from '../local-skills.js';
+import { candidatesOf, createLibraryScan, librarySize, localSkillCounts, localSkills, localSkillRoots, nearestRepoRoot, resolveLibrarySkill, unusableSkillFolder } from '../local-skills.js';
 import { emptyConfig } from '../schema.js';
 import { assertSkillSource } from '../skill-source.js';
 import { BUNDLED_SKILL_SOURCE, temporaryDirectory } from './fixtures.js';
@@ -354,6 +354,8 @@ describe('run-local library inventory reuse', () => {
     await candidate(project, 'beta');
     await mkdir(join(global, 'not-a-skill'));
     await symlink(join(global, 'alpha'), join(global, 'link'));
+    // §7.4(b): a plain file is scanned (entries mirror readdir) but is not a skill folder, so it never counts.
+    await writeFile(join(global, '.DS_Store'), '');
     const original = fs.readdir;
     const reads = vi.spyOn(fs, 'readdir').mockImplementation((...args) => {
       if (unreadable && args[0] === project) return Promise.reject(Object.assign(new Error('permission denied'), { code: 'EACCES' }));
@@ -430,6 +432,18 @@ describe('resolveLibrarySkill (D72)', () => {
     // Only when no root offers a usable folder does the rejected one come back, with its detail.
     expect(await resolveLibrarySkill(home, emptyConfig(), join(home, '.state'), 'dup')).toMatchObject({ libraryRoot: join(home, '.claude', 'skills'), inspection: { kind: 'rejected', reason: 'description-missing' } });
   });
+});
+
+// §7.4(b) / D16: the count is "direct child directories". A plain file (.DS_Store, README.md) still
+// becomes a LocalEntry so the inventory mirrors readdir, but it is neither a skill folder nor a card;
+// a symlink stays counted because it stays a (refused) card (hybrid review r1, high).
+it('counts folders and symlinks but never a plain file', async () => {
+  const home = await temporaryDirectory(), root = join(home, '.claude', 'skills');
+  await candidate(root, 'alpha'); await mkdir(join(root, 'empty')); await symlink(join(root, 'alpha'), join(root, 'link'));
+  await writeFile(join(root, '.DS_Store'), ''); await writeFile(join(root, 'README.md'), '# notes\n');
+  const inventory = await localSkills(root, emptyConfig(), { scope: 'global', stateRoot: join(home, '.state') });
+  expect(inventory.entries.map(entry => entry.name)).toEqual(['.DS_Store', 'README.md', 'alpha', 'empty', 'link']);
+  expect(localSkillCounts(inventory)).toEqual({ skillFolders: 3, connectable: 1 });
 });
 
 it('overlaps root walks and still returns the first usable match', async () => {

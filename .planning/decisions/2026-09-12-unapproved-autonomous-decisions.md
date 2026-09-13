@@ -690,3 +690,29 @@ Playwright could not bind :1420 inside the sandbox; the orchestrator's own gates
   `m7-S7q` keep theirs (no driver; nothing reads them).
 - *Medium, fixed:* `replay.test.ts` indexed `projects[0]` after the reorder; pinned by name. Also the
   drive.cjs UTF-8/`close` mediums, since the script was rewritten. The other mediums stay deferred.
+
+## A25 — B5's review: eight highs fixed, and the three calls made inside them
+
+**Review `wf_4c44b263-364` (base `d60cf36`, 179 agents): 0 critical, 8 high, 12 medium.** All eight
+highs fixed (each test proven failing pre-fix); the mediums stay deferred to the next batch that
+touches each file.
+- D75 recovery now finds the sibling read-only, locks it, then repairs (the lock set had been
+  computed from the literal names, so an externally renamed sibling was mutated unlocked).
+- `skill move --to` matches a registered project by realpath too, so a symlinked root is accepted.
+- **A20 #4 resolved by the review:** a plain file under a Library root is neither a card nor counted
+  — `isSkillFolder(entry)` excludes only the scan's own `not-a-directory` rejection, so the spec's
+  "direct child directories" sentence (OF-13 note, §7.4(b)) is true without editing it. Calls made:
+  symlinked entries stay counted and stay (refused) cards — D16's "whatever is a card is counted",
+  and Claude Code follows the link; a ledger row that points at a plain file is reported under
+  `problems` (the channel a missing folder uses), no longer a row.
+- The mock's `skillFile.move/rename` mirrors the CLI's collision contract (§9.1.1): rename onto an
+  occupied name refuses with the CLI's sentence; move keeps the resident at
+  `<root>/.claude/old-skills/<name>` with the notice; the silent eviction is gone.
+- One `cardSummary(body, description)` for Library and Marketplace cards (the Library card had
+  skipped the body excerpt). The review's suggested revert of two replay pins does not apply:
+  those recordings carry no `body`, so the frontmatter fallback there is correct.
+- `SkillFileDialog` hands a finished outcome on when dismissed and renders a refusal/cancel notice
+  (the page owns the workflow, as `SettingsDialogs` does).
+- Auto-category spec §6/§9: `assessHygiene`'s `categories?` is the sixth positional; the
+  options-object conversion the spec's own threshold demands is recorded as owed to whoever merges
+  B9 forward.

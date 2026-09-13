@@ -580,6 +580,17 @@ it('reports an unavailable untracked SKILL.md without inventing a local row', as
   } finally { spy.mockRestore(); }
 });
 
+// §7.4(b) / D16: a plain file under a Library root is not a skill folder — no row, no card, no count. A
+// ledger row that points at one is reported in `problems`, the way a missing folder is, so the stale
+// placement stays visible without drawing a card for a file (hybrid review r1, high).
+it('draws and counts no card for a plain file, and reports a ledger row that points at one',async()=>{
+ const home=await temporaryDirectory(),root=join(home,'.claude','skills'),store=createConfigStore(join(home,'.terum','skills'));
+ const good=await localSource(home,'good');await writeFile(join(root,'.DS_Store'),'');const stale=join(root,'stale');await writeFile(stale,'not a folder');
+ await store.update(c=>{c.placements[stale]={id:ID,team:'team',version:'v1',scope:{kind:'global'},fingerprint:'',placed_at:''};});
+ const io=new ScriptedPrompter(),result=await run({local:true,home,config:store},io);
+ expect(result).toMatchObject({ok:true,value:{local:[{counts:{skillFolders:1,connectable:1},rows:[{name:'good',path:good}],notOffered:[],problems:[{path:stale,reason:'placement recorded in the ledger but the path is not a folder'}]}]}});
+ expect(io.lines).toContain('  1 skill folder (1 connectable)');expect(io.lines.join('\n')).not.toContain('.DS_Store');
+});
 it('D16 emits four folders, including missing SKILL.md, unreadable and symlink, and counts all four',async()=>{
  const home=await temporaryDirectory(),root=join(home,'.claude','skills'),store=createConfigStore(join(home,'.terum','skills'));
  await localSource(home,'good');const blocked=await localSource(home,'blocked');await mkdir(join(root,'empty'));await fs.symlink(join(root,'good'),join(root,'link'));

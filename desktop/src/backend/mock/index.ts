@@ -69,15 +69,33 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   return createRun(async ctx=>{if(scenario==='error')return fail(errors[family]);if(scenario==='loading'){while(true)await ctx.sleep(60_000);}if(scenario==='slow'||latency)await ctx.sleep(scenario==='slow'?2000:latency);return structuredClone(await script(ctx));});
  }
  const fileChanges=new Map<string,{path:string|null;name:string;original:string}>();
+ function folderOf(root:Root):string{return root.kind==='global'?'~/.claude/skills':root.root+'/.claude/skills';}
+ /** The fixture skills natively under a root: Global holds every SKILLS entry, a checkout the ones LIST_OF puts there. */
+ function fixtureSkillsAt(root:Root){const scopes:Record<string,readonly string[]>=design.LIST_OF,canonical=root.label;return canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.project!=='local'&&scopes[skill.name]?.includes(canonical));}
+ /** Whether a Library card sits at `path` right now: a fixture skill not moved away (its change is keyed by its native path), or a moved/renamed one that landed there. */
+ function occupied(path:string):boolean{const folder=path.slice(0,path.lastIndexOf('/')),name=path.slice(folder.length+1),root=mockRoots().find(r=>folderOf(r)===folder);return (root!==undefined&&fixtureSkillsAt(root).some(s=>s.name===name)&&!fileChanges.has(path))||[...fileChanges.values()].some(change=>change.path===path);}
  function localProjection<T extends SkillCard>(card:T):T {return {...card,teamed:false,installs:'—',installsN:0,teamState:'unknown',latestVersion:null,installedVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,edited:card.flags.includes('local'),flags:card.flags.filter(flag=>flag!=='update'),localEval:card.summary?{...card.summary,runnerHandle:null,version:null}:null};}
  function fileRun(kind:'move'|'rename'|'delete',path:string,to?:string){return long('library',async ctx=>{
   const name=path.split('/').at(-1)!;
   if(await ctx.ask('text',`Type ${name} to ${kind} this folder`)!==name)return cancelled('The name did not match; nothing changed.');
   const destination=kind==='delete'?null:kind==='rename'?path.slice(0,path.lastIndexOf('/')+1)+to:(to==='global'?'~':to)+'/.claude/skills/'+name;
+  const notices:string[]=[];
+  // §7.5 / §9.1.1 (hybrid review r1, high): this used to evict whatever card already sat at the destination,
+  // silently. The CLI (src/commands/skill.ts) refuses the same folder, refuses a rename onto an occupied
+  // name, and on a move keeps the resident at <root>/.claude/old-skills/<name> and says so — old-skills is a
+  // sibling of the skills root, so it is hidden from the Library by construction, never by a filter.
+  if(destination===path)return fail('The source and destination are the same folder.');
+  if(destination!==null&&occupied(destination)){
+   if(kind==='rename')return fail(destination+' already exists; choose another name.');
+   const kept=destination.slice(0,destination.lastIndexOf('/.claude/skills/'))+'/.claude/old-skills/'+name,resident=[...fileChanges.entries()].find(([,change])=>change.path===destination);
+   fileChanges.set(resident?.[0]??destination,{path:kept,name:resident?.[1].name??name,original:resident?.[1].original??name});
+   notices.push('Your previous copy is kept at '+kept+'.');
+  }
   const prior=[...fileChanges.entries()].find(([,change])=>change.path===path),original=prior?.[1].original??name;
   fileChanges.set(prior?.[0]??path,{path:destination,name:kind==='rename'?to!:name,original});
   for(const listener of listeners)listener('config');
-  return ok({kind,path,destination,quarantined:kind==='delete'?'~/.terum/skills/quarantine/'+name:null,installed:false,notices:[kind==='delete'?'Moved to quarantine.':`Moved to ${destination}.`]});
+  notices.push(kind==='delete'?'Moved to quarantine.':`${kind==='rename'?'Renamed':'Moved'} ${path} to ${destination}.`);
+  return ok({kind,path,destination,quarantined:kind==='delete'?'~/.terum/skills/quarantine/'+name:null,installed:false,notices});
  });}
 
  const profileValues: {name?:string;bio?:string;role?:string;projects?:string[]} = {};
@@ -115,21 +133,22 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   settings:async()=>{const result=await read<Settings>('settings',()=>ok({INVITE_TIP:design.INVITE_TIP,JOIN_BLOCK_NOTE:design.JOIN_BLOCK_NOTE,INVITEE:design.INVITEE,K:design.K,MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:identity,TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,AGENT_CLI_AUTH:'signed-in',COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN}));return result.ok?result:{...result,reason:result.error.includes('Invalid')&&result.error.includes('config.json')?'invalid-config':'unreadable'};},
   onboarding:async()=>{const result=await read('onboarding',()=>ok(onboardingData()));return result.ok?result:{...result,value:onboardingData()};},
   library:({scope})=>read('library',scenario=>{
-   const scopes:Record<string,readonly string[]>=design.LIST_OF,roots=mockRoots(),root=roots.find(r=>scope.kind==='global'?r.kind==='global':r.id===scope.root);
+   const roots=mockRoots(),root=roots.find(r=>scope.kind==='global'?r.kind==='global':r.id===scope.root);
    if(!root)return fail('No such project: '+(scope.kind==='checkout'?scope.root:'global'));
-   const canonical=root.label,folder=root.kind==='global'?'~/.claude/skills':root.root+'/.claude/skills';
-   const source=scenario==='empty'?[]:canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.project!=='local'&&scopes[skill.name]?.includes(canonical));
+   const canonical=root.label,folder=folderOf(root);
+   const source=scenario==='empty'?[]:fixtureSkillsAt(root);
    const cardFor=(s:typeof design.SKILLS[number],path:string,name=s.name)=>localProjection(removalState(withInstall({...cardOf(s),name,path,project:canonical,enabled:backend.prefs.get('enabled:'+name,s.enabled??true),favorite:backend.prefs.get('favorite:'+name,s.favorite??false),...(scenario==='on-disk-only'&&name==='deploy-check'?{installed:'placed' as const,placed:false,onDiskOnly:true,paths:[[path,'global']] as [string,string][]}:{})})));
    const skills=source.filter(s=>!fileChanges.has(folder+'/'+s.name)).map(s=>cardFor(s,folder+'/'+s.name));
    for(const change of fileChanges.values())if(change.path?.slice(0,change.path.lastIndexOf('/'))===folder){
     const original=design.SKILLS.find(s=>s.name===change.original);if(!original)continue;
-    const collision=skills.findIndex(s=>s.path===change.path);if(collision>=0)skills.splice(collision,1);
     const card=cardFor(original,change.path,change.name);if(change.name!==change.original)Object.assign(card,{edited:true,summary:null,localEval:null,localEvalStale:card.localEval!==null});skills.push(card);
    }
    const overview=scenario==='empty'?zeroOverview:(Object.hasOwn(design.OVERVIEW_BY_SCOPE,canonical)?(design.OVERVIEW_BY_SCOPE as Record<string,Library['overview']>)[canonical]!:zeroOverview);
    return ok({roots,scanned:null,root,skills,overview:{...overview,skills:String(skills.length),installs:'—'},title:`${skills.length} skill${skills.length===1?'':'s'}`});
   }),
-  localSkill:({path})=>read('skill',()=>{const change=[...fileChanges.values()].find(change=>change.path===path),name=path.split(/[\\/]/).filter(Boolean).at(-1)??'';if(fileChanges.has(path)&&fileChanges.get(path)?.path!==path)return {ok:false,error:path+' is no longer in the Library.',reason:'not-in-library'};const detail=skillByRef(change?.original??name);return detail.ok?ok({...localProjection(detail.value),name,team:null,repo:null,installs_n:0,used_by:[],users:[],versions:null,version:'—',version_full:null,history:[],activity:[],...(change&&name!==change.original?{edited:true,localEval:null,summary:null,receipt:null,reportNumbers:null,skillMd:{...detail.value.skillMd,frontmatter:detail.value.skillMd.frontmatter.replace(/^name: .*$/m,'name: '+name)}}:{}),skillRef:'local:'+path,path,pathLabel:path,repoPath:path,owningRoot:mockOwningRoot(path)}):{ok:false,error:path+' is not in any Library root.',reason:'not-in-library'};}),
+  localSkill:({path})=>read('skill',()=>{const change=[...fileChanges.values()].find(change=>change.path===path),name=path.split(/[\\/]/).filter(Boolean).at(-1)??'';
+   // A card that landed here (a move onto the evicted resident's path) wins; only a path nothing occupies any more is gone.
+   if(change===undefined&&fileChanges.has(path))return {ok:false,error:path+' is no longer in the Library.',reason:'not-in-library'};const detail=skillByRef(change?.original??name);return detail.ok?ok({...localProjection(detail.value),name,team:null,repo:null,installs_n:0,used_by:[],users:[],versions:null,version:'—',version_full:null,history:[],activity:[],...(change&&name!==change.original?{edited:true,localEval:null,summary:null,receipt:null,reportNumbers:null,skillMd:{...detail.value.skillMd,frontmatter:detail.value.skillMd.frontmatter.replace(/^name: .*$/m,'name: '+name)}}:{}),skillRef:'local:'+path,path,pathLabel:path,repoPath:path,owningRoot:mockOwningRoot(path)}):{ok:false,error:path+' is not in any Library root.',reason:'not-in-library'};}),
   skillFile:{
    move:({path,to})=>fileRun('move',path,to),rename:({path,to})=>fileRun('rename',path,to),delete:({path})=>fileRun('delete',path),
   },
