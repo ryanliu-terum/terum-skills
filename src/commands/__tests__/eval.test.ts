@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
+import * as fs from 'node:fs/promises';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { dirname, join, sep } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore, type ConfigStore } from '../../lib/config.js';
 import { type AgentApi, Transcript } from '../../lib/evals/agent.js';
 import { success } from '../../lib/result.js';
@@ -11,6 +12,10 @@ import { skillContentDigest } from '../../lib/skills.js';
 import { sourceFiles } from '../../lib/skill-source.js';
 import { queueItemsFor, run, saveGeneratedAssets } from '../eval.js';
 import { run as publishRun } from '../publish.js';
+
+// Clone the ESM namespace so one fs call can be observed or made to fail, then restored (the
+// local-skills.test.ts pattern).
+vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs/promises')>() }));
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const skill = (body = '') => `---\nname: sample\ndescription: checks deployments\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${body}`;
@@ -39,6 +44,16 @@ const armAgent: AgentApi = {
   askJson: () => Promise.resolve({ selected: ['sample'] }),
 };
 const stub = async () => success({ ccVersion: 'stub' });
+/** Every `.generated.terum-*` entry under `root`, at any depth — the staging folder's name wherever it is. */
+async function stagingEntriesUnder(root: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.name.startsWith('.generated.terum-')) found.push(path);
+    if (entry.isDirectory()) found.push(...await stagingEntriesUnder(path));
+  }
+  return found;
+}
 
 /**
  * §6.3: eval targets a folder in the LIBRARY. The clone is still built — it supplies the incumbent
@@ -360,6 +375,7 @@ describe('D72 — the B3 full review highs on eval', () => {
     expect(await run(args(store, home, { agent: generationAgent([]), k: 1 }), new ScriptedPrompter())).toMatchObject({ ok: true });
     expect((await readdir(join(folder, 'evals'))).sort()).toEqual(['cases', 'triggers.yaml']);
     expect((await readdir(join(folder, 'evals', 'cases'))).sort()).toEqual(['happy-path.yaml', 'safe-command.yaml', 'unsafe-request.yaml']);
+    expect(await stagingEntriesUnder(dirname(folder))).toEqual([]);
   });
 
   it('the D61 already-exists refusal fires before anything is staged', async () => {
@@ -368,5 +384,59 @@ describe('D72 — the B3 full review highs on eval', () => {
     await writeFile(join(folder, 'evals', 'triggers.yaml'), TRIGGERS);
     expect(await saveGeneratedAssets(folder, { triggers: TRIGGERS, cases: { names: ['a'], files: { 'a.yaml': CASE } } })).toMatchObject({ ok: false, error: expect.stringContaining('already exists') });
     expect(await readdir(join(folder, 'evals'))).toEqual(['triggers.yaml']);
+  });
+});
+
+describe('B3 confirmation review — where saveGeneratedAssets stages, and what its failure says', () => {
+  it('stages in the skill folder’s parent, never inside it, so a crash mid-write cannot leave a folder publish would digest', async () => {
+    // Confirmation-review HIGH 2 on refactor/b3-versions-keystone: the staging folder was
+    // `<skill>/evals/.generated.terum-*`, inside the tree `sourceFiles`/`skillContentDigest` walk
+    // (D2's ignore list is fixed and `evals/` is digested by D9), so a SIGKILL between `mkdtemp` and
+    // the cleanup left a hidden folder the next publish shipped as version bytes. The rollback path
+    // cannot run for that interruption, so the only proof is WHERE the folder is made.
+    const { folder } = await evalFixture();
+    const spy = vi.spyOn(fs, 'mkdtemp');
+    let saved; let prefixes: string[] = [];
+    // The second case file's path runs THROUGH the first (ENOTDIR), so the run fails after staging.
+    // The calls are read before `mockRestore`, which clears them along with the spy.
+    try {
+      saved = await saveGeneratedAssets(folder, { triggers: TRIGGERS, cases: { names: ['a', 'b'], files: { 'a.yaml': CASE, 'a.yaml/b.yaml': CASE } } });
+      prefixes = spy.mock.calls.map((call) => String(call[0]));
+    } finally { spy.mockRestore(); }
+    expect(saved).toMatchObject({ ok: false, error: expect.stringContaining('ENOTDIR') });
+    expect(prefixes).toEqual([join(dirname(folder), '.generated.terum-')]);
+    expect(prefixes[0]!.startsWith(folder + sep)).toBe(false);
+    // Nothing of the staging survives anywhere: not under the skill folder at any depth, not beside it.
+    expect(await stagingEntriesUnder(folder)).toEqual([]);
+    expect(await stagingEntriesUnder(dirname(folder))).toEqual([]);
+  });
+
+  it('when cases landed and the triggers rename then fails, the message says which landed and evals/cases stays whole', async () => {
+    // Confirmed medium beside HIGH 2: the failure sentence claimed "Nothing was left in the skill
+    // folder" whatever had already landed. The renames are per asset, cases first, so a triggers
+    // failure leaves `evals/cases` whole — which the next run rightly treats as authored (D29) — and
+    // a user who believed the sentence would delete a good asset to start clean.
+    const { folder } = await evalFixture();
+    const triggers = join(folder, 'evals', 'triggers.yaml');
+    const original = fs.rename;
+    // The second rename has to fail for real AFTER the first succeeded. No on-disk shape does that:
+    // the D61 pre-check reads the destination, so a directory or a symlink at `triggers.yaml` is
+    // refused before staging, and a dangling link is simply replaced by the rename. Inject the
+    // refusal the volume would give (the local-skills.test.ts EACCES pattern), on that path only.
+    const spy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (String(to) === triggers) throw Object.assign(new Error(`EACCES: simulated, rename '${String(from)}' -> '${triggers}'`), { code: 'EACCES' });
+      return original(from, to);
+    });
+    let saved;
+    try { saved = await saveGeneratedAssets(folder, { triggers: TRIGGERS, cases: { names: ['a'], files: { 'a.yaml': CASE } } }); }
+    finally { spy.mockRestore(); }
+    expect(saved).toMatchObject({ ok: false, error: expect.stringContaining('EACCES: simulated') });
+    const error = saved.ok ? '' : saved.error;
+    expect(error).toContain('evals/cases/ landed whole');
+    expect(error).toContain('evals/triggers.yaml was not written');
+    expect(error).not.toContain('Nothing was left');
+    expect((await readdir(join(folder, 'evals'))).sort()).toEqual(['cases']);
+    expect(await readFile(join(folder, 'evals', 'cases', 'a.yaml'), 'utf8')).toBe(CASE);
+    expect(await stagingEntriesUnder(dirname(folder))).toEqual([]);
   });
 });

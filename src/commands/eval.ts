@@ -5,7 +5,7 @@ import type { WithForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { Config } from '../lib/schema.js';
 import { localReceiptsFor, newestReceiptAt } from '../lib/evals/receipt-store.js';
@@ -192,7 +192,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       // line naming the path and the consequence is the only signal they get. It is a PRINT, not a
       // prompt: nothing leaves the machine here, publish still asks before anything does, and
       // publish already writes into this same folder (§5.1 step 6b).
-      const written = [generated.cases === undefined ? null : 'evals/cases/', generated.triggers === undefined ? null : 'evals/triggers.yaml'].filter((entry): entry is string => entry !== null);
+      const written = generatedAssetLabels(generated);
       io.print(`Writing generated ${written.join(' and ')} into ${candidateDir} — they were missing, so this run made them. That changes the skill's content: the next publish mints a new version and the current local eval score blanks. To regenerate, delete evals/cases/ and run eval again.`);
       const saved = await saveGeneratedAssets(candidateDir, generated);
       if (!saved.ok) return failure(saved.error);
@@ -380,6 +380,11 @@ async function writeGeneratedAssets(root: string, generated: GeneratedAssets): P
   }
 }
 
+/** The folder-relative spellings of the assets a generation carries, in the order they are written back. */
+function generatedAssetLabels(generated: GeneratedAssets): string[] {
+  return [generated.cases === undefined ? null : 'evals/cases/', generated.triggers === undefined ? null : 'evals/triggers.yaml'].filter((entry): entry is string => entry !== null);
+}
+
 /**
  * §6.3 — the one write-back into the user's own skill folder. `plannedGeneration` only ever asks for
  * an asset that is MISSING (D29 deleted `--gen`, the only thing that could force a regeneration), so
@@ -405,25 +410,49 @@ export async function saveGeneratedAssets(source: string, generated: GeneratedAs
   // case file left a partial `evals/cases/` that the next run's `authoredCaseFiles` took for AUTHORED
   // (`plannedGeneration` never regenerates over it) and publish shipped as a version; a crash before
   // the first file left an empty `cases/` that the refusal above then reported as authored forever.
-  // Every file lands in a hidden sibling under `evals/` (same volume, so the rename is a rename), and
-  // each asset becomes visible in one `rename` only after all of it is written. A failure removes
-  // the staging folder — and `evals/` itself when this call made it — so `evals/cases` is absent or
-  // whole, never partial. The two renames are per asset: a failure between them leaves the first
-  // asset whole and the second absent, which the next run regenerates on its own.
+  // Each asset becomes visible in one `rename` only after all of it is written, so `evals/cases` is
+  // absent or whole, never partial.
+  //
+  // The staging folder lives in the skill folder's PARENT (the Library root), never inside the skill
+  // folder (confirmation-review HIGH 2 on refactor/b3-versions-keystone). It used to be a hidden
+  // sibling under `evals/` — inside the tree `sourceFiles`/`skillContentDigest` walk, which skips
+  // only D2's fixed ignore list (`ignoredByDigest`: `.git`/`.skillhub` at the root and two junk
+  // basenames; spec-fixed, so the staging name cannot join it, and `evals/` is digested on purpose,
+  // D9). The `catch` below never runs for a SIGKILL or a power loss between `mkdtemp` and the final
+  // `rm`, and a `.generated.terum-*` left inside the folder was then CONTENT: the next publish
+  // digested it and shipped it into the team repo as part of the version. Out in the parent it is
+  // nobody's content — the Library scan (`localSkills`) drops an untracked entry with no `SKILL.md`,
+  // so it is not a skill either — and the worst a crash leaves is a stray hidden folder beside the
+  // skill. The parent is on the skill folder's volume by construction (the folder is a real directory
+  // in it — `localSkills` rejects a symlinked skill folder — and only a mount point AT the skill
+  // folder could differ, which the rename then reports as EXDEV rather than corrupts), so each
+  // per-asset `rename` into `evals/` stays a rename. `evals/` is still made before the renames so
+  // they have a destination.
+  //
+  // A failure removes the staging folder — and `evals/` itself when this call made it. The renames
+  // are per asset, cases first, so a failure between them leaves cases whole and triggers absent;
+  // `landed` records which, because the message has to say so (confirmed medium in the same review:
+  // "Nothing was left in the skill folder" was false once cases had landed, and a user who believed
+  // it would delete a good asset to start clean). The next run regenerates only the missing one.
   const evals = join(source, 'evals');
   const hadEvals = await pathExists(evals);
+  const landed: string[] = [];
   let staging: string | undefined;
   try {
     await mkdir(evals, { recursive: true, mode: 0o700 });
-    staging = await mkdtemp(join(evals, '.generated.terum-'));
+    staging = await mkdtemp(join(dirname(source), '.generated.terum-'));
     await writeGeneratedAssets(staging, generated);
-    if (generated.cases !== undefined) await rename(join(staging, 'cases'), cases);
-    if (generated.triggers !== undefined) await rename(join(staging, 'triggers.yaml'), triggers);
+    if (generated.cases !== undefined) { await rename(join(staging, 'cases'), cases); landed.push('evals/cases/'); }
+    if (generated.triggers !== undefined) { await rename(join(staging, 'triggers.yaml'), triggers); landed.push('evals/triggers.yaml'); }
   } catch (error) {
     if (staging !== undefined) await rm(staging, { recursive: true, force: true }).catch(() => undefined);
     // `rmdir` refuses a non-empty directory, so this can only take away the `evals/` this call made.
     if (!hadEvals) await rmdir(evals).catch(() => undefined);
-    return failure(`Could not write the generated eval assets into ${evals}: ${error instanceof Error ? error.message : String(error)}. Nothing was left in the skill folder; run eval again.`);
+    const missing = generatedAssetLabels(generated).filter((asset) => !landed.includes(asset));
+    const outcome = landed.length === 0
+      ? 'Nothing was left in the skill folder; run eval again.'
+      : `${landed.join(' and ')} landed whole; ${missing.join(' and ')} was not written and the folder holds no partial copy of it. Run eval again to generate what is missing.`;
+    return failure(`Could not write the generated eval assets into ${evals}: ${error instanceof Error ? error.message : String(error)}. ${outcome}`);
   }
   // Emptied by the renames; a leftover hidden folder is cheaper than failing a landed write.
   await rm(staging, { recursive: true, force: true }).catch(() => undefined);

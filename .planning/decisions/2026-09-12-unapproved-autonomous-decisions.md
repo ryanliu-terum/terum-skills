@@ -579,3 +579,28 @@ ruling; the calls the rulings left open, taken as follows.
 
 **Owed, not fixed here:** `setup.ts:333-335` + `eval.ts:490 versionProblem` dead code; the
 `preserveUnchanged` observation above.
+
+## A19 — The B3 fix commit's own confirmation pass: two highs fixed, one adjacent medium taken, three coverage mediums deferred
+
+**Pass `wf_e3862d60-9ba` (base `c960998`, 2026-09-13 03:30 PDT): 0 critical, 2 high, 4 medium, all 3-0.**
+- *High, fixed:* `validate`'s new `atPath()` returned `name: basename(absolute)` for a directly targeted
+  layout-3 version folder (`skills/<name>/v3` holds `SKILL.md`), so HYG1 rejected every valid skill
+  validated by such a path — the trap the sibling `newestVersion()` docstring warns about, fixed only on
+  the container branch. Now the version-folder shape (a `v<N>` basename under a `skills/<name>` parent)
+  validates under `<name>`.
+- *High, fixed:* eval's generated-asset staging folder lived inside `<skill>/evals/`, i.e. inside the
+  tree `sourceFiles`/`skillContentDigest` walk; a non-catchable interruption left a hidden
+  `.generated.terum-*` folder that the next publish would digest and ship. The staging now lives in
+  the skill folder's parent (same volume by construction; the per-asset rename stays a rename). The
+  spec-fixed D2 ignore list was NOT extended — a hidden folder the digest silently skips would be the
+  wrong kind of invisible.
+- *Medium, taken (same catch block):* the failure message claimed "nothing was left" even when the
+  cases rename had landed and only the triggers rename failed; it now says what landed.
+- *Mediums, deferred:* no test drives `offerProfileEntry`'s `lockWait(io)` spread (gate: B6, which
+  owns `profile-entry.ts` per §9.3); no test drives `resolveLibrarySkill`'s `failed` inspection branch
+  (gate: B5, which next touches `local-skills.ts`); `atPath`'s `lstat` reports a symlinked target as
+  not-a-directory while the Library scan reports symlinks explicitly (gate: the first symlinked
+  Library entry a user reports; `validate` on a symlink today falls through to the by-name path).
+
+Budget note: this pass cost 5.4M subagent tokens and took the 5-hour session budget from 60% to 86%;
+the re-review of the two-high fix (`--base=f2089dd`) waits for the 07:00 reset before #183 merges.

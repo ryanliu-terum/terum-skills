@@ -77,6 +77,27 @@ describe('validate (§9)', () => {
     expect(await run({ target: folder, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { name: 'sample', findings: 0 } });
   });
 
+  it('a directly-targeted version folder skills/<name>/v<N> validates that version under <name>, in both modes', async () => {
+    // Confirmation-review HIGH 1 on refactor/b3-versions-keystone: the has-SKILL.md branch of atPath
+    // named the target by its basename, `v2`, so HYG1 ("SKILL.md name sample does not equal folder
+    // v2") failed every valid published skill reached by the path `ls`/`listVersions` print. v1 is
+    // dirty and v2 clean: a green v2 proves the TARGETED folder was checked under the right name, and
+    // a HYG2-only v1 proves the target was checked, not the newest version.
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill('bad‮text'));
+    await pushFromSeed(fixture.seed, 'skills/sample/v2/SKILL.md', skill());
+    const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const v2 = join(clone, 'skills', 'sample', 'v2');
+    expect(await run({ target: v2, cwd: clone }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { name: 'sample', findings: 0 } });
+    expect(await run({ target: v2, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { name: 'sample', findings: 0 } });
+    // The documented relative spelling, `validate skills/sample/v2 --cwd .`, read against the checkout.
+    expect(await atCwd(fixture.root, () => run({ target: 'skills/sample/v2', cwd: clone }, new ScriptedPrompter()))).toMatchObject({ ok: true, value: { name: 'sample', findings: 0 } });
+    const v1 = await run({ target: join(clone, 'skills', 'sample', 'v1'), cwd: clone }, new ScriptedPrompter());
+    expect(v1).toMatchObject({ ok: false, error: expect.stringContaining('HYG2') });
+    expect(v1.ok ? '' : v1.error).not.toContain('HYG1');
+  });
+
   it('without --cwd a folder at the user cwd wins, otherwise a bare name resolves through the configured team clone', async () => {
     const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill('bad‮text'));
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));

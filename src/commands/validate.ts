@@ -9,6 +9,7 @@ import { isSkillName } from '../lib/schema.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { readTeam } from '../lib/skills.js';
 import { listVersions } from '../lib/teamRepo.js';
+import { parseVersionFolder } from '../lib/versions.js';
 
 export interface ValidateArgs extends WithForm { target: string; team?: string; cwd?: string; config?: ConfigStore; }
 export interface ValidateResult { name: string; findings: number; warnings: number; }
@@ -29,20 +30,31 @@ async function newestVersion(root: string, name: string): Promise<Target | undef
 }
 
 /**
- * The target as a directory path. One holding `SKILL.md` is a skill folder (a local WIP folder, a
- * version folder) and validates as-is, named by its basename. One holding no `SKILL.md` directly
- * under a `skills/` parent is the layout-3 container `skills/<name>/`, whose only entries are
- * `v1/`, `v2/`, …: validating it would report HYG1 on a skill that is perfectly fine, so it
+ * The target as a directory path. One holding `SKILL.md` is a skill folder and validates as-is. Its
+ * NAME is its basename for a local WIP folder — but a directly-targeted VERSION folder,
+ * `skills/<name>/v<N>/` (the path `ls` and `listVersions` print, and the documented
+ * `validate skills/<name>/v<N> --cwd .`), is named by its `skills/<name>` segment: its basename is
+ * `v<N>`, and naming it so made HYG1 ("SKILL.md name <name> does not equal folder v<N>") reject every
+ * valid published skill reached by such a path (confirmation-review HIGH 1 on
+ * refactor/b3-versions-keystone — `newestVersion` above carries the same warning, and only the
+ * container branch below had honoured it). The shape is exact — the basename parses as a version
+ * folder (`parseVersionFolder`, the one parser) AND the grandparent is `skills/` — so a WIP folder
+ * that merely happens to be called `v2` elsewhere keeps its basename. One holding no `SKILL.md`
+ * directly under a `skills/` parent is the layout-3 container `skills/<name>/`, whose only entries
+ * are `v1/`, `v2/`, …: validating it would report HYG1 on a skill that is perfectly fine, so it
  * descends to the newest version — the documented path invocation `validate skills/<name> --cwd .`
  * depends on this (D71, the contested `:30` case folded into D72). Anything else validates as-is
  * and lets hygiene say what is wrong with it. `undefined` when the path is not a directory.
  */
 async function atPath(absolute: string): Promise<Target | undefined> {
   if (!(await isDirectory(absolute))) return undefined;
-  const asIs = { directory: absolute, name: basename(absolute) };
-  if (await isFile(join(absolute, 'SKILL.md'))) return asIs;
-  const container = basename(dirname(absolute)) === 'skills' ? await newestVersion(dirname(dirname(absolute)), asIs.name) : undefined;
-  return container ?? asIs;
+  const parent = dirname(absolute);
+  if (await isFile(join(absolute, 'SKILL.md'))) {
+    const versionFolder = parseVersionFolder(basename(absolute)) !== null && basename(dirname(parent)) === 'skills';
+    return { directory: absolute, name: versionFolder ? basename(parent) : basename(absolute) };
+  }
+  const container = basename(parent) === 'skills' ? await newestVersion(dirname(parent), basename(absolute)) : undefined;
+  return container ?? { directory: absolute, name: basename(absolute) };
 }
 
 /** Run the free §9 tier on a local skill folder, or a named skill in the selected team clone. */
