@@ -19,7 +19,7 @@ import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, lockWait } from '../lib/teamRepo.js';
 import { offerProfileEntry, writePersonFile } from '../lib/profile-entry.js';
 import { receiptFiles } from '../lib/evals/receipt-store.js';
-import { receiptSchema } from '../lib/evals/receipt.js';
+import { receiptSchema, type Receipt } from '../lib/evals/receipt.js';
 import { versionLabel } from '../lib/versions.js';
 import { listVersions } from '../lib/teamRepo.js';
 
@@ -157,9 +157,16 @@ export async function installOne(input: { team: string; destination: Destination
   // Seed before safeWrite refreshes the clone: these are receipts for the version just copied.
   const receipts = join(clone, 'evals', skill.id, latest);
   for (const file of await receiptFiles(receipts)) {
-    const raw = await readFile(join(receipts, file), 'utf8');
-    const receipt = receiptSchema.parse(JSON.parse(raw));
     const runId = file.slice(0, -5);
+    let receipt: Receipt;
+    // The skill is already placed and the ledger already claims it; a receipt this client cannot read
+    // (a newer schema, or not JSON) is skipped like the pre-migration case below, never a mid-install abort.
+    try {
+      receipt = receiptSchema.parse(JSON.parse(await readFile(join(receipts, file), 'utf8')));
+    } catch {
+      io.print(`Skipped ${runId}: invalid receipt.`);
+      continue;
+    }
     if (!receipt.content_digest) { io.print(`Skipped ${runId}: no content digest (pre-migration receipt).`); continue; }
     const directory = join(input.store.root, 'evals', 'local', receipt.content_digest.slice('sha256:'.length), runId);
     await mkdir(directory, { recursive: true });

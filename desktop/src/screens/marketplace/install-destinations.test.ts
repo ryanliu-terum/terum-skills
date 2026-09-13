@@ -13,3 +13,7 @@ it('preselects a unique remote match and requires a choice for several matches',
 it('keeps unreadable registered projects visible for the CLI to explain', () => {
   expect(destinationsFor([{ ...root('one'), rootState: 'unreadable' }], [], { libraryProjects: true }).rows).toHaveLength(2);
 });
+it('matches a root whose origin is any of the project\'s remotes, not only the first', () => {
+  // Spec §3: the CLI matches a destination on ANY project remote; a project with two remotes must match a checkout whose origin is the second.
+  expect(destinationsFor([root('one', true, 'acme/mirror')], ['acme/repo', 'acme/mirror'], { libraryProjects: true }).preselected).toBe('one');
+});

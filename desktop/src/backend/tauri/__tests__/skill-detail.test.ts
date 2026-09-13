@@ -40,8 +40,12 @@ it.each([undefined,'Global'])('passes only an explicitly selected Global destina
   const f = detailReplay();
   const result = await createTauriBackend(f.bridge).install({ref:'tdd',team:'acme',...(scope ? {scope} : {})}).done;
   expect(result).toMatchObject({ok:true,value:[{scope:'Global'}]});
-  // The mutation's hello advertises `refresh`, so one background `sync` follows it (index.ts onHello).
-  expect(f.spawns.map(spawn => spawn.args)).toEqual([['install','--team','acme',...(scope ? ['--into','global'] : []),'--','tdd'],['sync']]);
+  // The FIRST hello that advertises `refresh` schedules the one background `sync` (index.ts onHello). A scope-less
+  // install reads `ls --local` before spawning install, so that read's hello is the first and the resolved scope comes
+  // from the placed path (review r1 HIGH); an explicit Global needs no read, so install itself is first.
+  expect(f.spawns.map(spawn => spawn.args)).toEqual(scope
+    ? [['install','--team','acme','--into','global','--','tdd'],['sync']]
+    : [['ls','--local'],['sync'],['install','--team','acme','--','tdd']]);
 });
 it('maps a scanned project label to its absolute destination for install and removal', async () => {
   const f = detailReplay((name,value) => {

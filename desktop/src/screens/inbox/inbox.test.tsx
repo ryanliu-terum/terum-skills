@@ -60,3 +60,13 @@ it('uses status Global and checkout root counts on the empty scenario', async ()
   expect(await screen.findByRole('link', { name: 'Global 71' })).toBeInTheDocument();
   expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(['71','8','3','2']);
 });
+
+// refactor-b6 review H4 sweep: there is no declined list to add to and nothing re-offers a skill, so the
+// share report says only what install does (place, record, offer the profile) and that nothing moves until you do.
+it('describes a shared skill without a declined list or a re-offer promise', async () => {
+  open('#/inbox'); const pane = await screen.findByRole('region', { name: 'Inbox report' });
+  expect(pane).toHaveTextContent('install it when you want it; until then nothing on this machine changes.');
+  expect(pane).toHaveTextContent('records it in your people file. Your profile changes only if you say yes.');
+  expect(pane).not.toHaveTextContent('declined list');
+  expect(pane).not.toHaveTextContent('not be offered again');
+});

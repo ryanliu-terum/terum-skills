@@ -2,7 +2,7 @@ import { useContext, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { driveRun, githubUrl, PrintContext, PromptContext, useBackend, useFeatures } from '../../backend';
+import { driveRun, PrintContext, PromptContext, useBackend, useFeatures } from '../../backend';
 import type { Catalog, Person, Project, Run, SkillCard, Scope } from '../../backend/types';
 import { useUrlState } from '../../app/url-state';
 import { useSyncAction } from '../../components/domain/useSyncAction';
@@ -78,8 +78,7 @@ function InstallDialog({ project, catalog, busy, onClose, onInstall }: { project
   const backend = useBackend(), features = useFeatures(), action = useWorkflow(), state = useUrlState();
   const status = useQuery({ queryKey: ['status', state.mock], queryFn: ({ signal }) => backend.status(undefined, { signal }) });
   const roots = status.data?.ok ? status.data.value.roots : [];
-  const remote = githubUrl(project.remote)?.slice('https://github.com/'.length);
-  const model = destinationsFor(roots, remote ? [remote] : [], { libraryProjects: features?.libraryProjects ?? false });
+  const model = destinationsFor(roots, project.remoteSlugs, { libraryProjects: features?.libraryProjects ?? false });
   const [chosen, setChosen] = useState<string | undefined>();
   const scope = chosen ?? model.preselected;
   const counts = catalog.bulkInstall[project.key];
@@ -89,7 +88,7 @@ function InstallDialog({ project, catalog, busy, onClose, onInstall }: { project
       const picked = await backend.pickFolder();
       if (!picked.ok) { action.fail(picked.error); return; }
       if (picked.value === null) return;
-      await action.run(() => backend.projects.add(picked.value!), {}, () => { void status.refetch(); });
+      await action.run(() => backend.projects.add(picked.value!), {}, added => { setChosen(added.label); void status.refetch(); });
     } catch (error) { action.fail(error instanceof Error ? error.message : String(error)); }
   }
   const error = action.error ?? (status.data?.ok === false ? status.data.error : status.error?.message);

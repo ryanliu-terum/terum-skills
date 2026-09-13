@@ -294,7 +294,24 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
     expect(await backend.install({ ref: 'deploy-check', scope: 'SSM', yesProfile: true }).done).toEqual({ ok: true, value: [{ id: 'deploy-check', name: 'deploy-check', scope: 'SSM', path: '/p', version: 'v1', profiled: true }] });
     await backend.install({ ref: '', kind: 'member', member: 'ryan' }).done;
     await backend.install({ ref: '', kind: 'project', project: 'ssm' }).done;
-    expect(f.spawns.map((s) => s.args)).toEqual([['ls','--local'], ['install', '--yes-profile', '--into', '/Projects/SSM', '--', 'deploy-check'], ['install', '--', 'member', 'ryan'], ['install', '--', 'project', 'ssm']]);
+    // A scope-less install also reads `ls --local` first: not to build `--into` (the CLI's own picker chooses), but so the
+    // result can name the registered root the CLI actually placed into (review r1 HIGH; see the next test).
+    expect(f.spawns.map((s) => s.args)).toEqual([['ls','--local'], ['install', '--yes-profile', '--into', '/Projects/SSM', '--', 'deploy-check'], ['ls','--local'], ['install', '--', 'member', 'ryan'], ['ls','--local'], ['install', '--', 'project', 'ssm']]);
+  });
+  // Review r1 HIGH: a scope-less install lets the CLI's own picker choose the destination (`--into` is omitted), so the
+  // reported scope must come from where the CLI says it placed each skill — the registered root containing the returned
+  // `path` — never from the caller's absent input. Here the picker put deploy-check in SSM and tdd in Global.
+  it('reports the scope the CLI actually placed into when the caller named none', async () => {
+    const f = fakeBridge((args, emit) => {
+      if (args[0] === 'ls') ok('ls', { roster: [], skills: [], problems: [], local: [
+        { root: '/Users/teddy/.claude/skills', scope: 'global', rows: [], notOffered: [], problems: [] },
+        { root: '/Projects/SSM/.claude/skills', repoRoot: '/Projects/SSM', scope: 'project', label: 'SSM', rootState: 'scanned', registered: true, rows: [], notOffered: [], problems: [] },
+      ] })(args, emit);
+      else ok('install', [{ id: 'deploy-check', team: 'terum', path: '/Projects/SSM/.claude/skills/deploy-check', version: 'v1', profiled: false }, { id: 'tdd', team: 'terum', path: '/Users/teddy/.claude/skills/tdd', version: 'v2', profiled: false }])(args, emit);
+    });
+    const result = await createTauriBackend(f.bridge).install({ ref: '', kind: 'member', member: 'ryan' }).done;
+    expect(result.ok ? result.value.map(item => [item.id, item.scope]) : result).toEqual([['deploy-check', 'SSM'], ['tdd', 'Global']]);
+    expect(f.spawns.at(-1)?.args).toEqual(['install', '--', 'member', 'ryan']);
   });
   it('team, sync, and prune argv; sync never passes --hook', async () => {
     const f = fakeBridge(ok('x', { team: 't', notices: [], changed: true, teams: [], id: 'a', name: 'a', findings: 0, warnings: 1 }));

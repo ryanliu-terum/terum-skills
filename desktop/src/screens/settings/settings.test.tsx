@@ -408,3 +408,12 @@ it('draws an empty quarantine and still lets its CLI confirmation determine the 
 // project reaches the Library only by being added, so there is no candidate list left to test.
 
 
+
+// refactor-b6 review H8: install lost --force (commander now rejects it); under §9.1.1 (D12) a same-name folder
+// is replaced only after a confirm that keeps the old copy in that root's .claude/old-skills folder.
+it('describes config.json recovery through the replace-and-keep flow, never the removed install --force flag',async()=>{
+ open('#/settings/advanced');
+ const row=(await screen.findByText('Local state',{selector:'.setting-row span'})).closest('.setting-row');
+ expect(row).toHaveTextContent("install asks before replacing the folder already there and keeps it in that root's .claude/old-skills folder");
+ expect(row).not.toHaveTextContent('--force');
+});

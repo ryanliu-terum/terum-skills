@@ -8,7 +8,7 @@ import { overviewCopy } from '../../lib/overview-copy';
 import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
 import type { InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard } from '../types';
-import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData } from './data';
+import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData, remoteSlugsOf, MOCK_ORIGIN } from './data';
 import { cli, roster_by_adoption, statusLines } from './derive';
 import { onboardingData, replaySetupEvals } from './onboarding';
 import { readScenario } from './scenario';
@@ -106,7 +106,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
  const created: {name:string;remote:string|null}[] = [];
  /** Endorsements this session opened, so a project's card reflects what the picker did. */
  const endorsed: {project:string;name:string}[] = [];
- const asProject=(q:{name:string;remote:string|null}):Project=>({name:q.name,key:q.name,ico:'folder',desc:'',skills:0,members:0,remote:q.remote??'—',installed:false,favorites:null,updated:null,path:null,admin:null,evaluated:null,memberHandles:[],memberInitials:[],skillsIn:[]});
+ const asProject=(q:{name:string;remote:string|null}):Project=>({name:q.name,key:q.name,ico:'folder',desc:'',skills:0,members:0,remote:q.remote??'—',remoteSlugs:remoteSlugsOf(q.remote),installed:false,favorites:null,updated:null,path:null,admin:null,evaluated:null,memberHandles:[],memberInitials:[],skillsIn:[]});
  // `skillsTotal` is null on the mock: the canvas fixture records who authored a skill and how many installs
  // it has team-wide, but never how many skills a member's own machine holds, so there is no honest number to
  // draw. The real adapter reads each member's self-report from their people file; the column shows '—' here
@@ -253,8 +253,6 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
  return backend;
 }
 
-// MRF has no origin, so the header's "GitHub: not connected" state is reachable in the mock too.
-const MOCK_ORIGIN:Record<string,string|null>={Terum:'ryanliu-terum/terum-skills',SSM:'ryanliu-terum/ssm',MRF:null};
 function mockRoots():Root[]{const scenario=readScenario();const global:Root={id:'global',kind:'global',label:'Global',root:'~/.claude/skills',rootState:'scanned',registered:false,count:design.COUNTS.Global,remote:null};
  if(scenario==='no-projects')return [global];
  return [global,...(['Terum','SSM','MRF'] as const).map((name):Root=>({id:'/Users/you/code/'+name.toLowerCase(),kind:'checkout',label:name,root:'/Users/you/code/'+name.toLowerCase(),rootState:scenario==='missing-root'&&name==='SSM'?'absent':'scanned',registered:true,count:scenario==='missing-root'&&name==='SSM'?undefined:design.COUNTS[name],remote:MOCK_ORIGIN[name]===null?null:{url:'https://github.com/'+MOCK_ORIGIN[name],slug:MOCK_ORIGIN[name]!}}))];}

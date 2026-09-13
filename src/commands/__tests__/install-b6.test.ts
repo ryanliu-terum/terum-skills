@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, access, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { run } from '../install.js';
@@ -28,7 +28,10 @@ it('asks even when Global is the only interactive destination; headless defaults
 it.each(['global', 'project'])('keeps a collision in %s old-skills, copies whole version, and never quarantines', async mode => {
   const f = await fixture(), root = mode === 'global' ? f.home : f.seed;
   if (mode === 'project') await f.store.update(c => { c.projects = [{ root, label: 'project' }]; });
-  const target = join(root, '.claude/skills/sample'), backup = join(root, '.claude/old-skills/sample');
+  // `resolveDestination`/`installOne` canonicalize a project destination via `projectPath` (realpath),
+  // so the message they print is built from the realpath'd root — canonicalize the expectation too
+  // (macOS: os.tmpdir() is a /private/var symlink, so the raw fixture path never matches otherwise).
+  const target = join(root, '.claude/skills/sample'), backup = join(mode === 'project' ? await realpath(root) : root, '.claude/old-skills/sample');
   await mkdir(target, { recursive: true }); await writeFile(join(target, 'mine.txt'), 'my copy');
   await mkdir(join(f.clone, 'skills/sample/v1/evals/cases'), { recursive: true });
   await writeFile(join(f.clone, 'skills/sample/v1/evals/cases/case.yaml'), 'case bytes');
@@ -59,6 +62,24 @@ it('seeds by each receipt’s own digest verbatim and announces a pre-migration 
   expect(await readFile(join(f.store.root, 'evals/local', digest, '20260101T000000Z/receipt.json'), 'utf8')).toBe(seeded);
   expect(JSON.parse(seeded).provenance.runner_handle).toBe('alice');
   expect(io.lines).toContain('Skipped 20260102T000000Z: no content digest (pre-migration receipt).');
+});
+it('an unparseable receipt is skipped, not fatal, and the rest of the seed still lands', async () => {
+  const f = await fixture(), digest = 'a'.repeat(64);
+  await pendingReceipt(f.clone, { skillName: 'sample', id: f.id });
+  const path = join(f.clone, 'evals', f.id, 'v1/20260101T000000Z.json');
+  const seeded = JSON.stringify({ ...JSON.parse(await readFile(path, 'utf8')), content_digest: `sha256:${digest}` }, null, 3);
+  await writeFile(path, seeded);
+  // One receipt a newer client wrote (schema 3, unknown here) and one that is not JSON at all: both
+  // skip paths, neither fatal — the skill is already on disk by the time this loop runs.
+  await writeFile(join(f.clone, 'evals', f.id, 'v1/20260103T000000Z.json'), '{"schema_version": 3}');
+  await writeFile(join(f.clone, 'evals', f.id, 'v1/20260104T000000Z.json'), 'not json');
+  const io = new ScriptedPrompter(); expect(await run(f.args, io)).toMatchObject({ ok: true });
+  expect(await readFile(join(f.store.root, 'evals/local', digest, '20260101T000000Z/receipt.json'), 'utf8')).toBe(seeded);
+  expect(io.lines).toContain('Skipped 20260103T000000Z: invalid receipt.');
+  expect(io.lines).toContain('Skipped 20260104T000000Z: invalid receipt.');
+  // The steps after the seed loop still ran: the people file records the install and the pending row is drained.
+  expect((await f.store.read()).pending).toEqual([]);
+  expect(JSON.parse(await readFile(join(f.clone, 'people/seed.json'), 'utf8')).installed).toEqual([expect.objectContaining({ id: f.id, version: 'v1' })]);
 });
 it.each(['install', 'uninstall'] as const)('%s replaces duplicate pending rows with one new attempt, preserving unrelated work', async op => {
   const f = await fixture();

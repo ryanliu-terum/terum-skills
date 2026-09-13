@@ -39,9 +39,12 @@ it('keeps errors without value when the failing value cannot be parsed', async (
   expect(await createTauriBackend(replay('invalid', false).bridge).validate({ ref: 'a' })).toEqual({ ok: false, error: 'CLI failure.' });
 });
 
-const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = [
+// A scope-less install reads `ls --local` before spawning `install`, so its result can name the registered root the CLI's
+// own picker placed into (review r1 HIGH); the read is the fourth column, and the rows without one spawn exactly one process.
+const LS_LOCAL = ['ls', '--local'];
+const teamCases: [string, (backend: Backend) => Promise<unknown>, string[], string[][]?][] = [
   ['profile', b => b.profile({ name: 'A B', bio: '', role: 'Platform', projects: ['terum', 'second'] }).done, ['profile', '--name', 'A B', '--bio', '', '--role', 'Platform', '--project', 'terum', '--project', 'second']],
-  ['leading-dash install', b => b.install({ ref: '-x', team: 'acme' }).done, ['install', '--team', 'acme', '--', '-x']],
+  ['leading-dash install', b => b.install({ ref: '-x', team: 'acme' }).done, ['install', '--team', 'acme', '--', '-x'], [LS_LOCAL]],
   ['team create', b => b.team({ kind: 'create', name: '-x', remote: '/repo' }).done, ['team', 'create', '--remote', '/repo', '--', '-x']],
   ['team create without name', b => b.team({ kind: 'create', remote: '/repo' }).done, ['team', 'create', '--remote', '/repo']],
   ['team join', b => b.team({ kind: 'join', remote: '-x', name: 'acme' }).done, ['team', 'join', '--as', 'acme', '--', '-x']],
@@ -52,9 +55,9 @@ const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = 
   ['empty search', b => b.search({ q: '' }), ['search', '--', '']],
   ['empty invite', b => b.invite({ logins: [], team: 'acme' }).done, ['invite', '--team', 'acme']],
   ['uninstall machine', b => b.uninstallMachine({}).done, ['uninstall']],
-  ['install skill', b => b.install({ ref: 'a', yesProfile: true, team: 'acme' }).done, ['install', '--yes-profile', '--team', 'acme', '--', 'a']],
-  ['install member', b => b.install({ ref: '', kind: 'member', member: 'mira', team: 'acme' }).done, ['install', '--team', 'acme', '--', 'member', 'mira']],
-  ['install project', b => b.install({ ref: '', kind: 'project', project: 'ops', team: 'acme' }).done, ['install', '--team', 'acme', '--', 'project', 'ops']],
+  ['install skill', b => b.install({ ref: 'a', yesProfile: true, team: 'acme' }).done, ['install', '--yes-profile', '--team', 'acme', '--', 'a'], [LS_LOCAL]],
+  ['install member', b => b.install({ ref: '', kind: 'member', member: 'mira', team: 'acme' }).done, ['install', '--team', 'acme', '--', 'member', 'mira'], [LS_LOCAL]],
+  ['install project', b => b.install({ ref: '', kind: 'project', project: 'ops', team: 'acme' }).done, ['install', '--team', 'acme', '--', 'project', 'ops'], [LS_LOCAL]],
   ['uninstallSkill', b => b.uninstallSkill({ ref: 'a', team: 'acme' }).done, ['uninstall-skill', '--team', 'acme', '--', 'a']],
   ['publish', b => b.publish({ ref: 'a', team: 'acme' }).done, ['publish', '--team', 'acme', '--', 'a']],
   ['sync', b => b.sync({ team: 'acme' }).done, ['sync', '--team', 'acme']],
@@ -64,10 +67,10 @@ const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = 
   ['validate', b => b.validate({ ref: 'a', cwd: '/checkout', team: 'acme' }), ['validate', '--cwd', '/checkout', '--team', 'acme', '--', 'a']],
   ['team remove', b => b.team({ kind: 'remove', handle: 'mira', team: 'acme' }).done, ['team', 'remove', '--team', 'acme', '--', 'mira']],
 ];
-it.each(teamCases)('orders %s as verb, flags, separator, positionals', async (_name, call, argv) => {
+it.each(teamCases)('orders %s as verb, flags, separator, positionals', async (_name, call, argv, reads = []) => {
   const f = replay(undefined, false);
   await call(createTauriBackend(f.bridge));
-  expect(f.spawns.map(s => s.args)).toEqual([argv]);
+  expect(f.spawns.map(s => s.args)).toEqual([...reads, argv]);
 });
 
 it('passes the stored eval defaults as flags and omits the unset or sentinel ones', async () => {
@@ -1131,4 +1134,18 @@ it.each(['move','rename','delete'] as const)('maps the skillFile.%s seam and inv
 it('uses the shared legacy hash fallback on skill detail labels',async()=>{
  const hash='abcdef0123456789abcdef0123456789abcdef0123',local={...placedLocal,local:placedLocal.local.map(s=>({...s,rows:s.rows.map(r=>({...r,placement:{...r.placement,version:hash}}))}))};
  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a'})).toMatchObject({ok:true,value:{version:'abcdef012345',version_full:hash}});
+});
+
+// Bulk-install-destination spec §3 / §6: `remoteSlugs` carries EVERY remote's slug through `repoSlug`, dropping the ones
+// that normalise to null, so the destination picker matches on any remote the way the CLI's `resolveDestination` does.
+it('populates project remoteSlugs from every remote and drops null-normalized entries', async () => {
+  const f = peopleReplay((frame, name) => {
+    if (name === 'ls' && frame.t === 'result') {
+      const value = frame.value as { projects: { remotes: string[] }[] };
+      value.projects[0]!.remotes = ['https://github.com/team/first.git', 'git@github.com:team/second.git', ''];
+    }
+  });
+  const catalog = await createTauriBackend(f.bridge).catalog();
+  expect(catalog.ok).toBe(true);
+  expect(catalog.value?.projects[0]).toMatchObject({ remote: 'https://github.com/team/first.git', remoteSlugs: ['team/first', 'team/second'] });
 });

@@ -30,7 +30,7 @@ import { cliRefresh, createRefreshPolicy, createWorkflowGate } from './refresh';
 import { recordedVersionLabel, parseVersionFolder } from '../../../../src/lib/versions.js';
 import { overviewCopy } from '../../lib/overview-copy';
 import { bodyExcerpt } from '../../lib/body-excerpt';
-import { samePath } from '../../lib/skill-path';
+import { isUnderRoot, samePath } from '../../lib/skill-path';
 
 /**
  * The real adapter: every long verb is one `terum-skills --frames <verb>` process (run.ts). What the CLI has
@@ -110,6 +110,15 @@ function tokenLabel(characters:number|null):{size:string;tokensK:number}{
   if(characters===null)return {size:'—',tokensK:0};
   const tokens=Math.round(characters/4);
   return {size:tokens<1000?`~${tokens} tokens`:`~${(tokens/1000).toFixed(1)}k tokens`,tokensK:tokens/1000};
+}
+/** The registered root the CLI placed a skill into, named the way the app names that root everywhere else ('Global'
+ *  or the checkout's label). `section.root` is the skills folder the CLI places under, so containment is exact;
+ *  longest root first so a checkout nested inside another never resolves to the outer one. Null when no known
+ *  root contains the path — the caller then falls back rather than inventing a destination. */
+function scopeOfPath(sections:readonly LocalSection[],path:string|undefined):string|null{
+  if(path===undefined)return null;
+  const owner=[...sections].sort((a,b)=>b.root.length-a.root.length).find(section=>isUnderRoot(path,section.root));
+  return owner===undefined?null:owner.scope==='global'?'Global':labelOf(owner);
 }
 function rootOf(section:LocalSection,home=''):Root {
   const global=section.scope==='global',repoRoot=section.repoRoot??section.root;
@@ -359,7 +368,7 @@ function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, lo
     const members = people.filter(person => person.projects.includes(project.name));
     const updated = newestUpdated(rows);
     const placement = project.skills.length > 0 ? local.local?.find(section => section.scope === 'project' && section.repoRoot && project.skills.every(id => section.rows.some(row => row.placement?.id === id && row.placement.team === team.team))) : undefined;
-    return { name: project.name, key: project.name, ico: 'folder', desc: project.description ?? '', skills: project.skills.length, members: members.length, remote: project.remotes[0] ?? '—', installed: project.skills.length > 0 && rows.length === project.skills.length && rows.every(row => onDisk(local, team.team, row.id, features).some(r => r.scope === 'project' && r.placement?.id === row.id && r.placement.team === team.team)), favorites: null, updated: updated ? relativeTime(updated.updated) : null, path: placement?.repoRoot ?? null, admin: null, evaluated: null, memberHandles: members.map(member => member.handle), memberInitials: members.map(member => member.initials), skillsIn: rows.map(row => row.name) };
+    return { name: project.name, key: project.name, ico: 'folder', desc: project.description ?? '', skills: project.skills.length, members: members.length, remote: project.remotes[0] ?? '—', remoteSlugs: project.remotes.map(repoSlug).filter((slug): slug is string => slug !== null), installed: project.skills.length > 0 && rows.length === project.skills.length && rows.every(row => onDisk(local, team.team, row.id, features).some(r => r.scope === 'project' && r.placement?.id === row.id && r.placement.team === team.team)), favorites: null, updated: updated ? relativeTime(updated.updated) : null, path: placement?.repoRoot ?? null, admin: null, evaluated: null, memberHandles: members.map(member => member.handle), memberInitials: members.map(member => member.initials), skillsIn: rows.map(row => row.name) };
   });
   const verdictCounts = { PASS: 0, NEUTRAL: 0, FAIL: 0, 'Not evaluated': 0 };
   for (const skill of skills) verdictCounts[skill.summary?.verdict ?? 'Not evaluated']++;
@@ -800,17 +809,21 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return run(['login', ...pairs.flatMap(pair => ['--set', pair])], cliLogin, (value): IdentityWrite => ({ updated: value.updated, notice: value.notice ?? null }), ['config']);
     },
     // install writes config pending/approvals/placements, places the folder, and safeWrites people/<handle>.json.
-    install: (args: InstallArgs) => prepareRun(async signal => {
-      let into: string | undefined = args.scope === undefined ? undefined : 'global';
-      if (args.scope !== undefined && args.scope !== 'Global') {
-        const local = await read(run(['ls', '--local'], cliLs, value => value, []), {signal});
-        if (!local.ok) return {ok:false,error:local.error};
-        const matches = local.value.local?.filter(section => section.scope === 'project' && section.rootState !== 'absent' && section.label === args.scope) ?? [];
-        if (matches.length !== 1 || !matches[0]?.repoRoot) return {ok:false,error:`Unknown install destination ${args.scope}.`};
-        into = matches[0].repoRoot;
-      }
-      return {ok:true,value:into};
-    }, into => run(['install', ...(args.yesProfile ? ['--yes-profile'] : []), ...(args.team ? ['--team', args.team] : []), ...(into === undefined ? [] : ['--into', into]), '--', ...(args.kind === 'member' && args.member ? ['member', args.member] : args.kind === 'project' && args.project ? ['project', args.project] : [args.ref])], cliInstalled, (installed): InstalledResult[] => installed.map((item) => ({ id: item.id, name: item.id, scope: args.scope ?? 'Global', path: item.path ?? null, version: item.version ?? null, profiled: item.profiled ?? false })), ['config', 'placed', 'clone'])), // desktop-bug-skill-detail S14: CLI does not return scope yet.
+    install: (args: InstallArgs) => prepareRun(async (signal): Promise<Result<{ into: string | undefined; sections: readonly LocalSection[] }>> => {
+      // 'Global' needs no lookup: `--into global` is both the destination and the truthful report. A named project
+      // resolves its repoRoot for `--into`. A scope-less call omits `--into` so the CLI's own picker asks the user;
+      // the same `ls --local` sections are then kept to read back which registered root the CLI actually placed each
+      // skill in (scopeOfPath), because reporting the caller's absent scope as 'Global' would be a guess (review r1 HIGH).
+      if (args.scope === 'Global') return {ok:true,value:{into:'global',sections:[]}};
+      const local = await read(run(['ls', '--local'], cliLs, value => value, []), {signal});
+      // A scope-less install could always run without this read; a failed read only degrades the report, never the install.
+      if (!local.ok) return args.scope === undefined ? {ok:true,value:{into:undefined,sections:[]}} : {ok:false,error:local.error};
+      const sections = local.value.local ?? [];
+      if (args.scope === undefined) return {ok:true,value:{into:undefined,sections}};
+      const matches = sections.filter(section => section.scope === 'project' && section.rootState !== 'absent' && section.label === args.scope);
+      if (matches.length !== 1 || !matches[0]?.repoRoot) return {ok:false,error:`Unknown install destination ${args.scope}.`};
+      return {ok:true,value:{into:matches[0].repoRoot,sections}};
+    }, ({into, sections}) => run(['install', ...(args.yesProfile ? ['--yes-profile'] : []), ...(args.team ? ['--team', args.team] : []), ...(into === undefined ? [] : ['--into', into]), '--', ...(args.kind === 'member' && args.member ? ['member', args.member] : args.kind === 'project' && args.project ? ['project', args.project] : [args.ref])], cliInstalled, (installed): InstalledResult[] => installed.map((item) => ({ id: item.id, name: item.id, scope: args.scope ?? scopeOfPath(sections, item.path) ?? 'Global', path: item.path ?? null, version: item.version ?? null, profiled: item.profiled ?? false })), ['config', 'placed', 'clone'])),
     // uninstall-skill drops config placements/pending, removes placed folders, and rewrites the clone's people file.
     uninstallSkill: (args: UninstallArgs) => run(['uninstall-skill', ...(args.team ? ['--team', args.team] : []), ...(args.from ? ['--from', args.from] : []), '--', ...(args.kind === 'member' && args.member ? ['member', args.member] : args.kind === 'project' && args.project ? ['project', args.project] : [args.ref])], cliUninstalled, (removed): UninstalledResult[] => removed.map((item) => ({ id: item.id, name: item.id })), ['config', 'placed', 'clone']),
     quit: () => bridge.quit(),
