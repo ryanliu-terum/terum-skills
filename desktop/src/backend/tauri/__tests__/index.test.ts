@@ -122,10 +122,11 @@ it('refuses empty validate targets and uses cwd when ref is empty', async () => 
   expect(f.spawns[0]?.args).toEqual(['validate', '--', '/checkout']);
 });
 
+// `endorsed` is neither read nor emitted: spec §4.1 (line 283) dropped `SearchHit.endorsed` (review r1 HIGH).
 it.each([true, false])('maps every search field including its real description (optional metadata=%s)', async metadata => {
-  const hit = { description: 'Real description', grants: null, grantsHash: null, updated: '—', id: 'id', name: 'a', author: 'Mira <mira@example.com>', category: 'ops', installs: 0, latest: 'Version 1', ...(metadata ? { team: 'acme', endorsed: 'project: Global' } : {}) };
+  const hit = { description: 'Real description', grants: null, grantsHash: null, updated: '—', id: 'id', name: 'a', author: 'Mira <mira@example.com>', category: 'ops', installs: 0, latest: 'Version 1', ...(metadata ? { team: 'acme' } : {}) };
   const result = await createTauriBackend(replay([hit]).bridge).search({ q: 'a' });
-  expect(result).toEqual({ ok: true, value: [{ kind: 'skill', ref: metadata ? 'acme/a' : 'a', name: 'a', description: 'Real description', team: metadata ? 'acme' : null, author: hit.author, category: 'ops', installs: 0, latest: 'Version 1', endorsed: metadata ? 'project: Global' : null }] });
+  expect(result).toEqual({ ok: true, value: [{ kind: 'skill', ref: metadata ? 'acme/a' : 'a', name: 'a', description: 'Real description', team: metadata ? 'acme' : null, author: hit.author, category: 'ops', installs: 0, latest: 'Version 1' }] });
 });
 
 it('serves status, settings, library, skill, update, roster and catalog while the other three surfaces stay typed gaps', async () => {
@@ -228,9 +229,10 @@ it.each([false,true])('serves recorded status and settings with real team data (
  const f=statusReplay(failed),backend=createTauriBackend(f.bridge);
  const status=await backend.status(),settings=await backend.settings();
  expect(status.ok).toBe(!failed);expect(settings.ok).toBe(!failed);
- expect(status.value).toMatchObject({machine:{os:'macos',hostname:'',gh_login:''},me:{handle:'seed',name:'Seed',email:'seed@example.com'},counts:{},roots:expect.arrayContaining([expect.objectContaining({id:'global',count:undefined})]),teams:[{name:'acme',key:'acme',handle:'seed',remote:'https://github.com/acme/team',members:3,skills:3,policy:{license:'UNLICENSED'},categories:['ops','engineering','debugging'],pending:[],last_sync:null,stamp:null}]});
- expect(Object.keys(status.value?.counts??{})).toEqual([]);
- expect(status.value?.teams[0]?.clone).toContain('/fx/home/.terum/skills/teams/acme');
+ // The re-recorded scan carries the CLI's own `counts` limb (one skill folder), which statusModel turns into the sidebar count.
+ expect(status.value).toMatchObject({machine:{os:'macos',hostname:'',gh_login:''},me:{handle:'seed',name:'Seed',email:'seed@example.com'},counts:{Global:'1'},roots:expect.arrayContaining([expect.objectContaining({id:'global',count:'1'})]),teams:[{name:'acme',key:'acme',handle:'seed',remote:'https://github.com/acme/team',members:3,skills:3,policy:{license:'UNLICENSED'},categories:['ops','engineering','debugging'],pending:[],last_sync:null,stamp:null}]});
+ expect(Object.keys(status.value?.counts??{})).toEqual(['Global']);
+ expect(status.value?.teams[0]?.clone).toMatch(/\/m7-S7g\/home\/\.terum\/skills\/teams\/acme$/);
  expect(status.value?.teams[0]?.joinBlock?.join('\n')).toContain('npx -y terum-skills@latest setup acme/team');
  expect(settings.value).toMatchObject({ME:{handle:'seed',name:'Seed'},TEAM_POLICY:{license:'UNLICENSED',categories:['ops','engineering','debugging']},PLACEMENTS_N:1,PINNED_N:0,APPROVALS:[],QUARANTINE:null,HOOK:null,APP_VERSION:releaseVersion,AGENT_CLI:'—',CLI_LATEST:null});
  expect(settings.value?.PLACEMENTS[0]).toEqual([expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',null,'2026-09-01T00:00:00Z','up to date']);
@@ -238,7 +240,10 @@ it.each([false,true])('serves recorded status and settings with real team data (
  expect(status.value?.tools.git).toBe(true);
  if(failed){expect(status).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});expect(settings).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});}
  // Reads are shared across status and settings (read cache); a failed status is not kept, so it is retried once. A single-team settings read adds `ls --team` whenever status yielded a value, partial or not.
- expect(f.spawns.map(s=>s.args)).toEqual(failed?[['status'],['ls','--local'],['status'],['ls','--team','acme']]:[['status'],['ls','--local'],['ls','--team','acme']]);expect(f.writes).toEqual([]);
+ // The re-recorded hello advertises `refresh` and `serve`: the first hello is followed by one background `sync`, and every read after it is a request over one `serve` child (session.ts), not a spawn.
+ expect(f.spawns.map(s=>s.args)).toEqual([['status'],['ls','--local'],['sync'],['serve']]);
+ expect(f.requests.map(r=>r.argv)).toEqual(failed?[['status'],['ls','--team','acme']]:[['ls','--team','acme']]);
+ expect(f.writes.filter(line=>(JSON.parse(line) as {t:string}).t!=='request')).toEqual([]);
 });
 it.each([null,'old','current'])('only displays approvals joined to current grants (hash=%s)',async hash=>{
  const f=statusReplay(false,(frame,verb)=>{
@@ -390,13 +395,13 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   const roster = await backend.roster();
   expect(roster.ok).toBe(true);
   expect(roster.value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
-  // The 0.1.6 recording carries no per-member `admin`, so the permission status is 'unknown'; its
-  // hello frame likewise predates the roles flag flipping true, so the replayed feature map says false.
-  expect(roster.value?.members[0]).toMatchObject({ name: 'Mira Chen', role: 'Platform', projects: ['terum'], joined: null, lastSeen: '—', status: 'unknown' });
+  // The re-recorded status (gh logged out) carries no per-member `admin`, so the permission status is
+  // 'unknown'; it does carry the fixture's pinned join date, and its hello flips `roles` true.
+  expect(roster.value?.members[0]).toMatchObject({ name: 'Mira Chen', role: 'Platform', projects: ['terum'], joined: '2026-09-08', lastSeen: '—', status: 'unknown' });
   // The CLI reports neither invitations nor join dates: both are null, never an invented empty list or dash.
   expect(roster.value?.invited).toBeNull();
 
-  expect(await backend.features()).toMatchObject({ memberRole: true, roles: false, follow: false });
+  expect(await backend.features()).toMatchObject({ memberRole: true, roles: true, follow: false });
   const catalog = await backend.catalog();
   if (!catalog.ok) throw new Error(catalog.error);
   expect(catalog.value.topRated).toEqual(['deploy-check', 'tdd', 'diagnose']);
@@ -412,16 +417,20 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   // §12 deleted the auto-install `declined` suppressed, and §8.4's limb does not carry it.
   expect(catalog.value.people.find(person => person.handle === 'seed')?.declined).toEqual([]);
   expect(catalog.value.categories).toEqual([['ops', 'tag', 1], ['debugging', 'tag', 1], ['engineering', 'tag', 1]]);
-  expect(catalog.value.projects[0]).toMatchObject({ name: 'terum', skillsIn: ['tdd'], memberHandles: ['mira'], evaluated: null });
-  expect(catalog.value.bulkInstall).toEqual({ terum: { total: 1, asking: 0 } });
+  // The 0.14.0 `ls` lists the Global project too (first), so terum is found by name and bulkInstall carries both.
+  expect(catalog.value.projects.map(project => project.name)).toEqual(['Global', 'terum']);
+  expect(catalog.value.projects.find(project => project.name === 'terum')).toMatchObject({ name: 'terum', skillsIn: ['tdd'], memberHandles: ['mira'], evaluated: null });
+  expect(catalog.value.bulkInstall).toEqual({ Global: { total: 1, asking: 0 }, terum: { total: 1, asking: 0 } });
   expect(catalog.value.verdictCounts).toEqual({ PASS: 0, NEUTRAL: 0, FAIL: 0, 'Not evaluated': 3 });
   expect(JSON.stringify(catalog)).not.toMatch(/Teddy|SSM|MRF|founder/);
   // §8.4: three processes, regardless of team size. The per-member fan-out is deleted, so a roster of
   // fifty costs what a roster of three does.
   expect(f.spawns.some(spawn => spawn.args[1] === 'member')).toBe(false);
   // The roster() call earlier in this test spends its own status+ls; the CATALOG read adds one more
-  // of each, and nothing per member.
-  expect(f.spawns.map(spawn => spawn.args[0])).toEqual(['status', 'ls', 'status', 'ls']);
+  // of each, and nothing per member. Only the first read is a process: its hello advertises `serve`,
+  // so the rest are requests over one session child (and `refresh` adds one background `sync`).
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['status', '--permissions'], ['sync'], ['serve']]);
+  expect(f.requests.map(request => request.argv)).toEqual([['ls', '--team', 'acme'], ['status'], ['ls', '--local']]);
 });
 it('maps per-member admin to the permission status: true → admin, false → member, absent → unknown', async () => {
   const backend = createTauriBackend(peopleReplay((frame, name) => {
@@ -652,8 +661,9 @@ it.each(['identity','old-cli','missing-id','placed','placement'])('counts global
  const status=await createTauriBackend(f.bridge).status();
  expect(status.ok).toBe(true);
  expect(status.value?.ledger?.placements).toEqual([]);
- expect(status.value?.counts).toEqual({});
- expect(status.value?.roots).toMatchObject([{id:'global',kind:'global',count:undefined}]);
+ // The count is the CLI's own `counts.skillFolders` for the scanned root, whatever the ledger says.
+ expect(status.value?.counts).toEqual({Global:'1'});
+ expect(status.value?.roots).toMatchObject([{id:'global',kind:'global',count:'1'}]);
 });
 it.each(['failed','failed-with-value','unreadable'])('omits Global when the local scan is %s',async mode=>{
  const f=installedReplay('on-disk-only','none',frame=>{
@@ -671,8 +681,9 @@ it.each(['failed','failed-with-value','unreadable'])('omits Global when the loca
 it('does not derive per-project sidebar counts from placements or project scan rows',async()=>{
  const status=await createTauriBackend(installedReplay('project').bridge).status();
  expect(status.ok).toBe(true);
- expect(status.value?.counts).toEqual({});
- expect(status.value?.roots).toMatchObject([{id:'global',kind:'global',count:undefined},{id:'/work/project',kind:'checkout',label:'project',count:undefined}]);
+ // Every count is the CLI's recorded `counts` for that root — Global holds nothing, the checkout one folder; nothing is inferred from placements.
+ expect(status.value?.counts).toEqual({Global:'0'});
+ expect(status.value?.roots).toMatchObject([{id:'global',kind:'global',count:'0'},{id:'/work/project',kind:'checkout',label:'project',count:'1'}]);
 });
 it.each(['on-disk-only','project'])('includes only scanned roots and this library’s occurrence totals in the %s subtitle',async mode=>{
  const f=installedReplay(mode,'none',frame=>{
@@ -701,7 +712,7 @@ it.each([[[]],[['one','two']]])('refuses people inventory before ls for teams %j
   }
  });
  expect(await createTauriBackend(f.bridge).roster()).toEqual(teams.length?{ok:false,error:'This machine is configured for teams one, two; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.',reason:'ambiguous-team'}:{ok:false,error:'No team is configured on this machine.',reason:'no-team'});
- expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status','--permissions']]);
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['status','--permissions'],['sync']]);
 });
 it('syncs with the bare CLI verb and leaves by the supplied team key',async()=>{
  const f=replay(undefined,false),backend=createTauriBackend(f.bridge);
@@ -958,10 +969,13 @@ describe('§8.4 catalog reads',()=>{
   expect(result.ok).toBe(true);
   expect(result.value?.people.map(p=>p.handle)).toEqual(f.handles);
   expect(f.spawns.filter(s=>s.args[1]==='member')).toEqual([]);
-  expect(f.spawns.map(s=>s.args)).toEqual([['status'],['ls','--team','acme'],['ls','--local']]);
+  // One process, then requests over the `serve` child the first hello advertised (plus its background `sync`).
+  // B4's no-fan-out gate survives the serve routing: exactly the two `ls` reads, team then local, no member read.
+  expect(f.spawns.map(s=>s.args[0])).toEqual(['status','sync','serve']);
+  expect(f.requests.map(r=>r.argv)).toEqual([['ls','--team','acme'],['ls','--local']]);
  });
  it('only roster asks status for permissions',async()=>{
-  const f=catalogBurst(1);const backend=createTauriBackend(f.bridge);await backend.roster();await backend.catalog();expect(f.spawns.filter(s=>s.args[0]==='status').map(s=>s.args)).toEqual([['status','--permissions'],['status']]);
+  const f=catalogBurst(1);const backend=createTauriBackend(f.bridge);await backend.roster();await backend.catalog();expect(f.spawns.filter(s=>s.args[0]==='status').map(s=>s.args)).toEqual([['status','--permissions']]);expect(f.requests.map(r=>r.argv).filter(a=>a[0]==='status')).toEqual([['status']]);
  });
 });
 

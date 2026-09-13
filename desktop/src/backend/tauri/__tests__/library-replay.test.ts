@@ -10,10 +10,9 @@ const path=addResult.value.path;
 const home=path.slice(0,path.lastIndexOf('/repo/app'))+'/home';
 function replay(name='ls-local') {
  const f=fakeBridge((args,emit)=>{
-  // The re-recorded hello advertises `serve`, so the adapter probes for a shared read session. The
-  // transport itself is covered by session.test.ts; here the probe answers without the feature so every
-  // read stays a per-verb spawn and the recordings below are what the mirrors actually parse.
-  if(args[0]==='serve') {emit({kind:'stdout',line:JSON.stringify({t:'hello',protocol:1,version:'0.14.0',verbs:[],features:{}})});return;}
+  // The re-recorded hello advertises `serve` and `refresh`: the fake shell plays the read session itself
+  // (fake-bridge.ts), and the background refresh the first hello triggers (index.ts onHello) is answered
+  // here as a fetch that moved nothing, so the read cache keeps what these tests then assert on.
   if(args[0]==='sync') {emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{changed:false,notices:[],teams:[]}})});return;}
   if(args[0]==='status') {emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'status',ok:true,exitCode:0,value:{version:'0.1.7',teams:[],identity:null,ledger:{placements:[],approvals:[],},tools:{git:true,gh:true}}})});return;}
   const file=args[0]==='project'?'project-'+args[1]:name;

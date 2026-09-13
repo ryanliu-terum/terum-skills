@@ -8,7 +8,7 @@ import { Providers } from '../../../app/providers';
 import { useUiStore } from '../../../app/store';
 import { overviewCopy } from '../../../lib/overview-copy';
 import { createTauriBackend } from '../index';
-import { chromeLibraryReplay, underHome } from './chrome-library-fixture';
+import { chromeLibraryReplay, seedCheckout, underHome } from './chrome-library-fixture';
 import type { ReplayOptions } from './chrome-library-fixture';
 
 afterEach(()=>{cleanup();location.hash='';localStorage.clear();vi.restoreAllMocks();});
@@ -76,7 +76,9 @@ function uncCheckout(){
  const SKILLS=UNC+String.raw`\.claude\skills`;
  const row=(name:string)=>({name,path:SKILLS+'\\'+name,state:'untracked locally',tracked:false,placement:null,health:'untracked'});
  const fake=chromeLibraryReplay({local:value=>{
-  const project=value.local[1]!;
+  const project=seedCheckout(value,'scanned');
+  // A checkout the test shapes itself: no recorded label, so the title is labelOf's own fallback — the root's last segment.
+  delete project.label;
   project.root=SKILLS;project.repoRoot=UNC;
   project.rows=[row('alpha'),row('beta')];
   project.notOffered=[{name:'gamma',path:SKILLS+'\\gamma',reason:'name-mismatch',detail:'SKILL.md name not-gamma does not equal folder gamma'}];

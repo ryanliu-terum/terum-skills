@@ -73,19 +73,22 @@ describe('search (§6)', () => {
     expect(backwards.lines.join('\n')).toContain('may be stale');
   });
 
-  it('reports install count, endorsement, and the latest version, one hit per line in ls format', async () => {
+  // §4.1 (spec line 283) dropped `SearchHit.endorsed` (review r1 HIGH): the project listing below is real team.json content, and the
+  // hit must neither carry it as a field nor print it — the search line runs from the version straight to the date.
+  it('reports install count and the latest version, one hit per line in ls format, and no endorsement', async () => {
     const id = '11111111-1111-4111-8111-111111111111';
     const { fixture, store, clone } = await searchFixture('team', [{ name: 'sample', description: 'needle', category: 'testing', author: 'Seed <seed@example.com>', id }]);
     await pushFromSeed(fixture.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [{ id, version: null, scope: { kind: 'global' }, since: '2026-09-04' }] }), null, 2)}\n`);
-    // §4.1 deleted `team.json.global`; an endorsement is a project listing the skill (D1).
+    // §4.1 deleted `team.json.global`; an endorsement is a project listing the skill (D1) — listed here so its absence from the hit is a check, not a vacancy.
     const teamJson = JSON.parse(await git(['show', 'main:team.json'], fixture.bare)); teamJson.projects = { product: { remotes: [], skills: [id] } };
     await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify(teamJson, null, 2)}\n`);
     await git(['fetch', '-q', 'origin'], clone); await git(['reset', '-q', '--hard', 'origin/main'], clone);
     await freshStamp(store, 'team');
     const io = new ScriptedPrompter();
     const result = await run({ term: 'needle', config: store }, io);
-    expect(result).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'sample', installs: 1, endorsed: 'project: product', latest: 'v1' })] });
-    expect(io.lines).toEqual([`  sample — Seed <seed@example.com>; testing; 1 installs; Version 1; project: product; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/sample/v1'], clone)).trim()}`]);
+    expect(result).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'sample', installs: 1, latest: 'v1' })] });
+    expect(result.ok ? result.value[0] : undefined).not.toHaveProperty('endorsed');
+    expect(io.lines).toEqual([`  sample — Seed <seed@example.com>; testing; 1 installs; Version 1; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/sample/v1'], clone)).trim()}`]);
   });
 
   it('matches a skill name even when the term is absent from its description and category', async () => {
@@ -110,7 +113,7 @@ describe('search (§6)', () => {
     await freshStamp(store, 'team');
     const io = new ScriptedPrompter();
     expect(await run({ term: 'needle', config: store }, io)).toMatchObject({ ok: true, value: [expect.objectContaining({ name: 'ghost', latest: 'v1', updated: '—' }), expect.objectContaining({ name: 'healthy', latest: 'v1' })] });
-    expect(io.lines).toEqual(['  ghost — Seed <seed@example.com>; testing; 0 installs; Version 1; —; —', `  healthy — Seed <seed@example.com>; testing; 0 installs; Version 1; —; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/healthy/v1'], clone)).trim()}`]);
+    expect(io.lines).toEqual(['  ghost — Seed <seed@example.com>; testing; 0 installs; Version 1; —', `  healthy — Seed <seed@example.com>; testing; 0 installs; Version 1; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/healthy/v1'], clone)).trim()}`]);
   });
 
   it('a name holding no version folder is reported and never becomes a hit', async () => {

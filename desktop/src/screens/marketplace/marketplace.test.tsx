@@ -11,6 +11,18 @@ function names(prefix: string) { return screen.getAllByTestId(new RegExp('^' + p
 beforeEach(() => { localStorage.clear(); useUiStore.setState({ railOpen: true, overviewHidden: false, theme: 'dark' }); });
 afterEach(() => { cleanup(); location.hash = ''; vi.restoreAllMocks(); });
 it('renders all four home sections and the first three top-rated skills in DTO order', async () => { open('#/marketplace'); await screen.findByRole('region', { name: 'Top rated' }); for (const title of ['Top rated', 'Teams / Projects', 'People', 'Browse by category']) expect(screen.getByRole('region', { name: title })).toBeInTheDocument(); expect(names('skill-card-')).toEqual(design.DERIVED.topRated.slice(0, 3)); });
+// Review r1 HIGH: the List chips prepended a literal 'Global' to the catalog's project names. Under layout 3 Global is an ordinary
+// team.json project and the real adapter serves it as one (mock-vs-real's re-recorded ls.jsonl lists {name:'Global'} beside terum),
+// so any account with one globally-placed skill drew two identical 'Global' chips under one React key.
+it('renders one Global chip when the catalog itself carries a Global project', async () => {
+  const backend = pickBackend(); const before = await backend.catalog(); if (!before.ok) throw new Error(before.error);
+  const terum = before.value.projects.find(p => p.key === 'terum')!;
+  vi.spyOn(backend, 'catalog').mockResolvedValue({ ...before, value: { ...before.value, projects: [{ ...terum, key: 'Global', name: 'Global' }, ...before.value.projects] } });
+  open('#/marketplace?filters=open');
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  expect(within(filters).getAllByRole('button', { name: 'Global' })).toHaveLength(1);
+  expect(within(filters).getAllByRole('button', { name: 'Terum' })).toHaveLength(1);
+});
 it('renders filter verdict counts and the supplied matching count', async () => { open('#/marketplace?filters=open'); const filters = await screen.findByRole('region', { name: 'Marketplace filters' }); for (const [verdict, count] of Object.entries(design.DERIVED.verdictCounts)) expect(within(filters).getByTestId('verdict-count-' + verdict)).toHaveTextContent(verdict + count); expect(within(filters).getByRole('button', { name: `Show ${design.DERIVED.filterCount} skills` })).toBeInTheDocument(); expect(within(filters).getByRole('checkbox', { name: /PASS/ })).toBeChecked(); });
 it('renders the no-results query and both active filters', async () => { open('#/marketplace?q=deploy%20prod&active=2'); expect(await screen.findByText('No skills match “deploy prod” with 2 filters on')).toBeInTheDocument(); expect(screen.getByRole('textbox', { name: 'Search skills, people and projects' })).toHaveValue('deploy prod'); });
 it('keeps a single active filter singular in the no-results title', async () => { open('#/marketplace?q=deploy%20prod&active=1'); expect(await screen.findByText('No skills match “deploy prod” with 1 filter on')).toBeInTheDocument(); });

@@ -34,6 +34,17 @@ import { parseVersionFolder, versionLabel } from '../../lib/versions.js';
  *      recording of ANY provenance, `placement.version`, `state` and the printed row line are three
  *      renderings of one value, so they agree in both directions (D70: the layout-3 re-key wrote
  *      `v1` / `(Version 1)` over the fixture's tree hash, a value the CLI can never emit for it).
+ *
+ * **A frame file that is not a complete recording is a FAILURE, not a skip** (hybrid review r1 of
+ * frames-rerecord, CRITICAL — the oracle half). Every check above registers itself only for a file
+ * whose `result` frame it can find, so a driver that blanked a committed frame (the old `rec()`
+ * truncated `frames/<x>.jsonl` before the CLI ran and `|| true` hid the failure) left every
+ * assertion silently unregistered and this suite green — 88 "oracle-skipped" on the run that found
+ * it. The block right below therefore fails a `*.jsonl` that holds no row, a line that is not JSON,
+ * or a file that does not END in a `{"t":"result",…}` frame: the same acceptance rule
+ * `.planning/codex-runs/record-lib.sh` applies before it moves a recording into place, so the gate
+ * can catch what the recorder was supposed to refuse. No allow-list: every committed recording ends
+ * in its result frame, and a file that would need one is a file to re-record.
  */
 const ROOT = '.planning/codex-runs';
 type Frame = { t: string; verb?: string; ok?: boolean; line?: string; value?: unknown };
@@ -60,6 +71,20 @@ const read = (path: string): Frame[] =>
   });
 
 const files = frameFiles();
+
+describe('every frame file is a complete recording', () => {
+  for (const { id, path } of files) {
+    it(`${id}: at least one row, every line JSON, and the last line is the result frame`, () => {
+      const lines = readFileSync(path, 'utf8').split('\n').filter((line) => line.trim() !== '');
+      expect(lines.length, `${id} is empty`).toBeGreaterThan(0);
+      const rows = lines.map((line, index) => {
+        try { return JSON.parse(line) as Frame; } catch { throw new Error(`${id} line ${index + 1} is not JSON: ${line.slice(0, 80)}`); }
+      });
+      expect(rows.some((row) => row.t === 'result'), `${id} has no result frame`).toBe(true);
+      expect(rows.at(-1)?.t, `${id} does not end in its result frame`).toBe('result');
+    });
+  }
+});
 
 describe('capture frames stay consistent with the CLI that recorded them', () => {
   it('has frames to check at all — an empty walk would make every assertion below vacuous', () => {

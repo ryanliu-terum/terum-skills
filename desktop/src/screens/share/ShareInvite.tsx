@@ -14,7 +14,9 @@ export function ShareInvite({close,data,error,retry,onDone}:{close:()=>void;data
 function InviteForm({close,team,copy,catalog,onDone}:InviteData&{close:()=>void;onDone:(line:string)=>void}){
   const backend=useBackend(),action=useWorkflow(),features=useFeatures();
   const projects=catalog?.projects??[];
-  const [logins,setLogins]=useState(copy.INVITEE??''),[scope,setScope]=useState('project'),[project,setProject]=useState(projects[0]?.name??''),[help,setHelp]=useState(false),[invalid,setInvalid]=useState<string|null>(null);
+  // The Project radio's default is the first project that is NOT Global: "Whole team" already is the Global scope (submit maps it to
+  // 'Global'), and a layout-3 catalog lists Global as an ordinary project — first — so projects[0] made the two radios one choice (review r1 HIGH).
+  const [logins,setLogins]=useState(copy.INVITEE??''),[scope,setScope]=useState('project'),[project,setProject]=useState((projects.find(p=>p.name!=='Global')??projects[0])?.name??''),[help,setHelp]=useState(false),[invalid,setInvalid]=useState<string|null>(null);
   const [outcomes,setOutcomes]=useState<string[]>([]);
   const selected=projects.find(p=>p.name===project);
   async function submit(){

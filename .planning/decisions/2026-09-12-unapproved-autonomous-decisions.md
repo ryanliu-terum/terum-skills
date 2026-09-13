@@ -580,6 +580,40 @@ ruling; the calls the rulings left open, taken as follows.
 **Owed, not fixed here:** `setup.ts:333-335` + `eval.ts:490 versionProblem` dead code; the
 `preserveUnchanged` observation above.
 
+## A18 — B4's confirmation pass dispositions, and what the frame re-recording still owes
+
+**B4 confirmation pass (`wf_b9a72b49-3ec`, base `3460e0d`, 2026-09-13 03:15 PDT): 0 critical/high.**
+- *Medium, deferred:* in the demo backend the non-ME person pages' `buckets`/`onDisk` are computed once
+  from the fixture and never re-derived after a session install or removal (D65's sibling for people;
+  it reaches `personStatus()` and so the person page's Install/Remove primary). Not applied — the
+  harden loop never applies mediums, and the D53 bar is met. **Gate:** D64's tripwire (the first locked
+  board or desktop test that needs live per-person install state); fix shape = recompute both after
+  `withInstall`/`removalState` in the `catalog` handler, as D65 did for the stale-eval overlay.
+- *Contested 1-2, declined by ruling:* "the mock's `installable`/buckets model authorship, not
+  `installed[]`/`profile[]`" restates D64's option B, which Ryan gated behind the same tripwire.
+
+**Frame re-recording (D70 delegate, D77; stage 1 `bba1eae`, stage 2 this commit).** Fifteen drivers
+re-recorded 91 frames from layout-3 fixtures with the CLI at `f2089dd`; every difference from the
+derived frames is the CLI's real output. Still owed, none gating B5:
+1. **m7-S7q** — the thirteenth derived set; stage 1 gave it no fixture (an orchestration omission —
+   it has neither a `fixture.sh` nor a consumer beyond `features.test.ts`'s hello read). Labelled
+   honestly as still derived. Fixture shape = m7-S7ad's.
+2. **first-run-in-app `setup-create-fork.jsonl` / `setup-resume.jsonl`** — the creator path needs a
+   logged-in gh under the fixture HOME; the driver now records them only when the fresh recording
+   prints "GitHub: gh is logged in." and otherwise leaves the 0.1.7 recordings. Re-record on a
+   machine where `gh auth status` succeeds under a foreign HOME (e.g. `GH_TOKEN` exported).
+3. **Deleted-verb frames kept:** `m7-S7b/decline.jsonl` (`decline` is gone, §12) and
+   `m7-S7d/decline.jsonl` (`connect` is gone); `replay.test.ts` still pins the latter's error text.
+   A layout-3 substitute is a re-pin, not a recording — B5/B6's call.
+4. **Reproducibility hygiene:** 31 frames and S7c's `config-{before,after}.json` bake in the recording
+   session's scratch root, and `mock-vs-real` `update.jsonl` bakes in this checkout's `dist` path — as
+   the old recordings did. A driver that normalises the fixture root to a fixed path would make
+   re-runs byte-identical across machines; readers already rewrite the root, so no pin depends on it.
+5. **Adapter observation from the re-pins:** with a 0.14.0 hello (`refresh:true`) the adapter spawns
+   one background `sync` after the FIRST hello without consulting `workflowGate.busy()`
+   (`desktop/src/backend/tauri/index.ts` `onHello`), so a fetch can run concurrently with a write when
+   the mutation is the session's first CLI process. The pins document current behaviour; B5/B6 look.
+
 ## A19 — The B3 fix commit's own confirmation pass: two highs fixed, one adjacent medium taken, three coverage mediums deferred
 
 **Pass `wf_e3862d60-9ba` (base `c960998`, 2026-09-13 03:30 PDT): 0 critical, 2 high, 4 medium, all 3-0.**
@@ -604,3 +638,27 @@ ruling; the calls the rulings left open, taken as follows.
 
 Budget note: this pass cost 5.4M subagent tokens and took the 5-hour session budget from 60% to 86%;
 the re-review of the two-high fix (`--base=f2089dd`) waits for the 07:00 reset before #183 merges.
+
+## A24 — The frames PR's review: the recorder could blank its own fixtures, and two things honest frames exposed
+
+**Review `wf_7eaffc90-e93` (base `origin/main`, 254 agents): 1 critical, 2 high, 7 medium, 1 low.**
+- *Critical, fixed:* every `record.sh` opened the committed golden frame for writing BEFORE the CLI
+  ran and swallowed failure with `|| true`, so a stale `dist/` or a crash silently committed an empty
+  fixture — and the oracle `continue`d past empty files instead of failing. Now one shared
+  `.planning/codex-runs/record-lib.sh`: record to a pending file, accept only when the exit status,
+  the JSON, and a final `{"t":"result"}` frame agree (a recorded failure must say `ALLOW_FAIL=1` on
+  its own call — seven such frames), then move into place; the CLI defaults to the containing
+  checkout's build. Proven with a missing CLI and five fake CLIs (every frame byte-identical after)
+  and with the real CLI (all 97 driver-backed frames reproduced exactly). `capture-frames.test.ts`
+  fails an empty, non-JSON, or result-less frame file.
+- *High, fixed:* the desktop's hardcoded `Global` filter chip and the invite dialog's default project
+  collided with the real `Global` project a layout-3 catalog carries (duplicate key; wrong default).
+  The chip literal is added only when the catalog has no Global; the invite default skips it.
+  `MarketplaceScreen`'s "already has a project named Global" refusal is CORRECT under layout 3 and
+  stays.
+- *High, fixed:* `search` still emitted `endorsed` on every hit — spec §283 drops it with `unresolved`.
+  Dropped from the CLI, its printed line, the desktop type/reader/mock; the eight driver-backed
+  `search.jsonl` frames were re-recorded (only `search.jsonl` changed in each set). `b3-real-data` and
+  `m7-S7q` keep theirs (no driver; nothing reads them).
+- *Medium, fixed:* `replay.test.ts` indexed `projects[0]` after the reorder; pinned by name. Also the
+  drive.cjs UTF-8/`close` mediums, since the script was rewritten. The other mediums stay deferred.

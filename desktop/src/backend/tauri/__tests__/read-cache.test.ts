@@ -18,7 +18,9 @@ function frames(args: readonly string[]) {
     'uninstall-skill': [{ id: 'deploy-check', team: 'acme', removed: 1 }],
     profile: { handle: 'teddy', changed: ['display_name'] },
     publish: { team: 'acme', id: '11111111-1111-4111-8111-111111111111', name: 'deploy-check', project: 'Global', version: 'v2', created: true, identicalTo: null, attachedEvals: 0, profileAdded: false, projectAdded: false },
-    sync: { notices: [], changed: true, teams: [] },
+    // The background refresh the recorded hello triggers (`refresh`, index.ts onHello) runs this too: a
+    // fetch that moved nothing, so it never clears the cache these tests measure (refresh.ts onChanged).
+    sync: { notices: [], changed: false, teams: [] },
     eval: { name: 'deploy-check', runDir: '/runs/1', executionStatus: 'complete' },
     setup: { role: 'joiner', team: 'acme' },
     team: { team: 'acme' },
@@ -53,28 +55,31 @@ function bridge(options: { fail?: string[]; hold?: string; ask?: string; holdAft
   });
   return { ...f, release: () => release?.() };
 }
-const argv = (f: ReturnType<typeof bridge>) => f.spawns.map(s => s.args.join(' '));
+/** Every CLI read in order. The recorded hello advertises `serve`, so after the first hello a read is a
+ *  request over one `serve` child (session.ts) rather than a process; both count as one read here, and
+ *  the `sync` the same hello's `refresh` triggers, and the `serve` child itself, show up where they ran. */
+const argv = (f: ReturnType<typeof bridge>) => f.calls.map(c => c.args.join(' '));
 
 describe('read cache (BUGS.md L18/M24: one CLI process per read verb per render)', () => {
   it('a render burst shares one status and one ls --local across status, settings and the Library', async () => {
     const f = bridge(); const backend = createTauriBackend(f.bridge);
     const [a, b, c] = await Promise.all([backend.status(), backend.settings(), backend.library({ scope: { kind: 'global' }, team: 'acme' })]);
     expect(a.ok && b.ok && c.ok).toBe(true);
-    expect(argv(f).sort()).toEqual(['ls --local', 'ls --team acme', 'status', 'status --team acme']);
+    expect(argv(f).sort()).toEqual(['ls --local', 'ls --team acme', 'serve', 'status', 'status --team acme', 'sync']);
     // Sequential reads inside the window spawn nothing new.
     expect((await backend.status()).ok).toBe(true);
     expect((await backend.library({ scope: { kind: 'global' }, team: 'acme' })).ok).toBe(true);
-    expect(f.spawns).toHaveLength(4);
+    expect(f.calls).toHaveLength(6);
   });
 
   it('expires after the TTL and re-reads', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const f = bridge(); const backend = createTauriBackend(f.bridge);
     await backend.status(); await backend.status();
-    expect(argv(f)).toEqual(['status', 'ls --local']);
+    expect(argv(f)).toEqual(['status', 'ls --local', 'sync']);
     vi.setSystemTime(Date.now() + READ_CACHE_TTL_MS + 1);
     await backend.status();
-    expect(argv(f)).toEqual(['status', 'ls --local', 'status', 'ls --local']);
+    expect(argv(f)).toEqual(['status', 'ls --local', 'sync', 'serve', 'status', 'ls --local']);
   });
 
   it('a mutation clears it, so the next read sees the change', async () => {
@@ -82,7 +87,7 @@ describe('read cache (BUGS.md L18/M24: one CLI process per read verb per render)
     await backend.status();
     await backend.projects.add('/work/x').done;
     await backend.status();
-    expect(argv(f)).toEqual(['status', 'ls --local', 'project add -- /work/x', 'status', 'ls --local']);
+    expect(argv(f)).toEqual(['status', 'ls --local', 'sync', 'project add -- /work/x', 'serve', 'status', 'ls --local']);
   });
 
   it('window focus serves the cached value and refreshes it behind the screen', async () => {
@@ -143,11 +148,11 @@ describe('W-02 stale revalidation',()=>{
   it('notifies subscribers exactly once when the refreshed value differs',async()=>{
     const f=bridge({mutate:(frame,n,verb)=>{if(n>1&&verb==='status'&&frame.t==='result'){const value=frame.value as {version:string};value.version='9.9.9';}}});const backend=createTauriBackend(f.bridge);const listener=vi.fn();backend.subscribe(listener);
     await backend.status();window.dispatchEvent(new Event('focus'));await backend.status();await vi.waitFor(()=>expect(listener).toHaveBeenCalledExactlyOnceWith('config'));
-    const count=f.spawns.length;await backend.status();expect(f.spawns).toHaveLength(count);
+    const count=f.calls.length;await backend.status();expect(f.calls).toHaveLength(count);
   });
   it('does not notify when only print lines differ',async()=>{
     const f=bridge({mutate:(frame,n)=>{if(frame.t==='print')frame.line=`different prose ${n}`;}});const backend=createTauriBackend(f.bridge);const listener=vi.fn();backend.subscribe(listener);
-    await backend.status();window.dispatchEvent(new Event('focus'));await backend.status();await vi.waitFor(()=>expect(f.spawns).toHaveLength(4));await new Promise(resolve=>setTimeout(resolve,10));expect(listener).not.toHaveBeenCalled();
+    await backend.status();window.dispatchEvent(new Event('focus'));await backend.status();await vi.waitFor(()=>expect(f.calls).toHaveLength(6));await new Promise(resolve=>setTimeout(resolve,10));expect(listener).not.toHaveBeenCalled();
   });
   it('drops the entry and notifies when the background refresh fails',async()=>{
     const f=bridge({mutate:(frame,n,verb)=>{if(n>1&&verb==='status'&&frame.t==='result')Object.assign(frame,{ok:false,exitCode:1,error:'CLI denied the read.'});}});const backend=createTauriBackend(f.bridge);const listener=vi.fn();backend.subscribe(listener);
@@ -195,12 +200,12 @@ describe('mutation write-family audit', () => {
     const f = bridge(); const backend = createTauriBackend(f.bridge);
     const read = () => Promise.all([backend.status(), backend.library({ scope: { kind: 'global' }, team: 'acme' })]);
     expect((await read()).every(value => value.ok)).toBe(true);
-    const before = f.spawns.length;
+    const before = f.calls.length;
     const job = verb === 'install' ? backend.install({ ref: 'deploy-check' }) : verb === 'setup' ? backend.setup({}) : verb === 'team' ? backend.team({ kind: 'join', remote: 'acme/skills' }) : backend.uninstallMachine({});
     expect((await job.done).ok).toBe(true);
     expect((await read()).every(value => value.ok)).toBe(true);
     expect(argv(f).slice(before + 1).sort()).toEqual(['ls --local', 'ls --team acme', 'status', 'status --team acme']);
-    const after = f.spawns.length; await read(); expect(f.spawns).toHaveLength(after);
+    const after = f.calls.length; await read(); expect(f.calls).toHaveLength(after);
   });
 });
 
