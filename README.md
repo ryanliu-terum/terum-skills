@@ -23,7 +23,7 @@ Our purpose is it make it quick and easy to determine best AI practices through 
 - Measure ROI of skills and their workflows
   - Cost
   - Time
-  - Quality of output   
+  - Quality of output
 - Compare comparable/overlapping skills against each other
 - Share skills with team members easily
 
