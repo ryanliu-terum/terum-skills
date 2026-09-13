@@ -1,8 +1,8 @@
 import { it, expect, afterEach, vi } from 'vitest';
-import { createMockBackend, MOCK_REMOVE_DETAIL, MOCK_REMOVE_ADVICE } from '../mock';
+import { createMockBackend, resetMockRemovals, MOCK_REMOVE_DETAIL, MOCK_REMOVE_ADVICE } from '../mock';
 import { design } from '../mock/data';
 import type { Run, Frame } from '../types';
-afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();});
+afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();resetMockRemovals();});
 async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
 it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,libraryProjects:false,appUpdate:false});expect((await b.library({scope:{kind:'global'}})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:{kind:'global'}});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
 it.each([
@@ -176,4 +176,28 @@ it("returns exactly the PublishResult keys on a project publish and mints no PR 
  // The endorsement side effect survives the deletion: catalog() still counts the skill under the project.
  const catalog=await b.catalog();if(!catalog.ok)throw new Error(catalog.error);
  expect(catalog.value.projects.find(p=>p.key==="mrf")?.skillsIn).toContain("deploy-check");
+});
+// D64 (2026-09-13 ledger, option A): spec §8.5's two person buckets are distinct on the demo backend — "On their
+// profile" is what the person authored, "Installed" the subset the fixture marks on this machine — and
+// `installable` stays the full authored list the bulk Install/Remove button and marketplace.test pin.
+it('fills a person\'s profile bucket with their authored skills and Installed with the on-disk subset',async()=>{
+ const catalog=await createMockBackend().catalog();if(!catalog.ok)throw new Error(catalog.error);
+ const authors:Record<string,string>=design.AUTHOR_OF,authored=(handle:string)=>design.CATALOG.filter(s=>authors[s.name]===handle).map(s=>s.name);
+ const ajay=catalog.value.people.find(p=>p.handle==='ajay'),lena=catalog.value.people.find(p=>p.handle==='lena');
+ if(!ajay||!lena)throw new Error('Fixture roster is missing ajay or lena.');
+ // ajay authored two placed skills and one (secret-scan, installed:false) not on this machine, so his buckets differ; none of lena's three is placed.
+ expect(ajay.buckets).toEqual([['On their profile',['deploy-check','env-audit','secret-scan']],['Installed',['deploy-check','env-audit']]]);
+ expect(lena.buckets).toEqual([['On their profile',['a11y-audit','storybook-sync','bundle-budget']],['Installed',[]]]);
+ for(const person of [ajay,lena])expect(person.installable).toEqual(authored(person.handle));
+});
+// D65 (2026-09-13 ledger): under __mock=stale-eval, "you have Version 2" follows this session's installs and removals, not the page-load fixture flag.
+it('updates the stale-eval installedVersion after a mid-session install and removal',async()=>{
+ const b=createMockBackend();location.hash='#/marketplace?__mock=stale-eval';
+ const versionOf=async(name:string)=>{const catalog=await b.catalog();if(!catalog.ok)throw new Error(catalog.error);const skill=catalog.value.skills.find(s=>s.name===name);if(!skill)throw new Error('No catalog skill named '+name);return [skill.installedVersion,skill.latestVersion,skill.placed] as const;};
+ expect(await versionOf('a11y-audit')).toEqual([null,'v5',false]);
+ expect(await versionOf('deploy-check')).toEqual(['v2','v5',true]);
+ expect(await answerAll(b.install({ref:'a11y-audit'}),()=>true)).toMatchObject({ok:true});
+ expect(await versionOf('a11y-audit')).toEqual(['v2','v5',true]);
+ expect(await answerAll(b.uninstallSkill({ref:'deploy-check'}),()=>true)).toMatchObject({ok:true});
+ expect(await versionOf('deploy-check')).toEqual([null,'v5',false]);
 });
