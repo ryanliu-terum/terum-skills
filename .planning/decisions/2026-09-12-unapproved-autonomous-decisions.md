@@ -434,3 +434,28 @@ CLAUDE.md already states for new functions.
 
 **Gates:** root lint, typecheck, **vitest 1701/1701**; desktop lint, typecheck, **vitest 1980 passed**
 (the 4 failures are the pre-existing missing-oracle boards on `main`, unchanged).
+
+---
+
+## A14 — The loop converged: pass 3 found one test gap, and it was a real one
+
+**What.** The second fix-scoped pass (`--base=2d7b501`) returned **0 critical, 0 high, 1 medium, 0
+contested** — convergence by the `harden` rule (no critical/high remaining).
+
+The medium was in the test I had just written to pay off A13's debt. `canRetry`'s second disjunct is
+`ok === false && value === undefined`, but `Result<T>` (`backend/types.ts:2`) explicitly permits
+`ok:false` **with** a value, and `failureWith` produces exactly that on the drain path
+(`eval.ts:625`: some queued evals failed, the partial result survives). My fixtures only covered
+`value: undefined`, so the disjunct's second half was untested — a regression dropping it would have
+passed.
+
+The behaviour was already right; only the assertion was missing. Retrying there would spend the
+user's own Claude account on work that already ran.
+
+**Verified not vacuous:** weakening the guard to `ok === false` alone makes the new case fail.
+
+**Three passes, and the trend is the point:** 5 confirmed → 3 confirmed → 1 confirmed, highs 2 → 1 → 0.
+Every finding in all three was in code written this session.
+
+**Gates:** root lint, typecheck, **vitest 1701/1701**; desktop lint, typecheck, **vitest 1981 passed**
+(the 4 failures are the pre-existing missing-oracle boards on `main`).
