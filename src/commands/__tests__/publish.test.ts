@@ -355,9 +355,9 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
 
 describe('B9 — first-publish category', () => {
   const categories = ['debugging', 'testing', 'docs', 'workflow', 'research', 'infra', 'review', 'misc'];
-  async function categoryFixture(raw?: string) {
+  async function categoryFixture(raw?: string, list: readonly string[] = categories) {
     const fixture = await prepared();
-    await pushFromSeed(fixture.fixture.seed, 'team.json', JSON.stringify({ ...TEAM_JSON, categories }));
+    await pushFromSeed(fixture.fixture.seed, 'team.json', JSON.stringify({ ...TEAM_JSON, categories: list }));
     const folder = await librarySkill(fixture.home, 'sample', raw);
     return { ...fixture, folder };
   }
@@ -426,5 +426,29 @@ describe('B9 — first-publish category', () => {
     expect(read).not.toHaveBeenCalled();
     expect(systemAgent.askJson).not.toHaveBeenCalled();
     expect(io.lines).toEqual([]);
+  });
+  // Hybrid review r1 (medium, publish.ts:98): the flag was stored untrimmed, so a trailing space from
+  // shell history baked ` ops ` into the committed SKILL.md for the skill's whole lineage, and HYG7 —
+  // which compared the same untrimmed string — warned about an off-list category whose trimmed
+  // spelling was on the list. The flag now follows the model path (categorize.ts): trimmed, and in
+  // the team's own spelling when it matches a team category case-insensitively; an off-list value is
+  // kept trimmed as typed so HYG7's warning names what the user wrote.
+  it.each([
+    { flag: ' ops ', stored: 'ops', warnings: 0 },
+    { flag: 'Ops', stored: 'ops', warnings: 0 },
+    { flag: ' Nope ', stored: 'Nope', warnings: 1 },
+  ])('stores --category $flag as $stored: trimmed, team spelling when on the list, HYG7 otherwise', async ({ flag, stored, warnings }) => {
+    const { fixture, store, home, folder } = await categoryFixture(undefined, [...categories, 'ops']);
+    const agent = agentFor({ category: 'review' });
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, agent, category: flag, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(agent.askJson).not.toHaveBeenCalled();
+    expect(io.lines.join('\n')).toContain(`metadata.terum-category: ${stored} (from --category; edit SKILL.md any time)`);
+    const hyg7 = io.lines.filter(line => line.startsWith('warning HYG7'));
+    expect(hyg7).toHaveLength(warnings);
+    if (warnings) expect(hyg7[0]).toContain(`terum-category \`${stored}\` is not one of your team's categories`);
+    const local = await readFile(join(folder, 'SKILL.md'), 'utf8');
+    expect(local).toBe(await show(fixture.bare, 'skills/sample/v1/SKILL.md'));
+    expect(local).toContain(`terum-category: ${stored}\n`);
   });
 });

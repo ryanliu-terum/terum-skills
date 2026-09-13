@@ -37,6 +37,10 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     command.configureOutput({ writeOut: text => { output += text; } });
     command.outputHelp();
     expect(output).toContain('HYG7');
+    // Hybrid review r1 (medium, cli.ts:147): validate never passes a category list (auto-category §6,
+    // publish-only since 2026-09-13), so its help may name HYG7 but must not promise it fires here.
+    expect(output).toContain('HYG7 off-list category (checked only at publish');
+    expect(output).not.toContain('when a team category list is supplied');
     expect(output).toContain('no model, no network call');
   });
 
