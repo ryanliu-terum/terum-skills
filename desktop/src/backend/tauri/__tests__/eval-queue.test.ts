@@ -38,3 +38,11 @@ it('fails malformed queue data at the seam', async () => {
 it.each(['queued', 'batched'])('accepts the setup %s outcome at the real adapter boundary', async outcome => {
   expect(await harness({ role: 'creator', team: 'team', steps: { evals: outcome } }).backend.setup({}).done).toMatchObject({ ok: true, value: { steps: { evals: outcome } } });
 });
+
+it('lists and drains an item with team omitted through the real seam',async()=>{
+ const {team: omitted,...teamless}=item;expect(omitted).toBe('team');
+ const fake=fakeBridge((args,emit)=>{const value=args.includes('--queue-list')?{items:[teamless]}:{items:[],attempted:1,completed:1};emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'eval',ok:true,exitCode:0,value})});emit({kind:'exit',code:0});});
+ const queue=evalQueueFor(createTauriBackend(fake.bridge))!;
+ expect(await queue.list()).toEqual({ok:true,value:{items:[teamless]}});expect(await queue.drain().done).toMatchObject({ok:true,value:{completed:1}});
+ expect(fake.spawns.map(s=>s.args)).toEqual([['eval','--queue-list'],['eval','--drain','--parallel','4']]);
+});

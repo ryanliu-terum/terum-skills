@@ -68,3 +68,9 @@ export function versionsInTree(tree: { paths(prefix?: string): readonly string[]
     .sort(([a], [b]) => b - a)
     .map(([n, folder]) => ({ folder, n }));
 }
+
+/** Ordinal label, retaining the pre-versioning hash display for historical data. */
+export function recordedVersionLabel(version: string): string {
+  const n = parseVersionFolder(version);
+  return n === null ? version.slice(0, 12) : versionLabel(n);
+}

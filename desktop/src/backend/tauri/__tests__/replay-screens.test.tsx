@@ -24,10 +24,10 @@ function open(route: string, marketplace = false) {
 }
 it('renders recorded Library cards without favorite controls, sample provenance, or a checkout the registry does not hold', async () => {
   open('#/library/global');
-  expect(await screen.findByText('1 skill · 1 shared with acme')).toBeVisible();
+  expect(await screen.findByText('1 skill')).toBeVisible();
   expect(within(document.querySelector('.board-view-header') as HTMLElement).getByText('Global')).toBeVisible();
   const card = screen.getByTestId('skill-card-deploy-check');
-  expect(within(card).getByText('Use this skill when a deploy needs a pre-flight checklist.')).toBeVisible();
+  expect(within(card).getByText('a deploy needs a pre-flight checklist.')).toBeVisible();
   expect(within(card).queryByRole('button', { name: 'Favorite deploy-check' })).toBeNull();
   // §7.2: `ls --local` lists registered checkouts only, and the S7g fixture registers none — the derived frames' cwd-detected `seed` link is gone with them.
   expect(screen.queryByRole('link', { name: 'seed' })).toBeNull();
@@ -64,7 +64,7 @@ it('shows unknown quarantine contents without a fabricated folder count', async 
 it('refuses the fixture\'s unregistered seed checkout route without spawning project', async () => {
   // The derived frames listed this folder as a detected checkout; the re-recorded scan (§7.2) does not, so the route is refused as the adapter refuses any root outside the scan (index.ts library()).
   const f = open('#/library/checkout?root='+encodeURIComponent(seedRepo));
-  expect(await screen.findByRole('alert')).toHaveTextContent('No such checkout: '+seedRepo);
+  expect(await screen.findByRole('alert')).toHaveTextContent('No such project: '+seedRepo);
   expect(screen.queryAllByTestId(/^skill-card-/)).toHaveLength(0);
   expect(f.spawns.some(spawn => spawn.args[1] === 'project')).toBe(false);
 });

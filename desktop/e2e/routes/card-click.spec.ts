@@ -26,7 +26,7 @@ async function clickBody(page:Page,body:Locator){
 test('skill body click opens the skill',async({page})=>{
  const errors=await openCards(page,'#/library/global');
  await clickBody(page,page.getByTestId('skill-card-deploy-check').locator('.skill-card-desc'));
- await expect(page).toHaveURL(/#\/skill\/deploy-check$/);
+ await expect(page).toHaveURL(/#\/skill\/local\?path=/);
  expect(errors).toEqual([]);
 });
 
@@ -50,11 +50,9 @@ test('favorite click toggles without navigating',async({page})=>{
  expect(errors).toEqual([]);
 });
 
-test('flag hover still shows the update tooltip',async({page})=>{
+test('Library flags never claim a team update',async({page})=>{
  const errors=await openCards(page,'#/library/global');
- const flag=page.getByTestId('skill-card-pr-review').locator('[data-flag="update"]');
- await flag.hover();
- await expect(flag.locator('.board-hover-tip')).toBeVisible();
+ await expect(page.getByTestId('skill-card-pr-review').locator('[data-flag="update"]')).toHaveCount(0);
  await expect(page).toHaveURL(/#\/library\/global$/);
  expect(errors).toEqual([]);
 });
@@ -71,13 +69,13 @@ test('the marketplace card menu opens the install dialog',async({page})=>{
  expect(errors).toEqual([]);
 });
 
-test('More actions opens Uninstall',async({page})=>{
+test('More actions opens the Library Delete dialog',async({page})=>{
  const errors=await openCards(page,'#/library/global');
  const card=page.getByTestId('skill-card-deploy-check');
  await card.hover();
  await card.getByRole('button',{name:'More actions for deploy-check'}).click();
- await page.getByRole('menuitem',{name:'Uninstall…',exact:true}).click();
- await expect(page).toHaveURL(/dialog=remove/);
+ await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();
+ await expect(page).toHaveURL(/dialog=file-delete/);
  expect(errors).toEqual([]);
 });
 
@@ -90,7 +88,7 @@ test('More actions opens Move, and offers Publish for a skill on this machine',a
  await card.getByRole('button',{name:'More actions for deploy-check'}).click();
  await expect(page.getByRole('menuitem',{name:/Publish to team/})).toHaveText('Publish to team…');
  await page.getByRole('menuitem',{name:/Move to/}).click();
- await expect(page).toHaveURL(/dialog=move/);
+ await expect(page).toHaveURL(/dialog=file-move/);
  await expect(page.getByRole('dialog')).toBeVisible();
  expect(errors).toEqual([]);
 });
@@ -142,7 +140,7 @@ test('person Follow toggles without navigating',async({page})=>{
 test('project card click keeps the checkout root, crumb and sidebar',async({page})=>{
  const errors=await openCards(page,'#/library/checkout?root=%2FUsers%2Fyou%2Fcode%2Fterum');
  await clickBody(page,page.getByTestId('skill-card-deploy-check').locator('.skill-card-desc'));
- await expect(page).toHaveURL(/#\/skill\/deploy-check\?root=%2FUsers%2Fyou%2Fcode%2Fterum$/);
+ await expect(page).toHaveURL(/#\/skill\/local\?path=%2FUsers%2Fyou%2Fcode%2Fterum%2F.claude%2Fskills%2Fdeploy-check$/);
  await expect(page.getByRole('link',{name:/^Terum/})).toHaveAttribute('aria-current','page');
  await expect(page.locator('.detail-crumbs')).toContainText('Terum');
  expect(errors).toEqual([]);

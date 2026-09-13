@@ -8,7 +8,7 @@ it.each(['Global','Terum','SSM','MRF'] as const)('serves the exact %s title and 
  const result=await createMockBackend().library({scope:scope==='Global'?{kind:'global'}:{kind:'checkout',root:'/Users/you/code/'+scope.toLowerCase()}});
  expect(result.ok).toBe(true);
  expect(result.value?.title).toBe(design.DERIVED.libraryTitles[scope]);
- expect(result.value?.overview).toEqual(design.OVERVIEW_BY_SCOPE[scope]);
+ expect(result.value?.overview).toEqual({...design.OVERVIEW_BY_SCOPE[scope],installs:'—'});
  expect(result.value?.skills).toHaveLength(Number(design.COUNTS[scope]));
  expect(result.value?.title).toBe(`${result.value?.skills.length} skills`);
  const status=await createMockBackend().status();const root=status.value?.roots.find(root=>root.label===scope);
@@ -18,12 +18,12 @@ it.each(['Global','Terum','SSM','MRF'] as const)('serves the exact %s title and 
 });
 it.each(['unknown','toString','__proto__'])('rejects unknown checkout root %s',async root=>{
  const result=await createMockBackend().library({scope:{kind:'checkout',root}});
- expect(result).toEqual({ok:false,error:'No such checkout: '+root});
+ expect(result).toEqual({ok:false,error:'No such project: '+root});
 });
 it('serves a zero library for the empty scenario',async()=>{
  location.hash='#/library/checkout?root=%2FUsers%2Fyou%2Fcode%2Fterum&__mock=empty';
  const result=await createMockBackend().library({scope:{kind:'checkout',root:'/Users/you/code/terum'}});
- expect(result).toMatchObject({ok:true,value:{title:'0 skills',skills:[],overview:{skills:'0',evaluated:'—',installs:'0',attention:'0'}}});
+ expect(result).toMatchObject({ok:true,value:{title:'0 skills',skills:[],overview:{skills:'0',evaluated:'—',installs:'—',attention:'0'}}});
 });
 it('serves the fixture eval k in Settings',async()=>{
  const result=await createMockBackend().settings();

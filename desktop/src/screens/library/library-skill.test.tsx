@@ -11,39 +11,31 @@ import { design } from '../../backend/mock/data';
 function open(route:string){location.hash=route;return render(<Providers><App/></Providers>);}
 beforeEach(()=>{localStorage.clear();useUiStore.setState({railOpen:true,overviewHidden:false,theme:'dark'});});
 afterEach(()=>{cleanup();location.hash='';vi.restoreAllMocks();vi.unstubAllGlobals();});
-it('renders the Global title, 15 cards and the fixture hover target',async()=>{open('#/library/global');expect(await screen.findByText('15 skills')).toBeInTheDocument();expect(screen.getAllByTestId(/^skill-card-/)).toHaveLength(15);expect(screen.getByTestId('skill-card-'+design.SKILLS[design.HOVER_INDEX]!.name).querySelector('[data-flag="update"]')).not.toBeNull();});
+it('renders the Global title and 15 cards without a team-update flag',async()=>{open('#/library/global');expect(await screen.findByText('15 skills')).toBeInTheDocument();expect(screen.getAllByTestId(/^skill-card-/)).toHaveLength(15);expect(screen.getByTestId('skill-card-'+design.SKILLS[design.HOVER_INDEX]!.name).querySelector('[data-flag="update"]')).toBeNull();});
 it('renders the no-results query and clears it',async()=>{open('#/library/global?q=deploy%20prod');expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument();fireEvent.click(screen.getAllByRole('button',{name:'Clear search'}).at(-1)!);expect(await screen.findByTestId('skill-card-deploy-check')).toBeInTheDocument();});
 it('renders the default SKILL.md with four tabs and frontmatter',async()=>{open('#/skill/deploy-check');expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeInTheDocument();expect(screen.getAllByRole('tab')).toHaveLength(4);expect(screen.getByTestId('frontmatter')).toHaveTextContent('name: deploy-check');expect(screen.getByTestId('frontmatter')).toHaveTextContent('<ajay@terum.ai>');});
-it('renders the eval report',async()=>{open('#/skill/deploy-check?tab=evals');expect(await screen.findByText(/Evaluation of deploy-check/)).toBeInTheDocument();});
+it('renders the eval report',async()=>{const backend=createMockBackend(),detail=await backend.skill({ref:'deploy-check'});if(!detail.ok)throw new Error(detail.error);vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...detail.value,versions:{placed:'v3',teamCurrent:'v3',evaluated:'v3'}}});openWith('#/skill/deploy-check?tab=evals',backend);expect(await screen.findByText(/Evaluation of deploy-check/)).toHaveTextContent('Evaluation of deploy-check, Version 3');});
 it('renders all four install scope rows and keeps the Marketplace root after install',async()=>{open('#/skill/deploy-check?__mock=not-installed&dialog=install');const dialog=await screen.findByRole('dialog');expect(within(dialog).getAllByRole('radio')).toHaveLength(4);fireEvent.click(within(dialog).getByRole('button',{name:'Install'}));const approval=await screen.findByRole('dialog',{name:'Approve these tools for deploy-check?'});fireEvent.click(within(approval).getByRole('button',{name:'Yes'}));await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check?root=marketplace'));expect(await screen.findByText('Enabled')).toBeInTheDocument();await waitFor(()=>expect(document.querySelector('.detail-crumbs')).toHaveTextContent('Marketplace'));});
 it('renders the partial banner',async()=>{open('#/skill/migration-guard?tab=evals');expect(await screen.findByText('Partial run · 7 of 9 rounds scored · the verdict is greyed until a complete run lands')).toBeInTheDocument();});
 it('renders the no-receipt eval state',async()=>{open('#/skill/onboarding-tour?tab=evals');expect(await screen.findByText('Not evaluated', {selector:'.state-title'})).toBeInTheDocument();expect(screen.getByText('Never')).toBeInTheDocument();});
-it('moves a placed copy by installing into the destination before removing the old one',async()=>{
- const backend=createMockBackend();
- const order:string[]=[];
- const install=vi.spyOn(backend,'install').mockImplementation(args=>{order.push('install:'+args.scope);return backend.sync({}) as never;});
- const uninstall=vi.spyOn(backend,'uninstallSkill').mockImplementation(args=>{order.push('uninstall:'+(args.from??'—'));return backend.sync({}) as never;});
- openWith('#/skill/deploy-check?dialog=move',backend);
- const dialog=await screen.findByRole('dialog',{name:'Move deploy-check?'});
- // Global is where this copy sits, so the destinations are the other three scopes.
- expect(within(dialog).getAllByRole('radio')).toHaveLength(3);
- expect(dialog.querySelector('.skill-install-scopes')).toHaveTextContent(/Terum.*SSM.*MRF/);
- expect(dialog.querySelector('.skill-install-scopes')).not.toHaveTextContent('every session');
- fireEvent.click(within(dialog).getByRole('radio',{name:/SSM/}));
- fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
- await waitFor(()=>expect(uninstall).toHaveBeenCalled());
- expect(install).toHaveBeenCalledWith(expect.objectContaining({ref:'deploy-check',scope:'SSM'}));
- expect(order).toEqual(['install:SSM','uninstall:global']);
+async function openMove(backend:Backend,path='~/.claude/skills/deploy-check'){
+ openWith('#/skill/local?path='+encodeURIComponent(path)+'&dialog=file-move',backend);
+ const dialog=await screen.findByRole('dialog',{name:'Move deploy-check'});
+ await within(dialog).findByRole('option',{name:'SSM'});
+ fireEvent.change(within(dialog).getByLabelText('Move to'),{target:{value:'/Users/you/code/ssm'}});
+ fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});
+ return dialog;
+}
+it('moves the local folder through skillFile.move without install or uninstall',async()=>{
+ const backend=createMockBackend(),move=vi.spyOn(backend.skillFile,'move'),install=vi.spyOn(backend,'install'),uninstall=vi.spyOn(backend,'uninstallSkill');
+ const dialog=await openMove(backend);fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
+ await within(dialog).findByRole('button',{name:'Done'});
+ expect(move).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/ssm'});expect(install).not.toHaveBeenCalled();expect(uninstall).not.toHaveBeenCalled();
 });
-
-it('leaves the old copy in place when the move cannot place the new one',async()=>{
- const backend=createMockBackend();
- vi.spyOn(backend,'install').mockImplementation(()=>createRun(async()=>({ok:false,error:'No such checkout.'})) as never);
- const uninstall=vi.spyOn(backend,'uninstallSkill');
- openWith('#/skill/deploy-check?dialog=move',backend);
- fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Move'}));
- expect(await screen.findByText('No such checkout.')).toBeInTheDocument();
- expect(uninstall).not.toHaveBeenCalled();
+it('shows a failed local move without running install or uninstall',async()=>{
+ const backend=createMockBackend();vi.spyOn(backend.skillFile,'move').mockImplementation(()=>createRun(async()=>({ok:false,error:'Destination unavailable.'})));
+ const uninstall=vi.spyOn(backend,'uninstallSkill'),dialog=await openMove(backend);fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
+ expect(await screen.findByText('Destination unavailable.')).toBeVisible();expect(uninstall).not.toHaveBeenCalled();
 });
 
 // §5.2: there is no pull request any more. What the notice has to distinguish is the three things a
@@ -52,6 +44,7 @@ it('leaves the old copy in place when the move cannot place the new one',async()
 it.each([
   [{version:'v3',created:true,identicalTo:null,projectAdded:true},'deploy-check was published to Global as Version 3.'],
   [{version:null,created:false,identicalTo:'v2',projectAdded:true},'deploy-check was added to Global; its bytes are identical to Version 2.'],
+  [{version:null,created:false,identicalTo:'v2',projectAdded:false,attachedEvals:2},'Attached 2 eval run(s) to Version 2 in Global; identical skill bytes minted no version.'],
   [{version:null,created:false,identicalTo:'v2',projectAdded:false},'deploy-check is already Version 2 in Global; nothing to publish.'],
 ])('names what the publish actually did: %j',async(outcome,text)=>{
  const backend=createMockBackend();
@@ -106,17 +99,12 @@ it.each([
 it('can reopen persisted collapsed overview and rail',async()=>{useUiStore.setState({overviewHidden:true});open('#/library/global');await screen.findByText('15 skills');fireEvent.click(screen.getByRole('button',{name:'Show overview'}));expect(await screen.findByText('Team installs')).toBeInTheDocument();cleanup();useUiStore.setState({railOpen:false});open('#/skill/deploy-check');await screen.findByRole('heading',{name:'deploy-check'});fireEvent.click(screen.getByRole('button',{name:'Open details rail'}));expect(await screen.findByText('Status')).toBeInTheDocument();});
 it('binds the inbox placeholder to the share selection and clears unknown ids',async()=>{const view=open('#/inbox');await waitFor(()=>expect(view.container.querySelector('[data-selected-id="share-secret-scan"]')).not.toBeNull());cleanup();const unknown=open('#/inbox/unknown');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(unknown.container.querySelector('[data-selected-id]')).toBeNull();});
 
-it('offers app setup on the additive no-team board',async()=>{
- open('#/library/global?__mock=no-team');
- expect(await screen.findByText('No team on this machine')).toBeInTheDocument();
- expect(screen.getByRole('button',{name:'Start setup'})).toBeInTheDocument();
- expect(screen.getByRole('button',{name:'Copy terminal command'})).toBeInTheDocument();
-});
+it('keeps the Library usable with no team',async()=>{open('#/library/global?__mock=no-team');expect(await screen.findByTestId('skill-card-deploy-check')).toBeVisible();expect(screen.queryByText('No team on this machine')).toBeNull();});
 it('keeps the skill title as the only link without making the article interactive',async()=>{
  open('#/library/global');
  const card=await screen.findByTestId('skill-card-deploy-check');
  expect(within(card).getAllByRole('link')).toHaveLength(1);
- expect(within(card).getByRole('link',{name:'deploy-check'})).toHaveAttribute('href','#/skill/deploy-check');
+ expect(within(card).getByRole('link',{name:'deploy-check'})).toHaveAttribute('href','#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check'));
  expect(card.tagName).toBe('ARTICLE');
  expect(card).not.toHaveAttribute('role');
  expect(card).not.toHaveAttribute('tabindex');
@@ -150,15 +138,15 @@ it('stretches the card title link over the card so a body click opens the SKILL.
  open('#/library/global');
  const card=await screen.findByTestId('skill-card-deploy-check');
  const link=within(card).getByRole('link',{name:'deploy-check'});
- expect(link).toHaveAttribute('href','#/skill/deploy-check');
+ expect(link).toHaveAttribute('href','#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check'));
  fireEvent.click(link);
- await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check'));
+ await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')));
  expect(await screen.findByTestId('frontmatter')).toBeInTheDocument();
  expect(screen.getByRole('tab',{name:'SKILL.md'})).toHaveAttribute('aria-selected','true');
 });
 it('shows the truthful recorded state as Reinstall, never plain Install',async()=>{
  const backend=createMockBackend();const library=await backend.library({scope:{kind:'global'}});if(!library.ok)throw new Error(library.error);
- vi.spyOn(backend,'library').mockResolvedValue({...library,value:{...library.value,skills:library.value.skills.map(s=>s.name==='deploy-check'?{...s,installed:'recorded' as const,placed:false,onDiskOnly:false}:s)}});
+ vi.spyOn(backend,'library').mockResolvedValue({...library,value:{...library.value,skills:library.value.skills.map(s=>s.name==='deploy-check'?{...s,teamed:true,installed:'recorded' as const,placed:false,onDiskOnly:false}:s)}});
  const detail=await backend.skill({ref:'deploy-check'});if(!detail.ok)throw new Error(detail.error);
  vi.spyOn(backend,'skill').mockResolvedValue({...detail,value:{...detail.value,installed:'recorded' as const,placed:false,onDiskOnly:false}});
  openWith('#/library/global',backend);
@@ -211,7 +199,7 @@ it('opens a local card and its Open menu by folder path',async()=>{
  fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));fireEvent.click(await screen.findByRole('menuitem',{name:'Open'}));
  await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent(path)));
 });
-it.each([['Run eval','&tab=evals&dialog=run-eval'],['Uninstall…','&dialog=remove'],['Move to…','&dialog=move']])('routes %s on a local card by path, not by name',async(item,query)=>{
+it.each([['Run eval','&tab=evals&dialog=run-eval'],['Delete…','&dialog=file-delete'],['Move to…','&dialog=file-move']])('routes %s on a local card by path, not by name',async(item,query)=>{
  const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
  const path='/a folder/.claude/skills/deploy-check';
  result.value.skills=[{...result.value.skills[0]!,name:'deploy-check',project:'Global',teamed:false,placed:true,path}];
@@ -278,18 +266,21 @@ it('names the checkout a local folder was resolved in, from the backend',async()
 
 it.each(['none-with-skills','none-empty','unreadable'] as const)('shows the appropriate Library board for %s',async mode=>{
  const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
- result.value.team=mode==='unreadable'?{kind:'unreadable',message:'clone denied'}:{kind:'none'};
+ vi.spyOn(backend,'catalog').mockResolvedValue({ok:false,error:'clone denied'});
  if(mode==='none-empty')result.value.skills=[];
  vi.spyOn(backend,'library').mockResolvedValue(result);openWith('#/library/global',backend);
- if(mode==='none-empty'){expect(await screen.findByText('No team on this machine')).toBeVisible();expect(screen.getByRole('button',{name:'Start setup'})).toBeVisible();}
+ if(mode==='none-empty'){expect(await screen.findByText('Skills in ~/.claude/skills and in the projects you add show up here.')).toBeVisible();}
  else {expect(await screen.findByTestId('skill-card-deploy-check')).toBeVisible();expect(screen.queryByText('No team on this machine')).toBeNull();}
- if(mode==='unreadable')expect(screen.getByText('Team unreadable: clone denied · cards show local state only')).toBeVisible();
+ expect(screen.queryByText(/Team unreadable/)).toBeNull();
 });
-it('removes a placed local detail by the skill name, never the local route token',async()=>{
- const backend=createMockBackend(),remove=vi.spyOn(backend,'uninstallSkill');
+it('removes a placed local detail through D6, including an old remove bookmark',async()=>{
+ const backend=createMockBackend(),remove=vi.spyOn(backend.skillFile,'delete');
  openWith('#/skill/local?path=%2Ftmp%2Fdeploy-check&dialog=remove',backend);
- fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Remove'}));
- await waitFor(()=>expect(remove).toHaveBeenCalledWith({ref:'deploy-check'}));
+ const dialog=await screen.findByRole('dialog');
+ fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});
+ fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));
+ await waitFor(()=>expect(remove).toHaveBeenCalledWith({path:'/tmp/deploy-check'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Done'}));
  await waitFor(()=>expect(location.hash).toBe('#/library/global'));
 });
 it('resets a local action error when navigating to another path',async()=>{
@@ -331,18 +322,18 @@ it('preserves the mock breadcrumb and fixture hygiene caption',async()=>{
 });
 
 const terumOrigin='root=%2FUsers%2Fyou%2Fcode%2Fterum';
-it.each([['Open',''],['Run eval','tab=evals&dialog=run-eval&'],['Uninstall…','dialog=remove&'],['Move to…','dialog=move&']])('carries the checkout root from a project card into its %s menu row',async(label,query)=>{
+it.each([['Open',''],['Run eval','tab=evals&dialog=run-eval'],['Delete…','dialog=file-delete'],['Move to…','dialog=file-move']])('carries the checkout root from a project card into its %s menu row',async(label,query)=>{
  open('#/library/checkout?'+terumOrigin);
  const card=await screen.findByTestId('skill-card-deploy-check');
  expect(within(card).getAllByRole('link')).toHaveLength(1);
- expect(within(card).getByRole('link')).toHaveAttribute('href','#/skill/deploy-check?'+terumOrigin);
+ expect(within(card).getByRole('link')).toHaveAttribute('href','#/skill/local?path='+encodeURIComponent('/Users/you/code/terum/.claude/skills/deploy-check'));
  fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));
  fireEvent.click(await screen.findByRole('menuitem',{name:label}));
- await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check?'+query+terumOrigin));
+ await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/terum/.claude/skills/deploy-check')+(query?'&'+query:'')));
 });
 it('keeps Global-library and marketplace card links exactly as they were',async()=>{
  open('#/library/global');
- expect(within(await screen.findByTestId('skill-card-deploy-check')).getByRole('link')).toHaveAttribute('href','#/skill/deploy-check');
+ expect(within(await screen.findByTestId('skill-card-deploy-check')).getByRole('link')).toHaveAttribute('href','#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check'));
  cleanup();open('#/marketplace/people/lena');
  expect(within(await screen.findByTestId('skill-card-a11y-audit')).getByRole('link')).toHaveAttribute('href','#/skill/a11y-audit?root=marketplace');
 });
@@ -375,27 +366,16 @@ it.each(['','&'+terumOrigin])('preselects Global in the install dialog whatever 
  expect(within(dialog).getAllByRole('radio')).toHaveLength(4);
  expect(within(dialog).getByRole('radio',{name:/Global.*every session.*~\/.claude\/skills/})).toBeChecked();
 });
-it.each([true,false])('follows a moved copy from a scoped page and stays put from an unscoped one (scoped=%s)',async scoped=>{
- const backend=createMockBackend();
- vi.spyOn(backend,'install').mockImplementation(()=>createRun(async()=>({ok:true,value:[]})));
- const uninstall=vi.spyOn(backend,'uninstallSkill').mockImplementation(()=>createRun(async()=>({ok:true,value:[]})));
- openWith('#/skill/deploy-check?dialog=move'+(scoped?'&'+terumOrigin:''),backend);
- const dialog=await screen.findByRole('dialog');
- fireEvent.click(within(dialog).getByRole('radio',{name:/SSM/}));
- fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
- await waitFor(()=>expect(uninstall).toHaveBeenCalledWith(expect.objectContaining({from:scoped?'/Users/you/code/terum':'global'})));
- await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check'+(scoped?'?root=%2FUsers%2Fyou%2Fcode%2Fssm':'')));
+it.each([true,false])('follows the moved folder by path from either Library root (%s)',async project=>{
+ const backend=createMockBackend(),dialog=await openMove(backend,project?'/Users/you/code/terum/.claude/skills/deploy-check':'~/.claude/skills/deploy-check');
+ fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));fireEvent.click(await within(dialog).findByRole('button',{name:'Done'}));
+ await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
 });
-it('leaves a cancelled move on the page it started from',async()=>{
- const backend=createMockBackend();
- vi.spyOn(backend,'install').mockImplementation(()=>createRun(async()=>({ok:false,cancelled:true,error:'Declined.'})));
- const uninstall=vi.spyOn(backend,'uninstallSkill');
- openWith('#/skill/deploy-check?'+terumOrigin+'&dialog=move',backend);
- fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Move'}));
- expect(await screen.findByText('Move cancelled; nothing was changed.')).toBeVisible();
- expect(location.hash).toBe('#/skill/deploy-check?'+terumOrigin);
- expect(uninstall).not.toHaveBeenCalled();
+it('cancels a move before it starts and stays on the source page',async()=>{
+ const backend=createMockBackend(),move=vi.spyOn(backend.skillFile,'move'),dialog=await openMove(backend);
+ fireEvent.click(within(dialog).getByRole('button',{name:'Cancel'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(move).not.toHaveBeenCalled();expect(new URLSearchParams(location.hash.split('?')[1]).get('path')).toBe('~/.claude/skills/deploy-check');
 });
+
 it('keeps preference keys on the skill, not on the route segment',async()=>{
  open('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check'));
  fireEvent.click(await screen.findByRole('switch',{name:'Enable skill'}));
@@ -431,14 +411,41 @@ it('maps the reachable global root URL to a global scope',async()=>{
  expect(screen.getByRole('link',{name:/^Global/})).toHaveAttribute('aria-current','page');
 });
 
-it.each([true,false])('shows in-flight Move progress only when advertised (%s)',async progress=>{
+it.each([true,false])('locks the Move confirmation while the file operation is in flight (%s)',async progress=>{
  const backend=createMockBackend();const features=await backend.features();vi.spyOn(backend,'features').mockResolvedValue({...features,progress});
- let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});const install=backend.install.bind(backend);
- // Exercise the real mock's progress with consent already approved, holding completion for observation.
- // The unchanged install-flow test above owns the interactive consent modal.
- vi.spyOn(backend,'install').mockImplementation(args=>{const run=install(args);return {...run,frames:{async *[Symbol.asyncIterator](){for await(const frame of run.frames){if(frame.t==='ask'){run.answer(frame.id,true);continue;}yield frame;if(frame.t==='progress')await held;}}}};});
- openWith('#/skill/deploy-check?dialog=move',backend);fireEvent.click(within(await screen.findByRole('dialog',{name:'Move deploy-check?'})).getByRole('button',{name:'Move'}));
- const dialog=screen.getByRole('dialog',{name:'Move deploy-check?'});
- if(progress)expect(await within(dialog).findByRole('status')).toHaveTextContent('Installed');else {await waitFor(()=>expect(within(dialog).getByRole('button',{name:'Move'})).toBeDisabled());expect(within(dialog).queryByRole('status')).toBeNull();}
- release();await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Move deploy-check?'})).toBeNull());expect(document.querySelector('.skill-dialog-progress')).toBeNull();
+ let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
+ vi.spyOn(backend.skillFile,'move').mockImplementation(()=>createRun(async()=>{await held;return {ok:true,value:{kind:'move',path:'~/.claude/skills/deploy-check',destination:'/new/deploy-check',quarantined:null,installed:false,notices:['Moved local files.']}};}));
+ const dialog=await openMove(backend);fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));await waitFor(()=>expect(within(dialog).getByRole('button',{name:'Move'})).toBeDisabled());release();expect(await within(dialog).findByRole('status')).toHaveTextContent('Moved local files.');
+});
+
+it.each(['report','empty'] as const)('keeps the Evals %s Run eval control disabled with the path reason',async state=>{
+ const backend=createMockBackend(),result=await backend.skill({ref:'deploy-check'});if(!result.ok)throw new Error(result.error);
+ vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...result.value,path:null,...(state==='empty'?{receipt:null,summary:null}:{} )}});
+ openWith('#/skill/deploy-check?tab=evals',backend);const button=await screen.findByRole('button',{name:'Run eval'});expect(button).toBeDisabled();expect(screen.getByText('Install it first — evals run against the copy on your machine.')).toBeVisible();
+});
+it.each(['rename','delete'] as const)('the file %s dialog explains consequences, requires the name, and calls only its seam',async kind=>{
+ const backend=createMockBackend(),method=vi.spyOn(backend.skillFile,kind);
+ openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-'+kind,backend);
+ const dialog=await screen.findByRole('dialog'),action=within(dialog).getByRole('button',{name:kind==='rename'?'Rename':'Delete'});expect(action).toBeDisabled();
+ if(kind==='rename'){expect(dialog).toHaveTextContent('invocation name');expect(dialog).toHaveTextContent('Version 1');fireEvent.change(within(dialog).getByLabelText('New name'),{target:{value:'new-name'}});}else expect(dialog).toHaveTextContent('removes it from your installs');
+ fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});fireEvent.click(action);await within(dialog).findByRole('button',{name:'Done'});expect(method).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',...(kind==='rename'?{to:'new-name'}:{})});
+});
+
+it.each([false,true])('shows local receipt attribution or the stale-score explanation on the card (edited %s)',async edited=>{
+ const backend=createMockBackend(),library=await backend.library({scope:{kind:'global'}}),detail=await backend.skill({ref:'deploy-check'});
+ if(!library.ok||!detail.ok||!detail.value.summary)throw new Error('Missing receipt fixture');
+ const card={...library.value.skills[0]!,name:'deploy-check',teamed:false,edited,summary:edited?null:detail.value.summary,localEval:edited?null:{...detail.value.summary,runnerHandle:'mira',version:'v4'},localEvalStale:edited};
+ vi.spyOn(backend,'library').mockResolvedValue({ok:true,value:{...library.value,skills:[card]}});openWith('#/library/global',backend);
+ const face=await screen.findByTestId('skill-card-deploy-check');
+ expect(face).toHaveTextContent(edited?'Not evaluated · evaluated before your last edit':'run by mira · Version 4');
+ if(edited)expect(within(face).getByText('Edited')).toBeVisible();
+});
+it.each(['evals','run-eval','publish'])('excludes an inspected-invalid local folder from %s while keeping its reason visible',async entry=>{
+ const backend=createMockBackend(),result=await backend.localSkill({path:'~/.claude/skills/deploy-check'});if(!result.ok)throw new Error(result.error);
+ vi.spyOn(backend,'localSkill').mockResolvedValue({ok:true,value:{...result.value,flags:['broken'],flagText:{broken:'Invalid YAML'},teamed:false}});
+ openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+(entry==='evals'?'&tab=evals':'&dialog='+entry),backend);
+ await screen.findByRole('heading',{name:'deploy-check'});
+ if(entry==='run-eval'){const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Invalid YAML');expect(within(dialog).queryByRole('button',{name:'Run eval'})).toBeNull();}
+ else if(entry==='publish'){const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('Invalid YAML');expect(within(dialog).getByRole('button',{name:'Publish'})).toBeDisabled();}
+ else expect(screen.getByRole('button',{name:'Run eval'})).toBeDisabled();
 });

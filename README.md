@@ -371,6 +371,7 @@ Release notices appear last on stderr, at most once per release per day, and are
 | | `install <ref> [--into global\|<checkout root>]` / `uninstall-skill <ref> [--from global\|<checkout root>]` | Place or remove a skill (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |
 | | `sync` | Fetch each team clone and reset it to `origin/main`; it never places, uploads, or edits local skills |
 | | `prune` | List quarantined items and delete the ones you confirm |
+| | `skill move <path> --to global\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` | Move, rename, or delete a folder in your Library, after confirming by name. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` is the only thing that hard-deletes |
 | | `refresh` | Fetch the team clone to `origin/main` and nothing else — no placement, no sharing, no stamp; the desktop app runs it in the background so a teammate's committed work becomes visible |
 | | `serve` | Answer read requests on one long-lived process instead of starting a new one per call (`--frames` only; the desktop app drives it). Reads only: `status`, `ls`, `eval-report`, `search`, `validate`, `update` |
 | | `publish <skill>` | Endorse a skill for the team: a PR (default policy) or a direct commit |

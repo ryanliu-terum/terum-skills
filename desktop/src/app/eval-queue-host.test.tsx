@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { MemoryRouter } from 'react-router';
 import { BackendContext, PromptContext } from '../backend';
-import { registerEvalQueue, type EvalQueueResult } from '../backend/eval-queue';
+import { evalQueueFor, registerEvalQueue, type EvalQueueResult } from '../backend/eval-queue';
 import { createMockBackend } from '../backend/mock';
 import { createRun } from '../backend/mock/run';
 import type { Run } from '../backend/types';
@@ -31,4 +31,14 @@ it('queued runs are visible, dismissible, reopenable and stoppable without needi
   const reopened = await screen.findByRole('dialog', { name: 'Queued eval · alpha' });
   fireEvent.click(within(reopened).getByRole('button', { name: 'Stop' }));
   expect(await within(reopened).findByText('Stopped')).toBeVisible(); expect(cancel).toHaveBeenCalledTimes(1);
+});
+
+it('lists and completes a teamless queue item end-to-end',async()=>{
+ const backend=createMockBackend(),item={skill:'alpha',path:'/library/alpha',contentHash:`sha256:${'a'.repeat(64)}`,requestedAt:'2026-09-10T00:00:00Z',window:'overnight' as const};
+ const drain=vi.fn(()=>createRun<EvalQueueResult>(async()=>({ok:true,value:{items:[],attempted:1,completed:1}})));
+ registerEvalQueue(backend,{list:async()=>({ok:true,value:{items:[item]}}),drain});
+ expect(await evalQueueFor(backend)!.list()).toEqual({ok:true,value:{items:[item]}});
+ function Start(){const host=useEvalRun();return <button onClick={()=>void host.startQueued?.(item)}>Start teamless</button>;}
+ render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient()}><Tooltip.Provider><PromptContext value={async()=>true}><EvalRunProvider><MemoryRouter><Start/><EvalRunDialogHost/></MemoryRouter></EvalRunProvider></PromptContext></Tooltip.Provider></QueryClientProvider></BackendContext>);
+ fireEvent.click(screen.getByRole('button',{name:'Start teamless'}));expect(await screen.findByText('Finished')).toBeVisible();expect(drain).toHaveBeenCalledOnce();
 });

@@ -639,6 +639,34 @@ derived frames is the CLI's real output. Still owed, none gating B5:
 Budget note: this pass cost 5.4M subagent tokens and took the 5-hour session budget from 60% to 86%;
 the re-review of the two-high fix (`--base=f2089dd`) waits for the 07:00 reset before #183 merges.
 
+## A20 — B5's Codex build: the conservative readings kept, the scope line I got wrong, and the atPath guard deferred from B3's second pass
+
+**B3 pass 2 (`wf_d05b5064-1e6`, base `f2089dd`): 0 critical/high, 1 medium, deferred.** `validate`'s
+`atPath()` decides "this is a version folder" by shape alone (a `v<N>` basename under a `skills/`
+grandparent); a never-published local draft that happens to live at `~/drafts/skills/<name>/v2/` is
+now named `<name>` instead of `v2`. Unspecified territory, no test either way. **Gate:** the first
+report of a local draft shaped like a clone path; fix shape = require a sibling `team.json` at the
+presumed clone root, in both branches. #183 merged on this pass.
+
+**B5 (Codex, gpt-6-astra high, 58 min, base = frames 1da61f3 + B4 + rev-9 spec).** Status
+`partial`; every open question was answered with the most conservative reading, kept here for the
+review to judge rather than re-decided by me:
+1. *README command listing.* My prompt excluded "B7 docs"; the README's CLI table is a test gate
+   (`cli.test.ts` "documents every public command path"), so the three `skill` verbs are added
+   there by hand in this commit — a scope correction, not Codex's fault. The table's `connect` and
+   `decline` rows are stale (B1 deleted both) and remain B7's.
+2. *Repeated Move replacement when an old-skills backup already exists* → refused, both copies kept
+   (never deletes). Owed: §9.1.1's replace prompt vs the deletion invariant — B6 owns §9.1.1.
+3. *Stale-eval hint for an edited folder with no `metadata.id`* → hint only when a stable id proves
+   the association; the score blanks for changed bytes. Owed to the first user report.
+4. *D16's "remove the non-directory filter"* → ordinary files under a Library root appear as
+   rejected cards and count. Flag for the review: if a stray `README.md` in `~/.claude/skills/`
+   becomes a card, the filter deletion was read too literally.
+5. *Rename with missing/unparseable frontmatter* → folder renamed, frontmatter untouched (never
+   invents content). 6. *Move across project roots* → keeps the recorded team-project scope.
+7. *Recovery among several candidate siblings* → conservative (see the report's `openQuestions`).
+Playwright could not bind :1420 inside the sandbox; the orchestrator's own gates run it.
+
 ## A24 — The frames PR's review: the recorder could blank its own fixtures, and two things honest frames exposed
 
 **Review `wf_7eaffc90-e93` (base `origin/main`, 254 agents): 1 critical, 2 high, 7 medium, 1 low.**

@@ -65,11 +65,11 @@ describe('read cache (BUGS.md L18/M24: one CLI process per read verb per render)
     const f = bridge(); const backend = createTauriBackend(f.bridge);
     const [a, b, c] = await Promise.all([backend.status(), backend.settings(), backend.library({ scope: { kind: 'global' }, team: 'acme' })]);
     expect(a.ok && b.ok && c.ok).toBe(true);
-    expect(argv(f).sort()).toEqual(['ls --local', 'ls --team acme', 'serve', 'status', 'status --team acme', 'sync']);
+    expect(argv(f).sort()).toEqual(['ls --local', 'ls --team acme', 'serve', 'status', 'sync']);
     // Sequential reads inside the window spawn nothing new.
     expect((await backend.status()).ok).toBe(true);
     expect((await backend.library({ scope: { kind: 'global' }, team: 'acme' })).ok).toBe(true);
-    expect(f.calls).toHaveLength(6);
+    expect(f.calls).toHaveLength(5);
   });
 
   it('expires after the TTL and re-reads', async () => {
@@ -198,13 +198,13 @@ describe('mutation write-family audit', () => {
   });
   it.each(['install', 'setup', 'team', 'uninstall'] as const)('%s drops all three cached families, each re-read exactly once', async verb => {
     const f = bridge(); const backend = createTauriBackend(f.bridge);
-    const read = () => Promise.all([backend.status(), backend.library({ scope: { kind: 'global' }, team: 'acme' })]);
+    const read = () => Promise.all([backend.status(), backend.settings(), backend.library({ scope: { kind: 'global' }, team: 'acme' })]);
     expect((await read()).every(value => value.ok)).toBe(true);
     const before = f.calls.length;
     const job = verb === 'install' ? backend.install({ ref: 'deploy-check' }) : verb === 'setup' ? backend.setup({}) : verb === 'team' ? backend.team({ kind: 'join', remote: 'acme/skills' }) : backend.uninstallMachine({});
     expect((await job.done).ok).toBe(true);
     expect((await read()).every(value => value.ok)).toBe(true);
-    expect(argv(f).slice(before + 1).sort()).toEqual(['ls --local', 'ls --team acme', 'status', 'status --team acme']);
+    expect(argv(f).slice(before + 1).sort()).toEqual(['ls --local', 'ls --team acme', 'status']);
     const after = f.calls.length; await read(); expect(f.calls).toHaveLength(after);
   });
 });

@@ -1,3 +1,4 @@
+import { createMockBackend } from '../../mock';
 import { afterEach,expect,it,vi } from 'vitest';
 import { act,cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import { QueryClient,QueryClientProvider } from '@tanstack/react-query';
@@ -214,7 +215,7 @@ it('opens a folder the CLI could not parse, by path, and still names its checkou
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
  expect(document.querySelector('.detail-crumbs')?.textContent).toBe('teniroo/adopt-agent-tooling');
  expect(screen.getByRole('link',{name:/^teniroo/})).toHaveAttribute('aria-current','page');
- expect(screen.getByText('Not connectable · invalid-yaml')).toBeVisible();
+ expect(screen.getByText('invalid-yaml')).toBeVisible();
 });
 it('sends the folder, not the route segment, to validate',async()=>{
  const {backend,client}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',localFolder());
@@ -225,12 +226,12 @@ it('sends the folder, not the route segment, to validate',async()=>{
  expect(validate).toHaveBeenCalledExactlyOnceWith({ref:uncPath});
  expect(invalidate).toHaveBeenCalledWith({queryKey:['skill','local:'+uncPath]});
 });
-it('sends the skill name, not the route segment, to eval',async()=>{
+it('sends the selected local folder, not a potentially ambiguous name, to eval',async()=>{
  const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=evals&dialog=run-eval',localFolder());
  const dialog=await screen.findByRole('dialog');
  const evaluate=vi.spyOn(backend,'eval').mockImplementation(()=>createRun(async()=>({ok:false,error:'Eval failed for this test.'})));
  fireEvent.click(within(dialog).getByRole('button',{name:'Run eval'}));
- await waitFor(()=>expect(evaluate).toHaveBeenCalledExactlyOnceWith({ref:'adopt-agent-tooling'}));
+ await waitFor(()=>expect(evaluate).toHaveBeenCalledExactlyOnceWith({ref:uncPath}));
  await waitFor(()=>expect(new URLSearchParams(location.hash.split('?')[1]).has('dialog')).toBe(false));
  // Successful runs dismiss themselves; retain a failed run to exercise the host's URL dismissal.
  await screen.findByText('Eval failed for this test.');
@@ -275,10 +276,13 @@ it.each([false,true])('removes the copy in the root the URL named (both roots an
  await waitFor(()=>expect(f.spawns.find(spawn=>spawn.args[0]==='uninstall-skill')?.args).toEqual(['uninstall-skill','--team','acme','--from',seedRoot,'--','deploy-check']));
  await waitFor(()=>expect(location.hash).toBe('#/library/checkout?'+seedOrigin));
 });
-it('keeps the by-path remove argv unchanged',async()=>{
- const {f}=open('#/skill/local?path='+encodeURIComponent(seedRoot+'/.claude/skills/deploy-check')+'&dialog=remove',projectCopy());
- fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Remove'}));
- await waitFor(()=>expect(f.spawns.find(spawn=>spawn.args[0]==='uninstall-skill')?.args).toEqual(['uninstall-skill','--team','acme','--','deploy-check']));
+it('routes a by-path removal through D6 with the exact folder and typed confirmation',async()=>{
+ const {backend}=open('#/skill/local?path='+encodeURIComponent(seedRoot+'/.claude/skills/deploy-check')+'&dialog=file-delete',projectCopy());
+ const mock=createMockBackend();const remove=vi.spyOn(backend.skillFile,'delete').mockImplementation(mock.skillFile.delete);
+ const dialog=await screen.findByRole('dialog');
+ fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});
+ fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));
+ await waitFor(()=>expect(remove).toHaveBeenCalledWith({path:seedRoot+'/.claude/skills/deploy-check'}));
 });
 it('validates the team name on a qualified name route, not its placed folder or qualified ref',async()=>{
  const {backend}=open('#/skill/acme%2Fdeploy-check?'+seedOrigin+'&tab=quality',projectCopy());

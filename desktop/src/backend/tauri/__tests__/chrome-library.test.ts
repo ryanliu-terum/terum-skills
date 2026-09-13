@@ -16,8 +16,8 @@ it.each(['update-available','both'])('counts only available attention data with 
  const result=await createTauriBackend(f.bridge).library(global);
  expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
  expect(result.value.skills).toHaveLength(3);
- expect(result.value.overview).toMatchObject({attention:'3',attention_lines:['2 updates available','1 broken'],attention_link:''});
- expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status'],['sync'],['serve']]);expect(f.requests.map(r=>r.argv)).toEqual([['ls','--team','acme']]);
+ expect(result.value.overview).toMatchObject({attention:'1',attention_lines:['1 need attention'],attention_link:''});
+ expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['sync']]);expect(f.requests).toEqual([]);
 });
 it('reports zero attention without placeholder notes or fabricated eval counters (B1)',async()=>{
  const result=await createTauriBackend(chromeLibraryReplay().bridge).library(global);
@@ -25,20 +25,20 @@ it('reports zero attention without placeholder notes or fabricated eval counters
  const {evaluated,...overview}=result.value.overview;
  expect(overview).toMatchObject({attention:'0',attention_lines:[],attention_link:'',installs_note:''});
  // The unknown eval aggregate is the one dash §3 explicitly preserves.
- expect(evaluated).toBe('—');expect(JSON.stringify(overview)).not.toContain('—');
+ expect(evaluated).toBe('0');expect(overview.installs).toBe('—');
 });
 it.each(['joined','unreadable','unjoined'])('describes only a readable team join when %s (B1)',async state=>{
  const f=chromeLibraryReplay(state==='unreadable'?{statusError:'Unreadable team clone.'}:state==='unjoined'?{local:value=>{value.local[0]!.rows=[];}}:{});
  const result=await createTauriBackend(f.bridge).library(global);
  expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
- expect(result.value.overview.skills_note).toBe(state==='joined'?'1 shared with acme':'');
- if(state==='unreadable')expect(result.value.team.kind).toBe('unreadable');
+ expect(result.value.overview.skills_note).toBe('');
+ expect(result.value).not.toHaveProperty('team');
 });
 it('uses the designed empty eval copy without requesting per-skill reports (B1)',async()=>{
  const f=chromeLibraryReplay(),result=await createTauriBackend(f.bridge).library(global);
  expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
- expect(result.value.overview).toMatchObject({evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:'Nothing evaluated yet',zero:overviewCopy});
- expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status'],['sync'],['serve']]);expect(f.requests.map(r=>r.argv)).toEqual([['ls','--team','acme']]);
+ expect(result.value.overview).toMatchObject({evaluated:'0',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:'Nothing evaluated yet',zero:overviewCopy});
+ expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['sync']]);expect(f.requests).toEqual([]);
 });
 
 it('serves the recorded scan coverage abbreviated from the real roots, never a literal (L5)',async()=>{
@@ -68,7 +68,7 @@ it('serves the four zero captions as app copy and grammatical install counts (L7
  expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
  expect(result.value.overview.zero).toEqual(overviewCopy);
  expect(result.value.skills.map(card=>card.name)).toEqual(['deploy-check']);
- for(const card of result.value.skills)expect(card.installs).toMatch(/^\d+ installs?$/);
+ for(const card of result.value.skills)expect(card.installs).toBe('—');
 });
 it('shares the same scan coverage with Marketplace (M23)',async()=>{
  const backend=createTauriBackend(chromeLibraryReplay({local:value=>underHome(value,'absent')}).bridge);

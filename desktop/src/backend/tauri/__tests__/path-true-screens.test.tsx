@@ -37,7 +37,7 @@ it('uses the placed scope for Remove and its dialog location', async () => {
 it.each(['/nowhere/x','/nowhere/ssm','/nowhere/mrf'])('renders the No such checkout error for an unregistered root: %s',async root=>{
  const f=installedReplay(),backend=createTauriBackend(f.bridge);
  open('#/library/checkout?root='+encodeURIComponent(root),backend);
- expect(await screen.findByRole('alert')).toHaveTextContent('No such checkout: '+root);
+ expect(await screen.findByRole('alert')).toHaveTextContent('No such project: '+root);
  expect(f.spawns.some(spawn=>spawn.args[1]==='project')).toBe(false);
 });
 it('shows the installed person action when the real catalog has scan roots', async () => {

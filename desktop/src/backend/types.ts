@@ -34,7 +34,8 @@ export type InstallState='placed'|'recorded'|'absent';/** Which detail backend c
  *  it. Never infer this from `project` — that field carries the root a folder lives in ('Global'
  *  or a checkout's basename), which no longer distinguishes the two. */
 export interface SkillCard {
- localEval:(ReceiptSummary & {runnerHandle:string|null})|null;localEvalStale:boolean;
+ edited:boolean;
+ localEval:(ReceiptSummary & {runnerHandle:string|null;version:string|null})|null;localEvalStale:boolean;
  /** Machine-local annotation from placements; never used for catalogue ordering or counts. */
  installedVersion:string|null;latestVersion:string|null;evalVersion:number|null;evalStale:boolean;latestEvalState:'ok'|'none'|'invalid'|null;profileVersion:string|null;
 teamed:boolean;path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:InstallState;placed:boolean;onDiskOnly:boolean;teamState:TeamState;paths:[string,string][];projectRoots?:string[];provenance?:CardProvenance|null;wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
@@ -80,12 +81,11 @@ export interface RootRemote {url:string;slug:string|null}
 /** §7.2 removed `detected`: every project root is here because the user added it. */
 export interface Root {id:string;kind:'global'|'checkout';label:string;root:string;rootState?:'scanned'|'absent'|'unreadable'|undefined;registered:boolean;count?:string|undefined;remote?:RootRemote|null|undefined}
 export type LibraryScope={kind:'global'}|{kind:'checkout';root:string};
-export type LibraryTeam={kind:'ok';team:string}|{kind:'none'}|{kind:'unreadable';message:string};
 export interface ProjectAdded {path:string;label:string;added:boolean}
 /** `project create`: the team project as team.json now holds it. A new project is always born with no skills. */
 export interface ProjectCreated {team:string;name:string;remotes:string[];skills:number}
 export interface ProjectRemoved {path:string;placementsRemaining:number}
-export interface Library {scanned:string[]|null;skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;provenance?:string|null;root:Root;team:LibraryTeam;problems?:readonly {source:string;message:string}[]}
+export interface Library {roots:Root[];scanned:string[]|null;skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;root:Root;problems?:readonly {source:string;message:string}[]}
 /** attention = failingEvals + updatesAvailable + notEvaluated; counts.Alerts = attention, counts.Updates = updatesAvailable. Absent CLI counters are omitted. */
 export type CloneState = {state:'absent'} | {state:'incomplete';reason:'not-a-repository'|'no-team-json'|'unverifiable';error?:string} | {state:'foreign'|'ok';origin:string};
 /** name comes from team.json via status; key is the config identifier. They may differ; there is no label. */
@@ -156,3 +156,5 @@ HOOK:Design['HOOK']|null;QUARANTINE:Design['QUARANTINE']|null;CLI_LATEST:string|
 // mock-only: the drawn specimen login (design INVITEE); the real adapter never sets it
 INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};
+
+export interface SkillFileResult {kind:'move'|'rename'|'delete';path:string;destination:string|null;quarantined:string|null;installed:boolean;notices:string[]}

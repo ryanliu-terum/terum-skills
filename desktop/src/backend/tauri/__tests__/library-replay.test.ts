@@ -25,12 +25,12 @@ it('replays roots and authoritative skill-folder counts, including a name mismat
  const {backend}=replay();const status=await backend.status();
  expect(status).toMatchObject({ok:true,value:{counts:{Global:'2'},roots:[{id:'global',kind:'global',root:'~/.claude/skills',count:'2'},{id:path,kind:'checkout',label:'app',root:path,registered:true,count:'2',rootState:'scanned'}]}});
  const library=await backend.library({scope:{kind:'global'}});
- expect(library).toMatchObject({ok:true,value:{root:{id:'global',label:'Global',count:'2'},title:'2 skills',team:{kind:'none'},skills:[{name:'alpha',project:'Global',path:home+'/.claude/skills/alpha',flags:['local'],placed:false},{name:'beta',project:'Global',flags:['broken'],flagText:{broken:'Not connectable · SKILL.md name not-beta does not equal folder beta'}}]}});
+ expect(library).toMatchObject({ok:true,value:{root:{id:'global',label:'Global',count:'2'},title:'2 skills',skills:[{name:'alpha',project:'Global',path:home+'/.claude/skills/alpha',flags:['local'],placed:false},{name:'beta',project:'Global',flags:['broken'],flagText:{broken:'SKILL.md name not-beta does not equal folder beta'}}]}});
  // Re-recorded from the B1 CLI (Ryan's ruling, 2026-09-11), so the capture now carries description and
  // characters and the Library shows both instead of degrading to a dash. Nothing is shared, so installs is 0.
  // §7.4: the Library builder makes no team claim — `localCard`'s old `local ? '0 installs' : '—'`
 // collapses to the dash, because §12 deletes `connect`/`config.shared`, the predicate it keyed on.
- expect(library.value?.skills.every(s=>s.desc==='A fixture skill used by the desktop replay captures.'&&s.size!=='—'&&s.installs==='—')).toBe(true);
+ expect(library.value?.skills.every(s=>(s.name==='beta'?s.desc.includes('SKILL.md name not-beta'):s.desc==='A fixture skill used by the desktop replay captures.')&&s.size!=='—'&&s.installs==='—')).toBe(true);
  const checkout=await backend.library({scope:{kind:'checkout',root:path}});
  expect(checkout.value?.skills.map(s=>s.name)).toEqual(['delta','gamma']);
  expect(checkout.value?.skills.every(s=>!s.placed)).toBe(true);
@@ -57,7 +57,7 @@ it.each(['alpha','beta'])('serves the recorded %s local detail without fabricati
  // renders a document the CLI did not send.
  const frontmatter=`---\nname: ${name==='beta'?'not-beta':name}\ndescription: A fixture skill used by the desktop replay captures.\n---`;
  expect(detail).toMatchObject({ok:true,value:{name,path:folder,pathLabel:'~/.claude/skills/'+name,team:null,skillRef:'local:'+folder,skillMd:{frontmatter,body:[],markdown:null},repo:null,installScopes:[]}});
- if(name==='beta')expect(detail.value?.flagText.broken).toContain('Not connectable');
+ if(name==='beta')expect(detail.value?.flagText.broken).toContain('SKILL.md name not-beta does not equal folder beta');
 });
 it('reports only unknown folders as not-in-library and never enriches their team',async()=>{
  const {backend,spawns}=replay();
