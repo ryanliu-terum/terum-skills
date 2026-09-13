@@ -40,7 +40,8 @@ it.each([undefined,'Global'])('installs into global explicitly for scope %s', as
   const f = detailReplay();
   const result = await createTauriBackend(f.bridge).install({ref:'tdd',team:'acme',...(scope ? {scope} : {})}).done;
   expect(result).toMatchObject({ok:true,value:[{scope:'Global'}]});
-  expect(f.spawns.map(spawn => spawn.args)).toEqual([['install','--team','acme','--into','global','--','tdd']]);
+  // The mutation's hello advertises `refresh`, so one background `sync` follows it (index.ts onHello).
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['install','--team','acme','--into','global','--','tdd'],['sync']]);
 });
 it('maps a scanned project label to its absolute destination for install and removal', async () => {
   const f = detailReplay((name,value) => {
@@ -57,7 +58,7 @@ it.each(['nope','seed'])('refuses unknown or absent install destination %s befor
   const f = detailReplay();
   const run = createTauriBackend(f.bridge).install({ref:'tdd',scope});
   expect(await run.done).toEqual({ok:false,error:`Unknown install destination ${scope}.`});
-  expect(f.spawns.map(spawn => spawn.args)).toEqual([['ls','--local']]);
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['ls','--local'],['sync']]);
   const frames=[];for await (const frame of run.frames) frames.push(frame);
   expect(frames).toEqual([{t:'result',ok:false,error:`Unknown install destination ${scope}.`}]);
 });
@@ -117,7 +118,7 @@ it.each(['duplicate','missing-root'])('refuses an ambiguous or incomplete projec
 it('does not install when reading destinations fails',async()=>{
   const f=detailReplay((name,_value,frame)=>{if(name==='ls-local'){frame.ok=false;frame.error='Destination scan failed.';delete frame.value;}});
   expect(await createTauriBackend(f.bridge).install({ref:'tdd',scope:'seed'}).done).toMatchObject({ok:false,error:expect.stringMatching(/^Destination scan failed\./)});
-  expect(f.spawns.map(spawn=>spawn.args)).toEqual([['ls','--local']]);
+  expect(f.spawns.map(spawn=>spawn.args)).toEqual([['ls','--local'],['sync']]);
 });
 it('omits an unknown author handle and remote rather than inventing a share ref',async()=>{
   const f=detailReplay((name,value)=>{

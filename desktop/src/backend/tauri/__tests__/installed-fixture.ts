@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fakeBridge } from './fake-bridge';
+import { underFakeHome } from './recording';
 
+/** installed-state's scans and m7-S7b's team reads, each moved under the fake home (recording.ts) so the S7b ledger placement and the installed-state row name the same folder, as they did on the machine they describe. */
 export function installedReplay(local = 'on-disk-only', member = 'none', change?: (frame: Record<string, unknown>) => void, changeStatus?: (frame: Record<string, unknown>) => void) {
  return fakeBridge((args, emit) => {
   if(args[0] === 'validate') { emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'validate',ok:true,exitCode:0,value:{name:'deploy-check',findings:0,warnings:0}})});return; }
@@ -20,7 +22,7 @@ export function installedReplay(local = 'on-disk-only', member = 'none', change?
    }
    return [];
   };
-  for(const line of readFileSync(resolve('../.planning/codex-runs',file+'.jsonl'),'utf8').trim().split('\n')) {
+  for(const line of underFakeHome(readFileSync(resolve('../.planning/codex-runs',file+'.jsonl'),'utf8').trim().split('\n'))) {
    const frame = JSON.parse(line) as Record<string, unknown>;
    if(frame.t==='hello') (frame.features as Record<string,boolean>).localIdentity=true;
    if(frame.t==='result' && !scan && !person && args[0]==='ls') {

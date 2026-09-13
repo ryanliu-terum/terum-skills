@@ -4,6 +4,9 @@ import { overviewCopy } from '../../../lib/overview-copy';
 import { chromeLibraryReplay, underHome } from './chrome-library-fixture';
 
 const global = {scope:{kind:'global'} as const};
+// The re-recorded hello advertises `refresh` and `serve`: the first hello triggers one background `sync`
+// (index.ts onHello), and every read after it goes over one `serve` child as a request, not a spawn
+// (session.ts) — so `ls --team acme` is in `f.requests`, and the spawn list ends `sync`, `serve`.
 
 it.each(['update-available','both'])('counts only available attention data with a second %s row (B1)',async health=>{
  const f=chromeLibraryReplay({local:value=>{
@@ -14,7 +17,7 @@ it.each(['update-available','both'])('counts only available attention data with 
  expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
  expect(result.value.skills).toHaveLength(3);
  expect(result.value.overview).toMatchObject({attention:'3',attention_lines:['2 updates available','1 broken'],attention_link:''});
- expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status'],['ls','--team','acme']]);
+ expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status'],['sync'],['serve']]);expect(f.requests.map(r=>r.argv)).toEqual([['ls','--team','acme']]);
 });
 it('reports zero attention without placeholder notes or fabricated eval counters (B1)',async()=>{
  const result=await createTauriBackend(chromeLibraryReplay().bridge).library(global);
@@ -35,7 +38,7 @@ it('uses the designed empty eval copy without requesting per-skill reports (B1)'
  const f=chromeLibraryReplay(),result=await createTauriBackend(f.bridge).library(global);
  expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
  expect(result.value.overview).toMatchObject({evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:'Nothing evaluated yet',zero:overviewCopy});
- expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status'],['ls','--team','acme']]);
+ expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status'],['sync'],['serve']]);expect(f.requests.map(r=>r.argv)).toEqual([['ls','--team','acme']]);
 });
 
 it('serves the recorded scan coverage abbreviated from the real roots, never a literal (L5)',async()=>{
@@ -48,7 +51,8 @@ it('leaves a root outside the home directory unabbreviated',async()=>{
  const backend=createTauriBackend(chromeLibraryReplay().bridge);
  const result=await backend.library(global);
  expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
- expect(result.value.scanned).toHaveLength(2);
+ // §7.2: the re-recorded scan lists the Global root alone — the fixture registers no checkout.
+ expect(result.value.scanned).toHaveLength(1);
  for(const root of result.value.scanned??[])expect(root).not.toContain('~');
  expect(result.value.scanned?.[0]).toMatch(/\/\.claude\/skills$/);
 });

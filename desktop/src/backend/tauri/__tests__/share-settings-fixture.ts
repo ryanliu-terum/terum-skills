@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fakeBridge } from './fake-bridge';
+import { underFakeHome } from './recording';
 
 export function shareSettingsReplay(change?: (frame: Record<string, unknown>, name: string) => void) {
  return fakeBridge((args, emit) => {
   const name = args[0] === 'ls' ? args.includes('--local') ? 'ls-local' : 'ls' : args[0]!;
-  for (const line of readFileSync(resolve('../.planning/codex-runs/mock-vs-real-2026-09-09/frames', name + '.jsonl'), 'utf8').trim().split('\n')) {
+  for (const line of underFakeHome(readFileSync(resolve('../.planning/codex-runs/mock-vs-real-2026-09-09/frames', name + '.jsonl'), 'utf8').trim().split('\n'))) {
    const frame = JSON.parse(line) as Record<string, unknown>;
    if (frame.t === 'result' && name === 'status') {
     delete ((frame.value as {ledger?:Record<string,unknown>}).ledger?.shared);

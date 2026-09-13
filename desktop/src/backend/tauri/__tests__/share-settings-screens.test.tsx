@@ -34,8 +34,9 @@ it('renders tracked placements and refuses a prune URL when quarantine is unread
  expect(screen.getByText('Quarantine contents are not reported by this terum-skills version.')).toBeVisible();
  expect(screen.getByText('No tool approvals recorded.')).toBeVisible();expect(screen.queryByRole('dialog')).toBeNull();
 });
-it('renders installed and observed release versions',async()=>{
- open('#/settings/updates');expect(await screen.findByText('0.1.7 installed · up to date')).toBeVisible();
+// The re-recorded `update` ran offline against the fixture's local remote: running 0.14.0, no release observed.
+it('renders the installed version and the recorded unknown release observation',async()=>{
+ open('#/settings/updates');expect(await screen.findByText('0.14.0 installed · latest unknown')).toBeVisible();
  expect(screen.getByText(/1 placement on this machine/)).toBeVisible();
 });
 it('does not advertise a release before checking',async()=>{
@@ -63,10 +64,10 @@ it('draws unknown status with a muted alert icon',()=>{
  expect(container.querySelector('svg')?.innerHTML).toBe(ICON_PATHS.alert);
 });
 it.each([
- ['newer','0.1.8','0.1.7 installed · 0.1.8 available'],
- ['older','0.1.6','0.1.7 installed · newer than the advertised 0.1.6'],
- ['unknown',null,'0.1.7 installed · latest unknown'],
- ['newer',null,'0.1.7 installed · latest unknown'],
+ ['newer','0.1.8','0.14.0 installed · 0.1.8 available'],
+ ['older','0.1.6','0.14.0 installed · newer than the advertised 0.1.6'],
+ ['unknown',null,'0.14.0 installed · latest unknown'],
+ ['newer',null,'0.14.0 installed · latest unknown'],
 ])('renders the %s update observation from its values',async(observation,latest,summary)=>{
  open('#/settings/updates',(frame,name)=>{if(frame.t==='result'&&name==='update')Object.assign(frame.value as Record<string,unknown>,{observation,latest});});
  expect(await screen.findByText(summary!)).toBeVisible();
@@ -74,7 +75,7 @@ it.each([
 it('keeps release description and advice in the update dialog',async()=>{
  open('#/settings/updates?dialog=update');
  const dialog=await screen.findByRole('dialog');
- expect(within(dialog).getByText('Latest advertised release: 0.1.7 (observed 2026-09-09T08:33:14.426Z)')).toBeVisible();
+ expect(within(dialog).getByText('Release advertisements are not checked on this machine.')).toBeVisible();
  expect(dialog).toHaveTextContent('Running from a source checkout.');
 });
 

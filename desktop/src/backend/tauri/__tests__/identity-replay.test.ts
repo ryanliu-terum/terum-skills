@@ -22,10 +22,12 @@ it('replays the real login write and proves that only display_name bytes changed
     ok: true,
     value: {
       updated: [{ key: 'name', value: 'Seed2' }],
-      notice: 'This changes the author line (Seed2 <seed@example.com>) that the next sync writes into the skills you have connected on this machine; skills you authored elsewhere keep their recorded author.',
+      // The 0.14.0 CLI's wording (src/commands/login.ts): publish, not sync, is what writes the author line now.
+      notice: 'This changes the author line (Seed2 <seed@example.com>) that publish writes into the skills you publish from this machine; versions already published keep their recorded author.',
     },
   });
-  expect(f.spawns.map(spawn => spawn.args)).toEqual([['login', '--set', 'name=Seed2']]);
+  // The write's hello advertises `refresh`, so the adapter follows it with one background `sync` (index.ts onHello).
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['login', '--set', 'name=Seed2'], ['sync']]);
 });
 
 it.each([['status-before', 'Seed'], ['status-after', 'Seed2']])('replays %s through the served status (S7k) and shows the identity the CLI recorded', async (name, displayName) => {

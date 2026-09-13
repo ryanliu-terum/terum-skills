@@ -11,6 +11,10 @@ import { createTauriBackend } from '../index';
 import { inventoryReplay, marketplaceRecorded } from './inventory-replay';
 
 afterEach(() => { cleanup(); location.hash = ''; localStorage.clear(); });
+const s7g = resolve('../.planning/codex-runs/m7-S7g/frames');
+const s7gResult = (name: string) => JSON.parse(readFileSync(resolve(s7g, name + '.jsonl'), 'utf8').trim().split('\n').at(-1)!) as { value: Record<string, unknown> };
+/** The fixture's seed repository — the folder the CLI ran in (record.sh), registered nowhere: §7.2 lists registered checkouts only. */
+const seedRepo = ((s7gResult('ls-local').value as { local: { root: string }[] }).local[0]!.root).replace(/\/home\/\.claude\/skills$/, '/repo/seed');
 function open(route: string, marketplace = false) {
   useUiStore.setState({ railOpen: true, overviewHidden: false });
   const f = inventoryReplay(marketplace ? marketplaceRecorded : name => readFileSync(resolve('../.planning/codex-runs/m7-S7g/frames', name + '.jsonl'), 'utf8').trim().split('\n'));
@@ -18,22 +22,25 @@ function open(route: string, marketplace = false) {
   render(<BackendContext value={createTauriBackend(f.bridge)}><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Tooltip.Provider><App/></Tooltip.Provider></QueryClientProvider></BackendContext>);
   return f;
 }
-it('renders recorded Library cards and the real project registry without favorite controls or sample provenance', async () => {
+it('renders recorded Library cards without favorite controls, sample provenance, or a checkout the registry does not hold', async () => {
   open('#/library/global');
   expect(await screen.findByText('1 skill · 1 shared with acme')).toBeVisible();
   expect(within(document.querySelector('.board-view-header') as HTMLElement).getByText('Global')).toBeVisible();
   const card = screen.getByTestId('skill-card-deploy-check');
   expect(within(card).getByText('Use this skill when a deploy needs a pre-flight checklist.')).toBeVisible();
   expect(within(card).queryByRole('button', { name: 'Favorite deploy-check' })).toBeNull();
-  expect(screen.getByRole('link', { name: 'seed' })).toHaveAttribute('href', '#/library/checkout?root='+encodeURIComponent('/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'));
+  // §7.2: `ls --local` lists registered checkouts only, and the S7g fixture registers none — the derived frames' cwd-detected `seed` link is gone with them.
+  expect(screen.queryByRole('link', { name: 'seed' })).toBeNull();
   expect(screen.queryByRole('link', { name: 'SSM' })).toBeNull();
   expect(screen.queryByText(/sonnet · agent CLI/)).toBeNull();
 });
-it('renders recorded markdown and validation, omitting unknown counts and fabricated frontmatter', async () => {
+it('renders recorded markdown, validation and the recorded frontmatter, omitting unknown counts', async () => {
   const f = open('#/skill/deploy-check');
   // The body-derived description now equals the markdown's first paragraph, so the text appears twice.
   expect((await screen.findAllByText('Use this skill when a deploy needs a pre-flight checklist.'))[0]).toBeVisible();
-  expect(screen.queryByTestId('frontmatter')).toBeNull();
+  // The re-recorded `ls` carries the skill's frontmatter verbatim; the page shows exactly those bytes.
+  const frontmatter = (s7gResult('ls').value as { skills: { name: string; frontmatter: string }[] }).skills.find(skill => skill.name === 'deploy-check')!.frontmatter;
+  expect(screen.getByTestId('frontmatter').textContent).toBe(frontmatter);
   expect(screen.queryByText(/184 lines/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Favorite skill' })).toBeNull();
   fireEvent.click(screen.getByRole('tab', { name: 'Quality' }));
@@ -41,7 +48,8 @@ it('renders recorded markdown and validation, omitting unknown counts and fabric
   expect(screen.queryByText(/12 days ago/)).toBeNull();
   expect(screen.queryByText('none')).toBeNull();
   expect(screen.getByText('No tool grants requested')).toBeVisible();
-  expect(f.spawns.find(spawn => spawn.args[0] === 'validate')?.args).toEqual(['validate', '--team', 'acme', '--', 'deploy-check']);
+  // `validate` is a session read verb: after the first hello it is a request over the `serve` child, not a spawn.
+  expect(f.requests.find(request => request.argv[0] === 'validate')?.argv).toEqual(['validate', '--team', 'acme', '--', 'deploy-check']);
 });
 it('omits the missing-project crumb instead of drawing a dash segment', async () => {
   open('#/skill/diagnose');
@@ -53,10 +61,10 @@ it('shows unknown quarantine contents without a fabricated folder count', async 
   expect(await screen.findByText('Quarantine contents are not reported by this terum-skills version.')).toBeVisible();
   expect(screen.queryByText(/folders · —/)).toBeNull();
 });
-it('preserves the project route key when the displayed title is capitalized', async () => {
-  const f = open('#/library/checkout?root='+encodeURIComponent('/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'));
-  expect(await screen.findByText('0 skills')).toBeVisible();
-  expect(within(document.querySelector('.board-view-header') as HTMLElement).getByText('seed')).toBeVisible();
+it('refuses the fixture\'s unregistered seed checkout route without spawning project', async () => {
+  // The derived frames listed this folder as a detected checkout; the re-recorded scan (§7.2) does not, so the route is refused as the adapter refuses any root outside the scan (index.ts library()).
+  const f = open('#/library/checkout?root='+encodeURIComponent(seedRepo));
+  expect(await screen.findByRole('alert')).toHaveTextContent('No such checkout: '+seedRepo);
   expect(screen.queryAllByTestId(/^skill-card-/)).toHaveLength(0);
   expect(f.spawns.some(spawn => spawn.args[1] === 'project')).toBe(false);
 });
@@ -66,7 +74,8 @@ it('renders the real machine placement table from typed provenance, in the board
   const row=await screen.findByTestId('placement-row-0');
   expect(row).toHaveTextContent('deploy-check');expect(row).toHaveTextContent('up to date');
   expect(row).toHaveTextContent('tracking');expect(row).not.toHaveTextContent('In sync');
-  expect(screen.getByText(/1 placed · — global · 0 pinned/)).toBeVisible();
+  // The footer's global count is the CLI's recorded `counts` for the Global root (one folder), no longer a dash.
+  expect(screen.getByText(/1 placed · 1 global · 0 pinned/)).toBeVisible();
   expect(screen.queryByRole('alert')).toBeNull();
 });
 

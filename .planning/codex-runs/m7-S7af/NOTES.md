@@ -6,4 +6,4 @@
 - Merge: origin/main (S7ag) merged into the branch; `fake-bridge.ts` took S7ag's shape (spawn returns an unlisten spy; exposes unlisten and emit); `index.test.ts` keeps S7af's tests plus S7ag's spawn-rejection describe. Gates re-run after the fix.
 - Maintainer edits in this PR: GAPS.md re-anchored at b7be3c5 with the M7 status paragraph and the PF-08 line.
 - What lights: nothing yet by design. The real adapter still serves no read model, so the real app now shows Library ▸ Global only (every gap surface hidden), which is the North Star's honest state until S7f/S7k/S7b serve data.
-- Derived to layout 3 by hand on 2026-09-12/13, not a recording; re-recording owed (D70, .planning/decisions/2026-09-13-refactor-unblock-decision-walk.md).
+- Re-recorded 2026-09-13 from fixture.sh (layout 3) by record.sh with the CLI at f2089dd; kept as-is: none — all six frames are recordings.

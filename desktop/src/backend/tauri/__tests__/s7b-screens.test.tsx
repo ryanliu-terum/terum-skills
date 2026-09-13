@@ -38,11 +38,12 @@ it('serves Members with committed labels, no project column, and the permission 
   // The inert removal control was pulled; `terum-skills team remove` is the way until it works end to end.
   expect(within(row).queryByRole('button', { name: 'Remove from team' })).toBeNull();
 });
-// These frames were recorded from a CLI that reported neither field: the row must say '—', never 0 or a date.
-it('shows no join date and no skill total when the CLI reports neither', async () => {
+// The re-recorded status carries each member's `joined` (the fixture's pinned seed date) and no `skillsTotal`:
+// the row shows the date it was given and '—' for the total, never a 0 nobody reported.
+it('shows the recorded join date and no skill total when the CLI reports none', async () => {
   open('#/share');
   const cells = within(await screen.findByTestId('member-row-0')).getAllByRole('cell');
-  expect(cells[2]).toHaveTextContent('—');
+  expect(cells[2]).toHaveTextContent('2026-09-08');
   expect(cells[3]).toHaveTextContent('—');
 });
 it('renders the join date and the skill total the CLI reports', async () => {

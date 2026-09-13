@@ -19,7 +19,7 @@ function fixture(options: { advertised?: boolean; silent?: boolean; onRequest?: 
   const f = fakeBridge((argv, emit) => {
     if (argv[0] === 'serve') { if (!options.silent) emit(stdout(hello)); }
     else { emit(stdout({ ...hello, features: { serve: options.advertised !== false } })); emit(stdout({ t: 'result', verb: argv[0], ok: true, value: argv })); emit({ kind: 'exit', code: 0 }); }
-  });
+  }, STATE, { serve: 'script' });
   const spawn = f.bridge.spawn;
   f.bridge.spawn = async (id, at, argv, cwd, emit) => { events.set(id, emit); return spawn(id, at, argv, cwd, emit); };
   f.bridge.readAppState = async () => state;
@@ -217,7 +217,7 @@ it('adapter reads and stale revalidation reuse serve while old-CLI replay remain
       for (const frame of transcript(argv)) if (frame.t !== 'hello') emit(stdout(frame));
       emit({ kind: 'exit', code: 0 });
     }
-  });
+  }, STATE, { serve: 'script' });
   const requests: Request[] = [];
   f.bridge.write = async (_id, line) => {
     const request = JSON.parse(line) as Request;

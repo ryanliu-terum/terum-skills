@@ -35,10 +35,25 @@ drive() { local out=$1; shift; node "$FX/drive.cjs" "$CLI" "$OUT/$out" "${ANSWER
 # A machine that has never run setup: no config.json at all (status-zero reports teams [] and identity null).
 ZERO_HOME="$FX/home-zero"; rm -rf "$ZERO_HOME"; mkdir -p "$ZERO_HOME"
 HOME="$ZERO_HOME" GH_CONFIG_DIR="$ZERO_HOME/.config/gh" rec status-zero.jsonl status
+# Guard (stage 2): the two creator-path frames below need a LOGGED-IN gh. When gh is logged out the CLI refuses at
+# its GitHub check and the driver still exits 0, so an unguarded run would overwrite both committed recordings with
+# that refusal. Each is therefore recorded to a pending file and moved into place only when the fresh recording
+# carries the print "GitHub: gh is logged in."; otherwise the committed frame is left untouched and a SKIPPED line
+# says so. Logging gh in is never attempted here.
+drive_logged_in() {
+  local out=$1; shift; local pending="$FX/pending-$out"
+  node "$FX/drive.cjs" "$CLI" "$pending" "${ANSWERS:-[]}" "$@" || true
+  if grep -qF '"line":"GitHub: gh is logged in."' "$pending"; then
+    mv "$pending" "$OUT/$out"
+  else
+    echo "SKIPPED $out: gh is not logged in under the borrowed config (no \"GitHub: gh is logged in.\" print); the committed frame is kept as-is" >&2
+    rm -f "$pending"
+  fi
+}
 # The create fork: "Create a new team" chosen, gh logged in, then stdin closed at "Team name".
-( logged_in_gh; HOME="$ZERO_HOME" ANSWERS='["Create a new team"]' drive setup-create-fork.jsonl setup )
+( logged_in_gh; HOME="$ZERO_HOME" ANSWERS='["Create a new team"]' drive_logged_in setup-create-fork.jsonl setup )
 # The join hand-off: "Join an existing team" chosen; setup prints the owner-command hint and writes nothing (gh is never probed on this path).
 HOME="$ZERO_HOME" GH_CONFIG_DIR="$ZERO_HOME/.config/gh" ANSWERS='["Join an existing team"]' drive setup-join-handoff.jsonl setup
 # Resume on the configured machine (team acme, gh logged in): the recorded answers were q1 "" (invite), q2 false (hook),
 # q3 false (Claude skill); today's setup also asks the project-folder and eval offers, answered here with their skip choices.
-( logged_in_gh; ANSWERS='["", false, "Skip", false, false]' drive setup-resume.jsonl setup )
+( logged_in_gh; ANSWERS='["", false, "Skip", false, false]' drive_logged_in setup-resume.jsonl setup )

@@ -580,6 +580,40 @@ ruling; the calls the rulings left open, taken as follows.
 **Owed, not fixed here:** `setup.ts:333-335` + `eval.ts:490 versionProblem` dead code; the
 `preserveUnchanged` observation above.
 
+## A18 — B4's confirmation pass dispositions, and what the frame re-recording still owes
+
+**B4 confirmation pass (`wf_b9a72b49-3ec`, base `3460e0d`, 2026-09-13 03:15 PDT): 0 critical/high.**
+- *Medium, deferred:* in the demo backend the non-ME person pages' `buckets`/`onDisk` are computed once
+  from the fixture and never re-derived after a session install or removal (D65's sibling for people;
+  it reaches `personStatus()` and so the person page's Install/Remove primary). Not applied — the
+  harden loop never applies mediums, and the D53 bar is met. **Gate:** D64's tripwire (the first locked
+  board or desktop test that needs live per-person install state); fix shape = recompute both after
+  `withInstall`/`removalState` in the `catalog` handler, as D65 did for the stale-eval overlay.
+- *Contested 1-2, declined by ruling:* "the mock's `installable`/buckets model authorship, not
+  `installed[]`/`profile[]`" restates D64's option B, which Ryan gated behind the same tripwire.
+
+**Frame re-recording (D70 delegate, D77; stage 1 `bba1eae`, stage 2 this commit).** Fifteen drivers
+re-recorded 91 frames from layout-3 fixtures with the CLI at `f2089dd`; every difference from the
+derived frames is the CLI's real output. Still owed, none gating B5:
+1. **m7-S7q** — the thirteenth derived set; stage 1 gave it no fixture (an orchestration omission —
+   it has neither a `fixture.sh` nor a consumer beyond `features.test.ts`'s hello read). Labelled
+   honestly as still derived. Fixture shape = m7-S7ad's.
+2. **first-run-in-app `setup-create-fork.jsonl` / `setup-resume.jsonl`** — the creator path needs a
+   logged-in gh under the fixture HOME; the driver now records them only when the fresh recording
+   prints "GitHub: gh is logged in." and otherwise leaves the 0.1.7 recordings. Re-record on a
+   machine where `gh auth status` succeeds under a foreign HOME (e.g. `GH_TOKEN` exported).
+3. **Deleted-verb frames kept:** `m7-S7b/decline.jsonl` (`decline` is gone, §12) and
+   `m7-S7d/decline.jsonl` (`connect` is gone); `replay.test.ts` still pins the latter's error text.
+   A layout-3 substitute is a re-pin, not a recording — B5/B6's call.
+4. **Reproducibility hygiene:** 31 frames and S7c's `config-{before,after}.json` bake in the recording
+   session's scratch root, and `mock-vs-real` `update.jsonl` bakes in this checkout's `dist` path — as
+   the old recordings did. A driver that normalises the fixture root to a fixed path would make
+   re-runs byte-identical across machines; readers already rewrite the root, so no pin depends on it.
+5. **Adapter observation from the re-pins:** with a 0.14.0 hello (`refresh:true`) the adapter spawns
+   one background `sync` after the FIRST hello without consulting `workflowGate.busy()`
+   (`desktop/src/backend/tauri/index.ts` `onHello`), so a fetch can run concurrently with a write when
+   the mutation is the session's first CLI process. The pins document current behaviour; B5/B6 look.
+
 ## A19 — The B3 fix commit's own confirmation pass: two highs fixed, one adjacent medium taken, three coverage mediums deferred
 
 **Pass `wf_e3862d60-9ba` (base `c960998`, 2026-09-13 03:30 PDT): 0 critical, 2 high, 4 medium, all 3-0.**

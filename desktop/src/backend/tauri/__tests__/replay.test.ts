@@ -15,6 +15,9 @@ const s7dDirectory = resolve('../.planning/codex-runs/m7-S7d/frames');
 function recorded(name: string) {
   return readFileSync(resolve(name === 'usage-error' || name === 'decline' ? s7dDirectory : directory, name + '.jsonl'), 'utf8').trim().split('\n');
 }
+/** The fixture's seed repository — the folder the CLI ran in (record.sh), registered nowhere: §7.2 lists registered checkouts only, so the adapter refuses it like any root outside the scan. */
+const seedRepo=((JSON.parse(recorded('ls-local').at(-1)!) as {value:{local:{root:string}[]}}).value.local[0]!.root).replace(/\/home\/\.claude\/skills$/,'/repo/seed');
+const noSuchCheckout=(root:string)=>({ok:false,error:'No such checkout: '+root+' · Register it under Settings ▸ This machine ▸ Checkouts.'});
 // S7f's recording predates the S7k status payload (no ledger, identity or tools): the older schema the served surface must refuse.
 function olderStatus() {
   return readFileSync(resolve('../.planning/codex-runs/m7-S7f/frames/status.jsonl'), 'utf8').trim().split('\n');
@@ -71,20 +74,22 @@ function s7gReplay() {
     for(const line of recorded(name))emit({kind:'stdout',line});
   });
 }
-it('replays the rebuilt fixture through Global and checkout scopes and Skill detail',async()=>{
+it('replays the rebuilt fixture through the Global scope and Skill detail, refusing its unregistered seed checkout',async()=>{
   const backend=createTauriBackend(s7gReplay().bridge);
   const library=await backend.library({scope:{kind:'global'},team:'acme'});
-  expect(library).toMatchObject({ok:true,value:{title:'1 skill · 1 shared with acme',root:{id:'global',kind:'global',label:'Global',count:undefined},team:{kind:'ok',team:'acme'},skills:expect.arrayContaining([expect.objectContaining({name:'deploy-check',desc:'Use this skill when a deploy needs a pre-flight checklist.',normalizedGrants:'none',installed:'placed',installsN:2})])}});
+  // The root's count is the CLI's recorded `counts.skillFolders` for the Global scan (one folder).
+  expect(library).toMatchObject({ok:true,value:{title:'1 skill · 1 shared with acme',root:{id:'global',kind:'global',label:'Global',count:'1'},team:{kind:'ok',team:'acme'},skills:expect.arrayContaining([expect.objectContaining({name:'deploy-check',desc:'Use this skill when a deploy needs a pre-flight checklist.',normalizedGrants:'none',installed:'placed',installsN:2})])}});
   const detail=await backend.skill({ref:'deploy-check'});if(!detail.ok)throw new Error(detail.error);
   const resultFrame=recorded('ls').map(line=>JSON.parse(line) as {t:string;value?:{skills:{name:string;updated:string;grantsHash:string}[]}}).find(frame=>frame.t==='result');
   const row=resultFrame?.value?.skills.find(row=>row.name==='deploy-check');
   expect(detail.value.updated).toBe(row?.updated);expect(detail.value.updated).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   expect(detail.value.grantsHash).toBe(row?.grantsHash);
   expect(detail.value).toMatchObject({desc:'Use this skill when a deploy needs a pre-flight checklist.',grants:[],users:[['seed','S','Global · since 2026-08-20'],['mira','MC','Global · since 2026-08-25']],skillMd:{markdown:'# deploy-check\n\nUse this skill when a deploy needs a pre-flight checklist.\n\n1. Step one.\n2. Step two.\n'},receipt:null,lines:6,favorites:null});
-  const project=await backend.library({scope:{kind:'checkout',root:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'},team:'acme'});expect(project).toMatchObject({ok:true,value:{title:'0 skills',skills:[],root:{id:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed',kind:'checkout',label:'seed'}}});
+  const project=await backend.library({scope:{kind:'checkout',root:seedRepo},team:'acme'});expect(project).toEqual(noSuchCheckout(seedRepo));
   expect(await backend.library({scope:{kind:'global'},team:'acme'})).toMatchObject({ok:true,value:{skills:[{name:'deploy-check'}]}});
   const member=recorded('ls-member-mira').map(line=>JSON.parse(line) as {t:string;value?:unknown}).find(frame=>frame.t==='result');
-  expect(member?.value).toMatchObject({member:{handle:'mira',declined:[]},projects:[{name:'terum'}]});
+  // The 0.14.0 `ls member` lists the Global project ahead of terum (cliProject).
+  expect(member?.value).toMatchObject({member:{handle:'mira',declined:[]},projects:[{name:'Global'},{name:'terum'}]});
 });
 
 it('replays S7g local frames through settings: the real placement path, name, tracking version and drawn state',async()=>{
@@ -112,19 +117,19 @@ it('replays the rebuilt ls recording through the read consumer', async () => {
 });
 
 
-it('serves scoped folder titles and best-effort team enrichment',async()=>{
+it('serves the Global folder title with best-effort team enrichment and refuses an unregistered checkout',async()=>{
  const backend=createTauriBackend(s7gReplay().bridge);
  const global=await backend.library({scope:{kind:'global'},team:'acme'});
- const project=await backend.library({scope:{kind:'checkout',root:'/private/tmp/claude-501/-Users-ryanliu-Documents-Terum-skill-management-software/531442ce-3f4e-40d8-93ca-3e9bdddfd46a/scratchpad/fx/repo/seed'},team:'acme'});
+ const project=await backend.library({scope:{kind:'checkout',root:seedRepo},team:'acme'});
  expect(global).toMatchObject({ok:true,value:{title:'1 skill · 1 shared with acme',team:{kind:'ok',team:'acme'},overview:{skills_note:'1 shared with acme',installs:'2',evaluated:'—',attention:'0'}}});
- expect(project).toMatchObject({ok:true,value:{title:'0 skills',team:{kind:'ok',team:'acme'},overview:{skills_note:'',installs:'0',evaluated:'—',attention:'0'}}});
+ expect(project).toEqual(noSuchCheckout(seedRepo));
 });
 it('serves no default eval k from the real backend',async()=>{
  expect(await createTauriBackend(inventoryReplay(recorded).bridge).settings()).toMatchObject({ok:true,value:{K:null}});
 });
 
 
-it('derives Marketplace metadata and counts from the 0.1.7 recordings', async () => {
+it('derives Marketplace metadata and counts from the re-recorded (0.14.0) mock-vs-real frames', async () => {
   vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-10T08:33:11Z'));
   const f = inventoryReplay(), backend = createTauriBackend(f.bridge);
   const result = await backend.catalog();
@@ -193,8 +198,9 @@ it('selects newest valid authored timestamps and leaves an empty project unknown
     }
     // §8.4: authorship is resolved by the CLI and arrives on the team read, so "ravi authored
     // nothing" is now expressed there rather than by emptying a per-member reply.
+    // The 0.14.0 `ls` lists the Global project first (cliProject), so the terum project is found by name.
     if (name === 'ls') {
-      value.projects![0]!.skills = [];
+      value.projects!.find(project => project.name === 'terum')!.skills = [];
       for (const person of value.people ?? []) if (person.handle === 'ravi') person.authored = [];
     }
   });
@@ -202,14 +208,14 @@ it('selects newest valid authored timestamps and leaves an empty project unknown
   if (!result.ok) throw new Error(result.error);
   expect(result.value.people.find(p => p.handle === 'mira')?.publishLine).toBe('Published deploy-check · 1 day ago');
   expect(result.value.people.find(p => p.handle === 'ravi')).toMatchObject({ publishLine: 'Nothing shared yet', lastPublish: '—' });
-  expect(result.value.projects[0]).toMatchObject({ updated: null, path: null, installed: false });
+  expect(result.value.projects.find(p => p.name === 'terum')).toMatchObject({ updated: null, path: null, installed: false });
   expect(result.value.bulkInstall.terum).toEqual({ total: 0, asking: 0 });
 });
 it('counts grants once per project skill and derives the project update from its newest skill', async () => {
   vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-10T08:33:11Z'));
   const f = changedInventory((name, value) => {
     if (name !== 'ls') return;
-    value.projects![0]!.skills = value.skills.map(s => s.id);
+    value.projects!.find(project => project.name === 'terum')!.skills = value.skills.map(s => s.id);
     value.skills[0]!.grants = 'Read\nBash';
     value.skills[1]!.grants = null;
     value.skills[0]!.updated = '2026-09-10T07:33:11Z';
@@ -217,7 +223,7 @@ it('counts grants once per project skill and derives the project update from its
   const result = await createTauriBackend(f.bridge).catalog();
   if (!result.ok) throw new Error(result.error);
   expect(result.value.bulkInstall.terum).toEqual({ total: 3, asking: 1 });
-  expect(result.value.projects[0]?.updated).toBe('1 hour ago');
+  expect(result.value.projects.find(p => p.name === 'terum')?.updated).toBe('1 hour ago');
 });
 it('serves a project root only for matching team placements and abbreviates actual scan roots', async () => {
   for (const team of ['acme', 'other']) {
@@ -231,6 +237,6 @@ it('serves a project root only for matching team placements and abbreviates actu
     const result = await createTauriBackend(f.bridge).catalog();
     if (!result.ok) throw new Error(result.error);
     expect(result.value.scanned).toEqual(['~/other-skills', '~/code/seed']);
-    expect(result.value.projects[0]).toMatchObject({ installed: team === 'acme', path: team === 'acme' ? '/Users/teddy/code/seed' : null });
+    expect(result.value.projects.find(p => p.name === 'terum')).toMatchObject({ installed: team === 'acme', path: team === 'acme' ? '/Users/teddy/code/seed' : null });
   }
 });
