@@ -65,6 +65,24 @@ describe('safeWrite (§6.0)', () => {
     await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.remove('people/me.json'), { action: 'join', handle: 'me' });
     expect(await readFile(join(clone, 'README.md'), 'utf8')).not.toContain('- @me — me');
   });
+  // D69: on a half-migrated generic-remote repo the write still lands, README.md stays out of its
+  // commit byte-for-byte, and the reason reaches the caller through `onReadmeRefusal`.
+  it('commits a generic-remote write without README.md when a versionless skill folder refuses the regeneration, and tells the caller why', async () => {
+    const fixture = await bareTeam();
+    const skill = (name: string, id: string) => `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: docs\n---\n`;
+    await pushFromSeed(fixture.seed, 'skills/a/v1/SKILL.md', skill('a', '66666666-6666-4666-8666-666666666666'));
+    await pushFromSeed(fixture.seed, 'skills/legacy/SKILL.md', skill('legacy', '77777777-7777-4777-8777-777777777777'));
+    const readme = '# team\n\n<!-- terum-skills:begin -->\n| Skill | Owner |\n| --- | --- |\n| a | me |\n| legacy | me |\n<!-- terum-skills:end -->\n';
+    await pushFromSeed(fixture.seed, 'README.md', readme);
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    const refusals: string[] = [];
+    const result = await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', onReadmeRefusal: (reason) => refusals.push(reason) });
+    expect(result.changed).toBe(true);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatch(/README\.md left unchanged: skills\/legacy has no v<N>\/SKILL\.md/);
+    expect(await git(['show', '--name-only', '--format=', 'HEAD'], clone)).toBe('people/me.json\n');
+    expect(await readFile(join(clone, 'README.md'), 'utf8')).toBe(readme);
+  });
   it('lands eight barrier-released writers within the deadline and leaves every clone clean', async () => {
     const fixture = await bareTeam();
     const clones = await Promise.all(Array.from({ length: 8 }, (_, index) => cloneWithIdentity(fixture.bare, join(fixture.root, `clone-${index}`), `User ${index}`, `u${index}@example.com`)));
@@ -493,13 +511,24 @@ describe('safeWrite (§6.0)', () => {
 
   it('gives a watching person the long budget and a waiting line, and a background caller neither', () => {
     const print = vi.fn();
-    expect(lockWait({ interactive: false, print })).toEqual({ lockWaitMs: 4_000 });
+    const background = lockWait({ interactive: false, print });
+    expect(background.lockWaitMs).toBe(4_000);
+    expect(background.onWaiting).toBeUndefined();
     expect(print).not.toHaveBeenCalled();
     const policy = lockWait({ interactive: true, print });
     expect(policy.lockWaitMs).toBe(75_000);
     policy.onWaiting!({ label: 'team', elapsedMs: 6_400 });
     expect(print).toHaveBeenCalledWith('Waiting for another terum-skills operation on team to finish… (6 s)');
     expect(lockWait({ interactive: true, print }, 1_234).lockWaitMs).toBe(1_234);
+  });
+
+  // D69: the refusal is printed by whoever spreads lockWait into safeWrite — every command does — and in
+  // BOTH modes, because a script's log is the only place its operator would ever learn README.md was left out.
+  it('hands every writer a README-refusal printer, watching or not', () => {
+    const print = vi.fn();
+    lockWait({ interactive: false, print }).onReadmeRefusal('README.md left unchanged: skills/legacy has no v<N>/SKILL.md');
+    lockWait({ interactive: true, print }).onReadmeRefusal('README.md left unchanged: 1 skill row where the region held 3');
+    expect(print.mock.calls).toEqual([['README.md left unchanged: skills/legacy has no v<N>/SKILL.md'], ['README.md left unchanged: 1 skill row where the region held 3']]);
   });
 
   it('contention at acquisition is classified into CloneBusy for safeWrite and withCloneLock alike, never proper-lockfile\'s raw ELOCKED', async () => {

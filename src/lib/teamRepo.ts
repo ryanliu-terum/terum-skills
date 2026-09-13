@@ -53,6 +53,8 @@ export interface SafeWriteOptions extends GuardContext {
   /** How long to wait for the clone lock, and what to say while waiting (lib/teamRepo.ts lockWait). */
   lockWaitMs?: number;
   onWaiting?: (info: { label: string; elapsedMs: number }) => void;
+  /** D69: told why a generic-remote README regeneration was refused (README.md then stays out of the commit); the write itself proceeds. */
+  onReadmeRefusal?: (reason: string) => void;
 }
 
 export interface SafeWriteResult<R = void> { changed: boolean; pushedTo: string; returned: R; }
@@ -133,13 +135,18 @@ export interface LockWaitOptions {
 const waitingLine = (info: { label: string; elapsedMs: number }): string => `Waiting for another terum-skills operation on ${info.label} to finish… (${Math.round(info.elapsedMs / 1000)} s)`;
 
 /**
- * The one lock-wait policy. A person on the other end (a TTY, or a shell over frames) outwaits the
- * holder and is told that it is waiting; anything else — the session hook, a piped script — keeps the
- * short budget and stays silent, because there is nobody to read the line and a script wants to fail fast.
+ * The one lock-wait policy, and the one place a write's README refusal reaches the person. A person on
+ * the other end (a TTY, or a shell over frames) outwaits the holder and is told that it is waiting;
+ * anything else — the session hook, a piped script — keeps the short budget and stays silent, because
+ * there is nobody to read the line and a script wants to fail fast. The README refusal (D69) prints in
+ * BOTH modes: every command spreads this into its `safeWrite` options, so this is where the reason a
+ * generic-remote write left README.md out of its commit gets printed — a refusal nobody sees is the
+ * silent partial catalogue the guard exists to prevent, and a script's log is where its operator looks.
  */
-export function lockWait(io: { readonly interactive: boolean; print(line: string): void }, waitMs?: number): { lockWaitMs: number; onWaiting?: (info: { label: string; elapsedMs: number }) => void } {
-  if (!io.interactive) return { lockWaitMs: waitMs ?? LOCK_WAIT_MS };
-  return { lockWaitMs: waitMs ?? INTERACTIVE_LOCK_WAIT_MS, onWaiting: (info) => io.print(waitingLine(info)) };
+export function lockWait(io: { readonly interactive: boolean; print(line: string): void }, waitMs?: number): { lockWaitMs: number; onWaiting?: (info: { label: string; elapsedMs: number }) => void; onReadmeRefusal: (reason: string) => void } {
+  const onReadmeRefusal = (reason: string): void => io.print(reason);
+  if (!io.interactive) return { lockWaitMs: waitMs ?? LOCK_WAIT_MS, onReadmeRefusal };
+  return { lockWaitMs: waitMs ?? INTERACTIVE_LOCK_WAIT_MS, onWaiting: (info) => io.print(waitingLine(info)), onReadmeRefusal };
 }
 
 type Git = (args: readonly string[]) => Promise<CommandResult>;
@@ -209,7 +216,10 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       if (!isGitHubRemote(remote)) {
         // §4.1(d): the generator derives every skill's latest version from the in-memory post-image,
         // so there is no `write-tree` spawn and no git call inside its loop.
-        await regenerateReadmeInTree(tree, remote);
+        // D69: a refused regeneration (a versionless skill folder, a row drop) leaves README.md out of
+        // this commit rather than aborting the write; the reason is the caller's to print.
+        const readmeRefusal = await regenerateReadmeInTree(tree, remote);
+        if (readmeRefusal !== undefined) options.onReadmeRefusal?.(readmeRefusal);
         changed = tree.changedPaths;
         for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
         const readmeChanged = changed.filter((path) => path === 'README.md');

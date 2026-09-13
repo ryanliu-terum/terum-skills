@@ -3,7 +3,7 @@ import { dequeueEvals, queueKey, readEvalQueue, updateEvalQueue, withEvalQueueLo
 import { packageRoot } from '../lib/package-root.js';
 import type { WithForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
@@ -24,7 +24,7 @@ import { type Runner, systemRunner } from '../lib/runner.js';
 import { inspectSkillSource, sourceFiles } from '../lib/skill-source.js';
 import { findSkill, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
 import { parseSkillFrontmatter } from '../lib/schema.js';
-import { resolveLibrarySkill } from '../lib/local-skills.js';
+import { resolveLibrarySkill, unusableSkillFolder } from '../lib/local-skills.js';
 import { parseVersionFolder, type SkillVersion } from '../lib/versions.js';
 import { refreshClone, lockWait, listVersions, skillVersions } from '../lib/teamRepo.js';
 
@@ -102,6 +102,10 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // arm and the policy, but a folder that belongs to no team is evaluable.
     const local = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.ref);
     if (!local) return failure(`No local skill folder named \`${args.ref}\` in your library; install it from the marketplace first, or pass \`--path\`.`);
+    // D72: the folder is there but the scan rejected it or could not read it. Say so, with the
+    // scan's own detail against the path — the miss above is reserved for a name no root holds.
+    const unusable = unusableSkillFolder(local);
+    if (unusable !== undefined) return failure(unusable);
     // Best-effort, never a gate: a folder the team has never seen is still evaluable (§6.3).
     const record = clone === null || teamName === null ? undefined : await findSkill(clone, teamName, args.ref);
 
@@ -359,7 +363,11 @@ function announceGeneratedAssets(io: Prompter, wantsCases: boolean, wantsTrigger
 }
 
 
-/** Generated files first land in the run tree, keeping §6.0's team/store write invariant intact. */
+/**
+ * One generated-asset layout under `root` — `triggers.yaml`, `cases/<name>.yaml`. Two callers: the run
+ * tree's own copy (§6.0's team/store write invariant), and the staging folder `saveGeneratedAssets`
+ * renames from, so the folder the user gets is byte-for-byte the folder the run recorded.
+ */
 async function writeGeneratedAssets(root: string, generated: GeneratedAssets): Promise<void> {
   if (generated.triggers !== undefined) {
     await mkdir(root, { recursive: true, mode: 0o700 });
@@ -392,7 +400,33 @@ export async function saveGeneratedAssets(source: string, generated: GeneratedAs
   // the two names are different files and generation proceeds as it should.
   if (generated.cases !== undefined && await pathExists(cases)) return failure(`${cases} already exists, so the generated eval cases were not written — a generated asset never overwrites an authored one. Rename or delete it, then run eval again.`);
   if (generated.triggers !== undefined && await pathExists(triggers)) return failure(`${triggers} already exists, so the generated triggers were not written — a generated asset never overwrites an authored one. Rename or delete it, then run eval again.`);
-  await writeGeneratedAssets(join(source, 'evals'), generated);
+  // D72: stage, then rename — the same shape as `place()` in placer.ts. This is the user's own skill
+  // folder, and the file-by-file write it replaced had no rollback: an interruption after the first
+  // case file left a partial `evals/cases/` that the next run's `authoredCaseFiles` took for AUTHORED
+  // (`plannedGeneration` never regenerates over it) and publish shipped as a version; a crash before
+  // the first file left an empty `cases/` that the refusal above then reported as authored forever.
+  // Every file lands in a hidden sibling under `evals/` (same volume, so the rename is a rename), and
+  // each asset becomes visible in one `rename` only after all of it is written. A failure removes
+  // the staging folder — and `evals/` itself when this call made it — so `evals/cases` is absent or
+  // whole, never partial. The two renames are per asset: a failure between them leaves the first
+  // asset whole and the second absent, which the next run regenerates on its own.
+  const evals = join(source, 'evals');
+  const hadEvals = await pathExists(evals);
+  let staging: string | undefined;
+  try {
+    await mkdir(evals, { recursive: true, mode: 0o700 });
+    staging = await mkdtemp(join(evals, '.generated.terum-'));
+    await writeGeneratedAssets(staging, generated);
+    if (generated.cases !== undefined) await rename(join(staging, 'cases'), cases);
+    if (generated.triggers !== undefined) await rename(join(staging, 'triggers.yaml'), triggers);
+  } catch (error) {
+    if (staging !== undefined) await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+    // `rmdir` refuses a non-empty directory, so this can only take away the `evals/` this call made.
+    if (!hadEvals) await rmdir(evals).catch(() => undefined);
+    return failure(`Could not write the generated eval assets into ${evals}: ${error instanceof Error ? error.message : String(error)}. Nothing was left in the skill folder; run eval again.`);
+  }
+  // Emptied by the renames; a leftover hidden folder is cheaper than failing a landed write.
+  await rm(staging, { recursive: true, force: true }).catch(() => undefined);
   return success(undefined);
 }
 
@@ -530,6 +564,10 @@ export async function queueItemsFor(
   for (const name of input.names) {
     const local = await resolveLibrarySkill(input.home, input.config, input.stateRoot, name);
     if (local === undefined) { report(`${name}: no copy of this skill on this machine, so it cannot be evaluated; install it first.`); continue; }
+    // D72: same rule as the run itself — a folder the scan rejected is named with the scan's detail,
+    // never reported as missing, and costs that folder alone.
+    const unusable = unusableSkillFolder(local);
+    if (unusable !== undefined) { report(`${name}: ${unusable}; it was not queued.`); continue; }
     // Symmetrical with the miss above: one folder that cannot be read costs that folder, not the
     // whole batch. Unguarded, a single unreadable directory threw out of the loop and every other
     // skill the user asked to queue was silently lost with it.

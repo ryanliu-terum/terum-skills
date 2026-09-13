@@ -1,13 +1,18 @@
 import { join } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
 import { createExecute } from '../../lib/execute.js';
 import { run } from '../validate.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
-const skill = (body = '') => `---\nname: sample\ndescription: useful\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${body}`;
+const skill = (body = '', name = 'sample') => `---\nname: ${name}\ndescription: useful\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${body}`;
+/** Pin what `path.resolve` sees as the runner's cwd for one call — the Action's `--cwd .` runs at the checkout root; vitest runs at this repository's root. */
+async function atCwd<T>(cwd: string, call: () => Promise<T>): Promise<T> {
+  const spy = vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+  try { return await call(); } finally { spy.mockRestore(); }
+}
 
 describe('validate (§9)', () => {
   it('validates a selected clone skill and exits non-zero with all hygiene findings', async () => {
@@ -33,6 +38,53 @@ describe('validate (§9)', () => {
     const dirty = new ScriptedPrompter();
     expect(await run({ target: 'sample', cwd: checkout }, dirty)).toMatchObject({ ok: false, error: expect.stringContaining('HYG2') });
     expect(dirty.lines.join('\n')).toContain('HYG2');
+  });
+
+  it('with --cwd a bare name is the skill in that checkout, never a folder at the runner cwd or the checkout root (D72)', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/src/v1/SKILL.md', skill('', 'src'));
+    await pushFromSeed(fixture.seed, 'skills/evals/v1/SKILL.md', skill('', 'evals'));
+    const checkout = await cloneWithIdentity(fixture.bare, join(fixture.root, 'checkout'));
+    // A runner whose cwd holds `src/` (this repository under vitest), and the Action itself: `--cwd .` at the checkout root, where `evals/` is a real folder.
+    const runner = join(fixture.root, 'runner'); await mkdir(join(runner, 'src'), { recursive: true });
+    for (const [cwd, name] of [[runner, 'src'], [checkout, 'evals']] as const) {
+      const io = new ScriptedPrompter();
+      expect(await atCwd(cwd, () => run({ target: name, cwd: checkout }, io))).toMatchObject({ ok: true, value: { name, findings: 0 } });
+      expect(io.lines).toEqual([`${name}: hygiene passed.`]);
+    }
+  });
+
+  it('the container skills/<name> descends to the newest version in both modes (D71 :30, folded into D72)', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill('bad‮text'));
+    await pushFromSeed(fixture.seed, 'skills/sample/v2/SKILL.md', skill());
+    const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    // The documented path invocation, relative to the checkout (not to the runner's cwd) — v1 would fail HYG2, so passing proves v2 was chosen.
+    expect(await atCwd(fixture.root, () => run({ target: 'skills/sample', cwd: clone }, new ScriptedPrompter()))).toMatchObject({ ok: true, value: { name: 'sample', findings: 0 } });
+    const container = join(clone, 'skills', 'sample');
+    expect(await run({ target: container, cwd: clone }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { name: 'sample', findings: 0 } });
+    expect(await run({ target: container, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { name: 'sample', findings: 0 } });
+  });
+
+  it('an absolute path to a real skill folder validates that folder as-is in both modes', async () => {
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill('bad‮text'));
+    const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    // The published version is dirty, so passing proves the folder was validated, not the name.
+    const folder = join(fixture.root, 'sample'); await mkdir(folder); await writeFile(join(folder, 'SKILL.md'), skill());
+    expect(await run({ target: folder, cwd: clone }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { name: 'sample', findings: 0 } });
+    expect(await run({ target: folder, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { name: 'sample', findings: 0 } });
+  });
+
+  it('without --cwd a folder at the user cwd wins, otherwise a bare name resolves through the configured team clone', async () => {
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill('bad‮text'));
+    const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const wip = join(fixture.root, 'wip'); await mkdir(join(wip, 'sample'), { recursive: true }); await writeFile(join(wip, 'sample', 'SKILL.md'), skill());
+    expect(await atCwd(wip, () => run({ target: 'sample', config: store }, new ScriptedPrompter()))).toMatchObject({ ok: true, value: { name: 'sample', findings: 0 } });
+    expect(await atCwd(fixture.root, () => run({ target: 'sample', config: store }, new ScriptedPrompter()))).toMatchObject({ ok: false, error: expect.stringContaining('HYG2') });
+    expect(await atCwd(fixture.root, () => run({ target: 'missing', config: store }, new ScriptedPrompter()))).toMatchObject({ ok: false, error: 'skills/missing holds no v<N> folder.' });
   });
 });
 

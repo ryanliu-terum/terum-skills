@@ -245,6 +245,14 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     expect(file.profile).toEqual([{ id: result.ok ? result.value.id : '', name: 'sample', version: 'v2', added: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), via: 'publish' }]);
   });
 
+  it('D72: a folder that exists but the scan rejected is refused with its path and the scan’s detail, never "not found"', async () => {
+    const { store, home } = await prepared();
+    const odd = await librarySkill(home, 'odd', `---\nname: odd\ndescription: useful skill\nargument-hint: x\n---\n`);
+    expect(await run({ ref: 'odd', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `${odd} is not a usable skill folder: unsupported top-level field argument-hint (only name, description, license, metadata, allowed-tools)` });
+    // The §6.3 miss is reserved for a name no Library root holds.
+    expect(await run({ ref: 'ghost', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('No local skill folder named ghost in your library.') });
+  });
+
   it('resolves a folder the user already installed — the commonest thing publish is pointed at', async () => {
     const { store, home } = await prepared();
     const folder = await librarySkill(home, 'sample', published());

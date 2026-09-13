@@ -2,7 +2,7 @@ import type { WithForm } from '../lib/invocation.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { Prompter } from '../lib/prompt.js';
-import { applyReadme, generateReadme, inlineText, readReadmeData } from '../lib/readme.js';
+import { applyReadmeWithReason, generateReadme, inlineText, readReadmeData } from '../lib/readme.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { parseJson, teamSchema } from '../lib/schema.js';
@@ -10,7 +10,7 @@ import { parseJson, teamSchema } from '../lib/schema.js';
 export interface ReadmeArgs extends WithForm { prComment?: string; cwd?: string; runner?: Runner; }
 
 /** Hidden host-side entry point for the scaffolded Action. */
-export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ changed?: boolean; comment?: string }>> {
+export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ changed?: boolean; comment?: string; refusal?: string }>> {
   try {
     const cwd = args.cwd ?? resolve('.');
     const runner = args.runner ?? systemRunner;
@@ -41,8 +41,12 @@ export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ chan
     }
     const path = join(cwd, 'README.md');
     const existing = await readFile(path, 'utf8').catch(() => '');
-    const next = applyReadme(existing, generateReadme(data));
+    // D69: a refused render (a versionless `skills/<name>/`, or fewer skill rows than the README
+    // already shows) leaves the file as it is and says why here — the Action log is the only place a
+    // maintainer can learn that the catalogue was not regenerated and what to migrate.
+    const { text: next, refusal } = applyReadmeWithReason(existing, generateReadme(data), { skipped: data.skipped });
+    if (refusal !== undefined) io.print(refusal);
     if (next !== existing) await writeFile(path, next, 'utf8');
-    return success({ changed: next !== existing });
+    return success(refusal === undefined ? { changed: next !== existing } : { changed: false, refusal });
   } catch (error) { return fromError(error); }
 }

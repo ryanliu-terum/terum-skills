@@ -502,6 +502,24 @@ it.each(healthCases)('maps local health %s onto the drawn placement state withou
  expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',null,'2026-09-01T00:00:00Z',state]]);
  expect(settings.value?.PINNED_N).toBe(0);
 });
+// D71 (LOCK): every PLACEMENTS row above is tracked:true, which short-circuits the version column to null
+// before placementVersionLabel() is reached, so neither of its arms had a test. The function runs only for a
+// folder the scan could not connect to its ledger record (`tracked:false`, local-skills.ts:121; the CLI then
+// says 'untracked locally' / health 'untracked', ls.ts:272,282) — the ledger's own version is the only version
+// the board can show, and the row counts as pinned. Both arms: §3.2 a version FOLDER renders as the D1 label;
+// a 40-hex from a CLI older than §3.4's read-time preprocess (a layout-2 tree hash) keeps the old 12-char
+// rendering rather than printing the whole hash.
+it.each([['v4','Version 4'],['43bf7396d9edbdcfba751bc63dbe1c74055125ae','43bf7396d9ed']])('labels an untracked placement row from the ledger version through placementVersionLabel (%s)',async(version,label)=>{
+ const f=statusReplay(false,(frame,verb)=>{
+  const value=frame.value as {ledger?:{placements:Record<string,unknown>[]};local?:{rows:Record<string,unknown>[]}[]};
+  if(verb==='status')value.ledger!.placements[0]!.version=version;
+  else Object.assign(value.local![0]!.rows[0]!,{state:'untracked locally',tracked:false,placement:null,health:'untracked'});
+ });
+ const settings=await createTauriBackend(f.bridge).settings();
+ expect(settings.ok).toBe(true);
+ expect(settings.value?.PLACEMENTS).toEqual([[expect.stringContaining('/.claude/skills/deploy-check'),'deploy-check','Global',label,'2026-09-01T00:00:00Z','—']]);
+ expect(settings.value?.PINNED_N).toBe(1);
+});
 it('joins Skill provenance by ledger team and id (a relocated folder), never by name or prose',async()=>{
   const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'relocated',path:'/skills/relocated',state:'arbitrary prose',tracked:true,placement:{id:'id-a',team:'acme',version:'v4'},health:'up-to-date'}],notOffered:[],problems:[]}]};
   expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'acme/a'})).toMatchObject({ok:true,value:{installed:'placed',path:'/skills/relocated',version:'Version 4',version_full:'v4'}});

@@ -507,3 +507,75 @@ noted a sibling untested throw at `:206`. Both are real coverage gaps in new con
 because the same budget went into the finding above; they are small and worth closing.
 
 **B8 remains UNPUSHED**, as under A8.
+
+## A16 — The re-recorded fixtures keep the hash-seeded placement (a pre-versioning install), not an invented `v1`
+
+**Context (2026-09-13, ~02:30 PDT, under D78 grant 3).** D70 delegated the real re-recording of the
+frame corpus and D77 gated it before B5. Every committed `fixture.sh` seeds the machine-side
+`config.json` placement with `VER=$(git rev-parse HEAD:skills/deploy-check)` — a 40-hex tree hash. In
+rewriting the fixtures to layout 3 the question the ledger did not decide is what that placement
+should depict: a machine that installed **before versioning** (keep the hash; the CLI reads it as
+`null` per §3.4) or one that installed **at Version 1** (seed `"v1"`).
+
+**Taken: keep the hash.** Three reasons. (1) It is what D70's own alternative — "seed layout 2 and
+run `team migrate` inside the script" — would yield: migrate rewrites the repository, never the
+machine's ledger, so the placement stays a hash and reads as null. (2) The B3 fix commit nulls
+exactly these values in the derived frames (D70's LOCK half); a re-recording that keeps the same
+input differs from those frames only where the CLI's real output differs, which is the honesty the
+ruling wanted and keeps the desktop re-pins from flipping twice in one night. (3) Nothing in the
+seven replay consumers needs a `v1` placement — D71's `tracked:false` coverage row is a hand-built
+test fixture, not a recording. Every other id, handle, email, description, category and timestamp is
+kept, so the recordings differ from the committed frames only where today's CLI genuinely differs.
+
+**Revisit trigger:** a locked fidelity board or desktop test that needs a placement at a known
+version folder — then one fixture gains a second, `v1`-seeded placement rather than rewriting this one.
+
+## A17 — The B3 fix commit: the judgement calls the implementers made inside D69–D72, and the two defects the verifiers caught
+
+**Context (2026-09-13, 02:10–03:00 PDT, D78 grant 3).** Seven implementers built the B3 fix commit on
+disjoint file sets; seven read-only verifiers tried to refute each. Every item was implemented to its
+ruling; the calls the rulings left open, taken as follows.
+
+- **D69 shape.** `applyReadme(existing, block, { skipped })` stays a string-returning function;
+  `applyReadmeWithReason` is the one refusal path underneath it and returns `{ text, refusal? }`.
+  `ReadmeData.skipped` is required so a future reader cannot forget it. The cause refusal fires even
+  on a README with no generated region yet (a versionless folder is never legitimate in layout 3, so a
+  half-migrated repo gets no first catalogue either); rows are counted structurally (table body lines,
+  never skill names); the original empty-catalogue rule is kept beneath the cause rule. The hidden
+  `readme` command prints the reason and exits 0 — a red Action on every write would also fire for a
+  team that legitimately removed its last skill, which is the case the never-throw rule protects.
+  **Verifier defect, fixed:** the generic-remote path forwarded the reason only to an optional
+  `onReadmeRefusal` hook nobody passed, so `install`/`publish`/`join`/… on a half-migrated repo
+  would leave README.md out of the commit silently. The printer now rides `lockWait(io)`, which
+  every command already spreads into its `safeWrite` options, in both interactive and background
+  modes (a script's log is where its operator looks); `offerProfileEntry` gains the same spread.
+- **D72 validate.** `--cwd` mode resolves the NAME first (`isSkillName` → newest `v<N>` in the
+  checkout), then the path against the checkout; both modes descend from a `skills/<name>` container
+  with no `SKILL.md` to its newest version. The only divergence from the triage's literal "always by
+  name" is that a real path still works, which the folded `:30` case requires.
+- **D72 local-skills.** Across roots a usable folder in a later root still wins over a rejected one
+  in an earlier root; the rejected match is returned only when no root offers a usable one. Messages:
+  rejected → `<path> is not a usable skill folder: <detail>`, failed → `<path> could not be read as a
+  skill folder: <reason>`; the queue path skips that folder only. A folder with no `SKILL.md` at all
+  still gets the generic §6.3 miss (unchanged; spec D16 territory).
+- **D72 eval.** Staging is one `mkdtemp` under `<skill>/evals/`, one rename per asset; on failure the
+  staging dir goes and `evals/` is removed only when this call created it; the failure is a `Result`,
+  not a throw. No fs seam exists, so the partial-write test provokes the second file with a path that
+  cannot be a file.
+- **D72 mock.** The `endorsed` array stays (the catalog reads it for session-endorsed project cards);
+  only the PR-number use went. The expected key list is written out literally.
+- **D70 oracle.** The legacy half is keyed strictly to each set's own committed inputs (a fixture
+  seeding `rev-parse` into a placement, or a `config-*.json` holding a 40-hex version); older rows with
+  no `placement` field are keyed by the fixture's skill folder name; labels are markdown bullets in
+  the NOTES.md style. **Verifier defect, fixed:** the label was also appended to `m7-S7d`, whose two
+  frames (`decline`, `usage-error`) are the genuine 0.1.6 run record that the re-key commit never
+  touched; removed. The twelve labelled sets are exactly the twelve `b721cc5` re-keyed.
+- **D71 / config test.** The dead assertions after `setup.test.ts:919`'s `return;` were deleted, not
+  relocated: the message still exists at `setup.ts:335` but nothing sets `versionProblem` since B3
+  removed the `skillVersions` catch, so the arm is unreachable production code — filed below as owed,
+  not fixed here. The config-migration test uses the default (non-preserving) `update()`; with
+  `preserveUnchanged: true` the migration does not reach disk (observed, not asserted — a `patchConfig`
+  diff of `before` vs `after` sees no change), which is a question for the batch that next touches it.
+
+**Owed, not fixed here:** `setup.ts:333-335` + `eval.ts:490 versionProblem` dead code; the
+`preserveUnchanged` observation above.

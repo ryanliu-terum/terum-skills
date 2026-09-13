@@ -89,7 +89,7 @@ it('replays the rebuilt fixture through Global and checkout scopes and Skill det
 
 it('replays S7g local frames through settings: the real placement path, name, tracking version and drawn state',async()=>{
   const result=await createTauriBackend(inventoryReplay(recorded).bridge).settings();
-  const frame=recorded('ls-local').map(line=>JSON.parse(line) as {t:string;value?:{local:{rows:{name:string;path:string;health:string;placement:{id:string;team:string;version:string}}[]}[]}}).find(frame=>frame.t==='result');
+  const frame=recorded('ls-local').map(line=>JSON.parse(line) as {t:string;value?:{local:{rows:{name:string;path:string;health:string;placement:{id:string;team:string;version:string|null}}[]}[]}}).find(frame=>frame.t==='result');
   const row=frame?.value?.local.flatMap(section=>section.rows).find(row=>row.name==='deploy-check');
   expect(row?.health).toBe('up-to-date');expect(row?.placement.team).toBe('acme');
   expect(result).toMatchObject({ok:true,value:{PLACEMENTS:[[row?.path,'deploy-check','Global',null,'2026-09-01T00:00:00Z','up to date']],PLACEMENTS_N:1,PINNED_N:0}});

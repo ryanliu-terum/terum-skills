@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore, type ConfigStore } from '../../lib/config.js';
@@ -9,7 +9,7 @@ import { bareTeam, cloneWithIdentity, holdCloneLock, pushFromSeed, ScriptedPromp
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { skillContentDigest } from '../../lib/skills.js';
 import { sourceFiles } from '../../lib/skill-source.js';
-import { run, saveGeneratedAssets } from '../eval.js';
+import { queueItemsFor, run, saveGeneratedAssets } from '../eval.js';
 import { run as publishRun } from '../publish.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -321,5 +321,52 @@ describe('eval-in-app completion and eligibility', () => {
     expect(receipt.provenance.runner_handle).toBe('seed');
     expect(receipt.schema_version).toBe(2);
     expect(await readFile(join(clone, 'team.json'), 'utf8')).toBe(before);
+  });
+});
+
+describe('D72 — the B3 full review highs on eval', () => {
+  const rejected = `---\nname: sample\ndescription: checks deployments\nargument-hint: x\n---\n`;
+  const detail = 'unsupported top-level field argument-hint (only name, description, license, metadata, allowed-tools)';
+
+  it('a folder that exists but the scan rejected fails with its path and the scan’s detail, never the §6.3 miss', async () => {
+    const { store, home, folder } = await evalFixture({ source: rejected });
+    expect(await run(args(store, home, { agent: armAgent, k: 1 }), new ScriptedPrompter())).toMatchObject({ ok: false, error: `${folder} is not a usable skill folder: ${detail}` });
+    // The miss is reserved for a name no Library root holds.
+    expect(await run(args(store, home, { ref: 'ghost' }), new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('No local skill folder named `ghost` in your library') });
+  });
+
+  it('queueing a rejected folder reports its path and the detail, and queues nothing for it', async () => {
+    const { store, home, folder } = await evalFixture({ source: rejected });
+    const lines: string[] = [];
+    const items = await queueItemsFor({ home, config: await store.read(), stateRoot: store.root, names: ['sample'], requestedAt: '2026-09-13T00:00:00Z', window: 'later' }, (line) => lines.push(line));
+    expect(items).toEqual([]);
+    expect(lines).toEqual([`sample: ${folder} is not a usable skill folder: ${detail}; it was not queued.`]);
+  });
+
+  it('a write that fails part-way leaves no evals/cases and no staging folder behind, and reports it', async () => {
+    const { folder } = await evalFixture();
+    // The second file's path runs THROUGH the first, so its write fails (ENOTDIR) after the first
+    // landed — the interruption that used to leave a partial set the next run adopted as authored.
+    const saved = await saveGeneratedAssets(folder, { cases: { names: ['a', 'b'], files: { 'a.yaml': CASE, 'a.yaml/b.yaml': CASE } } })
+      .catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) }));
+    expect(saved).toMatchObject({ ok: false, error: expect.stringContaining('ENOTDIR') });
+    expect(existsSync(join(folder, 'evals', 'cases'))).toBe(false);
+    // Nothing of this call's making survives: not the staging folder, not the `evals/` made for it.
+    expect(existsSync(join(folder, 'evals'))).toBe(false);
+  });
+
+  it('a successful generation leaves exactly the generated files under evals/, and no staging folder', async () => {
+    const { store, home, folder } = await evalFixture();
+    expect(await run(args(store, home, { agent: generationAgent([]), k: 1 }), new ScriptedPrompter())).toMatchObject({ ok: true });
+    expect((await readdir(join(folder, 'evals'))).sort()).toEqual(['cases', 'triggers.yaml']);
+    expect((await readdir(join(folder, 'evals', 'cases'))).sort()).toEqual(['happy-path.yaml', 'safe-command.yaml', 'unsafe-request.yaml']);
+  });
+
+  it('the D61 already-exists refusal fires before anything is staged', async () => {
+    const { folder } = await evalFixture();
+    await mkdir(join(folder, 'evals'), { recursive: true });
+    await writeFile(join(folder, 'evals', 'triggers.yaml'), TRIGGERS);
+    expect(await saveGeneratedAssets(folder, { triggers: TRIGGERS, cases: { names: ['a'], files: { 'a.yaml': CASE } } })).toMatchObject({ ok: false, error: expect.stringContaining('already exists') });
+    expect(await readdir(join(folder, 'evals'))).toEqual(['triggers.yaml']);
   });
 });

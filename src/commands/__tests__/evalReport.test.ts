@@ -1,10 +1,12 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
-import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, denyingRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, denyingRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
+import { skillContentDigest } from '../../lib/skills.js';
+import { sourceFiles } from '../../lib/skill-source.js';
 import { run } from '../evalReport.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -136,3 +138,30 @@ describe('eval-report offline read model', () => {
   const result = await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter());
   expect(result.value?.history[0]).toMatchObject({ comparison, runner_handle: row.provenance.runner_handle, timestamp: row.provenance.timestamp });
  });
+
+describe('D72: the content-keyed local store is found through the resolver', () => {
+  it('lists the local runs of a folder the scan REJECTED — its path is all the merge needs — and stays best-effort for one it cannot read', async () => {
+    const { store, runner } = await setup();
+    const home = await temporaryDirectory();
+    const folder = join(home, '.claude', 'skills', 'sample');
+    await mkdir(folder, { recursive: true });
+    // An unknown top-level key: the Library scan rejects this folder, and before D72 the resolver hid it.
+    await writeFile(join(folder, 'SKILL.md'), skill.replace('license:', 'argument-hint: x\nlicense:'));
+    const digest = skillContentDigest((await sourceFiles(folder)).files).replace(/^sha256:/, '');
+    const dir = join(store.root, 'evals', 'local', digest, '20260907T050000Z'); await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'run.jsonl'), '{"execution_status":"complete"}\n');
+    const result = await run({ ref: 'sample', config: store, runner, home }, new ScriptedPrompter());
+    expect(result.value?.localRuns.map((row) => row.run_id)).toEqual(['20260907T050000Z']);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('stays best-effort for a folder it cannot read: the resolver returns a `failed` match, `sourceFiles` throws, the report still answers', async () => {
+    const { store, runner } = await setup();
+    const home = await temporaryDirectory();
+    const folder = join(home, '.claude', 'skills', 'sample');
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, 'SKILL.md'), skill);
+    await chmod(folder, 0o000);
+    try { expect(await run({ ref: 'sample', config: store, runner, home }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { localRuns: [] } }); }
+    finally { await chmod(folder, 0o700); }
+  });
+});

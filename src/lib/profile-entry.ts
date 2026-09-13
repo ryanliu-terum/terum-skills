@@ -9,7 +9,7 @@ import { Prompter } from './prompt.js';
 import { parseJson, personSchema } from './schema.js';
 import type { ConfigStore } from './config.js';
 import type { Runner } from './runner.js';
-import { openTeamRepo, treeText } from './teamRepo.js';
+import { lockWait, openTeamRepo, treeText } from './teamRepo.js';
 
 export interface ProfileEntryRequest {
   store: ConfigStore;
@@ -46,6 +46,6 @@ export async function offerProfileEntry(request: ProfileEntryRequest, io: Prompt
     const entry = { id: request.id, name: request.name, version: request.version, added, via: request.via };
     if (at === -1) profile.push(entry); else profile[at] = entry;
     tree.set(path, `${JSON.stringify({ ...person, profile }, null, 2)}\n`);
-  }, { action: 'publish', handle: request.handle });
+  }, { action: 'publish', handle: request.handle, ...lockWait(io) });
   return true;
 }

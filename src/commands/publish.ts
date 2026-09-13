@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { canonicalLedger, localRootLabel, candidatesOf, localSkillRoots, localSkills, resolveLibrarySkill } from '../lib/local-skills.js';
+import { canonicalLedger, localSkillRoots, localSkills, resolveLibrarySkill, unusableSkillFolder } from '../lib/local-skills.js';
 import type { Config } from '../lib/schema.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
@@ -71,7 +71,11 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     // 1. Resolve the ref to a LOCAL folder. You publish what is on your machine, never what is in
     //    the clone — that is the whole direction of this refactor.
     const found = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.ref);
-    if (!found) throw new Error(await notFoundLocally(args, config, team, args.ref, store.root));
+    if (!found) throw new Error(await notFoundLocally(args, config, args.ref, store.root));
+    // D72: the folder is there but the scan rejected it or could not read it. Refuse with the scan's
+    // own detail against the path — the miss above is reserved for a name no Library root holds.
+    const unusable = unusableSkillFolder(found);
+    if (unusable !== undefined) throw new Error(unusable);
 
     // 2. Refuse a nested symlink or a non-directory before reading a byte.
     assertNotInsideStateRoot(found.path, store.root);
@@ -264,14 +268,18 @@ async function chooseProject(args: PublishArgs, teamJson: Awaited<ReturnType<typ
   return io.select('Which project?', names, GLOBAL_PROJECT);
 }
 
-/** The miss supplies read-only local discovery guidance, never an import or tracking write. */
-async function notFoundLocally(args: PublishArgs, config: Config, team: string, name: string, stateRoot: string): Promise<string> {
+/**
+ * The miss supplies read-only local discovery guidance, never an import or tracking write. D72: it is
+ * reached only when `resolveLibrarySkill` matched NO entry by name in any root — a folder that exists
+ * but is unusable is refused above with the scan's detail — so the old "was found at … but could not
+ * be published" branch, which re-scanned through `candidatesOf`, had nothing left to find and went.
+ * The unreadable-folder note stays: a folder the scan could not open may be the one the user means.
+ */
+async function notFoundLocally(args: PublishArgs, config: Config, name: string, stateRoot: string): Promise<string> {
   const discovery = await localSkillRoots(args.home ?? homedir(), config.projects ?? []);
   const ledger = await canonicalLedger(config);
   const inventories = await Promise.all(discovery.roots.map((root) => localSkills(root.root, config, { scope: root.scope, stateRoot, ledger })));
-  const found = inventories.flatMap((inventory, index) => candidatesOf(inventory).filter((entry) => entry.name === name).map((entry) => ({ ...entry, label: localRootLabel(discovery.roots[index]!) })));
   const unreadable = discovery.problems.length + inventories.reduce((count, inventory) => count + inventory.problems.length + inventory.entries.filter((entry) => entry.inspection.kind === 'failed').length, 0);
   const note = unreadable ? ` (${unreadable} local folder(s) under ${discovery.roots.map((root) => root.root).join(' or ')} could not be read.)` : '';
-  if (found.length) return `${name} was found at ${found.map((entry) => entry.path).join(', ')} but could not be published to ${team}.${note}`;
   return `No local skill folder named ${name} in your library. Inspect it with \`${invocation(args.form, 'ls --local')}\`, or add the project holding it with \`${invocation(args.form, 'project add')}\`.${note}`;
 }

@@ -240,15 +240,28 @@ export async function librarySize(home: string, config: Pick<Config, 'placements
   return total;
 }
 
+/** What `resolveLibrarySkill` found: the folder, the Library root it sits in, and the scan's verdict on it. */
+export interface LibrarySkillMatch { name: string; path: string; libraryRoot: string; inspection: Inspection }
+
 /**
  * Resolve a bare skill name to a folder in the Library — the global root plus every `config.projects`
  * root, and nothing else. Shared by `publish` and `eval` (§5.1 step 1, §6.3) so there is exactly one
  * answer to "which folder does this ref mean"; two resolvers would let the verb that publishes bytes
  * and the verb that evaluates them disagree about which bytes they mean.
+ *
+ * D72: the match is by NAME, whatever the scan made of the folder. Matching only `candidate` entries
+ * made a folder that plainly exists — rejected for an unknown frontmatter key, a name mismatch, a
+ * missing description, an illegal name, or unreadable — come back as `undefined`, and both verbs then
+ * printed §6.3's "No local skill folder named …" for it: a lie, and one that hid the scan's own
+ * detail. The match now carries its `inspection` so the caller can refuse with that detail
+ * (`unusableSkillFolder`). A usable folder in a LATER root still wins over an unusable one in an
+ * earlier root, so no ref that resolved before turns into a refusal. `undefined` now means exactly
+ * one thing: no Library root holds an entry by that name.
  */
-export async function resolveLibrarySkill(home: string, config: Pick<Config, 'placements' | 'projects'>, stateRoot: string, ref: string): Promise<{ name: string; path: string; libraryRoot: string } | undefined> {
+export async function resolveLibrarySkill(home: string, config: Pick<Config, 'placements' | 'projects'>, stateRoot: string, ref: string): Promise<LibrarySkillMatch | undefined> {
   const discovery = await localSkillRoots(home, config.projects ?? []);
   const ledger = await canonicalLedger(config);
+  let unusable: LibrarySkillMatch | undefined;
   for (const root of discovery.roots) {
     const inventory = await localSkills(root.root, config, { scope: root.scope, stateRoot, ledger });
     // Deliberately NOT `candidatesOf`: that filter answers "what may the picker offer to connect",
@@ -257,8 +270,23 @@ export async function resolveLibrarySkill(home: string, config: Pick<Config, 'pl
     // `publish` and `eval` are pointed at. Telling them no such folder exists when it is plainly
     // there is the opposite of "you can always see exactly what's on each"; the privilege and
     // hygiene gates still fire afterwards, with a message that says what is actually wrong.
-    const entry = inventory.entries.find((candidate) => candidate.inspection.kind === 'candidate' && candidate.name === ref);
-    if (entry) return { name: entry.name, path: entry.path, libraryRoot: root.root };
+    const entry = inventory.entries.find((candidate) => candidate.name === ref);
+    if (!entry) continue;
+    const match = { name: entry.name, path: entry.path, libraryRoot: root.root, inspection: entry.inspection };
+    if (entry.inspection.kind === 'candidate') return match;
+    unusable ??= match;
   }
+  return unusable;
+}
+
+/**
+ * D72: the sentence `eval` and `publish` refuse with when the folder the ref resolved to is not usable
+ * — its PATH and the scan's own detail, so the user is told what is wrong with the folder they named
+ * rather than that it is missing. Undefined for a candidate; §6.3's miss message stays reserved for a
+ * name no Library root holds at all.
+ */
+export function unusableSkillFolder(match: LibrarySkillMatch): string | undefined {
+  if (match.inspection.kind === 'rejected') return `${match.path} is not a usable skill folder: ${match.inspection.detail}`;
+  if (match.inspection.kind === 'failed') return `${match.path} could not be read as a skill folder: ${match.inspection.reason}`;
   return undefined;
 }

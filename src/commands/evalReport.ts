@@ -88,11 +88,13 @@ export async function run(args: EvalReportArgs, io: Prompter): Promise<Result<Ev
     // and merged, display-only — §6.2 does not migrate it, so a report that read only the new store
     // would make every pre-upgrade run vanish from the Evals tab.
     const localRoots: string[] = [resolve(store.root, 'evals', teamName, record.id)];
+    // D72: the resolver now also returns a folder the scan REJECTED. Its path is all this needs — the
+    // digest of what is on disk locates `evals/local/<digest>`, and whether the folder would pass eval
+    // is eval's question, not the report's. A folder the scan could not read makes `sourceFiles`
+    // throw; best-effort means that costs the content-keyed merge, never the report.
     const local = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, record.name).catch(() => undefined);
-    if (local !== undefined) {
-      const digest = skillContentDigest((await sourceFiles(local.path)).files);
-      localRoots.unshift(resolve(store.root, 'evals', 'local', digest.replace(/^sha256:/, '')));
-    }
+    const files = local === undefined ? undefined : await sourceFiles(local.path).then((source) => source.files, () => undefined);
+    if (files !== undefined) localRoots.unshift(resolve(store.root, 'evals', 'local', skillContentDigest(files).replace(/^sha256:/, '')));
     const localRuns: EvalReport['localRuns'] = [];
     const seen = new Set<string>();
     for (const localRoot of localRoots) {

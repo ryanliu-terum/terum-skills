@@ -164,3 +164,16 @@ it('models the projects and evals questions and reports both step outcomes',asyn
   expect(questions.includes('Which folder?')).toBe(accepted);
  }
 });
+
+// §5.3 / D72: PublishResult has no prUrl/compareUrl/branch/policy and the mock mints no PR link. The key list is written
+// out on purpose: a new field on the DTO must be added here deliberately, and a stray extra key (the old fake URL) fails.
+it("returns exactly the PublishResult keys on a project publish and mints no PR link (§5.3, D72)",async()=>{
+ const b=createMockBackend();const result=await b.publish({ref:"deploy-check",project:"mrf"}).done;
+ expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
+ expect(Object.keys(result.value).sort()).toEqual(["attachedEvals","created","identicalTo","name","profileAdded","project","projectAdded","version"]);
+ expect(result.value).not.toHaveProperty("legacyPrUrl");
+ expect(result.value).toMatchObject({name:"deploy-check",project:"mrf",projectAdded:true});
+ // The endorsement side effect survives the deletion: catalog() still counts the skill under the project.
+ const catalog=await b.catalog();if(!catalog.ok)throw new Error(catalog.error);
+ expect(catalog.value.projects.find(p=>p.key==="mrf")?.skillsIn).toContain("deploy-check");
+});

@@ -916,10 +916,6 @@ describe('setup batch evals', () => {
     expect(await run(args, io)).toMatchObject({ ok: true, value: { steps: { evals: 'queued' } } });
     expect((await readEvalQueue(args.config.root)).items.map((item) => item.skill)).toEqual(['alpha']);
     expect(io.events.join('\n')).toContain('beta: no copy of this skill on this machine, so it cannot be evaluated; install it first.');
-    return;
-    expect(io.events).toContain('print:Could not read the current skill versions, so no shared skill could be checked for a receipt.');
-    expect(io.events).not.toContain('print:Every shared skill already has an eval receipt for its current version.');
-    expect(io.events.some(e => e.startsWith('ask:Evaluate the '))).toBe(false);
   });
   it.each([{ quiet: true }, { evals: false }])('quiet setup and --no-evals never ask (%j)', async options => {
     const args = await optionalSetup(2); const io = optionalAnswers();

@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseVersionFolder, versionLabel } from '../../lib/versions.js';
 
@@ -26,7 +26,14 @@ import { parseVersionFolder, versionLabel } from '../../lib/versions.js';
  *   5. `display_name` is the byline `authored[]` and showMember's "Authored:" line are matched on
  *      (`:121`, `:135-137`, `:215`), which the handle can never satisfy;
  *   6. `people[].installed` and a skill's `installedBy` agree, because `ls.ts:117-131` builds both
- *      from the same parsed people — one cannot name a handle the other leaves with nothing.
+ *      from the same parsed people — one cannot name a handle the other leaves with nothing;
+ *   7. a placement whose recorded INPUT is a 40-hex tree hash comes out as `version: null` with no
+ *      `(Version N)` in its state — `configFileSchema`'s preprocess maps the hash to null before any
+ *      verb sees it (`schema.ts:243-248`, spec §3.4), `status.ts:54` copies that null into the ledger
+ *      and `ls.ts:270-278`'s `stateOf` then says nothing rather than inventing an ordinal — and, for a
+ *      recording of ANY provenance, `placement.version`, `state` and the printed row line are three
+ *      renderings of one value, so they agree in both directions (D70: the layout-3 re-key wrote
+ *      `v1` / `(Version 1)` over the fixture's tree hash, a value the CLI can never emit for it).
  */
 const ROOT = '.planning/codex-runs';
 type Frame = { t: string; verb?: string; ok?: boolean; line?: string; value?: unknown };
@@ -134,4 +141,113 @@ describe('capture frames stay consistent with the CLI that recorded them', () =>
       });
     }
   }
+});
+
+const LEGACY_TREE_HASH = /^[0-9a-f]{40}$/;
+const VERSION_PROSE = /\(Version \d+\)/;
+type LocalRow = { name: string; path: string; state: string; placement?: { id: string; team: string; version: unknown } | null };
+type LedgerRow = { path: string; id: string; team: string; version: unknown };
+
+/**
+ * What a set's OWN committed inputs say a placement's version was: the ids and folder names every
+ * `fixture.sh` seeds with `$VER` (a `git rev-parse HEAD:skills/<x>` tree hash) and every
+ * `config-*.json` still holding a 40-hex value. Read from the inputs rather than from a list kept
+ * here, so a set genuinely re-recorded from a fixture that places at `v1` (D70's delegated
+ * re-recording) turns the legacy half off by itself, and a set with no committed input at all
+ * (installed-state, mock-vs-real-2026-09-09) is held by the self-consistency half alone.
+ */
+function legacyPlacements(dir: string): { ids: Set<string>; names: Set<string> } {
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  const set = join(ROOT, dir);
+  let fixture = '';
+  try { fixture = readFileSync(join(set, 'fixture.sh'), 'utf8'); } catch { /* no generator committed */ }
+  for (const hit of fixture.matchAll(/rev-parse HEAD:skills\/([a-z0-9-]+)/g)) names.add(hit[1]!);
+  if (names.size) {
+    // `"id":"$ID_DEPLOY",…,"version":"$VER"` — the id is a shell variable assigned earlier in the script.
+    const vars = new Map([...fixture.matchAll(/\b([A-Z_]+)=([0-9a-f-]{36})\b/g)].map((hit) => [hit[1]!, hit[2]!]));
+    for (const hit of fixture.matchAll(/"id":"(\$)?([A-Za-z0-9_-]+)"[^{}]*"version":"\$VER"/g)) {
+      const id = hit[1] ? vars.get(hit[2]!) : hit[2];
+      if (id !== undefined) ids.add(id);
+    }
+  }
+  let entries: string[] = [];
+  try { entries = readdirSync(set); } catch { return { ids, names }; }
+  for (const file of entries) {
+    if (!/^config.*\.json$/.test(file)) continue;
+    let config: { placements?: Record<string, { id?: unknown; version?: unknown } | null> };
+    try { config = JSON.parse(readFileSync(join(set, file), 'utf8')) as typeof config; } catch { continue; }
+    for (const [path, entry] of Object.entries(config.placements ?? {})) {
+      if (typeof entry?.version !== 'string' || !LEGACY_TREE_HASH.test(entry.version)) continue;
+      if (typeof entry.id === 'string') ids.add(entry.id);
+      names.add(basename(path));
+    }
+  }
+  return { ids, names };
+}
+
+// (7) D70. The legacy half is keyed to each set's committed inputs; the self-consistency half runs on
+// every set, because `placement.version` and `state` are one value rendered twice (`ls.ts:270-278`)
+// and the printed row line is `state` verbatim (`ls.ts:330`) — a value invented in one limb and not
+// the others is the exact shape the re-key left behind.
+describe('no invented version for a legacy hash (D70)', () => {
+  const legacy = new Map<string, ReturnType<typeof legacyPlacements>>();
+  const legacyOf = (dir: string): ReturnType<typeof legacyPlacements> => {
+    let hit = legacy.get(dir);
+    if (!hit) legacy.set(dir, hit = legacyPlacements(dir));
+    return hit;
+  };
+  let exercised = 0; // rows and ledger entries the legacy half actually judged
+
+  for (const { id, path } of files) {
+    const dir = id.split('/')[0]!;
+    const rows = read(path);
+    const result = rows.find((row) => row.t === 'result' && row.ok === true);
+    const value = (result?.value ?? null) as Record<string, unknown> | null;
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
+    const local = ((value['local'] ?? []) as { rows?: LocalRow[] }[]).flatMap((section) => section.rows ?? []);
+    const ledger = (value['ledger'] as { placements?: LedgerRow[] } | undefined)?.placements ?? [];
+    if (!local.length && !ledger.length) continue;
+    const { ids, names } = legacyOf(dir);
+    const prints = rows.flatMap((row) => (row.t === 'print' && typeof row.line === 'string' ? [row.line] : []));
+    exercised += local.filter((row) => (row.placement ? ids.has(row.placement.id) : row.placement === undefined && names.has(row.name))).length + ledger.filter((entry) => ids.has(entry.id)).length;
+
+    it(`${id}: a tree-hash placement comes out as version null, and version, state and the printed line agree`, () => {
+      for (const row of local) {
+        const where = `${id} / ${row.name}`;
+        const placement = row.placement;
+        // Both directions of `stateOf`: a folder version carries exactly its ordinal's label, null carries
+        // none, and no placement at all is "untracked locally". An older recording omits `placement`
+        // entirely; its state is still checkable against the set's inputs by folder name below.
+        if (placement === null) expect(row.state, `${where}: no placement`).toBe('untracked locally');
+        else if (placement) {
+          if (placement.version === null) expect(row.state, `${where}: a null version renders no ordinal`).not.toMatch(VERSION_PROSE);
+          else {
+            const n = typeof placement.version === 'string' ? parseVersionFolder(placement.version) : null;
+            expect(n, `${where}: placement.version ${JSON.stringify(placement.version)} is neither null nor a version folder`).not.toBeNull();
+            expect(row.state, `${where}: state carries its own ordinal`).toContain(`(${versionLabel(n!)})`);
+          }
+        }
+        // The legacy half: this set's own inputs recorded the placement with a tree hash (§3.4 → null).
+        if (placement ? ids.has(placement.id) : placement === undefined && names.has(row.name)) {
+          if (placement) expect(placement.version, `${where}: recorded with a tree hash, so §3.4 maps it to null`).toBeNull();
+          expect(row.state, `${where}: recorded with a tree hash, so stateOf says nothing`).not.toMatch(VERSION_PROSE);
+        }
+        // The printed row line is `state` verbatim; an older recording may carry no print lines at all.
+        const printed = prints.map((line) => /^\s*(.+?) — (.+?)(?:; source problem: .*?)?; path: (.+)$/.exec(line)).find((hit) => hit !== null && hit[3] === row.path);
+        if (printed) expect(printed[2], `${where}: the printed state is the row's state`).toBe(row.state);
+      }
+      for (const entry of ledger) {
+        const where = `${id} / ledger ${entry.id}`;
+        if (entry.version !== null) expect(typeof entry.version === 'string' ? parseVersionFolder(entry.version) : null, `${where}: version ${JSON.stringify(entry.version)} is neither null nor a version folder`).not.toBeNull();
+        if (ids.has(entry.id)) expect(entry.version, `${where}: recorded with a tree hash, so §3.4 maps it to null`).toBeNull();
+        // `status` prints no ledger row, so the only mirror a print line can offer is not inventing one.
+        if (entry.version === null) for (const line of prints) expect(line, where).not.toMatch(new RegExp(`placement recorded from ${entry.team} \\(Version`));
+      }
+    });
+  }
+
+  it('judged at least one recorded placement by its set\'s own inputs — otherwise the legacy half above is vacuous', () => {
+    expect(exercised).toBeGreaterThan(0);
+  });
 });
