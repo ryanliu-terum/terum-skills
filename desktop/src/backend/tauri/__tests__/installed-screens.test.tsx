@@ -16,11 +16,13 @@ function open(member:string,route='#/marketplace/people/mira',local='on-disk-onl
  return {backend,f};
 }
 it('shows the same empty-install status on the page and rail and no bulk button',async()=>{
+ // §8.4: the heading now shows the people[] display name; the empty-install copy still uses the handle.
  open('none');await screen.findByRole('heading',{name:'Mira Chen'});
  expect(screen.getAllByText('Nothing to install')).toHaveLength(2);
  expect(screen.getAllByText('mira has no recorded installs to copy')).toHaveLength(2);
  expect(screen.queryByRole('button',{name:/Install \d+ skills/})).toBeNull();
- expect(screen.getByRole('region',{name:'Authored'})).toHaveTextContent('deploy-check');
+ expect(screen.getByRole('region',{name:'On their profile'})).not.toHaveTextContent('deploy-check');
+ expect(screen.getByRole('region',{name:'Installed'})).not.toHaveTextContent('deploy-check');
 });
 it('uses two recorded install ids for one member install call',async()=>{
  const {backend}=open('installed');const install=vi.spyOn(backend,'install');
@@ -48,7 +50,7 @@ it('abbreviates the real detail labels while Edit and Manage keep the absolute o
  fireEvent.click(screen.getByRole('button',{name:'Open in editor'}));
  expect(edit).toHaveBeenCalledWith('/Users/teddy/.claude/skills/deploy-check');
  fireEvent.click(screen.getByRole('button',{name:'Manage with Terum…'}));
- fireEvent.click(await screen.findByRole('button',{name:'Continue'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Publish'}));
  await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:'deploy-check',team:'acme'}));
 });
 it('uses the resolved path label in the real Global Remove dialog',async()=>{

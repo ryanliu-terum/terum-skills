@@ -48,7 +48,10 @@ it('shows the installed person action when the real catalog has scan roots', asy
  });
  open('#/marketplace/people/mira', backend);
  await screen.findByRole('heading', { name: 'Mira Chen' });
- expect(screen.getByText('Installed')).toBeInTheDocument();
+ // §8.5 adds an 'Installed' bucket region, so the bare text is now ambiguous on this page.
+ // Assert the install-status label specifically: the one occurrence OUTSIDE that region.
+ const installedRegion = screen.getByRole('region', { name: 'Installed' });
+ expect(screen.getAllByText('Installed').filter(el => !installedRegion.contains(el))).toHaveLength(1);
  expect(screen.queryByRole('button', { name: 'Install 2 skills' })).toBeNull();
  expect(screen.getByRole('button', { name: "Remove mira's 2 installed skills from this machine" })).toBeInTheDocument();
 });
