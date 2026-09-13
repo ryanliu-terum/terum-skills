@@ -164,6 +164,8 @@ export interface RunAgentOptions {
 }
 
 export interface AskJsonOptions {
+  /** Defaults to project; an empty string disables settings for classification. */
+  settingSources?: string;
   timeoutMs?: number;
   model?: string;
 }
@@ -209,7 +211,7 @@ async function askJson(prompt: string, options: AskJsonOptions = {}): Promise<Re
     '-p', prompt,
     '--output-format', 'json',
     '--max-turns', '1', '--disallowedTools', '*',
-    '--setting-sources', 'project', '--strict-mcp-config',
+    '--setting-sources', options.settingSources ?? 'project', '--strict-mcp-config',
     '--model', options.model ?? DEFAULT_MODEL,
     // TCC hygiene: under the desktop app an inherited cwd is `/`, and agent startup work
     // scanning an unexpected root walks into macOS-protected dirs. Pin every spawn, like

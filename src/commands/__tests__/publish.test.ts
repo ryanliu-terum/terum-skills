@@ -1,6 +1,8 @@
 import { lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AgentRunError, systemAgent, type AgentApi } from '../../lib/evals/agent.js';
+import { run as validate } from '../validate.js';
 import { createConfigStore, type ConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, git, originSha, person, pushFromSeed, ScriptedPrompter, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
 import { run } from '../publish.js';
@@ -8,6 +10,10 @@ import { receiptSchema } from '../../lib/evals/receipt.js';
 import { DEFAULT_CATEGORY, skillContentDigest } from '../../lib/skills.js';
 import { sourceFiles } from '../../lib/skill-source.js';
 import { systemRunner, type Runner } from '../../lib/runner.js';
+
+// Every model call stays behind the askJson seam, including accidental calls in older cases.
+beforeEach(() => { vi.spyOn(systemAgent, 'askJson').mockRejectedValue(new AgentRunError('offline test')); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 const ID = '11111111-1111-4111-8111-111111111111';
 
@@ -343,5 +349,106 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     const io = new ScriptedPrompter();
     expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v2' } });
     expect(io.lines).toContain('1 local eval run(s) of these exact bytes could not be read (20260303T000000Z), so they were not considered.');
+  });
+});
+
+
+describe('B9 — first-publish category', () => {
+  const categories = ['debugging', 'testing', 'docs', 'workflow', 'research', 'infra', 'review', 'misc'];
+  async function categoryFixture(raw?: string, list: readonly string[] = categories) {
+    const fixture = await prepared();
+    await pushFromSeed(fixture.fixture.seed, 'team.json', JSON.stringify({ ...TEAM_JSON, categories: list }));
+    const folder = await librarySkill(fixture.home, 'sample', raw);
+    return { ...fixture, folder };
+  }
+  const agentFor = (answer: Record<string, unknown>): AgentApi => ({ askJson: vi.fn().mockResolvedValue(answer), runAgent: vi.fn() });
+
+  it('suggests once, writes identical local and published bytes, then preserves category on republish', async () => {
+    const { fixture, store, home, folder } = await categoryFixture();
+    const agent = agentFor({ category: ' REVIEW ' });
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(io.lines.join('\n')).toContain('metadata.terum-category: review (suggested from your SKILL.md; edit any time)');
+    expect(io.lines.join('\n')).not.toContain('HYG7');
+    const local = await readFile(join(folder, 'SKILL.md'), 'utf8');
+    expect(local).toBe(await show(fixture.bare, 'skills/sample/v1/SKILL.md'));
+    expect(local).toContain('terum-category: review');
+    const again = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, again)).toMatchObject({ ok: true, value: { created: false, identicalTo: 'v1' } });
+    expect(agent.askJson).toHaveBeenCalledTimes(1);
+    expect(again.lines.join('\n')).not.toContain('metadata.terum-category:');
+  });
+  it.each(['offline', 'invalid'])('falls back visibly and still publishes when the answer is %s', async mode => {
+    const { fixture, store, home } = await categoryFixture();
+    const agent = agentFor({ category: 'invented' });
+    if (mode === 'offline') vi.mocked(agent.askJson).mockRejectedValue(new AgentRunError('offline'));
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, io)).toMatchObject({ ok: true });
+    expect(io.lines.join('\n')).toContain("metadata.terum-category: misc (couldn't reach the model; edit SKILL.md any time)");
+    expect(await show(fixture.bare, 'skills/sample/v1/SKILL.md')).toContain('terum-category: misc');
+    expect(agent.askJson).toHaveBeenCalledTimes(1);
+  });
+  it('uses the system askJson seam when no agent is supplied', async () => {
+    const { store, home } = await categoryFixture();
+    vi.mocked(systemAgent.askJson).mockResolvedValue({ category: 'docs' });
+    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    expect(systemAgent.askJson).toHaveBeenCalledTimes(1);
+  });
+  it('the flag suppresses the model and off-list values warn without refusing', async () => {
+    const { store, home } = await categoryFixture();
+    const agent = agentFor({ category: 'review' });
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, agent, category: 'ops', yesProfile: false }, io)).toMatchObject({ ok: true });
+    expect(agent.askJson).not.toHaveBeenCalled();
+    expect(io.lines.join('\n')).toContain('metadata.terum-category: ops (from --category; edit SKILL.md any time)');
+    expect(io.lines.filter(line => line.startsWith('warning HYG7'))).toHaveLength(1);
+  });
+  it('declared category wins over flag and model, with HYG7 only at publish, never validate', async () => {
+    const { store, home, folder } = await categoryFixture(published().replace('terum-category: testing', 'terum-category: ops'));
+    const agent = agentFor({ category: 'review' });
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, agent, category: 'docs', yesProfile: false }, io)).toMatchObject({ ok: true });
+    expect(agent.askJson).not.toHaveBeenCalled();
+    expect(io.lines.join('\n')).not.toContain('metadata.terum-category:');
+    expect(io.lines.filter(line => line.startsWith('warning HYG7'))).toHaveLength(1);
+    for (const target of [folder, 'sample']) {
+      const checked = new ScriptedPrompter();
+      expect(await validate({ target, config: store }, checked)).toMatchObject({ ok: true, value: { warnings: 0 } });
+      expect(checked.lines.join('\n')).not.toContain('HYG7');
+    }
+    expect(systemAgent.askJson).not.toHaveBeenCalled();
+  });
+  it.each(['', '   '])('refuses blank --category %j before reading config or making any call', async category => {
+    const store = createConfigStore('/unused-b9-test');
+    const read = vi.spyOn(store, 'read').mockRejectedValue(new Error('must not read config'));
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', config: store, category }, io)).toEqual({ ok: false, error: '--category must be a non-empty name.' });
+    expect(read).not.toHaveBeenCalled();
+    expect(systemAgent.askJson).not.toHaveBeenCalled();
+    expect(io.lines).toEqual([]);
+  });
+  // Hybrid review r1 (medium, publish.ts:98): the flag was stored untrimmed, so a trailing space from
+  // shell history baked ` ops ` into the committed SKILL.md for the skill's whole lineage, and HYG7 —
+  // which compared the same untrimmed string — warned about an off-list category whose trimmed
+  // spelling was on the list. The flag now follows the model path (categorize.ts): trimmed, and in
+  // the team's own spelling when it matches a team category case-insensitively; an off-list value is
+  // kept trimmed as typed so HYG7's warning names what the user wrote.
+  it.each([
+    { flag: ' ops ', stored: 'ops', warnings: 0 },
+    { flag: 'Ops', stored: 'ops', warnings: 0 },
+    { flag: ' Nope ', stored: 'Nope', warnings: 1 },
+  ])('stores --category $flag as $stored: trimmed, team spelling when on the list, HYG7 otherwise', async ({ flag, stored, warnings }) => {
+    const { fixture, store, home, folder } = await categoryFixture(undefined, [...categories, 'ops']);
+    const agent = agentFor({ category: 'review' });
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, agent, category: flag, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(agent.askJson).not.toHaveBeenCalled();
+    expect(io.lines.join('\n')).toContain(`metadata.terum-category: ${stored} (from --category; edit SKILL.md any time)`);
+    const hyg7 = io.lines.filter(line => line.startsWith('warning HYG7'));
+    expect(hyg7).toHaveLength(warnings);
+    if (warnings) expect(hyg7[0]).toContain(`terum-category \`${stored}\` is not one of your team's categories`);
+    const local = await readFile(join(folder, 'SKILL.md'), 'utf8');
+    expect(local).toBe(await show(fixture.bare, 'skills/sample/v1/SKILL.md'));
+    expect(local).toContain(`terum-category: ${stored}\n`);
   });
 });

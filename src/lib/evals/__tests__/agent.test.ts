@@ -105,3 +105,12 @@ describe('preflight (§7.4, VE7-adjacent)', () => {
     if (!outcome.ok) expect(outcome.error).toContain('logged in');
   });
 });
+
+// B9: assert the actual spawn argv, including an explicit empty argument.
+it.each([undefined, '', 'user'])('askJson settingSources %j reaches the binary (default project)', async settingSources => {
+  const captured = join(scratch, 'argv.txt');
+  await stub(`printf '%s\\n' "$@" > '${captured}'; printf '%s' '{"category":"review"}'`);
+  await systemAgent.askJson('classify', { settingSources });
+  const argv = (await readFile(captured, 'utf8')).split('\n');
+  expect(argv[argv.indexOf('--setting-sources') + 1]).toBe(settingSources ?? 'project');
+});

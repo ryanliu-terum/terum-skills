@@ -11,7 +11,7 @@ import { Prompter } from '../lib/prompt.js';
 import { fromError, CancelledError, Result, success } from '../lib/result.js';
 import { GLOBAL_PROJECT, parseJson, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { DEFAULT_CATEGORY, declaredCategory, declaredSkillId, injectManagedFields, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
+import { declaredCategory, declaredSkillId, injectManagedFields, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
 import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { teamForReference } from './install.js';
 import { assertNotInsideStateRoot, assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
@@ -19,12 +19,16 @@ import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/eva
 import { versionFolderName, versionLabel, versionsInTree } from '../lib/versions.js';
 import { localReceiptsFor } from '../lib/evals/receipt-store.js';
 import { offerProfileEntry } from '../lib/profile-entry.js';
+import { suggestCategory, teamCategory, type CategorySuggestion } from '../lib/categorize.js';
+import type { AgentApi } from '../lib/evals/agent.js';
 
 export interface PublishArgs extends WithForm {
   ref: string;
   project?: string;
   team?: string;
   category?: string;
+  /** Model seam for category suggestions; production defaults to systemAgent. */
+  agent?: AgentApi;
   /** Pre-answers §5.1 step 6a's regression question, for the desktop and for scripts. */
   allowRegression?: boolean;
   /** Pre-answers the profile prompt, for the desktop and for tests. */
@@ -58,6 +62,13 @@ export interface PublishResult {
  */
 export async function run(args: PublishArgs, io: Prompter): Promise<Result<PublishResult>> {
   try {
+    // Hybrid review r1 (medium, publish.ts:98): this check trimmed the flag and then the RAW string was
+    // stored, so `--category "ops "` (a trailing space from shell history) was injected as ` ops ` and,
+    // because a declared category is never overwritten (skills.ts injectManagedFields), stayed for the
+    // skill's whole lineage — while HYG7, comparing the same raw string, warned that ` ops ` was not on
+    // a list that held `ops`. Trim once here and read the trimmed value everywhere the flag is used.
+    const categoryFlag = args.category?.trim();
+    if (args.category !== undefined && !categoryFlag) throw new Error('--category must be a non-empty name.');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
@@ -67,6 +78,17 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const clone = store.teamClone(team);
     await refreshClone(runner, clone, { label: team, ...lockWait(io) });
     const teamJson = await readTeam(clone);
+    // Hybrid review r1 (medium, publish.ts:99): start the local catalogue read NOW. It depends only on
+    // `clone`/`team`, both in hand, and on nothing the category branch below produces — while that
+    // branch's `suggestCategory` can hold a `claude` subprocess for up to 20s on a first publish. The
+    // two used to run back to back; now the readdir/readFile overlaps the model round-trip. The
+    // `.catch` is a deliberate no-op: it only marks the promise handled, so a rejection that lands while
+    // the model call is still in flight is not reported as an unhandled rejection (which kills the
+    // process without ever reaching this function's try/catch). `await catalogPromise` below still
+    // throws that same rejection into the try/catch, exactly as the inline await did; a refusal that
+    // returns before that point simply never awaits it.
+    const catalogPromise = skillRecords(clone, team);
+    catalogPromise.catch(() => {});
 
     // 1. Resolve the ref to a LOCAL folder. You publish what is on your machine, never what is in
     //    the clone — that is the whole direction of this refactor.
@@ -87,18 +109,29 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     if (skillMd === undefined) throw new Error(`${found.path} has no SKILL.md.`);
 
     // 4. Managed fields, resolved into the IN-MEMORY SKILL.md before anything is hygiene-checked or
-    //    digested. The category precedence is declared > --category > DEFAULT_CATEGORY; the model
-    //    call that sits between the last two arrives with B9 (auto-category, D28).
+    //    digested. Once written back, the category is ordinary content: subsequent publishes keep it.
     const declared = declaredCategory(skillMd.toString('utf8'));
-    const category = declared ?? args.category ?? DEFAULT_CATEGORY;
-    if (declared === undefined) io.print(`metadata.terum-category: ${category} (${args.category ? 'from --category' : 'default'}; edit SKILL.md any time)`);
+    //    The flag takes the team's own spelling when it matches a team category case-insensitively —
+    //    the rule the model's answer already goes through (categorize.ts teamCategory), so
+    //    `--category Ops` lands in the one `ops` bucket. An off-list value stays as typed, trimmed:
+    //    §5 says the flag need not be on the list, and HYG7 must warn about what the user wrote.
+    const chosen: CategorySuggestion = declared !== undefined ? { category: declared, suggested: false }
+      : categoryFlag !== undefined ? { category: teamCategory(categoryFlag, teamJson.categories) ?? categoryFlag, suggested: false }
+      : await suggestCategory(skillMd.toString('utf8'), teamJson.categories, args.agent);
+    const category = chosen.category;
+    if (declared === undefined) {
+      const disclosure = categoryFlag !== undefined ? 'from --category; edit SKILL.md any time'
+        : chosen.suggested ? 'suggested from your SKILL.md; edit any time'
+        : "couldn't reach the model; edit SKILL.md any time";
+      io.print(`metadata.terum-category: ${category} (${disclosure})`);
+    }
     // The REPOSITORY is the authority on which uuid a published name carries, not the local file.
     // Reading the id only from the folder was wrong in both directions: `existingId` parsed through
     // the `.strict()` `skillFrontmatterSchema`, so a published folder whose user deleted the injected
     // `license:` line minted a FRESH uuid and orphaned every receipt, install and profile entry keyed
     // to the old one; and a folder COPIED from another skill kept that skill's declared uuid, landing
     // this publish's receipts in that skill's eval history.
-    const catalogue = await skillRecords(clone, team);
+    const catalogue = await catalogPromise;
     const published = catalogue.find((record) => record.name === found.name);
     const declaredId = declaredSkillId(skillMd.toString('utf8'));
     const id = published?.id
@@ -112,7 +145,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     // 5. Hygiene on the INJECTED map, never before — `skillFrontmatterSchema` is strict and requires
     //    the managed fields, so a never-published folder would fail HYG1 on fields publish is about
     //    to write.
-    const assessment = assessHygiene(found.name, { files, executable }, teamJson.policy.skill_license, true);
+    const assessment = assessHygiene(found.name, { files, executable }, teamJson.policy.skill_license, true, false, teamJson.categories);
     reportHygieneWarnings((line) => io.print(line), assessment);
 
     // 6. The comparison digest, taken AFTER injection so it is post-normalization.

@@ -667,6 +667,37 @@ review to judge rather than re-decided by me:
 7. *Recovery among several candidate siblings* → conservative (see the report's `openQuestions`).
 Playwright could not bind :1420 inside the sandbox; the orchestrator's own gates run it.
 
+## A21 — B9's Codex build: the "Will add:" block that no longer exists
+
+**B9 (Codex, gpt-6-astra high, 15 min, base = main 04ecaeb + the rev-9 spec docs; built in parallel
+with B5 — D28's "runs after B5" is honoured as merge order).** Status `partial` on one question:
+the auto-category spec §1 shows the suggested category inside `connect`'s "Will add:" block before
+its y/N; `connect` is deleted (B1) and the amendment moves the suggestion to first publish, whose
+disclosure is a standalone printed line before publish's own D19 confirm. Codex kept that shape —
+the suggestion line printed before the existing y/N, no new prompt — which is R1's rule ("every
+generated value is shown before the existing y/N, no separate category prompt") applied to the verb
+that survives. Taken as the reading; the review judges the wording. The recorded
+`b3-real-data/frames/publish-fresh.jsonl` keeps its old default-category line (a recording; owed
+to the next real re-capture of that set).
+
+## A23 — B9's review: three mechanical mediums applied, and the one place I overrode the triage's fit rating
+
+**Review `wf_77c596f8-516` (base `af17fd2`): 0 critical/high, 3 mediums, all mechanical, all applied**
+(the D53 bar was already met; these are cheap and one is a permanent data defect):
+1. `--category` was stored untrimmed, so `"ops "` from shell history baked a skill into its own browse
+   bucket forever and HYG7 then warned about a spelling that IS on the list. Now trimmed once, and —
+   **my call, against the triage's Fit 3 (trim-only) vs Fit 1 (normalise)** — canonicalised to the
+   team's spelling when it matches a team category case-insensitively, through one `teamCategory`
+   helper that `suggestCategory` also uses. Reason: B9's North Star is "browse actually works"; `Ops`
+   and `ops` as two buckets is the same defect as the stray space. §5's "not required to be in the
+   team's list" still holds — an off-list value is stored trimmed exactly as typed and HYG7 warns.
+   Revert = drop the `teamCategory(...) ??` arm; one test expectation changes.
+2. `validate --help` promised an HYG7 check validate never performs (it passes no categories, and a
+   B9 test pins "HYG7 only at publish"); the help now says so.
+3. First publish awaited the 20 s model call before starting the independent local catalogue read;
+   the read now starts first and is awaited where it is used (a no-op `.catch` shield keeps a
+   rejection during the model window from becoming an unhandled rejection).
+
 ## A24 — The frames PR's review: the recorder could blank its own fixtures, and two things honest frames exposed
 
 **Review `wf_7eaffc90-e93` (base `origin/main`, 254 agents): 1 critical, 2 high, 7 medium, 1 low.**
