@@ -3,7 +3,7 @@ import YAML from 'yaml';
 import { CREDENTIAL_PATTERNS } from './receipt.js';
 import { allowedTools, describeRaw, FRONTMATTER, localSkillFrontmatterSchema, skillFrontmatterSchema } from '../schema.js';
 
-export type HygieneCode = 'HYG1' | 'HYG2' | 'HYG3' | 'HYG4' | 'HYG5' | 'HYG6';
+export type HygieneCode = 'HYG1' | 'HYG2' | 'HYG3' | 'HYG4' | 'HYG5' | 'HYG6' | 'HYG7';
 export interface HygieneFinding { code: HygieneCode; path: string; line?: number; message: string; }
 /** §9 rev 16: errors gate (fail-closed); warnings are printed by every caller and gate nothing. */
 export interface HygieneAssessment { readonly errors: readonly HygieneFinding[]; readonly warnings: readonly HygieneFinding[]; }
@@ -23,6 +23,8 @@ export interface HygieneInput {
    * injects first (§5.1 step 4) and assesses the finished bytes.
    */
   managedFieldsAbsent?: boolean;
+  /** Unknown or empty taxonomy means there is nothing to compare against. */
+  categories?: readonly string[];
   /** Explicit `--allow-privileged` consent (or content whose repository copy already carries the
    *  consented form): waives HYG4's exec-bit and shebang findings only — the extension allowlist
    *  and every other check still apply (walk D5, Ryan 2026-09-07). */
@@ -62,6 +64,13 @@ export function inspectHygiene(input: HygieneInput): HygieneAssessment {
       const line = lineOf(skill, /^allowed-tools\s*:/m);
       errors.push({ code: 'HYG1', path: 'SKILL.md', ...(line === undefined ? {} : { line }), message: `${input.name}: allowed-tools is malformed${line === undefined ? '' : ` (SKILL.md line ${line})`}: ${describeRaw(grants.raw)}. Use a YAML list of tool patterns, or one comma-separated string.` });
     }
+  }
+
+  const category = parsed.success ? parsed.data.metadata?.['terum-category'] : undefined;
+  if (input.categories?.length && typeof category === 'string' && category.trim()
+    && !input.categories.some(allowed => allowed.toLowerCase() === category.toLowerCase())) {
+    const line = lineOf(skill, /^\s*terum-category\s*:/m);
+    warnings.push({ code: 'HYG7', path: 'SKILL.md', ...(line === undefined ? {} : { line }), message: `terum-category \`${category}\` is not one of your team's categories (${input.categories.join(', ')}). Browse will give it a bucket of its own; add it to team.json or change this line.` });
   }
 
   const author = parsed.success ? authorEmail(parsed.data.metadata?.author) : undefined;
@@ -129,9 +138,9 @@ export class HygieneRefused extends Error {
 }
 
 /** The single pure gate shared by every hygiene caller. */
-export function assessHygiene(name: string, input: { files: Map<string, Buffer>; executable: ReadonlySet<string> }, license: string | null, allowExecutable = false, managedFieldsAbsent = false): HygieneAssessment {
+export function assessHygiene(name: string, input: { files: Map<string, Buffer>; executable: ReadonlySet<string> }, license: string | null, allowExecutable = false, managedFieldsAbsent = false, categories?: readonly string[]): HygieneAssessment {
   const skill = input.files.get('SKILL.md');
-  const assessment = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable, managedFieldsAbsent });
+  const assessment = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable, managedFieldsAbsent, categories });
   if (assessment.errors.length) throw new HygieneRefused(assessment);
   return assessment;
 }

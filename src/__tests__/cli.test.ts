@@ -23,6 +23,23 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     return { program, calls, outcomes };
   };
 
+  it('B9 routes --category on publish and describes the offline escape hatch', async () => {
+    const { program, calls } = harness();
+    await program.parseAsync(['publish', 'sample', '--category', 'ops'], { from: 'user' });
+    expect(calls).toEqual([expect.objectContaining({ verb: 'publish', ref: 'sample', category: 'ops' })]);
+    expect(program.commands.find(command => command.name() === 'publish')?.helpInformation()).toContain('skips the model suggestion');
+  });
+
+  it('B9 documents HYG7 while retaining deterministic offline validation', () => {
+    const { program } = harness();
+    let output = '';
+    const command = program.commands.find(command => command.name() === 'validate')!;
+    command.configureOutput({ writeOut: text => { output += text; } });
+    command.outputHelp();
+    expect(output).toContain('HYG7');
+    expect(output).toContain('no model, no network call');
+  });
+
   it.each([false,true])('routes status --permissions into StatusArgs (%s)', async permissions => {
     const {program,calls}=harness();await program.parseAsync(['status',...(permissions?['--permissions']:[])],{from:'user'});
     expect(calls).toEqual([{verb:'status',...(permissions?{permissions:true}:{})}]);

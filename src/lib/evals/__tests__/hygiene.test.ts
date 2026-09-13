@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hygieneFrontmatter, inspectHygiene } from '../hygiene.js';
+import { assessHygiene, formatHygieneWarnings, hygieneFrontmatter, inspectHygiene } from '../hygiene.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const skill = (extra = '', body = '') => `---\nname: sample\ndescription: useful skill\nlicense: Apache-2.0\nmetadata:\n  id: ${ID}\n  author: Author <author@authors.test>\n  terum-category: docs\n${extra}---\n${body}`;
@@ -69,4 +69,37 @@ it('counts supplementary characters as two UTF-16 units', () => {
   const assessment = inspect({ 'SKILL.md': skill('', '\u{1D54F}'.repeat(10_001)) });
   expect(assessment.errors).toEqual([]);
   expect(assessment.warnings).toEqual([expect.objectContaining({ code: 'HYG6' })]);
+});
+
+
+describe('HYG7 — category taxonomy warning', () => {
+  const categories = ['debugging', 'testing', 'docs', 'workflow', 'research', 'infra', 'review', 'misc'];
+  const assess = (category: string, list?: readonly string[]) => assessHygiene('sample', {
+    files: new Map([['SKILL.md', Buffer.from(skill().replace('terum-category: docs', `terum-category: ${category}`))]]), executable: new Set(),
+  }, 'Apache-2.0', false, false, list);
+
+  it('warns exactly once with the line number and never gates an off-list category', () => {
+    const result = assess('ops', categories);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toHaveLength(1);
+    expect(formatHygieneWarnings(result.warnings)).toBe("warning HYG7 SKILL.md:8: terum-category `ops` is not one of your team's categories (debugging, testing, docs, workflow, research, infra, review, misc). Browse will give it a bucket of its own; add it to team.json or change this line.");
+  });
+  it.each(['docs', 'DOCS', 'review'])('is silent for on-list %s, case-insensitively', category => {
+    expect(assess(category, categories)).toEqual({ errors: [], warnings: [] });
+  });
+  it.each([undefined, []])('is silent when the taxonomy is unknown or empty: %j', list => {
+    expect(assess('ops', list)).toEqual({ errors: [], warnings: [] });
+  });
+  it('keeps managedFieldsAbsent as the fifth parameter', () => {
+    expect(assessHygiene('sample', { files: new Map([['SKILL.md', Buffer.from('---\nname: sample\ndescription: useful skill\n---\n')]]), executable: new Set() }, null, false, true, categories)).toEqual({ errors: [], warnings: [] });
+  });
+  it('does not warn on unparseable frontmatter', () => {
+    const files = new Map([['SKILL.md', Buffer.from('---\nmetadata: [\n---\n')]]);
+    expect(inspectHygiene({ name: 'sample', files, frontmatter: hygieneFrontmatter(files.get('SKILL.md')!), executable: new Set(), policy: { skill_license: null }, categories }).warnings).toEqual([]);
+  });
+  it('omits an unavailable line number for inline metadata', () => {
+    const raw = skill().replace(/metadata:[\s\S]*?---/, `metadata: {id: ${ID}, author: 'Author <author@authors.test>', terum-category: ops}\n---`);
+    const result = assessHygiene('sample', { files: new Map([['SKILL.md', Buffer.from(raw)]]), executable: new Set() }, 'Apache-2.0', false, false, categories);
+    expect(formatHygieneWarnings(result.warnings)).toContain('warning HYG7 SKILL.md: terum-category');
+  });
 });

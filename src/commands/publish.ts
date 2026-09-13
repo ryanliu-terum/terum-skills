@@ -11,7 +11,7 @@ import { Prompter } from '../lib/prompt.js';
 import { fromError, CancelledError, Result, success } from '../lib/result.js';
 import { GLOBAL_PROJECT, parseJson, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { DEFAULT_CATEGORY, declaredCategory, declaredSkillId, injectManagedFields, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
+import { declaredCategory, declaredSkillId, injectManagedFields, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
 import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { teamForReference } from './install.js';
 import { assertNotInsideStateRoot, assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
@@ -19,12 +19,16 @@ import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/eva
 import { versionFolderName, versionLabel, versionsInTree } from '../lib/versions.js';
 import { localReceiptsFor } from '../lib/evals/receipt-store.js';
 import { offerProfileEntry } from '../lib/profile-entry.js';
+import { suggestCategory, type CategorySuggestion } from '../lib/categorize.js';
+import type { AgentApi } from '../lib/evals/agent.js';
 
 export interface PublishArgs extends WithForm {
   ref: string;
   project?: string;
   team?: string;
   category?: string;
+  /** Model seam for category suggestions; production defaults to systemAgent. */
+  agent?: AgentApi;
   /** Pre-answers §5.1 step 6a's regression question, for the desktop and for scripts. */
   allowRegression?: boolean;
   /** Pre-answers the profile prompt, for the desktop and for tests. */
@@ -58,6 +62,7 @@ export interface PublishResult {
  */
 export async function run(args: PublishArgs, io: Prompter): Promise<Result<PublishResult>> {
   try {
+    if (args.category !== undefined && !args.category.trim()) throw new Error('--category must be a non-empty name.');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
@@ -87,11 +92,18 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     if (skillMd === undefined) throw new Error(`${found.path} has no SKILL.md.`);
 
     // 4. Managed fields, resolved into the IN-MEMORY SKILL.md before anything is hygiene-checked or
-    //    digested. The category precedence is declared > --category > DEFAULT_CATEGORY; the model
-    //    call that sits between the last two arrives with B9 (auto-category, D28).
+    //    digested. Once written back, the category is ordinary content: subsequent publishes keep it.
     const declared = declaredCategory(skillMd.toString('utf8'));
-    const category = declared ?? args.category ?? DEFAULT_CATEGORY;
-    if (declared === undefined) io.print(`metadata.terum-category: ${category} (${args.category ? 'from --category' : 'default'}; edit SKILL.md any time)`);
+    const chosen: CategorySuggestion = declared !== undefined ? { category: declared, suggested: false }
+      : args.category !== undefined ? { category: args.category, suggested: false }
+      : await suggestCategory(skillMd.toString('utf8'), teamJson.categories, args.agent);
+    const category = chosen.category;
+    if (declared === undefined) {
+      const disclosure = args.category !== undefined ? 'from --category; edit SKILL.md any time'
+        : chosen.suggested ? 'suggested from your SKILL.md; edit any time'
+        : "couldn't reach the model; edit SKILL.md any time";
+      io.print(`metadata.terum-category: ${category} (${disclosure})`);
+    }
     // The REPOSITORY is the authority on which uuid a published name carries, not the local file.
     // Reading the id only from the folder was wrong in both directions: `existingId` parsed through
     // the `.strict()` `skillFrontmatterSchema`, so a published folder whose user deleted the injected
@@ -112,7 +124,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     // 5. Hygiene on the INJECTED map, never before — `skillFrontmatterSchema` is strict and requires
     //    the managed fields, so a never-published folder would fail HYG1 on fields publish is about
     //    to write.
-    const assessment = assessHygiene(found.name, { files, executable }, teamJson.policy.skill_license, true);
+    const assessment = assessHygiene(found.name, { files, executable }, teamJson.policy.skill_license, true, false, teamJson.categories);
     reportHygieneWarnings((line) => io.print(line), assessment);
 
     // 6. The comparison digest, taken AFTER injection so it is post-normalization.

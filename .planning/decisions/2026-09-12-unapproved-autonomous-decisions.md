@@ -667,6 +667,19 @@ review to judge rather than re-decided by me:
 7. *Recovery among several candidate siblings* → conservative (see the report's `openQuestions`).
 Playwright could not bind :1420 inside the sandbox; the orchestrator's own gates run it.
 
+## A21 — B9's Codex build: the "Will add:" block that no longer exists
+
+**B9 (Codex, gpt-6-astra high, 15 min, base = main 04ecaeb + the rev-9 spec docs; built in parallel
+with B5 — D28's "runs after B5" is honoured as merge order).** Status `partial` on one question:
+the auto-category spec §1 shows the suggested category inside `connect`'s "Will add:" block before
+its y/N; `connect` is deleted (B1) and the amendment moves the suggestion to first publish, whose
+disclosure is a standalone printed line before publish's own D19 confirm. Codex kept that shape —
+the suggestion line printed before the existing y/N, no new prompt — which is R1's rule ("every
+generated value is shown before the existing y/N, no separate category prompt") applied to the verb
+that survives. Taken as the reading; the review judges the wording. The recorded
+`b3-real-data/frames/publish-fresh.jsonl` keeps its old default-category line (a recording; owed
+to the next real re-capture of that set).
+
 ## A24 — The frames PR's review: the recorder could blank its own fixtures, and two things honest frames exposed
 
 **Review `wf_7eaffc90-e93` (base `origin/main`, 254 agents): 1 critical, 2 high, 7 medium, 1 low.**
