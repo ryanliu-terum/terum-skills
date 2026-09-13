@@ -59,7 +59,7 @@ describe('the bundled bin (W-02)',()=>{
     expect(result.code).toBe(1);expect(JSON.parse(result.stdout.trim().split('\n').at(-1)!)).toMatchObject({t:'result',ok:false,error:expect.stringContaining('Input ended before')});
     const hook=await readFile(join(isolated,'.terum/skills/teams/team/.git/hooks/pre-push'),'utf8');expect(hook).toContain(bin);expect(hook.split('\n').find(line=>line.startsWith('exec '))).not.toContain('npx');
   });
-  it('resolves the bundled wrapper SKILL.md',async()=>{expect(await readFile(join(out,'dist/claude/skills/terum-skills/SKILL.md'),'utf8')).toContain('name: terum-skills');expect(JSON.stringify(await framed(['status']))).not.toMatch(/wrapper source missing/i);});
+  it('resolves the bundled wrapper SKILL.md',async()=>{expect(await readFile(join(out,'dist/claude/skills/terum-skills/SKILL.md'),'utf8')).toBe(await readFile(join(root,'.claude/skills/terum-skills/SKILL.md'),'utf8'));expect(JSON.stringify(await framed(['status']))).not.toMatch(/wrapper source missing/i);});
   it('produces the same frames as the unbundled tree for a read verb',async()=>{expect(await framed(['ls','--local'])).toEqual(await framed(['ls','--local'],join(tree,'dist/index.js')));});
   it('runs a verb that needs proper-lockfile, yaml, zod and commander from the bundle',async()=>{
     const project=join(out,'project');await mkdir(project);await mkdir(join(project,'.git'));
