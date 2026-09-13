@@ -1014,6 +1014,22 @@ describe('f-wizard cost and run choices', () => {
     expect((await readEvalQueue(args.config.root)).items).toMatchObject([{ team: 'team', skill: 'alpha', window: 'overnight' }, { team: 'team', skill: 'beta', window: 'overnight' }]);
     expect(io.events).toContain('print:Queued 2 evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with `terum-skills eval --drain`.');
   });
+  it('D61: setup names a queue item it had to drop — the onboarding route writes the file back too', async () => {
+    // `enqueueEvals` goes through `updateEvalQueue`, which re-writes the parsed items over the file,
+    // so a schema-invalid leftover is deleted for good the next time setup queues anything. The
+    // reporter reached `eval`'s two call sites first and left this one — the route a NEW user takes —
+    // still silent.
+    const args = await optionalSetup(2), evaluate = vi.fn(successfulEval), preflight = vi.fn();
+    const queueFile = join(args.config.root, 'run', 'eval-queue.json');
+    await mkdir(join(args.config.root, 'run'), { recursive: true });
+    await writeFile(queueFile, JSON.stringify({ schema: 2, items: [{ skill: 'stale', path: '/library/stale', contentHash: 'a'.repeat(40), requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' }] }));
+    const io = optionalAnswers({}, { 'Evaluate the ': 'Overnight' });
+    expect(await run({ ...args, form: 'bare', preflight, verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'queued' } } });
+    expect(io.events.join('\n')).toContain('1 queued eval could not be read and was dropped from the queue (stale)');
+    // And it really is gone — the drop this reports is the permanent one.
+    expect((await readEvalQueue(args.config.root)).items.map((item) => item.skill)).toEqual(['alpha', 'beta']);
+  });
+
   it('D61: reports Overnight as skipped when nothing could actually be queued', async () => {
     // `steps.evals` is what the app renders back as this step's outcome. The queue helper already
     // prints that nothing could be queued — a candidate with no copy on this machine cannot be —

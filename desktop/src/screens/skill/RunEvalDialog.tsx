@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useCapabilities } from '../../backend';
 import type { SkillDetail } from '../../backend/types';
 import { useEvalRun } from '../../app/eval-run-context';
+import { canRetry } from './can-retry';
 import { WorkflowDialog } from '../../components/domain/WorkflowControls';
 import { TerminalHint } from '../../components/domain/Primitives';
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from '../../components/ui/Dialog';
@@ -34,7 +35,7 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  if(!active)return <Dialog open onOpenChange={value=>{if(!value)close();}}><DialogPopup><DialogTitle>{title}</DialogTitle><DialogDescription>{missing?'Install it first — evals run against the copy on your machine.':estimate}</DialogDescription>{missing?null:<TerminalHint command={s.evalCommand}/>}{error?<div role="alert">{error}</div>:null}<div className="skill-dialog-actions"><Button onClick={close}>{missing?'Close':'Cancel'}</Button>{missing?null:<Button kind="primary" onClick={start}>Run eval</Button>}</div></DialogPopup></Dialog>;
  // `missing` gates this branch too. The run can outlive its folder — the comment below says so —
  // and a retry for an absent folder is the same guaranteed failure the pre-run gate exists to stop.
- const busy=active?.state==='running',finished=active!==null&&!busy,retryable=finished&&!missing&&(active?.state==='stopped'||(active?.result?.ok===false&&active.result.value===undefined));
+ const busy=active?.state==='running',finished=active!==null&&!busy,retryable=canRetry(active,missing);
  // §6.3: an eval reads the copy on THIS machine, whatever state it is in — that is the whole point
  // of binding a run to its content digest rather than to a version the repo has not seen yet.
  // A run can outlive its folder — the copy is uninstalled while the eval streams — so the null arm

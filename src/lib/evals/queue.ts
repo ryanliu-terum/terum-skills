@@ -127,5 +127,7 @@ export async function dequeueEvals(root: string, ref: string, report?: (line: st
   const queue = await readEvalQueue(root, report);
   const teamed = [...new Set(queue.items.filter(item => item.skill === skill && item.team !== undefined).map(item => item.team!))].sort();
   if (teamed.length > 0) throw new Error(`${skill} is queued for ${teamed.length === 1 ? 'team' : 'teams'} ${teamed.join(', ')}; nothing was cancelled. Name one: ${teamed.map(name => `--dequeue ${name}/${skill}`).join(' or ')}.`);
-  return updateEvalQueue(root, items => items.filter(item => item.skill !== skill || item.team !== undefined), report);
+  // The read above already reported any dropped item. `updateEvalQueue` reads again before it
+  // writes, so passing the reporter here too would print the same line twice for one invocation.
+  return updateEvalQueue(root, items => items.filter(item => item.skill !== skill || item.team !== undefined));
 }

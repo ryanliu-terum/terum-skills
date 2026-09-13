@@ -267,3 +267,20 @@ it('D61: the drop is reported on the paths that make it PERMANENT, not only on t
   expect(io.lines.join('\n')).toContain('1 queued eval could not be read and was dropped from the queue (beta)');
   expect((await readEvalQueue(config.root)).items).toEqual([]);
 });
+
+it('D61: the bare --dequeue form reports a dropped item exactly once, not once per read', async () => {
+  // The teamless branch reads the queue to check for cross-team ambiguity and then reads again
+  // inside `updateEvalQueue` before writing back. Passing the reporter to both printed the same
+  // drop line twice for one invocation.
+  const { config, io } = await fixture();
+  const teamless: EvalQueueItem = { skill: 'alpha', path: '/library/alpha', contentHash: DIGEST_B, requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' };
+  await enqueueEvals(config.root, [teamless]);
+  const path = join(config.root, 'run', 'eval-queue.json');
+  const file = JSON.parse(await readFile(path, 'utf8')) as { schema: number; items: unknown[] };
+  file.items.push({ skill: 'beta', path: '/library/beta', contentHash: 'a'.repeat(40), requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' });
+  await writeFile(path, JSON.stringify(file));
+
+  expect(await runQueue({ config, dequeue: 'alpha' } as unknown as EvalArgs, io)).toMatchObject({ ok: true });
+  const dropLines = io.lines.filter((line) => line.includes('could not be read and was dropped'));
+  expect(dropLines).toHaveLength(1);
+});

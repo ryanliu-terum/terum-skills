@@ -358,7 +358,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
               const requestedAt = new Date().toISOString();
               const items = await queueItemsFor({ home: args.home ?? homedir(), config: await store.read(), stateRoot: store.root, team: teamName, names: remaining.map(candidate => candidate.name), requestedAt, window }, bullet);
               if (items.length === 0) { io.print('None of those skills has a copy on this machine, so none could be queued.'); return 0; }
-              await enqueueEvals(store.root, items);
+              await enqueueEvals(store.root, items, line => io.print(line));
               if (window === 'overnight') io.print(`Queued ${items.length} evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with \`${invocation(args.form, 'eval --drain')}\`.`);
               else io.print(`Queued ${items.length} evals for later. Run them with \`${invocation(args.form, 'eval --drain')}\`.`);
               return items.length;
