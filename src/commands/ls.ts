@@ -11,15 +11,17 @@ import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
-import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, shortHash, skillEndorsement } from '../lib/readme.js';
+import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, skillEndorsement } from '../lib/readme.js';
+import { parseVersionFolder, versionFolderName, versionLabel } from '../lib/versions.js';
 import type { Receipt } from '../lib/evals/receipt.js';
-import { newestReceiptAt } from '../lib/evals/receipt-store.js';
+import { selectCardEval } from '../lib/evals/receipt-store.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
 import { githubOwnerRepo, repositoryUrl } from '../lib/remote.js';
 
 import { skillVersions } from '../lib/teamRepo.js';
+import type { SkillVersion } from '../lib/versions.js';
 
 /** Fingerprint walks are latency-bound; overlap them (W-02). */
 const FINGERPRINT_CONCURRENCY = 8;
@@ -41,12 +43,62 @@ export interface LsReceipt {
   arm_scores: Receipt['arm_scores'];
   provenance: Pick<Receipt['provenance'], 'model' | 'k' | 'cc_version' | 'timestamp' | 'runner_handle'>;
 }
-export interface LsSkill { id: string; name: string; author: string; category: string; characters: number; installs: number; latest: string; endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; frontmatter: string | null; updated: string; unresolved: boolean; receipt: LsReceipt | null; }
+export interface LsSkill {
+  id: string; name: string; author: string; category: string; characters: number; installs: number;
+/**
+   * §8.4 — the `v<N>` FOLDER of the highest version, never a tree hash and never the rendered label.
+   * It is data: §8.6 puts it in a repository URL as a path segment, and every renderer already has
+   * `versionLabel` for the prose. A DTO carrying `Version 3` would force each reader to parse the
+   * sentence back into an address.
+   */
+  latest: string;
+  /** How many versions the skill has published. */
+  versionCount: number;
+  endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; frontmatter: string | null; updated: string; receipt: LsReceipt | null;
+}
 export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
 export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; description: string | null; frontmatter: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string; description: string | null; frontmatter: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
-export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
+/**
+ * §8.4 — one member, whole, from the team read that already parsed `people/<handle>.json`.
+ *
+ * This limb is what replaces the marketplace's per-member fan-out: `catalog()` spawned
+ * `status` + `ls --local` + N × `ls member`, and after this it is two processes regardless of team
+ * size. It is also the ONLY reader `profile[]` has — without it §9.3 curates a list nothing ever
+ * shows, and §14.1's two-children gate is unreachable.
+ *
+ * `installed[]` and `profile[]` are deliberately both here and deliberately different (§3.5):
+ * `installed` is automatic and means *a copy is on a machine*; `profile` is curated and means
+ * *I stand behind this*. A reader that collapses them loses the distinction §8.5's two buckets exist
+ * to show.
+ */
+export interface LsPerson {
+  handle: string;
+  display_name: string;
+  /** The byline half of `metadata.author`: without it no reader can reproduce `ls member`s authorship join. */
+  email: string;
+  /**
+   * The ids of the skills whose `metadata.author` is this member's byline — the same join
+   * `ls member <handle>` makes, resolved HERE so it has exactly one implementation. A reader that
+   * re-derived it would need `normalizeAuthor`, and the desktop bundle may only import root modules
+   * that import nothing at all (`cli-tree-imports.test.ts`).
+   */
+  authored: readonly string[];
+  role: string | null;
+  projects: readonly string[];
+  installed: readonly { id: string; version: Person['installed'][number]['version']; scope: Person['installed'][number]['scope']; since: string }[];
+  profile: readonly { id: string; name: string; version: string; added: string; via: 'publish' | 'install' }[];
+  /**
+   * §3.5 — how many skill folders that machine held at its last sync. A SELF-REPORT: null means
+   * "no answer" (never synced since it shipped, or never synced at all) and must never be drawn as
+   * a zero.
+   */
+  local_skills: number | null;
+}
+export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[];
+  /** §8.4: emitted on the `kind:'all'` team read only; `member?` still serves the single-member view. */
+  people?: readonly LsPerson[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
 export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>> {
@@ -64,7 +116,27 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     const report = (source: string, message: string) => { problems.push({ source, message }); io.print(`${source}: ${message}`); };
     const people = (await Promise.all((await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).sort().map((file) => readPerson(clone, file.slice(0, -5)).catch((error: unknown) => { report(`people/${file}`, error instanceof Error ? error.message : String(error)); return undefined; })))).filter((person) => person !== undefined);
     const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived), role: person.role ?? null, projects: person.projects ?? [] }));
+    // §8.4: built from the same parsed people the roster and the install counts come from — no extra
+    // read, no second process, and one shape every marketplace reader shares.
+    const bylines = new Map(people.map((person) => [normalizeAuthor(`${person.display_name} <${person.email}>`), person.handle]));
+    const personRows: LsPerson[] = people.map((person) => ({
+      handle: person.handle,
+      display_name: person.display_name,
+      email: person.email,
+      role: person.role ?? null,
+      projects: person.projects ?? [],
+      installed: person.installed.map(({ id, version, scope, since }) => ({ id, version, scope, since })),
+      profile: (person.profile ?? []).map(({ id, name, version, added, via }) => ({ id, name, version, added, via })),
+      local_skills: person.local_skills ?? null,
+      authored: [],
+    }));
     const skills = await listSkills(team, people, clone, runner, io, teamName, problems);
+    const byHandle = new Map(personRows.map((row) => [row.handle, row]));
+    for (const skill of skills) {
+      const handle = bylines.get(normalizeAuthor(skill.author));
+      const row = handle === undefined ? undefined : byHandle.get(handle);
+      if (row) (row.authored as string[]).push(skill.id);
+    }
     // `return await`: a returned promise leaves the try block before it settles, so a throw inside
     // showMember/showProject would reject run() instead of becoming the failure Result every verb returns.
     if (args.kind === 'member') return await showMember(args.value, people, skills, io, roster, projects, problems);
@@ -74,7 +146,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     io.print('Skills:');
     for (const skill of skills) io.print(format(skill));
     io.print(`Local skills: ${invocation(args.form, 'ls --local')}`);
-    return success({ roster, skills, projects, problems });
+    return success({ roster, skills, projects, problems, people: personRows });
   } catch (error) { return fromError(error); }
 }
 
@@ -83,22 +155,18 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
   await readdir(join(clone, 'skills'));
   const records = await skillRecords(clone, teamName, { onProblem: ({ name, message }) => { problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`); } });
   const counts = installCounts(people), installers = installersById(people);
-  let versionProblem: string | undefined;
-  const versions = await skillVersions(runner, clone).catch((error: unknown) => { versionProblem = error instanceof Error ? error.message : String(error); return new Map<string, string>(); });
+  // §8.4: `skillRecords` already resolved each skill's latest version folder, and a name holding none
+  // never reaches here — so the old `skillVersions` spawn and the `unresolved` row it fed are gone.
+  const versions = await skillVersions(clone, records.map((record) => record.name));
   const skills: LsSkill[] = [];
   for (let index = 0; index < records.length; index += 8) {
     const chunk = records.slice(index, index + 8);
     const dates = await Promise.allSettled(chunk.map((record) => latestChange(runner, clone, record.name)));
     // The version this chunk resolved is already in hand, so the card's receipt costs one readdir and
     // one readFile per skill — no extra process and no second version resolution (card-lift override).
-    const receipts = await Promise.allSettled(chunk.map((record) => cardReceipt(clone, record.id, versions.get(record.name))));
+    const receipts = await Promise.allSettled(chunk.map((record) => cardReceipt(clone, record.id, versions.get(record.name) ?? [], (message) => { problems.push({ source: `evals/${record.id}`, message }); io.print(`${record.name}: ${message}`); })));
     for (const [offset, record] of chunk.entries()) {
       const { id, name, frontmatter, grants } = record;
-      const latest = versions.get(name);
-      if (latest === undefined) {
-        const message = versionProblem ?? `Could not resolve the latest version of ${name}: absent from HEAD:skills`;
-        problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`);
-      }
       const date = dates[offset]!;
       const updated = date.status === 'fulfilled' ? date.value : '—';
       if (date.status === 'rejected') {
@@ -112,7 +180,7 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
         const message = found.reason instanceof Error ? found.reason.message : String(found.reason);
         problems.push({ source: `evals/${id}`, message }); io.print(`${name}: ${message}`);
       }
-      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: shortHash(latest ?? '—'), endorsement: skillEndorsement(team, id), unresolved: latest === undefined, grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, frontmatter: record.rawFrontmatter, updated, receipt: found.status === 'fulfilled' ? found.value : null });
+      skills.push({ id, name, description: frontmatter.description, author: frontmatter.metadata.author, category: frontmatter.metadata['terum-category'], characters: record.characters, installs: counts.get(id) ?? 0, latest: versionFolderName(record.latestVersion), versionCount: record.versionCount, endorsement: skillEndorsement(team, id), grants: grants.ok ? grants.normalized : null, grantsHash: grants.ok ? grants.hash : null, installedBy: installers.get(id) ?? [], body: record.body ?? null, frontmatter: record.rawFrontmatter, updated, receipt: found.status === 'fulfilled' ? found.value : null });
     }
   }
   return skills;
@@ -122,14 +190,20 @@ async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awa
  * receipt directory is not a problem — it is the "—" state. The identity check is `eval-report`'s
  * own (evalReport.ts), so the two verbs cannot disagree about which receipt is this version's.
  */
-async function cardReceipt(clone: string, id: string, version: string | undefined): Promise<LsReceipt | null> {
-  if (version === undefined) return null;
-  const newest = await newestReceiptAt(join(clone, 'evals', id, version));
-  if (newest === undefined) return null;
-  const found = newest.receipt;
-  if (found.skill_id.toLowerCase() !== id.toLowerCase() || found.version !== version) {
-    throw new Error(`newest receipt ${newest.file} does not match the receipt path: its skill ID or version disagrees.`);
-  }
+async function cardReceipt(clone: string, id: string, versions: readonly SkillVersion[], onProblem?: (message: string) => void): Promise<LsReceipt | null> {
+  // §8.1's fallback, shared with the README: show the newest version carrying a usable receipt. A
+  // corrupt newest file fails closed for that version only and the walk continues, so one bad file
+  // cannot blank a skill with three good older evals.
+  const selected = await selectCardEval(clone, id, versions, onProblem);
+  // D60: §8.2 makes the "from Version N" label on the card face mandatory — "a card showing v3's score
+  // next to a v5 install button is a claim about bytes the user will not receive", and the label "is
+  // the only thing that keeps the reversal honest". That label and the DTO limbs that carry it ship
+  // with B4 (§8.1's `evalVersion`/`latestVersion`/`latestEvalState` on `LsSkill`), so until B4 lands
+  // there is nowhere for the disclosure to go. `main` must never carry the reversal without it, so a
+  // stale receipt renders "—" here exactly as it does today. B4 deletes this clause in the same
+  // commit that adds `evalVersionLabel`; the README half (`annotate`) already discloses honestly.
+  if (selected.eval === null || selected.eval.stale) return null;
+  const found = selected.eval.receipt.receipt;
   const { model, k, cc_version, timestamp, runner_handle } = found.provenance;
   return { run_id: found.run_id, verdict: found.verdict, execution_status: found.execution_status, expected_rows: found.expected_rows, scored_rows: found.scored_rows, comparisons: found.comparisons, arm_scores: found.arm_scores, provenance: { model, k, cc_version, timestamp, runner_handle } };
 }
@@ -154,7 +228,11 @@ async function showProject(projectName: string | undefined, team: ReturnType<typ
   return success({ roster, skills: selected, projects, problems });
 }
 /** One skill per line, the §6 `ls` format; `search` prints hits through the same function. */
-export function format(skill: LsSkill): string { return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${skill.latest}; ${skill.endorsement}; ${skill.updated}`; }
+/** D1: the printed line is prose, so the folder is rendered here — the DTO stays an address. */
+export function format(skill: LsSkill): string {
+  const ordinal = parseVersionFolder(skill.latest);
+  return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${ordinal === null ? skill.latest : versionLabel(ordinal)}; ${skill.endorsement}; ${skill.updated}`;
+}
 
 
 /**
@@ -191,7 +269,13 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
   const sections: LocalSection[] = [];
   const snapshots = new Map<string, { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; fingerprints?: Map<string, string>; complete: boolean }>();
   const stateOf = (entry: LocalEntry): string => {
-    return entry.placement ? `placement recorded from ${entry.placement.team}${entry.placement.version === null ? '' : ` @${entry.placement.version.slice(0, 8)}`}` : 'untracked locally';
+    if (!entry.placement) return 'untracked locally';
+    // D1: `Version N` is the only form a version takes in a user-facing string. The old ` @<8 hex>`
+    // suffix sliced a tree hash; slicing a version FOLDER would print `@v1`, the one spelling D1
+    // forbids. A null version (no ordinal recorded, or a legacy tree hash the config read mapped to
+    // null) simply says nothing rather than inventing one.
+    const ordinal = entry.placement.version === null ? null : parseVersionFolder(entry.placement.version);
+    return `placement recorded from ${entry.placement.team}${ordinal === null ? '' : ` (${versionLabel(ordinal)})`}`;
   };
   const healthOf = async (entry: LocalEntry): Promise<LocalHealth> => {
     if (entry.inspection.kind === 'rejected') return 'unknown';

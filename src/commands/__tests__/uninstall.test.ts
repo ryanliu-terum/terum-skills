@@ -25,7 +25,7 @@ describe('uninstall (§6 pending)', () => {
 
   it('lets a qualified ref decide the team when --team names a different one, exactly as install does', async () => {
     const fixture = await bareTeam(); const id = 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await cloneWithIdentity(fixture.bare, store.teamClone('other'));
@@ -43,7 +43,7 @@ describe('uninstall (§6 pending)', () => {
     const fixture = await bareTeam();
     const first = '11111111-1111-4111-8111-111111111111';
     const second = '22222222-2222-4222-8222-222222222222';
-    for (const [name, id] of [['first', first], ['second', second]] as const) await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    for (const [name, id] of [['first', first], ['second', second]] as const) await pushFromSeed(fixture.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(fixture.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [
       { id: first, version: null, scope: { kind: 'global' }, since: '2026-09-04' },
       { id: second, version: null, scope: { kind: 'global' }, since: '2026-09-04' },
@@ -73,8 +73,8 @@ describe('uninstall (§6 pending)', () => {
   it('declines an automatically endorsed uninstall, preserves approval, and clears the decline on explicit reinstall', async () => {
     const fixture = await bareTeam();
     const id = '66666666-6666-4666-8666-666666666666';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [id], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [id] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
@@ -94,9 +94,9 @@ describe('uninstall (§6 pending)', () => {
     const projectId = '77777777-7777-4777-8777-777777777777';
     const personalId = '88888888-8888-4888-8888-888888888888';
     for (const [name, id] of [['projected', projectId], ['personal', personalId]] as const) {
-      await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+      await pushFromSeed(fixture.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     }
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: [product.bare], skills: [projectId] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] }, product: { remotes: [product.bare], skills: [projectId] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home');
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -132,8 +132,8 @@ describe('uninstall (§6 pending)', () => {
   it('uninstall project removes only that project\'s placement and never declines a skill still installed globally', async () => {
     const fixture = await bareTeam(); const product = await bareTeam();
     const id = 'dededede-dede-4ede-8ede-dededededede';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: [product.bare], skills: [id] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] }, product: { remotes: [product.bare], skills: [id] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
@@ -159,8 +159,8 @@ describe('uninstall (§6 pending)', () => {
     const fixture = await bareTeam();
     const product = await bareTeam();
     const id = '99999999-9999-4999-8999-999999999999';
-    await pushFromSeed(fixture.seed, 'skills/projected/SKILL.md', `---\nname: projected\ndescription: projected\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: [product.bare], skills: [id] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    await pushFromSeed(fixture.seed, 'skills/projected/v1/SKILL.md', `---\nname: projected\ndescription: projected\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] }, product: { remotes: [product.bare], skills: [id] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home');
     const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -188,7 +188,7 @@ describe('uninstall (§6 pending)', () => {
   it('clears a shared install record from a second machine without pretending it removed that machine’s missing placement', async () => {
     const fixture = await bareTeam();
     const id = 'abababab-abab-4bab-8bab-abababababab';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const homeA = join(fixture.root, 'home-a'); const homeB = join(fixture.root, 'home-b');
     const storeA = createConfigStore(join(fixture.root, 'state-a')); const storeB = createConfigStore(join(fixture.root, 'state-b'));
     const cloneA = await cloneWithIdentity(fixture.bare, storeA.teamClone('team'));
@@ -211,7 +211,7 @@ describe('uninstall (§6 pending)', () => {
   it('says a never-installed team skill is not placed on this machine instead of exiting silently', async () => {
     const fixture = await bareTeam();
     const id = 'efefefef-efef-4fef-8fef-efefefefefef';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const home = join(fixture.root, 'home');
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -223,8 +223,8 @@ describe('uninstall (§6 pending)', () => {
 
   it('does not turn an incidental team.json description mention into a durable decline', async () => {
     const fixture = await bareTeam(); const id = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: ${id}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [`note ${id}`], global: [], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: ${id}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [`note ${id}`], projects: { Global: { remotes: [], skills: [] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
@@ -254,8 +254,8 @@ it('unions people scopes and matching ledger scopes without borrowing another te
 async function projectPreviewFixture() {
   const fixture = await bareTeam(), product = await bareTeam();
   const ids = ['91919191-9191-4191-8191-919191919191', '92929292-9292-4292-8292-929292929292'];
-  for (const [index, name] of ['shared', 'projected'].entries()) await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${ids[index]}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-  await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: [product.bare], skills: ids } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }));
+  for (const [index, name] of ['shared', 'projected'].entries()) await pushFromSeed(fixture.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${ids[index]}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+  await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] }, product: { remotes: [product.bare], skills: ids } }, archived: [], policy: { skill_license: 'UNLICENSED' } }));
   const store = createConfigStore(join(fixture.root, 'state')), home = join(fixture.root, 'home');
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   const checkouts = await Promise.all(['a', 'b'].map(name => cloneWithIdentity(product.bare, join(product.root, name))));
@@ -337,7 +337,7 @@ it('fails closed at the non-interactive confirm before any project write', async
 it('removes a member installed list and leaves authored-only skills untouched', async () => {
   const fixture = await bareTeam();
   const authored = '93939393-9393-4393-8393-939393939393', installed = '94949494-9494-4494-8494-949494949494';
-  for (const [name, id, author] of [['authored', authored, 'Member <member@example.com>'], ['used', installed, 'Seed <seed@example.com>']]) await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: ${author}\n  terum-category: testing\n---\n`);
+  for (const [name, id, author] of [['authored', authored, 'Member <member@example.com>'], ['used', installed, 'Seed <seed@example.com>']]) await pushFromSeed(fixture.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: ${author}\n  terum-category: testing\n---\n`);
   await pushFromSeed(fixture.seed, 'people/member.json', JSON.stringify(person('member', { installed: [{ id: installed, scope: { kind: 'global' }, version: null, since: '2026-09-04' }] })));
   const store = createConfigStore(join(fixture.root, 'state')), home = join(fixture.root, 'home');
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -355,7 +355,7 @@ it('removes a member installed list and leaves authored-only skills untouched', 
 
 it.each(['member', 'project'] as const)('does not ask, print, or write for an empty %s preview', async kind => {
   const fixture = await bareTeam();
-  await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: [], skills: ['95959595-9595-4595-8595-959595959595'] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }));
+  await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] }, product: { remotes: [], skills: ['95959595-9595-4595-8595-959595959595'] } }, archived: [], policy: { skill_license: 'UNLICENSED' } }));
   const store = createConfigStore(join(fixture.root, 'state'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
@@ -368,10 +368,10 @@ it.each(['member', 'project'] as const)('does not ask, print, or write for an em
   expect(await git(['rev-list', '--count', 'main'], fixture.bare)).toBe(commits);
 });
 
-it('removes only --from and updates the shared record and decline only after the last Global-scope copy', async () => {
+it('removes only --from and updates the shared record only after the last Global-scope copy', async () => {
   const fixture = await bareTeam(); const id = 'acacacac-acac-4cac-8cac-acacacacacac';
-  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-  const team = JSON.parse(await readFile(join(fixture.seed, 'team.json'), 'utf8')); team.global = [id];
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+  const team = JSON.parse(await readFile(join(fixture.seed, 'team.json'), 'utf8')); team.projects = { Global: { remotes: [], skills: [id] } };
   await pushFromSeed(fixture.seed, 'team.json', JSON.stringify(team));
   const home = join(fixture.root, 'home'); const store = createConfigStore(join(home, '.terum', 'skills'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -387,6 +387,8 @@ it('removes only --from and updates the shared record and decline only after the
   await expect(access(join(checkout, '.claude', 'skills', 'sample'))).rejects.toMatchObject({ code: 'ENOENT' });
   await expect(access(join(home, '.claude', 'skills', 'sample'))).resolves.toBeUndefined();
   expect(await run({ ref: 'sample', from: 'global', config: store }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true, value: [{ removed: 1 }] });
+  // `declined` is still written here for an endorsed skill. §12 deleted the auto-install it used to
+  // suppress, so nothing reads it any more — vestigial, not wrong, and out of B3's scope to remove.
   expect(JSON.parse(await readFile(personPath, 'utf8'))).toMatchObject({ installed: [], declined: [id] });
   expect(await store.read()).toMatchObject({ pending: [], placements: {} });
 });

@@ -22,8 +22,9 @@ function receipt(version: string, run_id: string) {
 }
 async function setup(names = ['team']) {
   const fixture = await bareTeam();
-  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill);
-  const tree = (await git(['rev-parse', 'HEAD:skills/sample'], fixture.seed)).trim();
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill);
+  // §3.4: receipts are filed under the version FOLDER, not a tree hash.
+  const tree = 'v1';
   const store = createConfigStore(join(fixture.root, 'state'));
   for (const name of names) {
     await cloneWithIdentity(fixture.bare, store.teamClone(name));
@@ -133,7 +134,7 @@ describe('refresh', () => {
     expect(await git(['rev-parse', 'HEAD'], clone)).toBe(await git(['rev-parse', 'origin/main'], clone));
   });
   it('reports changed when a hard reset restores a tracked file that was deleted locally', async () => {
-    const { store, clone } = await setup(); const path = join(clone, 'skills/sample/SKILL.md'); const before = await git(['rev-parse', 'HEAD'], clone);
+    const { store, clone } = await setup(); const path = join(clone, 'skills/sample/v1/SKILL.md'); const before = await git(['rev-parse', 'HEAD'], clone);
     await clean(path);
     expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { changed: true, teams: [{ state: 'refreshed', changed: true }] } });
     expect(await readFile(path, 'utf8')).toBe(skill); expect(await git(['rev-parse', 'HEAD'], clone)).toBe(before);

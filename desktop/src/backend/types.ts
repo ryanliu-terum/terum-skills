@@ -87,7 +87,7 @@ export type CloneState = {state:'absent'} | {state:'incomplete';reason:'not-a-re
 /** name comes from team.json via status; key is the config identifier. They may differ; there is no label. */
 export interface TeamStatus {
  name:string;key:string;remote:string|null;handle:string;clone:string|null;members:number|null;skills:number|null;
- last_sync:string|null;stamp:string|null;policy:{publish:string;license:string}|null;categories:string[]|null;
+ last_sync:string|null;stamp:string|null;policy:{license:string}|null;categories:string[]|null;
  pending:{op:'install'|'uninstall';id:string;scope:{kind:'global'}|{kind:'project';project:string};version:string|null;started:string}[];
  joinCommand:string|null;joinBlock:readonly string[]|null;
  cloneState?:CloneState|null;readable?:boolean|null;
@@ -100,7 +100,7 @@ export interface StatusLedger {
 }
 export interface StatusResult {ledger?:StatusLedger|null;machine:Machine;me:Identity;teams:TeamStatus[];counts:Record<string,string>;tools:{git:boolean;gh:boolean};roots:Root[]}
 export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project')[]}
-export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null;endorsed:string|null;unresolved:boolean|null}
+export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null;endorsed:string|null}
 export interface IdentityArgs {name?:string;email?:string;defaultHandle?:string}
 export interface IdentityWrite {updated:{key:string;value:string}[];notice:string|null}
 export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}
@@ -109,8 +109,13 @@ export interface UninstallArgs {from?:string;team?:string;ref:string;kind?:'skil
 export interface UninstalledResult {id:string;name:string}
 export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
 export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string}
-/** `prUrl` is set only under `policy.publish: 'pr'`, where team.json does not change until that pull request merges. */
-export interface PublishResult {name:string;version:string|null;changed:boolean;prUrl:string|null}
+/**
+ * §5.3. `version` is the `v<N>` this publish minted, or — when the bytes were byte-identical to a
+ * version already in the repo — the one it matched, which `identicalTo` names. `created` is the
+ * honest "did anything new land" flag, and it is deliberately not the same question as "did
+ * anything change": a publish can add the skill to a project without minting a version.
+ */
+export interface PublishResult {name:string;project:string;version:string|null;created:boolean;identicalTo:string|null;attachedEvals:number;profileAdded:boolean;projectAdded:boolean}
 export interface SyncArgs {team?:string}
 // The fetch-only sync result (§10). `detail` is the CLI's own reason for a state other than 'refreshed';
 // it is spelled the same here as in the CLI so the popup can render it.
@@ -126,7 +131,8 @@ export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite',
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
 export interface SetupResult {team:string;role:'creator'|'joiner';steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'|'queued'|'batched'>>|null}
 export interface EvalArgs {team?:string;ref:string;cases?:number}
-export interface EvalResult {name:string;runDir:string;executionStatus:'complete'|'partial'|'failed'}
+/** §6.3: `team` and `id` are null for a folder that belongs to no team, which is now the common case. */
+export interface EvalResult {name:string;runDir:string;executionStatus:'complete'|'partial'|'failed';team:string|null;id:string|null;shareHint:boolean}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
 export interface ValidateResult {name:string;findings:number;warnings:number}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
@@ -143,5 +149,5 @@ export type ChangeSource='config'|'clone'|'marketplace'|'placed'|'stamp';
 export type Settings = Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'FOLLOWING'|'INVITE_TIP'|'JOIN_BLOCK_NOTE' > & {
 HOOK:Design['HOOK']|null;QUARANTINE:Design['QUARANTINE']|null;CLI_LATEST:string|null;STORAGE:Omit<Design['STORAGE'],'cache_n'|'evals_n'>&{cache_n:number|null;evals_n:number|null};
 // mock-only: the drawn specimen login (design INVITEE); the real adapter never sets it
-INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{publish:string|null;license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
+INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};

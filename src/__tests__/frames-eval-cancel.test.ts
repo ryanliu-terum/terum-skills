@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { chmod, readFile, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,9 +15,15 @@ it.skipIf(process.platform === 'win32')('cancel during a built-bin eval kills th
   await promisify(execFile)(process.execPath, [tsc, '-p', join(root, 'tsconfig.build.json'), '--outDir', join(fixture.root, 'dist')], { cwd: root });
   await writeFile(join(fixture.root, 'package.json'), await readFile(join(root, 'package.json')));
   await symlink(join(root, 'node_modules'), join(fixture.root, 'node_modules'), 'dir');
-  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', '---\nname: sample\ndescription: useful\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nbody\n');
-  await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+  const SKILL = '---\nname: sample\ndescription: useful\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nbody\n';
+  const CASE = 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n';
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', SKILL);
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/evals/cases/happy.yaml', CASE);
   const home = join(fixture.root, 'home');
+  // §6.3: eval reads the folder in the LIBRARY, so the bytes under eval have to be on this machine.
+  await mkdir(join(home, '.claude', 'skills', 'sample', 'evals', 'cases'), { recursive: true });
+  await writeFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), SKILL);
+  await writeFile(join(home, '.claude', 'skills', 'sample', 'evals', 'cases', 'happy.yaml'), CASE);
   const store = createConfigStore(join(home, '.terum', 'skills'));
   await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update(c => { c.teams.team = { remote: fixture.bare, handle: 'seed' }; });

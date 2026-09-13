@@ -19,13 +19,13 @@ const ID = '33333333-3333-4333-8333-333333333333';
 describe('ls (§6)', () => {
   it('reads the clone without pulling, computes installs across people, and marks archived members inactive', async () => {
     const fixture = await bareTeam();
-    const team = { layout_version: 2, name: 'team', categories: [], global: [ID], projects: { app: { remotes: [], skills: [ID] } }, archived: ['old'], policy: { publish: 'pr', skill_license: 'UNLICENSED' } };
+    const team = { layout_version: 3, name: 'team', categories: [], projects: { app: { remotes: [], skills: [ID] } }, archived: ['old'], policy: { skill_license: 'UNLICENSED' } };
     const installed = [{ id: ID, version: null, scope: { kind: 'global' }, since: '2026-09-04' }];
     await writeFile(join(fixture.seed, 'team.json'), `${JSON.stringify(team, null, 2)}\n`);
     await writeFile(join(fixture.seed, 'people', 'amy.json'), `${JSON.stringify(person('amy', { display_name: 'Amy', installed }), null, 2)}\n`);
     await writeFile(join(fixture.seed, 'people', 'old.json'), `${JSON.stringify(person('old', { installed }), null, 2)}\n`);
-    await mkdir(join(fixture.seed, 'skills', 'report'), { recursive: true });
-    await writeFile(join(fixture.seed, 'skills', 'report', 'SKILL.md'), `---\nname: report\ndescription: Report writing\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: " amy   <AMY@example.com> "\n  terum-category: docs\n---\n`);
+    await mkdir(join(fixture.seed, 'skills', 'report', 'v1'), { recursive: true });
+    await writeFile(join(fixture.seed, 'skills', 'report', 'v1', 'SKILL.md'), `---\nname: report\ndescription: Report writing\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: " amy   <AMY@example.com> "\n  terum-category: docs\n---\n`);
     await git(['add', '--all'], fixture.seed);
     await git(['commit', '-q', '-m', 'skills'], fixture.seed);
     await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
@@ -36,37 +36,39 @@ describe('ls (§6)', () => {
     const before = await git(['rev-parse', 'HEAD'], store.teamClone('team'));
     const io = new ScriptedPrompter();
     const result = await run({ config: store }, io);
-    expect(result).toMatchObject({ ok: true, value: { skills: [{ name: 'report', installs: 2, endorsement: 'global' }] } });
+    expect(result).toMatchObject({ ok: true, value: { skills: [{ name: 'report', installs: 2, endorsement: 'project: app', latest: 'v1', versionCount: 1 }] } });
     expect(io.lines).toContain('  old (inactive)');
     expect(await git(['rev-parse', 'HEAD'], store.teamClone('team'))).toBe(before);
     expect((await git(['status', '--porcelain'], store.teamClone('team'))).trim()).toBe('');
   });
 
-  it('one folder git cannot resolve — present on disk but not in HEAD — costs one row\'s version and one reported line, never the roster or the other rows', async () => {
+  it('an uncommitted folder still resolves its version and costs only its own date, never the roster or the other rows', async () => {
     const skillFile = (name: string, id: string) => `---\nname: ${name}\ndescription: ${name} skill\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`;
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/healthy/SKILL.md', skillFile('healthy', '11111111-1111-4111-8111-111111111111'));
+    await pushFromSeed(fixture.seed, 'skills/healthy/v1/SKILL.md', skillFile('healthy', '11111111-1111-4111-8111-111111111111'));
     const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     // A safeWrite that lost its clone lock skips its cleanup, and `reset --hard` never removes an untracked folder.
-    await mkdir(join(clone, 'skills', 'ghost')); await writeFile(join(clone, 'skills', 'ghost', 'SKILL.md'), skillFile('ghost', '33333333-3333-4333-8333-333333333333'));
+    await mkdir(join(clone, 'skills', 'ghost', 'v1'), { recursive: true }); await writeFile(join(clone, 'skills', 'ghost', 'v1', 'SKILL.md'), skillFile('ghost', '33333333-3333-4333-8333-333333333333'));
     const io = new ScriptedPrompter();
     const result = await run({ config: store }, io);
-    const tree = (await git(['rev-parse', 'HEAD:skills/healthy'], clone)).trim().slice(0, 8);
-    expect(result).toMatchObject({ ok: true, value: { skills: [expect.objectContaining({ name: 'ghost', latest: '—' }), expect.objectContaining({ name: 'healthy', latest: tree })] } });
-    expect(io.lines.filter((line) => line.startsWith('ghost: Could not resolve the latest version of ghost'))).toHaveLength(1);
+    // §4.1 deleted the tree-hash lookup and `unresolved` with it: the version is the folder NAME, so
+    // it resolves for a folder git has never seen. Only the commit DATE is unknown, and an unknown
+    // date is a dash, not a failure — and not a reported line either.
+    expect(result).toMatchObject({ ok: true, value: { skills: [expect.objectContaining({ name: 'ghost', latest: 'v1', updated: '—' }), expect.objectContaining({ name: 'healthy', latest: 'v1' })] } });
+    expect(io.lines.filter((line) => line.startsWith('ghost:'))).toHaveLength(0);
     expect(io.lines).toContain('Members:');
-    expect(io.lines).toContain(`  healthy — Seed <seed@example.com>; testing; 0 installs; ${tree}; —; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/healthy'], clone)).trim()}`);
+    expect(io.lines).toContain(`  healthy — Seed <seed@example.com>; testing; 0 installs; Version 1; —; ${(await git(['log', '-1', '--format=%cI', '--', 'skills/healthy/v1'], clone)).trim()}`);
   });
 
   it('supports member and project forms', async () => {
     const fixture = await bareTeam();
-    const team = { layout_version: 2, name: 'team', categories: [], global: [], projects: { app: { remotes: [], skills: [ID] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } };
+    const team = { layout_version: 3, name: 'team', categories: [], projects: { app: { remotes: [], skills: [ID] } }, archived: [], policy: { skill_license: 'UNLICENSED' } };
     await writeFile(join(fixture.seed, 'team.json'), `${JSON.stringify(team)}\n`);
     await writeFile(join(fixture.seed, 'people', 'amy.json'), `${JSON.stringify(person('amy', { display_name: 'Amy', installed: [{ id: ID, version: null, scope: { kind: 'project', project: 'app' }, since: '2026-09-04' }] }))}\n`);
-    await mkdir(join(fixture.seed, 'skills', 'report'), { recursive: true });
-    await writeFile(join(fixture.seed, 'skills', 'report', 'SKILL.md'), `---\nname: report\ndescription: Report writing\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Amy <amy@example.com>\n  terum-category: docs\n---\n`);
+    await mkdir(join(fixture.seed, 'skills', 'report', 'v1'), { recursive: true });
+    await writeFile(join(fixture.seed, 'skills', 'report', 'v1', 'SKILL.md'), `---\nname: report\ndescription: Report writing\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Amy <amy@example.com>\n  terum-category: docs\n---\n`);
     await git(['add', '--all'], fixture.seed); await git(['commit', '-q', '-m', 'skills'], fixture.seed); await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
     const store = createConfigStore(join(fixture.root, 'local')); await store.ensureRoot(); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'amy' }; });
@@ -115,11 +117,11 @@ describe('issue 9 local ls', () => {
     const home = await temporaryDirectory(); const store = createConfigStore(join(home, 'state'));
     const mine = await localSource(home, 'mine'); const placed = await localSource(home, 'placed');
     const rejected = await localSource(home, 'gsd-x', '---\nname: gsd:x\ndescription: x\n---\n');
-    await store.update((config) => { config.placements[placed] = { id: ID, team: 'team', version: 'a'.repeat(40), scope: { kind: 'global' }, fingerprint: '', placed_at: '' }; });
+    await store.update((config) => { config.placements[placed] = { id: ID, team: 'team', version: 'v1', scope: { kind: 'global' }, fingerprint: '', placed_at: '' }; });
     const io = new ScriptedPrompter();
     const result = await run({ local: true, home, config: store, runner: { run: async () => { throw new Error('must not run commands'); } } }, io);
-    expect(result).toMatchObject({ ok: true, value: { local: [{ root: join(home, '.claude', 'skills'), scope: 'global', rows: [{ name: 'mine', path: mine, state: 'untracked locally' }, { name: 'placed', path: placed, state: 'placement recorded from team @aaaaaaaa' }], notOffered: [{ name: 'gsd-x', path: rejected, reason: 'name-mismatch', detail: 'SKILL.md name gsd:x does not equal folder gsd-x' }], problems: [] }] } });
-    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `  mine — untracked locally; path: ${mine}`, `  placed — placement recorded from team @aaaaaaaa; path: ${placed}`, 'Cannot be connected:', `  gsd-x — SKILL.md name gsd:x does not equal folder gsd-x; path: ${rejected}`, '  3 skill folders (1 connectable)', FOOTER]);
+    expect(result).toMatchObject({ ok: true, value: { local: [{ root: join(home, '.claude', 'skills'), scope: 'global', rows: [{ name: 'mine', path: mine, state: 'untracked locally' }, { name: 'placed', path: placed, state: 'placement recorded from team (Version 1)' }], notOffered: [{ name: 'gsd-x', path: rejected, reason: 'name-mismatch', detail: 'SKILL.md name gsd:x does not equal folder gsd-x' }], problems: [] }] } });
+    expect(io.lines).toEqual([`Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`, `  mine — untracked locally; path: ${mine}`, `  placed — placement recorded from team (Version 1); path: ${placed}`, 'Cannot be connected:', `  gsd-x — SKILL.md name gsd:x does not equal folder gsd-x; path: ${rejected}`, '  3 skill folders (1 connectable)', FOOTER]);
     expect(io.asked).toEqual([]);
   });
 
@@ -183,9 +185,9 @@ describe('global and project local sections', () => {
       config.projects = [{ root: repo, label: 'repo' }];
       config.placements[placed] = { id: ID, team: 'team', version: null, scope: { kind: 'project', project: 'app' }, fingerprint: '', placed_at: '' };
     });
-    const clone = store.teamClone('team'); await mkdir(join(clone, 'skills', 'global'), { recursive: true });
-    await writeFile(join(clone, 'team.json'), JSON.stringify({ ...TEAM_JSON, global: [ID] }));
-    await writeFile(join(clone, 'skills', 'global', 'SKILL.md'), `---\nname: global\ndescription: stored\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`);
+    const clone = store.teamClone('team'); await mkdir(join(clone, 'skills', 'global', 'v1'), { recursive: true });
+    await writeFile(join(clone, 'team.json'), JSON.stringify({ ...TEAM_JSON, projects: { Global: { remotes: [], skills: [ID] } } }));
+    await writeFile(join(clone, 'skills', 'global', 'v1', 'SKILL.md'), `---\nname: global\ndescription: stored\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`);
     const teamCalls: string[] = []; const wrapped = { ...store, teamClone: (team: string) => { teamCalls.push(team); return store.teamClone(team); } };
     const runner = ghOnlyRunner(() => ({ code: 0, stdout: '', stderr: '' })); const io = new ScriptedPrompter();
     const before = await readFile(join(store.root, 'config.json'));
@@ -292,12 +294,13 @@ async function inventoryFixture() {
 const inventorySource = (name: string, grants = 'allowed-tools: [Read, Bash, Read]') => `---\nname: ${name}\ndescription: "A description with <tags> and  spaces"\nlicense: UNLICENSED\n${grants}\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n# Real body\n`;
 it('one malformed folder and one malformed person each cost only their row, with named problems', async () => {
   const { store, clone } = await inventoryFixture();
-  for (const name of ['good','bad','mismatch']) { await mkdir(join(clone,'skills',name)); await writeFile(join(clone,'skills',name,'SKILL.md'), name==='bad'?'invalid':inventorySource(name==='mismatch'?'other':name)); }
+  for (const name of ['good','bad','mismatch']) { await mkdir(join(clone,'skills',name, 'v1'), { recursive: true }); await writeFile(join(clone,'skills',name, 'v1','SKILL.md'), name==='bad'?'invalid':inventorySource(name==='mismatch'?'other':name)); }
   await writeFile(join(clone,'people','bad.json'), '{broken');
   const io = new ScriptedPrompter(); const result = await run({config:store},io);
-  expect(result).toMatchObject({ok:true,value:{skills:[{name:'good',unresolved:true,latest:'—',installs:0}],roster:[{handle:'seed'}]}});
+  // §8.4 deleted `unresolved`: an uncommitted folder resolves its version from the folder name.
+  expect(result).toMatchObject({ok:true,value:{skills:[{name:'good',latest:'v1',versionCount:1,installs:0}],roster:[{handle:'seed'}]}});
   if(!result.ok)throw new Error(result.error);
-  expect(result.value.problems.map(p=>p.source).sort()).toEqual(['people/bad.json','skills/bad','skills/good','skills/mismatch']);
+  expect(result.value.problems.map(p=>p.source).sort()).toEqual(['people/bad.json','skills/bad','skills/mismatch']);
   expect(io.lines.filter(line=>line.startsWith('people/bad.json:'))).toHaveLength(1);
   for(const kind of ['member','project'] as const) {
     if(kind==='project') await writeFile(join(clone,'team.json'),JSON.stringify({...TEAM_JSON,projects:{app:{skills:[ID],remotes:[]}}}));
@@ -311,16 +314,18 @@ it('an unreadable skills root fails whole, never masquerading as an empty team',
   try {expect(await run({config:store},new ScriptedPrompter())).toEqual({ok:false,error:'EACCES skills root'});}finally{spy.mockRestore();}
 });
 it('carries verbatim description, normalized grants, body, installers and date; format adds only the date',async()=>{
-  const {store,clone}=await inventoryFixture();await mkdir(join(clone,'skills','good'));await writeFile(join(clone,'skills','good','SKILL.md'),inventorySource('good'));
+  const {store,clone}=await inventoryFixture();await mkdir(join(clone,'skills','good', 'v1'), { recursive: true });await writeFile(join(clone,'skills','good', 'v1','SKILL.md'),inventorySource('good'));
   await writeFile(join(clone,'people','seed.json'),JSON.stringify(person('seed',{installed:[{id:ID,version:null,scope:{kind:'global'},since:'2026-08-01'},{id:ID,version:null,scope:{kind:'project',project:'app'},since:'2026-08-02'}]})));
   await git(['add','--all'],clone);await git(['commit','-qm','inventory'],clone);
   const io=new ScriptedPrompter();const result=await run({config:store},io);if(!result.ok)throw new Error(result.error);
   const row=result.value.skills[0]!;const grants=allowedTools(['Read','Bash','Read']);if(!grants.ok)throw new Error('bad grants');
-  expect(row).toMatchObject({description:'A description with <tags> and  spaces',grants:grants.normalized,grantsHash:grants.hash,body:'# Real body\n',installs:1,unresolved:false,updated:(await git(['log','-1','--format=%cI','--','skills/good'],clone)).trim()});
+  expect(row).toMatchObject({description:'A description with <tags> and  spaces',grants:grants.normalized,grantsHash:grants.hash,body:'# Real body\n',installs:1,latest:'v1',versionCount:1,updated:(await git(['log','-1','--format=%cI','--','skills/good'],clone)).trim()});
   expect(row.installedBy.map(p=>p.scope)).toEqual([{kind:'global'},{kind:'project',project:'app'}]);
-  expect(format(row)).toBe(`  good — Seed <seed@example.com>; testing; 1 installs; ${row.latest}; —; ${row.updated}`);
+  // D1: the DTO carries the folder, the printed line carries the label.
+  expect(row.latest).toBe('v1');
+  expect(format(row)).toBe(`  good — Seed <seed@example.com>; testing; 1 installs; Version 1; —; ${row.updated}`);
   expect(io.lines).toContain(format(row));
-  await writeFile(join(clone,'skills','good','SKILL.md'),inventorySource('good','allowed-tools: {bad: value}'));
+  await writeFile(join(clone,'skills','good', 'v1','SKILL.md'),inventorySource('good','allowed-tools: {bad: value}'));
   expect(await run({config:store},new ScriptedPrompter())).toMatchObject({ok:true,value:{skills:[{grants:null,grantsHash:null}]}});
 });
 it('returns sorted passthrough projects including empty projects, member declined only on member, and no registry on local',async()=>{
@@ -334,13 +339,14 @@ it('returns sorted passthrough projects including empty projects, member decline
   }
   const local=await run({config:store,local:true,home:root},new ScriptedPrompter());expect(local).toMatchObject({ok:true,value:{problems:[]}});expect(local.value).not.toHaveProperty('projects');
 });
-it('uses one version child and at most eight simultaneous date children for a large listing',async()=>{
+it('spawns NO version child and at most eight simultaneous date children for a large listing',async()=>{
   const {store,clone}=await inventoryFixture();
-  for(let i=0;i<19;i++){const name='skill-'+i;await mkdir(join(clone,'skills',name));await writeFile(join(clone,'skills',name,'SKILL.md'),inventorySource(name));}
+  for(let i=0;i<19;i++){const name='skill-'+i;await mkdir(join(clone,'skills',name, 'v1'), { recursive: true });await writeFile(join(clone,'skills',name, 'v1','SKILL.md'),inventorySource(name));}
   await git(['add','--all'],clone);await git(['commit','-qm','many'],clone);
   let active=0,peak=0;const calls:string[][]=[];
   const runner={run:async(command:Parameters<typeof systemRunner.run>[0],args:readonly string[],options?:Parameters<typeof systemRunner.run>[2])=>{active++;peak=Math.max(peak,active);calls.push([...args]);try{return await systemRunner.run(command,args,options);}finally{active--;}}};
-  const result=await run({config:store,runner},new ScriptedPrompter());expect(result.ok).toBe(true);expect(peak).toBeLessThanOrEqual(9);expect(peak).toBeGreaterThan(1);expect(calls.filter(c=>c[0]==='ls-tree')).toEqual([['ls-tree','HEAD:skills']]);expect(calls.filter(c=>c[0]==='log')).toHaveLength(19);
+  const result=await run({config:store,runner},new ScriptedPrompter());expect(result.ok).toBe(true);expect(peak).toBeLessThanOrEqual(9);expect(peak).toBeGreaterThan(1);// §8.4: `skillVersions` is two readdirs per skill now, so the version read spawns nothing at all.
+  expect(calls.filter(c=>c[0]==='ls-tree')).toEqual([]);expect(calls.filter(c=>c[0]==='log')).toHaveLength(19);
 });
 
 
@@ -348,17 +354,20 @@ describe('S7g local health and provenance', () => {
   it.each(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'unreadable', 'incomplete', 'rejected', 'failed-snapshot'] as const)('reports %s from the ledger and current filesystem without changing the row sentence', async mode => {
     const home = await temporaryDirectory(), store = createConfigStore(join(home, 'state'));
     const placed = await localSource(home, 'good', inventorySource('good'));
-    const clone = store.teamClone('team'), source = join(clone, 'skills', 'good');
+    const clone = store.teamClone('team'), source = join(clone, 'skills', 'good', 'v1');
     await mkdir(source, { recursive: true });
     await writeFile(join(source, 'SKILL.md'), inventorySource('good'));
     await writeFile(join(clone, 'team.json'), JSON.stringify(TEAM_JSON));
     const baseline = (await snapshotSkillDirectory(placed)).fingerprint;
-    await store.update(config => { config.placements[placed] = { id: ID, team: 'team', version: 'a'.repeat(40), fingerprint: baseline, scope: {kind:'global'}, placed_at: '' }; });
+    await store.update(config => { config.placements[placed] = { id: ID, team: 'team', version: 'v1', fingerprint: baseline, scope: {kind:'global'}, placed_at: '' }; });
     if (mode === 'update-available' || mode === 'both') await writeFile(join(source, 'extra.txt'), 'clone changed');
     if (mode === 'local-changed' || mode === 'both') await writeFile(join(placed, 'extra.txt'), 'placed changed');
-    if (mode === 'gone-from-repo') await rm(source, {recursive:true});
+    // Gone from the repo is the whole skill, not just one version folder: a name left holding no
+    // v<N> folder is a PROBLEM for skillRecords (so the clone reads incomplete -> unknown), which is a
+    // different fact than the skill having been removed.
+    if (mode === 'gone-from-repo') await rm(join(clone, 'skills', 'good'), {recursive:true});
     if (mode === 'unreadable') await rm(clone, {recursive:true});
-    if (mode === 'incomplete') { await mkdir(join(clone,'skills','broken')); await writeFile(join(clone,'skills','broken','SKILL.md'), 'bad'); }
+    if (mode === 'incomplete') { await mkdir(join(clone,'skills','broken', 'v1'), { recursive: true }); await writeFile(join(clone,'skills','broken', 'v1','SKILL.md'), 'bad'); }
     if (mode === 'rejected') { await rm(placed,{recursive:true}); await fs.symlink(source,placed,'dir'); }
     const original = fs.readdir;
     const spy = vi.spyOn(fs, 'readdir').mockImplementation((...args) => {
@@ -369,11 +378,11 @@ describe('S7g local health and provenance', () => {
     try {
       const io = new ScriptedPrompter(), result = await run({local:true,home,config:store},io);
       const health = ['unreadable','incomplete','rejected','failed-snapshot'].includes(mode) ? 'unknown' : mode;
-      expect(result).toMatchObject({ok:true,value:{local:[{rows:[{name:'good',path:placed,tracked:true,placement:{id:ID,team:'team',version:'a'.repeat(40)},health}]}]}});
+      expect(result).toMatchObject({ok:true,value:{local:[{rows:[{name:'good',path:placed,tracked:true,placement:{id:ID,team:'team',version:'v1'},health}]}]}});
       if (mode === 'rejected') {
         expect(spy.mock.calls.some(([path])=>path===placed)).toBe(false);
         expect(result.value?.local?.[0]?.rows[0]?.problem).toBe('symbolic link');
-      } else if (mode !== 'failed-snapshot') expect(io.lines).toContain(`  good — placement recorded from team @aaaaaaaa; path: ${placed}`);
+      } else if (mode !== 'failed-snapshot') expect(io.lines).toContain(`  good — placement recorded from team (Version 1); path: ${placed}`);
       expect(await readFile(join(store.root,'config.json'),'utf8')).toBe(before);
     } finally { spy.mockRestore(); }
   });
@@ -487,7 +496,7 @@ describe('W-02 local read stability', () => {
     for (let i = 0; i < 10; i++) {
       const name = `skill-${i}`; const id = `33333333-3333-4333-8333-${String(i).padStart(12, '0')}`;
       const raw = `---\nname: ${name}\ndescription: stable\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nBody\n`;
-      await mkdir(join(clone, 'skills', name)); await writeFile(join(clone, 'skills', name, 'SKILL.md'), raw);
+      await mkdir(join(clone, 'skills', name, 'v1'), { recursive: true }); await writeFile(join(clone, 'skills', name, 'v1', 'SKILL.md'), raw);
       if (i < 6) {
         const path = await localSource(home, name, raw);
         const fingerprint = (await snapshotSkillDirectory(path)).fingerprint;
@@ -514,7 +523,7 @@ describe('W-02 local read failure isolation',()=>{
   });
   it('reports health unknown for a placed folder whose fingerprint walk throws',async()=>{
     const home=await temporaryDirectory();const store=createConfigStore(join(home,'state'));const clone=store.teamClone('team');await mkdir(join(clone,'skills'),{recursive:true});await writeFile(join(clone,'team.json'),JSON.stringify(TEAM_JSON));
-    const raw=`---\nname: placed\ndescription: placed\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`;await mkdir(join(clone,'skills/placed'));await writeFile(join(clone,'skills/placed/SKILL.md'),raw);
+    const raw=`---\nname: placed\ndescription: placed\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`;await mkdir(join(clone,'skills/placed/v1'), { recursive: true });await writeFile(join(clone,'skills/placed/v1/SKILL.md'),raw);
     const path=await localSource(home,'placed',raw);await localSource(home,'healthy');const fingerprint=(await snapshotSkillDirectory(path)).fingerprint;await store.update(c=>{c.placements[path]={id:ID,team:'team',version:null,scope:{kind:'global'},fingerprint,placed_at:''};});
     const original=fs.readdir;const spy=vi.spyOn(fs,'readdir').mockImplementation(async(...args)=>{if(args[0]===path)throw new Error('unreadable walk');return original(...args);});
     try{const result=await run({local:true,home,config:store},new ScriptedPrompter());expect(result.value?.local?.[0]?.rows.map(r=>[r.name,r.health])).toEqual([['healthy','untracked'],['placed','unknown']]);}finally{spy.mockRestore();}
@@ -525,11 +534,11 @@ describe('W-02 local read failure isolation',()=>{
 it('returns the file frontmatter beside the team body without serializing YAML', async () => {
   const home = await temporaryDirectory(), store = createConfigStore(join(home, 'state'));
   const clone = store.teamClone('team');
-  await mkdir(join(clone, 'skills', 'sample'), { recursive: true });
+  await mkdir(join(clone, 'skills', 'sample', 'v1'), { recursive: true });
   await mkdir(join(clone, 'people'));
   await writeFile(join(clone, 'team.json'), JSON.stringify(TEAM_JSON));
   const raw = inventorySource('sample').replaceAll('\n', '\r\n');
-  await writeFile(join(clone, 'skills', 'sample', 'SKILL.md'), raw);
+  await writeFile(join(clone, 'skills', 'sample', 'v1', 'SKILL.md'), raw);
   await store.update(config => { config.teams.team = { remote: '/unused', handle: 'seed' }; });
   const runner: Runner = { run: async () => ({ code: 1, stdout: '', stderr: 'No version available' }) };
   const result = await run({ config: store, runner }, new ScriptedPrompter());

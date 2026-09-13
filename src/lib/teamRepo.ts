@@ -1,6 +1,6 @@
 import { packageRoot } from './package-root.js';
 import { existsSync, readFileSync } from 'node:fs';
-import { chmod, lstat, mkdir, realpath, rm, rmdir, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, realpath, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { packageVersion } from './package.js';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
 import lockfile from 'proper-lockfile';
@@ -9,6 +9,8 @@ import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
 import { explainGitAccessFailure, isGitHubRemote, normalizeRemote, remoteToGitUrl, stripRemoteCredentials } from './remote.js';
 import { CommandResult, Runner, systemRunner } from './runner.js';
 import { regenerateReadmeInTree } from './readme.js';
+import { parseVersionFolder, type SkillVersion } from './versions.js';
+import { mapWithConcurrency } from './concurrency.js';
 
 /**
  * §6.0: every write to the team repo goes through `safeWrite()` — a re-apply model, not a rebase.
@@ -24,16 +26,20 @@ import { regenerateReadmeInTree } from './readme.js';
 export interface MutableTree extends GuardTree {
   set(path: string, content: string | Buffer): void;
   remove(path: string): void;
+  /**
+   * §4.5(1)/D10: declare a path's executable bit. Mode is NOT part of content identity (D2
+   * normalizes it), so this never affects which version a folder's bytes are -- an executable and a
+   * non-executable copy of the same bytes are the same version.
+   */
+  setExecutable(path: string, executable: boolean): void;
   /** Tracked paths in the freshly reset tree. Needed to make a skill-folder update a true mirror. */
   paths(prefix?: string): readonly string[];
-  /** Executable Git entries in the freshly reset pre-image; mutations remain pure. */
+  /** Executable entries in the post-image: the reset pre-image, overridden by `setExecutable`. */
   executablePaths(prefix?: string): ReadonlySet<string>;
 }
 export type Mutate<R = void> = (tree: MutableTree) => R;
 
 export interface SafeWriteOptions extends GuardContext {
-  /** Destination ref. Defaults to `main`; PR-policy `publish` passes a fresh `publish/<name>-<handle>-<id8>` (§6.0 step 4). A non-main branch is created, never replaced. */
-  branch?: string;
   /** Commit message; defaults to `<handle>: <action>`. */
   message?: string;
   deadlineMs?: number;
@@ -87,9 +93,7 @@ const wait = (milliseconds: number) => new Promise<void>((done) => setTimeout(do
 /** git's non-fast-forward vocabulary: the only `main` push failures a retry can fix. */
 const RETRYABLE = /fetch first|non-fast-forward|cannot lock ref|failed to lock|stale info|incorrect old value|remote ref updated since checkout/i;
 /** The lease (CAS) vocabulary: the named ref moved since we read it — never retried against the same ref. */
-const STALE_LEASE = /stale info|incorrect old value|remote ref updated since checkout/i;
 /** Server-side ref-lock contention: transient, and the lease still stands, so the same ref is retried. */
-const REF_LOCK = /cannot lock ref|failed to lock/i;
 const lostLock = (root: string): string => `Lost the safeWrite lock on ${root} to another process; nothing was pushed — retry the command.`;
 
 /** How long a caller waits for another process's clone lock before failing: today's ladder, for anything nobody is watching. */
@@ -160,7 +164,6 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
 
   const now = options.now ?? Date.now;
   const budgetMs = options.deadlineMs ?? DEFAULT_DEADLINE_MS;
-  const branch = options.branch ?? 'main';
   const created = new Set<string>();
   let attempt = 0;
   let lastError = 'push rejected';
@@ -194,7 +197,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       const returned = mutate(tree);
       // Authorize the caller's own pure mutation before deriving any files from it. This keeps a
       // forbidden skill write from being reported as a frontmatter/README generation error.
-      if (tree.changedPaths.length === 0) return { changed: false, pushedTo: branch, returned };
+      if (tree.changedPaths.length === 0) return { changed: false, pushedTo: 'main', returned };
       guard(tree, options);
       // §9: Actions own GitHub README commits; generic remotes regenerate as a derived safeWrite path.
       // §6.0's eval exception is narrower: its receipt is immutable testimony and its commit must
@@ -203,12 +206,10 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
       await applyTree(root, realRoot, tree, changed);
       await requireGit(['add', '-A', '--', ...changed]);
-      if (!isGitHubRemote(remote) && options.action !== 'eval') {
-        // The index is the exact tree about to be committed, including the caller's mutation.
-        // Resolve every skill version from it in one git call before deriving README.md.
-        const writtenTree = (await requireGit(['write-tree'])).stdout.trim();
-        const latestBySkill = await skillTrees(git, writtenTree);
-        await regenerateReadmeInTree(tree, remote, runner, root, latestBySkill);
+      if (!isGitHubRemote(remote)) {
+        // §4.1(d): the generator derives every skill's latest version from the in-memory post-image,
+        // so there is no `write-tree` spawn and no git call inside its loop.
+        await regenerateReadmeInTree(tree, remote);
         changed = tree.changedPaths;
         for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
         const readmeChanged = changed.filter((path) => path === 'README.md');
@@ -224,7 +225,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       await requireGit(['commit', '-q', '-m', options.message ?? `${options.handle}: ${options.action}`]);
       if (compromised) throw new Error(lostLock(root));
       pushed = true;
-      const outcome = await push(git, branch);
+      const outcome = await push(git);
       if (outcome.ok) { pushedToMain = outcome.pushedTo === 'main'; return { changed: true, pushedTo: outcome.pushedTo, returned }; }
       if (!outcome.retryable) {
         const copy = explainGitAccessFailure(origin, outcome.error);
@@ -280,17 +281,13 @@ async function assertOrigin(root: string, remote: string, git: Git): Promise<str
  * arbitrates (rulings walk R2, 2026-09-06). Ref-lock contention is transient and the name still
  * must not exist, so it is retried; a stale lease means the name now exists — terminal.
  */
-async function push(git: Git, branch: string): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
-  if (branch === 'main') {
-    const result = await git(['push', '-q', '--no-verify', 'origin', 'HEAD:refs/heads/main']);
-    if (result.code === 0) return { ok: true, pushedTo: 'main' };
-    const error = result.stderr || result.stdout || 'push rejected';
-    return { ok: false, retryable: RETRYABLE.test(error), error };
-  }
-  const result = await git(['push', '-q', '--no-verify', `--force-with-lease=refs/heads/${branch}:`, 'origin', `HEAD:refs/heads/${branch}`]);
-  if (result.code === 0) return { ok: true, pushedTo: branch };
+async function push(git: Git): Promise<{ ok: true; pushedTo: string } | { ok: false; retryable: boolean; error: string }> {
+  // Main only (§4.1). The PR-policy branch arm went with `policy.publish`: publish appends an
+  // immutable version folder, so there is nothing for a reviewer to hold open and no branch to lease.
+  const result = await git(['push', '-q', '--no-verify', 'origin', 'HEAD:refs/heads/main']);
+  if (result.code === 0) return { ok: true, pushedTo: 'main' };
   const error = result.stderr || result.stdout || 'push rejected';
-  return { ok: false, retryable: REF_LOCK.test(error) && !STALE_LEASE.test(error), error };
+  return { ok: false, retryable: RETRYABLE.test(error), error };
 }
 
 /** Repo-relative POSIX paths only: no absolute paths, no `..`, no `.git` anywhere (any case, NTFS short names included), no empty segments. */
@@ -305,12 +302,18 @@ export function assertSafePath(path: string): void {
 function makeTree(root: string, tracked: ReadonlySet<string>, executable: ReadonlySet<string> = new Set()): MutableTree {
   const cache = new Map<string, Buffer>();
   const overlay = new Map<string, string | Buffer | undefined>();
+  // §4.5(2): the mode overlay, parallel to `overlay`. Absent key = "whatever the pre-image says".
+  const modes = new Map<string, boolean>();
   const before = (path: string): string | Buffer | undefined => {
     if (!tracked.has(path)) return undefined;
     let content = cache.get(path);
     if (content === undefined) { content = readFileSync(join(root, path)); cache.set(path, content); }
     return content;
   };
+  // §4.5(3): a path created by `tree.set()` is never in the committed index, so a liveness test that
+  // requires `tracked.has(path)` can never report it executable -- that was the root of the bug.
+  const live = (path: string): boolean => (overlay.has(path) ? overlay.get(path) : before(path)) !== undefined;
+  const isExecutable = (path: string): boolean => (modes.has(path) ? modes.get(path)! : executable.has(path));
   return {
     before,
     after: (path) => {
@@ -318,19 +321,27 @@ function makeTree(root: string, tracked: ReadonlySet<string>, executable: Readon
       return content;
     },
     get changedPaths() {
-      return [...overlay.keys()].filter((path) => !sameContent(overlay.get(path), before(path))).sort();
+      return [...new Set([...overlay.keys(), ...modes.keys()])].filter((path) => {
+        if (overlay.has(path) && !sameContent(overlay.get(path), before(path))) return true;
+        // §4.5(5): `git diff --cached --name-only` reports a mode-only change, so a chmod of a file
+        // whose bytes are unchanged stages a path this getter must also list -- otherwise safeWrite's
+        // staged-diff equality proof throws on an ordinary mode-only write.
+        return live(path) && modes.has(path) && modes.get(path) !== executable.has(path);
+      }).sort();
     },
     set(path, content) { assertSafePath(path); overlay.set(path, content); },
     remove(path) { assertSafePath(path); overlay.set(path, undefined); },
+    setExecutable(path, value) { assertSafePath(path); modes.set(path, value); },
     paths(prefix = '') {
       return [...new Set([...tracked, ...overlay.keys()])]
         .filter((path) => (!overlay.has(path) || overlay.get(path) !== undefined) && path.startsWith(prefix))
         .sort();
     },
-    executablePaths(prefix = '') { return new Set([...executable].filter((path) => treePaths(path) && path.startsWith(prefix))); },
+    executablePaths(prefix = '') {
+      const candidates = new Set([...executable, ...modes.keys()]);
+      return new Set([...candidates].filter((path) => isExecutable(path) && live(path) && path.startsWith(prefix)));
+    },
   };
-
-  function treePaths(path: string): boolean { return (!overlay.has(path) || overlay.get(path) !== undefined) && tracked.has(path); }
 }
 
 function sameContent(left: string | Buffer | undefined, right: string | Buffer | undefined): boolean {
@@ -343,37 +354,44 @@ function sameContent(left: string | Buffer | undefined, right: string | Buffer |
 /** Decode a tree value only at a text consumer; binary paths stay byte-for-byte in the tree. */
 export function treeText(value: string | Buffer): string { return Buffer.isBuffer(value) ? value.toString('utf8') : value; }
 
-/** Public read-only wrapper around the batched tree reader; never exposes the private Git seam. */
-export async function skillVersions(runner: Runner, clone: string, ref = 'HEAD'): Promise<Map<string, string>> {
-  const git: Git = async (args) => {
-    const result = await runner.run('git', args, { cwd: clone });
-    // git uses the same missing-object diagnostic for an absent skills tree and an invalid ref.
-    // Verify the ref only on that exceptional path; a normal listing is exactly one child.
-    if (result.code !== 0 && result.stderr.includes(`Not a valid object name ${ref}:skills`)) {
-      const exists = await runner.run('git', ['rev-parse', '--verify', ref], { cwd: clone });
-      if (exists.code === 0) return { code: 0, stdout: '', stderr: '' };
-    }
-    return result;
-  };
-  return skillTrees(git, ref);
+/**
+ * A published skill's version folders, newest first (spec §3.2). The fs-using half of the version
+ * vocabulary: it lives here rather than in `src/lib/versions.ts` so that leaf stays import-free for
+ * the desktop bundle.
+ *
+ * `readdir`, not git: the clone is always a full non-bare checkout that `refreshClone()` hard-resets,
+ * so the working tree is authoritative and a readdir is cheaper than a process spawn. A missing skill
+ * folder is `[]`, not a throw — an unpublished name is an ordinary answer, not an error.
+ *
+ * **Sorted descending by the parsed integer, never lexicographically** — it shares `versionsInTree`'s
+ * parser and sorter, because `['v10','v2'].sort()` would pin every skill past its tenth publish to
+ * the wrong version.
+ */
+export async function listVersions(clone: string, skillName: string): Promise<SkillVersion[]> {
+  const entries = await readdir(join(clone, 'skills', skillName), { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return [];
+    throw error;
+  });
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({ folder: entry.name, n: parseVersionFolder(entry.name) }))
+    .filter((entry): entry is SkillVersion => entry.n !== null)
+    .sort((left, right) => right.n - left.n);
 }
 
-/** Every direct child in `skills/` is a skill tree; one ls-tree call resolves all latest versions. */
-async function skillTrees(git: Git, writtenTree: string): Promise<Map<string, string>> {
-  const listed = await requireGitResult(git, ['ls-tree', `${writtenTree}:skills`]);
-  const versions = new Map<string, string>();
-  for (const line of listed.stdout.split('\n')) {
-    const match = /^\d+\s+tree\s+([0-9a-f]{40})\t(.+)$/.exec(line);
-    if (match) versions.set(match[2]!, match[1]!);
-  }
-  return versions;
+/**
+ * Every named skill's version folders, newest first. Replaces the `git ls-tree` tree-hash reader:
+ * under layout 3 a version is a directory, so this is `listVersions` per name and takes neither a
+ * `Runner` nor a `ref`.
+ *
+ * Two readdirs per skill in place of one process spawn. On local disk that is a win, and the fan-out
+ * is bounded at 8 the way every other batched clone read here is.
+ */
+export async function skillVersions(clone: string, names: readonly string[]): Promise<Map<string, SkillVersion[]>> {
+  const entries = await mapWithConcurrency(names, 8, async (name) => [name, await listVersions(clone, name)] as const);
+  return new Map(entries);
 }
 
-async function requireGitResult(git: Git, args: readonly string[]): Promise<CommandResult> {
-  const result = await git(args);
-  if (result.code !== 0) throw new Error(`git ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim()}`);
-  return result;
-}
 
 /** Resolve the parent directory and refuse it if a symlink would carry the write outside the clone. */
 async function assertInsideClone(root: string, realRoot: string, path: string): Promise<string> {
@@ -397,11 +415,18 @@ async function exists(path: string): Promise<boolean> {
 }
 
 async function applyTree(root: string, realRoot: string, tree: MutableTree, changed: readonly string[]): Promise<void> {
+  // §4.5(4): git records only the executable bit, so every written path gets an explicit mode rather
+  // than whatever the umask would leave. Computed once -- `executablePaths()` walks the whole set.
+  const executable = tree.executablePaths();
   for (const path of changed) {
     const destination = await assertInsideClone(root, realRoot, path);
     const next = tree.after(path);
     if (next === undefined) await rm(destination, { force: true });
-    else { await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, next); }
+    else {
+      await mkdir(dirname(destination), { recursive: true });
+      await writeFile(destination, next);
+      await chmod(destination, executable.has(path) ? 0o755 : 0o644);
+    }
   }
 }
 

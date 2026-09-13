@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
-import { bareTeam, cloneWithIdentity, git, pushFromSeed, ScriptedPrompter, denyingRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, denyingRunner } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { run } from '../evalReport.js';
 
@@ -18,16 +18,18 @@ function receipt(version: string, run_id: string) {
     provenance: { engine_version: '0.1.7', engine_commit: 'unknown', cc_version: 'stub', model: 'sonnet', judge_model: 'sonnet', k: 1, cases: [], arm_skill_lists: {}, timestamp: '2026-09-07T00:00:00Z', runner_handle: 'seed' },
   });
 }
+/** §3.4: the receipt's version segment is the version FOLDER, never a tree hash. */
 async function setup(newest?: string, receipts = true) {
   const fixture = await bareTeam();
-  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill);
-  const tree = (await git(['rev-parse', 'HEAD:skills/sample'], fixture.seed)).trim();
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill);
+  const tree = 'v1';
   if (receipts) for (const id of ids) await pushFromSeed(fixture.seed, `evals/${ID}/${tree}/${id}.json`, JSON.stringify(receipt(tree, id)));
   if (newest !== undefined) await pushFromSeed(fixture.seed, `evals/${ID}/${tree}/20260907T030000Z.json`, newest);
   const store = createConfigStore(join(fixture.root, 'state'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update(c => { c.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-  const runner = denyingRunner([{ command: 'git', argsPrefix: ['rev-parse', '--verify', 'HEAD:skills/sample'] }], systemRunner);
+  // §4.1 deleted the tree-hash resolver, so the report spawns no rev-parse at all.
+  const runner = denyingRunner([{ command: 'git', argsPrefix: ['rev-parse'] }], systemRunner);
   return { store, clone, tree, runner };
 }
 
@@ -53,32 +55,56 @@ describe('eval-report offline read model', () => {
 
   it('reports placed and current versions independently', async () => {
     const { store, tree, runner } = await setup();
-    await store.update(c => { c.placements['/tmp/x'] = { id: ID, team: 'team', version: 'a'.repeat(40), scope: { kind: 'global' }, placed_at: '2026-09-07T00:00:00Z', fingerprint: 'test' }; });
-    expect(await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { versions: { placed: 'a'.repeat(40), teamCurrent: tree } } });
+    await store.update(c => { c.placements['/tmp/x'] = { id: ID, team: 'team', version: 'v1', scope: { kind: 'global' }, placed_at: '2026-09-07T00:00:00Z', fingerprint: 'test' }; });
+    expect(await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { versions: { placed: 'v1', teamCurrent: tree } } });
   });
 
   it.each(['skill_id', 'version'] as const)('rejects a newest receipt with mismatched %s without substituting history', async field => {
     const { store, clone, tree, runner } = await setup();
     const path = join(clone, 'evals', ID, tree, '20260907T030000Z.json');
-    await writeFile(path, JSON.stringify({ ...receipt(tree, '20260907T030000Z'), [field]: field === 'version' ? 'b'.repeat(40) : '22222222-2222-4222-8222-222222222222' }));
+    await writeFile(path, JSON.stringify({ ...receipt(tree, '20260907T030000Z'), [field]: field === 'version' ? 'v2' : '22222222-2222-4222-8222-222222222222' }));
     const io = new ScriptedPrompter();
     expect(await run({ ref: 'sample', config: store, runner }, io)).toMatchObject({ ok: true, value: { latestState: 'invalid', latest: null, versions: { evaluated: null } } });
     expect(io.lines).toEqual([expect.stringContaining(path)]);
   });
 
-  it('lists valid history across tree directories and ignores other directories and non-JSON files', async () => {
+  it('§6.4: lists history across VERSION folders, sorted version-then-run, ignoring every other directory and non-JSON file', async () => {
     const { store, clone, tree, runner } = await setup();
-    for (const directory of ['b'.repeat(40), 'not-a-tree']) {
+    // A legacy 40-hex directory and a nonsense one are both skipped: the filter is parseVersionFolder.
+    for (const directory of ['b'.repeat(40), 'not-a-version', 'v0', 'v01']) {
       const path = join(clone, 'evals', ID, directory); await mkdir(path);
-      await writeFile(join(path, '20260907T030000Z.json'), JSON.stringify(receipt('b'.repeat(40), '20260907T030000Z')));
+      await writeFile(join(path, '20260907T030000Z.json'), JSON.stringify(receipt(tree, '20260907T030000Z')));
+    }
+    // v10 must sort ABOVE v2: the compare is numeric, not lexicographic.
+    for (const [folder, runId] of [['v2', '20260907T005000Z'], ['v10', '20260907T004000Z']] as const) {
+      await mkdir(join(clone, 'evals', ID, folder));
+      await writeFile(join(clone, 'evals', ID, folder, `${runId}.json`), JSON.stringify(receipt(folder, runId)));
     }
     await writeFile(join(clone, 'evals', ID, tree, '20260907T040000Z.txt'), JSON.stringify(receipt(tree, '20260907T040000Z')));
     const result = await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter());
-    expect(result.value?.history.map(row => [row.version, row.run_id])).toEqual([['b'.repeat(40), '20260907T030000Z'], [tree, ids[1]], [tree, ids[0]]]);
+    expect(result.value?.history.map(row => [row.version, row.run_id])).toEqual([
+      ['v10', '20260907T004000Z'], ['v2', '20260907T005000Z'], [tree, ids[1]], [tree, ids[0]],
+    ]);
     expect(result.value?.latest?.run_id).toBe(ids[1]);
+    expect(result.value?.fallbackFrom).toBeNull();
   });
 
-  it('lists local runs only with run.jsonl and gets status from receipt.json, never the log', async () => {
+  it('§6.4: with no receipt at the current version the newest valid one is shown, and fallbackFrom names it', async () => {
+    const { store, clone, runner } = await setup(undefined, false);
+    await mkdir(join(clone, 'evals', ID, 'v1'), { recursive: true });
+    await writeFile(join(clone, 'evals', ID, 'v1', `${ids[0]}.json`), JSON.stringify(receipt('v1', ids[0]!)));
+    // Publish v2 and leave it unevaluated: the card and the detail page must agree on which receipt
+    // they are showing, which is the whole reason fallbackFrom exists.
+    await writeFile(join(clone, 'skills', 'sample', 'v2', 'SKILL.md'), skill).catch(async () => {
+      await mkdir(join(clone, 'skills', 'sample', 'v2'), { recursive: true });
+      await writeFile(join(clone, 'skills', 'sample', 'v2', 'SKILL.md'), skill);
+    });
+    const result = await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { versions: { teamCurrent: 'v2' }, latestState: 'ok', fallbackFrom: 'v1' } });
+    expect(result.value?.latest?.run_id).toBe(ids[0]);
+  });
+
+  it('§6.4(3): lists the LEGACY per-team local runs too, so no pre-upgrade run vanishes from the tab', async () => {
     const { store, tree, runner } = await setup();
     for (const id of [...ids, '20260907T030000Z', '20260907T040000Z']) {
       const dir = join(store.root, 'evals', 'team', ID, id); await mkdir(dir, { recursive: true });
@@ -96,7 +122,7 @@ describe('eval-report offline read model', () => {
 
   it('has no latest when there are no receipts and uses eval’s missing skill message', async () => {
     const { store, runner } = await setup(undefined, false);
-    expect(await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { latest: null, latestState: 'none', history: [], versions: { evaluated: null } } });
+    expect(await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { latest: null, latestState: 'none', fallbackFrom: null, history: [], versions: { evaluated: null } } });
     expect(await run({ ref: 'missing', config: store, runner }, new ScriptedPrompter())).toEqual({ ok: false, error: 'No skill named or identified by missing exists in team team.' });
   });
 });

@@ -25,7 +25,9 @@ import { SHORTCUTS } from '../../lib/shortcuts';
 import { abbreviateHome, stripRemote } from '../paths';
 import { scannedRoots } from './scanned-roots';
 import { cliRefresh, createRefreshPolicy, createWorkflowGate } from './refresh';
-import { BRIDGE_BUSY, mapWithConcurrency } from './concurrency';
+// §3.2: the version vocabulary exists once. This leaf imports nothing at all, which is the only
+// shape `cli-tree-imports.test.ts` admits across the tree boundary.
+import { parseVersionFolder, versionLabel } from '../../../../src/lib/versions.js';
 import { overviewCopy } from '../../lib/overview-copy';
 import { bodyExcerpt } from '../../lib/body-excerpt';
 import { samePath } from '../../lib/skill-path';
@@ -44,24 +46,37 @@ const cliLogin = z.object({ updated: z.array(z.object({ key: z.string(), value: 
 export const cliInstalled = z.array(z.object({ id: z.string(), team: z.string() }).passthrough());
 export const cliUninstalled = z.array(z.object({ id: z.string(), team: z.string(), removed: z.number() }).passthrough());
 export const cliMachine = z.object({ teams: z.array(z.string()), removedPlacements: z.number(), hookRemoved: z.boolean(), wrapperRemoved: z.boolean(), configRemoved: z.boolean(), kept: z.array(z.string()), record: z.string(), advice: z.array(z.string()) }).passthrough();
-export const cliPublish = z.object({ name: z.string(), branch: z.string().nullable(), prUrl: z.string().nullable(), changed: z.boolean().optional() }).passthrough();
+// §5.3: publish mints an immutable version on main. There is no branch and no pull request any
+// more, so `version` is the `v<N>` it minted — or null when the bytes were identical to one that
+// already exists, which `identicalTo` then names.
+export const cliPublish = z.object({ team: z.string(), id: z.string(), name: z.string(), project: z.string(), version: z.string().nullable(), created: z.boolean(), identicalTo: z.string().nullable(), attachedEvals: z.number(), profileAdded: z.boolean(), projectAdded: z.boolean() }).passthrough();
 const cliInvite = z.object({ team: z.string(), invited: z.array(z.string()), already: z.array(z.string()).default([]), failed: z.array(z.object({ login: z.string(), error: z.string() })).default([]) }).passthrough();
 const cliTeam = z.object({ team: z.string() }).passthrough();
 export const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(), steps: z.partialRecord(z.enum(SETUP_STEP_KEYS), z.enum(['done','skipped','printed','queued','batched'])).nullish().transform(value => value ?? null) });
-export const cliEval = z.object({ name:z.string(),runDir:z.string(),executionStatus:z.enum(['complete','partial','failed']) }).passthrough();
+// §6.3: a local eval runs against a folder in the Library, which may belong to no team at all —
+// hence the nullable `team` and `id`. `shareHint` is the caller's cue to offer publishing.
+export const cliEval = z.object({ name:z.string(),runDir:z.string(),executionStatus:z.enum(['complete','partial','failed']),team:z.string().nullish().transform(v=>v??null),id:z.string().nullish().transform(v=>v??null),shareHint:z.literal(true).optional(),alreadyEvaluated:z.boolean().optional() }).passthrough();
 const cliValidate = z.object({ name: z.string(), findings: z.number(), warnings: z.number() });
-export const cliSearch = z.array(z.object({ team: z.string().optional(), endorsed: z.string().optional(), id: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), unresolved: z.boolean(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string() }));
+export const cliSearch = z.array(z.object({ team: z.string().optional(), endorsed: z.string().optional(), id: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string() }));
 
 const cliScope = z.discriminatedUnion('kind', [z.object({ kind: z.literal('global') }), z.object({ kind: z.literal('project'), project: z.string() })]);
 const cliCardComparison = z.object({ win: z.number(), loss: z.number(), tie: z.number(), net_lift: z.number(), sign_p: z.number() }).passthrough();
 // S7?/card-lift: the newest receipt at this skill's current version, or null. A CLI that predates the
 // limb omits it, and the card falls back to the honest '—' exactly as it did before.
-export const cliCardReceipt = z.object({ run_id: z.string(), verdict: z.enum(['PASS','NEUTRAL','FAIL']), execution_status: z.enum(['complete','partial','failed']), expected_rows: z.number(), scored_rows: z.number(), comparisons: z.record(z.string(), cliCardComparison), arm_scores: z.record(z.string(), z.number().nullable()), provenance: z.object({ model: z.string(), k: z.number(), cc_version: z.string(), timestamp: z.string(), runner_handle: z.string() }).passthrough() }).passthrough();
-export const cliLsSkill = z.object({ id: z.string(), name: z.string(), author: z.string(), category: z.string(), characters: z.number().nullish().transform(value => value ?? null), installs: z.number(), latest: z.string(), endorsement: z.string(), unresolved: z.boolean(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string(), body: z.string().nullable(), frontmatter: z.string().nullish(), receipt: cliCardReceipt.nullish().transform(value => value ?? null), installedBy: z.array(z.object({ handle: z.string(), displayName: z.string(), scope: cliScope, since: z.string().nullish() })) });
+export const cliCardReceipt = z.object({ version: z.string().nullish().transform(v => v ?? null), content_digest: z.string().nullish().transform(v => v ?? null), run_id: z.string(), verdict: z.enum(['PASS','NEUTRAL','FAIL']), execution_status: z.enum(['complete','partial','failed']), expected_rows: z.number(), scored_rows: z.number(), comparisons: z.record(z.string(), cliCardComparison), arm_scores: z.record(z.string(), z.number().nullable()), provenance: z.object({ model: z.string(), k: z.number(), cc_version: z.string(), timestamp: z.string(), runner_handle: z.string() }).passthrough() }).passthrough();
+export const cliLsSkill = z.object({ id: z.string(), name: z.string(), author: z.string(), category: z.string(), characters: z.number().nullish().transform(value => value ?? null), installs: z.number(), latest: z.string(), versionCount: z.number().nullish().transform(value => value ?? null), endorsement: z.string(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string(), body: z.string().nullable(), frontmatter: z.string().nullish(), receipt: cliCardReceipt.nullish().transform(value => value ?? null), installedBy: z.array(z.object({ handle: z.string(), displayName: z.string(), scope: cliScope, since: z.string().nullish() })) });
+/**
+ * §8.4 — the whole roster in one read. This limb is what replaced the marketplace's per-member
+ * fan-out: `catalog()` used to spawn `status` + `ls --local` + N × `ls member`, and is now two
+ * processes regardless of team size. `.passthrough()` per convention.
+ */
+/** §8.4: a CLI too old to report the roster in one read. Named so the message is not buried in a branch. */
+const STALE_CLI_ROSTER = 'This terum-skills version does not report the team roster in one read; update it with `npx -y terum-skills@latest update`.';
+export const cliPerson = z.object({ handle: z.string(), display_name: z.string(), email: z.string(), authored: z.array(z.string()).nullish().transform(v => v ?? []), role: z.string().nullish().transform(v => v ?? null), projects: z.array(z.string()).nullish().transform(v => v ?? []), installed: z.array(z.object({ id: z.string(), version: z.string().nullish().transform(v => v ?? null), scope: cliScope, since: z.string() }).passthrough()), profile: z.array(z.object({ id: z.string(), name: z.string(), version: z.string(), added: z.string(), via: z.enum(['publish', 'install']) }).passthrough()).nullish().transform(v => v ?? []), local_skills: z.number().nullish().transform(v => v ?? null) }).passthrough();
 export const cliProject = z.object({ name: z.string(), skills: z.array(z.string()), remotes: z.array(z.string()), description: z.string().optional() }).catchall(z.unknown());
 // S7g: every `ls --local` row carries typed provenance and a read-only health; the prose `state` is never parsed.
 const cliLocalHealth = z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']);
-export const cliLocalRow = z.object({ frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().length(40).nullable() }).nullable(), health: cliLocalHealth, category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional() }).strict();
+export const cliLocalRow = z.object({ frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().nullable() }).nullable(), health: cliLocalHealth, category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional() }).strict();
 export const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), remote:z.object({url:z.string(),slug:z.string().nullable()}).nullish(), registered:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({frontmatter:z.string().nullish(),skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),category:z.string().nullish().transform(v=>v??null),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null)})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
 export const cliProjectAdded = z.object({path:z.string(),label:z.string(),added:z.boolean()});
 export const cliProjectCreated = z.object({team:z.string(),name:z.string(),remotes:z.array(z.string()),skills:z.number()});
@@ -69,6 +84,8 @@ export const cliProjectRemoved = z.object({path:z.string(),placementsRemaining:z
 export const cliLs = z.object({
   roster: z.array(z.object({ handle: z.string(), active: z.boolean(), ...memberMetadata })), skills: z.array(cliLsSkill), problems: z.array(z.object({ source: z.string(), message: z.string() })), projects: z.array(cliProject).optional(), member: z.object({ installed: z.array(z.object({ id: z.string(), scope: cliScope, since: z.string() })).optional(), handle: z.string(), declined: z.array(z.string()), ...memberMetadata }).optional(),
   local: z.array(cliLocalSection).optional(),
+  // §8.4: emitted on the `kind:'all'` team read. Optional so a CLI that predates the limb parses.
+  people: z.array(cliPerson).optional(),
 });
 export const cliStatusTeams = z.object({ version: z.string().nullable(), teams: z.array(z.object({ team: z.string(), handle: z.string(), repository: z.string().nullable(), readable: z.boolean(), sharedSkills: z.number().nullable(), memberCount: z.number().nullable(), members: z.array(z.object({ handle: z.string(), displayName: z.string() })).optional() })), ledger: z.object({ placements: z.array(z.object({ id: z.string(), team: z.string() }).passthrough()) }).nullish() });
 type Inventory = z.infer<typeof cliLs>;
@@ -198,14 +215,30 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
   const summary = receiptSummary(row.receipt);
   const provenance = row.receipt ? { model: row.receipt.provenance.model, k: row.receipt.provenance.k, ccVersion: row.receipt.provenance.cc_version, runner: row.receipt.provenance.runner_handle, when: row.receipt.provenance.timestamp.slice(0, 10) } : null;
   const problem = placements.find(r => r.problem !== undefined || r.health === 'unknown' || r.health === 'gone-from-repo');
-  return { teamed:true, path:null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), desc: bodyExcerpt(row.body) ?? row.description, grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: summary ? [summary.w, summary.l, summary.t] : null, summary, provenance, favorite: false, favorites: null, enabled: true, flags: problem || row.unresolved ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The skill version could not be resolved.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
+  return { teamed:true, path:null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), desc: bodyExcerpt(row.body) ?? row.description, grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: summary ? [summary.w, summary.l, summary.t] : null, summary, provenance, favorite: false, favorites: null, enabled: true, flags: problem ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The placed copy could not be inspected.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
 /** `owner/repo` as the team remote spells it (case kept; any host); null when the team has no remote. */
 function repoSlug(remote: string | null | undefined): string | null {
   return remote ? stripRemote(remote.trim()).replace(/^github\.com\//, '') : null;
 }
+/**
+ * §8.6: the share command drops its `@<version>` suffix, because §9.1 REFUSES a versioned ref — the
+ * command it produced would now fail on the machine it was pasted into. The version itself is still
+ * shown; it is a label (`Version 3`) under D1, so it is never sliced to look like a hash.
+ */
+/** §3.2: `placements[].version` is a version FOLDER (`v1`) since the forced M6 slice — the 12-char
+ *  slice below it was the layout-2 tree hash. Anything that does not parse keeps the old rendering,
+ *  so a config written by an older CLI still shows something. */
+function placementVersionLabel(version: string | null | undefined): string | null {
+  if (version === null || version === undefined) return null;
+  const n = parseVersionFolder(version);
+  return n === null ? version.slice(0, 12) : versionLabel(n);
+}
 function detailVersionFields(repo: string | null, name: string, version: string | null): Pick<SkillDetail, 'version' | 'version_full' | 'shareCommand'> {
-  return { version: version?.slice(0, 12) ?? '—', version_full: version, shareCommand: repo ? `npx -y terum-skills@latest install ${repo}/${name}${version ? '@' + version.slice(0, 12) : ''}` : '—' };
+  // D1: what a PERSON reads is `Version 3`. `version_full` keeps the FOLDER, because §8.6 makes it a
+  // path segment in the repository link — one is prose, the other is an address.
+  const ordinal = version === null ? null : parseVersionFolder(version);
+  return { version: ordinal === null ? version ?? '—' : versionLabel(ordinal), version_full: version, shareCommand: repo ? `npx -y terum-skills@latest install ${repo}/${name}` : '—' };
 }
 /** `local` is the presence evidence — restricted to one section for a scoped read. `scopes` is the
  *  full machine inventory the install destinations come from, so restricting presence never
@@ -255,7 +288,9 @@ export const cliStatus = z.object({
   // '—' rather than a zero nobody reported.
   members:z.array(z.object({handle:z.string(),displayName:z.string(),joined:z.string().nullish().transform(v=>v??null),skillsTotal:z.number().nullish().transform(v=>v??null),...memberMetadata})),memberCount:z.number().nullable(),unreadableMembers:z.number().nullable(),sharedSkills:z.number().nullable(),unreadableSkills:z.number().nullable(),membership:z.enum(['active','inactive','missing']).nullable(),stale:z.boolean(),
   pending:z.array(z.object({op:z.enum(['install','uninstall']),id:z.string(),scope:cliScope,version:z.string().nullable(),started:z.string()})),
-  syncedAt:z.string().nullable(),policy:z.object({publish:z.enum(['pr','push']),skill_license:z.string()}).nullable(),categories:z.array(z.string()).nullable(),clonePath:z.string().nullable(),joinCommand:z.string().nullable(),joinBlock:z.array(z.string()).nullable(),
+  // §4.1/§11.5 deleted `policy.publish`. The mirror is NOT passthrough, so leaving it required would
+  // fail the whole status parse and cost the app its Settings screen, not one row.
+  syncedAt:z.string().nullable(),policy:z.object({skill_license:z.string()}).passthrough().nullable(),categories:z.array(z.string()).nullable(),clonePath:z.string().nullable(),joinCommand:z.string().nullable(),joinBlock:z.array(z.string()).nullable(),
  })),
  ledger:z.object({
   placements:z.array(z.object({path:z.string(),id:z.string(),team:z.string(),version:z.string().nullable(),scope:cliScope,placed_at:z.string()})),
@@ -275,7 +310,7 @@ function statusModel(value:CliStatus, local:CliLocal|null, platform:string, feat
   ledger:value.ledger??null,
   machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
   me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:[value.identity?.github,handle,value.identity?.default_handle].find(v=>v)??''},
-  teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath===null?null:abbreviateHome(team.clonePath,home),cloneState:team.clone.state==='ok'?team.clone.origin===undefined?null:{state:'ok',origin:team.clone.origin}:team.clone.state==='incomplete'?{state:'incomplete',...(team.clone.error===undefined?{}:{error:team.clone.error}),reason:team.clone.reason==='not-a-repository'||team.clone.reason==='no-team-json'?team.clone.reason:'unverifiable'}:team.clone,readable:team.readable,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{publish:team.policy.publish==='pr'?'Pull request':'Push',license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
+  teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath===null?null:abbreviateHome(team.clonePath,home),cloneState:team.clone.state==='ok'?team.clone.origin===undefined?null:{state:'ok',origin:team.clone.origin}:team.clone.state==='incomplete'?{state:'incomplete',...(team.clone.error===undefined?{}:{error:team.clone.error}),reason:team.clone.reason==='not-a-repository'||team.clone.reason==='no-team-json'?team.clone.reason:'unverifiable'}:team.clone,readable:team.readable,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
   counts:local?.local.find(section=>section.scope==='global')?.counts ? {Global:String(visibleSkillFolders(local.local.find(section=>section.scope==='global')!))} : {},tools:value.tools,roots:local===null?[]:local.local.map(section=>rootOf(section)),
  };
 }
@@ -288,8 +323,8 @@ function settingsModel(value:CliStatus, local:CliLocal|null, status:StatusResult
   K:null,MACHINE:status.machine,ME:status.me,TEAMS:status.teams,tools:status.tools,
   INVITE_TIP:"GitHub emails the invitation; the block runs the joiner&#39;s wizard",
   JOIN_BLOCK_NOTE:"GitHub emails the invitation. The block runs the joiner&#39;s wizard: with gh signed in it accepts the pending invitation, otherwise it asks them to accept it in the browser, and git must have access to this repository.",
-  TEAM_POLICY:{publish:policy?.publish??null,license:policy?.license??null,categories:status.teams.length===1?status.teams[0]?.categories??null:null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'}, // one team per machine — legacy 2+ shows a hint, not a projection
-  PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [abbreviateHome(p.path,home),row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,row?.tracked===true?null:p.version?.slice(0,12)??null,p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
+  TEAM_POLICY:{license:policy?.license??null,categories:status.teams.length===1?status.teams[0]?.categories??null:null,projects:null,categoriesNote:'From team.json; an admin extends it by pull request.'}, // one team per machine — legacy 2+ shows a hint, not a projection
+  PLACEMENTS:value.ledger.placements.map(p=>{const row=rows.find(row=>row.path===p.path);const missing=local?.local.some(root=>root.problems.some(problem=>problem.path===p.path))??false;return [abbreviateHome(p.path,home),row?.name??p.id,p.scope.kind==='global'?'Global':p.scope.project,row?.tracked===true?null:placementVersionLabel(p.version),p.placed_at??null,row?PLACEMENT_STATE[row.health]:missing?'folder missing':'—'];}),PLACEMENTS_N:value.ledger.placements.length,
   APPROVALS:value.ledger.approvals.flatMap(approval=>{const skill=local?.skills.find(skill=>skill.id===approval.id&&skill.grantsHash!==null&&skill.grantsHash===approval.grants&&skill.grants!==null);return skill?[[skill.name,skill.grants==='none'?[]:skill.grants!.split('\n'),approval.approved_at]]:[];}),
   QUARANTINE:null,HOOK:null,
   APP_VERSION:import.meta.env.VITE_APP_VERSION,AGENT_CLI:'—',AGENT_CLI_AUTH:'unknown',COMMUNITY:'github.com/ryanliu-terum/terum-skills/issues',
@@ -335,7 +370,6 @@ function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, lo
  */
 export const READ_CACHE_TTL_MS = 60_000;
 /** Four member reads leave headroom under the bridge cap of eight. */
-const CATALOG_CONCURRENCY = 4;
 /** The Settings error board branches on this: a config.json the CLI refused to parse is repairable in place; anything else is a read failure. */
 function readReason(error: string): 'invalid-config' | 'unreadable' {
   return error.includes('Invalid') && error.includes('config.json') ? 'invalid-config' : 'unreadable';
@@ -757,40 +791,31 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return fail(local.error);
       const members = rosterModel(team).members;
-      const pending = new Set<Promise<unknown>>();
-      const readMember = async (handle: string): Promise<Inventory> => {
-        const argv = ['ls', 'member', '--team', team.team, '--', handle];
-        const first = cached(argv, cliLs, options);
-        pending.add(first);
-        let detail;
-        try { detail = await first; } finally { pending.delete(first); }
-        // Retry once after another in-flight read settles; match the wrapped bridge message.
-        if (!detail.ok && detail.error.includes(BRIDGE_BUSY)) {
-          if (pending.size) await Promise.race(pending);
-          detail = await cached(argv, cliLs, options);
-        }
-        if (!detail.ok) throw new Error(detail.error);
-        return detail.value;
-      };
-      let details;
-      try { details = await mapWithConcurrency(members, CATALOG_CONCURRENCY, (member) => readMember(member.handle)); }
-      catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
+      // §8.4: the per-member fan-out is deleted. `catalog()` spawned `status` + `ls --local` + N × `ls
+      // member`; the team read now carries every member whole, so this is two processes regardless of
+      // team size. A CLI that predates the `people[]` limb is REPORTED rather than silently drawn as a
+      // team with no members — the only thing worse than a slow marketplace is a wrong one.
+      const roster = new Map((inventory.people ?? []).map(person => [person.handle, person]));
+      if (inventory.people === undefined && members.length) return fail(STALE_CLI_ROSTER);
       const people: Person[] = [];
-      for (const [index, member] of members.entries()) {
-        const detail = details[index]!;
-        if (!detail.member) return fail(`No member data for ${member.handle}.`);
-        const authored = detail.skills;
+      for (const member of members) {
+        const detail = roster.get(member.handle);
+        if (!detail) return fail(`No member data for ${member.handle}.`);
+        // §8.4: the CLI resolved the authorship join, so this is an id lookup rather than a second
+        // `normalizeAuthor` living on this side of the process boundary.
+        const authoredIds = new Set(detail.authored);
+        const authored = inventory.skills.filter(skill => authoredIds.has(skill.id));
         const names = authored.map(skill => skill.name);
-        const installedIds = new Set((detail.member.installed ?? []).map(item => item.id));
+        const installedIds = new Set(detail.installed.map(item => item.id));
         const installable = inventory.skills.filter(skill => installedIds.has(skill.id));
         const latest = newestUpdated(authored);
         const lastPublish = latest ? `${relativeTime(latest.updated)} · ${latest.name}` : '—';
         const disk: Person['onDisk'] = [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length];
-        people.push({ ...member, joined: member.joined ?? '—', role: detail.member.role, lastPublish, last_publish: lastPublish, organization: null, declined: detail.member.declined, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: names.length ? [['Authored', names]] : [], placeNote: personPlaceNote(disk), onDisk: disk });
+        people.push({ ...member, joined: member.joined ?? '—', role: detail.role, lastPublish, last_publish: lastPublish, organization: null, declined: [], skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: names.length ? [['Authored', names]] : [], placeNote: personPlaceNote(disk), onDisk: disk });
       }
       return { ok: true, value: catalogModel(team, inventory, local.value, placements, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
     },
-    search: (args: SearchArgs, options?: ReadOptions) => read(run(['search', '--', args.q], cliSearch, (hits): SearchHit[] => hits.map((hit) => ({ kind: 'skill', ref: hit.team === undefined ? hit.name : `${hit.team}/${hit.name}`, name: hit.name, description: hit.description, team: hit.team ?? null, category: hit.category ?? null, author: hit.author ?? null, installs: hit.installs ?? null, latest: hit.latest ?? null, endorsed: hit.endorsed ?? null, unresolved: hit.unresolved ?? null })), []), options).then(result),
+    search: (args: SearchArgs, options?: ReadOptions) => read(run(['search', '--', args.q], cliSearch, (hits): SearchHit[] => hits.map((hit) => ({ kind: 'skill', ref: hit.team === undefined ? hit.name : `${hit.team}/${hit.name}`, name: hit.name, description: hit.description, team: hit.team ?? null, category: hit.category ?? null, author: hit.author ?? null, installs: hit.installs ?? null, latest: hit.latest ?? null, endorsed: hit.endorsed ?? null })), []), options).then(result),
     // Long verbs: one process each, questions become dialogs, the CLI's own decline messages come back as `ok:false`.
     setIdentity: (args) => {
       const pairs = [args.name === undefined ? [] : [`name=${args.name}`], args.email === undefined ? [] : [`email=${args.email}`], args.defaultHandle === undefined ? [] : [`default-handle=${args.defaultHandle}`]].flat();
@@ -815,7 +840,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     // profile writes the clone's people file and, for --name, config.display_name.
     profile: args => run(['profile', ...(args.name === undefined ? [] : ['--name', args.name]), ...(args.bio === undefined ? [] : ['--bio', args.bio]), ...(args.role === undefined ? [] : ['--role', args.role]), ...(args.projects ?? []).flatMap(project => ['--project', project])], cliProfile, value => value, args.name === undefined ? ['clone'] : ['config', 'clone']),
     // publish writes clone team.json/PR branches and registers the current checkout in config.
-    publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), ...(args.project ? ['--project', args.project] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, version: value.prUrl ?? value.branch ?? null, changed: value.changed ?? true, prUrl: value.prUrl ?? null }), ['config', 'clone']),
+    publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), ...(args.project ? ['--project', args.project] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, project: value.project, version: value.version, created: value.created, identicalTo: value.identicalTo, attachedEvals: value.attachedEvals, profileAdded: value.profileAdded, projectAdded: value.projectAdded }), ['config', 'clone']),
     // Sync fetches team clones; it never changes the local Library or places a skill.
     sync: (args: SyncArgs) => run(['sync', ...(args.team ? ['--team', args.team] : [])], cliRefresh, (value): SyncResult => ({ notices:value.notices,changed:value.changed,teams:value.teams.map(team=>({team:team.team,state:team.state,...(team.detail===undefined?{}:{detail:team.detail})})) }), ['marketplace', 'stamp']),
     prune: () => run(['prune'], z.unknown(), () => undefined, ['placed']),
@@ -823,7 +848,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
     // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes"); an unset pref (or the k '—' sentinel) passes nothing and the CLI keeps no defaults of its own.
-    eval: (args: EvalArgs) => { const k = prefs.get('eval:k', ''), model = prefs.get('eval:model', ''), judge = prefs.get('eval:judge', ''); return run(['eval', ...(k && k !== '—' ? ['--k', k] : []), ...(model ? ['--model', model] : []), ...(judge ? ['--judge-model', judge] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus }), ['config', 'placed']); },
+    eval: (args: EvalArgs) => { const k = prefs.get('eval:k', ''), model = prefs.get('eval:model', ''), judge = prefs.get('eval:judge', ''); return run(['eval', ...(k && k !== '—' ? ['--k', k] : []), ...(model ? ['--model', model] : []), ...(judge ? ['--judge-model', judge] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']); },
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? cached<ValidateResult>(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, options).then(result) : fail('validate needs a skill name or a folder.'),
     update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
     appUpdate: createAppUpdate({ run, read, result, prefs, appVersion: import.meta.env.VITE_APP_VERSION }),

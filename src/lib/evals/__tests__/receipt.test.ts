@@ -6,7 +6,9 @@ const PEM = '-----BEGIN RSA PRIVATE KEY-----\nMIIEow…snip…\n-----END RSA PRI
 const valid = () => ({
   skill_id: '4e80fd2a-04bc-4d9f-88f7-a849d92879f1',
   skill_name: 'deploy-preflight',
-  version: 'a'.repeat(40),
+  // §3.4: a version is a `v<N>` folder, and §6.1 requires the digest at schema 2.
+  version: 'v3',
+  content_digest: `sha256:${'d'.repeat(64)}`,
   run_id: '20260904T221500Z',
   verdict: 'PASS',
   attribution: 'wins on execution checks',
@@ -60,7 +62,7 @@ describe('receipt schema and build (§5.3)', () => {
     const built = buildReceipt({ ...valid(), attribution: `leaked ghp_${'c'.repeat(36)} via team-tok-9` }, ['team-tok-9']);
     expect(built.ok).toBe(true);
     if (built.ok) {
-      expect(built.value.schema_version).toBe(1);
+      expect(built.value.schema_version).toBe(2);
       expect(built.value.attribution).not.toContain('ghp_');
       expect(built.value.attribution).not.toContain('team-tok-9');
     }
@@ -68,6 +70,15 @@ describe('receipt schema and build (§5.3)', () => {
 
   it('rejects malformed identity fields', () => {
     expect(buildReceipt({ ...valid(), version: 'short' }).ok).toBe(false);
+    expect(buildReceipt({ ...valid(), version: 'v0' }).ok).toBe(false);
+    // §6.1: the digest is required at schema 2 — declared and never enforced would mean a receipt
+    // that can never attach at publish, with nothing saying so.
+    expect(buildReceipt({ ...valid(), content_digest: undefined }).ok).toBe(false);
+    expect(buildReceipt({ ...valid(), content_digest: 'sha256:nope' }).ok).toBe(false);
+    // Both are legitimate for a LOCAL run, which happens before the skill has either.
+    expect(buildReceipt({ ...valid(), version: null, skill_id: null }).ok).toBe(true);
+    // The 40-hex arm is retained on READ so no historical receipt becomes unparseable.
+    expect(receiptSchema.safeParse({ ...valid(), schema_version: 1, version: 'a'.repeat(40), content_digest: undefined }).success).toBe(true);
     expect(buildReceipt({ ...valid(), run_id: '2026-09-04' }).ok).toBe(false);
     expect(buildReceipt({ ...valid(), skill_id: 'not-a-uuid' }).ok).toBe(false);
     expect(buildReceipt({ ...valid(), verdict: 'GREAT' }).ok).toBe(false);
@@ -82,7 +93,7 @@ describe('receipt schema and build (§5.3)', () => {
 
 describe('receipt path (rev 5, append-only)', () => {
   it('is keyed id/version/run', () => {
-    expect(receiptPath('4e80fd2a-04bc-4d9f-88f7-a849d92879f1', 'a'.repeat(40), '20260904T221500Z'))
-      .toBe(`evals/4e80fd2a-04bc-4d9f-88f7-a849d92879f1/${'a'.repeat(40)}/20260904T221500Z.json`);
+    expect(receiptPath('4e80fd2a-04bc-4d9f-88f7-a849d92879f1', 'v3', '20260904T221500Z'))
+      .toBe('evals/4e80fd2a-04bc-4d9f-88f7-a849d92879f1/v3/20260904T221500Z.json');
   });
 });

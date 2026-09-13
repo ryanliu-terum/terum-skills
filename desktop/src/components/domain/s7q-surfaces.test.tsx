@@ -82,7 +82,8 @@ it('never reads a favorite preference when favorites are false',async()=>{
 it('opens the skill deep link through the backend',async()=>{
  const {backend}=await open('/skill/deploy-check');const openUrl=vi.spyOn(backend,'openUrl').mockResolvedValue({ok:true,value:undefined});
  const result=await backend.skill({ref:'deploy-check'});if(!result.ok)throw new Error(result.error);
- const s=result.value,url=`https://github.com/${s.repo}/tree/${s.version_full}/skills/${s.name}/`;
+ // §8.6: a version is a PATH SEGMENT under main now, never a git ref.
+ const s=result.value,url=`https://github.com/${s.repo}/tree/main/skills/${s.name}${s.versions?.teamCurrent?'/'+s.versions.teamCurrent:''}`;
  const anchor=document.querySelector<HTMLAnchorElement>('.detail-repo a')!;expect(anchor.href).toBe(url);fireEvent.click(anchor);expect(openUrl).toHaveBeenCalledWith(url);
 });
 it('opens the project remote, with no hard-coded repository target',async()=>{

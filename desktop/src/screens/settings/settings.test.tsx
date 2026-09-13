@@ -104,7 +104,7 @@ it('renders a partial removal failure and allows closing it',async()=>{
 });
 it('refuses removal while an eval is running and offers to show it',async()=>{
  const uninstall=vi.spyOn(backend,'uninstallMachine'),show=vi.fn();
- open('#/settings/advanced',{current:{state:'running',ref:'deploy-check',name:'deploy-check',team:undefined,run:createRun(async()=>({ok:true,value:{name:'deploy-check',runDir:'/eval',executionStatus:'complete'}})),lines:[],startedAt:0},dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},show});
+ open('#/settings/advanced',{current:{state:'running',ref:'deploy-check',name:'deploy-check',team:undefined,run:createRun(async()=>({ok:true,value:{name:'deploy-check',runDir:'/eval',executionStatus:'complete',team:null,id:null,shareHint:true}})),lines:[],startedAt:0},dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},show});
  fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));
  const dialog=await screen.findByRole('dialog',{name:'Stop the running eval first'});expect(uninstall).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByRole('button',{name:'Show eval'}));expect(show).toHaveBeenCalledOnce();

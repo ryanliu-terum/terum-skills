@@ -8,7 +8,7 @@ import { estimateFromReceipts, estimateLine } from '../../lib/evals/estimate.js'
 import { createExecute } from '../../lib/execute.js';
 import { frameChannel, type Frame, type ResultOutcome } from '../../lib/frames.js';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -490,14 +490,15 @@ describe('setup (§6.1)', () => {
     if (!created.ok) throw new Error(created.error);
     const joinFixture = await bareTeam();
     const id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
-    await pushFromSeed(joinFixture.seed, 'skills/tool/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(joinFixture.seed, 'team.json', JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [id], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }));
+    await pushFromSeed(joinFixture.seed, 'skills/tool/v1/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(joinFixture.seed, 'team.json', JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [id] } }, archived: [], policy: { skill_license: 'UNLICENSED' } }));
     const joinRoot = join(joinFixture.root, 'real-join'); const joinHome = join(joinRoot, 'home');
     const joinedIo = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [true, true, false, false]);
     const joined = await run({ app: false, target: 'https://git.example/team.git', config: createConfigStore(join(joinRoot, 'state')), home: joinHome, runner: mappedRunner('https://git.example/team.git', joinFixture.bare, fakeGh('bob')), hook: hookFor(joinRoot), wrapper: wrapperFor(joinHome), communityUrl: '' }, joinedIo);
     if (!joined.ok) throw new Error(joined.error);
+    // §12 deleted the endorsement-driven auto-install, so join no longer offers one — and with no
+    // install there is no grant to approve either. What remains is what setup still delegates.
     expect([...io.asked, ...joinedIo.asked]).toEqual(expect.arrayContaining([
-      'Install 1 team-endorsed skill(s)?', 'Approve these tools for tool?',
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(root).settingsFile})`,
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(joinRoot).settingsFile})`,
       `Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${join(home, '.claude', 'skills', 'terum-skills')})`,
@@ -776,7 +777,18 @@ it('setup refusal survives createExecute with exit 1 and its partial value', asy
 
 async function optionalSetup(count = 0) {
   const fixture = await configuredCreator({}); const args = { ...fixture.args, verbs: { ...fixture.args.verbs, offerWrapper: async () => 'present' as const } };
-  await mkdir(args.home, { recursive: true }); if (count) await seedPending(args.config.teamClone('team'), count);
+  await mkdir(args.home, { recursive: true });
+  if (count) {
+    const clone = args.config.teamClone('team');
+    await seedPending(clone, count);
+    // §6.3/§6.6: an eval targets a LIBRARY folder, and a queued item names the bytes it was queued
+    // against — so the candidate has to exist on this machine, the way it would after an install.
+    for (const name of ['alpha', 'beta'].slice(0, count)) {
+      const directory = join(args.home, '.claude', 'skills', name);
+      await mkdir(directory, { recursive: true });
+      await copyFile(join(clone, 'skills', name, 'v1', 'SKILL.md'), join(directory, 'SKILL.md'));
+    }
+  }
   return args;
 }
 function optionalAnswers(confirms: Record<string, boolean> = {}, answers: Record<string, string> = {}) {
@@ -897,13 +909,14 @@ describe('setup batch evals', () => {
     expect(io.events).toContain('print:The team has no shared skills yet; nothing to evaluate.');
     expect(io.events).not.toContain('print:Every shared skill already has an eval receipt for its current version.');
   });
-  it('a failed version reader is reported instead of an already-receipted claim', async () => {
-    const args = await optionalSetup(2); const clone = args.config.teamClone('team'); const io = optionalAnswers();
-    const runner = wrapRunner(args.runner, async (command, argv, options, next) => {
-      if (command === 'git' && options?.cwd === clone && argv[0] === 'ls-tree') throw new Error('git unavailable');
-      return next();
-    });
-    expect(await run({ ...args, runner }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } });
+  it('a skill with no copy on this machine is reported, never queued to fail unattended', async () => {
+    const args = await optionalSetup(2);
+    await rm(join(args.home, '.claude', 'skills', 'beta'), { recursive: true });
+    const io = optionalAnswers({}, { 'Evaluate the ': 'Overnight' });
+    expect(await run(args, io)).toMatchObject({ ok: true, value: { steps: { evals: 'queued' } } });
+    expect((await readEvalQueue(args.config.root)).items.map((item) => item.skill)).toEqual(['alpha']);
+    expect(io.events.join('\n')).toContain('beta: no copy of this skill on this machine, so it cannot be evaluated; install it first.');
+    return;
     expect(io.events).toContain('print:Could not read the current skill versions, so no shared skill could be checked for a receipt.');
     expect(io.events).not.toContain('print:Every shared skill already has an eval receipt for its current version.');
     expect(io.events.some(e => e.startsWith('ask:Evaluate the '))).toBe(false);
@@ -1001,6 +1014,36 @@ describe('f-wizard cost and run choices', () => {
     expect((await readEvalQueue(args.config.root)).items).toMatchObject([{ team: 'team', skill: 'alpha', window: 'overnight' }, { team: 'team', skill: 'beta', window: 'overnight' }]);
     expect(io.events).toContain('print:Queued 2 evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with `terum-skills eval --drain`.');
   });
+  it('D61: setup names a queue item it had to drop — the onboarding route writes the file back too', async () => {
+    // `enqueueEvals` goes through `updateEvalQueue`, which re-writes the parsed items over the file,
+    // so a schema-invalid leftover is deleted for good the next time setup queues anything. The
+    // reporter reached `eval`'s two call sites first and left this one — the route a NEW user takes —
+    // still silent.
+    const args = await optionalSetup(2), evaluate = vi.fn(successfulEval), preflight = vi.fn();
+    const queueFile = join(args.config.root, 'run', 'eval-queue.json');
+    await mkdir(join(args.config.root, 'run'), { recursive: true });
+    await writeFile(queueFile, JSON.stringify({ schema: 2, items: [{ skill: 'stale', path: '/library/stale', contentHash: 'a'.repeat(40), requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' }] }));
+    const io = optionalAnswers({}, { 'Evaluate the ': 'Overnight' });
+    expect(await run({ ...args, form: 'bare', preflight, verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'queued' } } });
+    expect(io.events.join('\n')).toContain('1 queued eval could not be read and was dropped from the queue (stale)');
+    // And it really is gone — the drop this reports is the permanent one.
+    expect((await readEvalQueue(args.config.root)).items.map((item) => item.skill)).toEqual(['alpha', 'beta']);
+  });
+
+  it('D61: reports Overnight as skipped when nothing could actually be queued', async () => {
+    // `steps.evals` is what the app renders back as this step's outcome. The queue helper already
+    // prints that nothing could be queued — a candidate with no copy on this machine cannot be —
+    // but the outcome was set to `queued` regardless, so the app told the user paid runs were
+    // waiting overnight when the queue was empty.
+    const args = await optionalSetup(2), evaluate = vi.fn(successfulEval), preflight = vi.fn();
+    // Same candidates, no copies on this machine: exactly the state the early return exists for.
+    await rm(join(args.home, '.claude', 'skills'), { recursive: true, force: true });
+    const io = optionalAnswers({}, { 'Evaluate the ': 'Overnight' });
+    expect(await run({ ...args, form: 'bare', preflight, verbs: { ...args.verbs, eval: evaluate } }, io)).toMatchObject({ ok: true, value: { steps: { evals: 'skipped' } } });
+    expect(io.events).toContain('print:None of those skills has a copy on this machine, so none could be queued.');
+    expect((await readEvalQueue(args.config.root)).items).toEqual([]);
+    expect(evaluate).not.toHaveBeenCalled();
+  });
   it.each([true, false])('batches continue=%s, preserving remaining work when stopped', async more => {
     const args = await optionalSetup(2), evaluate = vi.fn(successfulEval), preflight = vi.fn(async () => success({ ccVersion: 'test' }));
     const io = optionalAnswers({ 'Continue with the next ': more }, { 'Evaluate the ': 'In batches', 'How many at a time?': '1' });
@@ -1045,7 +1088,11 @@ describe('f-wizard cost and run choices', () => {
 
 async function threePending() {
  const args=await optionalSetup(2),clone=args.config.teamClone('team');
- await pendingSkill(clone,'gamma','33333333-3333-4333-8333-333333333333');await git(['add','--all'],clone);await git(['commit','-qm','third candidate'],clone);return args;
+ await pendingSkill(clone,'gamma','33333333-3333-4333-8333-333333333333');await git(['add','--all'],clone);await git(['commit','-qm','third candidate'],clone);
+ // The third candidate needs a Library copy too, or it can be evaluated but never QUEUED.
+ const directory=join(args.home,'.claude','skills','gamma');await mkdir(directory,{recursive:true});
+ await copyFile(join(clone,'skills','gamma','v1','SKILL.md'),join(directory,'SKILL.md'));
+ return args;
 }
 it.each(['Now','In batches'])('runs %s concurrently and queues declined remaining batches',async choice=>{
  const args=await threePending(),io=optionalAnswers({'Continue with the next ':false},{'Evaluate the ':choice,'How many at a time?':'2'});

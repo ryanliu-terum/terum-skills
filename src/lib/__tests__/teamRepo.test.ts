@@ -40,7 +40,7 @@ describe('safeWrite (§6.0)', () => {
     expect(await exists(join(github, 'README.md'))).toBe(false);
   });
 
-  it('derives every generic-remote README version from the written index in one ls-tree call', async () => {
+  it('derives every generic-remote README version from the written tree, spawning no ls-tree at all', async () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     let lsTrees = 0;
@@ -49,12 +49,13 @@ describe('safeWrite (§6.0)', () => {
       return next();
     });
     const skill = '---\nname: new\ndescription: New\nlicense: UNLICENSED\nmetadata:\n  id: 55555555-5555-4555-8555-555555555555\n  author: Me <me@example.com>\n  terum-category: docs\n---\n';
-    await openTeamRepo(clone, fixture.bare, runner).safeWrite((tree) => tree.set('skills/new/SKILL.md', skill), { action: 'connect', handle: 'me', author: 'Me <me@example.com>' });
+    await openTeamRepo(clone, fixture.bare, runner).safeWrite((tree) => tree.set('skills/new/v1/SKILL.md', skill), { action: 'publish', handle: 'me' });
     await git(['fetch', '-q', 'origin'], fixture.seed);
     await git(['reset', '-q', '--hard', 'origin/main'], fixture.seed);
-    const latest = (await git(['rev-parse', 'main:skills/new'], fixture.bare)).trim();
-    expect(await readFile(join(fixture.seed, 'README.md'), 'utf8')).toContain(`| new | docs | New | 0 | — | ${latest.slice(0, 8)} |`);
-    expect(lsTrees).toBe(1);
+    // D1: the Latest column is the version LABEL, never a tree hash — and `versionsInTree` reads it
+    // straight out of the post-image, so the README costs no process at all.
+    expect(await readFile(join(fixture.seed, 'README.md'), 'utf8')).toContain('| new | docs | New | 0 | — | Version 1 |');
+    expect(lsTrees).toBe(0);
   });
 
   it('omits a removed tracked person from the regenerated generic-remote README', async () => {
@@ -111,10 +112,10 @@ describe('safeWrite (§6.0)', () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     const before = await originSha(fixture.bare);
-    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/new/SKILL.md', '---\nname: new\n---\n'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
+    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/new/v1/SKILL.md', '---\nname: new\n---\n'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
     expect(await originSha(fixture.bare)).toBe(before);
     expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
-    expect(await exists(join(clone, 'skills', 'new'))).toBe(false);
+    expect(await exists(join(clone, 'skills', 'new', 'v1'))).toBe(false);
   });
 
   it('stages only the mutation: an untracked file in the clone is neither pushed nor deleted', async () => {
@@ -136,16 +137,17 @@ describe('safeWrite (§6.0)', () => {
     await expect(openTeamRepo(clone, fixture.bare, denied).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' })).rejects.toThrow(/Permission to acme\/skills\.git denied/);
     expect(pushes).toBe(2);
     expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
-    const protectedBranch: Runner = { run(command, args, options) { if (command === 'git' && args[0] === 'push') return Promise.resolve({ code: 1, stdout: '', stderr: ' ! [remote rejected] HEAD -> publish/x (protected branch hook declined)' }); return systemRunner.run(command, args, options); } };
-    await expect(openTeamRepo(clone, fixture.bare, protectedBranch).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', branch: 'publish/x' })).rejects.toThrow(/protected branch hook declined/);
-    expect((await git(['branch', '--list', 'publish/x-2'], fixture.bare)).trim()).toBe('');
+    // §4.1 collapsed the push onto main, so a protected main is the only protected branch there is.
+    const protectedMain: Runner = { run(command, args, options) { if (command === 'git' && args[0] === 'push') return Promise.resolve({ code: 1, stdout: '', stderr: ' ! [remote rejected] HEAD -> main (protected branch hook declined)' }); return systemRunner.run(command, args, options); } };
+    await expect(openTeamRepo(clone, fixture.bare, protectedMain).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' })).rejects.toThrow(/protected branch hook declined/);
+    expect((await git(['branch', '--list'], fixture.bare)).trim()).toBe('* main');
   });
 
   it('refuses unsafe paths inside the mutation and refuses a clone that points at a different remote', async () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
-    for (const bad of ['../escape.json', '/etc/passwd', '.git/config', '.Git/config', '.GIT/hooks/pre-commit', 'skills/x/.git/config', 'skills/x/GIT~1/config', 'people/../team.json', 'a/./b', 'a//b', 'people\\me.json', 'people/', '']) expect(() => assertSafePath(bad), bad).toThrow(GuardError);
-    for (const good of ['people/me.json', 'skills/x/SKILL.md', 'skills/x/.gitkeep', 'team.json']) expect(() => assertSafePath(good), good).not.toThrow();
+    for (const bad of ['../escape.json', '/etc/passwd', '.git/config', '.Git/config', '.GIT/hooks/pre-commit', 'skills/x/v1/.git/config', 'skills/x/v1/GIT~1/config', 'people/../team.json', 'a/./b', 'a//b', 'people\\me.json', 'people/', '']) expect(() => assertSafePath(bad), bad).toThrow(GuardError);
+    for (const good of ['people/me.json', 'skills/x/v1/SKILL.md', 'skills/x/v1/.gitkeep', 'team.json']) expect(() => assertSafePath(good), good).not.toThrow();
     await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('../escape.json', '{}'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
     let mutated = false;
     await expect(openTeamRepo(clone, 'https://github.com/someone/else.git').safeWrite(() => { mutated = true; }, { action: 'join', handle: 'me' })).rejects.toThrow('wrong repository');
@@ -159,8 +161,8 @@ describe('safeWrite (§6.0)', () => {
     const configBefore = await readFile(join(clone, '.git', 'config'), 'utf8');
     await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('.Git/config', '[core]\n'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
     expect(await readFile(join(clone, '.git', 'config'), 'utf8')).toBe(configBefore);
-    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/new/SKILL.md', 'x'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
-    expect(await exists(join(clone, 'skills', 'new'))).toBe(false);
+    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/new/v1/SKILL.md', 'x'), { action: 'join', handle: 'me' })).rejects.toThrow(GuardError);
+    expect(await exists(join(clone, 'skills', 'new', 'v1'))).toBe(false);
   });
 
   it('never writes or deletes through a symlinked parent that leaves the clone', async () => {
@@ -200,33 +202,13 @@ describe('safeWrite (§6.0)', () => {
     expect((await git(['log', '-1', '--format=%s', 'main'], fixture.bare)).trim()).toBe('admin: team-remove');
   });
 
-  it('a non-main branch is created, never replaced: origin/main is byte-identical, a name already on the remote is refused with nothing overwritten, and a branch that appears mid-write survives with no fallback name', async () => {
+  it('§4.1: every write lands on main and the remote grows no other branch', async () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
-    const mainBefore = await originSha(fixture.bare);
-    const first = await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', branch: 'publish/x' });
-    expect(first.pushedTo).toBe('publish/x');
-    expect(await originSha(fixture.bare)).toBe(mainBefore);
-    expect(await git(['ls-tree', '--name-only', 'publish/x:people'], fixture.bare)).toContain('me.json');
-    const firstSha = await originSha(fixture.bare, 'publish/x');
-    // The same name again — even by the same writer — is a refusal, not a refresh (R2: one fresh branch per publish).
-    await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v2"')), { action: 'join', handle: 'me', branch: 'publish/x' })).rejects.toBeInstanceOf(PushRefused);
-    expect(await originSha(fixture.bare, 'publish/x')).toBe(firstSha);
-    expect((await git(['branch', '--list', 'publish/x-2'], fixture.bare)).trim()).toBe('');
-    // Someone creates the name after our fetch and before our push: theirs stands, ours is refused, no fallback name.
-    let injected = false;
-    const racing = wrapRunner(systemRunner, async (command, args, _options, next) => {
-      if (command === 'git' && args[0] === 'push' && !injected) {
-        injected = true;
-        await git(['push', '-q', 'origin', 'HEAD:refs/heads/publish/y'], fixture.seed);
-      }
-      return next();
-    });
-    const theirs = (await git(['rev-parse', 'HEAD'], fixture.seed)).trim();
-    await expect(openTeamRepo(clone, fixture.bare, racing).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v3"')), { action: 'join', handle: 'me', branch: 'publish/y' })).rejects.toBeInstanceOf(PushRefused);
-    expect(await originSha(fixture.bare, 'publish/y')).toBe(theirs);
-    expect((await git(['branch', '--list', 'publish/y*'], fixture.bare)).trim()).toBe('publish/y');
-    expect(await originSha(fixture.bare)).toBe(mainBefore);
+    const result = await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me' });
+    expect(result.pushedTo).toBe('main');
+    expect(await git(['ls-tree', '--name-only', 'main:people'], fixture.bare)).toContain('me.json');
+    expect((await git(['branch', '--list'], fixture.bare)).trim()).toBe('* main');
     expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
   });
 
@@ -247,23 +229,65 @@ describe('safeWrite (§6.0)', () => {
     const fixture = await bareTeam();
     const id = '11111111-1111-4111-8111-111111111111';
     const initial = `---\nname: binary\ndescription: binary\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Me <me@example.com>\n  terum-category: testing\n---\n`;
-    await pushFromSeed(fixture.seed, 'skills/binary/SKILL.md', initial);
+    await pushFromSeed(fixture.seed, 'skills/binary/v1/SKILL.md', initial);
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     const payload = Buffer.concat([Buffer.from(initial), Buffer.from([0xff, 0xfe, 0x80])]);
-    await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/binary/SKILL.md', payload), { action: 'sync', handle: 'me', author: 'Me <me@example.com>' });
-    expect(await readFile(join(clone, 'skills', 'binary', 'SKILL.md'))).toEqual(payload);
+    // Row a' is add-only, so re-publishing changed bytes mints v2 rather than rewriting v1.
+    await openTeamRepo(clone, fixture.bare).safeWrite((tree) => tree.set('skills/binary/v2/SKILL.md', payload), { action: 'publish', handle: 'me' });
+    expect(await readFile(join(clone, 'skills', 'binary', 'v2', 'SKILL.md'))).toEqual(payload);
+    expect(await readFile(join(clone, 'skills', 'binary', 'v1', 'SKILL.md'), 'utf8')).toBe(initial);
+  });
+
+  // §4.5/D10, named in §14.1. Before the five touch points landed, `sourceFiles`' executable set was
+  // read for hygiene and then dropped, `applyTree` wrote every path with no chmod, and
+  // `executablePaths` required `tracked.has(path)` — which a path created by `tree.set()` never is.
+  it('carries the executable bit into the team repo, and a mode-only change does not trip the staged-diff proof (D10, §4.5)', async () => {
+    const fixture = await bareTeam();
+    // Real frontmatter: this remote is generic, so safeWrite regenerates the README in-process and
+    // parses the newest version's SKILL.md.
+    const frontmatter = (body: string) => `---\nname: x\ndescription: x\nlicense: UNLICENSED\nmetadata:\n  id: 22222222-2222-4222-8222-222222222222\n  author: Me <me@example.com>\n  terum-category: testing\n---\n${body}\n`;
+    await pushFromSeed(fixture.seed, 'skills/x/v1/SKILL.md', frontmatter('v1'));
+    await pushFromSeed(fixture.seed, 'people/me.json', personJson('me'));
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+
+    await openTeamRepo(clone, fixture.bare).safeWrite((tree) => {
+      tree.set('skills/x/v2/SKILL.md', frontmatter('v2'));
+      tree.set('skills/x/v2/scripts/run.sh', '#!/bin/sh\necho hi\n');
+      tree.setExecutable('skills/x/v2/scripts/run.sh', true);
+    }, { action: 'publish', handle: 'me' });
+
+    // The proof that matters is what a FRESH clone gets — the working copy could be right by luck.
+    const fresh = await cloneWithIdentity(fixture.bare, join(fixture.root, 'fresh'));
+    const listed = await git(['ls-tree', '-r', 'HEAD', '--', 'skills/x/v2'], fresh);
+    expect(listed).toMatch(/^100755 blob \S+\tskills\/x\/v2\/scripts\/run\.sh$/m);
+    expect(listed).toMatch(/^100644 blob \S+\tskills\/x\/v2\/SKILL\.md$/m);
+
+    // Touch point 5, on a path the guard admits for mutation. It cannot be tested inside a version
+    // folder: row a' is add-only, so a mode-only change there is a mutation of a published version
+    // and is refused — correctly, per §3.1's immutability. `applyTree` is shared by every write
+    // path, which is why the mode-only case still has to work somewhere.
+    await openTeamRepo(fresh, fixture.bare).safeWrite((tree) => {
+      tree.setExecutable('people/me.json', true);
+      // Content is untouched: before this landed, `changedPaths` compared bytes only, so it returned
+      // [] while `git diff --cached --name-only` listed the path, and the equality proof threw.
+      expect(tree.changedPaths).toEqual(['people/me.json']);
+    }, { action: 'join', handle: 'me' });
+
+    const after = await cloneWithIdentity(fixture.bare, join(fixture.root, 'after'));
+    expect(await git(['ls-tree', 'HEAD', '--', 'people/me.json'], after))
+      .toMatch(/^100755 blob \S+\tpeople\/me\.json$/m);
   });
 
   it('lists the tree as mutated, including additions and excluding removals', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/x/SKILL.md', 'skill');
+    await pushFromSeed(fixture.seed, 'skills/x/v1/SKILL.md', 'skill');
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     let observed = false;
     await expect(openTeamRepo(clone, fixture.bare).safeWrite((tree) => {
       tree.set('people/new.json', personJson('new'));
-      tree.remove('skills/x/SKILL.md');
+      tree.remove('skills/x/v1/SKILL.md');
       expect(tree.paths('people/')).toContain('people/new.json');
-      expect(tree.paths('skills/x/')).not.toContain('skills/x/SKILL.md');
+      expect(tree.paths('skills/x/v1/')).not.toContain('skills/x/v1/SKILL.md');
       observed = true;
     }, { action: 'join', handle: 'new' })).rejects.toThrow(GuardError);
     expect(observed).toBe(true);
@@ -286,35 +310,22 @@ describe('safeWrite (§6.0)', () => {
     expect(failed).not.toContain('tok');
     expect(failed).not.toContain('@');
   });
-  it('retries ref-lock contention on a derived branch; a commit pushed in between is never overwritten and gets no fallback name; a protected-branch refusal is one push and a PushRefused', async () => {
+  it('retries ref-lock contention on main, and a protected-main refusal is one push and a PushRefused', async () => {
     const fixture = await bareTeam();
     const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
     let pushes = 0;
     const contended = wrapRunner(systemRunner, async (command, args, _options, next) => {
-      if (command === 'git' && args[0] === 'push' && pushes++ === 0) return { code: 1, stdout: '', stderr: "error: cannot lock ref 'refs/heads/publish/x': is at abc but expected def" };
+      if (command === 'git' && args[0] === 'push' && pushes++ === 0) return { code: 1, stdout: '', stderr: "error: cannot lock ref 'refs/heads/main': is at abc but expected def" };
       return next();
     });
-    const result = await openTeamRepo(clone, fixture.bare, contended).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', branch: 'publish/x', deadlineMs: 5_000 });
-    expect(result.pushedTo).toBe('publish/x');
+    const result = await openTeamRepo(clone, fixture.bare, contended).safeWrite((tree) => tree.set('people/me.json', personJson('me')), { action: 'join', handle: 'me', deadlineMs: 5_000 });
+    expect(result.pushedTo).toBe('main');
     expect(pushes).toBe(2);
-    // Contention, and someone lands on publish/y before our retry: the name now exists, so the retry is refused and theirs stands — no fallback name.
-    let racing = 0;
-    const raced = wrapRunner(systemRunner, async (command, args, _options, next) => {
-      if (command === 'git' && args[0] === 'push' && racing++ === 0) {
-        await git(['push', '-q', 'origin', 'HEAD:refs/heads/publish/y'], fixture.seed);
-        return { code: 1, stdout: '', stderr: "error: cannot lock ref 'refs/heads/publish/y'" };
-      }
-      return next();
-    });
-    const theirs = (await git(['rev-parse', 'HEAD'], fixture.seed)).trim();
-    await expect(openTeamRepo(clone, fixture.bare, raced).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"y"')), { action: 'join', handle: 'me', branch: 'publish/y', deadlineMs: 5_000 })).rejects.toBeInstanceOf(PushRefused);
-    expect(await originSha(fixture.bare, 'publish/y')).toBe(theirs);
-    expect((await git(['branch', '--list', 'publish/y-2'], fixture.bare)).trim()).toBe('');
     let refused = 0;
-    const protectedBranch: Runner = { run(command, args, options) { if (command === 'git' && args[0] === 'push') { refused++; return Promise.resolve({ code: 1, stdout: '', stderr: ' ! [remote rejected] HEAD -> publish/z (protected branch hook declined)' }); } return systemRunner.run(command, args, options); } };
-    await expect(openTeamRepo(clone, fixture.bare, protectedBranch).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v2"')), { action: 'join', handle: 'me', branch: 'publish/z' })).rejects.toBeInstanceOf(PushRefused);
+    const protectedMain: Runner = { run(command, args, options) { if (command === 'git' && args[0] === 'push') { refused++; return Promise.resolve({ code: 1, stdout: '', stderr: ' ! [remote rejected] HEAD -> main (protected branch hook declined)' }); } return systemRunner.run(command, args, options); } };
+    await expect(openTeamRepo(clone, fixture.bare, protectedMain).safeWrite((tree) => tree.set('people/me.json', personJson('me').replace('""', '"v2"')), { action: 'join', handle: 'me' })).rejects.toBeInstanceOf(PushRefused);
     expect(refused).toBe(1);
-    expect((await git(['branch', '--list', 'publish/z*'], fixture.bare)).trim()).toBe('');
+    expect((await git(['branch', '--list'], fixture.bare)).trim()).toBe('* main');
   });
 
   it('a deletion is restored by the finally when the push is refused, lands when it is not, and a byte-identical rewrite is no change', async () => {
@@ -653,36 +664,42 @@ it('returns only the completed attempt value after rejection', async () => {
 });
 
 
-it('skillVersions resolves every tree in one child, matching latestTree name by name', async () => {
+it('skillVersions reads each named skill\'s version folders from the clone, newest first, and spawns nothing', async () => {
   const fixture = await bareTeam();
-  for (const name of ['a', 'b', 'c']) await pushFromSeed(fixture.seed, 'skills/'+name+'/SKILL.md', name);
+  for (const name of ['a', 'b', 'c']) await pushFromSeed(fixture.seed, 'skills/' + name + '/v1/SKILL.md', name);
+  for (const folder of ['v2', 'v10']) await pushFromSeed(fixture.seed, 'skills/a/' + folder + '/SKILL.md', folder);
   let children = 0;
   const runner = wrapRunner(systemRunner, async (_command, _args, _options, next) => { children++; return next(); });
-  const versions = await skillVersions(runner, fixture.seed);
-  expect(children).toBe(1); expect(versions.size).toBe(3);
-  for (const [name, hash] of versions) expect(hash).toBe((await git(['rev-parse', 'HEAD:skills/'+name], fixture.seed)).trim());
-  expect(versions.has('missing')).toBe(false);
+  void runner;
+  const versions = await skillVersions(fixture.seed, ['a', 'b', 'c', 'missing']);
+  expect(children).toBe(0);
+  // The sort is numeric on the ordinal: ['v10','v2'].sort() would pin 'a' to v2 forever.
+  expect(versions.get('a')!.map((version) => version.folder)).toEqual(['v10', 'v2', 'v1']);
+  expect(versions.get('a')!.map((version) => version.n)).toEqual([10, 2, 1]);
+  expect(versions.get('b')!.map((version) => version.folder)).toEqual(['v1']);
+  // An unpublished name is an ordinary answer, not an error or an absent key.
+  expect(versions.get('missing')).toEqual([]);
 });
-it('skillVersions returns an empty map when the valid ref has no skills tree', async () => {
+it('skillVersions ignores every directory that is not a version folder, and a missing skills root', async () => {
   const fixture = await bareTeam();
+  await pushFromSeed(fixture.seed, 'skills/a/v1/SKILL.md', 'a');
+  for (const folder of ['v0', 'v01', 'V2', 'draft']) await pushFromSeed(fixture.seed, 'skills/a/' + folder + '/SKILL.md', folder);
+  expect((await skillVersions(fixture.seed, ['a'])).get('a')!.map((version) => version.folder)).toEqual(['v1']);
   await rm(join(fixture.seed, 'skills'), { recursive: true });
-  await git(['add', '--all'], fixture.seed); await git(['commit', '-qm', 'remove skills root'], fixture.seed);
-  expect(await skillVersions(systemRunner, fixture.seed)).toEqual(new Map());
-});
-it('skillVersions preserves requireGitResult failure text', async () => {
-  await expect(skillVersions({ run: async () => ({ code: 1, stdout: '', stderr: 'cannot read objects' }) }, '/clone', 'main')).rejects.toThrow('git ls-tree main:skills failed: cannot read objects');
+  expect(await skillVersions(fixture.seed, ['a'])).toEqual(new Map([['a', []]]));
+  expect(await skillVersions(fixture.seed, [])).toEqual(new Map());
 });
 
 
 describe('W-02 post-push cleanup',()=>{
-  it.each(['main','branch','unchanged','guard','exhausted'] as const)('preserves cleanup semantics for %s',async mode=>{
+  it.each(['main','unchanged','guard','exhausted'] as const)('preserves cleanup semantics for %s',async mode=>{
     const f=await bareTeam();const clone=await cloneWithIdentity(f.bare,join(f.root,'clone'));const calls:string[][]=[];let pushed='';let clock=0;
     const runner=wrapRunner(systemRunner,async(_command,args,_options,next)=>{calls.push([...args]);if(args[0]==='push'){pushed=(await git(['rev-parse','HEAD'],clone)).trim();if(mode==='exhausted'){clock=100;return {code:1,stdout:'',stderr:'! [rejected] main -> main (non-fast-forward)'};}}return next();});
-    const attempt=openTeamRepo(clone,f.bare,runner).safeWrite(tree=>{if(mode==='unchanged')return;if(mode==='guard'){tree.set('people/other.json',personJson('other'));return;}tree.set('people/me.json',personJson('me'));},{action:'join',handle:'me',...(mode==='branch'?{branch:'publish/x-seed-abcd1234'}:{}),...(mode==='exhausted'?{deadlineMs:50,now:()=>clock,sleep:async()=>{clock=100;}}:{})});
+    const attempt=openTeamRepo(clone,f.bare,runner).safeWrite(tree=>{if(mode==='unchanged')return;if(mode==='guard'){tree.set('people/other.json',personJson('other'));return;}tree.set('people/me.json',personJson('me'));},{action:'join',handle:'me',...(mode==='exhausted'?{deadlineMs:50,now:()=>clock,sleep:async()=>{clock=100;}}:{})});
     if(mode==='guard')await expect(attempt).rejects.toThrow(GuardError);else if(mode==='exhausted')await expect(attempt).rejects.toThrow(SafeWriteExhausted);else expect(await attempt).toMatchObject({changed:mode!=='unchanged'});
     expect(calls.filter(c=>c[0]==='fetch')).toHaveLength(mode==='main'?1:2);
     const push=calls.findIndex(c=>c[0]==='push');
     if(mode==='main'){expect(calls.slice(push+1).some(c=>c[0]==='reset')).toBe(false);expect((await git(['rev-parse','HEAD'],clone)).trim()).toBe(pushed);}
-    else {expect(calls.at(-1)?.[0]==='reset'||calls.some((c,i)=>i>push&&c.join(' ')==='reset --hard origin/main')).toBe(true);expect(await exists(join(clone,'people/me.json'))).toBe(false);if(mode==='guard')expect(await exists(join(clone,'people/other.json'))).toBe(false);if(mode==='branch')expect((await git(['rev-parse','HEAD'],clone)).trim()).not.toBe(pushed);}
+    else {expect(calls.at(-1)?.[0]==='reset'||calls.some((c,i)=>i>push&&c.join(' ')==='reset --hard origin/main')).toBe(true);expect(await exists(join(clone,'people/me.json'))).toBe(false);if(mode==='guard')expect(await exists(join(clone,'people/other.json'))).toBe(false);}
   });
 });

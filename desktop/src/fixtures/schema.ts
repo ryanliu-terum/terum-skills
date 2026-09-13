@@ -61,7 +61,9 @@ SKILL_MD_BODY: z.array(z.tuple([z.enum(["h2","p","ol","code"]),z.union([z.string
 "MACHINE": z.object({"name":z.string(),"os":z.string(),"gh_login":z.string(),"gh_version":z.string()}),
 "ME": z.object({"handle":z.string(),"name":z.string(),"email":z.string(),"default_handle":z.string()}),
 "TEAMS": z.array(z.object({"name":z.string(),"key":z.string(),"remote":z.string(),"handle":z.string(),"clone":z.string(),"members":z.number(),"skills":z.number(),"last_sync":z.string(),"stamp":z.string()})),
-"TEAM_POLICY": z.object({"publish":z.string(),"license":z.string()}),
+// D23: `publish` is deleted from team.json (§4.1). design.json is byte-locked, so it still carries
+// the field and the schema admits it as optional rather than the fixture changing. FIDELITY.md records it.
+"TEAM_POLICY": z.object({"publish":z.string().optional(),"license":z.string()}),
 "PLACEMENTS": z.array(z.array(z.union([z.null(), z.string()]))),
 "PLACEMENTS_N": z.number(),
 "PINNED_N": z.number(),

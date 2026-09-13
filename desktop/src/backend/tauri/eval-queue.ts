@@ -2,7 +2,8 @@ import { z } from 'zod';
 import type { EvalQueueService } from '../eval-queue';
 import type { AppUpdateDeps } from './app-update';
 
-const item = z.object({ team: z.string(), skill: z.string(), version: z.string(), requestedAt: z.string(), window: z.enum(['overnight', 'later']), lastError: z.string().optional() });
+// §6.6: the CLI emits `contentHash` where it emitted `version`, and `team` is optional.
+const item = z.object({ skill: z.string(), path: z.string(), contentHash: z.string(), requestedAt: z.string(), window: z.enum(['overnight', 'later']), team: z.string().optional(), lastError: z.string().optional() });
 const queue = z.object({ items: z.array(item), attempted: z.number().optional(), completed: z.number().optional(), failures: z.array(z.object({ item, error: z.string() })).optional() });
 export function createEvalQueue(deps: Pick<AppUpdateDeps, 'run' | 'read' | 'result'>): EvalQueueService {
   return {

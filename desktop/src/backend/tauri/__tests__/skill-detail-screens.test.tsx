@@ -35,7 +35,7 @@ it('renders the recorded detail in the board shapes with one heading and real pr
   // The recording's viewer is `seed`, one of the two installers, so the viewer is named (PR 104).
   expect(screen.getAllByText('Installed by you and 1 teammate').length).toBeGreaterThan(0);
   expect(screen.getByText('Global · since 2026-08-20')).toBeInTheDocument();
-  expect(screen.getByRole('link',{name:'acme/team'})).toHaveAttribute('href','https://github.com/acme/team/tree/43bf7396d9edbdcfba751bc63dbe1c74055125ae/skills/deploy-check/');
+  expect(screen.getByRole('link',{name:'acme/team'})).toHaveAttribute('href','https://github.com/acme/team/tree/main/skills/deploy-check/v1');
   expect(screen.getByText('skills/deploy-check')).toBeVisible();
   expect(document.querySelector('.detail-author')).toHaveTextContent('Mira Chenmira');
   expect(document.querySelector('.skill-md-meta')).not.toHaveTextContent(' · —');
@@ -55,7 +55,7 @@ it('shows the global install destination and full team-version prefix for an unp
   open('#/skill/tdd?dialog=install');
   const dialog=await screen.findByRole('dialog');
   expect(within(dialog).getByRole('radio',{name:/Global/})).toBeVisible();
-  expect(within(dialog).getByText(/Copies the team's current version \(db604968dcc6\)/)).toBeVisible();
+  expect(within(dialog).getByText(/Copies the team's current version \(Version 1\)/)).toBeVisible();
   expect(within(dialog).queryByText('Approved once per machine; a changed grant set asks again.')).toBeNull();
   expect(screen.queryByRole('button',{name:'Edit'})).toBeNull();
   expect(screen.queryByRole('button',{name:'Open in editor'})).toBeNull();

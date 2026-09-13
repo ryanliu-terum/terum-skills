@@ -17,7 +17,7 @@ describe('install (§6 refs)', () => {
   it('13 suppresses connect during a non-interactive bootstrap with a shareable global skill', async () => {
     const fixture = await bareTeam(); const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     const id = '31313131-3131-4131-8131-313131313131';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const local = join(home, '.claude', 'skills', 'local'); await mkdir(local, { recursive: true });
     const bytes = '---\nname: local\ndescription: local skill\n---\n'; await writeFile(join(local, 'SKILL.md'), bytes);
     const remote = 'https://github.com/acme/team.git'; const runner = mappedRunner(remote, fixture.bare, fakeGh('seed'));
@@ -61,7 +61,7 @@ describe('install (§6 refs)', () => {
   it('a three-part ref on a machine that never joined bootstraps through setup — quiet, every prompt still asked — and then installs: one command (§6, M4 exit)', async () => {
     const fixture = await bareTeam();
     const id = '31313131-3131-4131-8131-313131313131';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const root = join(fixture.root, 'fresh'); const store = createConfigStore(join(root, 'state')); const home = join(root, 'home');
     const remote = 'https://github.com/acme/team.git';
     const runner = mappedRunner(remote, fixture.bare, fakeGh('bob', { 'api user/repository_invitations': { code: 0, stdout: '[]\n', stderr: '' } }));
@@ -94,32 +94,45 @@ describe('install (§6 refs)', () => {
     expect(await run({ kind: 'project', project: 'constructor', config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Unknown project constructor.' });
   });
 
-  it('records a short requested version as its resolved full tree hash', async () => {
+  it('§9.1: refuses an @version ref outright — install takes the latest version, and records it', async () => {
     const fixture = await bareTeam();
     const id = '11111111-1111-4111-8111-111111111111';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    const tree = (await git(['rev-parse', 'HEAD:skills/sample'], clone)).trim();
-    const result = await run({ ref: `sample@${tree.slice(0, 8)}`, config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter());
-    expect(result).toMatchObject({ ok: true, value: [{ version: tree }] });
+    const tree = (await git(['rev-parse', 'HEAD:skills/sample/v1'], clone)).trim();
+    // The marketplace installs the latest; picking an older one is not a thing this verb offers, and
+    // a tree hash is not a version at all any more.
+    expect(await run({ ref: `sample@${tree.slice(0, 8)}`, config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter()))
+      .toMatchObject({ ok: false, error: expect.stringContaining('Installing a previous version is not supported yet') });
+    expect((await store.read()).placements).toEqual({});
+    // The spelling the new §3.2 vocabulary actually teaches. The old guard tested the SHAPE, so this
+    // passed it and was then silently discarded in favour of the latest — the user asked for one
+    // version and got another with nothing on screen saying so.
+    expect(await run({ ref: 'sample@v1', config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter()))
+      .toMatchObject({ ok: false, error: expect.stringContaining('Installing a previous version is not supported yet') });
+    expect((await store.read()).placements).toEqual({});
+
+    const result = await run({ ref: 'sample', config: store, home: join(fixture.root, 'home') }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: [{ version: 'v1' }] });
     const person = JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8'));
-    expect(person.installed[0].version).toBe(tree);
-    expect(Object.values((await store.read()).placements)[0]).toMatchObject({ version: tree });
+    expect(person.installed[0].version).toBe('v1');
+    expect(Object.values((await store.read()).placements)[0]).toMatchObject({ version: 'v1' });
   });
 
-  it('asks consent for allowed-tools in the pinned tree, rather than HEAD', async () => {
+  it('asks consent for the allowed-tools in the NEWEST version folder, not an older one', async () => {
     const fixture = await bareTeam();
     const id = '12121212-1212-4212-8212-121212121212';
-    await pushFromSeed(fixture.seed, 'skills/helper/SKILL.md', `---\nname: helper\ndescription: historical\nlicense: UNLICENSED\nallowed-tools: Bash(*)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    const pinned = (await git(['rev-parse', 'HEAD:skills/helper'], fixture.seed)).trim();
-    await pushFromSeed(fixture.seed, 'skills/helper/SKILL.md', `---\nname: helper\ndescription: current\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    // v1 grants nothing; v2 asks for Bash(*). Reading the oldest folder would install a
+    // tool-requesting skill without ever asking.
+    await pushFromSeed(fixture.seed, 'skills/helper/v1/SKILL.md', `---\nname: helper\ndescription: historical\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/helper/v2/SKILL.md', `---\nname: helper\ndescription: current\nlicense: UNLICENSED\nallowed-tools: Bash(*)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter([], [true]);
-    expect(await run({ ref: `helper@${pinned}`, config: store, home: join(fixture.root, 'home') }, io)).toMatchObject({ ok: true });
+    expect(await run({ ref: 'helper', config: store, home: join(fixture.root, 'home') }, io)).toMatchObject({ ok: true, value: [{ version: 'v2' }] });
     expect(io.askedAbout('Approve these tools')).toBe(true);
     expect(io.lines.join('\n')).not.toContain('helper requests allowed-tools:');
     expect(io.details['Approve these tools for helper?']).toEqual(['helper requests allowed-tools:', 'Bash(*)']);
@@ -131,7 +144,7 @@ describe('install (§6 refs)', () => {
   it('shows malformed allowed-tools verbatim, requires consent, and leaves no durable intent when declined', async () => {
     const fixture = await bareTeam();
     const id = '44444444-4444-4444-8444-444444444444';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools:\n  Bash: \"*\"\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools:\n  Bash: \"*\"\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
@@ -150,7 +163,7 @@ describe('install (§6 refs)', () => {
   it('keeps the malformed-allowed-tools consent prompt when the YAML value cannot be serialized (a self-referencing anchor)', async () => {
     const fixture = await bareTeam();
     const id = '46464646-4646-4646-8646-464646464646';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools: &a [*a]\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools: &a [*a]\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
@@ -163,7 +176,7 @@ describe('install (§6 refs)', () => {
 
   it('keeps an earlier matching pending install when this attempt declines consent', async () => {
     const fixture = await bareTeam(); const id = '45454545-4545-4545-8545-454545454545';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools:\n  Bash: "*"\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools:\n  Bash: "*"\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const started = '2026-09-04T00:00:00.000Z';
@@ -179,7 +192,7 @@ describe('install (§6 refs)', () => {
   it('never overwrites a foreign target without force, and force moves it to quarantine before placing', async () => {
     const fixture = await bareTeam();
     const id = '55555555-5555-4555-8555-555555555555';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
@@ -203,8 +216,8 @@ describe('install (§6 refs)', () => {
   it('re-places its own target and never consults a foreign global target for a project install', async () => {
     const fixture = await bareTeam(); const product = await bareTeam();
     const id = '88888888-8888-4888-8888-888888888888';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: { product: { remotes: [product.bare], skills: [id] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] }, product: { remotes: [product.bare], skills: [id] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(home, '.terum', 'skills'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
@@ -228,7 +241,7 @@ describe('install (§6 refs)', () => {
   it('re-installing over an owned placement moves hand edits to quarantine instead of deleting them', async () => {
     const fixture = await bareTeam();
     const id = '55555555-5555-4555-8555-555555555555';
-    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
@@ -257,12 +270,12 @@ describe('install (§6 refs)', () => {
       ['project-b', projectBId, 'project b'],
       ['global', globalId, 'global before'],
     ] as const) {
-      await pushFromSeed(fixture.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+      await pushFromSeed(fixture.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     }
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: {
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: {
       alpha: { remotes: [productA.bare], skills: [projectAId] },
       beta: { remotes: [productB.bare], skills: [projectBId] },
-    }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     const home = join(fixture.root, 'home');
     const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -298,6 +311,25 @@ describe('install (§6 refs)', () => {
 
   });
 
+  it('installs a member batch whose installed[] carries a legacy 40-hex version, instead of aborting the whole batch', async () => {
+    const fixture = await bareTeam();
+    const id = '11111111-1111-4111-8111-111111111111';
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    // `persistedVersionSchema` still admits a 40-hex tree hash, so this is ordinary data on any
+    // machine that installed before layout 3. The old guard tested the SHAPE of a forwarded version
+    // and threw on it, aborting every skill in the batch — for a field install never even read.
+    await pushFromSeed(fixture.seed, 'people/mira.json', `${JSON.stringify(person('mira', { installed: [{ id, version: 'a'.repeat(40), scope: { kind: 'global' }, since: '2026-09-04' }] }))}\n`);
+    const home = join(fixture.root, 'home');
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+
+    const result = await run({ kind: 'member', member: 'mira', config: store, home }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true });
+    // Installed at the LATEST version, which is what §9.1 says install always does.
+    expect(Object.values((await store.read()).placements)).toMatchObject([{ id, version: 'v1' }]);
+  });
+
   it('resolves qualified, self-locating, and unique ID refs while rejecting ambiguous batch versions and prefixes without placement', async () => {
     const first = await bareTeam();
     const second = await bareTeam();
@@ -310,8 +342,8 @@ describe('install (§6 refs)', () => {
       ['member-only', memberId, 'member skill'],
       ['one', prefixOne, 'first prefix'],
       ['two', prefixTwo, 'second prefix'],
-    ] as const) await pushFromSeed(first.seed, `skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(second.seed, 'skills/dup/SKILL.md', `---\nname: dup\ndescription: from second\nlicense: UNLICENSED\nmetadata:\n  id: ${dupId}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    ] as const) await pushFromSeed(first.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(second.seed, 'skills/dup/v1/SKILL.md', `---\nname: dup\ndescription: from second\nlicense: UNLICENSED\nmetadata:\n  id: ${dupId}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(first.seed, 'people/me.json', `${JSON.stringify(person('me'))}\n`);
     await pushFromSeed(first.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [{ id: memberId, version: null, scope: { kind: 'global' }, since: '2026-09-04' } ] }))}\n`);
     const home = join(first.root, 'home');
@@ -366,7 +398,7 @@ it('skillAtSource carries the materialized source body rather than the clone bod
   const { skillRecords } = await import('../../lib/skills.js');
   const fixture = await bareTeam();
   const source = '---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n';
-  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', source+'clone prose');
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', source+'clone prose');
   const record = (await skillRecords(fixture.seed, 'team'))[0]!;
   expect(record.body).toBe('clone prose');
   const pinned = join(fixture.root, 'pinned'); await mkdir(pinned);
@@ -409,7 +441,7 @@ async function destinationFixture() {
   const fixture = await bareTeam();
   const id = 'abababab-abab-4bab-8bab-abababababab';
   const content = `---\nname: sample\ndescription: first\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`;
-  await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', content);
+  await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', content);
   const home = join(fixture.root, 'home');
   const store = createConfigStore(join(home, '.terum', 'skills'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -478,13 +510,15 @@ describe('Library install destinations', () => {
 
   it('updates the version of matching pending intent in place and retains its destination', async () => {
     const f = await destinationFixture();
-    const v1 = (await git(['rev-parse', 'HEAD:skills/sample'], f.clone)).trim();
-    await pushFromSeed(f.seed, 'skills/sample/SKILL.md', f.content.replace('first', 'second'));
-    await git(['fetch', 'origin'], f.clone); await git(['reset', '--hard', 'origin/main'], f.clone);
-    const v2 = (await git(['rev-parse', 'HEAD:skills/sample'], f.clone)).trim();
     const target = join(f.checkout, '.claude', 'skills', 'sample'); await mkdir(target, { recursive: true }); await writeFile(join(target, 'SKILL.md'), 'foreign');
-    for (const version of [v1, v2]) expect((await run({ ref: `sample@${version}`, into: f.checkout, config: f.store }, new ScriptedPrompter())).ok).toBe(false);
-    expect((await f.store.read()).pending).toEqual([expect.objectContaining({ version: v2, destination: { kind: 'checkout', root: await realpath(f.checkout) } })]);
+    // A foreign target refuses without --force, leaving the intent behind. A second version is
+    // published; the SAME intent must move to it rather than a second one appearing beside it.
+    expect((await run({ ref: 'sample', into: f.checkout, config: f.store }, new ScriptedPrompter())).ok).toBe(false);
+    expect((await f.store.read()).pending).toEqual([expect.objectContaining({ version: 'v1' })]);
+    await pushFromSeed(f.seed, 'skills/sample/v2/SKILL.md', f.content.replace('first', 'second'));
+    await git(['fetch', 'origin'], f.clone); await git(['reset', '--hard', 'origin/main'], f.clone);
+    expect((await run({ ref: 'sample', into: f.checkout, config: f.store }, new ScriptedPrompter())).ok).toBe(false);
+    expect((await f.store.read()).pending).toEqual([expect.objectContaining({ version: 'v2', destination: { kind: 'checkout', root: await realpath(f.checkout) } })]);
   });
 
   it('recognizes owned placement through a symlinked parent and keeps one ledger key', async () => {
@@ -503,7 +537,7 @@ describe('Library install destinations', () => {
 describe('W-02 install progress', () => {
   it.each(['success','no-sink','declined','collision'] as const)('reports only reached steps: %s',async mode=>{
     const f=await bareTeam();const home=join(f.root,'home');const store=createConfigStore(join(f.root,'state'));const id='31313131-3131-4131-8131-313131313131';
-    await pushFromSeed(f.seed,'skills/sample/SKILL.md',`---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools: Bash\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(f.seed,'skills/sample/v1/SKILL.md',`---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools: Bash\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await cloneWithIdentity(f.bare,store.teamClone('team'));await store.update(c=>{c.teams.team={remote:f.bare,handle:'seed'};});
     if(mode==='collision'){await mkdir(join(home,'.claude/skills/sample'),{recursive:true});await writeFile(join(home,'.claude/skills/sample/foreign'),'foreign');}
     // Progress rides the prompter (Prompter.progress, the frame channel implements it); a terminal prompter has none.
