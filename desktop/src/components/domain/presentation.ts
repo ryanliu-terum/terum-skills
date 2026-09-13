@@ -30,12 +30,14 @@ export function installedVersionBehind(card: Pick<SkillCard, 'installedVersion' 
  const latest = card.latestVersion === null ? null : parseVersionFolder(card.latestVersion);
  return installed !== null && latest !== null && installed < latest;
 }
+/** §8.3's two states, both about a copy on this machine. A card the viewer has not installed says
+ *  nothing here — the spec names no third state — and the identity line is never what this replaces. */
 export function marketplaceVersionLabel(card: Pick<SkillCard, 'installedVersion' | 'latestVersion'>): string | null {
  const latest = card.latestVersion === null ? null : parseVersionFolder(card.latestVersion);
  if (latest === null) return null;
  const installed = card.installedVersion === null ? null : parseVersionFolder(card.installedVersion);
  return installed === latest ? `${versionLabel(latest)} · installed`
-  : installed !== null && installed < latest ? `${versionLabel(latest)} · you have ${versionLabel(installed)}` : versionLabel(latest);
+  : installed !== null && installed < latest ? `${versionLabel(latest)} · you have ${versionLabel(installed)}` : null;
 }
 export function profileVersionLabel(card: Pick<SkillCard, 'profileVersion'>): string | null {
  const n = card.profileVersion === null ? null : parseVersionFolder(card.profileVersion);

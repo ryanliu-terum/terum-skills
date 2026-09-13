@@ -44,7 +44,19 @@ it('shows parity without a Reinstall action and compares versions numerically', 
  expect(installedVersionBehind(card())).toBe(true);
  expect(installedVersionBehind(card({installedVersion:'v11'}))).toBe(false);
  expect(installedVersionBehind(card({installedVersion:null}))).toBe(false);
- expect(marketplaceVersionLabel(card({installedVersion:null}))).toBe('Version 10');
+ // §8.3 names two states, both about a copy on this machine; a card the viewer never installed says nothing.
+ expect(marketplaceVersionLabel(card({installedVersion:null}))).toBeNull();
+});
+it('keeps the project / category identity line in every version state and puts the version copy in the footer', () => {
+ const skill=card();show(skill);
+ expect(document.querySelector('.skill-card-ident span')?.textContent).toBe(skill.project+' / '+skill.category);
+ const label=screen.getByText('Version 10 · you have Version 2');
+ expect(label).toHaveClass('card-version-label');
+ expect(label.closest('.skill-card-bottom')).not.toBeNull();
+ cleanup();
+ show(card({installedVersion:null}));
+ expect(document.querySelector('.skill-card-ident span')?.textContent).toBe(skill.project+' / '+skill.category);
+ expect(screen.queryByText('Version 10')).toBeNull();
 });
 it('renders the curated profile version independently of the latest version and eval', () => {
  show(card({profileVersion:'v1'}));
