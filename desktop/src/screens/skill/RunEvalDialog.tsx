@@ -32,14 +32,16 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  // B5 add their disabled menu rows on the surfaces they own.
  const missing=s.path===null;
  if(!active)return <Dialog open onOpenChange={value=>{if(!value)close();}}><DialogPopup><DialogTitle>{title}</DialogTitle><DialogDescription>{missing?'Install it first — evals run against the copy on your machine.':estimate}</DialogDescription>{missing?null:<TerminalHint command={s.evalCommand}/>}{error?<div role="alert">{error}</div>:null}<div className="skill-dialog-actions"><Button onClick={close}>{missing?'Close':'Cancel'}</Button>{missing?null:<Button kind="primary" onClick={start}>Run eval</Button>}</div></DialogPopup></Dialog>;
- const busy=active?.state==='running',finished=active!==null&&!busy,retryable=finished&&(active?.state==='stopped'||(active?.result?.ok===false&&active.result.value===undefined));
+ // `missing` gates this branch too. The run can outlive its folder — the comment below says so —
+ // and a retry for an absent folder is the same guaranteed failure the pre-run gate exists to stop.
+ const busy=active?.state==='running',finished=active!==null&&!busy,retryable=finished&&!missing&&(active?.state==='stopped'||(active?.result?.ok===false&&active.result.value===undefined));
  // §6.3: an eval reads the copy on THIS machine, whatever state it is in — that is the whole point
  // of binding a run to its content digest rather than to a version the repo has not seen yet.
  // A run can outlive its folder — the copy is uninstalled while the eval streams — so the null arm
  // states that rather than asserting a copy that is no longer there.
  const versionLine=s.path===null?'This skill is no longer on this machine.':`Evaluates the copy on this machine at ${s.pathLabel}.`;
  const status=busy?'Running…':active?.state==='stopped'?'Stopped':active?.result?.ok===false?active.result.error:undefined;
- return <WorkflowDialog title={title} body={versionLine} primary={finished?(retryable?'Run eval again':null):'Run eval'} command={s.evalCommand} close={close} submit={start} busy={busy} error={error} onStop={()=>void evalRun.stop()} dismissKeepsRunning lines={active?.lines??[]} status={status} closeLabel={finished?'Close':'Cancel'}>
+ return <WorkflowDialog title={title} body={versionLine} primary={finished?(retryable?'Run eval again':null):missing?null:'Run eval'} command={missing?'':s.evalCommand} close={close} submit={start} busy={busy} error={error} onStop={()=>void evalRun.stop()} dismissKeepsRunning lines={active?.lines??[]} status={status} closeLabel={finished?'Close':'Cancel'}>
  <p>{estimate}</p>
  </WorkflowDialog>;
 }

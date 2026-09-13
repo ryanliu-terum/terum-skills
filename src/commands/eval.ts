@@ -129,7 +129,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       if (args.expectedVersion !== undefined && args.expectedVersion !== candidateDigest) {
         return failure(`The queued bytes of ${local.name} are no longer what is on disk; dequeue it and queue it again.`);
       }
-      const already = await localReceiptsFor(store.root, candidateDigest);
+      const already = await localReceiptsFor(store.root, candidateDigest, line => io.print(line));
       if (args.skipReceipted && already.length) {
         const newest = already[already.length - 1]!;
         io.print(`Already evaluated these exact bytes of ${local.name}.`);
@@ -575,7 +575,7 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
     if (args.noGen || args.case !== undefined || args.triggersOnly || args.executionOnly || args.expectedVersion !== undefined || args.team !== undefined) return failure('Queue modes use the queued team and the full committed skill; per-skill selection flags are unavailable.');
     const store = args.config ?? createConfigStore();
     if (args.queueList || args.dequeue !== undefined) {
-      const queue = args.dequeue === undefined ? await readEvalQueue(store.root, line => io.print(line)) : await dequeueEvals(store.root, args.dequeue);
+      const queue = args.dequeue === undefined ? await readEvalQueue(store.root, line => io.print(line)) : await dequeueEvals(store.root, args.dequeue, line => io.print(line));
       if (queue.items.length === 0) io.print('No queued evals.');
       // §6.6: a queued item is keyed on the BYTES it was queued against, and its team is optional.
       for (const item of queue.items) io.print(`${item.team === undefined ? '' : `${item.team}/`}${item.skill}@${item.contentHash} · ${item.window} · ${item.requestedAt}${item.lastError === undefined ? '' : ` · ${item.lastError}`}`);

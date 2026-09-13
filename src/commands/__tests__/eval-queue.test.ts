@@ -225,7 +225,7 @@ it('D61: a bare --dequeue never reaches past the teamless item it exists for', a
   expect((await readEvalQueue(config.root)).items).toEqual([]);
 });
 
-it('D61: one unreadable folder costs that folder, not the whole batch', async () => {
+it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('D61: one unreadable folder costs that folder, not the whole batch', async () => {
   // `resolveLibrarySkill`'s miss was already reported-and-skipped; the digest read beside it was not
   // guarded at all, so a single unreadable directory threw out of the loop and every other skill the
   // user asked to queue went with it, silently.
@@ -248,4 +248,22 @@ it('D61: one unreadable folder costs that folder, not the whole batch', async ()
     expect(items.map(entry => entry.skill)).toEqual(['alpha']);
     expect(lines.join('\n')).toContain('so it was not queued; the rest were.');
   } finally { await chmod(blocked, 0o644); }
+});
+
+it('D61: the drop is reported on the paths that make it PERMANENT, not only on the two reads', async () => {
+  // `readEvalQueue` gained a reporter, but `updateEvalQueue` — which writes the parsed items straight
+  // back over the file — did not, so `--dequeue` and `enqueue` discarded a schema-invalid item for
+  // good while saying nothing. That is the same silence D61 was raised about, on the path where it
+  // is irreversible.
+  const { config, io } = await fixture();
+  await enqueueEvals(config.root, [item('alpha')]);
+  const path = join(config.root, 'run', 'eval-queue.json');
+  const file = JSON.parse(await readFile(path, 'utf8')) as { schema: number; items: unknown[] };
+  file.items.push({ skill: 'beta', path: '/library/beta', contentHash: 'a'.repeat(40), requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' });
+  await writeFile(path, JSON.stringify(file));
+
+  expect(await runQueue({ config, dequeue: 'team/alpha' } as unknown as EvalArgs, io)).toMatchObject({ ok: true });
+  // Said out loud, and `beta` really is gone from the file — the drop is permanent.
+  expect(io.lines.join('\n')).toContain('1 queued eval could not be read and was dropped from the queue (beta)');
+  expect((await readEvalQueue(config.root)).items).toEqual([]);
 });

@@ -106,7 +106,19 @@ describe('capture frames stay consistent with the CLI that recorded them', () =>
         for (const person of people) {
           const installs = (skills ?? []).filter((skill) => ((skill['installedBy'] as { handle: string }[] | undefined) ?? []).some((p) => p.handle === person.handle));
           if (installs.length === 0) continue;
-          expect(person.installed ?? [], `${id} / ${person.handle} installed ${installs.map((s) => s['name']).join(', ')}`).toHaveLength(installs.length);
+          const rows = (person.installed ?? []) as { id: string; version: unknown; scope: unknown; since?: string }[];
+          expect(rows, `${id} / ${person.handle} installed ${installs.map((s) => s['name']).join(', ')}`).toHaveLength(installs.length);
+          // Length alone cannot catch a fabricated FIELD, which is how a guessed `version: "v1"`
+          // survived the first cut of this assertion. `installedBy` carries the same `scope` and
+          // `since` for the same install, so those are checkable against it; `version` is not on
+          // `installedBy` at all, which is precisely why it must never be invented — `ls.ts:277-279`.
+          for (const skill of installs) {
+            const mine = ((skill['installedBy'] as { handle: string; scope: unknown; since?: string }[]).find((p) => p.handle === person.handle))!;
+            const row = rows.find((r) => r.id === skill['id']);
+            expect(row, `${id} / ${person.handle} has no installed[] row for ${skill['name']}`).toBeDefined();
+            expect(row!.scope, `${id} / ${person.handle} / ${skill['name']} scope`).toEqual(mine.scope);
+            if (mine.since !== undefined) expect(row!.since, `${id} / ${person.handle} / ${skill['name']} since`).toBe(mine.since);
+          }
         }
       });
       if (people) it(`${id}: display_name matches the byline authored[] and "Authored:" are matched on`, () => {

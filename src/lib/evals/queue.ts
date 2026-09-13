@@ -82,9 +82,12 @@ export async function withEvalQueueLock<T>(root: string, kind: 'state' | 'drain'
   finally { await release().catch(() => undefined); } // Preserve the action's result if its lock was already lost.
 }
 
-export async function updateEvalQueue(root: string, mutate: (items: EvalQueueItem[]) => EvalQueueItem[]): Promise<EvalQueue> {
+export async function updateEvalQueue(root: string, mutate: (items: EvalQueueItem[]) => EvalQueueItem[], report?: (line: string) => void): Promise<EvalQueue> {
   return withEvalQueueLock(root, 'state', async assertHeld => {
-    const queue = await readEvalQueue(root);
+    // This is the path that makes the drop PERMANENT — the parsed items are written straight back
+    // over the file — so it is the one place the silence mattered most, and the one the first cut of
+    // this fix left unwired.
+    const queue = await readEvalQueue(root, report);
     // The next write upgrades the file: schema 1 items were already dropped on read.
     const next = queueSchema.parse({ schema: QUEUE_SCHEMA_VERSION, items: mutate(queue.items) });
     assertHeld();
@@ -93,7 +96,7 @@ export async function updateEvalQueue(root: string, mutate: (items: EvalQueueIte
   });
 }
 
-export async function enqueueEvals(root: string, items: readonly EvalQueueItem[]): Promise<EvalQueue> {
+export async function enqueueEvals(root: string, items: readonly EvalQueueItem[], report?: (line: string) => void): Promise<EvalQueue> {
   // Validate before entering the mutation, including duplicates that would otherwise be ignored.
   const added = z.array(itemSchema).parse(items);
   return updateEvalQueue(root, current => {
@@ -104,7 +107,7 @@ export async function enqueueEvals(root: string, items: readonly EvalQueueItem[]
       if (!prior || prior.window !== item.window) byKey.set(queueKey(item), { ...prior, ...item });
     }
     return [...byKey.values()];
-  });
+  }, report);
 }
 
 /**
@@ -112,17 +115,17 @@ export async function enqueueEvals(root: string, items: readonly EvalQueueItem[]
  * queueable, and an item with no team could never be named by the two-part form — you would be able
  * to see a queued paid run you had no way to cancel.
  */
-export async function dequeueEvals(root: string, ref: string): Promise<EvalQueue> {
+export async function dequeueEvals(root: string, ref: string, report?: (line: string) => void): Promise<EvalQueue> {
   const parts = ref.split('/');
   if (parts.length > 2 || parts.some(part => !part.trim())) throw new Error('--dequeue requires <skill> or <team>/<skill>.');
   const [team, skill] = parts.length === 2 ? parts : [undefined, parts[0]];
-  if (team !== undefined) return updateEvalQueue(root, items => items.filter(item => item.skill !== skill || item.team !== team));
+  if (team !== undefined) return updateEvalQueue(root, items => items.filter(item => item.skill !== skill || item.team !== team), report);
   // The bare form exists for the one item the two-part form cannot name: a teamless folder (§6.3).
   // It must not reach past it. Matching on the name alone cancelled every team's queued run for that
   // name at once — each of those is a paid run the user never named, and cancelling one is silent and
   // final. Where the name is ambiguous, refuse and say which forms to use; nothing is cancelled.
-  const queue = await readEvalQueue(root);
+  const queue = await readEvalQueue(root, report);
   const teamed = [...new Set(queue.items.filter(item => item.skill === skill && item.team !== undefined).map(item => item.team!))].sort();
   if (teamed.length > 0) throw new Error(`${skill} is queued for ${teamed.length === 1 ? 'team' : 'teams'} ${teamed.join(', ')}; nothing was cancelled. Name one: ${teamed.map(name => `--dequeue ${name}/${skill}`).join(' or ')}.`);
-  return updateEvalQueue(root, items => items.filter(item => item.skill !== skill || item.team !== undefined));
+  return updateEvalQueue(root, items => items.filter(item => item.skill !== skill || item.team !== undefined), report);
 }
