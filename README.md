@@ -19,9 +19,15 @@ Our purpose is it make it quick and easy to determine best AI practices through 
 - **Developers in an team** looking to discover and share best practices internally
 - Individuals looking to evaluate the near infinite amount of publicly available skills and decide which ones are best for their own repo.
 
+**Use cases**
+- Measure ROI of skills and their workflows
+  - Cost
+  - Time
+  - Quality of output   
+- Compare comparable/overlapping skills against each other
+- Share skills with team members easily
 
-
-**Isn't it super easy to share skills by just pushing them to GitHub? **
+**Isn't it super easy to share skills by just pushing them to GitHub?**
 - **Yes, it is**, and you should do that if you only work on one project and don't mind having your .claude in your project.
 - However, if any of the following apply, Terum might be useful:
   - If you're working on multiple projects with specialized skills,
@@ -29,7 +35,7 @@ Our purpose is it make it quick and easy to determine best AI practices through 
   - If you're trying to manage and separate global and project skills while still sharing them easily with teammates 
 
 
-**Aren't there open source frameworks for evaluating skills already? **
+**Aren't there open source frameworks for evaluating skills already?**
 - **Yes, there are!** Like Nvidia's SkillEvaluator or the SkillsBench paper. Our evaluation methods are heavily based off of these proven methods. Terum doesn't try to reinvent the wheel, it just adopts the methods so that they are fully plug and play. SkillEvaluator requires Docker and an API key; SkillsBench requires you to bring your own tests. Terum runs using your subscription plan, with one terminal installation, using dynamically generated tests for the specific skill being tested(we're currently looking into dynamic generation along with category-specific tests). 
 
 **How are you evaluating skills?**
