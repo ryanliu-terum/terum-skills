@@ -26,7 +26,7 @@ it('keeps the marketplace origin off the local-folder route, which has no market
 
 it('offers Run eval only when the feature is on', () => {
  expect(cardActions(card()).some(a=>a.key==='run-eval')).toBe(false);
- expect(cardActions(card(),{runEvalInApp:true}).find(a=>a.key==='run-eval')?.to).toBe('/skill/deploy-check?tab=evals&dialog=run-eval');
+ expect(cardActions(card({path:'~/.claude/skills/deploy-check'}),{runEvalInApp:true}).find(a=>a.key==='run-eval')?.to).toBe('/skill/deploy-check?tab=evals&dialog=run-eval');
 });
 
 it('moves only a copy Terum placed', () => {
@@ -49,14 +49,20 @@ it('offers Reinstall, and says so, for a skill the people file records with noth
  expect(row.reason).toBe('Installed · not on this machine.');
 });
 
-it('enables Publish only for a skill the team repo holds but has not endorsed', () => {
- const reasons=Object.fromEntries((['endorsed','shared','unshared','unknown'] as TeamState[]).map(teamState=>[teamState,find(card({teamState}),'publish')]));
- expect(reasons.shared!.to).toBe('/skill/deploy-check?dialog=publish');
- expect(reasons.shared!.reason).toBeNull();
- expect(reasons.endorsed!.to).toBeNull();
- expect(reasons.endorsed!.reason).toBe('Already published to the team.');
- expect(reasons.unshared!.reason).toMatch(/Not shared with the team yet/);
- expect(reasons.unknown!.reason).toMatch(/could not read this team/);
+// §11.4: the gate is the local folder alone. A skill the team already holds IS publishable — that is
+// how its next version ships (§5.1 step 9 mints highest+1; identical bytes mint nothing).
+it('enables Publish for any card with a local folder, whatever the team state, and says why otherwise', () => {
+ for(const teamState of ['endorsed','shared','unshared','unknown'] as TeamState[]) {
+  expect(find(card({teamState,path:'~/.claude/skills/deploy-check'}),'publish')).toMatchObject({to:'/skill/deploy-check?dialog=publish',reason:null});
+ }
+ const missing=find(card({teamState:'shared',path:null}),'publish');
+ expect(missing.to).toBeNull();
+ expect(missing.reason).toBe('This skill is not on this machine, so there is nothing to publish.');
+});
+
+it('gates Run eval on the local folder with a reason, keeping the row', () => {
+ expect(cardActions(card({path:'~/.claude/skills/deploy-check'}),{runEvalInApp:true}).find(a=>a.key==='run-eval')).toMatchObject({to:'/skill/deploy-check?tab=evals&dialog=run-eval',reason:null});
+ expect(cardActions(card({path:null}),{runEvalInApp:true}).find(a=>a.key==='run-eval')).toMatchObject({to:null,reason:'Install it first — evals run against the copy on your machine.'});
 });
 
 it('keeps the same five rows whatever the state, so the menu does not change shape', () => {

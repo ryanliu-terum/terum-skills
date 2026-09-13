@@ -460,6 +460,17 @@ it('S7b tolerates absent metadata but rejects malformed values and failed member
     }
   }).bridge);
   expect(await missing.catalog()).toMatchObject({ ok: false, error: expect.stringContaining('No member data for ravi.') });
+  // The Roster screen fails the same way: a member `status` names and `ls` does not is never drawn as absent.
+  expect(await missing.roster()).toMatchObject({ ok: false, error: expect.stringContaining('No member data for ravi.') });
+  // And the reverse: a people file `team remove` left behind is not a teammate — `status` is the membership.
+  const departed = createTauriBackend(peopleReplay((frame, name) => {
+    if (frame.t === 'result' && name === 'ls') {
+      const value = frame.value as { people: Record<string, unknown>[] };
+      value.people = [...value.people, { ...value.people[0]!, handle: 'ghost', display_name: 'Ghost', authored: [], installed: [], profile: [] }];
+    }
+  }).bridge);
+  expect((await departed.roster()).value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
+  expect((await departed.catalog()).value?.people.map(person => person.handle)).toEqual(['mira', 'ravi', 'seed']);
   // A CLI too old to report the roster in one read is named, never drawn as a team with no members.
   const stale = createTauriBackend(peopleReplay((frame, name) => {
     if (frame.t === 'result' && name === 'ls') delete (frame.value as { people?: unknown }).people;

@@ -346,13 +346,23 @@ function newestUpdated(skills: InventorySkill[]): InventorySkill | undefined {
 // `status` is the permission chip: host truth from the CLI's per-member `admin` (gh collaborator permission); 'unknown' when gh could not answer — never a defaulted 'member'.
 // `invited` is null, not []: this CLI reports no invitations, and the screen must not assert "0 invitations".
 // `joined` and `skillsTotal` are the CLI's own values (the people file's first commit, and the skill total that person's machine last reported); null when it reported neither, which the screen draws as '—'.
-function rosterModel(team: CliStatus['teams'][number], inventory: Inventory): Roster {
-  const source = inventory.people?.map(person => {
-    const status = team.members.find(member => member.handle === person.handle);
-    return { ...status, handle: person.handle, displayName: person.display_name, role: person.role, projects: person.projects, skillsTotal: person.local_skills, joined: status?.joined ?? null };
-  }) ?? team.members;
+function rosterModel(team: CliStatus['teams'][number], inventory: Inventory): Result<Roster> {
+  // §8.4: `team.members` — status's roster, already without `team.archived` — IS the membership; the
+  // `people[]` limb enriches it. A member `status` names that `ls` does not carry fails closed rather than
+  // vanishing from the screen, and a people file `team remove` left behind never re-enters as a
+  // teammate. A CLI too old to send `people[]` at all still draws the roster from `status` alone.
+  const people = inventory.people === undefined ? undefined : new Map(inventory.people.map(person => [person.handle, person]));
+  const enriched = team.members.map(member => {
+    if (people === undefined) return member;
+    const person = people.get(member.handle);
+    if (person === undefined) return null;
+    return { ...member, displayName: person.display_name, role: person.role, projects: person.projects, skillsTotal: person.local_skills, joined: member.joined ?? null };
+  });
+  const missing = team.members.find((_, index) => enriched[index] === null);
+  if (missing) return { ok: false, error: `No member data for ${missing.handle}.` };
+  const source = enriched.filter((row): row is Exclude<typeof row, null> => row !== null);
   const members = source.map(member => ({ handle: member.handle, name: member.displayName, initials: initials(member.displayName), role: member.role ?? null, projects: member.projects ?? [], followers: null, joined: member.joined, skillsTotal: member.skillsTotal, last_publish: '—', lastPublish: '—', lastSeen: '—', status: member.admin === true ? 'admin' : member.admin === false ? 'member' : 'unknown' }));
-  return { members, invited: null, member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] };
+  return { ok: true, value: { members, invited: null, member: Object.fromEntries(members.map(member => [member.handle, { status: member.status, projects: member.projects, lastSeen: member.lastSeen }])), byAdoption: [] } };
 }
 function catalogModel(team: CliStatus['teams'][number], inventory: Inventory, local: Inventory, placements: LedgerPlacements, people: Person[], features: Pick<Features, 'localIdentity'>, home: string, query?: string): Catalog {
   const skills = inventory.skills.map(row => inventoryCard(row, local, team.team, features, home, team.handle, placements));
@@ -790,7 +800,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const data = await peopleInventory(options, true);
       if (!data.ok) return {ok:false,error:data.error,...(data.reason?{reason:data.reason}:{})};
       const { team, inventory } = data.value;
-      return { ok: true, value: rosterModel(team, inventory) };
+      return rosterModel(team, inventory);
     },
     async catalog(query, options) {
       const data = await peopleInventory(options);
@@ -798,14 +808,15 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       const { team, inventory, placements } = data.value;
       const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return fail(local.error);
-      const members = rosterModel(team, inventory).members;
+      if (inventory.people === undefined && team.members.length) return fail(STALE_CLI_ROSTER);
+      const model = rosterModel(team, inventory);
+      if (!model.ok) return fail(model.error);
+      const members = model.value.members;
       // §8.4: the per-member fan-out is deleted. `catalog()` spawned `status` + `ls --local` + N × `ls
       // member`; the team read now carries every member whole, so this is three processes regardless of
       // team size. A CLI that predates the `people[]` limb is REPORTED rather than silently drawn as a
       // team with no members — the only thing worse than a slow marketplace is a wrong one.
       const roster = new Map((inventory.people ?? []).map(person => [person.handle, person]));
-      if (inventory.people === undefined && members.length) return fail(STALE_CLI_ROSTER);
-      for (const member of team.members) if (!roster.has(member.handle)) return fail(`No member data for ${member.handle}.`);
       const people: Person[] = [];
       for (const member of members) {
         const detail = roster.get(member.handle);

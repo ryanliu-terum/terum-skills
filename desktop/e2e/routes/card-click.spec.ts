@@ -81,12 +81,14 @@ test('More actions opens Uninstall',async({page})=>{
  expect(errors).toEqual([]);
 });
 
-test('More actions opens Move, and says why Publish cannot run',async({page})=>{
+// §11.4: Publish gates on the local folder alone; a skill the team already holds is how its next
+// version ships, so on a placed card the row is live and carries no reason.
+test('More actions opens Move, and offers Publish for a skill on this machine',async({page})=>{
  const errors=await openCards(page,'#/library/global');
  const card=page.getByTestId('skill-card-deploy-check');
  await card.hover();
  await card.getByRole('button',{name:'More actions for deploy-check'}).click();
- await expect(page.getByRole('menuitem',{name:/Publish to team/})).toContainText('Already published to the team.');
+ await expect(page.getByRole('menuitem',{name:/Publish to team/})).toHaveText('Publish to team…');
  await page.getByRole('menuitem',{name:/Move to/}).click();
  await expect(page).toHaveURL(/dialog=move/);
  await expect(page.getByRole('dialog')).toBeVisible();
