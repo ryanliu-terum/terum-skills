@@ -36,7 +36,7 @@ import { failure, Result } from './lib/result.js';
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
 export interface CliVerbs { project?: typeof runProject; profile?: typeof profile; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; prune?: typeof prune; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; }
 
-export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean; serve?: () => Promise<void> } = {}): Command {
+export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean; frames?: boolean; serve?: () => Promise<void> } = {}): Command {
   const active: Required<CliVerbs> = { project: verbs.project ?? runProject, profile: verbs.profile ?? profile, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, prune: verbs.prune ?? prune, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
@@ -80,6 +80,10 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .action(async () => execute(io => active.project({ form: context.form, kind: 'list' }, io), { verb: 'project list', notices: true }));
 
   const team = program.command('team').description(`Create, join, leave, and admin settings for a team; run \`${invocation(context.form, 'team')}\` to see all options`);
+  team.command('migrate')
+    .description('Migrate this team repository to layout 3; run only after the release removing auto-share has propagated to teammates')
+    .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
+    .action(async (options: { team?: string }) => execute(io => context.frames ? Promise.resolve(failure('team migrate is a terminal-only operation; run it without --frames after the auto-share removal release has propagated.')) : active.team({ form: context.form, kind: 'migrate', ...options }, io), { verb: 'team migrate', notices: false }));
   team
     .command('create [name]')
     .description('Create a private team repository and become its first member (asks for the team name and the repository name when omitted)')

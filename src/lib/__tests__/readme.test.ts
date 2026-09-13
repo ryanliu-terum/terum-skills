@@ -174,6 +174,8 @@ function fakeTree(files: Record<string, string>): MutableTree & { writes: string
     get changedPaths() { return writes; },
     set(path, content) { writes.push(path); store.set(path, typeof content === 'string' ? content : content.toString('utf8')); },
     remove(path) { writes.push(path); store.delete(path); },
+    // §13's `beforeTreeId` (migrate-only HEAD identities): README generation never reads one, so inert here.
+    beforeTreeId: () => undefined,
     setExecutable() {},
     paths: (prefix = '') => [...store.keys()].filter((path) => path.startsWith(prefix)).sort(),
     executablePaths: () => new Set(),
