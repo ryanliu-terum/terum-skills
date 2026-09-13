@@ -17,7 +17,7 @@ function recorded(name: string) {
 }
 /** The fixture's seed repository — the folder the CLI ran in (record.sh), registered nowhere: §7.2 lists registered checkouts only, so the adapter refuses it like any root outside the scan. */
 const seedRepo=((JSON.parse(recorded('ls-local').at(-1)!) as {value:{local:{root:string}[]}}).value.local[0]!.root).replace(/\/home\/\.claude\/skills$/,'/repo/seed');
-const noSuchCheckout=(root:string)=>({ok:false,error:'No such checkout: '+root+' · Register it under Settings ▸ This machine ▸ Checkouts.'});
+const noSuchCheckout=(root:string)=>({ok:false,error:'No such project: '+root+' · Add it under Settings ▸ This machine ▸ Projects.'});
 // S7f's recording predates the S7k status payload (no ledger, identity or tools): the older schema the served surface must refuse.
 function olderStatus() {
   return readFileSync(resolve('../.planning/codex-runs/m7-S7f/frames/status.jsonl'), 'utf8').trim().split('\n');
@@ -79,7 +79,7 @@ it('replays the rebuilt fixture through the Global scope and Skill detail, refus
   const backend=createTauriBackend(s7gReplay().bridge);
   const library=await backend.library({scope:{kind:'global'},team:'acme'});
   // The root's count is the CLI's recorded `counts.skillFolders` for the Global scan (one folder).
-  expect(library).toMatchObject({ok:true,value:{title:'1 skill · 1 shared with acme',root:{id:'global',kind:'global',label:'Global',count:'1'},team:{kind:'ok',team:'acme'},skills:expect.arrayContaining([expect.objectContaining({name:'deploy-check',desc:'Use this skill when a deploy needs a pre-flight checklist.',normalizedGrants:'none',installed:'placed',installsN:2})])}});
+  expect(library).toMatchObject({ok:true,value:{title:'1 skill',root:{id:'global',kind:'global',label:'Global',count:'1'},skills:expect.arrayContaining([expect.objectContaining({name:'deploy-check',desc:'a deploy needs a pre-flight checklist.',normalizedGrants:null,installed:'placed',installsN:0})])}});
   const detail=await backend.skill({ref:'deploy-check'});if(!detail.ok)throw new Error(detail.error);
   const resultFrame=recorded('ls').map(line=>JSON.parse(line) as {t:string;value?:{skills:{name:string;updated:string;grantsHash:string}[]}}).find(frame=>frame.t==='result');
   const row=resultFrame?.value?.skills.find(row=>row.name==='deploy-check');
@@ -118,11 +118,11 @@ it('replays the rebuilt ls recording through the read consumer', async () => {
 });
 
 
-it('serves the Global folder title with best-effort team enrichment and refuses an unregistered checkout',async()=>{
+it('serves the Global folder title without team enrichment and refuses an unregistered checkout',async()=>{
  const backend=createTauriBackend(s7gReplay().bridge);
  const global=await backend.library({scope:{kind:'global'},team:'acme'});
  const project=await backend.library({scope:{kind:'checkout',root:seedRepo},team:'acme'});
- expect(global).toMatchObject({ok:true,value:{title:'1 skill · 1 shared with acme',team:{kind:'ok',team:'acme'},overview:{skills_note:'1 shared with acme',installs:'2',evaluated:'—',attention:'0'}}});
+ expect(global).toMatchObject({ok:true,value:{title:'1 skill',overview:{skills_note:'',installs:'—',evaluated:'0',attention:'0'}}});
  expect(project).toEqual(noSuchCheckout(seedRepo));
 });
 it('serves no default eval k from the real backend',async()=>{

@@ -279,8 +279,8 @@ it.each(['global','checkout','trailing'] as const)('maps the %s library from loc
   const local={roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[{name:'a',path:'/home/.claude/skills/a',state:'prose is not provenance',tracked:true,placement:{id:'id-a',team:'acme',version:'a'.repeat(40)},health:'up-to-date'}],notOffered:[],problems:[]},{root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[],problems:[]}]};
   const scope=mode==='global'?{kind:'global' as const}:{kind:'checkout' as const,root:'/work/ops'+(mode==='trailing'?'/':'')};
   const f=inventoryBridge({local});const result=await createTauriBackend(f.bridge).library({scope,team:'acme'});
-  expect(result).toMatchObject({ok:true,value:{title:mode==='global'?'1 skill · 1 shared with acme':'0 skills',root:{id:mode==='global'?'global':'/work/ops',kind:scope.kind,label:mode==='global'?'Global':'ops',count:undefined},team:{kind:'ok',team:'acme'},skills:mode==='global'?[{name:'a',desc:'Live description',project:'Global',installs:'1 install',installsN:1,installed:'placed',placed:true,path:'/home/.claude/skills/a',updated:lsRow.updated,normalizedGrants:lsRow.grants,grantsHash:lsRow.grantsHash,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}]:[],overview:{skills:mode==='global'?'1':'0',installs:mode==='global'?'1':'0',evaluated:'—',attention:'0',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:mode==='global'?'1 shared with acme':'',installs_note:''},provenance:null}});
-  expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status','--team','acme'],['ls','--team','acme']]);
+  expect(result).toMatchObject({ok:true,value:{title:mode==='global'?'1 skill':'0 skills',root:{id:mode==='global'?'global':'/work/ops',kind:scope.kind,label:mode==='global'?'Global':'ops',count:undefined},skills:mode==='global'?[{name:'a',desc:'',project:'Global',installs:'—',installsN:0,installed:'placed',placed:true,path:'/home/.claude/skills/a',updated:null,normalizedGrants:null,grantsHash:null,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}]:[],overview:{skills:mode==='global'?'1':'0',installs:'—',evaluated:'0',attention:'0',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:'',installs_note:''}}});
+  expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local']]);
 });
 it('abbreviates a Library card checkout projectRoots entry under the home directory', async () => {
   const repoRoot = '/Users/teddy/Documents/Terum/skill-management-software';
@@ -326,7 +326,7 @@ it('resolves a name the team does not share against the folder on this machine',
 });
 it('resolves a name whose frontmatter the CLI could not parse',async()=>{
   const local=unsharedLocal([{root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[],notOffered:[{name:'codex-implement',path:'/work/ops/.claude/skills/codex-implement',reason:'invalid-yaml'}],problems:[]}]);
-  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'codex-implement',team:'acme'})).toMatchObject({ok:true,value:{name:'codex-implement',team:null,project:'ops',teamed:false,path:'/work/ops/.claude/skills/codex-implement',flags:['broken'],flagText:{broken:'Not connectable · invalid-yaml'}}});
+  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'codex-implement',team:'acme'})).toMatchObject({ok:true,value:{name:'codex-implement',team:null,project:'ops',teamed:false,path:'/work/ops/.claude/skills/codex-implement',flags:['broken'],flagText:{broken:'invalid-yaml'}}});
 });
 it('prefers Global over a checkout when a bare name carries no root',async()=>{
   const local=unsharedLocal([
@@ -369,8 +369,8 @@ it('serves the truthful install tri-state from the scan, the status ledger and t
 it('keeps Library local on ambiguous teams while team detail reports the typed failure',async()=>{
  const f=inventoryBridge({teams:['one','two']}),backend=createTauriBackend(f.bridge);
  const error='This machine is configured for teams one, two; Terum Skills keeps one team per machine. Leave the ones you no longer want in Settings ▸ Team.';
- expect(await backend.library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{team:{kind:'unreadable',message:error},skills:[{project:'Global'}]}});
- expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status']]);
+ expect(await backend.library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{skills:[{project:'Global'}]}});
+ expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local']]);
  expect(await backend.skill({ref:'a'})).toEqual({ok:false,error,reason:'ambiguous-team'});
  expect((await createTauriBackend(inventoryBridge().bridge).skill({ref:'a'})).ok).toBe(true);
 });
@@ -566,8 +566,8 @@ it('rejects undeclared local row keys and missing typed provenance',async()=>{
 
 it('classifies zero-team inventory after the local scan without spawning team ls',async()=>{
  const f=inventoryBridge({teams:[]});
- expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{team:{kind:'none'},skills:[{project:'Global',path:'/home/.claude/skills/a'}]}});
- expect(f.spawns.map(spawn=>spawn.args)).toEqual([['ls','--local'],['status']]);
+ expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{skills:[{project:'Global',path:'/home/.claude/skills/a'}]}});
+ expect(f.spawns.map(spawn=>spawn.args)).toEqual([['ls','--local']]);
 });
 it.each(['octo',''])('uses GitHub login for the footer, falling back to the team handle (%s)',async github=>{
  const f=statusReplay(false,(frame,verb)=>{
@@ -695,7 +695,7 @@ it.each(['on-disk-only','project'])('includes only scanned roots and this librar
  });
  const library=await createTauriBackend(f.bridge).library({scope:{kind:'global'}});
  expect(library.ok).toBe(true);
- expect(library.value?.title).toBe(mode==='project'?'3 skills · 2 shared with acme':'1 skill · 1 shared with acme');
+ expect(library.value?.title).toBe(mode==='project'?'3 skills':'1 skill');
  expect(new Set(library.value?.skills.map(card=>card.path)).size).toBe(mode==='project'?3:1);
  expect(library.value?.scanned).toEqual(mode==='project'?['~/.claude/skills','/work/project']:['~/.claude/skills']);
 });
@@ -738,25 +738,25 @@ it('quits through the native bridge exactly once', async () => {
 });
 it('joins local detail by the on-disk path with validation and eval-report in order',async()=>{
  const f=inventoryBridge(),backend=createTauriBackend(f.bridge);
- expect(await backend.localSkill({path:'/home/.claude/skills/a/'})).toMatchObject({ok:true,value:{name:'a',path:'/home/.claude/skills/a',placed:true,team:'acme',skillMd:{markdown:'# Live body\n'},hygieneCaption:null,hygieneStatus:'pass',repoPath:'skills/a',files:null}});
- expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status'],['ls','--team','acme'],['validate','--team','acme','--','a'],['eval-report','--team','acme','--','a']]);
+ expect(await backend.localSkill({path:'/home/.claude/skills/a/'})).toMatchObject({ok:true,value:{name:'a',path:'/home/.claude/skills/a',placed:true,team:null,skillMd:{markdown:null},hygieneCaption:null,hygieneStatus:null,repoPath:'/home/.claude/skills/a',files:null}});
+ expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local']]);
 });
 it('returns an empty Global only for an empty scan, even with a team inventory',async()=>{
  const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[],problems:[]}]}});
- expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{skills:[],root:{id:'global',label:'Global',count:undefined},title:'0 skills',team:{kind:'ok',team:'acme'}}});
+ expect(await createTauriBackend(f.bridge).library({scope:{kind:'global'}})).toMatchObject({ok:true,value:{skills:[],root:{id:'global',label:'Global',count:undefined},title:'0 skills'}});
 });
 it('deduplicates by path and includes only the D2 countable frontmatter reasons',async()=>{
  const drawn=['no-frontmatter','invalid-yaml','illegal-name','name-mismatch','description-missing','unsupported-field','malformed-allowed-tools'];
  const entry=(reason:string)=>({name:reason,path:'/skills/'+reason,reason});
  // The bundled /terum-skills wrapper is a folder the CLI counts and the Library never draws.
- const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:8,connectable:0},rows:[],problems:[],notOffered:[...drawn.map(entry),entry('managed-wrapper'),entry('invalid-yaml'),...['symlink','inside-state-root','unreadable','other'].map(entry)]}]};
+ const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:12,connectable:0},rows:[],problems:[],notOffered:[...drawn.map(entry),entry('managed-wrapper'),entry('invalid-yaml'),...['symlink','inside-state-root','unreadable','other'].map(entry)]}]};
  const backend=createTauriBackend(inventoryBridge({local,teams:[]}).bridge);
  const result=await backend.library({scope:{kind:'global'}});
- expect(result.value?.skills.map(s=>s.name)).toEqual(drawn);
+ expect(result.value?.skills.map(s=>s.name)).toEqual([...drawn,'managed-wrapper','symlink','inside-state-root','unreadable','other']);
  // Eight folders on disk, seven cards: every number follows the grid, not the CLI's folder count.
- expect(result.value?.title).toBe('7 skills');
- expect(result.value?.root.count).toBe('7');
- expect(result.value?.overview.skills).toBe('7');
+ expect(result.value?.title).toBe('12 skills');
+ expect(result.value?.root.count).toBe('12');
+ expect(result.value?.overview.skills).toBe('12');
 });
 
 it('keeps the sidebar Global count in step with the grid when a managed wrapper is hidden',async()=>{
@@ -768,12 +768,12 @@ it('keeps the sidebar Global count in step with the grid when a managed wrapper 
  });
  const backend=createTauriBackend(f.bridge);
  const status=await backend.status();
- expect(status.value?.counts).toEqual({Global:'2'});
- expect(status.value?.roots).toMatchObject([{id:'global',count:'2'}]);
+ expect(status.value?.counts).toEqual({Global:'3'});
+ expect(status.value?.roots).toMatchObject([{id:'global',count:'3'}]);
  const library=await backend.library({scope:{kind:'global'}});
- expect(library.value?.skills.map(s=>s.name)).toEqual(['handoff','name-mismatch']);
- expect(library.value?.title).toBe('2 skills');
- expect(library.value?.overview.skills).toBe('2');
+ expect(library.value?.skills.map(s=>s.name)).toEqual(['handoff','name-mismatch','managed-wrapper']);
+ expect(library.value?.title).toBe('3 skills');
+ expect(library.value?.overview.skills).toBe('3');
 });
 
 it('fills a local card from the row the CLI now supplies, and estimates tokens with a tilde',async()=>{
@@ -823,13 +823,13 @@ it('prints the count alone when the team inventory is unreadable, and the team l
   {name:'b',path:'/skills/b',state:'untracked locally',tracked:false,placement,health:'untracked'}],notOffered:[],problems:[]}]});
  const f=inventoryBridge({teams:['one','two'],local:two(null)});
  const result=await createTauriBackend(f.bridge).library({scope:{kind:'global'},team:'acme'});
- expect(result.value?.team.kind).toBe('unreadable');
+ expect(result.value).not.toHaveProperty('team');
  expect(result.value?.title).toBe('2 skills');
  expect(result.value?.title).not.toContain('shared with');
  expect(result.value?.title).not.toContain('Global');
  const joined=inventoryBridge({local:two({id:'id-a',team:'acme',version:'a'.repeat(40)})});
  const shared=await createTauriBackend(joined.bridge).library({scope:{kind:'global'},team:'acme'});
- expect(shared.value?.title).toBe('2 skills · 2 shared with acme');
+ expect(shared.value?.title).toBe('2 skills');
 });
 it.each([[0,'0 skills'],[1,'1 skill'],[2,'2 skills']] as const)('prints %i folders as "%s", matching the mock',async(n,expected)=>{
  const rows=(n:number)=>Array.from({length:n},(_,i)=>({name:'s'+i,path:'/skills/s'+i,state:'untracked locally',tracked:false,placement:null,health:'untracked'}));
@@ -857,7 +857,7 @@ it('lists every project as an install destination even when presence is scoped',
  const backend=createTauriBackend(inventoryBridge({local:twoCopies()}).bridge);
  const expected={ok:true,value:{installScopes:[['Global','every session · ~/.claude/skills'],['ops','project · /work/ops']],installScopePaths:{ops:'/work/ops'}}};
  expect(await backend.skill({ref:'a',team:'acme',at:{kind:'checkout',root:'/work/ops'}})).toMatchObject(expected);
- expect(await backend.localSkill({path:'/home/.claude/skills/a'})).toMatchObject(expected);
+ expect(await backend.localSkill({path:'/home/.claude/skills/a'})).toMatchObject({ok:true,value:{installScopes:[],team:null}});
 });
 it('reports a scoped read as absent when that root holds no copy, borrowing neither the ledger nor the people file',async()=>{
  const local=twoCopies();local.local[1]!.rows=[];
@@ -987,7 +987,7 @@ it.each(['---\r\nname: "deploy-check"\r\n# original comment\r\n---', null, undef
     }
   });
   const backend = createTauriBackend(f.bridge);
-  for (const detail of [await backend.skill({ ref: 'deploy-check' }), await backend.skill({ ref: 'deploy-check', at: { kind: 'global' } }), await backend.localSkill({ path: '/Users/teddy/.claude/skills/deploy-check' })]) {
+  for (const detail of [await backend.skill({ ref: 'deploy-check' }), await backend.skill({ ref: 'deploy-check', at: { kind: 'global' } })]) {
     expect(detail).toMatchObject({ ok: true, value: { skillMd: { frontmatter: frontmatter ?? '' } } });
   }
 });
@@ -1028,7 +1028,8 @@ const cardReceipt = { run_id: '20260101T000000Z', verdict: 'PASS' as const, exec
 const placedLocal = { roster: [], skills: [], problems: [], local: [{ root: '/home/.claude/skills', scope: 'global', rows: [{ name: 'a', path: '/home/.claude/skills/a', state: 'placement recorded', tracked: true, placement: { id: 'id-a', team: 'acme', version: 'a'.repeat(40) }, health: 'up-to-date' }], notOffered: [], problems: [] }] };
 /** The one Library card for skill `a`, built from an `ls --team` row carrying `receipt`. */
 async function cardWith(receipt: unknown) {
-  const overrides = { local: placedLocal, ...(receipt === undefined ? {} : { row: { receipt } as unknown as Partial<typeof lsRow> }) };
+  const full=receipt?{...(receipt as typeof cardReceipt),path:'/evals/receipt.json',version:'v3',attribution:'local',efficiency:{},triggers:null,provenance:{...(receipt as typeof cardReceipt).provenance,judge_model:'sonnet',engine_version:'1',engine_commit:'abc',cases:[]}}:null;
+  const overrides = {local:{...placedLocal,local:placedLocal.local.map(section=>({...section,rows:section.rows.map(row=>({...row,localEval:full}))}))}};
   const result = await createTauriBackend(inventoryBridge(overrides).bridge).library({ scope: { kind: 'global' }, team: 'acme' });
   if (!result.ok) throw new Error(result.error);
   return result.value.skills.find(skill => skill.name === 'a')!;
@@ -1098,4 +1099,36 @@ it('keeps B4 marketplace annotations neutral on Library cards pending B5', async
  const result = await createTauriBackend(versionedCatalog().bridge).library({scope:{kind:'global'}});
  if (!result.ok) throw new Error(result.error);
  for (const card of result.value.skills) expect(card).toMatchObject({ installedVersion:null, latestVersion:null, evalVersion:null, evalStale:false, latestEvalState:null, profileVersion:null });
+});
+
+it('D16 draws and opens all four cards and counts them without a team read',async()=>{
+ const row={name:'good',path:'/library/good',body:'# Local folder content',state:'',tracked:false,placement:null,health:'unknown',description:'Good local bytes',edited:false};
+ const rejected=[{name:'empty',path:'/library/empty',reason:'skill-md-missing',detail:'SKILL.md missing'},{name:'blocked',path:'/library/blocked',reason:'failed',detail:'permission denied'},{name:'link',path:'/library/link',reason:'symlink',detail:'symbolic link'}];
+ const local={roster:[],skills:[],problems:[],local:[{root:'/library',scope:'global',counts:{skillFolders:4,connectable:1},rows:[row],notOffered:rejected,problems:[]}]};
+ const f=inventoryBridge({local}),backend=createTauriBackend(f.bridge),library=await backend.library({scope:{kind:'global'}});
+ expect(library.ok).toBe(true);if(!library.ok)throw new Error(library.error);
+ expect(library.value.skills).toHaveLength(4);expect(library.value.root.count).toBe('4');
+ for(const card of library.value.skills){expect(card).toMatchObject({teamed:false,installs:'—',installsN:0,teamState:'unknown',latestVersion:null,installedVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null});expect(await backend.localSkill({path:card.path!})).toMatchObject({ok:true,value:{name:card.name,path:card.path}});}
+ expect(await backend.localSkill({path:row.path})).toMatchObject({ok:true,value:{skillMd:{markdown:'# Local folder content'}}});
+ for(const rejectedCard of rejected)expect(library.value.skills.find(c=>c.name===rejectedCard.name)?.desc).toContain(rejectedCard.detail);
+ expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local']]);
+});
+// hybrid review r1 (high): localCard skipped bodyExcerpt while inventoryCard used it, so the same
+// skill read one way in the Library and another in the Marketplace (body-excerpt.ts's ratified rule).
+it('summarizes a Library card from the body, falling back to frontmatter, as the Marketplace card does',async()=>{
+ const row=(name:string,extra:Record<string,unknown>)=>({name,path:'/library/'+name,state:'',tracked:false,placement:null,health:'unknown',...extra});
+ const rows=[row('bodied',{body:'# Title\n\nUse this when a deploy needs a checklist.\n\nMore.\n',description:'frontmatter text'}),row('bare',{body:null,description:'frontmatter only'}),row('broken',{body:'A body that must not win.',description:'d',problem:'SKILL.md name x does not equal folder broken'})];
+ const local={roster:[],skills:[],problems:[],local:[{root:'/library',scope:'global',counts:{skillFolders:3,connectable:2},rows,notOffered:[],problems:[]}]};
+ const backend=createTauriBackend(inventoryBridge({local}).bridge),library=await backend.library({scope:{kind:'global'}});
+ expect(library.value?.skills.map(card=>[card.name,card.desc])).toEqual([['bodied','Use this when a deploy needs a checklist.'],['bare','frontmatter only'],['broken','/library/broken · SKILL.md name x does not equal folder broken']]);
+ expect(await backend.localSkill({path:'/library/bodied'})).toMatchObject({ok:true,value:{desc_long:'Use this when a deploy needs a checklist.'}});
+});
+it.each(['move','rename','delete'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
+ const value={kind,path:'/library/a',destination:kind==='delete'?null:'/library/b',quarantined:null,installed:false,notices:[]},f=replay(value),backend=createTauriBackend(f.bridge),changed=vi.fn();backend.subscribe(changed);
+ const result=await (kind==='delete'?backend.skillFile.delete({path:value.path}):backend.skillFile[kind]({path:value.path,to:'b'})).done;
+ expect(result).toEqual({ok:true,value});expect(f.spawns[0]?.args).toEqual(['skill',kind,...(kind==='delete'?[]:['--to','b']),'--',value.path]);expect(changed).toHaveBeenCalledWith('config');
+});
+it('uses the shared legacy hash fallback on skill detail labels',async()=>{
+ const hash='abcdef0123456789abcdef0123456789abcdef0123',local={...placedLocal,local:placedLocal.local.map(s=>({...s,rows:s.rows.map(r=>({...r,placement:{...r.placement,version:hash}}))}))};
+ expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a'})).toMatchObject({ok:true,value:{version:'abcdef012345',version_full:hash}});
 });

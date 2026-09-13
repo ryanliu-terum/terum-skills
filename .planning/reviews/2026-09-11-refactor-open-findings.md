@@ -141,6 +141,8 @@ sibling-spec supersession note, in the style already used at that spec's head.
 ## Blocking B5 — M4 library
 
 ### OF-10 — `backend.skill` is already taken by the detail reader
+
+> **RESOLVED 2026-09-13 (B5 start; D73).** Holds: `desktop/src/backend/Backend.ts:28` declares `skill(q)` and `:19` declares `library(q)`, so both candidate names were taken. **Applied:** the seam namespace is `backend.skillFile.{move,rename,delete}` in §7.5, D24 and §11.4's `moveAction` routing; no occurrence of the old namespace remains in the spec.
 *r3 #11 DRIFT (unverified)*
 §7.5 specifies `backend.skill.{move,rename,delete}` on the seam, but `desktop/src/backend/Backend.ts:28`
 already declares `skill(q: {ref, team?, at?}, options?): Promise<Result<SkillDetail>>`. A method and
@@ -149,6 +151,8 @@ a namespace cannot share the name.
 or `backend.library.*`) and §11.4's `moveAction` routing follows.
 
 ### OF-11 — reusing `uninstallMany` unchanged breaks the undo guarantee
+
+> **RESOLVED 2026-09-13 (B5 start; D74, Ryan).** Holds in wording, not in substance: an unmodified placement is removed outright (`uninstall.ts:178-241` — the team repo holds its bytes, reinstall restores them), an edited placement is quarantined, a non-placement folder always goes through `moveToQuarantine()`, and `prune` is what hard-deletes quarantine. **Applied:** §7.5's delete bullet now states that three-way contract. No behaviour change; the code is untouched.
 *r2 #16 DRIFT (2-1) · r3 #13 DRIFT (unverified) — raised twice*
 §7.5 promises deletion "is undoable, and `prune` is the only thing that ever hard-deletes", and
 prescribes "delete of a placement = `uninstallMany`, unchanged". The finders report `uninstallMany`
@@ -156,6 +160,8 @@ does not in fact preserve an undoable copy in every path.
 **Check:** read `uninstall.ts`'s removal path and `placer.remove`'s quarantine behaviour.
 
 ### OF-12 — interrupted rename has no usable completion contract
+
+> **RESOLVED 2026-09-13 (B5 start; D75, Ryan).** Holds: after the folder rename the fingerprint has changed (the frontmatter `name` is part of it), so rev 8's rule dropped the row at the very interruption it was written for. **Applied:** §7.5 re-points a stale ledger row by the skill's stable `metadata.id` — the fingerprint decides only `edited` — names the two interruption points and each forward repair, and B5 implements it in `src/commands/skill.ts` with a test per interruption point.
 *r3 #20 GAP (unverified)*
 §7.5's recovery rule re-points a stale ledger row "when the recorded fingerprint matches what is
 there, dropped otherwise". After an interruption *between* the `SKILL.md` frontmatter rewrite and
@@ -164,6 +170,8 @@ so the rule drops the row rather than repairing it — the one state §7.5 says 
 **Fix shape:** match on the recorded *name* as well as the fingerprint, or write the ledger first.
 
 ### OF-13 — the Library inventory still hides folders and reads team state (sibling)
+
+> **RESOLVED 2026-09-13 (B5 start; D73).** Holds. **Applied:** a scoped supersession note in D51's shape under phase-1 build §6's `ls --local` block — the discovery filters, S7g's five-state `health` and the team-derived row states are reversed for the Library (refactor §7.4/D16/D12, §12); the scanned roots, `skillId`/`placed`/`placement`, the missing-folder `problems` entry and the no-git/no-write rule still stand; the team path of `ls` is untouched.
 *r1 #6 DRIFT (2-1) · r3 #6 DRIFT (unverified) — raised twice*
 D16 and §7.4 make every direct child folder a card and delete the clone-dependent health states;
 `2026-09-02-phase-1-build.md` §6 still requires the old discovery and team-derived inventory. A
@@ -174,6 +182,8 @@ sibling supersession note, same shape as OF-8.
 ## Blocking B6 — M6 install
 
 ### OF-14 — the lifted destination picker requires the feature key B2 renames
+
+> **RESOLVED 2026-09-13 (spec edit at B5's start; owned by B6; D73).** Holds: `origin/feat/bulk-install-destination:desktop/src/screens/marketplace/install-destinations.ts` reads `features.checkouts` at `:4` and `:10`, and B2 renamed the key to `libraryProjects` on both sides of the seam. **Applied:** §9.1.1 states that the lift carries the rename — both occurrences and the test's fixture — and nothing else in the file changes.
 *r3 #10 BLOCKER→DRIFT (1-2)*
 §9.1.1 lifts `install-destinations.ts` from closed PR #167 "not rewritten", but §7.1 renames the
 `checkouts` feature key to `libraryProjects`. The lifted file reads the old key.
@@ -181,6 +191,8 @@ sibling supersession note, same shape as OF-8.
 that silently reads `false`.
 
 ### OF-15 — receipt seeding needs a digest migrated receipts never acquire
+
+> **RESOLVED 2026-09-13 (B5 start; D76, Ryan).** Holds — round 3's 0-3 refutation was wrong: `receipt.ts:73` has `content_digest` optional and `:109` requires it only at schema 2, so a §13 re-keyed receipt has none, and nothing seeds today (`install.ts` has no seeding step). **Applied:** §13 step 3 stamps `content_digest` from the `v1` bytes at migrate time — faithful by construction, because rekey happens only when the receipt's tree hash equals the skill's current tree (B8) — and §9.1's seeding keys the local store by the receipt's `content_digest` and prints `Skipped <runId>: no content digest (pre-migration receipt).` for one still lacking it (B6).
 *r2 #19 BLOCKER (1-2) · r3 #18 BLOCKER (refuted 0-3)*
 D11's install seeding keys the local store by `content_digest`, which a receipt re-keyed by §13
 step 3 does not carry (it predates schema 2). Round 3's panel refuted this 0-3; round 2's split
@@ -189,6 +201,8 @@ whether it is seeded under a computed digest or skipped.
 **Also touches B8.**
 
 ### OF-16 / OF-17 — sibling install grammar and collision contract are stale
+
+> **RESOLVED 2026-09-13 (spec edit at B5's start; owned by B6; D73).** Holds at `:316`, `:415`, `:417-418` and §12. **Applied:** the sibling's ref grammar and install grammar now refuse `@<version>` (refactor §9.1); the destination rule is always-ask, with `--into <untracked path>` refusing and naming `project add` (§9.1, §7.2); the collision paragraph is §9.1.1's one rule, with quarantine kept for `uninstall` and explicit deletion (§7.5, D74); and the §12 walkthrough, `collision` and `partial state` bullets describe the refactor's behaviour — each amendment cross-referenced to its refactor section.
 *r3 #4 DRIFT (3-0) · r3 #5 DRIFT (3-0) — both confirmed, both sibling-spec edits*
 `2026-09-02-phase-1-build.md` §6 still advertises `install <ref>[@<version>]`, says an unregistered
 root is registered by the install, and describes the foreign-collision abort with a `--force` hint
@@ -209,6 +223,8 @@ Both are the same class as OF-8 and OF-13: the phase-1 build spec is the ancesto
 supersedes wholesale. A single supersession banner at its head, enumerating the sections §3, §5,
 §9 and §10 replace, closes OF-13, OF-16, OF-17, OF-18 and OF-19 together — cheaper than five
 separate edits, and the pattern is already established at `2026-09-04-eval-engine.md:3`.
+
+> **2026-09-13:** OF-13, OF-16 and OF-17 were closed by *scoped* edits instead (D73 — the D51 shape, so nothing is superseded more widely than the refactor actually reaches); OF-18 and OF-19 remain open for whichever batch touches the area.
 
 ---
 

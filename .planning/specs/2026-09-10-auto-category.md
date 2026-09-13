@@ -213,8 +213,11 @@ model suggestion")`, threaded into `ConnectArgs`.
 - `HygieneCode` gains `'HYG7'`. A new code rather than a warning under HYG1, because HYG1
   emits only errors today and the two would be indistinguishable in output.
 - `HygieneInput` gains `categories?: readonly string[]`.
-- `assessHygiene(name, input, license, allowExecutable = false, categories?: readonly string[])`
-  — a fifth optional positional keeps all four existing call sites compiling unchanged.
+- `assessHygiene(name, input, license, allowExecutable = false, managedFieldsAbsent = false, categories?: readonly string[])`
+  — the fifth positional is already `managedFieldsAbsent` (`src/lib/evals/hygiene.ts:132` on `main`), so
+  `categories?` is the **sixth** optional positional, and the three surviving call sites (`publish`,
+  `eval`, `validate` — §8 step 4) keep compiling unchanged. (Corrected 2026-09-13: this line said
+  "fifth" and "four call sites" while §8 step 4 said sixth; the code is the sixth.)
 - The check emits **one warning** when `categories` is provided and non-empty, the
   frontmatter parses, and its `metadata.terum-category` is a non-empty string that is not in
   the list (case-insensitive). It **no-ops when the list is unknown** — `validate <path>` on
@@ -231,9 +234,21 @@ warning HYG7 SKILL.md:<line>: terum-category `ops` is not one of your team's cat
 Use the existing `lineOf` helper against `/^\s*terum-category\s*:/m` for the line number;
 omit the line if it cannot be found.
 
-**Callers pass the list where they have it:** `connect.ts` (from `teamDoc`), `publish.ts:64`
-and `:118`, `eval.ts:98`, and `validate.ts:42` when resolving a shared skill or a
-`--cwd <team-checkout>`. `validate <path>` on an unconnected folder passes nothing.
+**Callers pass the list where they have it — rewritten 2026-09-13 to publish-only** (refactor
+batch **B9**, D28; the list this paragraph carried — `connect.ts`, `publish.ts:64/:118`,
+`eval.ts:98`, `validate.ts:42` — was written against pre-B1 files). The one caller that holds
+both a category and the team's list is **`publish`**: `.planning/specs/2026-09-11-library-marketplace-refactor.md`
+§5.1 step 5's `assessHygiene(…)` call on the injected map, immediately after step 4 resolves the
+category with this spec's precedence — it passes `team.categories` from the `team.json` it already
+parsed. `connect.ts` no longer exists (deleted by B1, refactor §12). `eval` (refactor §6.3's
+local-eval mode; `eval.ts`'s single `assessHygiene` call) and `validate` (`validate.ts`'s single
+call) keep their calls and **pass nothing**, so HYG7 no-ops there by the rule above — an eval or
+validate of a never-published folder has no list to compare against, and a published one was
+already warned at publish. `suggestCategory` has **no caller in `src/` today** (`grep -rn
+suggestCategory src` is empty and `src/lib/categorize.ts` does not exist): publish's category
+suggestion at refactor §5.1 step 4 is the one surviving call site, and B9 adds it there.
+**B9 is gated on B5 merged** (D28: it runs after B5; until then B3 ships the precedence without
+the suggestion limb — *declared › `--category` › `DEFAULT_CATEGORY`*).
 
 `cli.ts:114`'s help text enumerates HYG1–HYG6 and gains HYG7. HYG7 is a list comparison —
 **no model, no network** — so validate's deterministic-and-offline promise holds.
@@ -270,7 +285,8 @@ and `:118`, `eval.ts:98`, and `validate.ts:42` when resolving a shared skill or 
    tests in `src/commands/__tests__/connect.test.ts`: declared wins over both flag and model;
    flag wins over model and suppresses the call; suggestion path prints the suggested line;
    failure path prints the fallback line and still completes the connect.
-4. HYG7 + the `categories` parameter threaded through all five call sites + tests in
+4. HYG7 + the `categories` parameter, passed by `publish` alone (§6 as rewritten 2026-09-13; the
+   two other surviving call sites keep compiling on the optional trailing `categories?` parameter — `assessHygiene`'s fifth positional is already `managedFieldsAbsent`, so `categories?` is the sixth) + tests in
    `src/lib/evals/__tests__/hygiene.test.ts`: warns on an off-list category; silent on an
    on-list one; silent when no list is supplied; case-insensitive; never an error.
 5. `cli.ts:114` help text.
@@ -292,7 +308,10 @@ lint, typecheck, and the full suite yourself before trusting the diff (CLAUDE.md
 - A fourth confirmation state for `--category`. The walk locked only "distinguish success
   from failure"; telling the user the value came from their own flag is the same principle
   applied to the same line.
-- A fifth optional positional on `assessHygiene` rather than converting it to an options
-  object. Minimal diff over four call sites; convert it later if a sixth parameter appears.
+- A **sixth** optional positional on `assessHygiene` rather than converting it to an options
+  object. This bullet's own threshold — *convert it later if a sixth parameter appears* — is met by
+  `categories` itself. B9 (`refactor/b9-auto-category`) ships it positional so the three call sites
+  keep compiling; the options-object conversion is **owed**, not waived, and falls to whoever merges
+  B9 forward (reconciled 2026-09-13, hybrid review r1).
 - `HYG7` as its own code rather than a warning-flavoured HYG1.
 - Canonicalising the model's answer to the team's spelling, so `Review` lands as `review`.

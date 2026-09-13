@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import YAML from 'yaml';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { candidatesOf, createLibraryScan, librarySize, localSkills, localSkillRoots, nearestRepoRoot, resolveLibrarySkill, unusableSkillFolder } from '../local-skills.js';
+import { candidatesOf, createLibraryScan, librarySize, localSkillCounts, localSkills, localSkillRoots, nearestRepoRoot, resolveLibrarySkill, unusableSkillFolder } from '../local-skills.js';
 import { emptyConfig } from '../schema.js';
 import { assertSkillSource } from '../skill-source.js';
 import { BUNDLED_SKILL_SOURCE, temporaryDirectory } from './fixtures.js';
@@ -36,7 +36,7 @@ describe('candidateSummary', () => {
     await candidate(root, 'zebra');
     await candidate(root, 'alpha');
     await mkdir(join(root, 'empty'));
-    expect(await candidateSummary(root, emptyConfig())).toEqual({ names: ['alpha', 'zebra'], omitted: [], unreadable: 0 });
+    expect(await candidateSummary(root, emptyConfig())).toEqual({ names: ['alpha', 'zebra'], omitted: [{name:'empty',reason:'SKILL.md missing'}], unreadable: 0 });
   });
 
   it('excludes a placement', async () => {
@@ -117,7 +117,7 @@ describe('issue 9 local inventory', () => {
     const inventory = await localSkills(root, emptyConfig(), { scope: 'global', stateRoot: join(root, '.state') });
     expect(inventory).toMatchObject({ root, scope: 'global', rootState: 'scanned', problems: [] });
     expect(inventory.entries.map((entry) => [entry.name, entry.inspection.kind === 'rejected' ? entry.inspection.reason : entry.inspection.kind])).toEqual([
-      ['grants', 'malformed-allowed-tools'], ['gsd-x', 'name-mismatch'], ['linked', 'symlink'], ['missing', 'description-missing'],
+      ['empty','skill-md-missing'], ['grants', 'malformed-allowed-tools'], ['gsd-x', 'name-mismatch'], ['linked', 'symlink'], ['missing', 'description-missing'],
       ['nested', 'nested-symlink'], ['privileged', 'candidate'], ['stock', 'candidate'], ['unsupported', 'unsupported-field'], ['yaml', 'invalid-yaml'],
     ]);
     expect(inventory.entries.find((entry) => entry.name === 'stock')?.inspection).toEqual({ kind: 'candidate', description: 'skill', privileged: false });
@@ -313,11 +313,13 @@ describe('W-02 parallel folder scan', () => {
     await mkdir(join(root,'directory','SKILL.md'),{recursive:true});
     await candidate(root,'invalid','---\nname: [\n---\n'); await symlink(join(root,'a'),join(root,'linked'));
     const inventory = await localSkills(root,emptyConfig(),{scope:'global',stateRoot:join(root,'.state')});
-    expect(inventory.entries.map(e=>e.name)).toEqual((await fs.readdir(root)).sort().filter(n=>!['plain','empty'].includes(n)));
-    const expected = names.sort().map(name=>({frontmatter:`---\nname: ${name}\ndescription: skill\n---`,skillId:null,category:null,name,path:join(root,name),characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
+    expect(inventory.entries.map(e=>e.name)).toEqual((await fs.readdir(root)).sort());
+    const expected = names.sort().map(name=>({body:'',frontmatter:`---\nname: ${name}\ndescription: skill\n---`,skillId:null,category:null,name,path:join(root,name),characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
     expect(inventory).toEqual({root,scope:'global',rootState:'scanned',problems:[],entries:[...expected,
+      {frontmatter:null,skillId:null,category:null,name:'empty',path:join(root,'empty'),inspection:{kind:'rejected',reason:'skill-md-missing',detail:'SKILL.md missing'}},
+      {frontmatter:null,skillId:null,category:null,name:'plain',path:join(root,'plain'),inspection:{kind:'rejected',reason:'not-a-directory',detail:'not a directory'}},
       {frontmatter:null,skillId:null,category:null,name:'directory',path:join(root,'directory'),inspection:{kind:'rejected',reason:'skill-md-not-a-file',detail:'SKILL.md is not a regular file'}},
-      {frontmatter:'---\nname: [\n---',skillId:null,category:null,name:'invalid',path:join(root,'invalid'),characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
+      {body:'',frontmatter:'---\nname: [\n---',skillId:null,category:null,name:'invalid',path:join(root,'invalid'),characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
       {frontmatter:null,skillId:null,category:null,name:'linked',path:join(root,'linked'),inspection:{kind:'rejected',reason:'symlink',detail:'symbolic link'}},
     ].sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0)});
   });
@@ -352,6 +354,8 @@ describe('run-local library inventory reuse', () => {
     await candidate(project, 'beta');
     await mkdir(join(global, 'not-a-skill'));
     await symlink(join(global, 'alpha'), join(global, 'link'));
+    // §7.4(b): a plain file is scanned (entries mirror readdir) but is not a skill folder, so it never counts.
+    await writeFile(join(global, '.DS_Store'), '');
     const original = fs.readdir;
     const reads = vi.spyOn(fs, 'readdir').mockImplementation((...args) => {
       if (unreadable && args[0] === project) return Promise.reject(Object.assign(new Error('permission denied'), { code: 'EACCES' }));
@@ -366,7 +370,7 @@ describe('run-local library inventory reuse', () => {
       reads.mockClear();
       const reused = await librarySize(home, config, stateRoot, scan);
       expect(reads).not.toHaveBeenCalled();
-      expect(reused).toBe(unreadable ? null : 3);
+      expect(reused).toBe(unreadable ? null : 5);
       expect(await librarySize(home, config, stateRoot)).toBe(reused);
       expect(reads.mock.calls.filter(([path]) => path === global)).toHaveLength(1);
       expect(reads.mock.calls.filter(([path]) => path === project)).toHaveLength(1);
@@ -428,4 +432,29 @@ describe('resolveLibrarySkill (D72)', () => {
     // Only when no root offers a usable folder does the rejected one come back, with its detail.
     expect(await resolveLibrarySkill(home, emptyConfig(), join(home, '.state'), 'dup')).toMatchObject({ libraryRoot: join(home, '.claude', 'skills'), inspection: { kind: 'rejected', reason: 'description-missing' } });
   });
+});
+
+// §7.4(b) / D16: the count is "direct child directories". A plain file (.DS_Store, README.md) still
+// becomes a LocalEntry so the inventory mirrors readdir, but it is neither a skill folder nor a card;
+// a symlink stays counted because it stays a (refused) card (hybrid review r1, high).
+it('counts folders and symlinks but never a plain file', async () => {
+  const home = await temporaryDirectory(), root = join(home, '.claude', 'skills');
+  await candidate(root, 'alpha'); await mkdir(join(root, 'empty')); await symlink(join(root, 'alpha'), join(root, 'link'));
+  await writeFile(join(root, '.DS_Store'), ''); await writeFile(join(root, 'README.md'), '# notes\n');
+  const inventory = await localSkills(root, emptyConfig(), { scope: 'global', stateRoot: join(home, '.state') });
+  expect(inventory.entries.map(entry => entry.name)).toEqual(['.DS_Store', 'README.md', 'alpha', 'empty', 'link']);
+  expect(localSkillCounts(inventory)).toEqual({ skillFolders: 3, connectable: 1 });
+});
+
+it('overlaps root walks and still returns the first usable match', async () => {
+ const home=await temporaryDirectory(),project=await temporaryDirectory(),global=join(home,'.claude','skills'),other=join(project,'.claude','skills');
+ await candidate(global,'dup');await candidate(other,'dup');
+ const original=fs.readdir;let started=0,release!:()=>void;const both=new Promise<void>(resolve=>{release=resolve;});
+ const spy=vi.spyOn(fs,'readdir').mockImplementation(async(...args)=>{if(args[0]===global||args[0]===other){started++;if(started===2)release();await both;}return original(...args);});
+ try{const result=await resolveLibrarySkill(home,{...emptyConfig(),projects:[{root:project,label:'P'}]},join(home,'.state'),'dup');expect(result?.path).toBe(join(global,'dup'));expect(started).toBe(2);}finally{release();spy.mockRestore();}
+});
+it('returns failed inspection detail for an unreadable folder',async()=>{
+ const home=await temporaryDirectory(),root=join(home,'.claude','skills'),path=await candidate(root,'blocked'),original=fs.readFile;
+ const spy=vi.spyOn(fs,'readFile').mockImplementation(async(...args)=>{if(args[0]===join(path,'SKILL.md'))throw new Error('permission denied');return original(...args);});
+ try{const result=await resolveLibrarySkill(home,emptyConfig(),join(home,'.state'),'blocked');expect(result?.inspection).toEqual({kind:'failed',reason:'permission denied'});expect(unusableSkillFolder(result!)).toBe(`${path} could not be read as a skill folder: permission denied`);}finally{spy.mockRestore();}
 });

@@ -13,7 +13,7 @@ export type Inspection =
   | { kind: 'candidate'; description: string; privileged: boolean }
   | { kind: 'rejected'; reason: SourceProblem; detail: string; description?: string }
   | { kind: 'failed'; reason: string };
-export interface LocalEntry { frontmatter: string | null; skillId: string | null; name: string; path: string; placement?: PlacementRef; placementFingerprint?: string; characters?: number; category: string | null; inspection: Inspection; }
+export interface LocalEntry { body?: string | null; frontmatter: string | null; skillId: string | null; name: string; path: string; placement?: PlacementRef; placementFingerprint?: string; characters?: number; category: string | null; inspection: Inspection; }
 export interface LocalInventory {
   root: string;
   scope: 'global' | 'project';
@@ -133,22 +133,22 @@ export async function localSkills(root: string, config: Pick<Config, 'placements
         return entry;
       }
       if (!details.isDirectory()) {
-        if (!tracked) return null;
         reject('not-a-directory', 'not a directory');
       } else {
         let skill;
         try { skill = await stat(join(path, 'SKILL.md')); }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
         if (!skill) {
-          if (!tracked) return null;
-          reject('skill-md-missing', 'SKILL.md missing');
+            reject('skill-md-missing', 'SKILL.md missing');
         } else if (!skill.isFile()) reject('skill-md-not-a-file', 'SKILL.md is not a regular file');
         else {
           const raw = await readFile(join(path, 'SKILL.md'), 'utf8');
           // String.prototype.length counts UTF-16 code units, the same basis HYG6's 20,000-character
           // guideline uses; the file is already in hand, so the count costs no extra read.
           entry.characters = raw.length;
-          entry.frontmatter = FRONTMATTER.exec(raw)?.[0].replace(/\r?\n$/, '') ?? null;
+          const fence = FRONTMATTER.exec(raw);
+          entry.frontmatter = fence?.[0].replace(/\r?\n$/, '') ?? null;
+          entry.body = fence ? raw.slice(fence[0].length) : raw;
           const inspection = inspectSkillSource(raw, tracked ? undefined : name);
           entry.category = inspection.category ?? null;
           if (!inspection.ok) reject(inspection.reason, inspection.detail, inspection.description);
@@ -172,10 +172,20 @@ export function candidatesOf(inventory: LocalInventory, allowPrivileged = false)
 }
 
 
-/** F2 wire formula: every displayed row, plus untracked folders rejected for frontmatter. */
-const FRONTMATTER_PROBLEMS: ReadonlySet<SourceProblem> = new Set(['no-frontmatter', 'invalid-yaml', 'illegal-name', 'name-mismatch', 'description-missing', 'unsupported-field', 'malformed-allowed-tools', 'managed-wrapper']);
+/**
+ * D16 draws a card for every direct child FOLDER and §7.4(b) counts "direct child directories". A plain
+ * file (`.DS_Store`, `README.md`) is neither: it is still scanned, so `entries` mirrors `readdir` and a
+ * ledger row pointing at it can be reported, but it is not a skill and must not draw a broken card or
+ * inflate every printed and sidebar count (hybrid review r1, high — A20 #4). The scan rejects exactly
+ * that entry as `not-a-directory`; a symlink is rejected as `symlink` first and stays a (refused)
+ * card, because the agent that follows it sees a skill folder there, so it stays counted too.
+ */
+export function isSkillFolder(entry: Pick<LocalEntry, 'inspection'>): boolean {
+  return !(entry.inspection.kind === 'rejected' && entry.inspection.reason === 'not-a-directory');
+}
+
 export function localSkillCounts(inventory: LocalInventory): { skillFolders: number; connectable: number } {
-  const skillFolders = inventory.entries.filter(entry => entry.placement !== undefined || entry.inspection.kind === 'candidate' || (entry.inspection.kind === 'rejected' && FRONTMATTER_PROBLEMS.has(entry.inspection.reason))).length;
+  const skillFolders = inventory.entries.filter(isSkillFolder).length;
   return { skillFolders, connectable: candidatesOf(inventory).length };
 }
 
@@ -262,8 +272,9 @@ export async function resolveLibrarySkill(home: string, config: Pick<Config, 'pl
   const discovery = await localSkillRoots(home, config.projects ?? []);
   const ledger = await canonicalLedger(config);
   let unusable: LibrarySkillMatch | undefined;
-  for (const root of discovery.roots) {
-    const inventory = await localSkills(root.root, config, { scope: root.scope, stateRoot, ledger });
+  const inventories = await Promise.all(discovery.roots.map(root => localSkills(root.root, config, { scope: root.scope, stateRoot, ledger })));
+  for (const [index, root] of discovery.roots.entries()) {
+    const inventory = inventories[index]!;
     // Deliberately NOT `candidatesOf`: that filter answers "what may the picker offer to connect",
     // which excludes an already-placed folder and a privileged one. This answers "which folder does
     // this ref mean" — and an installed skill the user then edited is the commonest thing both

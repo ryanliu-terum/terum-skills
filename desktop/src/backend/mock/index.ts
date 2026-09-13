@@ -9,7 +9,7 @@ import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
 import type { InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard } from '../types';
 import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData } from './data';
-import { cli, library_title, roster_by_adoption, statusLines } from './derive';
+import { cli, roster_by_adoption, statusLines } from './derive';
 import { onboardingData, replaySetupEvals } from './onboarding';
 import { readScenario } from './scenario';
 import { RAW_MD } from './raw-md';
@@ -68,6 +68,36 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   const scenario=readScenario();
   return createRun(async ctx=>{if(scenario==='error')return fail(errors[family]);if(scenario==='loading'){while(true)await ctx.sleep(60_000);}if(scenario==='slow'||latency)await ctx.sleep(scenario==='slow'?2000:latency);return structuredClone(await script(ctx));});
  }
+ const fileChanges=new Map<string,{path:string|null;name:string;original:string}>();
+ function folderOf(root:Root):string{return root.kind==='global'?'~/.claude/skills':root.root+'/.claude/skills';}
+ /** The fixture skills natively under a root: Global holds every SKILLS entry, a checkout the ones LIST_OF puts there. */
+ function fixtureSkillsAt(root:Root){const scopes:Record<string,readonly string[]>=design.LIST_OF,canonical=root.label;return canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.project!=='local'&&scopes[skill.name]?.includes(canonical));}
+ /** Whether a Library card sits at `path` right now: a fixture skill not moved away (its change is keyed by its native path), or a moved/renamed one that landed there. */
+ function occupied(path:string):boolean{const folder=path.slice(0,path.lastIndexOf('/')),name=path.slice(folder.length+1),root=mockRoots().find(r=>folderOf(r)===folder);return (root!==undefined&&fixtureSkillsAt(root).some(s=>s.name===name)&&!fileChanges.has(path))||[...fileChanges.values()].some(change=>change.path===path);}
+ function localProjection<T extends SkillCard>(card:T):T {return {...card,teamed:false,installs:'—',installsN:0,teamState:'unknown',latestVersion:null,installedVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,edited:card.flags.includes('local'),flags:card.flags.filter(flag=>flag!=='update'),localEval:card.summary?{...card.summary,runnerHandle:null,version:null}:null};}
+ function fileRun(kind:'move'|'rename'|'delete',path:string,to?:string){return long('library',async ctx=>{
+  const name=path.split('/').at(-1)!;
+  if(await ctx.ask('text',`Type ${name} to ${kind} this folder`)!==name)return cancelled('The name did not match; nothing changed.');
+  const destination=kind==='delete'?null:kind==='rename'?path.slice(0,path.lastIndexOf('/')+1)+to:(to==='global'?'~':to)+'/.claude/skills/'+name;
+  const notices:string[]=[];
+  // §7.5 / §9.1.1 (hybrid review r1, high): this used to evict whatever card already sat at the destination,
+  // silently. The CLI (src/commands/skill.ts) refuses the same folder, refuses a rename onto an occupied
+  // name, and on a move keeps the resident at <root>/.claude/old-skills/<name> and says so — old-skills is a
+  // sibling of the skills root, so it is hidden from the Library by construction, never by a filter.
+  if(destination===path)return fail('The source and destination are the same folder.');
+  if(destination!==null&&occupied(destination)){
+   if(kind==='rename')return fail(destination+' already exists; choose another name.');
+   const kept=destination.slice(0,destination.lastIndexOf('/.claude/skills/'))+'/.claude/old-skills/'+name,resident=[...fileChanges.entries()].find(([,change])=>change.path===destination);
+   fileChanges.set(resident?.[0]??destination,{path:kept,name:resident?.[1].name??name,original:resident?.[1].original??name});
+   notices.push('Your previous copy is kept at '+kept+'.');
+  }
+  const prior=[...fileChanges.entries()].find(([,change])=>change.path===path),original=prior?.[1].original??name;
+  fileChanges.set(prior?.[0]??path,{path:destination,name:kind==='rename'?to!:name,original});
+  for(const listener of listeners)listener('config');
+  notices.push(kind==='delete'?'Moved to quarantine.':`${kind==='rename'?'Renamed':'Moved'} ${path} to ${destination}.`);
+  return ok({kind,path,destination,quarantined:kind==='delete'?'~/.terum/skills/quarantine/'+name:null,installed:false,notices});
+ });}
+
  const profileValues: {name?:string;bio?:string;role?:string;projects?:string[]} = {};
  // A successful mock install flips the fixture's installed state, so the UI updates like the real adapter's.
  const installedRefs = new Set<string>();
@@ -102,8 +132,26 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   async status(){return structuredClone(ok({machine:{...design.MACHINE,hostname:design.MACHINE.name},me:identity,teams:readScenario()==='no-team'?[]:mockTeams(),tools:{git:true,gh:true},roots:mockRoots(),counts:statusCounts(location.hash,readScenario())}));},
   settings:async()=>{const result=await read<Settings>('settings',()=>ok({INVITE_TIP:design.INVITE_TIP,JOIN_BLOCK_NOTE:design.JOIN_BLOCK_NOTE,INVITEE:design.INVITEE,K:design.K,MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:identity,TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,AGENT_CLI_AUTH:'signed-in',COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN}));return result.ok?result:{...result,reason:result.error.includes('Invalid')&&result.error.includes('config.json')?'invalid-config':'unreadable'};},
   onboarding:async()=>{const result=await read('onboarding',()=>ok(onboardingData()));return result.ok?result:{...result,value:onboardingData()};},
-  library:({scope})=>read('library',scenario=>{if(scenario==='no-team')return {ok:false,error:'No team is configured on this machine.',reason:'no-team'};const scopes:Record<string,readonly string[]>=design.LIST_OF;const root=mockRoots().find(r=>scope.kind==='global'?r.kind==='global':r.id===scope.root);if(!root)return fail('No such checkout: '+(scope.kind==='checkout'?scope.root:'global'));const canonical=root.label;const skills=scenario==='empty'?[]:canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.project!=='local'&&scopes[skill.name]?.includes(canonical));return ok({scanned:null,root,team:{kind:'ok',team:design.TEAMS[0]!.name},skills:skills.map(s=>removalState(withInstall({...cardOf(s),path:root.kind==='global'?'~/.claude/skills/'+s.name:root.root+'/.claude/skills/'+s.name,...(scenario==='on-disk-only'&&s.name==='deploy-check'?{installed:'placed' as const,placed:false,onDiskOnly:true,paths:[['~/.claude/skills/deploy-check','global']] as [string,string][]}:{}),enabled:backend.prefs.get('enabled:'+s.name,s.enabled??true),favorite:backend.prefs.get('favorite:'+s.name,s.favorite??false)}))),overview:scenario==='empty'?zeroOverview:(Object.hasOwn(design.OVERVIEW_BY_SCOPE,canonical)?(design.OVERVIEW_BY_SCOPE as Record<string,Library['overview']>)[canonical]!:zeroOverview),title:scenario==='empty'?'0 skills':library_title(canonical)});}),
-  localSkill:({path})=>read('skill',()=>{const detail=skillByRef(path.split(/[\\/]/).filter(Boolean).at(-1)??'');return detail.ok?ok({...detail.value,team:null,skillRef:'local:'+path,path,pathLabel:path,repoPath:path,owningRoot:mockOwningRoot(path)}):{ok:false,error:path+' is not in any Library root.',reason:'not-in-library'};}),
+  library:({scope})=>read('library',scenario=>{
+   const roots=mockRoots(),root=roots.find(r=>scope.kind==='global'?r.kind==='global':r.id===scope.root);
+   if(!root)return fail('No such project: '+(scope.kind==='checkout'?scope.root:'global'));
+   const canonical=root.label,folder=folderOf(root);
+   const source=scenario==='empty'?[]:fixtureSkillsAt(root);
+   const cardFor=(s:typeof design.SKILLS[number],path:string,name=s.name)=>localProjection(removalState(withInstall({...cardOf(s),name,path,project:canonical,enabled:backend.prefs.get('enabled:'+name,s.enabled??true),favorite:backend.prefs.get('favorite:'+name,s.favorite??false),...(scenario==='on-disk-only'&&name==='deploy-check'?{installed:'placed' as const,placed:false,onDiskOnly:true,paths:[[path,'global']] as [string,string][]}:{})})));
+   const skills=source.filter(s=>!fileChanges.has(folder+'/'+s.name)).map(s=>cardFor(s,folder+'/'+s.name));
+   for(const change of fileChanges.values())if(change.path?.slice(0,change.path.lastIndexOf('/'))===folder){
+    const original=design.SKILLS.find(s=>s.name===change.original);if(!original)continue;
+    const card=cardFor(original,change.path,change.name);if(change.name!==change.original)Object.assign(card,{edited:true,summary:null,localEval:null,localEvalStale:card.localEval!==null});skills.push(card);
+   }
+   const overview=scenario==='empty'?zeroOverview:(Object.hasOwn(design.OVERVIEW_BY_SCOPE,canonical)?(design.OVERVIEW_BY_SCOPE as Record<string,Library['overview']>)[canonical]!:zeroOverview);
+   return ok({roots,scanned:null,root,skills,overview:{...overview,skills:String(skills.length),installs:'—'},title:`${skills.length} skill${skills.length===1?'':'s'}`});
+  }),
+  localSkill:({path})=>read('skill',()=>{const change=[...fileChanges.values()].find(change=>change.path===path),name=path.split(/[\\/]/).filter(Boolean).at(-1)??'';
+   // A card that landed here (a move onto the evicted resident's path) wins; only a path nothing occupies any more is gone.
+   if(change===undefined&&fileChanges.has(path))return {ok:false,error:path+' is no longer in the Library.',reason:'not-in-library'};const detail=skillByRef(change?.original??name);return detail.ok?ok({...localProjection(detail.value),name,team:null,repo:null,installs_n:0,used_by:[],users:[],versions:null,version:'—',version_full:null,history:[],activity:[],...(change&&name!==change.original?{edited:true,localEval:null,summary:null,receipt:null,reportNumbers:null,skillMd:{...detail.value.skillMd,frontmatter:detail.value.skillMd.frontmatter.replace(/^name: .*$/m,'name: '+name)}}:{}),skillRef:'local:'+path,path,pathLabel:path,repoPath:path,owningRoot:mockOwningRoot(path)}):{ok:false,error:path+' is not in any Library root.',reason:'not-in-library'};}),
+  skillFile:{
+   move:({path,to})=>fileRun('move',path,to),rename:({path,to})=>fileRun('rename',path,to),delete:({path})=>fileRun('delete',path),
+  },
   projects:{add:(path:string)=>long('settings',async ctx=>{ctx.print('Added '+path+' to your library.');for(const listener of listeners)listener('config');return ok({path,label:path.split(/[\\/]/).filter(Boolean).at(-1)??path,added:true});}),remove:(path:string)=>long('settings',async ctx=>{ctx.print('Removed '+path+' from your library.');for(const listener of listeners)listener('config');return ok({path,placementsRemaining:0});})},
   teamProjects:{create:({name,remote}:{name:string;remote?:string})=>long('marketplace',async ctx=>{if(catalogData().projects.some(p=>p.name.toLowerCase()===name.toLowerCase())||created.some(p=>p.name.toLowerCase()===name.toLowerCase()))return fail(`team already has a project named ${name}.`);created.push({name,remote:remote??null});ctx.print('Created project '+name);for(const listener of listeners)listener('clone');return ok({team:'team',name,remotes:remote?[remote]:[],skills:0});})},
   skill:({ref,at})=>read('skill',scenario=>{if(scenario==='not-installed'&&ref==='deploy-check')return ok(scopedDetail(removalState(detailOf(design.DETAIL_NOT_INSTALLED)),at));const result=skillByRef(ref);
@@ -179,13 +227,13 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   }),
   // §5.3: publish commits straight to the clone, so PublishResult has no PR/compare/branch field and the mock mints no
   // URL (B3 review high #1, D72). `endorsed` stays: catalog() reads it for the project cards, only its length-as-PR-number went.
-  publish:args=>long('share',async ctx=>{const skill=skillByRef(args.ref);if(!skill.ok)return fail(skill.error);ctx.print(`Publishing ${args.ref}…`);if(args.project){endorsed.push({project:args.project,name:args.ref});for(const listener of listeners)listener('clone');}return ok({name:args.ref,project:args.project??'Global',version:skill.value.version??design.DETAIL.version,created:true,identicalTo:null,attachedEvals:0,profileAdded:false,projectAdded:Boolean(args.project)});}),
+  publish:args=>long('share',async ctx=>{const name=args.ref.split(/[\\/]/).filter(Boolean).at(-1)??args.ref;const skill=skillByRef([...fileChanges.values()].find(change=>change.path===args.ref)?.original??name);if(!skill.ok)return fail(skill.error);ctx.print(`Publishing ${args.ref}…`);if(args.project){endorsed.push({project:args.project,name:args.ref});for(const listener of listeners)listener('clone');}return ok({name:args.ref,project:args.project??'Global',version:skill.value.version??design.DETAIL.version,created:true,identicalTo:null,attachedEvals:0,profileAdded:false,projectAdded:Boolean(args.project)});}),
   sync:args=>long<SyncResult>('onboarding',async ctx=>{ctx.print('Fetching team clones…');return ok({notices:[],changed:true,teams:[{team:args.team??design.TEAMS[0]!.key,state:'refreshed'}]});}),
   prune:()=>long('settings',async ctx=>{const names=design.QUARANTINE.map(q=>q[1]??'');if(!await ctx.ask('confirm',`Delete ${names.length} quarantined item(s)?`)){ctx.print('Prune cancelled; nothing deleted.');return cancelled('Prune was cancelled.');}return ok(undefined);}),
   invite:args=>long<InviteResult>('share',async ctx=>{if(!args.logins.length||args.logins.some(login=>!login.trim()))return fail('At least one GitHub login is required.');ctx.print(`Inviting ${args.logins.join(', ')}…`);if(readScenario()==='partial'){const [first,...rest]=args.logins;const failed=rest.map(login=>({login,error:`Could not invite @${login} (GitHub status 422). gh: Validation Failed (HTTP 422)`}));return {ok:false,error:failed.map(f=>f.error).join('\n'),value:{invited:first?[first]:[],already:[],failed}};}return ok({invited:[...args.logins],already:[],failed:[]});}),
   team:args=>long('share',async ctx=>{const name=args.team??args.name??design.TEAMS[0]?.name??'Terum';ctx.print(`${args.kind}: ${name}`);if(args.kind==='leave'&&!await ctx.ask('confirm',`Leave ${name}? This removes ${design.PLACEMENTS_N} placed skill(s) from this machine.`))return cancelled('Leave was declined.');return ok({name,kind:args.kind});}),
   setup:args=>long('share',async ctx=>{ctx.print('Setting up terum-skills…');const choice=await ctx.ask('select','Create a team or join one?',{choices:['Create a new team','Join an existing team'],descriptions:['Creates a private GitHub repository under your account.','Uses an invitation from the team owner.']});const role=choice==='Create a new team'?'creator' as const:'joiner' as const;const team=args.target??design.TEAM_REPO;const steps:NonNullable<SetupResult['steps']>={role:'done',team:'done'};ctx.print('Looking for skill folders on this machine…');if(await ctx.ask('confirm','Add a project?')){const folder=await ctx.ask('path','Which folder?',{default:'~/code/terum'});ctx.print('Added '+folder+' to your library.');steps.projects='done';}else steps.projects='skipped';steps.evals=await replaySetupEvals(ctx);return ok({team,role,steps});}),
-  eval:args=>long('library',async ctx=>{const detail=skillByRef(args.ref);if(!detail.ok)return fail(detail.error);ctx.print(`Evaluating ${args.ref}…`);ctx.progress(1,1,'Complete');return ok({name:args.ref,runDir:`~/.terum/skills/evals/local/${'0'.repeat(64)}/20260906T120000Z`,executionStatus:'complete' as const,team:detail.value.team??null,id:null,shareHint:true});}),
+  eval:args=>long('library',async ctx=>{const detail=skillByRef([...fileChanges.values()].find(change=>change.path===args.ref)?.original??args.ref.split(/[\\/]/).filter(Boolean).at(-1)??args.ref);if(!detail.ok)return fail(detail.error);ctx.print(`Evaluating ${args.ref}…`);ctx.progress(1,1,'Complete');return ok({name:args.ref,runDir:`~/.terum/skills/evals/local/${'0'.repeat(64)}/20260906T120000Z`,executionStatus:'complete' as const,team:detail.value.team??null,id:null,shareHint:true});}),
   validate:args=>read('library',()=>{const name=args.ref??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0}):fail(detail.error);}),
   update:()=>read('settings',()=>ok({running:design.CLI_VERSION,latest:design.CLI_LATEST,observation:'newer',launch:'npx',description:`${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`,advice:updateAdvice,lines:[`terum-skills ${design.CLI_VERSION}`,`Latest advertised release: ${design.CLI_LATEST}`,...updateAdvice]})),
   appUpdate:{

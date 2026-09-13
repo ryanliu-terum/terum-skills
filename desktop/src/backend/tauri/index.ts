@@ -12,7 +12,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
-import type { Root, LibraryScope, LibraryTeam, IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
+import type { Root, LibraryScope,  IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { createReadSession } from './session.js';
@@ -27,7 +27,7 @@ import { scannedRoots } from './scanned-roots';
 import { cliRefresh, createRefreshPolicy, createWorkflowGate } from './refresh';
 // §3.2: the version vocabulary exists once. This leaf imports nothing at all, which is the only
 // shape `cli-tree-imports.test.ts` admits across the tree boundary.
-import { parseVersionFolder, versionLabel } from '../../../../src/lib/versions.js';
+import { recordedVersionLabel, parseVersionFolder } from '../../../../src/lib/versions.js';
 import { overviewCopy } from '../../lib/overview-copy';
 import { bodyExcerpt } from '../../lib/body-excerpt';
 import { samePath } from '../../lib/skill-path';
@@ -76,8 +76,9 @@ export const cliPerson = z.object({ handle: z.string(), display_name: z.string()
 export const cliProject = z.object({ name: z.string(), skills: z.array(z.string()), remotes: z.array(z.string()), description: z.string().optional() }).catchall(z.unknown());
 // S7g: every `ls --local` row carries typed provenance and a read-only health; the prose `state` is never parsed.
 const cliLocalHealth = z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']);
-export const cliLocalRow = z.object({ frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().nullable() }).nullable(), health: cliLocalHealth, category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional() }).strict();
-export const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), remote:z.object({url:z.string(),slug:z.string().nullable()}).nullish(), registered:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({frontmatter:z.string().nullish(),skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),category:z.string().nullish().transform(v=>v??null),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null)})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
+export const cliLocalRow = z.object({ body: z.string().nullish(), frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().nullable() }).nullable(), health: cliLocalHealth, edited:z.boolean().optional(), localEval:cliEvalReport.shape.latest.optional(), localEvalStale:z.boolean().optional(), category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional() }).strict();
+export const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), remote:z.object({url:z.string(),slug:z.string().nullable()}).nullish(), registered:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({body:z.string().nullish(),frontmatter:z.string().nullish(),skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),category:z.string().nullish().transform(v=>v??null),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null)})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
+export const cliSkillFile=z.object({kind:z.enum(['move','rename','delete']),path:z.string(),destination:z.string().nullable(),quarantined:z.string().nullable(),installed:z.boolean(),notices:z.array(z.string())});
 export const cliProjectAdded = z.object({path:z.string(),label:z.string(),added:z.boolean()});
 export const cliProjectCreated = z.object({team:z.string(),name:z.string(),remotes:z.array(z.string()),skills:z.number()});
 export const cliProjectRemoved = z.object({path:z.string(),placementsRemaining:z.number()});
@@ -112,7 +113,7 @@ function tokenLabel(characters:number|null):{size:string;tokensK:number}{
 }
 function rootOf(section:LocalSection,home=''):Root {
   const global=section.scope==='global',repoRoot=section.repoRoot??section.root;
-  return {id:global?'global':repoRoot,kind:global?'global':'checkout',label:labelOf(section),root:global?(home?abbreviateHome(section.root,home):'~/.claude/skills'):repoRoot,rootState:section.rootState,registered:section.registered??false,count:section.counts?String(visibleSkillFolders(section)):undefined,remote:section.remote??null};
+  return {id:global?'global':repoRoot,kind:global?'global':'checkout',label:labelOf(section),root:global?(home?abbreviateHome(section.root,home):'~/.claude/skills'):repoRoot,rootState:section.rootState,registered:section.registered??false,count:section.counts?String(section.counts!.skillFolders):undefined,remote:section.remote??null};
 }
 /** The root a detail was resolved in, in the sidebar's own terms. The checkout id comes from rootOf
  *  so it is byte-identical to the id Sidebar.tsx compares against; the global root uses the literal
@@ -128,35 +129,22 @@ function sectionFor(local:Inventory,at:LibraryScope):LocalSection|undefined{
 }
 /** Presence evidence narrowed to one root. Destinations are NOT narrowed — see inventoryDetail. */
 function restrictLocal(local:Inventory,section:LocalSection):Inventory{return {...local,local:[section]};}
-// D2: only these frontmatter failures still describe folders holding SKILL.md. 'managed-wrapper' is
-// deliberately absent: the bundled /terum-skills skill is counted as a folder by the CLI, but it is
-// our own placed component, so the Library neither draws it as a card nor counts it anywhere.
-function countable(entry:NotOffered):boolean{return ['no-frontmatter','invalid-yaml','illegal-name','name-mismatch','description-missing','unsupported-field','malformed-allowed-tools'].includes(entry.reason);}
-// The grid's own arithmetic — rows plus the countable omissions, deduplicated by path exactly as
-// library() draws its cards. Every count the app prints (sidebar, Skills tile, Library title, search
-// placeholder) comes from here, so a folder countable() hides — the managed /terum-skills wrapper —
-// is absent from the numbers too. The CLI's counts.skillFolders keeps counting it, and must: the
-// terminal lists the wrapper under "Cannot be connected", so its total stays true for that output.
-function visibleSkillFolders(section:LocalSection):number{
-  const seen=new Set<string>(section.rows.map(row=>row.path));
-  let n=seen.size;
-  for(const entry of section.notOffered??[])if(countable(entry)&&!seen.has(entry.path)){seen.add(entry.path);n++;}
-  return n;
-}
-function joinedSkill(row:LocalRow,inventory:Inventory,team:string,features:Pick<Features,'localIdentity'>):InventorySkill|undefined {
-  return inventory.skills.find(skill=>features.localIdentity&&row.skillId!=null?row.skillId===skill.id:row.placement?.id===skill.id&&row.placement.team===team);
-}
+/** body-excerpt.ts's ratified rule, shared by BOTH card builders so a skill reads the same in the Library
+ *  and the Marketplace (hybrid review r1, high — localCard skipped it): the body's first paragraph, else the
+ *  frontmatter `description`, else blank. */
+function cardSummary(body:string|null|undefined,description:string|null|undefined):string{return bodyExcerpt(body??null)??description??'';}
 function localCard(row:LocalRow,section:LocalSection,home:string):SkillCard {
   const placed=row.placed??row.placement!==null,local=!placed;
+  const summary=receiptSummary(row.localEval??null);
   // A local card makes no claim about team installs; all new team fields are neutral.
   // The identity line names the root the folder lives in, never the word 'local'.
-  return {localEval:null,localEvalStale:false,installedVersion:null,latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:false,path:row.path,name:row.name,desc:row.description??'',project:labelOf(section),category:row.category??'—',installs:'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:'unknown',paths:[[abbreviateHome(row.path,home),section.scope]],flags:row.problem!==undefined?['broken']:local?['local']:[],flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:null,summary:null,favorite:false,favorites:null,enabled:true,updated:null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};}
+  return {edited:row.edited??row.health==='local-changed',localEval:summary?{...summary,runnerHandle:row.localEval?.version?row.localEval.provenance.runner_handle:null,version:row.localEval?.version??null}:null,localEvalStale:row.localEvalStale??false,installedVersion:null,latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:false,path:row.path,name:row.name,desc:row.problem!==undefined?row.path+' · '+row.problem:cardSummary(row.body,row.description),project:labelOf(section),category:row.category??'—',installs:'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:'unknown',paths:[[abbreviateHome(row.path,home),section.scope]],projectRoots:section.repoRoot?[abbreviateHome(section.repoRoot,home)]:[],flags:row.problem!==undefined?['broken']:local?['local']:[],flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:summary?[summary.w,summary.l,summary.t]:null,summary,provenance:row.localEval?{model:row.localEval.provenance.model,k:row.localEval.provenance.k,ccVersion:row.localEval.provenance.cc_version,runner:row.localEval.provenance.runner_handle,when:row.localEval.provenance.timestamp.slice(0,10)}:null,favorite:false,favorites:null,enabled:true,updated:null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};}
 function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):SkillCard {
-  return localCard({name:entry.name,path:entry.path,state:'',tracked:false,placement:null,health:'unknown',category:entry.category,description:entry.description,characters:entry.characters,problem:'Not connectable · '+(entry.detail??entry.reason)},section,home);
+  return localCard({name:entry.name,path:entry.path,state:'',tracked:false,placement:null,health:'unknown',category:entry.category,description:entry.description,characters:entry.characters,problem:entry.detail??entry.reason},section,home);
 }
 function localDetail(card:SkillCard,section:LocalSection,path:string,home:string):SkillDetail {
   const pathLabel=abbreviateHome(path,home);
-  return {...card,desc_long:card.desc,size_bytes:'—',team:null,skillRef:'local:'+path,root:'Global',owningRoot:owningRootOf(section),installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,hygieneStatus:null,hygieneWhen:null,path,pathLabel,repo:null,repoPath:pathLabel,version:'—',version_full:null,scope:section.scope==='global'?'Global':labelOf(section),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:null,grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.frontmatter??'',body:[],markdown:null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest publish '+card.name,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},method:'',versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[],unidentifiedLocal:null,viewerHandle:null};
+  return {...card,desc_long:card.desc,size_bytes:'—',team:null,skillRef:'local:'+path,root:'Global',owningRoot:owningRootOf(section),installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,hygieneStatus:null,hygieneWhen:null,path,pathLabel,repo:null,repoPath:pathLabel,version:'—',version_full:null,scope:section.scope==='global'?'Global':labelOf(section),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:null,grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.frontmatter??'',body:[],markdown:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.body??null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest publish '+card.name,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},method:'',versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[],unidentifiedLocal:null,viewerHandle:null};
 }
 /** A bare name that is not in the team may still name a folder on this machine — one nobody has
  *  shared, or one whose frontmatter the CLI could not parse. Deep links, bookmarks and hand-typed
@@ -168,7 +156,7 @@ function localDetailByName(local:Inventory,name:string,home:string):SkillDetail|
   for(const section of sections) {
     const row=section.rows.find(row=>row.name===name);
     if(row)return localDetail(localCard(row,section,home),section,row.path,home);
-    const entry=section.notOffered?.find(entry=>countable(entry)&&entry.name===name);
+    const entry=section.notOffered?.find(entry=>entry.name===name);
     if(entry)return localDetail(notOfferedCard(entry,section,home),section,entry.path,home);
   }
   return undefined;
@@ -220,7 +208,7 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
     && recordedVersions[0] != null && parseVersionFolder(recordedVersions[0]) !== null ? recordedVersions[0] : null;
   const latestVersion = row.latestVersion ?? (parseVersionFolder(row.latest) === null ? null : row.latest);
   const latestN = latestVersion === null ? null : parseVersionFolder(latestVersion);
-  return { localEval:null, localEvalStale:false, installedVersion, latestVersion, evalVersion:row.evalVersion ?? null, evalStale:row.evalVersion != null && latestN !== null && row.evalVersion !== latestN, latestEvalState:row.latestEvalState ?? null, profileVersion:null, teamed:true, path:rows[0]?.path ?? null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), desc: bodyExcerpt(row.body) ?? row.description, grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: summary ? [summary.w, summary.l, summary.t] : null, summary, provenance, favorite: false, favorites: null, enabled: true, flags: problem ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The placed copy could not be inspected.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
+  return { edited:false, localEval:null, localEvalStale:false, installedVersion, latestVersion, evalVersion:row.evalVersion ?? null, evalStale:row.evalVersion != null && latestN !== null && row.evalVersion !== latestN, latestEvalState:row.latestEvalState ?? null, profileVersion:null, teamed:true, path:rows[0]?.path ?? null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), desc: cardSummary(row.body, row.description), grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: summary ? [summary.w, summary.l, summary.t] : null, summary, provenance, favorite: false, favorites: null, enabled: true, flags: problem ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The placed copy could not be inspected.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
 /** `owner/repo` as the team remote spells it (case kept; any host); null when the team has no remote. */
 function repoSlug(remote: string | null | undefined): string | null {
@@ -236,14 +224,12 @@ function repoSlug(remote: string | null | undefined): string | null {
  *  so a config written by an older CLI still shows something. */
 function placementVersionLabel(version: string | null | undefined): string | null {
   if (version === null || version === undefined) return null;
-  const n = parseVersionFolder(version);
-  return n === null ? version.slice(0, 12) : versionLabel(n);
+  return recordedVersionLabel(version);
 }
 function detailVersionFields(repo: string | null, name: string, version: string | null): Pick<SkillDetail, 'version' | 'version_full' | 'shareCommand'> {
   // D1: what a PERSON reads is `Version 3`. `version_full` keeps the FOLDER, because §8.6 makes it a
   // path segment in the repository link — one is prose, the other is an address.
-  const ordinal = version === null ? null : parseVersionFolder(version);
-  return { version: ordinal === null ? version ?? '—' : versionLabel(ordinal), version_full: version, shareCommand: repo ? `npx -y terum-skills@latest install ${repo}/${name}` : '—' };
+  return { version: version === null ? '—' : recordedVersionLabel(version), version_full: version, shareCommand: repo ? `npx -y terum-skills@latest install ${repo}/${name}` : '—' };
 }
 /** `local` is the presence evidence — restricted to one section for a scoped read. `scopes` is the
  *  full machine inventory the install destinations come from, so restricting presence never
@@ -267,7 +253,7 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
   const installScopes: [string, string][] = [['Global', 'every session · ~/.claude/skills'], ...projects.map((section): [string, string] => [section.label!, `project · ${abbreviateHome(section.repoRoot ?? section.root, home)}`])];
   // Captions stay display-only; removal needs the original absolute destination.
   const installScopePaths = Object.fromEntries(projects.flatMap(section => section.repoRoot && projects.filter(other => other.label === section.label).length === 1 ? [[section.label!, section.repoRoot]] : []));
-  return { ...card, team: team.team, installScopes, installScopePaths, projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: typeof row.body === 'string' ? row.body.replace(/\n$/, '').split('\n').length : null, skillRef: `${team.team}/${row.name}`, root: 'Global', owningRoot: at, desc_long: bodyExcerpt(row.body) ?? row.description, files: null, size_bytes: '—', ...detailVersionFields(repo, row.name, version), scope: placed?.scope === 'global' ? 'Global' : placed?.label ?? placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
+  return { ...card, team: team.team, installScopes, installScopePaths, projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: typeof row.body === 'string' ? row.body.replace(/\n$/, '').split('\n').length : null, skillRef: `${team.team}/${row.name}`, root: 'Global', owningRoot: at, desc_long: cardSummary(row.body, row.description), files: null, size_bytes: '—', ...detailVersionFields(repo, row.name, version), scope: placed?.scope === 'global' ? 'Global' : placed?.label ?? placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
     unidentifiedLocal: card.installed === 'placed' ? null : unidentifiedLocal(local, row.name, features, home), viewerHandle: team.handle,
     used_by: [...new Map(installers.map(person => [person.handle, initials(person.displayName)])).values()], users: installers.map(person => [person.handle, initials(person.displayName), `${person.scope.kind === 'global' ? 'Global' : person.scope.project}${person.since ? ` · since ${person.since.slice(0, 10)}` : ''}`]),
     author: { name, handle, role: '', initials: initials(name) }, repo, repoPath: `skills/${row.name}`, path, pathLabel: path === null ? '—' : abbreviateHome(path, home), grants_approved: '', versions:null,latestState:'none',invalidReceiptFile:null,localRuns:[],evalReportError:null, receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: null, hygieneStatus: validation.value === undefined ? null : validation.ok && validation.value.findings === 0 ? 'pass' : 'fail', hygieneWhen: null,
@@ -316,7 +302,7 @@ function statusModel(value:CliStatus, local:CliLocal|null, platform:string, feat
   machine:{os:platform,name:'',hostname:'',gh_login:'',gh_version:''},
   me:{handle,name,email:value.identity?.email??'',default_handle:value.identity?.default_handle??'',initials:name.split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase(),footerLabel:[value.identity?.github,handle,value.identity?.default_handle].find(v=>v)??''},
   teams:value.teams.map(team=>({name:team.team,key:team.team,handle:team.handle,remote:team.repository??null,members:team.memberCount??null,skills:team.sharedSkills??null,clone:team.clonePath===null?null:abbreviateHome(team.clonePath,home),cloneState:team.clone.state==='ok'?team.clone.origin===undefined?null:{state:'ok',origin:team.clone.origin}:team.clone.state==='incomplete'?{state:'incomplete',...(team.clone.error===undefined?{}:{error:team.clone.error}),reason:team.clone.reason==='not-a-repository'||team.clone.reason==='no-team-json'?team.clone.reason:'unverifiable'}:team.clone,readable:team.readable,last_sync:team.syncedAt??null,stamp:team.syncedAt??null,policy:team.policy===null?null:{license:team.policy.skill_license},categories:team.categories??null,pending:team.pending,joinCommand:team.joinCommand??null,joinBlock:team.joinBlock??null})),
-  counts:local?.local.find(section=>section.scope==='global')?.counts ? {Global:String(visibleSkillFolders(local.local.find(section=>section.scope==='global')!))} : {},tools:value.tools,roots:local===null?[]:local.local.map(section=>rootOf(section)),
+  counts:local?.local.find(section=>section.scope==='global')?.counts ? {Global:String(local.local.find(section=>section.scope==='global')!.counts!.skillFolders)} : {},tools:value.tools,roots:local===null?[]:local.local.map(section=>rootOf(section)),
  };
 }
 // AD-23: the drawn placement states (design fixture PLACEMENTS: 'up to date', 'update available', 'edited locally', 'pinned'); a health the board has no word for is '—'.
@@ -619,13 +605,6 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     if (!selected.readable) return fail(`Team ${selected.team} could not be read.`);
     return { ok: true, value: { ...selected, placements: status.value.ledger?.placements ?? [] } };
   }
-  async function libraryTeam(team:string|undefined,options?:ReadOptions):Promise<{team:LibraryTeam;inventory?:Inventory;selected?:InventoryTeam & {placements:LedgerPlacements}}> {
-    const selected=await inventoryTeam(team,options);
-    if(!selected.ok)return {team:selected.reason==='no-team'?{kind:'none'}:{kind:'unreadable',message:selected.error}};
-    const inventory=await cached(['ls','--team',selected.value.team], cliLs, options);
-    if(!inventory.ok)return {team:{kind:'unreadable',message:inventory.error}};
-    return {team:{kind:'ok',team:selected.value.team},selected:selected.value,inventory:inventory.value};
-  }
   async function peopleInventory(options?: ReadOptions, permissions = false) {
     const status = await cached(['status', ...(permissions ? ['--permissions'] : [])], cliStatus, options);
     if (!status.ok) return status;
@@ -688,61 +667,40 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return models;
     },
     onboarding: async () => gap('Onboarding data'),
-    async library({ scope, team }, options) {
-      // Keep local first for recorded spawn order and failure precedence.
-      const [local, enrichment] = await Promise.all([cached(['ls', '--local'], cliLs, options), libraryTeam(team, options)]);
+    async library({ scope }, options) {
+      const local = await cached(['ls', '--local'], cliLs, options);
       if (!local.ok) return fail(local.error);
-      const section = local.value.local?.find(section => scope.kind==='global' ? section.scope==='global' : section.scope==='project' && samePath(section.repoRoot??section.root,scope.root));
-      if (!section) return fail('No such checkout: '+(scope.kind==='checkout'?scope.root:'global')+' · Register it under Settings ▸ This machine ▸ Checkouts.');
-      const features = {localIdentity:hello?.features.localIdentity??false};
+      const section = sectionFor(local.value, scope);
+      if (!section) return fail('No such project: '+(scope.kind==='checkout'?scope.root:'global')+' · Add it under Settings ▸ This machine ▸ Projects.');
       const directory = await home(), root = rootOf(section, directory);
-      const skills:SkillCard[] = [], seen=new Set<string>();let joined=0,updatesAvailable=0;
-      for (const row of section.rows) {
-        if(seen.has(row.path))continue;seen.add(row.path);
-        if(row.health==='update-available'||row.health==='both')updatesAvailable++;
-        const skill = enrichment.team.kind==='ok' ? joinedSkill(row,enrichment.inventory!,enrichment.team.team,features) : undefined;
-        if(skill && enrichment.team.kind==='ok') {joined++;skills.push({...inventoryCard(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.team.team,features,directory,enrichment.selected?.handle??'',enrichment.selected?.placements??[]),installedVersion:null,latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,path:row.path});}
-        else skills.push(localCard(row,section,directory));
-      }
-      for(const entry of section.notOffered??[]) {
-        if(!countable(entry)||seen.has(entry.path))continue;seen.add(entry.path);
-        skills.push(notOfferedCard(entry,section,directory));
-      }
-      const n=skills.length; // the grid itself — title, tile and placeholder never count a card the grid does not draw
-      const broken=skills.filter(card=>card.flags.includes('broken')).length,attention_lines:string[]=[];
-      if(updatesAvailable>0)attention_lines.push(`${plural(updatesAvailable,'update')} available`);
-      if(broken>0)attention_lines.push(`${broken} broken`);
-      const value:Library={root,team:enrichment.team,scanned:scannedRoots(local.value,directory),skills,problems:enrichment.inventory?.problems??[],provenance:null,
-        // The ViewHeader title beside this subtitle is already root.label (LibraryScreen.tsx:30), so the
-        // subtitle prints the count alone, in the board's shape ("15 skills") and the shape the mock and
-        // the search placeholder already use (.planning/specs/desktop-scoped-stats-and-collapse.md:29).
-        // plural() is the very helper that placeholder calls, so the two strings cannot drift apart again.
-        // The team limb keeps the shared count beside the root's total.
-        title:plural(n,'skill')+(enrichment.team.kind==='ok'&&joined>0?` · ${joined} shared with ${enrichment.team.team}`:''),
-        overview:{skills:String(n),skills_note:enrichment.team.kind==='ok'&&joined>0?`${joined} shared with ${enrichment.team.team}`:'',evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:overviewCopy.evaluated,installs:String(skills.reduce((sum,row)=>sum+row.installsN,0)),installs_note:'',attention:String(updatesAvailable+broken),attention_lines,attention_link:'',zero:overviewCopy}};
+      const skills:SkillCard[] = [], seen=new Set<string>();
+      for (const row of section.rows) { if(seen.has(row.path))continue;seen.add(row.path);skills.push(localCard(row,section,directory)); }
+      for (const entry of section.notOffered??[]) { if(seen.has(entry.path))continue;seen.add(entry.path);skills.push(notOfferedCard(entry,section,directory)); }
+      const broken=skills.filter(card=>card.flags.includes('broken')).length;
+      const value:Library={root,roots:(local.value.local??[]).map(section=>rootOf(section,directory)),scanned:scannedRoots(local.value,directory),skills,problems:section.problems.map(p=>({source:p.path,message:p.reason})),title:plural(skills.length,'skill'),
+        overview:{skills:String(skills.length),skills_note:'',evaluated:String(skills.filter(s=>s.localEval!==null).length),meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:overviewCopy.evaluated,installs:'—',installs_note:'',attention:String(broken),attention_lines:broken?[`${broken} need attention`]:[],attention_link:'',zero:overviewCopy}};
       return {ok:true,value};
     },
     async localSkill({path},options) {
       const local=await cached(['ls','--local'], cliLs, options);
       if(!local.ok)return fail(local.error);
-      const directory=await home(),features={localIdentity:hello?.features.localIdentity??false};
+      const directory=await home();
       for(const section of local.value.local??[]) {
         const row=section.rows.find(row=>samePath(row.path,path));
-        const entry=row?undefined:section.notOffered?.find(entry=>countable(entry)&&samePath(entry.path,path));
+        const entry=row?undefined:section.notOffered?.find(entry=>samePath(entry.path,path));
         if(!row&&!entry)continue;
-        const enrichment=await libraryTeam(undefined,options);
-        const skill=row&&enrichment.team.kind==='ok'?joinedSkill(row,enrichment.inventory!,enrichment.team.team,features):undefined;
-        if(row&&skill&&enrichment.selected&&enrichment.inventory) {
-          const team=enrichment.selected.team;
-          const [validation,report]=await Promise.all([backend.validate({ref:skill.name,team},options),backend.evalReport({ref:skill.name,team},options)]);
-          if(!validation.ok&&validation.value===undefined)return fail(validation.error);
-          const detail=inventoryDetail(skill,{...local.value,local:[{...section,rows:[row]}]},enrichment.selected,enrichment.selected.placements,validation,enrichment.inventory,features,directory,local.value,owningRootOf(section));
-          return {ok:true,value:report.ok?{...detail,...report.value}:{...detail,evalReportError:report.error}};
-        }
         const card=row?localCard(row,section,directory):notOfferedCard(entry!,section,directory);
-        return {ok:true,value:localDetail(card,section,row?.path??entry!.path,directory)};
+        const detail=localDetail(card,section,row?.path??entry!.path,directory);
+        const receipt=row?.localEval;
+        const report=receipt?mapEvalReport({versions:{placed:null,teamCurrent:null,evaluated:receipt.version},latestState:'none',latest:null,history:[],localRuns:[{run_id:receipt.run_id,run_dir:receipt.path.replace(/[/\\]receipt.json$/,''),execution_status:receipt.execution_status,committed:false,receipt}]}):{};
+        return {ok:true,value:{...detail,...report}};
       }
-      return {ok:false,error:abbreviateHome(path,directory)+' is not in any Library root (Global or a registered checkout), or no longer holds a SKILL.md.',reason:'not-in-library'};
+      return {ok:false,error:abbreviateHome(path,directory)+' is not in any Library root (Global or a registered project).',reason:'not-in-library'};
+    },
+    skillFile:{
+      move:({path,to})=>run(['skill','move','--to',to,'--',path],cliSkillFile,v=>v,['config']),
+      rename:({path,to})=>run(['skill','rename','--to',to,'--',path],cliSkillFile,v=>v,['config']),
+      delete:({path})=>run(['skill','delete','--',path],cliSkillFile,v=>v,['config','clone']),
     },
     projects:{add:path=>run(['project','add','--',path],cliProjectAdded,v=>v,['config']),remove:path=>run(['project','remove','--',path],cliProjectRemoved,v=>v,['config'])},
     teamProjects:{create:({name,remote})=>run(['team','project','create',...(remote?['--remote',remote]:[]),'--',name],cliProjectCreated,v=>v,['clone'])},

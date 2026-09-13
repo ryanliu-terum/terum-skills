@@ -13,9 +13,9 @@ import { useEvalRun, type EvalRunApi } from './eval-run-context';
 const minute = 60_000;
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 8, 10, 1)); localStorage.clear(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
-function harness({ enabled = true, failure = false, deferred = false } = {}) {
+function harness({ enabled = true, failure = false, deferred = false, teamless = false } = {}) {
   const backend = createMockBackend(); backend.prefs.set('evals:overnight', enabled);
-  const items: EvalQueueItem[] = ['alpha', 'beta'].map(skill => ({ team: 'team', skill, path: `/library/${skill}`, contentHash: `sha256:${'a'.repeat(64)}`, requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' }));
+  const items: EvalQueueItem[] = ['alpha', 'beta'].map(skill => ({ ...(teamless?{}:{team:'team'}), skill, path: `/library/${skill}`, contentHash: `sha256:${'a'.repeat(64)}`, requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' }));
   let release: (() => void) | undefined;
   const cancelled = vi.fn();
   const drain = vi.fn(() => {
@@ -91,3 +91,5 @@ it.each(['activity','unmount','disable'] as const)('rechecks eligibility after a
  if(reason==='activity')fireEvent.pointerMove(window);else if(reason==='unmount')h.view.unmount();else act(()=>h.backend.prefs.set('evals:overnight',false));
  await act(async()=>{finish({ok:true,value:{items:h.items}});});expect(h.drain).not.toHaveBeenCalled();
 });
+
+it('lists and drains teamless items through the scheduled host',async()=>{const h=harness({teamless:true});expect(h.items[0]).not.toHaveProperty('team');await act(()=>vi.advanceTimersByTimeAsync(30*minute));expect(h.list).toHaveBeenCalled();expect(h.drain).toHaveBeenCalledOnce();expect(h.host().current?.state).toBe('done');expect(h.items).toEqual([]);});

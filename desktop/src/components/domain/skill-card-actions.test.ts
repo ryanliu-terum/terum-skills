@@ -3,7 +3,7 @@ import { cardActions, detailPath } from './skill-card-actions';
 import type { SkillCard, TeamState } from '../../backend/types';
 
 function card(over:Partial<SkillCard>={}):SkillCard {
- return {localEval:null,localEvalStale:false,installedVersion:null,latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:true,path:null,updated:null,grants:null,normalizedGrants:null,grantsHash:null,project:'Terum',category:'infra',name:'deploy-check',desc:'',size:'2k',installs:'3 installs',favorite:false,flags:[],flagText:{},enabled:true,installed:'placed',placed:true,onDiskOnly:false,teamState:'endorsed',paths:[],wlt:null,summary:null,installsN:3,tokensK:2,indicators:{} as SkillCard['indicators'],...over};
+ return {edited:false,localEval:null,localEvalStale:false,installedVersion:null,latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:true,path:null,updated:null,grants:null,normalizedGrants:null,grantsHash:null,project:'Terum',category:'infra',name:'deploy-check',desc:'',size:'2k',installs:'3 installs',favorite:false,flags:[],flagText:{},enabled:true,installed:'placed',placed:true,onDiskOnly:false,teamState:'endorsed',paths:[],wlt:null,summary:null,installsN:3,tokensK:2,indicators:{} as SkillCard['indicators'],...over};
 }
 function find(skill:SkillCard,key:string){const action=cardActions(skill).find(a=>a.key===key);if(!action)throw new Error('no action '+key);return action;}
 
@@ -21,7 +21,7 @@ it('carries the marketplace origin into every row it links to', () => {
 it('keeps the marketplace origin off the local-folder route, which has no marketplace', () => {
  const rows=cardActions(card({teamed:false,path:'~/.claude/skills/notes',placed:true}),{origin:'root=marketplace'});
  expect(rows.find(a=>a.key==='open')?.to).toBe('/skill/local?path=' + encodeURIComponent('~/.claude/skills/notes'));
- expect(rows.find(a=>a.key==='place')?.to).toBe('/skill/local?path=' + encodeURIComponent('~/.claude/skills/notes') + '&dialog=remove');
+ expect(rows.find(a=>a.key==='delete')?.to).toBe('/skill/local?path=' + encodeURIComponent('~/.claude/skills/notes') + '&dialog=file-delete');
 });
 
 it('offers Run eval only when the feature is on', () => {
@@ -29,10 +29,9 @@ it('offers Run eval only when the feature is on', () => {
  expect(cardActions(card({path:'~/.claude/skills/deploy-check'}),{runEvalInApp:true}).find(a=>a.key==='run-eval')?.to).toBe('/skill/deploy-check?tab=evals&dialog=run-eval');
 });
 
-it('moves only a copy Terum placed', () => {
- expect(find(card({placed:true}),'move').to).toBe('/skill/deploy-check?dialog=move');
- expect(find(card({placed:false,onDiskOnly:true}),'move').reason).toMatch(/Terum did not place it/);
- expect(find(card({placed:false,installed:'absent',onDiskOnly:false}),'move').reason).toBe('Install it before moving it.');
+it('offers local file actions on all Library folders and no Move on marketplace cards',()=>{
+ for(const placed of [true,false]){const c=card({teamed:false,path:'/library/deploy-check',placed});expect(find(c,'move').to).toContain('dialog=file-move');expect(find(c,'rename').to).toContain('dialog=file-rename');expect(find(c,'delete').to).toContain('dialog=file-delete');}
+ expect(cardActions(card()).some(a=>a.key==='move')).toBe(false);
 });
 
 it('turns the one place row into Install or Uninstall by state', () => {
@@ -67,7 +66,7 @@ it('gates Run eval on the local folder with a reason, keeping the row', () => {
 
 it('keeps the same five rows whatever the state, so the menu does not change shape', () => {
  for(const skill of [card(),card({placed:false,installed:'absent',teamState:'unshared'}),card({placed:false,onDiskOnly:true,teamState:'shared'})]) {
-  expect(cardActions(skill,{runEvalInApp:true}).map(a=>a.key)).toEqual(['open','run-eval','move','place','publish']);
+  expect(cardActions(skill,{runEvalInApp:true}).map(a=>a.key)).toEqual(['open','run-eval','place','publish']);
  }
 });
 
@@ -77,5 +76,5 @@ it('rides a checkout origin exactly as it rides the marketplace one',()=>{
  expect(rows.find(a=>a.key==='place')?.to).toBe('/skill/deploy-check?dialog=remove&'+origin);
  const local=cardActions(card({teamed:false,path:'~/.claude/skills/notes'}),{origin});
  expect(local.find(a=>a.key==='open')?.to).toBe('/skill/local?path='+encodeURIComponent('~/.claude/skills/notes'));
- expect(local.find(a=>a.key==='place')?.to).toBe('/skill/local?path='+encodeURIComponent('~/.claude/skills/notes')+'&dialog=remove');
+ expect(local.find(a=>a.key==='delete')?.to).toBe('/skill/local?path='+encodeURIComponent('~/.claude/skills/notes')+'&dialog=file-delete');
 });

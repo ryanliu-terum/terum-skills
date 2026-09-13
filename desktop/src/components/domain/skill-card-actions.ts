@@ -2,7 +2,7 @@ import type { SkillCard } from '../../backend/types';
 
 /** One row of the card's ⋯ menu. `to` is a router path; a disabled row carries the reason it
  *  cannot run instead, so the menu keeps a fixed shape and the card says why (Ryan, 2026-09-09). */
-export interface CardAction { key:'open'|'run-eval'|'move'|'place'|'publish'; label:string; to:string|null; reason:string|null }
+export interface CardAction { key:'open'|'run-eval'|'move'|'place'|'publish'|'rename'|'delete'; label:string; to:string|null; reason:string|null }
 
 /** Every way into the detail page goes through here, so a folder that belongs to no team is
  *  addressed by path and a team skill by name. Never read `project` for this — it carries the root
@@ -21,19 +21,19 @@ export function cardActions(skill:SkillCard,{origin='',runEvalInApp=false}:{orig
  const base=detailPath(skill),ridesOrigin=skill.teamed||!skill.path,at=(...params:string[])=>withParams(base,[...params,ridesOrigin?origin:'']);
  const actions:CardAction[]=[{key:'open',label:'Open',to:at(),reason:null}];
  // §11.4: evals run against the copy on this machine, so the row stays and says why when there is none.
- if(runEvalInApp)actions.push({key:'run-eval',label:'Run eval',to:skill.path?at('tab=evals','dialog=run-eval'):null,reason:skill.path?null:'Install it first — evals run against the copy on your machine.'});
- actions.push(moveAction(skill,at),placeAction(skill,at),publishAction(skill,at));
+ const evalReason=localActionReason(skill,'eval');
+ if(runEvalInApp)actions.push({key:'run-eval',label:'Run eval',to:evalReason?null:at('tab=evals','dialog=run-eval'),reason:evalReason});
+ if(!skill.teamed){
+  actions.push(moveAction(skill,at),{key:'rename',label:'Rename…',to:at('dialog=file-rename'),reason:null},{key:'delete',label:'Delete…',to:at('dialog=file-delete'),reason:null});
+ }else actions.push(placeAction(skill,at));
+ actions.push(publishAction(skill,at));
  return actions;
 }
 
 type At = (...params:string[])=>string;
-/** Move re-places the installed copy between Global and a project checkout (Ryan, 2026-09-09:
- *  machine placement, not the team's project taxonomy). Only a Terum placement can be moved. */
+/** D18: move the local bytes, including edits, through the skillFile seam. */
 function moveAction(skill:SkillCard,at:At):CardAction {
- const reason=skill.placed?null
-  :skill.onDiskOnly?'This copy sits on your machine but Terum did not place it, so there is no placement to move.'
-  :'Install it before moving it.';
- return {key:'move',label:'Move to…',to:reason?null:at('dialog=move'),reason};
+ return {key:'move',label:'Move to…',to:at('dialog=file-move'),reason:null};
 }
 /** One state-dependent row: the card menu is the only place install and uninstall live. */
 function placeAction(skill:SkillCard,at:At):CardAction {
@@ -49,6 +49,11 @@ function placeAction(skill:SkillCard,at:At):CardAction {
  *  how its next version ships (§5.1 step 9 mints highest+1; identical bytes mint nothing). The
  *  endorsement-era `teamState` branches went with §12. */
 function publishAction(skill:SkillCard,at:At):CardAction {
- const reason=skill.path?null:'This skill is not on this machine, so there is nothing to publish.';
+ const reason=localActionReason(skill,'publish');
  return {key:'publish',label:'Publish to team…',to:reason?null:at('dialog=publish'),reason};
+}
+
+/** Shared path/inspection gate for the menu, detail buttons and pasted dialog URLs. */
+export function localActionReason(skill:Pick<SkillCard,'path'|'teamed'|'flags'|'flagText'>,action:'eval'|'publish'):string|null {
+ return !skill.path?(action==='eval'?'Install it first — evals run against the copy on your machine.':'This skill is not on this machine, so there is nothing to publish.'):!skill.teamed&&skill.flags.includes('broken')?skill.flagText.broken??'This folder is not a usable skill.':null;
 }

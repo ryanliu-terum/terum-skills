@@ -3,22 +3,19 @@ import { roiFractions } from '../score-fractions';
 import { comparisonSummary, receiptSummary } from '../receipt-summary';
 import type { EvalReportModel, Receipt } from '../types';
 // §3.2: the version vocabulary exists once, and the desktop imports the leaf by relative path.
-import { parseVersionFolder, versionLabel } from '../../../../src/lib/versions.js';
+import { recordedVersionLabel as versionText } from '../../../../src/lib/versions.js';
 
 /** A history row's version was a 40-hex tree hash before layout 3, which is why it was sliced to 12;
  *  it now holds a version FOLDER (`v1`), where slicing means nothing and the bare folder is not the
  *  UI form (§3.2). Anything that does not parse — a hash, the `—` sentinel — is passed through. */
-const versionText = (version: string): string => {
- const n = parseVersionFolder(version);
- return n === null ? version.slice(0, 12) : versionLabel(n);
-};
+
 
 const comparison = z.object({ win:z.number(), loss:z.number(), tie:z.number(), net_lift:z.number(), sign_p:z.number() }).passthrough();
 const efficiency = z.object({ turns:z.number().nullish(), duration_ms:z.number().nullish(), cost_usd:z.number().nullish() }).passthrough();
 const executionStatus = z.enum(['complete','partial','failed']);
 const verdict = z.enum(['PASS','NEUTRAL','FAIL']);
 const receipt = z.object({
- path:z.string(), version:z.string(), run_id:z.string(), verdict, execution_status:executionStatus,
+ path:z.string(), version:z.string().nullable(), run_id:z.string(), verdict, execution_status:executionStatus,
  expected_rows:z.number(), scored_rows:z.number(), attribution:z.string(),
  comparisons:z.record(z.string(),comparison), arm_scores:z.record(z.string(),z.number().nullable()),
  triggers:z.object({tp:z.number(),fn:z.number(),fp:z.number(),tn:z.number(),recall:z.number().nullable(),precision:z.number().nullable()}).passthrough().nullable(),

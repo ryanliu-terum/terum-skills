@@ -4,17 +4,17 @@ import type { WithForm } from '../lib/invocation.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { canonicalLedger, localSkillCounts, localRootLabel, localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
+import { canonicalLedger, isSkillFolder, localSkillCounts, localRootLabel, localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { printable, type SourceProblem } from '../lib/skill-source.js';
-import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
+import { canonicalDigest, readPerson, skillRecords } from '../lib/skills.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
 import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, skillEndorsement } from '../lib/readme.js';
 import { parseVersionFolder, versionFolderName, versionLabel } from '../lib/versions.js';
 import type { Receipt } from '../lib/evals/receipt.js';
-import { selectCardEval } from '../lib/evals/receipt-store.js';
+import { localReceiptsFor, selectCardEval } from '../lib/evals/receipt-store.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
@@ -59,10 +59,10 @@ export interface LsSkill {
   latestEvalState: 'ok' | 'none' | 'invalid';
   endorsement: string; description: string; grants: string | null; grantsHash: string | null; installedBy: readonly Installer[]; body: string | null; frontmatter: string | null; updated: string; receipt: LsReceipt | null;
 }
-export type LocalHealth = 'up-to-date' | 'update-available' | 'local-changed' | 'both' | 'gone-from-repo' | 'untracked' | 'unknown';
+export type LocalHealth = 'local-changed' | 'unknown';
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
-export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; description: string | null; frontmatter: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem; detail: string; description: string | null; frontmatter: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; edited: boolean; localEval: (Receipt & { path: string }) | null; localEvalStale: boolean; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem | 'failed'; detail: string; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
 /**
  * §8.4 — one member, whole, from the team read that already parsed `people/<handle>.json`.
  *
@@ -266,7 +266,6 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
   const discovery = await localSkillRoots(home, config.projects ?? []);
   const inventories = await Promise.all(discovery.roots.map(async (root) => ({ ...root, inventory: await localSkills(root.root, config, { scope: root.scope, stateRoot: store.root, ledger }) })));
   const sections: LocalSection[] = [];
-  const snapshots = new Map<string, { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; fingerprints?: Map<string, string>; complete: boolean }>();
   const stateOf = (entry: LocalEntry): string => {
     if (!entry.placement) return 'untracked locally';
     // D1: `Version N` is the only form a version takes in a user-facing string. The old ` @<8 hex>`
@@ -277,19 +276,28 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
     return `placement recorded from ${entry.placement.team}${ordinal === null ? '' : ` (${versionLabel(ordinal)})`}`;
   };
   const healthOf = async (entry: LocalEntry): Promise<LocalHealth> => {
-    if (entry.inspection.kind === 'rejected') return 'unknown';
-    if (!entry.placement) return 'untracked';
-    const snapshot = snapshots.get(entry.placement.team);
-    if (!snapshot?.complete || !snapshot.ids) return 'unknown';
-    if (!snapshot.ids.has(entry.placement.id)) return 'gone-from-repo';
-    const current = snapshot.fingerprints?.get(entry.placement.id);
-    if (current === undefined || entry.placementFingerprint === undefined) return 'unknown';
+    if (entry.placementFingerprint === undefined || (entry.inspection.kind === 'rejected' && ['symlink','nested-symlink','not-a-directory','inside-state-root'].includes(entry.inspection.reason))) return 'unknown';
+    try { return (await snapshotSkillDirectory(entry.path)).fingerprint !== entry.placementFingerprint ? 'local-changed' : 'unknown'; }
+    catch { return 'unknown'; }
+  };
+  // Read only the content-keyed LOCAL store, once per load. IDs identify older runs; a name alone
+  // cannot prove that two folders contain the same skill.
+  const receipts: Receipt[] = [];
+  const evalRoot = join(store.root, 'evals', 'local');
+  let digests: string[] = [];
+  try { digests = await readdir(evalRoot); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') io.print(String(error)); }
+  await Promise.all(digests.filter(d => /^[0-9a-f]{64}$/.test(d)).map(async digest => {
+    receipts.push(...(await localReceiptsFor(store.root, 'sha256:' + digest, line => io.print(line))).map(run => run.receipt).filter(receipt => receipt.content_digest === 'sha256:' + digest));
+  }));
+  receipts.sort((a, b) => b.run_id.localeCompare(a.run_id));
+  const evalOf = async (entry: LocalEntry) => {
+    if (entry.inspection.kind !== 'candidate') return { localEval: null, localEvalStale: false };
     try {
-      const placed = (await snapshotSkillDirectory(entry.path)).fingerprint;
-      const localChanged = placed !== entry.placementFingerprint;
-      const repoChanged = current !== entry.placementFingerprint;
-      return localChanged ? repoChanged ? 'both' : 'local-changed' : repoChanged ? 'update-available' : 'up-to-date';
-    } catch { return 'unknown'; }
+      const digest = await canonicalDigest(entry.path);
+      const receipt = receipts.find(r => r.content_digest === digest);
+      return { localEval: receipt ? { ...receipt, path: join(evalRoot, digest.slice(7), receipt.run_id, 'receipt.json') } : null,
+        localEvalStale: !receipt && entry.skillId !== null && receipts.some(r => r.skill_id === entry.skillId && r.content_digest !== digest) };
+    } catch { return { localEval: null, localEvalStale: false }; }
   };
   // Probe origins in one wave before rendering the ordered sections.
   const remotes = await Promise.all(inventories.map((root) => originRemote(root.repoRoot, runner)));
@@ -298,51 +306,41 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
     sections.push(local);
     io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}${root.registered ? '; registered' : ''}):`);
     if (root.repoRoot !== undefined) io.print(`  GitHub: ${local.remote === null ? 'not connected' : local.remote.slug === null ? `not connected (origin is ${printable(local.remote.url)})` : printable(local.remote.slug)}`);
-    for (const entry of inventory.entries) {
-      for (const ref of entry.placement ? [entry.placement] : []) {
-        if (snapshots.has(ref.team)) continue;
-        const snapshot: { teamJson?: Awaited<ReturnType<typeof readTeam>>; ids?: Set<string>; fingerprints?: Map<string, string>; complete: boolean } = { complete: false };
-        snapshots.set(ref.team, snapshot);
-        try {
-          const clone = store.teamClone(ref.team);
-          snapshot.teamJson = await readTeam(clone);
-          let complete = true;
-          const records = await skillRecords(clone, ref.team, { onProblem: () => { complete = false; } });
-          snapshot.ids = new Set(records.map((record) => record.id));
-          snapshot.complete = complete;
-          snapshot.fingerprints = new Map();
-          await mapWithConcurrency(records, FINGERPRINT_CONCURRENCY, async (record) => {
-            try { snapshot.fingerprints!.set(record.id, (await snapshotSkillDirectory(record.directory)).fingerprint); }
-            catch { /* An unreadable tree has no usable fingerprint. */ }
-          });
-        } catch { /* A ledger fact survives an unavailable clone. */ }
-      }
-    }
     // Recursive fingerprint reads dominate latency on UNC roots; retain row order after the wave.
     const healthNeeded = inventory.entries.filter((entry) => entry.placement !== undefined || entry.inspection.kind === 'candidate');
     const healths = new Map<LocalEntry, LocalHealth>();
     const computed = await mapWithConcurrency(healthNeeded, FINGERPRINT_CONCURRENCY, (entry) => healthOf(entry));
     healthNeeded.forEach((entry, index) => healths.set(entry, computed[index]!));
-    for (const entry of inventory.entries) {
+    const evals = await Promise.all(inventory.entries.map(evalOf));
+    for (const [entryIndex, entry] of inventory.entries.entries()) {
       const tracked = entry.placement !== undefined;
       const inspection = entry.inspection;
+      // §7.4(b) / D16: a plain file is not a skill folder — no row, no card, no count (isSkillFolder). A
+      // ledger row that points at one is reported the way a missing folder is, so the stale placement
+      // stays visible without drawing a card for a file.
+      if (!isSkillFolder(entry)) {
+        if (tracked) local.problems.push({ path: entry.path, reason: 'placement recorded in the ledger but the path is not a folder' });
+        continue;
+      }
       if (tracked || inspection.kind === 'candidate') {
-        const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions (connect needs --allow-privileged)' : undefined;
-        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, name: entry.name, path: entry.path, state: stateOf(entry), tracked, placement: entry.placement ?? null, health: healths.get(entry)!, description: describedBy(inspection), frontmatter: entry.frontmatter, category: entry.category, characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });
-      } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail, description: inspection.description ?? null, frontmatter: entry.frontmatter, category: entry.category, characters: entry.characters ?? null });
-      if (inspection.kind === 'failed') local.problems.push({ path: entry.path, reason: inspection.reason });
+        const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions' : undefined;
+        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, name: entry.name, path: entry.path, state: stateOf(entry), tracked, placement: entry.placement ?? null, health: healths.get(entry)!, edited: healths.get(entry) === 'local-changed', ...evals[entryIndex]!, description: describedBy(inspection), frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });
+      } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail, description: inspection.description ?? null, frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null });
+      if (inspection.kind === 'failed') {
+        if (!tracked) local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: 'failed', detail: inspection.reason, description: null, frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null });
+        local.problems.push({ path: entry.path, reason: inspection.reason });
+      }
     }
     for (const row of local.rows) io.print(`  ${printable(row.name)} — ${printable(row.state)}${row.problem === undefined ? '' : `; source problem: ${printable(row.problem)}`}; path: ${printable(row.path)}`);
     if (local.notOffered.length) {
-      io.print('Cannot be connected:');
+      io.print('Could not inspect as skills:');
       for (const entry of local.notOffered) io.print(`  ${printable(entry.name)} — ${printable(entry.detail)}; path: ${printable(entry.path)}`);
     }
     if (inventory.rootState === 'absent') io.print(`  none (${printable(inventory.root)} does not exist)`);
-    else if (inventory.rootState === 'scanned' && !inventory.entries.length) io.print('  none');
+    else if (inventory.rootState === 'scanned' && !inventory.entries.some(isSkillFolder)) io.print('  none');
     for (const problem of local.problems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
     io.print(`  ${local.counts.skillFolders} skill ${local.counts.skillFolders === 1 ? 'folder' : 'folders'} (${local.counts.connectable} connectable)`);
   }
   for (const problem of discovery.problems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
-  io.print('Team status is from local clones and may be stale; open endorsement requests are not checked.');
   return success({ roster: [], skills: [], problems: [], local: sections });
 }

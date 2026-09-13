@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { VERSION_FOLDER, parseVersionFolder, versionFolderName, versionLabel, versionsInTree } from '../versions.js';
+import { recordedVersionLabel, VERSION_FOLDER, parseVersionFolder, versionFolderName, versionLabel, versionsInTree } from '../versions.js';
 import { listVersions } from '../teamRepo.js';
 
 /** The `paths(prefix)` half of `MutableTree`: full repo-relative paths, unstripped (teamRepo.ts:325). */
@@ -129,3 +129,5 @@ describe('listVersions', () => {
     expect(await listVersions(root, 'deploy-check')).toEqual(versionsInTree(tree(Object.keys(layout)), 'deploy-check'));
   });
 });
+
+it.each([["v3", "Version 3"], ["abcdef1234567890abcdef1234567890abcdef12", "abcdef123456"]])("renders recorded version %s consistently", (version, label) => { expect(recordedVersionLabel(version)).toBe(label); });

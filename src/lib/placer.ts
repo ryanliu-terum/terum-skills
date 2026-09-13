@@ -167,9 +167,9 @@ export async function snapshotIfPresent(path: string): Promise<SkillSnapshot | u
   return snapshotSkillDirectory(path);
 }
 
-export async function moveToQuarantine(path: string, quarantineRoot: string, name: string): Promise<string> {
-  const directory = join(quarantineRoot, new Date().toISOString().replace(/[:.]/g, '-'));
-  const destination = join(directory, name);
+export async function moveToQuarantine(path: string, quarantineRoot: string, name: string, planned?: string): Promise<string> {
+  const destination = planned ?? join(quarantineRoot, new Date().toISOString().replace(/[:.]/g, '-'), name);
+  const directory = dirname(destination);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await moveDirectory(path, destination);
   return destination;
@@ -182,12 +182,19 @@ export async function moveToQuarantine(path: string, quarantineRoot: string, nam
  * restore of a displaced folder both go through it.
  */
 export async function moveDirectory(from: string, to: string): Promise<void> {
+  // A completed cross-volume copy may outlive an interrupted source removal. Only identical
+  // snapshots permit finishing that move; a different destination is never deleted here.
+  if (!(await isAbsent(to))) {
+    if ((await snapshotSkillDirectory(from)).fingerprint !== (await snapshotSkillDirectory(to)).fingerprint) throw new Error(`Move destination ${to} already exists with different bytes.`);
+    await fsForTests.rm(from, { recursive: true, force: true });
+    return;
+  }
   try {
     await fsForTests.rename(from, to);
   } catch (error) {
     if (!(error instanceof Error && 'code' in error && error.code === 'EXDEV')) throw error;
     await cp(from, to, { recursive: true, errorOnExist: true, force: false });
-    await rm(from, { recursive: true, force: true });
+    await fsForTests.rm(from, { recursive: true, force: true });
   }
 }
 
