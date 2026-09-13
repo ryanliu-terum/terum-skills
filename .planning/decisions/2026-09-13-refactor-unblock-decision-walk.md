@@ -348,3 +348,19 @@ The verify panel split on ten findings (four from the earlier B3 passes, six fro
 - Sequence: B3 fix commit (incl. D70's nulls/labels) → confirmation pass → #183 merges; **in parallel from the nulls commit:** re-recording in a scratch worktree off B3's tip; B4/B8 rebase → CI → merge. B5's spec resolution (D73–D76) can be written meanwhile; B5 is handed to Codex only once the re-recorded frames are merged.
 
 ---
+
+## Decision 78 — Standing authorizations for the overnight run (2026-09-13, 02:01 PDT)
+
+**Verdict: LOCK — "everything granted, 1 through 5"** (Ryan, 2026-09-13)
+
+Ryan's stated goal: the refactor spec fully implemented with every PR merged, targeting **09:00 America/Los_Angeles on 2026-09-13**; if implementation finishes earlier, `/hybrid-review` the most important PRs until **10:00**. Granted so Claude runs without asking:
+
+1. **#183 merges on Claude's report of green CI + a review with zero confirmed critical/high** — D53's exclusion of #183 is lifted for this run.
+2. **Rebase and force-push each child after its parent merges; retarget #184/#185 (and later PRs) to `main`; delete merged branches** in the Gotcha-10 order (retarget first). D63 made standing.
+3. **Take any fork a later review or confirmation pass surfaces**, logged in the A-ledger (`2026-09-12-unapproved-autonomous-decisions.md`, continuing A16+), under the unchanged limits: **no `npm publish`, never run `team migrate` against a real repo, no direct push to `main`.**
+4. **Run Codex builds for B5, B6, B9 and B7** in fresh worktrees (`npm ci` root and desktop), review each with `/hybrid-review`, fix, and merge on the D53 bar.
+5. **Fidelity boards:** a new board is filed as an owed deviation in `desktop/FIDELITY.md` rather than blocking on an oracle (the design-canvas copies on this Mac are stale).
+
+Not granted because not Ryan's to grant: the machine staying awake, Codex quota, `gh` auth. **Owed to Ryan, non-gating under grant 4:** reading A8's hand-merged `teamRepo.ts` resolution on B8 before or after #184 merges.
+
+---
