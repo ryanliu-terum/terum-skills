@@ -12,11 +12,11 @@ One per line, in this order: `hello` once, then any number of `print` and `ask`,
 
 | Frame | Shape | Meaning |
 |---|---|---|
-| `hello` | `{"t":"hello","protocol":1,"version":"0.1.5","verbs":[...],"features":{...}}` | Always first. `verbs` is every public verb as it may be invoked. `features` maps drawn affordances the desktop design assumes to whether this CLI version supports them; a `false` means hide or grey the control. Read it instead of hard-coding what the CLI can do. |
+| `hello` | `{"t":"hello","protocol":1,"version":"0.14.0","verbs":[...],"features":{...}}` | Always first. `verbs` is every public verb as it may be invoked. `features` maps drawn affordances the desktop design assumes to whether this CLI version supports them; a `false` means hide or grey the control. Read it instead of hard-coding what the CLI can do. |
 | `print` | `{"t":"print","level":"info"\|"warn"\|"error","line":"..."}` | Text the verb would have printed. Render it where the verb's output belongs. |
-| `ask` | `{"t":"ask","id":"q1","kind":"confirm"\|"text"\|"select"\|"path","question":"...","default":"...","choices":[...],"detail":["..."]}` | The verb is blocked until an `answer` with the same `id` arrives. `default` appears only for `text` and `path` when the verb offers one; `choices` only for `select`. `path` is `text` whose answer is a filesystem path: a shell may offer a folder chooser beside the field, a terminal reads a line as usual, and the answer is a string either way — a shell that treats `path` as `text` is correct, just less convenient. `detail` is optional and carries the lines the person needs in order to answer (for example the identity line, or a skill's requested allowed-tools); render it with the question, as the dialog's description, not in the transcript; absent means none. |
-| `progress` | `{"t":"progress","step":"...","current":n,"total":n}` | Coarse step reporting for a long verb. `install` and `setup`'s `evals` step emit it; every other verb is silent. `step` names the step (`evals`, or `install`'s four phases); `current` counts what is done so far and `total` appears only when the verb knows it. `features.progress` is `true`. Never required, never ordered against `ask`; a shell that ignores it is unaffected. |
-| `result` | `{"t":"result","verb":"install","ok":true,"exitCode":0,"value":{...}}` | Always last. `verb` is the invoked verb. `value` is the verb's own result object when it has one. A failing result may also carry `value`, the verb's partial result (for example, `eval` after a completed evaluation whose receipt commit failed). On failure: `ok:false`, `exitCode:1`, `error` is the one-line message, and `declined:true` when set by the CLI's typed decline (the person said no) rather than by matching the error text, and `refused:true` when the CLI refused the operation before any side effect (one team per machine); a refusal is not a decline. After `result` the CLI stops reading stdin and exits. |
+| `ask` | `{"t":"ask","id":"q1","kind":"confirm"\|"text"\|"select"\|"path","question":"...","default":"...","choices":[...],"detail":["..."]}` | The verb is blocked until an `answer` with the same `id` arrives. `default` appears for `text`, `path`, and `select` when the verb offers one; `choices` only for `select`. `path` is `text` whose answer is a filesystem path: a shell may offer a folder chooser beside the field, a terminal reads a line as usual, and the answer is a string either way — a shell that treats `path` as `text` is correct, just less convenient. `detail` is optional and carries the lines the person needs in order to answer (for example the identity line, or a skill's requested allowed-tools); render it with the question, as the dialog's description, not in the transcript; absent means none. |
+| `progress` | `{"t":"progress","step":"...","current":n,"total":n}` | Coarse step reporting for a long verb. `install` and eval batches (including setup’s `evals` step) emit it. `step` names the step (`evals`, or `install`'s four phases); `current` counts what is done so far and `total` appears only when the verb knows it. `features.progress` is `true`. Never required, never ordered against `ask`; a shell that ignores it is unaffected. |
+| `result` | `{"t":"result","verb":"install","ok":true,"exitCode":0,"value":{...}}` | Always last. `verb` is the invoked verb. `value` is the verb's own result object when it has one. A failing result may also carry `value`, the verb's partial result (for example, `eval` after a partially failed queue drain). On failure: `ok:false`, `exitCode:1`, `error` is the one-line message, and `declined:true` when set by the CLI's typed decline (the person said no) rather than by matching the error text, and `refused:true` when the CLI refused the operation before any side effect (one team per machine); a refusal is not a decline. After `result` the CLI stops reading stdin and exits. |
 
 The process exit code matches `result.exitCode`. The failure line is also written to stderr, exactly as without the flag, so a shell that only watches the exit code and stderr still works.
 
@@ -24,7 +24,7 @@ The process exit code matches `result.exitCode`. The failure line is also writte
 
 | Frame | Shape | Meaning |
 |---|---|---|
-| `answer` | `{"t":"answer","id":"q1","value":...}` | Answers the `ask` with that `id`. For `confirm`: a boolean, or one of `y`, `yes`, `true` (anything else is no). For `text` and `path`: a string; empty means take the default. For `select`: the 1-based index as a number, or the exact choice string. An invalid `select` answer gets a `print` warn frame and the same question is asked again with a new `id`, up to three times, then the verb fails. |
+| `answer` | `{"t":"answer","id":"q1","value":...}` | Answers the `ask` with that `id`. For `confirm`: a boolean, or one of `y`, `yes`, `true` (anything else is no). For `text` and `path`: a string; empty means take the default. For `select`: the 1-based index as a number, or the exact choice string; an empty or absent answer takes the offered default. An invalid `select` answer gets a `print` warn frame and the same question is asked again with a new `id`, up to three times, then the verb fails. |
 | `cancel` | `{"t":"cancel"}` | Abandons the run. Every pending question fails closed and the bin runs its shutdown hooks and exits 143 — killing its live agent children with SIGKILL first, and releasing any file lock it holds. A terminal `result` frame is not guaranteed after cancellation. |
 
 Closing stdin fails pending questions closed; it does not invoke the bin’s cancellation hook. Send `cancel` to stop work that does not ask questions. Malformed lines and answers to unknown ids are reported on stderr and ignored; they never disturb a pending question.
@@ -41,8 +41,8 @@ Closing stdin fails pending questions closed; it does not invoke the bin’s can
 ## Read sessions (`serve`)
 
 `terum-skills --frames serve` starts one stdio session, advertising `features.serve: true`
-in its single `hello`. Without `--frames`, `serve` immediately writes a result-shaped failure
-(`ok:false`, `error:"serve requires --frames"`) and exits 1. This is an app-owned child, not a
+in its single `hello`. Without `--frames`, `serve` immediately fails
+with the error `serve requires --frames` and exits 1. This is an app-owned child, not a
 network server or a daemon.
 
 Send one JSON request per stdin line:
@@ -81,13 +81,13 @@ questions closed, and exits 0 after their results. Malformed lines, unknown fram
 duplicate in-flight ids, and answers to unknown ids are diagnosed on stderr and ignored;
 none may disturb a pending question or write unframed text to stdout.
 
-Example (`>` is stdout, `<` is stdin):
+Abbreviated example (`>` is stdout, `<` is stdin; the complete hello inventory is below):
 
 ```text
-> {"t":"hello","protocol":1,"version":"0.13.0","verbs":["status","ls","serve"],"features":{"serve":true}}
+> {"t":"hello","protocol":1,"version":"0.14.0","verbs":["status","ls","serve"],"features":{"serve":true}}
 < {"t":"request","id":"r1","argv":["status"]}
 < {"t":"request","id":"r2","argv":["ls","--local"],"cwd":"/work/acme"}
-> {"t":"print","id":"r1","level":"info","line":"terum-skills 0.13.0"}
+> {"t":"print","id":"r1","level":"info","line":"terum-skills 0.14.0"}
 > {"t":"result","id":"r1","verb":"status","ok":true,"exitCode":0,"value":{"teams":[]}}
 > {"t":"result","id":"r2","verb":"ls","ok":true,"exitCode":0,"value":{"local":[]}}
 < {"t":"request","id":"r3","argv":["install","example"]}
@@ -109,11 +109,11 @@ and question ids, with only the advertised verb and feature lists extended.
 
 ```
 $ printf '' | terum-skills --frames status
-{"t":"hello","protocol":1,"version":"0.1.5","verbs":["login","setup",...],"features":{"favorites":false,...}}
-{"t":"print","level":"info","line":"terum-skills 0.1.5"}
+{"t":"hello","protocol":1,"version":"0.14.0","verbs":["login","setup",...],"features":{"favorites":false,...}}
+{"t":"print","level":"info","line":"terum-skills 0.14.0"}
 {"t":"print","level":"info","line":"Get started:"}
 ...
-{"t":"result","verb":"status","ok":true,"exitCode":0,"value":{"version":"0.1.5","teams":[]}}
+{"t":"result","verb":"status","ok":true,"exitCode":0,"value":{"version":"0.14.0","teams":[]}}
 ```
 
 An `install` whose tool grants are declined:
@@ -121,7 +121,7 @@ An `install` whose tool grants are declined:
 ```
 > {"t":"ask","id":"q1","kind":"confirm","question":"Approve these tools for tdd?"}
 < {"t":"answer","id":"q1","value":false}
-> {"t":"result","verb":"install","ok":false,"exitCode":1,"error":"Install was declined.","declined":true}
+> {"t":"result","verb":"install","ok":false,"exitCode":1,"error":"Consent was declined for tdd.","declined":true}
 ```
 
 A second-team binding refused before any side effect:
@@ -132,23 +132,112 @@ A second-team binding refused before any side effect:
 
 ## Versioning
 
-Protocol stays 1. `hello.features.localIdentity` advertises the additive `ls --local` identity fields: every row and `notOffered` entry carries `skillId` (UUID or null), and every row carries independent `placed` and `connected` booleans. The app declares these keys optional while keeping local rows strict, so older CLIs remain readable; presence joins require the feature. `ls member` adds `member.installed` records (`id`, `scope`, `since`), and `connect` may return `adopted: true` after consent to record an existing identity. These are additive result fields. `ls --local` additionally carries `remote` on every section (`{url, slug}` or `null`, where `slug` is owner/repo on GitHub and null on every other host); the app declares it optional so an older CLI reads as "not connected".
+The current package reports version `0.14.0`, protocol `1`. The re-recorded 0.14.0
+hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verbs;
+`src/lib/frames.ts` now advertises this complete verb list:
 
-`hello.features` names `favorites`, `follow`, `roles`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `memberRole`, `localIdentity`, `libraryProjects`, `projects`, `refresh`, `appUpdate`, and `serve`. `refresh` advertises that `sync` is fetch-only, so a shell may call it in the background. `memberRole` is the owner-written job label and is true; `roles` is the Admin/Member permission chip and is true — `status` emits a per-member `admin: boolean | null` derived from the repository's GitHub collaborator permissions via gh, and only when `status --permissions` is passed (null when the flag is absent, when gh is absent, or when the lookup fails or times out). `libraryProjects` is true and means the `project add`, `project remove`, and `project list` verbs and the `registered` section field exist — the folders this machine reads local skills from. It is named `libraryProjects` rather than `projects` because `projects` was already taken, and one boolean cannot mean two things. `projects` is true and means the `team project create` verb exists: a shell may offer creating a team project (a name in `team.json projects` and the repository its skills place into), which is a different act from adding a local project folder. `installScope` is true: install destinations and destination-aware removal are available. `refresh` is true and means the `refresh` verb exists: a shell may fetch each team clone to `origin/main` in the background without running `sync`, so a teammate's committed work becomes visible to the read verbs. `liftOnCards` is true and means `ls` carries the per-skill `receipt` limb described below, so a shell may show a skill's net lift on its card; a shell whose CLI reports it false shows the verdict-free "—" card instead. Lift on a card must be rendered with its receipt's provenance (`model`, `k`, `cc_version`, `runner_handle`, `timestamp`) reachable from the same element, and no skill list may be sorted or ranked by any receipt number.
+```json
+["skill move","skill rename","skill delete","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team workflow-update","team project create","invite","ls","status","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
+```
 
-`appUpdate` is true and means the `app-update` verb exists: a shell may check for, download and install a newer desktop app. A CLI that omits the key cannot, and a shell must render the honest read-only state instead of trying.
+`team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the
+caller to run it from a terminal (D24). The refresh feature is true, but there is no standalone refresh
+command: use `sync`. Neither belongs in the advertised verb list.
 
-`hello.protocol` is `1`. `install`, `sync`, and `uninstall-skill` carry `detail` on their confirmation asks. `detail` is an additive optional field: protocol stays 1. Additive changes (new optional fields, new `features` keys, a verb starting to emit `progress`) do not bump it. A change that alters the meaning of an existing field does.
+`hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, and `serve`.
 
-Each `ls` team skill carries `receipt`: the newest schema-valid committed receipt at that skill's own
-current tree hash, reduced to the card's display facts — `{ run_id, verdict, execution_status,
+True: `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `installScope`,
+`liftOnCards`, `runEvalInApp`, `progress`, `refresh`, `appUpdate`, `serve`.
+False: `favorites`, `follow`, `lastSeen`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `perCase`.
+
+`libraryProjects` is the explicit local registry (`project add`, `project remove`, `project list`);
+`projects` is team grouping (`team project create`). `memberRole` is the owner-written job label;
+`roles` supports GitHub Admin/Member permissions from `status --permissions` (otherwise unknown).
+`installScope` supports destinations and destination-aware removal. `appUpdate` and `serve`
+advertise their respective verbs. Read feature values rather than assuming a control is available.
+
+`localIdentity` covers `skillId` on local rows and rejected entries, and `placed` on rows.
+Local inventory is a scan of Global and explicitly registered project roots; it reads no clone.
+Team `ls` includes `people` with automatic `installed` records and curated `profile` entries.
+
+Each team skill's `latestVersion` is its highest `v<N>` folder; `versionCount` counts versions.
+The `receipt` limb contains one receipt's display facts — `{ run_id, verdict, execution_status,
 expected_rows, scored_rows, comparisons, arm_scores, provenance: { model, k, cc_version, timestamp,
-runner_handle } }` — under the receipt's own field names, or null when that version has no receipt
-(the honest "—" state). `comparisons` and `arm_scores` are the receipt's own records, verbatim; a
-shell reads `comparisons['candidate-vs-baseline']` for the card and never combines receipts. The limb
-costs no extra process: `ls` has already resolved each skill's version. A receipt that is unreadable,
-or whose `skill_id`/`version` disagrees with its path, is reported as that skill's problem and leaves
-the limb null — it never fails the listing.
+runner_handle } }` — or null. `comparisons` and `arm_scores` retain the receipt's own records.
+The reader tries versions in descending numeric order, taking each version's newest receipt;
+an invalid or misfiled newest receipt is reported and that version is skipped. `evalVersion`
+identifies the selected version and `latestEvalState` is `ok`, `none`, or `invalid` for the latest
+version. An older receipt must be labelled as such, including when the latest is unreadable.
+Render runner/model/k/time provenance with the score; do not combine receipts or rank by their numbers.
+
+`detail` on asks is optional and additive; protocol remains 1. Install's grant and replacement
+questions, and removal inventories, carry the information needed to answer in that field.
+Sync has no consent question and does not place skills.
+
+### Install, publish, and Library writes
+
+`install <ref> [--into global|<project root>]` installs the highest numbered version in the clone,
+including its eval assets. `install member <handle>` and `install project <name>` use the same
+placement path for a list. Version-suffixed skill refs are refused. An unregistered project path
+is refused with a `project add` hint; install never registers a root itself.
+
+Without `--into`, frames are interactive: the CLI emits a `select` ask named `Install to`, even
+when Global is the only choice. Choices are `Global (~/.claude/skills)` and each registered
+`<label> · <root>`. Global is the default unless a team project's remotes match exactly one local
+project, which becomes the default; multiple matches offer no default. An explicit destination
+skips this ask. A noninteractive terminal invocation defaults to Global only with no registered projects.
+
+After any tool-grant consent, a collision emits this ask (paths and Version N come from the run):
+
+```json
+{"t":"ask","id":"q2","kind":"confirm","question":"Replace it with Version 4?","detail":["You already have a skill named deploy-check.","Your copy is kept at /work/web/.claude/old-skills/deploy-check."]}
+```
+
+Only an affirmative answer moves the existing folder to old-skills and places the new copy.
+A pre-existing kept copy causes a refusal; it is never overwritten. Old-skills is a sibling of
+the targeted skills root, is excluded locally for a project, and is neither scanned nor pruned.
+The optional profile confirm follows placement and the install-record write; `--yes-profile`
+pre-answers only that offer. Install seeds receipts under their own `content_digest`, preserving
+runner attribution. A receipt lacking a digest is skipped with `Skipped <runId>: no content digest (pre-migration receipt).`
+Pending intent may already exist when replacement is declined; retry the matching install to drain it.
+The result is an array of `{ id, team, path, version, profiled }`.
+
+`publish <ref> [--project <name>] [--category <name>]` resolves a local Library folder, checks
+injected frontmatter, writes it back locally, and publishes directly to main as an immutable version.
+Identical bytes reuse the existing version and can still attach receipts or add project membership.
+A local FAIL receipt can trigger a confirm; multiple projects without `--project` trigger a
+`Which project?` select defaulting to Global. There is no unconditional publish confirmation.
+The profile offer follows the team write. A failed team write can leave injected local frontmatter;
+a failed profile offer does not undo publication.
+
+Category precedence is declared frontmatter, `--category`, model suggestion, then `misc`.
+A declared category makes no model call and emits no line. Otherwise a `print` frame precedes
+any subsequent question and write, with exactly one of:
+
+```text
+metadata.terum-category: X (from --category; edit SKILL.md any time)
+metadata.terum-category: X (suggested from your SKILL.md; edit any time)
+metadata.terum-category: misc (couldn't reach the model; edit SKILL.md any time)
+```
+
+Off-list categories produce an HYG7 warning at publish. Eval and validate do not supply a category
+list. The publish result is `{ team, id, name, project, version, created, identicalTo, attachedEvals,
+profileAdded, projectAdded }`; `version` is null on identical content and `identicalTo` names that version.
+
+`skill move <path> --to global|<project root>`, `skill rename <path> --to <new-name>`, and
+`skill delete <path>` are one-shot frame writes. Their `text` ask is `Type <name> to <operation> this folder`.
+They require a direct child of a Library root and refuse symlinks. Move preserves local bytes;
+a destination collision is kept in that root's old-skills (an existing backup refuses). Rename
+rewrites readable frontmatter to match the new folder name; publishing under a new name starts
+a new lineage. Delete removes an unmodified placement outright, quarantines an edited placement,
+and quarantines a folder not tracked as a placement. Placement deletion also updates install records.
+The result is `{ kind, path, destination, quarantined, installed, notices }`.
+
+`prune` lists quarantine paths and asks `Delete <n> quarantined item(s)?`; empty quarantine asks
+nothing. Its result is `{ deleted, declined }`. It does not clean old-skills.
+
+Neither `skill` nor `project` is in `SERVE_READ_VERBS`: serve gates on the first argv token, so
+even `project list` needs its own process. The six accepted read verbs are unchanged.
 
 ## What `status` reports about this machine
 
@@ -174,26 +263,14 @@ These are additive result fields; protocol stays 1.
 
 `eval-report <skill> [--team <team>]` is read-only: it reads the local clone and this machine's run tree without fetching, networking, or prompting. `result.value` is an `EvalReport`:
 
-- `skill: { id, name }` and `versions: { placed, teamCurrent, evaluated }`; versions are full tree hashes, with `placed` and `evaluated` nullable.
-- `latest`: the newest committed receipt for `teamCurrent`, verbatim with an absolute `path`, or null; `latestState` is `ok`, `none`, or `invalid`. An invalid newest receipt produces one warning and is never replaced by an older receipt.
-- `history`: schema-valid committed receipts across version directories, newest first by `run_id`, as `{ version, run_id, verdict, execution_status, model, cc_version, runner_handle, timestamp, comparison, committed: true }` rows. `runner_handle` and `timestamp` come verbatim from provenance; `comparison` is the receipt's `candidate-vs-baseline` comparison (`win`, `loss`, `tie`, `net_lift`, `sign_p`), or null.
-- `localRuns`: directories containing `run.jsonl`, newest first, as `{ run_id, run_dir, execution_status, committed, receipt }` rows. `run_dir` is absolute; `receipt` is the schema-valid local `receipt.json` with an absolute `path`, or null. Status comes from that receipt or is `unknown`; `committed` indicates a matching run ID in history. No statistics are derived from the log.
+- `skill: { id, name }` and `versions: { placed, teamCurrent, evaluated }`; versions are `v<N>` strings or null.
+- `latest`: the newest committed receipt for `teamCurrent`, verbatim with an absolute `path`, or null; `latestState` is `ok`, `none`, or `invalid`. When the current version has no receipt, history can supply one and `fallbackFrom` names its version. An invalid newest receipt produces a warning and blocks this report’s fallback, unlike the team-list card reader.
+- `history`: schema-valid committed receipts across version directories, sorted by numeric version descending, then `run_id` descending, as `{ version, run_id, verdict, execution_status, model, cc_version, runner_handle, timestamp, comparison, committed: true }` rows. `runner_handle` and `timestamp` come verbatim from provenance; `comparison` is the receipt's `candidate-vs-baseline` comparison (`win`, `loss`, `tie`, `net_lift`, `sign_p`), or null.
+- `localRuns`: merged from the current local folder’s digest-keyed store and legacy per-team run trees; only directories containing `run.jsonl` are included, newest first, as `{ run_id, run_dir, execution_status, committed, receipt }` rows. `run_dir` is absolute; `receipt` is the schema-valid local `receipt.json` with an absolute `path`, or null. Status comes from that receipt or is `unknown`; `committed` indicates a matching run ID in history. No statistics are derived from the log.
 
-`refresh [--team <team>]` moves each configured team clone to `origin/main` — `git fetch origin` then
-`git reset --hard origin/main`, under the same per-clone writer lock every write verb takes — and does nothing
-else: no placement, no pending replay, no auto-share, no push, no question, and **no `run/<team>.stamp` write**
-(the stamp means "fully synced" and still belongs to `sync` alone). The clone is disposable state, so a local
-commit in it is discarded by the reset. `result.value` is:
-
-- `changed: boolean` — true when at least one clone moved.
-- `teams`: one row per team as `{ team, state, changed, head, detail? }`. `state` is `refreshed` (the fetch and
-  reset ran), `busy` (another process holds that clone's writer lock — that process is itself fetching),
-  `unreachable` (a recognised remote access failure), `no-clone` (nothing at the path, an incomplete clone, or a
-  clone of a different remote — never repaired here), or `error`. `head` is HEAD after the attempt or null;
-  `detail` is this CLI's own explanation for any state other than `refreshed`.
-
-Exit code is 0 whenever the query ran: a per-team failure is reported in its row, never as a process failure.
-Over frames the verb emits only `hello` and `result`.
+`sync [--team <team>]` fetches and resets the disposable clone under its writer lock and records
+a fetch stamp. It neither places skills nor replays pending work. See `f-sync` for the result
+shape and per-team failures. Over frames it emits hello and result; there is no separate refresh verb.
 
 `project add [path]` · `project remove <path>` · `project list` are the Library's local project registry. `add` asks `Which folder?` as a `path` ask when no argument is given (default: the nearest git repository above the cwd) and returns `{ path, label, added }`; `remove` returns `{ path, placementsRemaining }` and forgets the path only — nothing on disk changes; `list` returns `{ projects: { path, label, rootState, skillFolders }[] }`. A project is added only by an explicit act: no verb registers one as a side effect, and `install --into <path>` refuses a path that is not already a project rather than adding it.
 
@@ -244,15 +321,17 @@ The shared overnight hook resets idleness before handling activity. A timer more
 
 ### f-wizard
 
-`eval --queue-list` returns `{ items }`, where each item has `team`, `skill`, `version`, `requestedAt`,
+`eval --queue-list` returns `{ items }`, where each item has `skill`, `path`, `contentHash`, `requestedAt`, optional `team`,
 `window: "overnight" | "later"`, and an optional `lastError`. `eval --dequeue <team>/<skill>` removes all queued
-versions of that team/skill and returns `{ items }` with the remaining queue. Missing queue state is empty;
-malformed or unreadable state fails without replacing it.
+items of that team/skill and returns `{ items }` with the remaining queue. A bare skill selector is also accepted. Missing queue state is empty;
+invalid legacy items are dropped with a notice, while malformed or unreadable queue files fail without replacement.
 
 `eval --drain [--parallel n] [--window overnight] [--max n]` returns `{ items, attempted, completed, failures }`.
 `failures` contains `{ item, error }` entries. A failure returns `ok:false` with that partial value, retains the
-item with `lastError`, and continues siblings up to the positive-integer attempt limit. The bounded pool defaults to four concurrent evals. Runs with committed receipts are removed even when their execution status is partial or failed; that status remains visible in output. Uncommitted runs and changed queued versions without receipts remain. After refresh, an existing receipt for the pinned version satisfies the queue item before any paid work.
-Runs use ordinary eval preflight and consent; a drain never auto-answers a generated-asset confirmation.
+item with `lastError`, and continues siblings up to the positive-integer attempt limit. The bounded pool defaults to four concurrent evals. A successful eval result removes its queue item, including a successful result reporting partial
+or failed execution. Changed queued bytes fail without paid work and remain queued with an error. An existing local receipt for
+the queued digest satisfies the item before paid work. A failing result retains the item with its error.
+Generation only fills missing local assets and prints its disclosure before writing.
 Print and `progress` frames identify the current eval; no new verb or feature key is added.
 
 Setup keeps the existing eval question string and uses a select with `Now`, `In batches`, `Overnight`, `Skip`
@@ -306,8 +385,7 @@ dirty and got reset counts as moved, because the read verbs now see something di
 
 A successful fetch writes a JSON `{head, at}` stamp, which means *this clone was fetched at this time*
 — never *these skills were reconciled*. A team whose HEAD could not be read is deliberately left
-unstamped so the next run retries it. Empty and ISO legacy stamps remain valid for freshness but
-cannot establish an unchanged HEAD. A fetch that outruns the deadline is killed, so a background
+unstamped. A fetch that outruns the deadline is killed, so a background
 caller never wedges, and Git terminal prompts are disabled for the whole run.
 
 `--hook` is the session-start entry and must never be driven over frames (rule 2). It is also the one

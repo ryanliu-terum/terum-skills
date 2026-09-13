@@ -200,6 +200,13 @@ it('CP-19: every feature is named in the protocol features sentence', () => {
   expect(sentence).toBeDefined();
   for (const key of Object.keys(FRAME_FEATURES)) expect(sentence).toContain(`\`${key}\``);
 });
+it('B7: the documented complete hello verb list matches the running CLI', () => {
+  const doc = readFileSync(new URL('../../../docs/frame-protocol.md', import.meta.url), 'utf8');
+  const versioning = doc.split('## Versioning\n')[1]!;
+  const inventory = versioning.match(/```json\n([^]*?)\n```/);
+  expect(inventory).not.toBeNull();
+  expect(JSON.parse(inventory![1]!)).toEqual([...FRAME_VERBS]);
+});
 
 it('a typed refusal emits refused without declined', () => {
   const s = shell();

@@ -59,7 +59,7 @@ npx -y terum-skills@latest app
 
 There is no install step — `npx -y` fetches and runs the latest release every time. (Prefer a permanent `terum-skills` binary? See [Installing, updating, uninstalling](#installing-updating-uninstalling).)
 
-Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/skills/terum-skills/`, so Claude Code can run these commands for you inside a session (and hand you the ones that need a terminal). It ships inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes it.
+Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/skills/terum-skills/`, so Claude Code can run these commands for you inside a session (and hand you the ones that need a terminal). It ships inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes it. The session hook also refreshes an outdated managed copy and announces the update; it leaves a foreign copy alone.
 
 ## How it works
 
@@ -67,7 +67,7 @@ Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/sk
 
 **Local-first, with shared skills in a team Github, created on setup** The team repo holds every skill and their unique versions in GitHub along with each skill's associated eval. Each individual has their own .json detailing their personal profile along with the skills they have published or have installed. 
 
-**Sharing skills with a team** To share a skill with a team, you must explicitly publish the skill. If no skill already exists in the shared repo with the same name, creates a Version 1 of that skill as you shared it. Team members get the shared skill on the next git pull from the remote repo(every 1hr, can manually sync on demand). If a skill with the same name already exists, check if any of the versions are identical to the version you are trying to publish. If identical, attach any new local evals you have ran associated with that version to the shared repo. If not identical, create a new version of that skill by incrementally increasing the version number. 
+**Sharing skills with a team** To share a skill with a team, you must explicitly publish the skill. If no skill already exists in the shared repo with the same name, creates a Version 1 of that skill as you shared it. A fetch makes the published version visible in teammates’ local Marketplace clones; they explicitly install it to copy it into their Library. If a skill with the same name already exists, check if any of the versions are identical to the version you are trying to publish. If identical, attach any new local evals you have ran associated with that version to the shared repo. If not identical, create a new version of that skill by incrementally increasing the version number. 
 
 **The team marketplace holds your teams shared skills** Marketplace shows you all of the published skills by your team members along with their evals
 
@@ -117,19 +117,20 @@ By default, each case runs once. Use `--k 3` when you need a more stable estimat
 Evaluation has two parts: hygiene and execution.
 
 #### Hygiene
-Hygiene checks are deterministic and free. They run before skill content reaches the repository through `validate`, `connect`, `sync`, `publish`, `eval`, or team CI.
+Hygiene checks are deterministic and free. Use `validate` for a free check. `publish` checks its injected frontmatter before writing; `eval` checks local bytes while permitting missing managed fields. Validation uses team policy and does not inject fields.
 
 | Code | Fails when |
 | --- | --- |
 | `HYG1` | Frontmatter does not parse, the folder name differs from `name`, or `allowed-tools` grants are malformed. |
 | `HYG2` | A text file contains bidirectional or zero-width characters, or a token mixes scripts in a way that resembles a homoglyph attack. |
 | `HYG3` | A file contains a credential pattern or an email address other than the author's own. |
-| `HYG4` | A file has an executable bit or shebang without `--allow-privileged` consent, or uses an extension outside the allowlist. |
+| `HYG4` | A file has an executable bit or shebang in a check that disallows executables, or uses an extension outside the allowlist. Publish permits executable content; local eval and validate do not. |
 | `HYG5` | The frontmatter license, team policy license, and any bundled `LICENSE` file disagree. |
 | `HYG6` | `description` is empty. A `SKILL.md` longer than 20,000 characters produces a warning but does not block. |
+| `HYG7` | At publish, a category outside the team list produces a warning. Eval and validate do not supply that list. |
 
 #### Execution
-`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The command reads the team clone and writes only to its local run directory, plus a receipt when you pass `--commit`. It does not modify `skills/`, `people/`, or installed copies of a skill.
+`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path and content change first. Only publish shares skill bytes and matching receipts.
 
 ### Writing evals
 Eval files live inside the skill folder and travel with the skill.
@@ -219,7 +220,7 @@ You can evaluate a skill even when it does not include eval files. By default, `
 
 - if neither exists, generation creates three execution cases, including at least one adversarial case, plus five positive and five negative trigger prompts.
 
-Generation reads the complete skill and the team catalog. Negative trigger prompts are based on nearby sibling skills, so they test realistic confusion rather than random unrelated requests.
+Generation reads the complete local skill and a local catalog of sibling skills. Negative trigger prompts are based on nearby sibling skills, so they test realistic confusion rather than random unrelated requests.
 
 Every generated file is checked against the real case or trigger schema before it is used. Generated cases may use the five declarative checks, but not `command_succeeds`; this prevents the generator from inventing an incorrect verification program. If the files are still invalid after two correction attempts, the eval stops with an error.
 
@@ -239,16 +240,16 @@ The header also records the model and generation time.
 The runner records `claude --version` and sends a one-turn smoke task. A logged-out or broken CLI therefore fails before the full set of paid trials begins.
 
 #### 2. Trigger evaluation
-The selection catalog contains the team's endorsed skills plus the candidate skill. For each trigger prompt, a tool-free one-turn call chooses which skills apply. The report shows recall, precision, and every `MISS` or `FALSE-FIRE`.
+The selection catalog contains usable skills in the candidate’s Library root plus the candidate itself; it does not read the team catalog. For each trigger prompt, a tool-free one-turn call chooses which skills apply. The report shows recall, precision, and every `MISS` or `FALSE-FIRE`.
 
 #### 3. Execution arms
-Each case runs in three arms, with `k` repetitions per arm:
+Each case runs against baseline, with an incumbent arm when one is available, and `k` repetitions per arm:
 
 | Arm | What it contains |
 | --- | --- |
 | Baseline | No copy of the skill under test. |
 | Candidate | The version currently being evaluated. |
-| Incumbent | The latest version with a committed receipt. This shows whether a republish improves on what it would replace. |
+| Incumbent | The published version with the most recent receipt, excluding versions identical to the candidate bytes. Omitted when no eligible version exists. |
 
 Every repetition runs `claude -p` in a fresh sandbox with `--setting-sources project`, preventing user-level skills from leaking into the run. The engine checks the resolved skill list and refuses to continue if the tested skill appears in baseline or is missing from candidate.
 
@@ -297,17 +298,18 @@ The report also includes:
 
 
 ### Receipts
-`eval --commit` writes one immutable receipt to:
+`eval` writes a local receipt under `~/.terum/skills/evals/local/<digest>/<run-id>/`.
+Its content digest identifies the evaluated bytes; its version is null until publish attaches a copy.
+`publish` shares matching receipts alongside the immutable version at:
 
 ```text
-
-evals/<skill-id>/<tree-hash>/<run-id>.json
-
+evals/<skill-id>/v<N>/<run-id>.json
 ```
 
-The tree hash pins the exact bytes that were evaluated. Running the same version again adds another receipt beside the earlier one; receipts are never overwritten or deleted.
+Identical bytes reuse the existing version and can receive additional matching receipts.
+Eval cases are part of the skill's content: generating or editing them changes the digest.
 
-Anyone can evaluate any team member's skill. A receipt records:
+Anyone can evaluate a local skill, including a copy installed from a teammate. A receipt records:
 
 - who ran the eval;
 
@@ -321,7 +323,7 @@ Anyone can evaluate any team member's skill. A receipt records:
 
 Results are only compared when their model and Claude Code versions match.
 
-`--working` evaluates your connected local source instead of the stored copy. It cannot be combined with `--commit`, because receipts only pin committed trees.
+To share a local run, publish the matching skill bytes. Runs remain on this machine until then.
 
 ### Where the design comes from
 The framework's measurement discipline comes from [NVIDIA's SkillEvaluator](https://docs.nvidia.com/skills/skillevaluator). We didn't adopt it on reputation: we ran it end-to-end on our own skills first, and kept what survived that trial. The adoptions fall into three groups.
@@ -334,7 +336,7 @@ The framework's measurement discipline comes from [NVIDIA's SkillEvaluator](htt
 
 ****What we deliberately left behind.**** SkillEvaluator's live-execution tier requires containers and a raw API key — an onboarding tax we measured firsthand, and one that shuts out subscription-authenticated agents entirely. We also passed on its agent-agnostic harness, its embedding-based deduplication tier, its cloud sandbox backends, and its five-dimension 0-to-1 rubric as the headline score: at the sample sizes a team can actually afford, a win/loss record summarized as net lift is the more honest instrument.
 
-The execution engine itself is our own: a three-arm, comparison-first harness that drives each member's own logged-in agent instead of containers or cloud sandboxes, plus the trigger evals measured against the team's real catalog, the incumbent regression arm, the committed receipt system, and the display rules above. SkillEvaluator supplied the discipline; our own measurements supplied every departure from it.
+The execution engine itself is our own: a three-arm, comparison-first harness that drives each member's own logged-in agent instead of containers or cloud sandboxes, plus the trigger evals measured against the local skill catalog, the incumbent regression arm, the committed receipt system, and the display rules above. SkillEvaluator supplied the discipline; our own measurements supplied every departure from it.
 
 ### Why it's built this way
 Every rule above traces back to something we measured rather than assumed: that real execution is non-negotiable, that repetition is the price of a trustworthy verdict, that arm scores are stable where their differences are not, and that honest small-sample statistics mean saying "neutral" far more often than a marketing page would like. The framework's job is not to make skills look good. It's to make one command produce a verdict a teammate can commit, audit, and believe.
@@ -366,21 +368,21 @@ Release notices appear last on stderr, at most once per release per day, and are
 | | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
 | | `team migrate` | Convert a team repo to the versioned layout (one commit per repo). Run **once per team, from a terminal**, and only after the release carrying the new CLI has reached everyone — an un-upgraded teammate cannot read a migrated repo |
 | | `team project create [<name>] [--remote <url>]` | Create a team project: a name and the repository its skills place into (the skills themselves are added with `publish --project`) |
-| | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` / `decline <ref>` | Describe yourself in your own people file (job label, projects) / record a shared skill you decline |
-| Skills | `connect [<path>]` | Put a local skill folder in the team repo and keep your later edits synced |
-| | `install <ref> [--into global\|<project root>] [--yes-profile]` / `uninstall-skill <ref> [--from global\|<checkout root>]` | Install the latest version with a destination choice and a replace prompt, keeping an existing copy in `.claude/old-skills/`; uninstall leaves your profile unchanged (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |
+| | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` | Describe yourself in your own people file (job label, team projects) |
+| Skills | `install <ref> [--into global\|<project root>] [--yes-profile]` / `uninstall-skill <ref> [--from global\|<project root>]` | Install the highest numbered version in the clone. Interactive use always offers Global and added projects; `--into` selects explicitly and refuses unregistered project roots. A replace prompt keeps the existing folder in the targeted root’s `.claude/old-skills/<name>`; an existing backup there must be moved elsewhere first; uninstall leaves your profile unchanged (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |
 | | `sync` | Fetch each team clone and reset it to `origin/main`; it never places, uploads, or edits local skills |
 | | `prune` | List quarantined items and delete the ones you confirm |
-| | `skill move <path> --to global\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` | Move, rename, or delete a folder in your Library, after confirming by name. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` is the only thing that hard-deletes |
-| | `refresh` | Fetch the team clone to `origin/main` and nothing else — no placement, no sharing, no stamp; the desktop app runs it in the background so a teammate's committed work becomes visible |
+| | `skill move <path> --to global\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` | Move, rename, or delete a folder in your Library, after confirming by name. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |
 | | `serve` | Answer read requests on one long-lived process instead of starting a new one per call (`--frames` only; the desktop app drives it). Reads only: `status`, `ls`, `eval-report`, `search`, `validate`, `update` |
-| | `publish <skill>` | Endorse a skill for the team: a PR (default policy) or a direct commit |
+| | `publish <ref> [--project <name>] [--category <name>]` | Publish a local folder as an immutable version directly to main, or reuse identical bytes and attach matching evals. Select a team project (Global by default). Category precedence: declared frontmatter, flag, model suggestion, misc fallback; undeclared categories get a source disclosure. Managed frontmatter is written back locally; a profile offer follows publication |
 | Evals | `validate <path\|name>` | Deterministic safety and formatting checks, no model |
-| | `eval <skill>` | Run the skill's evals on your own Claude Code login; `--commit` files a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes queued versions |
+| | `eval <skill>` | Evaluate the local skill with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). Publish to share matching receipts. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |
 | | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |
-| Machine | `update` / `uninstall` | Show the update command for this copy / remove everything from this machine |
+| Machine | `update` / `uninstall` | Show the update command for this copy / confirm machine teardown, preserve recovery data, and print the package-manager removal step |
 | | `app` | Install and open the desktop app for this CLI version |
 | | `app-update [--check\|--stage\|--apply] [--release <version>] [--reason on-close\|overnight\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes) |
+
+This CLI has no standalone refresh command: use `sync` to fetch. `team workflow-update --print` only prints workflow migration instructions; the skill-layout migration is `team migrate`, a terminal-only, once-per-team operation that refuses to run under `--frames`.
 
 `npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option you are expected to use.
 
