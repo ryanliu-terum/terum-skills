@@ -231,9 +231,21 @@ warning HYG7 SKILL.md:<line>: terum-category `ops` is not one of your team's cat
 Use the existing `lineOf` helper against `/^\s*terum-category\s*:/m` for the line number;
 omit the line if it cannot be found.
 
-**Callers pass the list where they have it:** `connect.ts` (from `teamDoc`), `publish.ts:64`
-and `:118`, `eval.ts:98`, and `validate.ts:42` when resolving a shared skill or a
-`--cwd <team-checkout>`. `validate <path>` on an unconnected folder passes nothing.
+**Callers pass the list where they have it — rewritten 2026-09-13 to publish-only** (refactor
+batch **B9**, D28; the list this paragraph carried — `connect.ts`, `publish.ts:64/:118`,
+`eval.ts:98`, `validate.ts:42` — was written against pre-B1 files). The one caller that holds
+both a category and the team's list is **`publish`**: `.planning/specs/2026-09-11-library-marketplace-refactor.md`
+§5.1 step 5's `assessHygiene(…)` call on the injected map, immediately after step 4 resolves the
+category with this spec's precedence — it passes `team.categories` from the `team.json` it already
+parsed. `connect.ts` no longer exists (deleted by B1, refactor §12). `eval` (refactor §6.3's
+local-eval mode; `eval.ts`'s single `assessHygiene` call) and `validate` (`validate.ts`'s single
+call) keep their calls and **pass nothing**, so HYG7 no-ops there by the rule above — an eval or
+validate of a never-published folder has no list to compare against, and a published one was
+already warned at publish. `suggestCategory` has **no caller in `src/` today** (`grep -rn
+suggestCategory src` is empty and `src/lib/categorize.ts` does not exist): publish's category
+suggestion at refactor §5.1 step 4 is the one surviving call site, and B9 adds it there.
+**B9 is gated on B5 merged** (D28: it runs after B5; until then B3 ships the precedence without
+the suggestion limb — *declared › `--category` › `DEFAULT_CATEGORY`*).
 
 `cli.ts:114`'s help text enumerates HYG1–HYG6 and gains HYG7. HYG7 is a list comparison —
 **no model, no network** — so validate's deterministic-and-offline promise holds.
@@ -270,7 +282,8 @@ and `:118`, `eval.ts:98`, and `validate.ts:42` when resolving a shared skill or 
    tests in `src/commands/__tests__/connect.test.ts`: declared wins over both flag and model;
    flag wins over model and suppresses the call; suggestion path prints the suggested line;
    failure path prints the fallback line and still completes the connect.
-4. HYG7 + the `categories` parameter threaded through all five call sites + tests in
+4. HYG7 + the `categories` parameter, passed by `publish` alone (§6 as rewritten 2026-09-13; the
+   two other surviving call sites keep compiling on the optional trailing `categories?` parameter — `assessHygiene`'s fifth positional is already `managedFieldsAbsent`, so `categories?` is the sixth) + tests in
    `src/lib/evals/__tests__/hygiene.test.ts`: warns on an off-list category; silent on an
    on-list one; silent when no list is supplied; case-insensitive; never an error.
 5. `cli.ts:114` help text.
