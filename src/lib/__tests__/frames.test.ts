@@ -189,7 +189,10 @@ it('CP-19: the hello inventory and public commander verbs agree in both directio
       return [...(hasAction ? [name.startsWith('ls ') ? 'ls' : name] : []), ...inventory(child, `${name} `)];
     });
   }
-  expect([...FRAME_VERBS].sort()).toEqual([...new Set(inventory(program))].sort());
+  // D24: migration is a human's terminal operation, explicitly excluded from the app protocol.
+  expect(inventory(program)).toContain('team migrate');
+  expect(FRAME_VERBS).not.toContain('team migrate');
+  expect([...FRAME_VERBS].sort()).toEqual([...new Set(inventory(program).filter(verb => verb !== 'team migrate'))].sort());
 });
 it('CP-19: every feature is named in the protocol features sentence', () => {
   const doc = readFileSync(new URL('../../../docs/frame-protocol.md', import.meta.url), 'utf8');

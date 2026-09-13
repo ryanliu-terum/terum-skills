@@ -3,6 +3,12 @@
  */
 export const invocationLiteralCatalog: readonly { file: string; line: number; policy: 'routed' | 'fixed' | 'prose' | 'not-a-hint'; pattern: string }[] = [
   {
+    file: 'src/commands/teamMigrate.ts',
+    line: 26,
+    policy: 'prose',
+    pattern: '/** §13: terum-skills team migrate. Terminal-only; a human runs it after the B1 release propagates. */',
+  },
+  {
     "file": "src/cli.ts",
     "line": 39,
     "policy": "not-a-hint",

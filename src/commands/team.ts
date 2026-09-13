@@ -17,6 +17,7 @@ import { githubLoginSchema, GLOBAL_PROJECT, Person, PROJECT_NAME_RULE, projectNa
 import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, refreshClone, type SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { readRoster, RosterEntry } from '../lib/skills.js';
 import { teamForReference } from './install.js';
+import { run as migrate, type MigrateArgs, type MigrateResult } from './teamMigrate.js';
 
 /**
  * §6 `team create` and `team join` (milestone M1). Both are `run(args, io)` over the Prompter.
@@ -38,14 +39,14 @@ export interface ProjectCreateArgs extends WithForm {
   runner?: Runner;
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
 }
-export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs) | ({ kind: 'workflow-update' } & WorkflowUpdateArgs) | ({ kind: 'project-create' } & ProjectCreateArgs);
+export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs) | ({ kind: 'workflow-update' } & WorkflowUpdateArgs) | ({ kind: 'project-create' } & ProjectCreateArgs) | ({ kind: 'migrate' } & MigrateArgs);
 export type CreateResult = { team: string; remote: string };
 export type JoinResult = { team: string; handle: string; rejoined: boolean; roster: RosterEntry[] };
 export type { RosterEntry } from '../lib/skills.js';
 export interface RemoveResult { team: string; handle: string; archiveOnly: boolean; }
 export interface WorkflowUpdateResult { workflow: string; }
 export interface ProjectCreated { team: string; name: string; remotes: string[]; skills: number; }
-export type TeamRunResult = CreateResult | JoinResult | RemoveResult | WorkflowUpdateResult | ProjectCreated;
+export type TeamRunResult = CreateResult | JoinResult | RemoveResult | WorkflowUpdateResult | ProjectCreated | MigrateResult;
 export type TeamCommand = (args: TeamArgs, io: Prompter) => Promise<Result<TeamRunResult>>;
 
 export class HandleCollisionError extends Error {
@@ -63,12 +64,14 @@ export function run(args: { kind: 'join' } & JoinArgs, io: Prompter): Promise<Re
 export function run(args: { kind: 'remove' } & RemoveArgs, io: Prompter): Promise<Result<RemoveResult>>;
 export function run(args: { kind: 'workflow-update' } & WorkflowUpdateArgs, io: Prompter): Promise<Result<WorkflowUpdateResult>>;
 export function run(args: { kind: 'project-create' } & ProjectCreateArgs, io: Prompter): Promise<Result<ProjectCreated>>;
+export function run(args: { kind: 'migrate' } & MigrateArgs, io: Prompter): Promise<Result<MigrateResult>>;
 export function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunResult>>;
 export async function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunResult>> {
   if (args.kind === 'create') return create(args, io);
   if (args.kind === 'join') return join(args, io);
   if (args.kind === 'remove') return remove(args, io);
   if (args.kind === 'project-create') return projectCreate(args, io);
+  if (args.kind === 'migrate') return migrate(args, io);
   return workflowUpdate(args, io);
 }
 
