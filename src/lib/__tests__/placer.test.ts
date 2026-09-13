@@ -18,10 +18,10 @@ describe('native Placer (§7)', () => {
     const placed = await place(source, target, 'sample');
     await release();
     expect(await readFile(join(target, 'sample', 'SKILL.md'), 'utf8')).toBe('skill');
-    expect((await inspect(placed.path, true)).kind).toBe('ours');
+    expect((await inspect(placed.path)).kind).toBe('present');
     await expect(remove(target, join(root, 'outside'), placed.snapshot.fingerprint, join(root, 'quarantine'))).rejects.toThrow('unowned');
     await remove(target, placed.path, placed.snapshot.fingerprint, join(root, 'quarantine'));
-    expect((await inspect(placed.path, false)).kind).toBe('absent');
+    expect((await inspect(placed.path)).kind).toBe('absent');
   });
 
   it('uses Git\'s reported exclude path inside a linked worktree', async () => {

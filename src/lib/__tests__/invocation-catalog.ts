@@ -1,5 +1,5 @@
 /** B5 registers skill move/rename/delete through commander without adding executable literals.
- * B4: marketplace reinstall uses install; the retired manage hint now uses publish.
+ * B6: install grammar changes no package literals; the existing install hints remain catalogued.
  * No new CLI verb or root-source package literal is introduced.
  * Explicit source literal policy. Exact trimmed line patterns prevent file-wide exemptions.
  * Line numbers are informational; the tripwire matches file AND content and checks multiplicity.

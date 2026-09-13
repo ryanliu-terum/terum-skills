@@ -43,7 +43,7 @@ import { samePath } from '../../lib/skill-path';
 const cliProfile = z.object({ handle: z.string(), changed: z.array(z.string()) });
 const memberMetadata = { role: z.string().nullish().transform(value => value ?? null), projects: z.array(z.string()).nullish().transform(value => value ?? []), admin: z.boolean().nullish().transform(v => v ?? null) };
 const cliLogin = z.object({ updated: z.array(z.object({ key: z.string(), value: z.string() })), notice: z.string().nullish() });
-export const cliInstalled = z.array(z.object({ id: z.string(), team: z.string() }).passthrough());
+export const cliInstalled = z.array(z.object({ id: z.string(), team: z.string(), path: z.string().optional(), version: z.string().nullable().optional(), profiled: z.boolean().optional() }).passthrough());
 export const cliUninstalled = z.array(z.object({ id: z.string(), team: z.string(), removed: z.number() }).passthrough());
 export const cliMachine = z.object({ teams: z.array(z.string()), removedPlacements: z.number(), hookRemoved: z.boolean(), wrapperRemoved: z.boolean(), configRemoved: z.boolean(), kept: z.array(z.string()), record: z.string(), advice: z.array(z.string()) }).passthrough();
 // §5.3: publish mints an immutable version on main. There is no branch and no pull request any
@@ -83,7 +83,7 @@ export const cliProjectAdded = z.object({path:z.string(),label:z.string(),added:
 export const cliProjectCreated = z.object({team:z.string(),name:z.string(),remotes:z.array(z.string()),skills:z.number()});
 export const cliProjectRemoved = z.object({path:z.string(),placementsRemaining:z.number()});
 export const cliLs = z.object({
-  roster: z.array(z.object({ handle: z.string(), active: z.boolean(), ...memberMetadata })), skills: z.array(cliLsSkill), problems: z.array(z.object({ source: z.string(), message: z.string() })), projects: z.array(cliProject).optional(), member: z.object({ installed: z.array(z.object({ id: z.string(), scope: cliScope, since: z.string() })).optional(), handle: z.string(), declined: z.array(z.string()), ...memberMetadata }).optional(),
+  roster: z.array(z.object({ handle: z.string(), active: z.boolean(), ...memberMetadata })), skills: z.array(cliLsSkill), problems: z.array(z.object({ source: z.string(), message: z.string() })), projects: z.array(cliProject).optional(), member: z.object({ installed: z.array(z.object({ id: z.string(), scope: cliScope, since: z.string() })).optional(), handle: z.string(), ...memberMetadata }).optional(),
   local: z.array(cliLocalSection).optional(),
   // §8.4: emitted on the `kind:'all'` team read. Optional so a CLI that predates the limb parses.
   people: z.array(cliPerson).optional(),
@@ -789,7 +789,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         const latest = newestUpdated(authored);
         const lastPublish = latest ? `${relativeTime(latest.updated)} · ${latest.name}` : '—';
         const disk: Person['onDisk'] = [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length];
-        people.push({ ...member, joined: member.joined ?? '—', role: detail.role, lastPublish, last_publish: lastPublish, organization: null, declined: [], skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: [['On their profile', detail.profile.map(entry => entry.name)], ['Installed', installable.map(skill => skill.name)]], profileVersions: Object.fromEntries(detail.profile.map(entry => [entry.name, entry.version])), placeNote: personPlaceNote(disk), onDisk: disk });
+        people.push({ ...member, joined: member.joined ?? '—', role: detail.role, lastPublish, last_publish: lastPublish, organization: null, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: [['On their profile', detail.profile.map(entry => entry.name)], ['Installed', installable.map(skill => skill.name)]], profileVersions: Object.fromEntries(detail.profile.map(entry => [entry.name, entry.version])), placeNote: personPlaceNote(disk), onDisk: disk });
       }
       return { ok: true, value: catalogModel(team, inventory, local.value, placements, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
     },
@@ -801,7 +801,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     },
     // install writes config pending/approvals/placements, places the folder, and safeWrites people/<handle>.json.
     install: (args: InstallArgs) => prepareRun(async signal => {
-      let into = 'global';
+      let into: string | undefined = args.scope === undefined ? undefined : 'global';
       if (args.scope !== undefined && args.scope !== 'Global') {
         const local = await read(run(['ls', '--local'], cliLs, value => value, []), {signal});
         if (!local.ok) return {ok:false,error:local.error};
@@ -810,7 +810,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         into = matches[0].repoRoot;
       }
       return {ok:true,value:into};
-    }, into => run(['install', ...(!(args.kind === 'member' && args.member || args.kind === 'project' && args.project) && args.force ? ['--force'] : []), ...(args.team ? ['--team', args.team] : []), '--into', into, '--', ...(args.kind === 'member' && args.member ? ['member', args.member] : args.kind === 'project' && args.project ? ['project', args.project] : [args.ref])], cliInstalled, (installed): InstalledResult[] => installed.map((item) => ({ id: item.id, name: item.id, scope: args.scope ?? 'Global' })), ['config', 'placed', 'clone'])), // desktop-bug-skill-detail S14: CLI does not return scope yet.
+    }, into => run(['install', ...(args.yesProfile ? ['--yes-profile'] : []), ...(args.team ? ['--team', args.team] : []), ...(into === undefined ? [] : ['--into', into]), '--', ...(args.kind === 'member' && args.member ? ['member', args.member] : args.kind === 'project' && args.project ? ['project', args.project] : [args.ref])], cliInstalled, (installed): InstalledResult[] => installed.map((item) => ({ id: item.id, name: item.id, scope: args.scope ?? 'Global', path: item.path ?? null, version: item.version ?? null, profiled: item.profiled ?? false })), ['config', 'placed', 'clone'])), // desktop-bug-skill-detail S14: CLI does not return scope yet.
     // uninstall-skill drops config placements/pending, removes placed folders, and rewrites the clone's people file.
     uninstallSkill: (args: UninstallArgs) => run(['uninstall-skill', ...(args.team ? ['--team', args.team] : []), ...(args.from ? ['--from', args.from] : []), '--', ...(args.kind === 'member' && args.member ? ['member', args.member] : args.kind === 'project' && args.project ? ['project', args.project] : [args.ref])], cliUninstalled, (removed): UninstalledResult[] => removed.map((item) => ({ id: item.id, name: item.id })), ['config', 'placed', 'clone']),
     quit: () => bridge.quit(),

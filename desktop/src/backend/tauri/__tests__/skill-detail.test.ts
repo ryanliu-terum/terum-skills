@@ -36,12 +36,12 @@ it.each(['ls','ls-local','validate-deploy-check'])('classifies a failed %s read 
   expect(await createTauriBackend(f.bridge).skill({ref:'deploy-check'})).toMatchObject({ok:false,reason:'unreadable',error:expect.stringMatching(/^Cannot read the folder\./)});
 });
 
-it.each([undefined,'Global'])('installs into global explicitly for scope %s', async scope => {
+it.each([undefined,'Global'])('passes only an explicitly selected Global destination for scope %s', async scope => {
   const f = detailReplay();
   const result = await createTauriBackend(f.bridge).install({ref:'tdd',team:'acme',...(scope ? {scope} : {})}).done;
   expect(result).toMatchObject({ok:true,value:[{scope:'Global'}]});
   // The mutation's hello advertises `refresh`, so one background `sync` follows it (index.ts onHello).
-  expect(f.spawns.map(spawn => spawn.args)).toEqual([['install','--team','acme','--into','global','--','tdd'],['sync']]);
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['install','--team','acme',...(scope ? ['--into','global'] : []),'--','tdd'],['sync']]);
 });
 it('maps a scanned project label to its absolute destination for install and removal', async () => {
   const f = detailReplay((name,value) => {

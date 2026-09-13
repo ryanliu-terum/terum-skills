@@ -70,7 +70,7 @@ describe('uninstall (§6 pending)', () => {
 
 
 
-  it('declines an automatically endorsed uninstall, preserves approval, and clears the decline on explicit reinstall', async () => {
+  it('removes an install without writing declined and preserves approval on reinstall', async () => {
     const fixture = await bareTeam();
     const id = '66666666-6666-4666-8666-666666666666';
     await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
@@ -81,14 +81,14 @@ describe('uninstall (§6 pending)', () => {
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const approved = (await store.read()).approvals[id];
     expect((await run({ ref: 'sample', team: 'team', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
-    expect(JSON.parse(await readFile(join(store.teamClone('team'), 'people', 'seed.json'), 'utf8')).declined).toContain(id);
+    expect(JSON.parse(await readFile(join(store.teamClone('team'), 'people', 'seed.json'), 'utf8')).declined).toEqual([]);
     expect((await store.read()).approvals[id]).toEqual(approved);
     expect((await install({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
     expect(JSON.parse(await readFile(join(store.teamClone('team'), 'people', 'seed.json'), 'utf8')).declined).not.toContain(id);
     expect((await store.read()).approvals[id]).toEqual(approved);
   });
 
-  it('declines a project-list uninstall but not a personal uninstall, while removing both placements and retaining approval', async () => {
+  it('removes project and personal installs without writing declined and retains approval', async () => {
     const fixture = await bareTeam();
     const product = await bareTeam();
     const projectId = '77777777-7777-4777-8777-777777777777';
@@ -113,7 +113,7 @@ describe('uninstall (§6 pending)', () => {
 
     expect((await run({ ref: 'projected', team: 'team', config: store, home, from: checkout, cwd: checkout }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const afterProject = JSON.parse(await readFile(join(store.teamClone('team'), 'people', 'seed.json'), 'utf8'));
-    expect(afterProject.declined).toContain(projectId);
+    expect(afterProject.declined).toEqual([]);
     expect(afterProject.installed.map((entry: { id: string }) => entry.id)).not.toContain(projectId);
     await expect(access(projectPath)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(Object.values((await store.read()).placements).some((entry) => entry.id === projectId)).toBe(false);
@@ -269,7 +269,7 @@ async function projectPreviewFixture() {
   const quarantine = `Local changes are moved to ${join(store.root, 'quarantine')}, never deleted.`;
   const kept = 'Install records dropped from your people file (0): another copy stays, so your records are kept';
   const title = "Remove product's 2 skills from this machine?";
-  const detail = ['Folders removed (2):', ...pathsIn('a').map(path => `  ${path}  ·  project product`), quarantine, kept, 'Copies installed to Global stay.'];
+  const detail = ['Folders removed (2):', ...pathsIn('a').map(path => `  ${path}  ·  project product`), quarantine, kept, 'Your profile is unchanged.', 'Copies installed to Global stay.'];
   return { fixture, store, home, clone, checkouts, ids, before, people, projectPaths, pathsIn, quarantine, kept, title, detail, args: { kind: 'project' as const, project: 'product', config: store, home, from: checkouts[0]! } };
 }
 
@@ -297,15 +297,15 @@ it('confirms the chosen checkout\'s paths, keeps the other copy and global, and 
   expect(await readFile(join(f.clone, 'people/seed.json'), 'utf8')).toBe(f.people);
   expect(Number(await git(['rev-list', '--count', 'main'], f.fixture.bare))).toBe(commits);
   expect((await f.store.read()).pending).toEqual([]);
-  // The last copies: the records go, the project-only skill is declined, one commit.
+  // The last copies: the records go, declined remains untouched, one commit.
   const last = new ScriptedPrompter([], [true]);
   expect((await run({ ...f.args, from: f.checkouts[1]! }, last)).ok).toBe(true);
   expect(last.asked).toEqual([f.title]);
-  expect(last.details[f.title]).toEqual(['Folders removed (2):', ...f.pathsIn('b').map(path => `  ${path}  ·  project product`), f.quarantine, 'Install records dropped from your people file (2): shared, projected', 'Not offered again until you install them: projected', 'These have no remaining install record, so sync stops placing them anywhere.', 'Copies installed to Global stay.']);
+  expect(last.details[f.title]).toEqual(['Folders removed (2):', ...f.pathsIn('b').map(path => `  ${path}  ·  project product`), f.quarantine, 'Install records dropped from your people file (2): shared, projected', 'Your profile is unchanged.', 'Copies installed to Global stay.']);
   expect(Object.keys((await f.store.read()).placements)).toEqual([globalPath]);
   const caller = JSON.parse(await readFile(join(f.clone, 'people/seed.json'), 'utf8'));
   expect(caller.installed).toEqual([expect.objectContaining({ id: f.ids[0], scope: { kind: 'global' } })]);
-  expect(caller.declined).toEqual([f.ids[1]]);
+  expect(caller.declined).toEqual([]);
   expect((await f.store.read()).pending).toEqual([]);
   expect(Number(await git(['rev-list', '--count', 'main'], f.fixture.bare))).toBe(commits + 1);
 });
@@ -317,7 +317,7 @@ it('asks which copy first, then confirms exactly the chosen copies', async () =>
   expect((await run({ kind: 'project', project: 'product', config: f.store, home: f.home }, io)).ok).toBe(true);
   expect(io.asked).toEqual(['Remove which copy?', 'Remove which copy?', f.title]);
   expect(io.offered).toEqual([[f.pathsIn('a')[0], f.pathsIn('b')[0]], [f.pathsIn('a')[1], f.pathsIn('b')[1]]]);
-  expect(io.details[f.title]).toEqual(['Folders removed (2):', ...chosen.map(path => `  ${path}  ·  project product`), f.quarantine, f.kept, 'Copies installed to Global stay.']);
+  expect(io.details[f.title]).toEqual(['Folders removed (2):', ...chosen.map(path => `  ${path}  ·  project product`), f.quarantine, f.kept, 'Your profile is unchanged.', 'Copies installed to Global stay.']);
   for (const path of chosen) await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' });
   for (const path of [f.pathsIn('a')[1]!, f.pathsIn('b')[0]!, join(f.home, '.claude/skills/shared')]) await expect(access(path)).resolves.toBeUndefined();
   expect(await readFile(join(f.clone, 'people/seed.json'), 'utf8')).toBe(f.people);
@@ -346,7 +346,7 @@ it('removes a member installed list and leaves authored-only skills untouched', 
   const io = new ScriptedPrompter([], [true]), title = "Remove member's 1 skills from this machine?";
   expect(await run({ kind: 'member', member: 'member', config: store }, io)).toMatchObject({ ok: true, value: [{ id: installed, removed: 1 }] });
   expect(io.asked).toEqual([title]);
-  expect(io.details[title]).toEqual(['Folders removed (1):', `  ${join(home, '.claude/skills/used')}  ·  Global`, `Local changes are moved to ${join(store.root, 'quarantine')}, never deleted.`, 'Install records dropped from your people file (1): used', "Targets are member's current installed list, not what you installed from them."]);
+  expect(io.details[title]).toEqual(['Folders removed (1):', `  ${join(home, '.claude/skills/used')}  ·  Global`, `Local changes are moved to ${join(store.root, 'quarantine')}, never deleted.`, 'Install records dropped from your people file (1): used', 'Your profile is unchanged.', "Targets are member's current installed list, not what you installed from them."]);
   await expect(access(join(home, '.claude/skills/authored'))).resolves.toBeUndefined();
   await expect(access(join(home, '.claude/skills/used'))).rejects.toMatchObject({ code: 'ENOENT' });
   expect(JSON.parse(await readFile(join(clone, 'people/seed.json'), 'utf8')).installed).toEqual([expect.objectContaining({ id: authored })]);
@@ -387,8 +387,7 @@ it('removes only --from and updates the shared record only after the last Global
   await expect(access(join(checkout, '.claude', 'skills', 'sample'))).rejects.toMatchObject({ code: 'ENOENT' });
   await expect(access(join(home, '.claude', 'skills', 'sample'))).resolves.toBeUndefined();
   expect(await run({ ref: 'sample', from: 'global', config: store }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true, value: [{ removed: 1 }] });
-  // `declined` is still written here for an endorsed skill. §12 deleted the auto-install it used to
-  // suppress, so nothing reads it any more — vestigial, not wrong, and out of B3's scope to remove.
-  expect(JSON.parse(await readFile(personPath, 'utf8'))).toMatchObject({ installed: [], declined: [id] });
+  // B6 keeps legacy declined data unchanged and never adds a new decline.
+  expect(JSON.parse(await readFile(personPath, 'utf8'))).toMatchObject({ installed: [], declined: [] });
   expect(await store.read()).toMatchObject({ pending: [], placements: {} });
 });

@@ -118,7 +118,7 @@ it('shows no fake tool grants in the real project install preview', async () => 
   open('#/marketplace/projects/terum?dialog=install', true);
   const dialog = await screen.findByRole('dialog');
   expect(dialog).toHaveTextContent('0 of 1 ask');
-  expect(dialog).toHaveTextContent("Adds the project's 1 skill");
+  expect(dialog).toHaveTextContent("Copies the latest version of the project's 1 skill");
   expect(within(dialog).queryByText('none')).toBeNull();
   expect(within(dialog).getByRole('button', { name: 'Install 1 skill' })).toBeVisible();
 });

@@ -680,6 +680,23 @@ that survives. Taken as the reading; the review judges the wording. The recorded
 `b3-real-data/frames/publish-fresh.jsonl` keeps its old default-category line (a recording; owed
 to the next real re-capture of that set).
 
+## A22 — B6's Codex build (built in parallel with B5's review under Ryan's §16.1 waiver): three conservative readings kept
+
+**B6 (Codex, gpt-6-astra high, 26 min, base = B5's tip 33e4971).** Status `partial`, gates green.
+1. *Repeated replacement when an old-skills backup already exists* → refuses, keeps both copies. Not
+   drift: §9.1.1 lists "replacing the same skill twice overwrites the previous kept copy — a timestamp
+   suffix was raised, not decided" as a sub-fork deliberately left open in the ledger's `deferred:`.
+   The refusal never deletes, which is the North Star's side of an undecided fork. Stays open.
+2. *`profile --add/--remove` CLI grammar* → not added: §9.3 names the mechanics
+   (`addProfileEntry`/`removeProfileEntry`, now shared under `offerProfileEntry`, and one
+   `writePersonFile`), and the batch table names no new profile grammar; my scope line kept `cli.ts`
+   help edits to install/uninstall. Owed to the batch that specs the grammar (B7 documents what exists).
+3. *Headless install with registered projects* → follows §9.1's explicit guard: Global only when no
+   project is registered, otherwise `--into` is required (the synopsis's "lands in Global" reads as the
+   no-projects case).
+Also: PR #167's original picker test could not be lifted verbatim (no git in the sandbox); replacement
+coverage was written against the lifted builder, which differs only by the `libraryProjects` rename.
+
 ## A23 — B9's review: three mechanical mediums applied, and the one place I overrode the triage's fit rating
 
 **Review `wf_77c596f8-516` (base `af17fd2`): 0 critical/high, 3 mediums, all mechanical, all applied**

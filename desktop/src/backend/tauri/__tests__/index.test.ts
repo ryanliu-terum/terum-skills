@@ -41,7 +41,7 @@ it('keeps errors without value when the failing value cannot be parsed', async (
 
 const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = [
   ['profile', b => b.profile({ name: 'A B', bio: '', role: 'Platform', projects: ['terum', 'second'] }).done, ['profile', '--name', 'A B', '--bio', '', '--role', 'Platform', '--project', 'terum', '--project', 'second']],
-  ['leading-dash install', b => b.install({ ref: '-x', team: 'acme' }).done, ['install', '--team', 'acme', '--into', 'global', '--', '-x']],
+  ['leading-dash install', b => b.install({ ref: '-x', team: 'acme' }).done, ['install', '--team', 'acme', '--', '-x']],
   ['team create', b => b.team({ kind: 'create', name: '-x', remote: '/repo' }).done, ['team', 'create', '--remote', '/repo', '--', '-x']],
   ['team create without name', b => b.team({ kind: 'create', remote: '/repo' }).done, ['team', 'create', '--remote', '/repo']],
   ['team join', b => b.team({ kind: 'join', remote: '-x', name: 'acme' }).done, ['team', 'join', '--as', 'acme', '--', '-x']],
@@ -52,9 +52,9 @@ const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = 
   ['empty search', b => b.search({ q: '' }), ['search', '--', '']],
   ['empty invite', b => b.invite({ logins: [], team: 'acme' }).done, ['invite', '--team', 'acme']],
   ['uninstall machine', b => b.uninstallMachine({}).done, ['uninstall']],
-  ['install skill', b => b.install({ ref: 'a', force: true, team: 'acme' }).done, ['install', '--force', '--team', 'acme', '--into', 'global', '--', 'a']],
-  ['install member', b => b.install({ ref: '', kind: 'member', member: 'mira', team: 'acme' }).done, ['install', '--team', 'acme', '--into', 'global', '--', 'member', 'mira']],
-  ['install project', b => b.install({ ref: '', kind: 'project', project: 'ops', team: 'acme' }).done, ['install', '--team', 'acme', '--into', 'global', '--', 'project', 'ops']],
+  ['install skill', b => b.install({ ref: 'a', yesProfile: true, team: 'acme' }).done, ['install', '--yes-profile', '--team', 'acme', '--', 'a']],
+  ['install member', b => b.install({ ref: '', kind: 'member', member: 'mira', team: 'acme' }).done, ['install', '--team', 'acme', '--', 'member', 'mira']],
+  ['install project', b => b.install({ ref: '', kind: 'project', project: 'ops', team: 'acme' }).done, ['install', '--team', 'acme', '--', 'project', 'ops']],
   ['uninstallSkill', b => b.uninstallSkill({ ref: 'a', team: 'acme' }).done, ['uninstall-skill', '--team', 'acme', '--', 'a']],
   ['publish', b => b.publish({ ref: 'a', team: 'acme' }).done, ['publish', '--team', 'acme', '--', 'a']],
   ['sync', b => b.sync({ team: 'acme' }).done, ['sync', '--team', 'acme']],
@@ -412,10 +412,10 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   // from one read in `ls.ts:117-131` and cannot disagree. With the frame repaired, mira's two
   // installs appear, and the derived pair agrees with the rest of the frame: `deploy-check` is
   // `placed` for the viewer and `tdd` is `absent`, so one of her two is on this disk.
-  expect(catalog.value.people[0]).toMatchObject({ handle: 'mira', role: 'Platform', projects: ['terum'], skills: ['deploy-check'], declined: [], installable: ['deploy-check', 'tdd'], onDisk: [1, 2], adoption: 2 });
+  expect(catalog.value.people[0]).toMatchObject({ handle: 'mira', role: 'Platform', projects: ['terum'], skills: ['deploy-check'], installable: ['deploy-check', 'tdd'], onDisk: [1, 2], adoption: 2 });
   expect(catalog.value.people.map(person => person.handle)).toEqual(['mira', 'ravi', 'seed']);
   // §12 deleted the auto-install `declined` suppressed, and §8.4's limb does not carry it.
-  expect(catalog.value.people.find(person => person.handle === 'seed')?.declined).toEqual([]);
+  expect(catalog.value.people.find(person => person.handle === 'seed')).not.toHaveProperty('declined');
   expect(catalog.value.categories).toEqual([['ops', 'tag', 1], ['debugging', 'tag', 1], ['engineering', 'tag', 1]]);
   // The 0.14.0 `ls` lists the Global project too (first), so terum is found by name and bulkInstall carries both.
   expect(catalog.value.projects.map(project => project.name)).toEqual(['Global', 'terum']);

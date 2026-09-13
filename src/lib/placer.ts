@@ -12,7 +12,7 @@ import { Runner, systemRunner } from './runner.js';
 export const fsForTests = { rename, rm, lstat: (path: string) => lstat(path) };
 
 export type PlacementScope = { kind: 'global' } | { kind: 'project'; project: string };
-export type Inspection = { kind: 'absent'; path: string } | { kind: 'ours'; path: string } | { kind: 'foreign'; path: string };
+export type Inspection = { kind: 'absent'; path: string } | { kind: 'present'; path: string };
 
 export interface PlacerOptions { home?: string; agent?: SupportedAgent; }
 
@@ -26,11 +26,10 @@ export function resolveTarget(agent: SupportedAgent, scope: PlacementScope, repo
 }
 
 /** Collision detection is deliberately target-local: callers pass the exact resolved destination. */
-export async function inspect(dir: string, owned: boolean): Promise<Inspection> {
+export async function inspect(dir: string): Promise<Inspection> {
   try {
-    const details = await lstat(dir);
-    if (!details.isDirectory()) return { kind: 'foreign', path: dir };
-    return { kind: owned ? 'ours' : 'foreign', path: dir };
+    await lstat(dir);
+    return { kind: 'present', path: dir };
   } catch (error) {
     if (isMissing(error)) return { kind: 'absent', path: dir };
     throw error;

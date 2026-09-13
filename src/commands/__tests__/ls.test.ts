@@ -328,14 +328,14 @@ it('carries verbatim description, normalized grants, body, installers and date; 
   await writeFile(join(clone,'skills','good', 'v1','SKILL.md'),inventorySource('good','allowed-tools: {bad: value}'));
   expect(await run({config:store},new ScriptedPrompter())).toMatchObject({ok:true,value:{skills:[{grants:null,grantsHash:null}]}});
 });
-it('returns sorted passthrough projects including empty projects, member declined only on member, and no registry on local',async()=>{
+it('returns sorted passthrough projects including empty projects, no legacy declined field on member, and no registry on local',async()=>{
   const {store,clone,root}=await inventoryFixture();
   await writeFile(join(clone,'team.json'),JSON.stringify({...TEAM_JSON,projects:{z:{skills:[],remotes:[]},A:{skills:[ID],remotes:['github.com/acme/a'],description:'Hand maintained'}}}));
   await writeFile(join(clone,'people','seed.json'),JSON.stringify(person('seed',{declined:[ID]})));
   for(const args of [{},{kind:'member' as const,value:'seed'},{kind:'project' as const,value:'A'}]) {
     const result=await run({config:store,...args},new ScriptedPrompter());if(!result.ok)throw new Error(result.error);
     expect(result.value.projects).toEqual([{name:'A',skills:[ID],remotes:['github.com/acme/a'],description:'Hand maintained'},{name:'z',skills:[],remotes:[]}]);
-    if(args.kind==='member')expect(result.value.member).toEqual({handle:'seed',declined:[ID],role:null,projects:[],installed:[]});else expect(result.value).not.toHaveProperty('member');
+    if(args.kind==='member')expect(result.value.member).toEqual({handle:'seed',role:null,projects:[],installed:[]});else expect(result.value).not.toHaveProperty('member');
   }
   const local=await run({config:store,local:true,home:root},new ScriptedPrompter());expect(local).toMatchObject({ok:true,value:{problems:[]}});expect(local.value).not.toHaveProperty('projects');
 });

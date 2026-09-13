@@ -138,3 +138,9 @@ it.each(['no fences', '---\nname: [\n---\nbody', '---\nname: x\n---\nbody'])('do
   expect(parsed).not.toHaveProperty('frontmatter');
   expect(parsed).not.toHaveProperty('body');
 });
+it('reads legacy declined arrays without requiring or synthesizing the retired field', () => {
+  const person = { handle: 'seed', display_name: 'Seed', email: 'seed@example.com', github: 'seed', bio: '', installed: [] };
+  expect(personSchema.parse(person)).not.toHaveProperty('declined');
+  const declined = ['11111111-1111-4111-8111-111111111111'];
+  expect(personSchema.parse({ ...person, declined }).declined).toEqual(declined);
+});

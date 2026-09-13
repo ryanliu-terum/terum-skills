@@ -69,3 +69,28 @@ it('commander collects repeated projects and passes explicit empty bio/role', as
   await program.parseAsync(['profile', '--name', 'New', '--bio', '', '--role', '', '--project', 'terum', '--project', 'second'], { from: 'user' });
   expect(received).toMatchObject({ name: 'New', bio: '', role: '', projects: ['terum', 'second'] });
 });
+
+it('the shared people mutation composes profile edits over its post-image and validates before staging', async () => {
+  const { writePersonFile, addProfileEntry, removeProfileEntry } = await import('../../lib/profile-entry.js');
+  const { openTeamRepo } = await import('../../lib/teamRepo.js');
+  const { fixture, store } = await setup(), clone = store.teamClone('team');
+  const repo = openTeamRepo(clone, fixture.bare, systemRunner);
+  const id = '11111111-1111-4111-8111-111111111111';
+  await repo.safeWrite(tree => {
+    writePersonFile(tree, 'seed', p => addProfileEntry(p, { id, name: 'sample', version: 'v1', added: '2026-09-13', via: 'install' }));
+    writePersonFile(tree, 'seed', p => addProfileEntry(p, { id, name: 'sample', version: 'v2', added: '2026-09-14', via: 'install' }));
+  }, { action: 'profile', handle: 'seed' });
+  const before = await readFile(join(clone, 'people/seed.json'), 'utf8');
+  expect(JSON.parse(before).profile).toEqual([{ id, name: 'sample', version: 'v2', added: '2026-09-14', via: 'install' }]);
+  await expect(repo.safeWrite(tree => writePersonFile(tree, 'seed', p => { p.role = 'x'.repeat(33); }), { action: 'profile', handle: 'seed' })).rejects.toThrow();
+  expect(await readFile(join(clone, 'people/seed.json'), 'utf8')).toBe(before);
+  await repo.safeWrite(tree => writePersonFile(tree, 'seed', p => removeProfileEntry(p, id)), { action: 'profile', handle: 'seed' });
+  expect(JSON.parse(await readFile(join(clone, 'people/seed.json'), 'utf8')).profile).toEqual([]);
+});
+it('refreshes local_skills opportunistically when writing the profile', async () => {
+  const { mkdir } = await import('node:fs/promises');
+  const { store } = await setup();
+  await mkdir(join(store.root, '.claude/skills/local-folder'), { recursive: true });
+  expect(await run({ config: store, bio: 'hello' }, new ScriptedPrompter())).toMatchObject({ ok: true });
+  expect(JSON.parse(await readFile(join(store.teamClone('team'), 'people/seed.json'), 'utf8')).local_skills).toBe(1);
+});

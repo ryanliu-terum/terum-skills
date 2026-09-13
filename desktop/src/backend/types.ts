@@ -69,7 +69,7 @@ export type EvalReportModel=Pick<SkillDetail,'receipt'|'summary'|'incumbentLift'
 export type InboxKind='share'|'alert'|'eval'|'author'|'team';
 export const INBOX_KINDS:readonly InboxKind[]=['share','alert','eval','author','team'];
 export type InboxItem=Omit<Design['INBOX'][number],'kind'> & {id:string;skillRef:string;kind:InboxKind;summary:ReceiptSummary|null;incumbentLift:[number,string]|null;reportNumbers?:ReportNumbers};
-export type Person=Omit<Design['ROSTER'][number], 'followers'|'role'> & {role:string|null;followers:number|null;projects:string[];declined:string[];organization:string|null;lastPublish:string;skills:string[];installable:string[];adoption:number;publishLine:string;teamsLine:string;buckets:[string,string[]][];profileVersions:Record<string,string>;placeNote:string;onDisk:[number,number]};
+export type Person=Omit<Design['ROSTER'][number], 'followers'|'role'> & {role:string|null;followers:number|null;projects:string[];organization:string|null;lastPublish:string;skills:string[];installable:string[];adoption:number;publishLine:string;teamsLine:string;buckets:[string,string[]][];profileVersions:Record<string,string>;placeNote:string;onDisk:[number,number]};
 export type Project=Omit<Design['PROJECTS'][number], 'evaluated'|'favorites'|'admin'|'updated'> & {admin:Design['PROJECTS'][number]['admin']|null;updated:string|null;evaluated:number|null;favorites:number|null;memberHandles:string[];memberInitials:string[];skillsIn:string[]};
 export interface Catalog {scanned:string[]|null;repository:string|null;skills:SkillCard[];extras:SkillCard[];people:Person[];projects:Project[];categories:Design['CATEGORIES'];categoryRemaining:Record<string,number>;topRated:string[];peopleByAdoption:string[];projectsByMembers:string[];categorySkills:Record<string,string[]>;filterDefault:Design['FILTER_DEFAULT'];filterCount:number;verdictCounts:Record<'PASS'|'NEUTRAL'|'FAIL'|'Not evaluated',number|null>;catalogN:number;teamN:number;bulkInstall:Record<string,{total:number;asking:number}>}
 /** `skillsTotal` is how many skills that member's own machine last reported having (their people file's `local_skills`) — a self-report about them, not a fact about this machine; null when nobody has reported one. */
@@ -108,8 +108,8 @@ export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project
 export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null}
 export interface IdentityArgs {name?:string;email?:string;defaultHandle?:string}
 export interface IdentityWrite {updated:{key:string;value:string}[];notice:string|null}
-export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}
-export interface InstalledResult {id:string;name:string;scope:Scope}
+export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;yesProfile?:boolean}
+export interface InstalledResult {id:string;name:string;scope:Scope;path:string|null;version:string|null;profiled:boolean}
 export interface UninstallArgs {from?:string;team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
 export interface UninstalledResult {id:string;name:string}
 export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
