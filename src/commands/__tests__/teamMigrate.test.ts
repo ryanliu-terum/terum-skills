@@ -12,7 +12,8 @@ import { openTeamRepo } from '../../lib/teamRepo.js';
 import { bareTeam, cloneWithIdentity, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { run } from '../team.js';
 
-const ID = '11111111-1111-4111-8111-111111111111';
+// Lettered on purpose: the upper-case folder test below is a no-op on an all-digit uuid.
+const ID = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 const OTHER = '22222222-2222-4222-8222-222222222222';
 const OLD = 'a'.repeat(40);
 const RUN = '20260907T010000Z';
@@ -31,7 +32,7 @@ function receipt(hash: string) {
 
 // Every repository and config is created under bareTeam's temporary directory. No ambient team,
 // remote, config, or home path may enter this test; the public-looking remote is locally mapped.
-async function prepared(github = false) {
+async function prepared(github = false, evalFolder = ID) {
   const fixture = await bareTeam();
   const files = new Map<string, string | Buffer>([
     ['team.json', JSON.stringify(legacyTeam)], ['skills/sample/SKILL.md', skill],
@@ -49,8 +50,8 @@ async function prepared(github = false) {
   const hash = (await git(['rev-parse', 'HEAD:skills/sample'], fixture.seed)).trim();
   const archived = `  ${JSON.stringify(receipt(OLD))}\n\n`;
   const records = {
-    [`evals/${ID}/${hash}/${RUN}.json`]: JSON.stringify(receipt(hash)),
-    [`evals/${ID}/${OLD}/${RUN}.json`]: archived,
+    [`evals/${evalFolder}/${hash}/${RUN}.json`]: JSON.stringify(receipt(hash)),
+    [`evals/${evalFolder}/${OLD}/${RUN}.json`]: archived,
     'people/seed.json': JSON.stringify(person('seed', { installed: [entry(ID, hash), entry(OTHER, hash)], projects: ['global'], future: true })),
     'people/other.json': JSON.stringify(person('other', { installed: [entry(ID, OLD), entry(ID, 'v2'), entry(ID, null)], projects: ['global', 'App'], future: true })),
   };
@@ -68,6 +69,28 @@ async function prepared(github = false) {
 }
 
 describe('§13 migration (temporary bare repositories only)', () => {
+  // The receipt folder is the one place a skill id reaches the migration without passing a schema:
+  // `z.uuid()` lower-cases the frontmatter id, the receipt's skill_id and every people-file entry,
+  // but the path capture is raw. A layout-2 repository written by an older build that kept the
+  // author's spelling can carry `evals/ABCDEFAB-…/`; matching it case-sensitively against the
+  // normalized frontmatter id sends the CURRENT receipt to the archive with no message. (A lettered
+  // uuid is essential: on the all-digit fixture ids `toUpperCase()` changes nothing.)
+  it('re-keys a current receipt whose evals/ folder spells the uuid in upper case instead of archiving it', async () => {
+    const p = await prepared(false, ID.toUpperCase());
+    const result = await p.invoke();
+    if (!result.ok) throw new Error(result.error);
+    expect(result).toMatchObject({ ok: true, value: { changed: true, rekeyedReceipts: 1, archivedReceipts: 1 } });
+    const paths = (await git(['ls-tree', '-r', '--name-only', 'main'], p.fixture.bare)).split('\n');
+    // The folder keeps its recorded spelling: a case-only rename cannot be staged through a working
+    // tree on a case-insensitive volume, so normalizing it is not this verb's job.
+    const folder = `evals/${ID.toUpperCase()}`;
+    expect(paths).toContain(`${folder}/v1/${RUN}.json`);
+    expect(paths).toContain(`${folder}/archive/${OLD}/${RUN}.json`);
+    expect(paths.filter(path => path.startsWith(`evals/${ID}/`))).toEqual([]);
+    const migrated = receiptSchema.parse(JSON.parse(await git(['show', `main:${folder}/v1/${RUN}.json`], p.fixture.bare)));
+    expect(migrated).toMatchObject({ skill_id: ID, version: 'v1', version_tree: p.hash });
+  });
+
   it.each([false, true])('moves the complete diff in one safeWrite commit (GitHub=%s), preserves bytes/modes, and re-arms idempotently', async github => {
     const p = await prepared(github);
     const before = (await git(['rev-parse', 'main'], p.fixture.bare)).trim();
