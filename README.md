@@ -13,7 +13,7 @@ As a result, we built Terum, a free, fully open source tool that lets you evalua
 
 Our purpose is it make it quick and easy to determine best AI practices through skills and share your findings with your team. 
 
-## Why should I use this? Who would find this helpful?
+## Why should I use this? Who would find this helpful? (And other FAQ)
 
 **Who would find this helpful?**
 - **Developers in an team** looking to discover and share best practices internally
