@@ -757,7 +757,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 45,
     "policy": "prose",
-    "pattern": "team-migration command; use `sync` for fetching and do not invent a migration invocation."
+    "pattern": "`team migrate` exists but is terminal-only (Table B); do not invent any other migration invocation."
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
@@ -1217,9 +1217,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 384,
+    "line": 385,
     "policy": "prose",
-    "pattern": "This CLI has no team migrate or standalone refresh command. Use `sync` to fetch; `team workflow-update --print` only prints workflow migration instructions and does not migrate skill layout."
+    "pattern": "This CLI has no standalone refresh command: use `sync` to fetch. `team workflow-update --print` only prints workflow migration instructions; the skill-layout migration is `team migrate`, a terminal-only, once-per-team operation that refuses to run under `--frames`."
   },
   {
     "file": "README.md",
@@ -1385,9 +1385,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 144,
+    "line": 145,
     "policy": "prose",
-    "pattern": "there is no standalone refresh command: use `sync`. Neither belongs in the advertised verb list."
+    "pattern": "command: use `sync`. Neither belongs in the advertised verb list."
   },
   {
     "file": "docs/frame-protocol.md",
@@ -1640,5 +1640,35 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 395,
     "policy": "prose",
     "pattern": "by `sync`."
+  },
+  {
+    "file": "README.md",
+    "line": 369,
+    "policy": "prose",
+    "pattern": "| | `team migrate` | Convert a team repo to the versioned layout (one commit per repo). Run **once per team, from a terminal**, and only after the release carrying the new CLI has reached everyone — an un-upgraded teammate cannot read a migrated repo |"
+  },
+  {
+    "file": "docs/migration-layout-3.md",
+    "line": 3,
+    "policy": "prose",
+    "pattern": "Batch B8 builds `terum-skills team migrate`. Shipping this command does not authorize running it."
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 44,
+    "policy": "prose",
+    "pattern": "- Use the grammar below. This CLI has no standalone refresh command; use `sync` for fetching."
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 114,
+    "policy": "fixed",
+    "pattern": "| `team migrate [--team <name>]` | none | `npx -y terum-skills@latest team migrate` — once per team, from a terminal, only after the release carrying the new CLI has reached every teammate (an un-upgraded teammate cannot read a migrated repo); refuses under `--frames` |"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 143,
+    "policy": "prose",
+    "pattern": "`team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the"
   }
 ];

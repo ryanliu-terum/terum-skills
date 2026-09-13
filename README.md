@@ -382,7 +382,7 @@ Release notices appear last on stderr, at most once per release per day, and are
 | | `app` | Install and open the desktop app for this CLI version |
 | | `app-update [--check\|--stage\|--apply] [--release <version>] [--reason on-close\|overnight\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes) |
 
-This CLI has no team migrate or standalone refresh command. Use `sync` to fetch; `team workflow-update --print` only prints workflow migration instructions and does not migrate skill layout.
+This CLI has no standalone refresh command: use `sync` to fetch. `team workflow-update --print` only prints workflow migration instructions; the skill-layout migration is `team migrate`, a terminal-only, once-per-team operation that refuses to run under `--frames`.
 
 `npx -y terum-skills@latest --help` and `npx -y terum-skills@latest <verb> --help` list every option you are expected to use.
 

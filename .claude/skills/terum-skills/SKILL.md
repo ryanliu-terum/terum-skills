@@ -41,8 +41,8 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 - `$ARGUMENTS`: the command path can have multiple tokens (`skill move`, `team project create`).
   Pass the remaining arguments unchanged. With no arguments, ask which verb, defaulting to
   `status`. Explain the tables below briefly; ask for the user's intent before assembling flags.
-- Use the grammar below. This CLI has no standalone refresh or
-  team-migration command; use `sync` for fetching and do not invent a migration invocation.
+- Use the grammar below. This CLI has no standalone refresh command; use `sync` for fetching.
+  `team migrate` exists but is terminal-only (Table B); do not invent any other migration invocation.
 
 ## Table A: verbs that run here
 
@@ -111,6 +111,7 @@ the CLI will ask you questions the session cannot answer.*
 | `uninstall` | none | `npx -y terum-skills@latest uninstall` — machine teardown, preserving recovery data and printing the package-manager step |
 | `team leave <name>`, `team remove <handle>` | none | the same command with the supported npx prefix |
 | `team project create [name] [--remote <url>]` | none | `npx -y terum-skills@latest team project create <name> --remote <url>` |
+| `team migrate [--team <name>]` | none | `npx -y terum-skills@latest team migrate` — once per team, from a terminal, only after the release carrying the new CLI has reached every teammate (an un-upgraded teammate cannot read a migrated repo); refuses under `--frames` |
 | `setup [target]`, `team create`, `team join <target>`, `login` | none; setup/join can clone before asking | `npx -y terum-skills@latest setup` / `setup <org>/<repo>` / `team create` / `team join <target>` / `login` with the same npx prefix |
 
 Publish writes the local folder as an immutable `skills/<name>/v<N>/` version directly to team

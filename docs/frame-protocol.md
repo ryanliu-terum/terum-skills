@@ -140,8 +140,9 @@ hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verb
 ["skill move","skill rename","skill delete","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team workflow-update","team project create","invite","ls","status","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
 ```
 
-There is no team migrate registration in this checkout. The refresh feature is true, but
-there is no standalone refresh command: use `sync`. Neither belongs in the advertised verb list.
+`team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the
+caller to run it from a terminal (D24). The refresh feature is true, but there is no standalone refresh
+command: use `sync`. Neither belongs in the advertised verb list.
 
 `hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, and `serve`.
 
