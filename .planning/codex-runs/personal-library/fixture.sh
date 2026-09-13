@@ -8,7 +8,7 @@
 # `<path before /repo/app>/home`, so the two folders must keep these positions under the scratch root.
 # Usage: fixture.sh <scratch-root>   (CLI env var: path to dist/index.js, unused here but honoured by record.sh)
 set -euo pipefail
-FX=${1:?fixture root}; CLI=${CLI:-/Users/ryanliu/Documents/Terum/terum-codex/refactor-frames/dist/index.js}
+FX=${1:?fixture root}
 rm -rf "$FX"; mkdir -p "$FX/home/.terum/skills" "$FX/home/.claude/skills" "$FX/repo/app/.claude/skills"
 export HOME="$FX/home"
 DESCRIPTION='A fixture skill used by the desktop replay captures.'

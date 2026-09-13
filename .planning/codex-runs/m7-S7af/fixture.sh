@@ -4,7 +4,7 @@
 # diagnose), seeded directly in layout 3 (skills/<name>/v1/, team.json layout_version 3, projects.Global).
 # Usage: fixture.sh <scratch-root>   (CLI env var: path to dist/index.js, unused here but honoured by record.sh)
 set -euo pipefail
-FX=${1:?fixture root}; CLI=${CLI:-/Users/ryanliu/Documents/Terum/terum-codex/refactor-frames/dist/index.js}
+FX=${1:?fixture root}
 rm -rf "$FX"; mkdir -p "$FX/home/.terum/skills/teams" "$FX/home/.claude/skills" "$FX/repo"
 export HOME="$FX/home"
 # `ls` reports each skill's `updated` from `git log -1 --format=%cI -- skills/<name>`; a pinned commit date keeps

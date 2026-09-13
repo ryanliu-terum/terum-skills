@@ -104,7 +104,8 @@ export interface StatusLedger {
 }
 export interface StatusResult {ledger?:StatusLedger|null;machine:Machine;me:Identity;teams:TeamStatus[];counts:Record<string,string>;tools:{git:boolean;gh:boolean};roots:Root[]}
 export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project')[]}
-export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null;endorsed:string|null}
+/** No `endorsed`: the CLI's SearchHit dropped it (refactor spec §4.1; review r1 HIGH) — a skill's lists are the catalog's projects, not a search field. */
+export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null}
 export interface IdentityArgs {name?:string;email?:string;defaultHandle?:string}
 export interface IdentityWrite {updated:{key:string;value:string}[];notice:string|null}
 export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;force?:boolean}

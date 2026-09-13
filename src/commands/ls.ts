@@ -226,9 +226,11 @@ async function showProject(projectName: string | undefined, team: ReturnType<typ
 }
 /** One skill per line, the §6 `ls` format; `search` prints hits through the same function. */
 /** D1: the printed line is prose, so the folder is rendered here — the DTO stays an address. */
-export function format<T extends Pick<LsSkill, 'name' | 'author' | 'category' | 'installs' | 'latest' | 'endorsement' | 'updated'>>(skill: T): string {
+// `endorsement` is optional because a search hit no longer carries one (§4.1 dropped `SearchHit.endorsed`, review r1
+// HIGH): its line runs from the version straight to the date rather than printing a '—' for a field it does not have.
+export function format<T extends Pick<LsSkill, 'name' | 'author' | 'category' | 'installs' | 'latest' | 'updated'> & { endorsement?: string }>(skill: T): string {
   const ordinal = parseVersionFolder(skill.latest);
-  return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${ordinal === null ? skill.latest : versionLabel(ordinal)}; ${skill.endorsement}; ${skill.updated}`;
+  return `  ${skill.name} — ${skill.author}; ${skill.category}; ${skill.installs} installs; ${ordinal === null ? skill.latest : versionLabel(ordinal)}; ${skill.endorsement === undefined ? '' : `${skill.endorsement}; `}${skill.updated}`;
 }
 
 

@@ -56,10 +56,11 @@ it('retains the recorded status payload when its result frame fails', async () =
   expect(result.error).toMatch(/^Unreadable team clone\.\nterum-skills/);
 });
 
+// No `endorsed` in the schema: spec §4.1 (line 283) dropped `SearchHit.endorsed` and the re-recorded frame carries none (review r1 HIGH) — the adapter must not invent a null for it either.
 it('serves all three recorded search hits with real metadata and no fabricated descriptions', async () => {
   const lines = recorded('search');
   const resultFrame = lines.map(line => z.object({ t: z.string(), value: z.unknown().optional() }).parse(JSON.parse(line))).find(frame => frame.t === 'result');
-  const hits = z.array(z.object({ description: z.string(), team: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), endorsed: z.string() })).parse(resultFrame?.value);
+  const hits = z.array(z.object({ description: z.string(), team: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string() })).parse(resultFrame?.value);
   expect(hits).toHaveLength(3);
   expect(hits.map(hit => hit.team)).toEqual(['acme', 'acme', 'acme']);
   const result = await createTauriBackend(replay(lines).bridge).search({ q: '' });
@@ -139,8 +140,11 @@ it('derives Marketplace metadata and counts from the re-recorded (0.14.0) mock-v
   expect(c.scanned).toEqual(['~/.claude/skills']);
   expect(c.verdictCounts).toEqual({ PASS: 0, NEUTRAL: 0, FAIL: 0, 'Not evaluated': 3 });
   expect(c.bulkInstall.terum).toEqual({ total: 1, asking: 0 });
-  expect(c.projects[0]).toMatchObject({ admin: null, desc: '', evaluated: null, updated: '1 day ago', path: null });
-  expect(c.projects[0]?.updated).toBe(relativeTime(c.skills.find(s => s.name === 'tdd')!.updated));
+  // Pinned by name (review r1, MEDIUM): the re-recorded ls.jsonl lists projects [Global, terum] and catalogModel keeps that order, so
+  // `projects[0]` was Global — whose deploy-check shares tdd's timestamp, the only reason the old index-0 assertion still passed.
+  const terum = c.projects.find(p => p.name === 'terum')!;
+  expect(terum).toMatchObject({ admin: null, desc: '', evaluated: null, updated: '1 day ago', path: null, skillsIn: ['tdd'] });
+  expect(terum.updated).toBe(relativeTime(c.skills.find(s => s.name === 'tdd')!.updated));
   expect(c.people.find(p => p.handle === 'mira')).toMatchObject({ publishLine: 'Published deploy-check · 1 day ago', lastPublish: '1 day ago · deploy-check', placeNote: '1 of 2 on this machine · install places the other 1', skills: ['deploy-check'], installable: ['deploy-check', 'tdd'], onDisk: [1, 2] });
   expect(c.people.find(p => p.handle === 'ravi')).toMatchObject({ publishLine: 'Published diagnose · 1 day ago', lastPublish: '1 day ago · diagnose' });
   for (const person of c.people) expect(person).toMatchObject({ role: null, organization: null, teamsLine: 'On no project yet' });

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Re-records every frame of this set from the built CLI against fixture.sh. Usage: record.sh <scratch-root> [out-dir]
 set -euo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd); FX=${1:?scratch root}; OUT=${2:-$HERE/frames}; CLI=${CLI:-/Users/ryanliu/Documents/Terum/terum-codex/refactor-frames/dist/index.js}
+HERE=$(cd "$(dirname "$0")" && pwd); FX=${1:?scratch root}; OUT=${2:-$HERE/frames}
+# rec/drive, the CLI default (this checkout's dist/) and the stage-verify-move rule live in ../record-lib.sh (review r1 CRITICAL): a
+# frame is written over the committed one only after its fresh recording is checked; a failed verb exits 1 and leaves it untouched.
+. "$HERE/../record-lib.sh"
 bash "$HERE/fixture.sh" "$FX"; export HOME="$FX/home"; cd "$FX/repo/seed"; mkdir -p "$OUT"
-rec() { local out=$1; shift; printf '%s' "${STDIN:-}" | node "$CLI" --frames "$@" > "$OUT/$out" || true; }
 # Team reads (the inventory-, skill-detail- and share-settings replays spawn exactly these argv shapes).
 rec status.jsonl status
 # `status` has no --json flag and never had one over frames: the committed status-json.jsonl is byte-identical
@@ -15,18 +17,19 @@ rec ls-local.jsonl ls --local
 rec ls-member-mira.jsonl ls member mira
 rec ls-member-ravi.jsonl ls member ravi
 rec ls-member-seed.jsonl ls member seed
-rec ls-member-nope.jsonl ls member nope
+# The four `*-nope` reads are recorded refusals (result ok:false, exit 1): each says so on its own call (record-lib.sh rule 1).
+ALLOW_FAIL=1 rec ls-member-nope.jsonl ls member nope
 rec ls-project-terum.jsonl ls project terum
-rec ls-project-nope.jsonl ls project nope
+ALLOW_FAIL=1 rec ls-project-nope.jsonl ls project nope
 rec search.jsonl search ''
 rec validate-deploy-check.jsonl validate deploy-check
 rec validate-diagnose.jsonl validate diagnose
 rec validate-tdd.jsonl validate tdd
-rec validate-nope.jsonl validate nope
+ALLOW_FAIL=1 rec validate-nope.jsonl validate nope
 rec eval-report-deploy-check.jsonl eval-report deploy-check
 rec eval-report-diagnose.jsonl eval-report diagnose
 rec eval-report-tdd.jsonl eval-report tdd
-rec eval-report-nope.jsonl eval-report nope
+ALLOW_FAIL=1 rec eval-report-nope.jsonl eval-report nope
 # `update` last, offline: the committed frame was taken on a machine that had observed a release advertisement.
 # A GitHub-hosted team would make the CLI probe the network here, so — as m7-S7e's fixture does — the team's
 # remote is re-pointed at the local bare repo first; under the github-teams policy that disables release

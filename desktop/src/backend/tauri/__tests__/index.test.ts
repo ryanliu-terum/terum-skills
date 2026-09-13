@@ -122,10 +122,11 @@ it('refuses empty validate targets and uses cwd when ref is empty', async () => 
   expect(f.spawns[0]?.args).toEqual(['validate', '--', '/checkout']);
 });
 
+// `endorsed` is neither read nor emitted: spec §4.1 (line 283) dropped `SearchHit.endorsed` (review r1 HIGH).
 it.each([true, false])('maps every search field including its real description (optional metadata=%s)', async metadata => {
-  const hit = { description: 'Real description', grants: null, grantsHash: null, updated: '—', id: 'id', name: 'a', author: 'Mira <mira@example.com>', category: 'ops', installs: 0, latest: 'Version 1', ...(metadata ? { team: 'acme', endorsed: 'project: Global' } : {}) };
+  const hit = { description: 'Real description', grants: null, grantsHash: null, updated: '—', id: 'id', name: 'a', author: 'Mira <mira@example.com>', category: 'ops', installs: 0, latest: 'Version 1', ...(metadata ? { team: 'acme' } : {}) };
   const result = await createTauriBackend(replay([hit]).bridge).search({ q: 'a' });
-  expect(result).toEqual({ ok: true, value: [{ kind: 'skill', ref: metadata ? 'acme/a' : 'a', name: 'a', description: 'Real description', team: metadata ? 'acme' : null, author: hit.author, category: 'ops', installs: 0, latest: 'Version 1', endorsed: metadata ? 'project: Global' : null }] });
+  expect(result).toEqual({ ok: true, value: [{ kind: 'skill', ref: metadata ? 'acme/a' : 'a', name: 'a', description: 'Real description', team: metadata ? 'acme' : null, author: hit.author, category: 'ops', installs: 0, latest: 'Version 1' }] });
 });
 
 it('serves status, settings, library, skill, update, roster and catalog while the other three surfaces stay typed gaps', async () => {

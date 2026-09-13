@@ -638,3 +638,27 @@ derived frames is the CLI's real output. Still owed, none gating B5:
 
 Budget note: this pass cost 5.4M subagent tokens and took the 5-hour session budget from 60% to 86%;
 the re-review of the two-high fix (`--base=f2089dd`) waits for the 07:00 reset before #183 merges.
+
+## A24 — The frames PR's review: the recorder could blank its own fixtures, and two things honest frames exposed
+
+**Review `wf_7eaffc90-e93` (base `origin/main`, 254 agents): 1 critical, 2 high, 7 medium, 1 low.**
+- *Critical, fixed:* every `record.sh` opened the committed golden frame for writing BEFORE the CLI
+  ran and swallowed failure with `|| true`, so a stale `dist/` or a crash silently committed an empty
+  fixture — and the oracle `continue`d past empty files instead of failing. Now one shared
+  `.planning/codex-runs/record-lib.sh`: record to a pending file, accept only when the exit status,
+  the JSON, and a final `{"t":"result"}` frame agree (a recorded failure must say `ALLOW_FAIL=1` on
+  its own call — seven such frames), then move into place; the CLI defaults to the containing
+  checkout's build. Proven with a missing CLI and five fake CLIs (every frame byte-identical after)
+  and with the real CLI (all 97 driver-backed frames reproduced exactly). `capture-frames.test.ts`
+  fails an empty, non-JSON, or result-less frame file.
+- *High, fixed:* the desktop's hardcoded `Global` filter chip and the invite dialog's default project
+  collided with the real `Global` project a layout-3 catalog carries (duplicate key; wrong default).
+  The chip literal is added only when the catalog has no Global; the invite default skips it.
+  `MarketplaceScreen`'s "already has a project named Global" refusal is CORRECT under layout 3 and
+  stays.
+- *High, fixed:* `search` still emitted `endorsed` on every hit — spec §283 drops it with `unresolved`.
+  Dropped from the CLI, its printed line, the desktop type/reader/mock; the eight driver-backed
+  `search.jsonl` frames were re-recorded (only `search.jsonl` changed in each set). `b3-real-data` and
+  `m7-S7q` keep theirs (no driver; nothing reads them).
+- *Medium, fixed:* `replay.test.ts` indexed `projects[0]` after the reorder; pinned by name. Also the
+  drive.cjs UTF-8/`close` mediums, since the script was rewritten. The other mediums stay deferred.

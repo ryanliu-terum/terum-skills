@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Builds a layout-3 fixture team (refactor spec §3.1) under a scratch HOME so the built CLI can be driven
-# over --frames offline. Usage: fixture.sh <scratch-root>. The CLI path is taken from the CLI env var so
-# record.sh beside this file and the seed agree on one build; the seed itself never runs it.
+# over --frames offline. Usage: fixture.sh <scratch-root>. The CLI is resolved by record.sh beside this
+# file (through ../record-lib.sh); the seed itself never runs it.
 set -euo pipefail
-FX=${1:?fixture root}; CLI=${CLI:-/Users/ryanliu/Documents/Terum/terum-codex/refactor-frames/dist/index.js}
+FX=${1:?fixture root}
 # ---- this set's knobs: the only lines that differ between the sets' fixture.sh files ----
 REMOTE=local
 MIRA_META=1

@@ -7,7 +7,7 @@ import { staleLine } from '../lib/hook.js';
 import { Prompter } from '../lib/prompt.js';
 import { fromError, failure, Result, success } from '../lib/result.js';
 import { readPerson, readTeam, skillRecords } from '../lib/skills.js';
-import { installCounts, latestChange, skillEndorsement } from '../lib/readme.js';
+import { installCounts, latestChange } from '../lib/readme.js';
 import { versionFolderName } from '../lib/versions.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { format as formatSkill } from './ls.js';
@@ -16,7 +16,9 @@ export interface SearchArgs extends WithForm { term: string; category?: string; 
 export interface SearchHit {
   team: string; id: string; name: string; author: string; category: string; installs: number;
   /** §8.4: the `v<N>` FOLDER of the highest version — data, not the rendered label (see `LsSkill.latest`). */
-  latest: string; endorsed: string;
+  latest: string;
+  // No `endorsed` (§4.1, spec line 283; review r1 HIGH): an endorsement is a project listing the id, which `ls`'s
+  // projects[] already carries — search reports the skill, not its lists, and its printed line carries no '—' for it.
   description: string; grants: string | null; grantsHash: string | null; updated: string;
 }
 
@@ -53,12 +55,11 @@ export async function run(args: SearchArgs, io: Prompter): Promise<Result<Search
         for (let index = 0; index < filtered.length; index += 8) dates.push(...await Promise.allSettled(filtered.slice(index, index + 8).map((skill) => latestChange(runner, clone, skill.name))));
         const counts = installCounts(people);
         for (const [index, skill] of filtered.entries()) {
-        const endorsed = skillEndorsement(teamJson, skill.id);
         const date = dates[index]!;
         if (date.status === 'rejected') io.print(`${team}/${skill.name}: ${date.reason instanceof Error ? date.reason.message : String(date.reason)}`);
-        const hit: SearchHit = { team, description: skill.frontmatter.description, grants: skill.grants.ok ? skill.grants.normalized : null, grantsHash: skill.grants.ok ? skill.grants.hash : null, updated: date.status === 'fulfilled' ? date.value : '—', id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: versionFolderName(skill.latestVersion), endorsed };
+        const hit: SearchHit = { team, description: skill.frontmatter.description, grants: skill.grants.ok ? skill.grants.normalized : null, grantsHash: skill.grants.ok ? skill.grants.hash : null, updated: date.status === 'fulfilled' ? date.value : '—', id: skill.id, name: skill.name, author: skill.frontmatter.metadata.author, category: skill.frontmatter.metadata['terum-category'], installs: counts.get(skill.id) ?? 0, latest: versionFolderName(skill.latestVersion) };
         hits.push(hit);
-        io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, characters: skill.characters, installs: hit.installs, latest: hit.latest, endorsement: hit.endorsed, description: hit.description, grants: hit.grants, grantsHash: hit.grantsHash, installedBy: [], body: null, frontmatter: null, updated: hit.updated, receipt: null, versionCount: skill.versionCount }));
+        io.print(formatSkill({ id: hit.id, name: hit.name, author: hit.author, category: hit.category, characters: skill.characters, installs: hit.installs, latest: hit.latest, description: hit.description, grants: hit.grants, grantsHash: hit.grantsHash, installedBy: [], body: null, frontmatter: null, updated: hit.updated, receipt: null, versionCount: skill.versionCount }));
         }
         const stale = await staleLine(store.root, team, args.now, args.form);
         if (stale) io.print(stale);
