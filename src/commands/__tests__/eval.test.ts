@@ -311,6 +311,20 @@ describe('eval (§6 / IE2)', () => {
   it('names the Library, not the team, when the ref resolves to no local folder', async () => {
     const { store, home } = await evalFixture();
     expect(await run(args(store, home, { ref: 'ghost' }), new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('No local skill folder named `ghost` in your library') });
+    // No --path flag exists, so the miss must not promise one: it points at the path grammar instead.
+    expect(await run(args(store, home, { ref: 'ghost' }), new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.not.stringContaining('--path') });
+  });
+
+  // The desktop passes the Library card's path (as `~/…`) for a skill the team has never seen.
+  it('accepts the skill folder\'s path as the ref, ~-prefixed or absolute, and refuses a path outside the Library', async () => {
+    const { store, home } = await evalFixture();
+    // Resolution succeeded: the run got as far as looking for the named case.
+    expect(await run(args(store, home, { ref: join(home, '.claude', 'skills', 'sample'), case: 'missing' }), new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No eval case named missing for sample.' });
+    expect(await run(args(store, home, { ref: '~/.claude/skills/sample', case: 'missing' }), new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No eval case named missing for sample.' });
+    const outside = await temporaryDirectory();
+    await mkdir(join(outside, 'sample'), { recursive: true });
+    await writeFile(join(outside, 'sample', 'SKILL.md'), skill());
+    expect(await run(args(store, home, { ref: join(outside, 'sample') }), new ScriptedPrompter())).toMatchObject({ ok: false, error: `\`${join(outside, 'sample')}\` is not a skill folder in your library (~/.claude/skills or an added project's .claude/skills); add the project holding it with \`project add\`, or install it from the marketplace first.` });
   });
 });
 
