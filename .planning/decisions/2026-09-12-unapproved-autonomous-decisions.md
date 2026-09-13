@@ -876,3 +876,27 @@ seventh bullet added (`desktop/src/backend/tauri/index.ts:812-826`):
 
 Alternative rejected: a third pass to fix the two mediums before merging. The bar is critical/high
 (D53); each is one commit later, and B7 is the only batch still open.
+
+## A29 — B7's review: one medium, applied without a further pass
+
+**Review `wf_a5481504-0a7` (base `origin/main` = `52f776b`, 21 agents): 0 critical, 0 high, 1 medium, 0
+contested.** Clean on the D53 bar. The medium is a coverage gap in B7's own guard, the doc-literal
+tripwire (`src/lib/__tests__/invocation-tripwire.test.ts`): its verb alternation came from
+`buildProgram().commands`, commander's direct children only, so the ~13 namespaced subcommands
+(`team create`, `skill move`, `project add`, `ls member`, `team migrate`, …) were invisible and a doc
+line naming a bare subcommand (`\`create [name]\`: makes a new team repo.`) never needed a catalogue
+entry — the drift the test exists to stop, and the opposite of its own comment's claim.
+- **Applied here**, not deferred: the alternation now walks the whole command tree (every
+  `name()` at every depth). Proof: appending that bare-subcommand line to `docs/frame-protocol.md`
+  fails the test; restored, it passes with zero catalogue delta (the triage had verified the same).
+- Why apply a medium: it is test-only, changes no shipped behaviour, adds no catalogue entry today,
+  and B7 is the batch that owns the tripwire — no later batch "next touches" it. Precedent: A23
+  applied B9's mechanical mediums after its clean review without another pass. The other mediums of
+  this refactor stayed deferred because each touched shipped code.
+- No confirmation pass over this commit: a test-file hardening plus two planning documents; CI's
+  `gates` job (which runs the tripwire) is the gate. If Ryan wants the letter of D53, one scoped pass
+  `--base=c693456` costs ~1M tokens.
+- Report (untracked): `terum-codex/refactor-b7/.planning/reviews/refactor-b7-docs.hybrid.r1.review.md`.
+
+Alternative rejected: narrowing the test's comment to "top-level verbs only" — cheaper, but it would
+make the manual's guard weaker than the spec sentence it cites. Reversal cost: revert one commit.
