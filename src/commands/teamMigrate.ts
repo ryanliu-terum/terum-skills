@@ -5,6 +5,7 @@ import type { Prompter } from '../lib/prompt.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { anyLayoutTeamSchema, GLOBAL_PROJECT, installedSchema, isSkillName, LEGACY_TREE_HASH, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, teamSchema } from '../lib/schema.js';
+import { ignoredByDigest, skillContentDigest } from '../lib/skills.js';
 import { installPushGuard, lockWait, MutableTree, openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { parseVersionFolder, VERSION_FOLDER, versionFolderName } from '../lib/versions.js';
 import { receiptSchema } from '../lib/evals/receipt.js';
@@ -69,6 +70,11 @@ export function migrateTree(tree: MutableTree): MigrationCounts {
   const executable = tree.executablePaths();
   const movedExecutables = new Set<string>();
   const hashes = new Map<string, string>(); // UUID → this attempt's HEAD:skills/<name> tree.
+  // UUID → the v1 bytes keyed the way `canonicalDigest`'s walker keys a folder on disk: skill-relative
+  // POSIX paths with D2's ignore list applied. D76 stamps a digest from this map, and B6's install
+  // seeding looks the receipt up by re-walking the placed folder (§9.1) -- a key shape or ignore rule
+  // that differs from `walk()`'s would mint a digest no on-disk reader can ever reproduce.
+  const filesById = new Map<string, Map<string, Buffer>>();
   const v1 = versionFolderName(1);
   const paths = tree.paths();
   const skillNames = new Set(paths.flatMap(path => /^skills\/([^/]+)\/.+$/.exec(path)?.slice(1, 2) ?? []));
@@ -87,10 +93,16 @@ export function migrateTree(tree: MutableTree): MigrationCounts {
     const hash = tree.beforeTreeId(`skills/${name}`);
     if (hash === undefined || !LEGACY_TREE_HASH.test(hash)) throw new Error(`Migration refused: no HEAD tree identity for skills/${name}.`);
     hashes.set(id, hash);
+    const files = new Map<string, Buffer>();
     for (const source of skillPaths) {
-      const destination = `${prefix}${v1}/${source.slice(prefix.length)}`;
-      move(source, destination, required(tree, source));
+      const relative = source.slice(prefix.length);
+      const bytes = required(tree, source);
+      // Every path moves (§13 step 1 -- `.DS_Store` and friends are bytes the team committed); only the
+      // digest applies D2's ignore list, exactly as `sourceFiles()` and `walk()` do for a folder on disk.
+      if (!ignoredByDigest(relative)) files.set(relative, Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes, 'utf8'));
+      move(source, `${prefix}${v1}/${relative}`, bytes);
     }
+    filesById.set(id, files);
     counts.skills++;
   }
 
@@ -110,7 +122,12 @@ export function migrateTree(tree: MutableTree): MigrationCounts {
       const receipt = parseJson(receiptSchema, treeText(bytes), source);
       if (receipt.skill_id !== id || receipt.version !== hash || receipt.run_id !== runId) throw new Error(`Migration refused: misfiled receipt ${source}.`);
       if (receipt.version_tree !== undefined && receipt.version_tree !== hash) throw new Error(`Migration refused: conflicting version_tree in ${source}.`);
-      move(source, `evals/${folder}/${v1}/${runId}.json`, json({ ...receipt, version: v1, version_tree: hash }));
+      // D76 (LOCK, 2026-09-13): stamp `content_digest`, the key B6's install seeding reads the receipt
+      // by. Faithful by construction: this branch runs only when HEAD:skills/<name> IS the tree the
+      // receipt was evaluated on, so the v1 bytes are the evaluated bytes. The receipt stays schema 1
+      // (`content_digest` is optional there, §6.1). `filesById` is populated beside `hashes`, so the
+      // guard above proves the lookup. An archived receipt describes OTHER bytes and is never stamped.
+      move(source, `evals/${folder}/${v1}/${runId}.json`, json({ ...receipt, version: v1, version_tree: hash, content_digest: skillContentDigest(filesById.get(id)!) }));
       counts.rekeyedReceipts++;
     } else {
       move(source, `evals/${folder}/archive/${hash}/${runId}.json`, bytes);

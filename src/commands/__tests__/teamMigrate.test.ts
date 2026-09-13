@@ -7,6 +7,7 @@ import { receiptSchema } from '../../lib/evals/receipt.js';
 import { FRAME_VERBS } from '../../lib/frames.js';
 import { applyReadme } from '../../lib/readme.js';
 import { personSchema, parseJson, teamSchema } from '../../lib/schema.js';
+import { canonicalDigest } from '../../lib/skills.js';
 import { systemRunner } from '../../lib/runner.js';
 import { openTeamRepo } from '../../lib/teamRepo.js';
 import { bareTeam, cloneWithIdentity, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
@@ -119,7 +120,8 @@ describe('§13 migration (temporary bare repositories only)', () => {
     }
     expect(await git(['ls-tree', 'main', '--', 'skills/sample/v1/scripts/run.sh'], p.fixture.bare)).toMatch(/^100755 blob /);
     const migrated = receiptSchema.parse(JSON.parse(await git(['show', `main:evals/${ID}/v1/${RUN}.json`], p.fixture.bare)));
-    expect(migrated).toEqual({ ...receipt(p.hash), version: 'v1', version_tree: p.hash });
+    // D76: the stamped digest is the one the codebase's own on-disk walker computes over the MIGRATED folder.
+    expect(migrated).toEqual({ ...receipt(p.hash), version: 'v1', version_tree: p.hash, content_digest: await canonicalDigest(join(p.clone, 'skills/sample/v1')) });
     expect(await git(['show', `main:evals/${ID}/archive/${OLD}/${RUN}.json`], p.fixture.bare)).toBe(p.archived);
     const seed = personSchema.parse(JSON.parse(await git(['show', 'main:people/seed.json'], p.fixture.bare)));
     const other = personSchema.parse(JSON.parse(await git(['show', 'main:people/other.json'], p.fixture.bare)));
@@ -136,6 +138,25 @@ describe('§13 migration (temporary bare repositories only)', () => {
     const migratedHead = (await git(['rev-parse', 'main'], p.fixture.bare)).trim();
     expect(await p.invoke()).toMatchObject({ ok: true, value: { changed: false } });
     expect((await git(['rev-parse', 'main'], p.fixture.bare)).trim()).toBe(migratedHead);
+  });
+
+  // D76 (LOCK, 2026-09-13): B6's install seeding keys the local eval store by `content_digest`, and a
+  // §13 re-key stays schema 1 where the field is optional -- so migrate stamps it. The stamp is faithful
+  // because the branch re-keys only when HEAD:skills/<name> IS the evaluated tree. The value must be
+  // what an on-disk reader recomputes: the fixture's `.DS_Store` is moved into v1 like every other byte
+  // (§13 step 1) yet D2's predicate ignores it, so a migrate walker that skipped `ignoredByDigest` would
+  // mint a digest `canonicalDigest` never reproduces and every seeded receipt would be orphaned.
+  it('D76: stamps the re-keyed receipt with the migrated v1 folder\'s content digest and leaves the archive unstamped', async () => {
+    const p = await prepared();
+    expect(await p.invoke()).toMatchObject({ ok: true, value: { rekeyedReceipts: 1, archivedReceipts: 1 } });
+    expect(await readFile(join(p.clone, 'skills/sample/v1/.DS_Store'))).toEqual(Buffer.from([0, 255, 1]));
+    const rekeyed = receiptSchema.parse(JSON.parse(await git(['show', `main:evals/${ID}/v1/${RUN}.json`], p.fixture.bare)));
+    expect(rekeyed.schema_version).toBe(1);
+    expect(rekeyed.content_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    // The codebase's own on-disk walker over the migrated folder, not the same helper over the same map.
+    expect(rekeyed.content_digest).toBe(await canonicalDigest(join(p.clone, 'skills/sample/v1')));
+    const archived = receiptSchema.parse(JSON.parse(await git(['show', `main:evals/${ID}/archive/${OLD}/${RUN}.json`], p.fixture.bare)));
+    expect(archived.content_digest).toBeUndefined();
   });
 
   it('re-reads HEAD tree identities when a concurrent skill change forces a retry', async () => {
