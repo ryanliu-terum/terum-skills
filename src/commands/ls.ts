@@ -101,7 +101,7 @@ export interface LsPerson {
 }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[];
   /** §8.4: emitted on the `kind:'all'` team read only; `member?` still serves the single-member view. */
-  people?: readonly LsPerson[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; declined: Person['declined']; role: string | null; projects: readonly string[] }; }
+  people?: readonly LsPerson[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; role: string | null; projects: readonly string[] }; }
 
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
 export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>> {
@@ -214,7 +214,7 @@ async function showMember(handle: string | undefined, people: Awaited<ReturnType
   io.print(`Member ${member.handle}:`);
   io.print(`  Authored: ${authored.map((skill) => skill.name).join(', ') || '—'}`);
   io.print(`  Installed: ${member.installed.map((item) => namesById.get(item.id) ?? item.id).join(', ') || '—'}`);
-  return success({ roster, skills: authored, projects, problems, member: { installed: member.installed.map(({id,scope,since}) => ({id,scope,since})), handle: member.handle, declined: member.declined, role: member.role ?? null, projects: member.projects ?? [] } });
+  return success({ roster, skills: authored, projects, problems, member: { installed: member.installed.map(({id,scope,since}) => ({id,scope,since})), handle: member.handle, role: member.role ?? null, projects: member.projects ?? [] } });
 }
 async function showProject(projectName: string | undefined, team: ReturnType<typeof teamSchema.parse>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems']): Promise<Result<LsResult>> {
   if (!projectName || !Object.hasOwn(team.projects, projectName)) throw new Error(`No project named ${projectName ?? ''}.`);

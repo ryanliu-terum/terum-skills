@@ -51,7 +51,10 @@ describe('team join (§6, §5.4 identity)', () => {
     const teams = (await store.read()).teams;
     expect(Object.hasOwn(teams, 'toString')).toBe(true);
     expect(teams.toString).toMatchObject({ handle: 'me' });
-    expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare)).handle).toBe('me');
+    const me = JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare));
+    expect(me.handle).toBe('me');
+    // §3.5: a fresh join writes no declined[] key; only a legacy file that already carries one keeps it.
+    expect(me).not.toHaveProperty('declined');
   });
 
   it('a completed join survives an unreadable settings.json: ok, one skipped-hook line, roster entry pushed, settings bytes untouched', async () => {
@@ -358,6 +361,8 @@ describe('team join (§6, §5.4 identity)', () => {
     const io = new ScriptedPrompter(['me', 'Me', 'me@example.com'], [false]);
     expect((await join({ target: REMOTE, config: store, runner }, io)).ok).toBe(true);
     expect(io.askedAbout('team-endorsed')).toBe(false);
+    // The rejoin spreads the existing file first, so legacy declined data is carried as-is — neither rewritten nor dropped.
+    expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare)).declined).toEqual([id]);
   });
 
   it('§12: an endorsed skill that grants tools is not installed either, so no consent is ever asked at join', async () => {

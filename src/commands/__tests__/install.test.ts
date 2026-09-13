@@ -1,7 +1,7 @@
 import { createExecute } from '../../lib/execute.js';
 import type { ResultOutcome } from '../../lib/frames.js';
 import { getStartedLines } from '../../lib/invocation.js';
-import { access, mkdir, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import { basename, join, posix, win32 } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as setup from '../setup.js';
@@ -189,7 +189,7 @@ describe('install (§6 refs)', () => {
     expect((await store.read()).placements).toEqual({});
   });
 
-  it('never overwrites a foreign target without force, and force moves it to quarantine before placing', async () => {
+  it('never replaces a target without consent, and keeps the approved replacement in old-skills', async () => {
     const fixture = await bareTeam();
     const id = '55555555-5555-4555-8555-555555555555';
     await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
@@ -198,18 +198,15 @@ describe('install (§6 refs)', () => {
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const target = join(home, '.claude', 'skills', 'sample');
     await mkdir(target, { recursive: true }); await writeFile(join(target, 'SKILL.md'), 'user-owned');
-    const first = await run({ ref: 'sample', config: store, home }, new ScriptedPrompter());
-    expect(first).toMatchObject({ ok: false, error: expect.stringContaining('--force') });
+    const first = await run({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [false]));
+    expect(first).toMatchObject({ ok: false, cancelled: true });
     expect(await readFile(join(target, 'SKILL.md'), 'utf8')).toBe('user-owned');
     expect((await store.read()).placements).toEqual({});
     expect((await store.read()).pending).toHaveLength(1);
-    const forced = await run({ ref: 'sample', config: store, home, force: true }, new ScriptedPrompter());
+    const forced = await run({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]));
     expect(forced.ok).toBe(true);
     expect(await readFile(join(target, 'SKILL.md'), 'utf8')).toContain('name: sample');
-    const quarantined = await readdirRecursive(join(store.root, 'quarantine'));
-    const quarantinedSkill = quarantined.find((entry) => entry.endsWith('sample/SKILL.md'));
-    expect(quarantinedSkill).toBeDefined();
-    expect(await readFile(join(store.root, 'quarantine', quarantinedSkill!), 'utf8')).toBe('user-owned');
+    expect(await readFile(join(home, '.claude/old-skills/sample/SKILL.md'), 'utf8')).toBe('user-owned');
   });
 
 
@@ -222,10 +219,10 @@ describe('install (§6 refs)', () => {
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     const checkout = await cloneWithIdentity(product.bare, join(product.root, 'checkout'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    expect((await run({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const global = join(home, '.claude', 'skills', 'sample');
     const quarantine = join(store.root, 'quarantine');
-    expect((await run({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     await expect(access(global)).resolves.toBeUndefined();
     await expect(access(quarantine)).rejects.toMatchObject({ code: 'ENOENT' });
     const projectHome = join(fixture.root, 'project-home'); const foreign = join(projectHome, '.claude', 'skills', 'sample');
@@ -238,24 +235,22 @@ describe('install (§6 refs)', () => {
     await expect(access(join(checkout, '.claude', 'skills', 'sample', 'SKILL.md'))).resolves.toBeUndefined();
   });
 
-  it('re-installing over an owned placement moves hand edits to quarantine instead of deleting them', async () => {
+  it('reinstall keeps hand edits in old-skills under the same replace rule', async () => {
     const fixture = await bareTeam();
     const id = '55555555-5555-4555-8555-555555555555';
     await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     const home = join(fixture.root, 'home'); const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    expect((await run({ ref: 'sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'sample', config: store, home }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     const placed = join(home, '.claude', 'skills', 'sample');
     await writeFile(join(placed, 'SKILL.md'), 'hand edited');
-    const io = new ScriptedPrompter();
+    const io = new ScriptedPrompter([], [true]);
     expect((await run({ ref: 'sample', config: store, home }, io)).ok).toBe(true);
     expect(await readFile(join(placed, 'SKILL.md'), 'utf8')).toContain('description: sample');
-    const quarantine = join(store.root, 'quarantine');
-    const entries = await readdir(quarantine, { recursive: true });
-    const copies = await Promise.all(entries.filter((item) => item.endsWith('sample/SKILL.md')).map((item) => readFile(join(quarantine, item), 'utf8')));
-    expect(copies).toEqual(['hand edited']);
-    expect(io.lines.filter((line) => line.startsWith(`Local changes at ${placed} moved to `))).toHaveLength(1);
+    const kept = join(home, '.claude/old-skills/sample');
+    expect(await readFile(join(kept, 'SKILL.md'), 'utf8')).toBe('hand edited');
+    expect(io.lines).toContain(`Your copy is kept at ${kept}.`);
   });
 
   it('places project packages in explicit checkouts from any cwd and refreshes Global from outside', async () => {
@@ -303,7 +298,7 @@ describe('install (§6 refs)', () => {
 
     const outside = await temporaryDirectory('terum-unmatched-project-');
     const ledgerBeforeOutside = Object.keys((await store.read()).placements);
-    const outsideInstall = await run({ kind: 'project', project: 'alpha', config: store, home, into: alphaOne, cwd: outside }, new ScriptedPrompter());
+    const outsideInstall = await run({ kind: 'project', project: 'alpha', config: store, home, into: alphaOne, cwd: outside }, new ScriptedPrompter([], [true]));
     expect(outsideInstall).toMatchObject({ ok: true, value: [{ path: join(await realpath(alphaOne), '.claude', 'skills', 'project-a') }] });
     expect((await store.read()).pending).toEqual([]);
     expect(Object.keys((await store.read()).placements)).toEqual(ledgerBeforeOutside);
@@ -364,18 +359,18 @@ describe('install (§6 refs)', () => {
 
     expect((await run({ ref: 'team-a/dup', config: store, home, runner: mapped }, new ScriptedPrompter())).ok).toBe(true);
     expect(await readFile(join(home, '.claude', 'skills', 'dup', 'SKILL.md'), 'utf8')).toContain('description: from first');
-    expect((await run({ ref: 'org/repo/dup', config: store, home, runner: mapped }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: 'org/repo/dup', config: store, home, runner: mapped }, new ScriptedPrompter([], [true]))).ok).toBe(true);
     expect(await readFile(join(home, '.claude', 'skills', 'dup', 'SKILL.md'), 'utf8')).toContain('description: from first');
 
     const beforeUnjoined = JSON.stringify(await store.read());
     expect(await run({ ref: 'other/repo/dup', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, refused: true, error: expect.stringContaining("One team per machine") });
     expect(JSON.stringify(await store.read())).toBe(beforeUnjoined);
-    expect((await run({ ref: `team-a/${dupId.slice(0, 8)}`, config: store, home, runner: mapped }, new ScriptedPrompter())).ok).toBe(true);
+    expect((await run({ ref: `team-a/${dupId.slice(0, 8)}`, config: store, home: join(first.root, 'id-ref-home'), runner: mapped }, new ScriptedPrompter())).ok).toBe(true);
     expect(await run({ ref: 'team-a/deadbeef', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('ambiguous') });
 
     const beforeBatchVersions = JSON.stringify(await store.read());
-    expect(await run({ kind: 'member', member: 'seed@abc', team: 'team-a', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('single-skill') });
-    expect(await run({ kind: 'project', project: 'alpha@abc', team: 'team-a', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('single-skill') });
+    expect(await run({ kind: 'member', member: 'seed@abc', team: 'team-a', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('Installing a previous version is not supported yet') });
+    expect(await run({ kind: 'project', project: 'alpha@abc', team: 'team-a', config: store, home }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('Installing a previous version is not supported yet') });
     expect(JSON.stringify(await store.read())).toBe(beforeBatchVersions);
 
     const secondHome = join(first.root, 'second-home');
@@ -388,9 +383,6 @@ describe('install (§6 refs)', () => {
   });
 });
 
-async function readdirRecursive(root: string): Promise<string[]> {
-  return (await readdir(root, { recursive: true })).map(String);
-}
 
 
 it('skillAtSource carries the materialized source body rather than the clone body', async () => {
@@ -455,7 +447,7 @@ describe('Library install destinations', () => {
   it('places a Global package in a project, adds nothing to the library, and keeps Global scope', async () => {
     const f = await destinationFixture(); const io = new ScriptedPrompter();
     const before = (await f.store.read()).projects;
-    for (let i = 0; i < 2; i++) expect(await run({ ref: 'sample', config: f.store, home: f.home, into: f.checkout }, io)).toMatchObject({ ok: true });
+    for (let i = 0; i < 2; i++) expect(await run({ ref: 'sample', config: f.store, home: f.home, into: f.checkout }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true });
     const root = await realpath(f.checkout); const config = await f.store.read();
     expect(config.projects).toEqual(before);
     expect(config.placements[join(root, '.claude', 'skills', 'sample')]).toMatchObject({ id: f.id, scope: { kind: 'global' } });
@@ -508,10 +500,10 @@ describe('Library install destinations', () => {
     expect(await run({ ref: 'sample', config: f.store }, new NonInteractivePrompter())).toMatchObject({ ok: false, error: 'Pass --into global or --into <project root>' });
   });
 
-  it('updates the version of matching pending intent in place and retains its destination', async () => {
+  it('replaces matching pending intent with the latest version and retains its destination', async () => {
     const f = await destinationFixture();
     const target = join(f.checkout, '.claude', 'skills', 'sample'); await mkdir(target, { recursive: true }); await writeFile(join(target, 'SKILL.md'), 'foreign');
-    // A foreign target refuses without --force, leaving the intent behind. A second version is
+    // An unanswered replace prompt leaves intent behind. A second version is
     // published; the SAME intent must move to it rather than a second one appearing beside it.
     expect((await run({ ref: 'sample', into: f.checkout, config: f.store }, new ScriptedPrompter())).ok).toBe(false);
     expect((await f.store.read()).pending).toEqual([expect.objectContaining({ version: 'v1' })]);
@@ -527,7 +519,7 @@ describe('Library install destinations', () => {
     const alias = join(f.root, 'alias'); await symlink(f.checkout, alias);
     const { installOne } = await import('../install.js');
     await writeFile(join(f.checkout, '.claude', 'skills', 'sample', 'SKILL.md'), 'local edit');
-    await expect(installOne({ team: 'team', id: f.id, destination: { kind: 'checkout', root: alias }, store: f.store, runner: systemRunner }, new ScriptedPrompter())).resolves.toMatchObject({ path: join(alias, '.claude', 'skills', 'sample') });
+    await expect(installOne({ team: 'team', id: f.id, destination: { kind: 'checkout', root: alias }, store: f.store, runner: systemRunner }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ path: join(alias, '.claude', 'skills', 'sample') });
     expect(Object.keys((await f.store.read()).placements)).toHaveLength(1);
     expect(await readFile(join(alias, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('description: first');
   });

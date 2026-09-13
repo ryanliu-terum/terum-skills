@@ -204,7 +204,11 @@ describe('mutation write-family audit', () => {
     const job = verb === 'install' ? backend.install({ ref: 'deploy-check' }) : verb === 'setup' ? backend.setup({}) : verb === 'team' ? backend.team({ kind: 'join', remote: 'acme/skills' }) : backend.uninstallMachine({});
     expect((await job.done).ok).toBe(true);
     expect((await read()).every(value => value.ok)).toBe(true);
-    expect(argv(f).slice(before + 1).sort()).toEqual(['ls --local', 'ls --team acme', 'status']);
+    // A scope-less install first spawns a fresh `ls --local` (a prepare-step read, never the cached family) to name the
+    // root the CLI placed into (index.ts install → scopeOfPath); every other mutation here spawns itself first.
+    const calls = argv(f).slice(before);
+    if (verb === 'install') expect(calls[0]).toBe('ls --local');
+    expect(calls.slice((verb === 'install' ? 1 : 0) + 1).sort()).toEqual(['ls --local', 'ls --team acme', 'status']);
     const after = f.calls.length; await read(); expect(f.calls).toHaveLength(after);
   });
 });

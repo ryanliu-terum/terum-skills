@@ -1,22 +1,26 @@
 import { invocation, type InvocationForm } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, mkdir, copyFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { projectPath } from '../lib/projects.js';
-import { canonicalParentPath } from '../lib/local-skills.js';
+import { canonicalParentPath, librarySize } from '../lib/local-skills.js';
 import { checkoutRootOf } from '../lib/placer/agent-paths.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { HookOptions } from '../lib/hook.js';
 import type { WrapperOptions } from '../lib/wrapper.js';
-import { inspect, lockTarget, moveToQuarantine, place, quarantineDrift, resolveTarget } from '../lib/placer.js';
+import { inspect, lockTarget, moveDirectory, place, appendExclude, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { refuseSecondTeam, teamByRemote } from '../lib/auth.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { fromError, CancelledError, RefusedError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { Config, Destination, Team, describeRaw, handleSchema, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, sameScope } from '../lib/schema.js';
+import { Config, Destination, Team, describeRaw, handleSchema, parseOrExplain, parseSkillFrontmatter, sameScope } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
-import { openTeamRepo, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
+import { openTeamRepo, SafeWriteOptions, lockWait } from '../lib/teamRepo.js';
+import { offerProfileEntry, writePersonFile } from '../lib/profile-entry.js';
+import { receiptFiles } from '../lib/evals/receipt-store.js';
+import { receiptSchema, type Receipt } from '../lib/evals/receipt.js';
+import { versionLabel } from '../lib/versions.js';
 import { listVersions } from '../lib/teamRepo.js';
 
 export interface InstallArgs extends WithForm {
@@ -26,7 +30,7 @@ export interface InstallArgs extends WithForm {
   member?: string;
   project?: string;
   team?: string;
-  force?: boolean;
+  yesProfile?: boolean;
   config?: ConfigStore;
   runner?: Runner;
   cwd?: string;
@@ -38,7 +42,7 @@ export interface InstallArgs extends WithForm {
   /** Injectable retry clock for deterministic recovery tests; authorization remains command-owned. */
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
 }
-export interface InstalledResult { id: string; team: string; path: string; version: string | null; }
+export interface InstalledResult { id: string; team: string; path: string; version: string; profiled: boolean; }
 
 export async function run(args: InstallArgs, io: Prompter): Promise<Result<InstalledResult[]>> {
   try {
@@ -53,7 +57,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       const destination = await destinationFor(team);
       const results: InstalledResult[] = [];
       for (const item of person.installed) {
-        const result = await installOne({ team, destination, id: item.id, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io);
+        const result = await installOne({ team, destination, id: item.id, yesProfile: args.yesProfile, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io);
         results.push(result);
       }
       return success(results);
@@ -65,10 +69,11 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       if (!project) throw new Error(`Unknown project ${operation.project}.`);
       const destination = await destinationFor(team, operation.project);
       const results: InstalledResult[] = [];
-      for (const id of project.skills) results.push(await installOne({ team, destination, id, project: operation.project, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
+      for (const id of project.skills) results.push(await installOne({ team, destination, id, project: operation.project, yesProfile: args.yesProfile, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
       return success(results);
     }
     const reference = parseRef(operation.ref);
+    if (reference.version !== undefined) throw new Error('Installing a previous version is not supported yet; install installs the latest version.');
     const team = await teamForReference(config, reference.team ?? args.team, reference.remote, reference.name, args.form).catch(async (error: unknown) => {
       // §6: a three-part ref on a machine that has joined nothing performs the bootstrap first —
       // `setup <org>/<repo>` with its print-only steps suppressed — and then installs: one code
@@ -86,20 +91,12 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       return bootstrapped.value.team;
     });
     const destination = await destinationFor(team);
-    // §9.1: a `@version` in a ref is refused HERE, where it is genuinely a ref the user typed. The
-    // old guard lived inside installOne and tested the spelling, so `@v2` — the exact vocabulary §3.2
-    // teaches — passed it and was then silently discarded in favour of the latest version, while a
-    // legacy 40-hex version that `persistedVersionSchema` still admits aborted a whole `install
-    // member` batch. Neither reached the user as a sentence.
-    if (reference.version !== undefined) {
-      throw new Error(`Installing a previous version is not supported yet; install installs the latest version of ${reference.name}.`);
-    }
-    return success([await installOne({ team, destination, reference: reference.name, force: args.force, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
+    return success([await installOne({ team, destination, reference: reference.name, yesProfile: args.yesProfile, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
   } catch (error) { return fromError(error); }
 }
 
-/** Shared by team join and sync: exactly one install/consent/placement path. */
-export async function installOne(input: { team: string; destination: Destination; reference?: string; id?: string; project?: string; scope?: { kind: 'global' } | { kind: 'project'; project: string }; force?: boolean; store: ConfigStore; runner: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'> }, io: Prompter): Promise<InstalledResult> {
+/** One explicit install/consent/placement path for single and bulk installs. */
+export async function installOne(input: { team: string; destination: Destination; reference?: string; id?: string; project?: string; scope?: { kind: 'global' } | { kind: 'project'; project: string }; yesProfile?: boolean; store: ConfigStore; runner: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'> }, io: Prompter): Promise<InstalledResult> {
   const config = await input.store.read();
   const binding = config.teams[input.team];
   if (!binding?.handle) throw new Error(`Team ${input.team} has no joined handle.`);
@@ -116,17 +113,14 @@ export async function installOne(input: { team: string; destination: Destination
   // accepted and then ignored.
   const latest = (await listVersions(clone, skill.name))[0]?.folder ?? null;
   const pending = { op: 'install' as const, id: skill.id, team: input.team, scope, destination: input.destination, version: latest, started: new Date().toISOString() };
-  const pendingAlreadyExists = (await input.store.read()).pending.some((entry) => samePending(entry, pending));
-  await input.store.update((fresh) => { const existing = fresh.pending.find((entry) => samePending(entry, pending)); if (existing) existing.version = latest; else fresh.pending.push(pending); });
-  const source = latest ? join(clone, 'skills', skill.name, latest) : skill.directory;
+  if (!latest) throw new Error(`skills/${skill.name} holds no v<N> folder.`);
+  const source = join(clone, 'skills', skill.name, latest);
   const sourceSkill = await skillAtSource(source, skill);
-  try {
-    await ensureConsent(input.store, sourceSkill, io);
-  } catch (error) {
-    // A declined pre-placement consent is not an interrupted install: nothing observable moved.
-    if (!pendingAlreadyExists) await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
-    throw error;
-  }
+  await ensureConsent(input.store, sourceSkill, io);
+  await input.store.update(fresh => {
+    fresh.pending = fresh.pending.filter(entry => !samePending(entry, pending));
+    fresh.pending.push(pending);
+  });
   const repoRoot = input.destination.kind === 'checkout' ? input.destination.root : undefined;
   const root = resolveTarget('claude-code', repoRoot ? { kind: 'project', project: packageProject ?? '' } : { kind: 'global' }, repoRoot, input.home ?? placementHome(input.store));
   const destination = join(root, skill.name);
@@ -138,41 +132,61 @@ export async function installOne(input: { team: string; destination: Destination
     const canonical = await canonicalParentPath(destination);
     const ledger = (await input.store.read()).placements;
     const ownedKey = (await Promise.all(Object.keys(ledger).map(async key => ({ key, canonical: await canonicalParentPath(key) })))).find(item => item.key === destination || (canonical !== undefined && item.canonical === canonical))?.key;
-    const entry = ownedKey === undefined ? undefined : ledger[ownedKey];
-    const owned = entry?.id === skill.id;
-    const collision = await inspect(destination, owned);
-    if (collision.kind === 'foreign') {
-      if (!input.force) throw new Error(`Install target ${destination} already contains another skill; retry with --force to move it to quarantine.`);
-      await moveToQuarantine(destination, join(input.store.root, 'quarantine'), basename(destination));
+    const collision = await inspect(destination);
+    if (collision.kind === 'present') {
+      const kept = join(dirname(root), 'old-skills', skill.name);
+      // §9.1.1 leaves repeated-backup policy deferred. Keep B5's conservative no-loss refusal.
+      if ((await inspect(kept)).kind !== 'absent') throw new Error(`${kept} already exists; move the kept copy elsewhere before retrying.`);
+      if (!(await io.confirm(`Replace it with ${versionLabel(skill.latestVersion)}?`, { detail: [
+        `You already have a skill named ${skill.name}.`, `Your copy is kept at ${kept}.`,
+      ] }))) throw new CancelledError('Replace was declined.');
+      if (repoRoot) await appendExclude(repoRoot, '.claude/old-skills/', input.runner).catch((error: unknown) => {
+        io.print(`Could not add .claude/old-skills/ to .git/info/exclude: ${error instanceof Error ? error.message : String(error)}`);
+      });
+      await mkdir(dirname(kept), { recursive: true });
+      await moveDirectory(destination, kept);
+      io.print(`Your copy is kept at ${kept}.`);
     }
-    if (collision.kind === 'ours' && entry) {
-      // Re-placing over our own placement keeps the user's edits (spec §4.3 / default 33): the
-      // same quarantine-on-mismatch rule sync and uninstall apply, through the same helper.
-      const drift = await quarantineDrift(destination, entry.fingerprint, join(input.store.root, 'quarantine'));
-      if (drift.quarantined) io.print(`Local changes at ${destination} moved to ${drift.quarantined}.`);
-    }
-    placed = await place(source, root, skill.name, { replace: collision.kind === 'ours', projectRoot: repoRoot ? checkoutRootOf(destination) : undefined, runner: input.runner, quarantineRoot: join(input.store.root, 'quarantine') });
+    placed = await place(source, root, skill.name, { replace: false, projectRoot: repoRoot ? checkoutRootOf(destination) : undefined, runner: input.runner });
     await input.store.update((fresh) => {
       if (ownedKey && ownedKey !== placed.path) delete fresh.placements[ownedKey];
       fresh.placements[placed.path] = { id: skill.id, team: input.team, version: latest, scope, placed_at: new Date().toISOString().slice(0, 10), fingerprint: placed.snapshot.fingerprint };
     });
     for (const notice of placed.notices) io.print(notice);
   } finally { await release(); }
+  // Seed before safeWrite refreshes the clone: these are receipts for the version just copied.
+  const receipts = join(clone, 'evals', skill.id, latest);
+  for (const file of await receiptFiles(receipts)) {
+    const runId = file.slice(0, -5);
+    let receipt: Receipt;
+    // The skill is already placed and the ledger already claims it; a receipt this client cannot read
+    // (a newer schema, or not JSON) is skipped like the pre-migration case below, never a mid-install abort.
+    try {
+      receipt = receiptSchema.parse(JSON.parse(await readFile(join(receipts, file), 'utf8')));
+    } catch {
+      io.print(`Skipped ${runId}: invalid receipt.`);
+      continue;
+    }
+    if (!receipt.content_digest) { io.print(`Skipped ${runId}: no content digest (pre-migration receipt).`); continue; }
+    const directory = join(input.store.root, 'evals', 'local', receipt.content_digest.slice('sha256:'.length), runId);
+    await mkdir(directory, { recursive: true });
+    await copyFile(join(receipts, file), join(directory, 'receipt.json'));
+  }
   io.progress?.({ step: 'Publishing to the team repository', current: 3, total: 4 });
   const repo = openTeamRepo(clone, binding.remote, input.runner);
-  await repo.safeWrite((tree) => {
-    const path = `people/${binding.handle}.json`;
-    const raw = tree.before(path);
-    if (!raw) throw new Error(`Missing ${path}.`);
-    const person = parseJson(personSchema, treeText(raw), path);
-    const installed = person.installed.filter((entry) => !(entry.id === skill.id && sameScope(entry.scope, scope)));
-    installed.push({ id: skill.id, version: latest, scope, since: new Date().toISOString().slice(0, 10) });
-    const declined = person.declined.filter((id) => id !== skill.id);
-    tree.set(path, `${JSON.stringify({ ...person, installed, declined }, null, 2)}\n`);
-  }, { action: 'install', handle: binding.handle, message: `${binding.handle}: install ${skill.name}`, ...input.safeWrite, ...lockWait(io) });
+  const since = new Date().toISOString().slice(0, 10);
+  const localSkills = await librarySize(input.home ?? placementHome(input.store), await input.store.read(), input.store.root);
+  await repo.safeWrite((tree) => writePersonFile(tree, binding.handle!, person => {
+    person.installed = person.installed.filter(entry => !(entry.id === skill.id && sameScope(entry.scope, scope)));
+    person.installed.push({ id: skill.id, version: latest, scope, since });
+    if (localSkills !== null) person.local_skills = localSkills;
+  }), { action: 'install', handle: binding.handle, message: `${binding.handle}: install ${skill.name}`, ...input.safeWrite, ...lockWait(io) });
   io.progress?.({ step: 'Recording your install', current: 4, total: 4 });
   await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
-  return { id: skill.id, team: input.team, path: placed!.path, version: latest };
+  const profiled = await offerProfileEntry({ store: input.store, clone, team: input.team, handle: binding.handle, remote: binding.remote, runner: input.runner,
+    id: skill.id, name: skill.name, version: latest, via: 'install', preAnswered: input.yesProfile, localSkills, safeWrite: input.safeWrite }, io);
+  return { id: skill.id, team: input.team, path: placed.path, version: latest, profiled };
+
 }
 
 async function ensureConsent(store: ConfigStore, skill: SkillRecord, io: Prompter): Promise<void> {
@@ -208,13 +222,13 @@ function parseOperation(args: InstallArgs): ParsedOperation {
   if (args.kind === 'member' || args.member) {
     const member = args.member ?? args.ref;
     if (!member) throw new Error(`Provide a member handle: \`${invocation(args.form, 'install member <handle>')}\`.`);
-    if (member.includes('@')) throw new Error('Version pins are supported for single-skill installs only.');
+    if (member.includes('@')) throw new Error('Installing a previous version is not supported yet; install installs the latest version.');
     return { kind: 'member', member: parseOrExplain(handleSchema, member, 'member handle') };
   }
   if (args.kind === 'project' || args.project) {
     const project = args.project ?? args.ref;
     if (!project) throw new Error(`Provide a project name: \`${invocation(args.form, 'install project <name>')}\`.`);
-    if (project.includes('@')) throw new Error('Version pins are supported for single-skill installs only.');
+    if (project.includes('@')) throw new Error('Installing a previous version is not supported yet; install installs the latest version.');
     return { kind: 'project', project };
   }
   if (!args.ref) throw new Error('Provide a skill ref, `member <handle>`, or `project <name>`.');
@@ -267,8 +281,10 @@ export async function resolveDestination(store: ConfigStore, teamJson: Team, pac
     if (!roots.includes(path)) throw new Error(`${path} is not a project in your library. Add it with \`${invocation(opts.form, 'project add', path)}\`, or pass --into global.`);
     return { kind: 'checkout', root: path };
   }
-  if (!roots.length) return { kind: 'global' };
-  if (!interactive) throw new Error('Pass --into global or --into <project root>');
+  if (!interactive) {
+    if (!roots.length) return { kind: 'global' };
+    throw new Error('Pass --into global or --into <project root>');
+  }
   const global = 'Global (~/.claude/skills)';
   const labels = new Map(await Promise.all(projects.map(async (project) => [await projectPath(project.root), project.label] as const)));
   const choices = [global, ...roots.map(root => `${labels.get(root) ?? basename(root)} · ${root}`)];

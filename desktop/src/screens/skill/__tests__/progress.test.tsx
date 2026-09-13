@@ -137,3 +137,14 @@ it('answering a CLI consent prompt leaves the install dialog and subsequent prog
   await act(async () => { finish(); });
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 });
+
+// refactor-b6 review H4: B6 deleted uninstall's declined[] write and sync has no re-offer pass, so the
+// Remove dialog mirrors the CLI's own closing line ('Your profile is unchanged.', src/commands/uninstall.ts)
+// instead of promising a declined-list record or a sync suppression that no longer exist.
+it('the Remove dialog mirrors the CLI and promises no declined-list write or sync suppression', async () => {
+  await open('remove');
+  const dialog = screen.getByRole('dialog');
+  expect(dialog).toHaveTextContent('your people file stops listing it. Your profile is unchanged.');
+  expect(dialog).not.toHaveTextContent('declined');
+  expect(dialog).not.toHaveTextContent('sync stops offering it back');
+});

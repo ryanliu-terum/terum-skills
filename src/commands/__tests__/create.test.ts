@@ -95,7 +95,10 @@ describe('team create (§6)', () => {
     if (!result.ok) throw new Error(result.error);
     const clone = store.teamClone('new-team');
     expect(JSON.parse(await readFile(pathJoin(clone, 'team.json'), 'utf8'))).toMatchObject({ layout_version: 3, name: 'new-team', archived: [], policy: { skill_license: 'UNLICENSED' } });
-    expect(JSON.parse(await readFile(pathJoin(clone, 'people', 'me.json'), 'utf8'))).toMatchObject({ handle: 'me', display_name: 'Me', email: 'me@example.com' });
+    const me = JSON.parse(await readFile(pathJoin(clone, 'people', 'me.json'), 'utf8'));
+    expect(me).toMatchObject({ handle: 'me', display_name: 'Me', email: 'me@example.com' });
+    // §3.5: declined[] stays in the schema so legacy files parse, but is no longer written — a new team's first person file has no such key.
+    expect(me).not.toHaveProperty('declined');
     expect(await readFile(pathJoin(clone, 'README.md'), 'utf8')).toContain('<!-- terum-skills:begin -->');
     expect(await readFile(pathJoin(clone, '.github', 'workflows', 'terum-skills.yml'), 'utf8')).toContain('name: terum-skills');
     expect((await git(['ls-tree', '--name-only', '-r', 'main'], bare)).split('\n').filter(Boolean).sort()).toEqual(['.github/workflows/terum-skills.yml', 'README.md', 'evals/.gitkeep', 'people/me.json', 'skills/.gitkeep', 'team.json']);

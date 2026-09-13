@@ -680,6 +680,23 @@ that survives. Taken as the reading; the review judges the wording. The recorded
 `b3-real-data/frames/publish-fresh.jsonl` keeps its old default-category line (a recording; owed
 to the next real re-capture of that set).
 
+## A22 — B6's Codex build (built in parallel with B5's review under Ryan's §16.1 waiver): three conservative readings kept
+
+**B6 (Codex, gpt-6-astra high, 26 min, base = B5's tip 33e4971).** Status `partial`, gates green.
+1. *Repeated replacement when an old-skills backup already exists* → refuses, keeps both copies. Not
+   drift: §9.1.1 lists "replacing the same skill twice overwrites the previous kept copy — a timestamp
+   suffix was raised, not decided" as a sub-fork deliberately left open in the ledger's `deferred:`.
+   The refusal never deletes, which is the North Star's side of an undecided fork. Stays open.
+2. *`profile --add/--remove` CLI grammar* → not added: §9.3 names the mechanics
+   (`addProfileEntry`/`removeProfileEntry`, now shared under `offerProfileEntry`, and one
+   `writePersonFile`), and the batch table names no new profile grammar; my scope line kept `cli.ts`
+   help edits to install/uninstall. Owed to the batch that specs the grammar (B7 documents what exists).
+3. *Headless install with registered projects* → follows §9.1's explicit guard: Global only when no
+   project is registered, otherwise `--into` is required (the synopsis's "lands in Global" reads as the
+   no-projects case).
+Also: PR #167's original picker test could not be lifted verbatim (no git in the sandbox); replacement
+coverage was written against the lifted builder, which differs only by the `libraryProjects` rename.
+
 ## A23 — B9's review: three mechanical mediums applied, and the one place I overrode the triage's fit rating
 
 **Review `wf_77c596f8-516` (base `af17fd2`): 0 critical/high, 3 mediums, all mechanical, all applied**
@@ -747,3 +764,94 @@ touches each file.
 - Auto-category spec §6/§9: `assessHygiene`'s `categories?` is the sixth positional; the
   options-object conversion the spec's own threshold demands is recorded as owed to whoever merges
   B9 forward.
+
+## A26 — The deferred mediums from four confirmation passes, recorded in one place
+
+**Frames r2 (3 medium), B4 r2 (1 medium), B5 r2 (`wf_18df9765-ee3`, base `4bcb88e`, 45 agents: 3 medium
++ 1 contested).** Each pass was clean of critical/high and its PR merged on that bar (D53); none of
+these was fixed. Each is deferred to the batch that next touches its file. What each is and what
+closes it:
+- Frames recorder (`.planning/codex-runs/record-lib.sh`): `record_accept`'s accept/reject state
+  machine has no automated test (:53); the golden-frame replace is not atomic when `mv` falls back
+  to copy+unlink across filesystems — stage inside `$OUT` (:72); `ALLOW_FAIL` is read as an ambient
+  shell variable, not enforced per call — `unset` it after sourcing or pass it per call (:67).
+- B4 mock: person `buckets`/`onDisk` never pick up this session's install/uninstall, unlike
+  `catalog.skills` (`desktop/src/backend/mock/data.ts:33`).
+- B5: D75's `repairSibling` persists the ledger rekey before the operation journal exists, so a
+  crash between them leaves `skill rename <old> <new>` permanently refused although the repair
+  succeeded (`src/commands/skill.ts:72`; the ordering is inherited from `recoverSibling`, not
+  introduced by A25's fix; a `metadata.id` fallback in the fresh-op lookup closes it). The mock's
+  `fileRun` evicts onto an already-occupied `old-skills/<name>` slot, silently overwriting the first
+  quarantined entry — the CLI already refuses this case (`desktop/src/backend/mock/index.ts:88`; the
+  report carries the patch). The hoisted `useWorkflow()` leaks a failed rename's error and lines
+  into the next dialog opened on the same page (`SkillFileDialog.tsx:32`; `clear()` in `onClose`).
+  Contested 1-2, for a human: no test covers the new same-folder refusal in `fileRun`
+  (`mock/index.ts:87`).
+- Reports (untracked, in the worktrees): `terum-codex/refactor-frames/.planning/reviews/frames-rerecord.hybrid.r2.review.md`,
+  `terum-codex/refactor-b4/.planning/reviews/refactor-b4-marketplace.hybrid.r2.review.md`,
+  `terum-codex/refactor-b5/.planning/reviews/refactor-b5-fix.hybrid.r2.review.md`.
+
+Alternative rejected: fixing them inside the confirmation loop. The bar is critical/high, and each
+fix would have re-opened a pass. Reversal cost: none — nothing changed; each is an ordinary PR later.
+
+## A27 — B6's review: eight highs fixed, the calls made inside them, and what stays deferred
+
+**Review `wf_2d42198b-e55` (base `origin/main` = `6ff6c52`, 121 agents, 6.6M tokens): 0 critical, 8 high,
+6 medium, 2 low, 1 contested.** All eight highs fixed in one commit, each test proven failing pre-fix;
+mediums and lows deferred to the batch that next touches each file (as A19/A25/A26).
+- `install-b6.test.ts` builds the project-mode `old-skills` expectation from `realpath(root)` — the
+  destination is canonicalised through `projectPath`, so the raw `os.tmpdir()` path never matched
+  on macOS (proved by a failure under `TMPDIR=/tmp/`).
+- Receipt seeding in `install.ts` no longer aborts a placed install on a receipt it cannot parse:
+  per-file try/catch, `Skipped <runId>: invalid receipt.`, continue. **Calls:** the test covers both
+  throw paths (a `schema_version: 3` receipt and non-JSON bytes) and asserts the people file and
+  the `pending` ledger still complete — the review's stated harm was the partial write, which its
+  supplied test did not check.
+- `team.ts` no longer writes `declined[]` on `team join` or `team create` (the two writers the spec's
+  inventory missed); legacy files keep their key through the existing-file spread, pinned by a
+  rejoin guard. No other production writer remains; `schema.ts` keeps the optional key.
+- Remove dialog and the inbox share report stop promising a declined-list write and a sync
+  re-offer; the dialog mirrors the CLI's `Your profile is unchanged.`. **Call:** the inbox
+  "Installing" sentence became `Your profile changes only if you say yes.` (mirrors the skill page's
+  install dialog) rather than being deleted. **Flagged, not fixed:** the inbox Decline button has no
+  `secondary()` branch and is inert on this branch (pre-existing, outside the finding).
+- Settings recovery copy describes the §9.1.1 replace-and-keep flow instead of `install --force`
+  (a flag this batch removed; commander now hard-errors on it). `app-update --check --force` is a
+  different, live flag and was left alone.
+- `Project.remoteSlugs` exists and is filled from every remote through `repoSlug`; the install
+  dialog passes it to `destinationsFor`. **Calls:** the mock derives slugs by the adapter's
+  `stripRemote` rule (the first attempt used `githubUrl`, which drops non-GitHub hosts);
+  `MOCK_ORIGIN` moved to `mock/data.ts` so the SSM/Terum mock projects carry their checkout origin
+  as a second slug (§4.4: the mock pre-selects a checkout on at least one project while the locked
+  Docs board stays Global). The requested `install-destinations` unit case is green pre-fix — the
+  matcher already accepted any slug; the defect was what the screen passed — so it is a contract
+  pin, not the proof. **Owed:** `repoSlug` belongs in `backend/paths.ts` so mock and adapter share
+  one function.
+- The install result reports the destination the CLI actually placed into: a scope-less call now
+  reads `ls --local` first and maps the returned `path` to the longest containing registered root
+  (`scopeOfPath`), Global otherwise. **Call:** a failed `ls --local` degrades only the report (falls
+  back to `Global`), never the install; a named scope still fails as before. Seven spawn-order tests
+  now pin the leading read (`testsModified`, nothing weakened): five argv rows in `run.test.ts`/`index.test.ts`,
+  `read-cache.test.ts`'s install row (the pre-read precedes the mutation), and `skill-detail.test.ts`'s scope-less
+  case, where the one background `sync` now follows the read's hello because onHello fires on the FIRST hello that
+  advertises `refresh`, not on the mutation's.
+- "Add a project folder…" selects the folder it just added (`setChosen(added.label)`), as C3 says.
+
+**Deferred (6 medium, 2 low, 1 contested; report `terum-codex/refactor-b6/.planning/reviews/refactor-b6-install.hybrid.r1.review.md`):**
+declining the replace prompt leaves the pre-written `pending` row (`install.ts:120`); collision
+replace lost `place()`'s swap-or-restore (`install.ts:147`); `writePersonFile` lost the no-op guard and
+`profile` can push a reformat while printing "No profile changes" (`profile.ts:22`, `:34`; patch in
+the report); a checkout literally named `Global` collides with the destination row (`schema.ts`
+`projectLabels`, patch in the report); no component test for the two-match ambiguous destination;
+`--yes-profile` untested for member/project installs; `ledgerScopes` reads config twice. Contested
+1-2: `install.ts` re-implements `skill.ts`'s old-skills backup and the copies diverge on
+`appendExclude` error handling.
+
+**Also owed:** a FIDELITY.md OWED entry for the copy changes on the in-progress boards
+`SkillDetailRemove`, `Inbox`/`InboxLight`, `SettingsAdvanced` (the gate skips in-progress boards, so
+nothing fails); B7's SKILL.md:59 still shows the retired `install <ref>[@<version>]` grammar and a
+`--force` sentence — B7's follow-up must take it.
+
+Alternative rejected: fixing the two data-loss-adjacent mediums (`pending` row, swap-or-restore)
+in this commit. Both are real; both are medium by a 3-0 panel; the bar is critical/high, and each
+would have widened the confirmation pass. Reversal cost of any fix above: one commit each.

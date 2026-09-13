@@ -424,7 +424,6 @@ export function joinMutation(tree: MutableTree, identity: Identity, boundHandle:
     ...(existing?.role === undefined ? {} : { role: existing.role }),
     ...(existing?.projects === undefined ? {} : { projects: existing.projects }),
     installed: existing?.installed ?? [],
-    declined: existing?.declined ?? [],
   };
   tree.set(path, `${JSON.stringify(person, null, 2)}\n`);
   if (archived) {
@@ -534,7 +533,7 @@ async function bootstrap(remote: string, clone: string, teamName: string, identi
     await git('config', 'user.name', identity.displayName);
     await git('config', 'user.email', identity.email);
     const team: Team = { layout_version: 3, name: teamName, categories: CATEGORIES, projects: { [GLOBAL_PROJECT]: { remotes: [], skills: [] } }, archived: [], policy: { skill_license: 'UNLICENSED' } };
-    const person: Person = { handle: identity.handle, display_name: identity.displayName, email: identity.email, github: identity.github, bio: '', installed: [], declined: [] };
+    const person: Person = { handle: identity.handle, display_name: identity.displayName, email: identity.email, github: identity.github, bio: '', installed: [] };
     await writeFile(pathJoin(staging, 'team.json'), `${JSON.stringify(team, null, 2)}\n`);
     await mkdir(pathJoin(staging, 'people'), { recursive: true });
     await writeFile(pathJoin(staging, 'people', `${identity.handle}.json`), `${JSON.stringify(person, null, 2)}\n`);

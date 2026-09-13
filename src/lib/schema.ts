@@ -122,7 +122,7 @@ export const personSchema = z.object({
    */
   profile: z.array(z.object({ id: skillIdSchema, name: z.string().min(1), version: z.string().regex(VERSION_FOLDER), added: z.string(), via: z.enum(['publish', 'install']) }).passthrough()).optional(),
   /** Retained so existing files parse, but no longer written: its only job was suppressing the endorsement-driven auto-install §12 deletes. */
-  declined: z.array(skillIdSchema),
+  declined: z.array(skillIdSchema).optional(),
   projects: z.array(z.string().min(1)).optional(),
   /**
    * How many skill folders this person's machine holds across the global root and its registered
