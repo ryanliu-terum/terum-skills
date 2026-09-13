@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import YAML from 'yaml';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { candidatesOf, createLibraryScan, librarySize, localSkills, localSkillRoots, nearestRepoRoot } from '../local-skills.js';
+import { candidatesOf, createLibraryScan, librarySize, localSkills, localSkillRoots, nearestRepoRoot, resolveLibrarySkill, unusableSkillFolder } from '../local-skills.js';
 import { emptyConfig } from '../schema.js';
 import { assertSkillSource } from '../skill-source.js';
 import { BUNDLED_SKILL_SOURCE, temporaryDirectory } from './fixtures.js';
@@ -399,5 +399,33 @@ describe('run-local library inventory reuse', () => {
       expect(reads).not.toHaveBeenCalled();
       expect(candidatesOf(await scan.inventory(global!, emptyConfig()))).toHaveLength(2);
     } finally { reads.mockRestore(); }
+  });
+});
+
+describe('resolveLibrarySkill (D72)', () => {
+  it('returns a folder that exists but the scan rejected, carrying the scan’s own verdict', async () => {
+    const home = await temporaryDirectory();
+    const root = join(home, '.claude', 'skills');
+    const path = await candidate(root, 'unsupported', '---\nname: unsupported\ndescription: x\nargument-hint: x\n---\n');
+    const match = await resolveLibrarySkill(home, emptyConfig(), join(home, '.state'), 'unsupported');
+    expect(match).toEqual({ name: 'unsupported', path, libraryRoot: root, inspection: { kind: 'rejected', reason: 'unsupported-field', detail: 'unsupported top-level field argument-hint (only name, description, license, metadata, allowed-tools)', description: 'x' } });
+    expect(unusableSkillFolder(match!)).toBe(`${path} is not a usable skill folder: unsupported top-level field argument-hint (only name, description, license, metadata, allowed-tools)`);
+    // A candidate carries no refusal, and a name no root holds is still undefined — the §6.3 miss.
+    const stock = await candidate(root, 'stock');
+    const usable = await resolveLibrarySkill(home, emptyConfig(), join(home, '.state'), 'stock');
+    expect(usable).toMatchObject({ path: stock, inspection: { kind: 'candidate' } });
+    expect(unusableSkillFolder(usable!)).toBeUndefined();
+    expect(await resolveLibrarySkill(home, emptyConfig(), join(home, '.state'), 'ghost')).toBeUndefined();
+  });
+
+  it('prefers a usable folder in a later root over a rejected one in an earlier root', async () => {
+    const home = await temporaryDirectory();
+    await candidate(join(home, '.claude', 'skills'), 'dup', '---\nname: dup\n---\n');
+    const project = await temporaryDirectory();
+    const usable = await candidate(join(project, '.claude', 'skills'), 'dup');
+    const config = { ...emptyConfig(), projects: [{ root: project, label: 'project' }] };
+    expect(await resolveLibrarySkill(home, config, join(home, '.state'), 'dup')).toMatchObject({ path: usable, libraryRoot: join(project, '.claude', 'skills'), inspection: { kind: 'candidate' } });
+    // Only when no root offers a usable folder does the rejected one come back, with its detail.
+    expect(await resolveLibrarySkill(home, emptyConfig(), join(home, '.state'), 'dup')).toMatchObject({ libraryRoot: join(home, '.claude', 'skills'), inspection: { kind: 'rejected', reason: 'description-missing' } });
   });
 });

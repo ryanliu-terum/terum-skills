@@ -34,7 +34,6 @@ export async function run(args: GuardPushArgs, io: Prompter): Promise<Result<Gua
     const configured = Object.entries(config.teams).find(([, entry]) => normalizeRemote(entry.remote) === normalized);
     if (!configured) throw new Error(`Push guard: ${stripRemoteCredentials(args.url)} is not a team this machine has joined, so ownership cannot be checked. Push from a configured clone, or bypass with \`git push --no-verify\` (attributed to you).`);
     const [team, binding] = configured;
-    const author = config.display_name && config.email ? `${config.display_name} <${config.email}>` : undefined;
     // git's `$1` is the push target as typed — a remote NAME ordinarily, the credentialed URL itself
     // when someone pushes by URL (githooks(5)). Only a target that CAN hold a credential is scrubbed:
     // every URL and scp spelling carries a colon and a nickname never does, so no message and no git
@@ -63,7 +62,7 @@ export async function run(args: GuardPushArgs, io: Prompter): Promise<Result<Gua
       const listed = await git(['diff', '--name-only', '--no-renames', '-z', base, localSha]);
       if (listed.code !== 0) throw new Error(`Push guard could not diff ${base.slice(0, 8)}..${localSha.slice(0, 8)}: ${(listed.stderr || listed.stdout).trim()}. Run \`git fetch ${remoteLabel}\` and retry, or bypass with \`git push --no-verify\` (attributed to you).`);
       const changedPaths = listed.stdout.split('\0').filter(Boolean).sort();
-      guardRawPush(await treeBetween(git, base, localSha, changedPaths), { handle: binding.handle, author }, args.form);
+      guardRawPush(await treeBetween(git, base, localSha, changedPaths), { handle: binding.handle }, args.form);
       checked += changedPaths.length;
     }
     if (checked) io.print(`terum-skills push guard: ${checked} path(s) to ${stripRemoteCredentials(args.url)} are yours.`);

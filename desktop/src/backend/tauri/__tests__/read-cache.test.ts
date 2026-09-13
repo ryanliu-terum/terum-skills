@@ -17,7 +17,7 @@ function frames(args: readonly string[]) {
     install: [{ id: 'deploy-check', team: 'acme' }],
     'uninstall-skill': [{ id: 'deploy-check', team: 'acme', removed: 1 }],
     profile: { handle: 'teddy', changed: ['display_name'] },
-    publish: { name: 'deploy-check', branch: null, prUrl: null },
+    publish: { team: 'acme', id: '11111111-1111-4111-8111-111111111111', name: 'deploy-check', project: 'Global', version: 'v2', created: true, identicalTo: null, attachedEvals: 0, profileAdded: false, projectAdded: false },
     sync: { notices: [], changed: true, teams: [] },
     eval: { name: 'deploy-check', runDir: '/runs/1', executionStatus: 'complete' },
     setup: { role: 'joiner', team: 'acme' },

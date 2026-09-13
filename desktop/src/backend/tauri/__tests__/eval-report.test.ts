@@ -53,6 +53,13 @@ it('shows the newest local receipt and appends only uncommitted local history',a
  const r=await adapter({...report(),latestState:'none',latest:null,history:[history],localRuns:[local,{...local,run_id:'committed',committed:true}]}).backend.evalReport({ref:'deploy-check'});
  expect(r.value?.receipt?.run_id).toBe(local.run_id);expect(r.value?.latestState).toBe('none');expect(r.value?.history).toHaveLength(2);expect(r.value?.history[0]).toMatchObject({when:'2026-09-08',runner:'sam',version:tree.slice(0,12),wlt:[6,1,2]});expect(r.value?.history[1]).toMatchObject({local:true,runner:'local'});expect(r.value?.evalEstimate).toBeNull();
 });
+it('§3.2: a history row carrying a version FOLDER is labelled, not sliced',async()=>{
+ // The row above pins the legacy shape (a 40-hex tree hash, sliced to 12). Under layout 3 the same
+ // field holds `v12`, where the slice means nothing and the bare folder is not the UI form.
+ const history={version:'v12',run_id:'old',timestamp:'2026-09-08T00:00:00Z',runner_handle:'sam',comparison:receipt().comparisons['candidate-vs-baseline'],verdict:'PASS',execution_status:'complete'};
+ const r=await adapter({...report(),history:[history]}).backend.evalReport({ref:'deploy-check'});
+ expect(r.value?.history[0]).toMatchObject({version:'Version 12'});
+});
 it('only serves a committed receipt matching the requested raw version',async()=>{
  const {backend}=adapter({...report(),versions:{...report().versions,evaluated:'different'}});
  expect((await backend.receipts({skillId:'deploy-check',version:tree})).value?.run_id).toBe('20260909T010000Z');
@@ -60,7 +67,9 @@ it('only serves a committed receipt matching the requested raw version',async()=
  expect((await adapter({...report(),latestState:'none'}).backend.receipts({skillId:'deploy-check',version:tree})).value).toBeNull();
 });
 it('renders the installed/team version mismatch through the App using CLI inventory frames',async()=>{
- const value={...report(),versions:{...report().versions,placed:'a1b2c3d4'+'0'.repeat(32)}};
+ // Layout 3: these fields hold version FOLDERS, not the 40-hex tree hashes this fixture carried
+ // before the refactor — so the sentence names versions rather than slicing an identifier (§3.2).
+ const value={...report(),versions:{...report().versions,placed:'v1',teamCurrent:'v2'}};
  const f=fakeBridge((args,emit)=>{
   if(args[0]==='eval-report'){emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'eval-report',ok:true,exitCode:0,value})});return;}
   const name=args[0]==='ls'?args.includes('--local')?'ls-local':'ls':args[0]==='validate'?'validate-deploy-check':args[0]!;
@@ -68,7 +77,7 @@ it('renders the installed/team version mismatch through the App using CLI invent
  });
  location.hash='#/skill/deploy-check?tab=evals';
  render(createElement(BackendContext,{value:createTauriBackend(f.bridge)},createElement(QueryClientProvider,{client:new QueryClient({defaultOptions:{queries:{retry:false}}})},createElement(Tooltip.Provider,null,createElement(App)))));
- expect(await screen.findByText("Your installed copy is a1b2c3d4; the team's current version is 5f0e12ab. The receipt below is for the team's version.")).toBeVisible();
+ expect(await screen.findByText("Your installed copy is Version 1; the team's current version is Version 2. The receipt below is for the team's version.")).toBeVisible();
 });
 
 it('does not label an already committed local receipt as an uncommitted run',async()=>{

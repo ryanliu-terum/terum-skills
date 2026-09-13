@@ -3,7 +3,7 @@ import { evalQueueFor } from '../../eval-queue';
 import { createTauriBackend } from '../index';
 import { fakeBridge } from './fake-bridge';
 
-const item = { team: 'team', skill: 'alpha', version: 'a'.repeat(40), requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' };
+const item = { team: 'team', skill: 'alpha', path: '/library/alpha', contentHash: `sha256:${'a'.repeat(64)}`, requestedAt: '2026-09-10T00:00:00Z', window: 'overnight' };
 function harness(value: unknown) {
   const fake = fakeBridge((args, emit) => {
     emit({ kind: 'stdout', line: JSON.stringify({ t: 'result', verb: args[0], ok: true, exitCode: 0, value }) });

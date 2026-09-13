@@ -46,16 +46,23 @@ it('leaves the old copy in place when the move cannot place the new one',async()
  expect(uninstall).not.toHaveBeenCalled();
 });
 
-it('publishes a shared skill and names the pull request the team has to merge',async()=>{
+// §5.2: there is no pull request any more. What the notice has to distinguish is the three things a
+// publish can actually have done — minted a version, matched one that already existed, or only added
+// the skill to a project — because they are not the same news.
+it.each([
+  [{version:'v3',created:true,identicalTo:null,projectAdded:true},'deploy-check was published to Global as Version 3.'],
+  [{version:null,created:false,identicalTo:'v2',projectAdded:true},'deploy-check was added to Global; its bytes are identical to Version 2.'],
+  [{version:null,created:false,identicalTo:'v2',projectAdded:false},'deploy-check is already Version 2 in Global; nothing to publish.'],
+])('names what the publish actually did: %j',async(outcome,text)=>{
  const backend=createMockBackend();
  const detail=await backend.skill({ref:'deploy-check'});
  if(!detail.ok)throw new Error('fixture detail unavailable');
  vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...detail.value,teamState:'shared'}});
- const publish=vi.spyOn(backend,'publish').mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'deploy-check',version:'https://github.com/terum/team-skills/pull/7',changed:true}})) as never);
+ const publish=vi.spyOn(backend,'publish').mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'deploy-check',project:'Global',attachedEvals:0,profileAdded:false,...outcome}})) as never);
  openWith('#/skill/deploy-check?dialog=publish',backend);
  fireEvent.click(within(await screen.findByRole('dialog',{name:'Publish deploy-check to the team?'})).getByRole('button',{name:'Publish'}));
  await waitFor(()=>expect(publish).toHaveBeenCalledWith(expect.objectContaining({ref:'deploy-check'})));
- expect(await screen.findByRole('status')).toHaveTextContent('A pull request is open for the team to merge.');
+ expect(await screen.findByRole('status')).toHaveTextContent(text);
 });
 
 it('refuses the publish dialog for a skill the team has already endorsed',async()=>{

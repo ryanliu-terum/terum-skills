@@ -188,7 +188,7 @@ describe('team remove (§6)', () => {
     expect((await git(['rev-parse', 'main'], fixture.bare)).trim()).toBe(before);
     expect(runner.calls.some((call) => call.args.includes('DELETE'))).toBe(false);
     // An ARCHIVED twin does not block, and an archive-only removal never consults the login at all.
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [], projects: {}, archived: ['twin'], policy: { publish: 'pr', skill_license: 'UNLICENSED' } }, null, 2)}\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] } }, archived: ['twin'], policy: { skill_license: 'UNLICENSED' } }, null, 2)}\n`);
     const again = mappedRunner(REMOTE, fixture.bare, host);
     await expect(run({ kind: 'remove', handle: 'member', config: store, runner: again }, new ScriptedPrompter([], [true]))).resolves.toMatchObject({ ok: true });
     expect(JSON.parse(await git(['show', 'main:team.json'], fixture.bare)).archived).toEqual(['twin', 'member']);

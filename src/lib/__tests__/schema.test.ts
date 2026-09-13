@@ -36,7 +36,7 @@ describe('frontmatter (§5.3)', () => {
   });
 
   it('preserves unknown team.json fields', () => {
-    expect(teamSchema.parse({ layout_version: 2, name: 'x', categories: [], global: [], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' }, future: true }).future).toBe(true);
+    expect(teamSchema.parse({ layout_version: 3, name: 'x', categories: [], projects: {}, archived: [], policy: { skill_license: 'UNLICENSED' }, future: true }).future).toBe(true);
   });
 });
 

@@ -25,7 +25,7 @@ import { join, resolve } from 'node:path';
 import type { Launch } from '../lib/launch.js';
 import { assetSuffix, detectPlatform, type PlatformEvidence } from '../lib/platform.js';
 import { run as runApp } from './app.js';
-import { run as evalRun, skillsWithoutReceipt, type EvalArgs } from './eval.js';
+import { run as evalRun, queueItemsFor, skillsWithoutReceipt, type EvalArgs } from './eval.js';
 import { joinCommand, run as invite } from './invite.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
 
@@ -325,7 +325,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
           io.print('Skipping the eval offer: this machine has no joined handle for the team yet.');
           steps.evals = 'skipped';
         } else {
-          const scan = await skillsWithoutReceipt(clone, teamName, runner, bullet);
+          const scan = await skillsWithoutReceipt(clone, teamName, bullet);
           const candidates = scan.pending;
           if (candidates.length === 0) {
             // An empty batch has four different causes and only one of them means "everything is evaluated".
@@ -350,14 +350,24 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
               'Queues them; the app runs them between 01:00 and 05:00 while it is open and idle.',
               `Evaluate any skill later with \`${invocation(args.form, 'eval <skill>')}\`.`,
             ] });
-            const queue = async (remaining: typeof candidates, window: 'overnight' | 'later') => {
+            // §6.6: a queued eval names the bytes it was queued against, and §6.3 made eval target a
+            // LOCAL folder — so queueing resolves and digests each skill here, and a skill with no
+            // copy on this machine is reported and left out rather than queued to fail unattended.
+            /** Returns how many were actually queued: not every candidate can be. */
+            const queue = async (remaining: typeof candidates, window: 'overnight' | 'later'): Promise<number> => {
               const requestedAt = new Date().toISOString();
-              await enqueueEvals(store.root, remaining.map(candidate => ({ team: teamName, skill: candidate.name, version: candidate.version, requestedAt, window })));
-              if (window === 'overnight') io.print(`Queued ${remaining.length} evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with \`${invocation(args.form, 'eval --drain')}\`.`);
-              else io.print(`Queued ${remaining.length} evals for later. Run them with \`${invocation(args.form, 'eval --drain')}\`.`);
+              const items = await queueItemsFor({ home: args.home ?? homedir(), config: await store.read(), stateRoot: store.root, team: teamName, names: remaining.map(candidate => candidate.name), requestedAt, window }, bullet);
+              if (items.length === 0) { io.print('None of those skills has a copy on this machine, so none could be queued.'); return 0; }
+              await enqueueEvals(store.root, items, line => io.print(line));
+              if (window === 'overnight') io.print(`Queued ${items.length} evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with \`${invocation(args.form, 'eval --drain')}\`.`);
+              else io.print(`Queued ${items.length} evals for later. Run them with \`${invocation(args.form, 'eval --drain')}\`.`);
+              return items.length;
             };
             if (choice === 'Skip') steps.evals = 'skipped';
-            else if (choice === 'Overnight') { await queue(candidates, 'overnight'); steps.evals = 'queued'; }
+            // `queued` is what the app renders back as the outcome of this step, so it has to be
+            // what happened: the early return above prints that nothing could be queued, and
+            // reporting `queued` over it told the user evals were waiting when none were.
+            else if (choice === 'Overnight') steps.evals = await queue(candidates, 'overnight') > 0 ? 'queued' : 'skipped';
             else if (choice === 'Now' || choice === 'In batches') {
               let batchSize = candidates.length;
               if (choice === 'In batches') {

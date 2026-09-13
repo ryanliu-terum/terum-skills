@@ -75,12 +75,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "if (teamSource === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');"
   },
   {
-    "file": "src/commands/publish.ts",
-    "line": 131,
-    "policy": "not-a-hint",
-    "pattern": "'--body', `Endorse ${record.name} (${record.id.slice(0, 8)}) for ${team}: ${scopeLabel}.\\n\\nOpened by terum-skills publish; merge to endorse.`,"
-  },
-  {
     "file": "src/commands/readme.ts",
     "line": 29,
     "policy": "not-a-hint",
@@ -186,7 +180,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/team.ts",
     "line": 576,
     "policy": "fixed",
-    "pattern": "[ -z \"$name\" ] || [ ! -d \"skills/$name\" ] || npx -y terum-skills@latest validate \"skills/$name\" --cwd ."
+    "pattern": "[ -z \"$name\" ] || [ ! -d \"skills/$name\" ] || npx -y terum-skills@latest validate \"$name\" --cwd ."
   },
   {
     "file": "src/commands/team.ts",

@@ -272,10 +272,10 @@ describe('the built bin (dist/index.js)', () => {
     expect(code).toBe(0);
   });
 
-  it('the clone-local pre-push guard (D12) makes a raw `git push` of another author\'s skill fail with the path named, lets your own edit through, judges every ref of a multi-ref push, and fails open when its launcher is gone', async () => {
+  it('the clone-local pre-push guard (D12) makes a raw `git push` of any skill fail with the path named, lets your own people file through, judges every ref of a multi-ref push, and fails open when its launcher is gone', async () => {
     const fixture = await bareTeam();
-    await pushFromSeed(fixture.seed, 'skills/theirs/SKILL.md', skillOf('theirs', THEIRS, 'Other <other@example.com>'));
-    await pushFromSeed(fixture.seed, 'skills/mine/SKILL.md', skillOf('mine', MINE, 'Seed <seed@example.com>'));
+    await pushFromSeed(fixture.seed, 'skills/theirs/v1/SKILL.md', skillOf('theirs', THEIRS, 'Other <other@example.com>'));
+    await pushFromSeed(fixture.seed, 'skills/mine/v1/SKILL.md', skillOf('mine', MINE, 'Seed <seed@example.com>'));
     const home = resolve(out, 'guard-home');
     const store = createConfigStore(resolve(home, '.terum', 'skills'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'), 'Seed', 'seed@example.com');
@@ -293,28 +293,36 @@ describe('the built bin (dist/index.js)', () => {
     const main = (await git(['rev-parse', 'origin/main'], clone)).trim();
     const pushEnv = { ...process.env, HOME: home, USERPROFILE: home, NODE_NO_WARNINGS: '1' };
     const push = (...refspecs: string[]) => run('git', ['push', '-q', 'origin', ...(refspecs.length ? refspecs : ['HEAD:main'])], { cwd: clone, env: pushEnv }).then((result) => ({ code: 0, stderr: result.stderr }), (error: { code?: number; stderr: string }) => ({ code: error.code ?? 1, stderr: error.stderr }));
-    await writeFile(resolve(clone, 'skills', 'theirs', 'SKILL.md'), skillOf('theirs', THEIRS, 'Other <other@example.com>', 'meddled'));
+    await writeFile(resolve(clone, 'skills', 'theirs', 'v1', 'SKILL.md'), skillOf('theirs', THEIRS, 'Other <other@example.com>', 'meddled'));
     await git(['commit', '-q', '-am', 'meddle'], clone);
     const refused = await push();
     expect(refused.code).not.toBe(0);
-    expect(refused.stderr).toContain('Push guard refused skills/theirs/SKILL.md');
+    expect(refused.stderr).toContain('Push guard refused skills/theirs/v1/SKILL.md');
     expect((await git(['rev-parse', 'main'], fixture.bare)).trim()).toBe(main);
+    // D15: your OWN skill is refused too — a version is minted by publish, never hand-pushed.
     await git(['reset', '-q', '--hard', 'origin/main'], clone);
-    await writeFile(resolve(clone, 'skills', 'mine', 'SKILL.md'), skillOf('mine', MINE, 'Seed <seed@example.com>', 'edited'));
+    await writeFile(resolve(clone, 'skills', 'mine', 'v1', 'SKILL.md'), skillOf('mine', MINE, 'Seed <seed@example.com>', 'edited'));
     await git(['commit', '-q', '-am', 'edit mine'], clone);
+    const ownSkill = await push();
+    expect(ownSkill.code).not.toBe(0);
+    expect(ownSkill.stderr).toContain('Push guard refused skills/mine/v1/SKILL.md');
+    // What DOES stand open to a raw push is your own people file.
+    await git(['reset', '-q', '--hard', 'origin/main'], clone);
+    await writeFile(resolve(clone, 'people', 'seed.json'), JSON.stringify({ handle: 'seed', display_name: 'Seed', email: 'seed@example.com', github: 'seed', bio: 'pushed by hand', installed: [], declined: [] }, null, 2) + '\n');
+    await git(['commit', '-q', '-am', 'edit my people file'], clone);
     expect((await push()).code).toBe(0);
     const advanced = (await git(['rev-parse', 'main'], fixture.bare)).trim();
     expect(advanced).not.toBe(main);
     // Two refs in one push: git hands the hook two stdin lines, the shell flattens them into one argument
     // list, and the second group's refusal aborts the whole push — the allowed first group does not land either.
-    await writeFile(resolve(clone, 'skills', 'mine', 'SKILL.md'), skillOf('mine', MINE, 'Seed <seed@example.com>', 'edited again'));
-    await git(['commit', '-q', '-am', 'edit mine again'], clone);
+    await writeFile(resolve(clone, 'people', 'seed.json'), JSON.stringify({ handle: 'seed', display_name: 'Seed', email: 'seed@example.com', github: 'seed', bio: 'again', installed: [], declined: [] }, null, 2) + '\n');
+    await git(['commit', '-q', '-am', 'edit my people file again'], clone);
     await git(['checkout', '-q', '-b', 'meddle', 'origin/main'], clone);
-    await writeFile(resolve(clone, 'skills', 'theirs', 'SKILL.md'), skillOf('theirs', THEIRS, 'Other <other@example.com>', 'meddled again'));
+    await writeFile(resolve(clone, 'skills', 'theirs', 'v1', 'SKILL.md'), skillOf('theirs', THEIRS, 'Other <other@example.com>', 'meddled again'));
     await git(['commit', '-q', '-am', 'meddle again'], clone);
     const two = await push('main', 'meddle:refs/heads/publish/meddle');
     expect(two.code).not.toBe(0);
-    expect(two.stderr).toContain('Push guard refused skills/theirs/SKILL.md');
+    expect(two.stderr).toContain('Push guard refused skills/theirs/v1/SKILL.md');
     expect((await git(['rev-parse', 'main'], fixture.bare)).trim()).toBe(advanced);
     // The launcher is gone (an npx cache pruned): the push goes through, and says it was not checked.
     await installPushGuard(clone, systemRunner, { node: process.execPath, entry: resolve(out, 'pruned', 'index.js') });

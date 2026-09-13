@@ -2,6 +2,16 @@ import { z } from 'zod';
 import { roiFractions } from '../score-fractions';
 import { comparisonSummary, receiptSummary } from '../receipt-summary';
 import type { EvalReportModel, Receipt } from '../types';
+// §3.2: the version vocabulary exists once, and the desktop imports the leaf by relative path.
+import { parseVersionFolder, versionLabel } from '../../../../src/lib/versions.js';
+
+/** A history row's version was a 40-hex tree hash before layout 3, which is why it was sliced to 12;
+ *  it now holds a version FOLDER (`v1`), where slicing means nothing and the bare folder is not the
+ *  UI form (§3.2). Anything that does not parse — a hash, the `—` sentinel — is passed through. */
+const versionText = (version: string): string => {
+ const n = parseVersionFolder(version);
+ return n === null ? version.slice(0, 12) : versionLabel(n);
+};
 
 const comparison = z.object({ win:z.number(), loss:z.number(), tie:z.number(), net_lift:z.number(), sign_p:z.number() }).passthrough();
 const efficiency = z.object({ turns:z.number().nullish(), duration_ms:z.number().nullish(), cost_usd:z.number().nullish() }).passthrough();
@@ -47,8 +57,8 @@ export function mapEvalReport(report:z.infer<typeof cliEvalReport>,lines:readonl
  const s=receiptSummary(r),inc=r?.comparisons['candidate-vs-incumbent'],t=r?.triggers;
  const holes=s?.partial?r!.expected_rows-r!.scored_rows:0;
  const localRuns=report.localRuns.map(run=>({runId:run.run_id,runDir:run.run_dir,executionStatus:run.execution_status,committed:run.committed,receipt:run.receipt?mapReceipt(run.receipt):null,summary:receiptSummary(run.receipt)}));
- const history:EvalReportModel['history']=report.history.map(h=>({when:h.timestamp.slice(0,10),runner:h.runner_handle,version:h.version.slice(0,12),wlt:h.comparison?wlt(h.comparison):[0,0,0],rows:'',summary:comparisonSummary(h.comparison,h.verdict)}));
- for(const run of report.localRuns.filter(run=>!run.committed)){const c=run.receipt?.comparisons['candidate-vs-baseline'];history.push({when:run.receipt?.provenance.timestamp.slice(0,10)??run.run_id,runner:'local',version:(run.receipt?.version??'—').slice(0,12),wlt:c?wlt(c):[0,0,0],rows:'',summary:receiptSummary(run.receipt),local:true});}
+ const history:EvalReportModel['history']=report.history.map(h=>({when:h.timestamp.slice(0,10),runner:h.runner_handle,version:versionText(h.version),wlt:h.comparison?wlt(h.comparison):[0,0,0],rows:'',summary:comparisonSummary(h.comparison,h.verdict)}));
+ for(const run of report.localRuns.filter(run=>!run.committed)){const c=run.receipt?.comparisons['candidate-vs-baseline'];history.push({when:run.receipt?.provenance.timestamp.slice(0,10)??run.run_id,runner:'local',version:versionText(run.receipt?.version??'—'),wlt:c?wlt(c):[0,0,0],rows:'',summary:receiptSummary(run.receipt),local:true});}
  let evalEstimate:EvalReportModel['evalEstimate']=null,evalEstimateText='';
  const latest=report.latest;
  if(report.latestState==='ok'&&latest?.provenance.model==='sonnet'&&Object.values(latest.efficiency).every(e=>e.cost_usd!=null&&e.duration_ms!=null)){

@@ -59,6 +59,58 @@ describe('config store (§5.4)', () => {
     expect(JSON.parse(written).teams).toEqual({ t: { remote: 'github.com/a/t', handle: 'me' } });
   });
 
+  // D72's taken medium (B3 full review, schema.ts:245): §3.4's read-time migrations — `migrateVersion`
+  // (40-hex tree hash → null) and `migrateScope` (any-case `global` project → `Global`) — rewrite every
+  // user's placement ledger on first read, and the next `update()` makes that rewrite permanent on disk.
+  // Through the store rather than the schema so the test fails if EITHER half stops: the read no
+  // longer migrating, or the write no longer persisting what the read produced.
+  it('migrates placements and pending on read (40-hex version → null, any-case global → Global), leaves every other row untouched, and the next update makes the rewrite permanent on disk', async () => {
+    const root = join(await temporaryDirectory(), 'skills');
+    const store = createConfigStore(root);
+    await store.ensureRoot();
+    const hash = '0123456789abcdef0123456789abcdef01234567';
+    const id = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+    const row = (version: string | null, scope: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ id, team: 'acme', version, scope, placed_at: '2026-01-01T00:00:00Z', fingerprint: 'fp', ...extra });
+    const seeded = {
+      teams: {}, approvals: {},
+      pending: [{ op: 'install', id, team: 'acme', scope: { kind: 'project', project: 'global' }, started: '2026-01-01T00:00:00Z', version: hash }],
+      placements: {
+        '/h/hash': row(hash, { kind: 'global' }),
+        '/h/v3': row('v3', { kind: 'global' }),
+        '/h/null': row(null, { kind: 'global' }),
+        '/h/lower': row('v1', { kind: 'project', project: 'global' }, { note: 'kept' }),
+        '/h/upper': row('v1', { kind: 'project', project: 'GLOBAL' }),
+        '/h/exact': row('v1', { kind: 'project', project: 'Global' }),
+        '/h/other': row('v1', { kind: 'project', project: 'terum' }),
+        '/h/global-kind': row('v1', { kind: 'global' }),
+      },
+    };
+    await writeFile(join(root, 'config.json'), JSON.stringify(seeded));
+    const migrated = {
+      pending: [{ ...seeded.pending[0]!, scope: { kind: 'project', project: 'Global' }, version: null }],
+      placements: {
+        ...seeded.placements,
+        '/h/hash': { ...seeded.placements['/h/hash'], version: null },
+        '/h/lower': { ...seeded.placements['/h/lower'], scope: { kind: 'project', project: 'Global' } },
+        '/h/upper': { ...seeded.placements['/h/upper'], scope: { kind: 'project', project: 'Global' } },
+      },
+    };
+    const first = await store.read();
+    expect(first.placements).toEqual(migrated.placements);
+    expect(first.pending).toEqual(migrated.pending);
+    // Persisted by an UNRELATED change: the migration rides along with whatever the next verb writes.
+    await store.update((config) => { config.default_handle = 'me'; });
+    const written = await readFile(join(root, 'config.json'), 'utf8');
+    expect(written).not.toContain(hash);
+    expect(written).not.toMatch(/"project":\s*"(?:global|GLOBAL)"/);
+    const onDisk = JSON.parse(written) as { placements: unknown; pending: unknown; default_handle: unknown };
+    expect(onDisk.placements).toEqual(migrated.placements);
+    expect(onDisk.pending).toEqual(migrated.pending);
+    expect(onDisk.default_handle).toBe('me');
+    // Idempotent: a second read of the already-migrated bytes changes nothing.
+    expect(await store.read()).toEqual({ ...first, default_handle: 'me' });
+  });
+
   // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
   it('serializes concurrent updates so neither is lost', async () => {
     const store = createConfigStore(join(await temporaryDirectory(), 'skills'));

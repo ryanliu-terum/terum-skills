@@ -24,7 +24,7 @@ export interface TeamStatus {
   members: RosterEntry[]; memberCount: number | null; unreadableMembers: number | null;
   sharedSkills: number | null; unreadableSkills: number | null;
   pending: { op: 'install' | 'uninstall'; id: string; scope: Config['pending'][number]['scope']; version: string | null; destination: NonNullable<Config['pending'][number]['destination']> | null; started: string }[];
-  syncedAt: string | null; policy: { publish: 'pr' | 'push'; skill_license: string } | null; categories: string[] | null;
+  syncedAt: string | null; policy: { skill_license: string } | null; categories: string[] | null;
   clonePath: string | null; joinCommand: string | null; joinBlock: readonly string[] | null;
   membership: 'active' | 'inactive' | 'missing' | null; stale: boolean;
 }

@@ -69,7 +69,7 @@ export async function git(args: string[], cwd?: string): Promise<string> {
   return result.stdout;
 }
 
-export const TEAM_JSON = { layout_version: 2, name: 'team', categories: [], global: [], projects: {}, archived: [] as string[], policy: { publish: 'pr', skill_license: 'UNLICENSED' } };
+export const TEAM_JSON = { layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] as string[] } }, archived: [] as string[], policy: { skill_license: 'UNLICENSED' } };
 export const person = (handle: string, extra: Record<string, unknown> = {}) => ({ handle, display_name: handle, email: `${handle}@example.com`, github: handle, bio: '', installed: [], declined: [], ...extra });
 
 /** A bare "origin" seeded with a minimal §4.1 tree on `main`, plus the seed clone that pushed it. */

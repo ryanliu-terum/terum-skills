@@ -327,30 +327,32 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(await systemRunner.run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: store.teamClone('team') })).toMatchObject({ code: 0 });
   });
 
-  it('offers one endorsed-set confirmation and one destination and one individual tool-grant confirmation at join', async () => {
+  it('§12: a join installs nothing — no endorsed set, no destination, no grant', async () => {
     const { fixture, store, runner } = await setup();
     const plain = '77777777-7777-4777-8777-777777777777';
     const tool = '88888888-8888-4888-8888-888888888888';
-    await pushFromSeed(fixture.seed, 'skills/plain/SKILL.md', `---\nname: plain\ndescription: plain\nlicense: UNLICENSED\nmetadata:\n  id: ${plain}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'skills/tool/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${tool}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [plain, tool], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    await pushFromSeed(fixture.seed, 'skills/plain/v1/SKILL.md', `---\nname: plain\ndescription: plain\nlicense: UNLICENSED\nmetadata:\n  id: ${plain}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'skills/tool/v1/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${tool}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [plain, tool] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     await store.update(config => { config.checkouts = [fixture.seed]; });
     const io = new ScriptedPrompter([...answers(), ''], [true, true], true);
     const joined = await join({ target: REMOTE, config: store, runner }, io);
     if (!joined.ok) throw new Error(joined.error);
-    expect(io.countAsked('Install 2 team-endorsed')).toBe(1);
-    expect(io.countAsked('Install to')).toBe(1);
-    expect(io.offeredDefaults).toContain('Global (~/.claude/skills)');
-    expect(io.countAsked('Approve these tools')).toBe(1);
-    expect((await store.read()).approvals[tool]).toBeDefined();
-    expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare)).installed.map((entry: { id: string }) => entry.id)).toEqual(expect.arrayContaining([plain, tool]));
+    // §12 deleted `endorsedCandidates` and with it join's post-join endorsement offer: a join no
+    // longer places anything at all, and the member browses the Marketplace instead. Nothing is
+    // installed, so there is no destination to choose and no grant to approve either.
+    expect(io.countAsked('Install 2 team-endorsed')).toBe(0);
+    expect(io.countAsked('Install to')).toBe(0);
+    expect(io.countAsked('Approve these tools')).toBe(0);
+    expect((await store.read()).placements).toEqual({});
+    expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare)).installed).toEqual([]);
   });
 
   it('does not re-offer an endorsed skill the member declined', async () => {
     const { fixture, store, runner } = await setup();
     const id = '99999999-9999-4999-8999-999999999999';
-    await pushFromSeed(fixture.seed, 'skills/declined/SKILL.md', `---\nname: declined\ndescription: declined\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [id], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
+    await pushFromSeed(fixture.seed, 'skills/declined/v1/SKILL.md', `---\nname: declined\ndescription: declined\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [id] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
     expect((await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers(), [false]))).ok).toBe(true);
     await pushFromSeed(fixture.seed, 'people/me.json', `${JSON.stringify(person('me', { display_name: 'Me', declined: [id] }), null, 2)}\n`);
     const io = new ScriptedPrompter(['me', 'Me', 'me@example.com'], [false]);
@@ -358,19 +360,16 @@ describe('team join (§6, §5.4 identity)', () => {
     expect(io.askedAbout('team-endorsed')).toBe(false);
   });
 
-  it('keeps the join successful when one endorsed skill’s consent is declined', async () => {
+  it('§12: an endorsed skill that grants tools is not installed either, so no consent is ever asked at join', async () => {
     const { fixture, store, runner } = await setup();
-    const plain = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const tool = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-    await pushFromSeed(fixture.seed, 'skills/plain/SKILL.md', `---\nname: plain\ndescription: plain\nlicense: UNLICENSED\nmetadata:\n  id: ${plain}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'skills/tool/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${tool}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
-    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 2, name: 'team', categories: [], global: [plain, tool], projects: {}, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' } })}\n`);
-    const io = new ScriptedPrompter(answers(), [true, false]);
+    await pushFromSeed(fixture.seed, 'skills/tool/v1/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${tool}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'team.json', `${JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [tool] } }, archived: [], policy: { skill_license: 'UNLICENSED' } })}\n`);
+    const io = new ScriptedPrompter(answers(), []);
     expect(await join({ target: REMOTE, config: store, runner }, io)).toMatchObject({ ok: true });
-    const joined = JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare));
-    expect(joined.installed.map((entry: { id: string }) => entry.id)).toEqual([plain]);
+    expect(JSON.parse(await git(['show', 'main:people/me.json'], fixture.bare)).installed).toEqual([]);
     expect((await store.read()).approvals[tool]).toBeUndefined();
-    expect(io.lines.join('\n')).toContain('Could not install endorsed skill tool');
+    expect(io.asked.some((question) => question.includes('Approve these tools'))).toBe(false);
   });
 });
 

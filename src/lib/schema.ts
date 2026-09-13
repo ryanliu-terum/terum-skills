@@ -3,6 +3,7 @@ import { basename, dirname } from 'node:path';
 import { inspect } from 'node:util';
 import { z } from 'zod';
 import YAML from 'yaml';
+import { VERSION_FOLDER } from './versions.js';
 
 /** §5.4: GitHub's own syntax — 1–39 chars, ASCII alphanumerics and single internal hyphens, stored lowercased. */
 export const HANDLE_RULE = 'a handle is 1-39 characters: letters, digits, and single internal hyphens (stored lowercase)';
@@ -44,23 +45,63 @@ export function sameScope(a: unknown, b: unknown): boolean {
   return left.data.kind === 'global' || left.data.project === (right.data as { kind: 'project'; project: string }).project;
 }
 
+/** `Global` is reserved: auto-created at team creation and present in every layout-3 repo (§3.1). */
+export const GLOBAL_PROJECT = 'Global';
+
+/**
+ * §3.4 — a persisted version is the string `"v3"`, or `null`. One type in all five declarations.
+ *
+ * **The 40-hex arm is retained READ-ONLY.** Nothing new ever writes it; it is what keeps §6.1's "no
+ * historical receipt becomes unparseable" true. Without it the retype would reject every receipt and
+ * every placement ever written — and because `configSchema` is parsed on the first read of *every*
+ * verb and `ConfigStore.read()` re-throws anything that is not ENOENT, that would brick every machine
+ * that has ever installed a skill, `sync --hook` included. A reader renders it as "a version recorded
+ * before versioning".
+ *
+ * A string over an integer because it round-trips unchanged through JSON, a git path segment, a CLI
+ * ref and a URL with no formatting decision at any boundary.
+ */
+export const LEGACY_TREE_HASH = /^[0-9a-f]{40}$/;
+export const persistedVersionSchema = z.union([z.string().regex(VERSION_FOLDER), z.string().regex(LEGACY_TREE_HASH), z.null()]);
+
+/**
+ * A refinement, deliberately NOT `z.literal(3)`: a bare literal produces an unreadable zod dump on the
+ * very file that would otherwise tell the user what to do about it.
+ */
+const layoutVersionSchema = z.number().refine((value) => value === 3, {
+  message: 'this team repository uses an older layout; an admin should run `team migrate` to upgrade it',
+});
+
 export const installedSchema = z.object({
   id: skillIdSchema,
-  version: z.string().length(40).nullable(),
+  version: persistedVersionSchema,
   scope: scopeSchema,
   since: z.string(),
 }).passthrough();
 
 export const teamSchema = z.object({
-  layout_version: z.literal(2),
+  layout_version: layoutVersionSchema,
   name: z.string().min(1),
   categories: z.array(z.string()),
-  global: z.array(skillIdSchema),
   projects: z.record(z.string(), z.object({ remotes: z.array(z.string()), skills: z.array(skillIdSchema) }).passthrough()),
   archived: z.array(handleSchema),
-  policy: z.object({ publish: z.enum(['pr', 'push']), skill_license: z.string().min(1) }).passthrough(),
+  policy: z.object({ skill_license: z.string().min(1) }).passthrough(),
 }).passthrough();
 export type Team = z.infer<typeof teamSchema>;
+
+/**
+ * The lenient sibling, for the two callers that must read a **layout-2** `team.json`: `team migrate`
+ * and §13.1's layout precondition. The strict schema above rejects its own input there — it would
+ * refuse the very file the migration exists to rewrite.
+ *
+ * Exactly two callers. Anything else reads `teamSchema`.
+ */
+export const anyLayoutTeamSchema = teamSchema.extend({
+  layout_version: z.union([z.literal(2), z.literal(3)]),
+  global: z.array(skillIdSchema).optional(),
+  policy: z.object({ publish: z.enum(['pr', 'push']).optional(), skill_license: z.string().min(1) }).passthrough(),
+});
+export type AnyLayoutTeam = z.infer<typeof anyLayoutTeamSchema>;
 
 export const personSchema = z.object({
   handle: handleSchema,
@@ -72,6 +113,15 @@ export const personSchema = z.object({
   bio: z.string(),
   role: z.string().max(32).optional(),
   installed: z.array(installedSchema),
+  /**
+   * §3.5 — curated, and deliberately NOT `installed[]`. `installed[]` is automatic and means *a copy
+   * is on a machine*; this means *I stand behind this*. Written only on an explicit yes at publish or
+   * install, and by `profile --add/--remove`. One entry per id: a re-add updates in place.
+   *
+   * Optional so every people file written before it shipped still parses.
+   */
+  profile: z.array(z.object({ id: skillIdSchema, name: z.string().min(1), version: z.string().regex(VERSION_FOLDER), added: z.string(), via: z.enum(['publish', 'install']) }).passthrough()).optional(),
+  /** Retained so existing files parse, but no longer written: its only job was suppressing the endorsement-driven auto-install §12 deletes. */
   declined: z.array(skillIdSchema),
   projects: z.array(z.string().min(1)).optional(),
   /**
@@ -162,7 +212,7 @@ export const configSchema = z.object({
   teams: teamsSchema,
   approvals: z.record(z.string(), z.object({ grants: z.string(), approved_at: z.string() }).passthrough()),
   pending: z.array(z.object({ op: z.enum(['install', 'uninstall']), id: skillIdSchema, team: z.string(), scope: scopeSchema, destination: destinationSchema.optional(), started: z.string() }).passthrough()),
-  placements: z.record(z.string(), z.object({ id: skillIdSchema, team: z.string(), version: z.string().length(40).nullable(), scope: scopeSchema, placed_at: z.string(), fingerprint: z.string() }).passthrough()),
+  placements: z.record(z.string(), z.object({ id: skillIdSchema, team: z.string(), version: persistedVersionSchema, scope: scopeSchema, placed_at: z.string(), fingerprint: z.string() }).passthrough()),
 }).passthrough();
 export type Config = z.infer<typeof configSchema>;
 
@@ -178,14 +228,51 @@ export type Config = z.infer<typeof configSchema>;
  */
 export const configFileSchema = z.preprocess((value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const source = value as Record<string, unknown>;
-  if (!('checkouts' in source)) return source;
-  const { checkouts, ...rest } = source;
-  if (rest['projects'] !== undefined || !Array.isArray(checkouts)) return rest;
-  const roots = checkouts.filter((root): root is string => typeof root === 'string' && root.length > 0);
-  const labels = projectLabels(roots);
-  return { ...rest, projects: roots.map((root, index) => ({ root, label: labels[index]! })) };
+  let source = value as Record<string, unknown>;
+  if ('checkouts' in source) {
+    const { checkouts, ...rest } = source;
+    source = rest;
+    if (rest['projects'] === undefined && Array.isArray(checkouts)) {
+      const roots = checkouts.filter((root): root is string => typeof root === 'string' && root.length > 0);
+      const labels = projectLabels(roots);
+      source = { ...rest, projects: roots.map((root, index) => ({ root, label: labels[index]! })) };
+    }
+  }
+  return { ...source, placements: migratePlacements(source['placements']), pending: migratePending(source['pending']) };
 }, configSchema);
+
+/** A 40-hex tree hash is not a version under layout 3; it means "placed before versioning" (§3.4). */
+function migrateVersion(entry: Record<string, unknown>): Record<string, unknown> {
+  const version = entry['version'];
+  return typeof version === 'string' && LEGACY_TREE_HASH.test(version) ? { ...entry, version: null } : entry;
+}
+
+/**
+ * `Global` is the reserved project name, but the migration commit runs on ONE machine and cannot reach
+ * another member's config — and §10 deleted the sync pass that used to reconcile placements. So a
+ * scope naming `global`/`GLOBAL` is normalized here, on read, on every machine.
+ */
+function migrateScope(entry: Record<string, unknown>): Record<string, unknown> {
+  const scope = entry['scope'];
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return entry;
+  const project = (scope as Record<string, unknown>)['project'];
+  if (typeof project !== 'string' || project === GLOBAL_PROJECT || project.toLowerCase() !== GLOBAL_PROJECT.toLowerCase()) return entry;
+  return { ...entry, scope: { ...(scope as Record<string, unknown>), project: GLOBAL_PROJECT } };
+}
+
+function migrateEntry(entry: unknown): unknown {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+  return migrateScope(migrateVersion(entry as Record<string, unknown>));
+}
+
+function migratePlacements(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([path, entry]) => [path, migrateEntry(entry)]));
+}
+
+function migratePending(value: unknown): unknown {
+  return Array.isArray(value) ? value.map(migrateEntry) : value;
+}
 
 export const emptyConfig = (): Config => ({ teams: {}, approvals: {}, pending: [], placements: {} });
 
@@ -198,6 +285,20 @@ export const skillFrontmatterSchema = z.object({
   'allowed-tools': z.unknown().optional(),
 }).strict();
 export type SkillFrontmatter = z.infer<typeof skillFrontmatterSchema>;
+
+/**
+ * §6.3 — the same schema with the four MANAGED fields optional. `license` and the three
+ * `metadata.*` fields are written by publish's injection (§5.1 step 4); a folder that has never been
+ * published carries none of them, and `eval` reads the folder exactly as it is on disk. Still
+ * `.strict()`: an unknown top-level key is as wrong locally as it is in the repo.
+ */
+export const localSkillFrontmatterSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  license: z.string().optional(),
+  metadata: z.object({ id: skillIdSchema.optional(), author: z.string().optional(), 'terum-category': z.string().optional() }).passthrough().optional(),
+  'allowed-tools': z.unknown().optional(),
+}).strict();
 
 export type AllowedTools = { ok: true; normalized: string; hash: string } | { ok: false; raw: unknown };
 

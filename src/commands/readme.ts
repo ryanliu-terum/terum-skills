@@ -2,7 +2,7 @@ import type { WithForm } from '../lib/invocation.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { Prompter } from '../lib/prompt.js';
-import { applyReadme, generateReadme, inlineText, readReadmeData } from '../lib/readme.js';
+import { applyReadmeWithReason, generateReadme, inlineText, readReadmeData } from '../lib/readme.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { parseJson, teamSchema } from '../lib/schema.js';
@@ -10,20 +10,29 @@ import { parseJson, teamSchema } from '../lib/schema.js';
 export interface ReadmeArgs extends WithForm { prComment?: string; cwd?: string; runner?: Runner; }
 
 /** Hidden host-side entry point for the scaffolded Action. */
-export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ changed?: boolean; comment?: string }>> {
+export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ changed?: boolean; comment?: string; refusal?: string }>> {
   try {
     const cwd = args.cwd ?? resolve('.');
     const runner = args.runner ?? systemRunner;
     const origin = await runner.run('git', ['remote', 'get-url', 'origin'], { cwd });
     if (origin.code !== 0) throw new Error(`Could not read origin: ${(origin.stderr || origin.stdout).trim()}`);
-    const data = await readReadmeData(cwd, origin.stdout.trim(), runner);
+    // §13.1(a): refuse loudly on a pre-migration repo instead of regenerating a catalogue from a
+    // layout this reader cannot see. `readReadmeData` skips any `skills/<name>/` with no `v<N>` folder
+    // (under layout 2 the SKILL.md files sit at the skill root), which renders as "No shared skills
+    // yet" — and the committed Action runs the latest CLI with `contents: write`. `applyReadme`'s
+    // never-blank refusal is the second, independent guard; this one makes the failure loud and
+    // non-zero, carrying `layoutVersionSchema`'s own `team migrate` remedy.
+    parseJson(teamSchema, await readFile(join(cwd, 'team.json'), 'utf8'), 'team.json');
+    const data = await readReadmeData(cwd, origin.stdout.trim());
     if (args.prComment) {
       const base = await runner.run('git', ['show', `${args.prComment}:team.json`], { cwd });
       if (base.code !== 0) throw new Error(`Could not read ${args.prComment}:team.json: ${(base.stderr || base.stdout).trim()}`);
       const before = parseJson(teamSchema, base.stdout, `${args.prComment}:team.json`);
       const current = parseJson(teamSchema, await readFile(join(cwd, 'team.json'), 'utf8'), 'team.json');
-      const beforeIds = new Set([...before.global, ...Object.values(before.projects).flatMap((project) => project.skills)]);
-      const added = new Set([...current.global, ...Object.values(current.projects).flatMap((project) => project.skills)].filter((id) => !beforeIds.has(id)));
+      // `team.json.global` is deleted (§4.1); `Global` is an ordinary project key, so the projects
+      // walk alone covers what the union used to.
+      const beforeIds = new Set(Object.values(before.projects).flatMap((project) => project.skills));
+      const added = new Set(Object.values(current.projects).flatMap((project) => project.skills).filter((id) => !beforeIds.has(id)));
       const skills = data.skills.filter((skill) => added.has(skill.id));
       // The Action finds its own comment by the anchor below, so skill text must not be able to forge a second one.
       const comment = ['<!-- terum-skills:pr-comment -->', '## terum-skills publish preview', ...(skills.length ? skills.map((skill) => `- ${inlineText(skill.name)} (${inlineText(skill.category)})`) : ['- No new endorsements.'])].join('\n');
@@ -32,8 +41,12 @@ export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ chan
     }
     const path = join(cwd, 'README.md');
     const existing = await readFile(path, 'utf8').catch(() => '');
-    const next = applyReadme(existing, generateReadme(data));
+    // D69: a refused render (a versionless `skills/<name>/`, or fewer skill rows than the README
+    // already shows) leaves the file as it is and says why here — the Action log is the only place a
+    // maintainer can learn that the catalogue was not regenerated and what to migrate.
+    const { text: next, refusal } = applyReadmeWithReason(existing, generateReadme(data), { skipped: data.skipped });
+    if (refusal !== undefined) io.print(refusal);
     if (next !== existing) await writeFile(path, next, 'utf8');
-    return success({ changed: next !== existing });
+    return success(refusal === undefined ? { changed: next !== existing } : { changed: false, refusal });
   } catch (error) { return fromError(error); }
 }

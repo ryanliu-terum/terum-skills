@@ -158,11 +158,11 @@ describe('status (offline local team summary)', () => {
 
   it('qualifies bad skill counts and never counts evaluation receipts', async () => {
     const f = await fixture();
-    await mkdir(join(f.clone, 'skills', 'good'));
-    await writeFile(join(f.clone, 'skills', 'good', 'SKILL.md'), '---\nname: good\ndescription: good\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n');
-    await mkdir(join(f.clone, 'skills', 'ghost')); await writeFile(join(f.clone, 'skills', 'ghost', 'SKILL.md'), 'broken');
-    await mkdir(join(f.clone, 'evals', '11111111-1111-4111-8111-111111111111', 'hash'), { recursive: true });
-    await writeFile(join(f.clone, 'evals', '11111111-1111-4111-8111-111111111111', 'hash', 'run.json'), '{}'); await commit(f.clone);
+    await mkdir(join(f.clone, 'skills', 'good', 'v1'), { recursive: true });
+    await writeFile(join(f.clone, 'skills', 'good', 'v1', 'SKILL.md'), '---\nname: good\ndescription: good\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n');
+    await mkdir(join(f.clone, 'skills', 'ghost', 'v1'), { recursive: true }); await writeFile(join(f.clone, 'skills', 'ghost', 'v1', 'SKILL.md'), 'broken');
+    await mkdir(join(f.clone, 'evals', '11111111-1111-4111-8111-111111111111', 'v1'), { recursive: true });
+    await writeFile(join(f.clone, 'evals', '11111111-1111-4111-8111-111111111111', 'v1', 'run.json'), '{}'); await commit(f.clone);
     const { result, io } = await query(f);
     expect(result).toMatchObject({ ok: true, value: { teams: [{ sharedSkills: 1, unreadableSkills: 1 }] } });
     expect(io.lines).toContain('  Shared skills: 1 readable; 1 unreadable');
@@ -183,7 +183,7 @@ describe('status (offline local team summary)', () => {
 
 it.each(['missing', 'incomplete', 'foreign'] as const)('returns pending and the recorded stamp even with a %s clone', async state => {
   const f = await fixture();
-  const id = '11111111-1111-4111-8111-111111111111', version = 'a'.repeat(40), started = '2026-09-01T00:00:00.000Z';
+  const id = '11111111-1111-4111-8111-111111111111', version = 'v1', started = '2026-09-01T00:00:00.000Z';
   await f.store.update(config => { config.pending = [{ op: 'install', id, team: 'acme', scope: { kind: 'global' }, destination: { kind: 'checkout', root: '/checkout' }, version, started }, { op: 'uninstall', id, team: 'other', scope: { kind: 'global' }, started }]; });
   await mkdir(join(f.store.root, 'run'));
   await writeFile(stampPath(f.store.root, 'acme'), 'ignored');
@@ -216,7 +216,7 @@ it('keeps generic git join instructions null', async () => {
 });
 it('returns the full machine ledger and identity before a missing --team fails', async () => {
   const f = await fixture(), id = '11111111-1111-4111-8111-111111111111';
-  const placement = { id, team: 'other', version: 'b'.repeat(40), scope: { kind: 'project' as const, project: 'ops', ignored: 'extra' }, placed_at: '2026-09-01' };
+  const placement = { id, team: 'other', version: 'v2', scope: { kind: 'project' as const, project: 'ops', ignored: 'extra' }, placed_at: '2026-09-01' };
   await f.store.update(config => {
     config.placements['/placed'] = { ...placement, fingerprint: 'private' };
     config.approvals[id] = { grants: 'hash', approved_at: '2026-09-02' };

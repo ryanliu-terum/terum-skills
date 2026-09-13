@@ -3,8 +3,10 @@ import { join } from 'node:path';
 import { isSkillName, Person, parseJson, parseSkillFrontmatter, personSchema, teamSchema } from './schema.js';
 import { githubOwnerRepo } from './remote.js';
 import { receiptSchema } from './evals/receipt.js';
-import { Runner, systemRunner } from './runner.js';
+import type { Runner } from './runner.js';
 import type { MutableTree } from './teamRepo.js';
+import { listVersions } from './teamRepo.js';
+import { parseVersionFolder, versionLabel, versionsInTree, type SkillVersion } from './versions.js';
 
 /** The tree may hold Buffers (binary skill assets); README generation reads only text paths, decoded here. */
 const asText = (value: string | Buffer): string => (Buffer.isBuffer(value) ? value.toString('utf8') : value);
@@ -24,12 +26,25 @@ export interface ReadmeSkill {
 }
 
 export interface ReadmeData {
-  team: { name: string; remote: string; global: readonly string[]; projects: Record<string, { skills: readonly string[] }>; archived?: readonly string[] };
+  team: { name: string; remote: string; projects: Record<string, { skills: readonly string[] }>; archived?: readonly string[] };
   people: readonly Person[];
   skills: readonly ReadmeSkill[];
+  /**
+   * D69: every `skills/<name>/` the reader found but could not catalogue because it holds no
+   * `v<N>/SKILL.md` — the state a half-finished migration leaves. `generateReadme` renders without
+   * them; `applyReadme` refuses to commit that render while this is non-empty, so the omission can
+   * never be pushed over the team's catalogue.
+   */
+  skipped: readonly string[];
 }
 
-type EndorsementTeam = Pick<ReadmeData['team'], 'global' | 'projects'>;
+/** D69: what `applyReadme` needs beyond the two texts to tell a legitimate render from a partial one. */
+export interface ApplyReadmeOptions { skipped?: readonly string[]; }
+
+/** D69: `text` is the README to write; `refusal` (present only when `text` is the input unchanged) says why the render was not applied. */
+export interface AppliedReadme { text: string; refusal?: string; }
+
+type EndorsementTeam = Pick<ReadmeData['team'], 'projects'>;
 
 /**
  * Install totals include archived people: they are historical installs, not active membership.
@@ -57,9 +72,13 @@ export function installersById(people: readonly Person[]): Map<string, Installer
   return installers;
 }
 
+/**
+ * Simplified in place, not deleted (§4.1c): `team.global` is gone and `Global` is now an ordinary
+ * project key, so the projects list alone answers it — `Global` among them.
+ */
 export function skillEndorsement(team: EndorsementTeam, id: string): string {
   const projects = Object.entries(team.projects).filter(([, project]) => project.skills.includes(id)).map(([name]) => name).sort();
-  return team.global.includes(id) ? 'global' : projects.length ? `project: ${projects.join(', ')}` : '—';
+  return projects.length ? `project: ${projects.join(', ')}` : '—';
 }
 
 export function activePeople(people: readonly Person[], archived: readonly string[] = []): Person[] {
@@ -98,7 +117,7 @@ export function generateReadme(data: ReadmeData): string {
       // already defanged a link label (every cell has, per R14); an angle bracket could still spell an
       // HTML anchor, so those become entities here. A no-op for every name the CLI accepts.
       const shownName = cell(skill.name).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      lines.push(`| ${shownName} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${shortHash(skill.latest)} | ${cell(skill.eval ?? '—')} | ${command} |`);
+      lines.push(`| ${shownName} | ${cell(skill.category)} | ${cell(skill.description)} | ${installs.get(skill.id) ?? 0} | ${cell(endorsement)} | ${cell(latestLabel(skill.latest))} | ${cell(skill.eval ?? '—')} | ${command} |`);
     }
   }
   if (byAuthor.size === 0) lines.push('', '### Skills', '', 'No shared skills yet.');
@@ -112,8 +131,16 @@ export function generateReadme(data: ReadmeData): string {
   return block;
 }
 
-/** Replace exactly the generated region. Everything outside the two markers is byte-for-byte retained. */
-export function applyReadme(existing: string, block: string): string {
+/**
+ * Replace exactly the generated region. Everything outside the two markers is byte-for-byte retained.
+ * A refused render (D69, §13.1(a)) comes back as `existing` unchanged; `applyReadmeWithReason` is the
+ * same function for a caller who has to say why.
+ */
+export function applyReadme(existing: string, block: string, options: ApplyReadmeOptions = {}): string {
+  return applyReadmeWithReason(existing, block, options).text;
+}
+
+export function applyReadmeWithReason(existing: string, block: string, options: ApplyReadmeOptions = {}): AppliedReadme {
   const begins = countMarkers(existing, README_BEGIN);
   const ends = countMarkers(existing, README_END);
   const beginAt = existing.indexOf(README_BEGIN);
@@ -124,16 +151,55 @@ export function applyReadme(existing: string, block: string): string {
     }
   }
   const expression = new RegExp(`${escapeRegExp(README_BEGIN)}[\\s\\S]*?${escapeRegExp(README_END)}`);
-  if (expression.test(existing)) return existing.replace(expression, () => block.trimEnd()); // function form: `$&`/`$1` in skill text must not be interpreted
+  const region = existing.match(expression)?.[0];
+  const refusal = readmeRefusal(region?.replace(README_BEGIN, '').replace(README_END, '').trim(), block, options.skipped ?? []);
+  if (refusal !== undefined) return { text: existing, refusal };
+  if (region !== undefined) return { text: existing.replace(expression, () => block.trimEnd()) }; // function form: `$&`/`$1` in skill text must not be interpreted
   const suffix = existing.length === 0 ? '' : existing.endsWith('\n') ? '\n' : '\n\n';
-  return `${existing}${suffix}${block}`;
+  return { text: `${existing}${suffix}${block}` };
 }
 
-/** §M3 bridge for ls; M2 moves this single helper into version.ts at integration. */
-export async function latestTree(runner: Runner, clone: string, name: string): Promise<string> {
-  const result = await runner.run('git', ['rev-parse', `HEAD:skills/${name}`], { cwd: clone });
-  if (result.code !== 0) throw new Error(`Could not resolve the latest version of ${name}: ${(result.stderr || result.stdout).trim()}`);
-  return result.stdout.trim();
+/**
+ * §13.1(a), load-bearing: only `applyReadme` sees both sides, so the never-blank invariant belongs
+ * here and not in `generateReadme`. The readers skip any `skills/<name>/` holding no `v<N>/SKILL.md`,
+ * so a half-migrated repo renders a catalogue missing those skills — "No shared skills yet." when
+ * every folder is unmigrated, a one-row table when one of ten is — and the committed Action is the
+ * only job with `contents: write`, so it would commit and push that over the team's whole catalogue.
+ * Refuse the replacement and leave the block untouched; do NOT throw, because a throw fires
+ * identically when a team legitimately removes its last shared skill and would wedge README
+ * regeneration for them permanently. A stale catalogue is recoverable; a blanked, pushed one is not.
+ *
+ * D69 widens the refusal from the full wipe to its cause and its symptom. Cause: a skipped folder
+ * (in layout 3 a versionless `skills/<name>/` is never legitimate, so this cannot misfire). Symptom:
+ * fewer skill rows than the block being replaced (rows never legitimately drop in layout 3 — the
+ * repository has no skill deletion; revisit if a batch adds one). The original empty-catalogue rule is
+ * kept below the cause because its reasoning above still governs the case, and because a foreign
+ * previous region can carry prose and no table at all, which the row count alone would let through.
+ */
+function readmeRefusal(previous: string | undefined, block: string, skipped: readonly string[]): string | undefined {
+  if (skipped.length) {
+    const folders = skipped.map((name) => `skills/${name}`).join(', ');
+    return `README.md left unchanged: ${folders} ${skipped.length === 1 ? 'has' : 'have'} no v<N>/SKILL.md, so the regenerated catalogue would omit ${skipped.length === 1 ? 'it' : 'them'}. Every skill in a layout-3 repository lives under a version folder; finish the migration and the next write regenerates the README.`;
+  }
+  if (previous === undefined) return undefined;
+  const emptyCatalogue = /^No shared skills yet\.$/m;
+  if (previous && !emptyCatalogue.test(previous) && emptyCatalogue.test(block)) return 'README.md left unchanged: the regenerated catalogue is empty where the current one is not; a derived artifact may not delete a team\'s catalogue.';
+  const before = skillRows(previous);
+  const after = skillRows(block);
+  if (after < before) return `README.md left unchanged: the regenerated catalogue has ${after} skill row${after === 1 ? '' : 's'} where the current one has ${before}; a derived artifact may not drop a team's skills.`;
+  return undefined;
+}
+
+/**
+ * D69: skill rows in a generated region, counted structurally — every table body line, i.e. a `| `
+ * line that is neither a delimiter row nor the header row above one — never by matching skill
+ * names, which a hostile or merely renamed skill would defeat. Every body row carries the integer
+ * Installs cell, so no body row can read as a delimiter row.
+ */
+function skillRows(region: string): number {
+  const lines = region.split('\n');
+  const isRule = (line: string | undefined): boolean => line !== undefined && /^\|(\s*:?-+:?\s*\|)+\s*$/.test(line);
+  return lines.filter((line, index) => line.startsWith('| ') && !isRule(line) && !isRule(lines[index + 1])).length;
 }
 
 /** Last committed change; a successful empty log means this folder has no history. */
@@ -144,20 +210,27 @@ export async function latestChange(runner: Runner, clone: string, name: string):
 }
 
 /** Read one clone without pulling or mutating it; used by the hidden workflow command and ls. */
-export async function readReadmeData(clone: string, remote: string, runner: Runner = systemRunner): Promise<ReadmeData> {
+export async function readReadmeData(clone: string, remote: string): Promise<ReadmeData> {
   const team = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
   const people = await readPeople(clone);
   const names = (await readdir(join(clone, 'skills'), { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   const skills: ReadmeSkill[] = [];
+  const skipped: string[] = [];
   for (const name of names) {
-    const source = await readFile(join(clone, 'skills', name, 'SKILL.md'), 'utf8');
+    const versions = await listVersions(clone, name);
+    // A name with no version folder is skipped rather than thrown on: this function runs inside
+    // safeWrite through its sibling below, and one half-migrated folder must not wedge every write.
+    // D69: it is skipped OUT LOUD — the name travels with the data so `applyReadme` refuses to commit
+    // a catalogue that silently omits it.
+    if (versions.length === 0) { skipped.push(name); continue; }
+    const latest = versions[0]!;
+    const source = await readFile(join(clone, 'skills', name, latest.folder, 'SKILL.md'), 'utf8');
     const parsed = parseSkillFrontmatter(source);
-    if (!parsed.ok) throw new Error(`Invalid skills/${name}/SKILL.md: ${parsed.error}`);
-    if (parsed.data.name !== name) throw new Error(`skills/${name}/SKILL.md names ${parsed.data.name}; folder name must match`);
-    const latest = await latestTree(runner, clone, name);
-    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest, eval: await latestReceiptVerdict(clone, parsed.data.metadata.id, latest) });
+    if (!parsed.ok) throw new Error(`Invalid skills/${name}/${latest.folder}/SKILL.md: ${parsed.error}`);
+    if (parsed.data.name !== name) throw new Error(`skills/${name}/${latest.folder}/SKILL.md names ${parsed.data.name}; folder name must match`);
+    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest: latest.folder, eval: await latestReceiptVerdict(clone, parsed.data.metadata.id, versions) });
   }
-  return { team: { name: team.name, remote, global: team.global, projects: team.projects, archived: team.archived }, people, skills };
+  return { team: { name: team.name, remote, projects: team.projects, archived: team.archived }, people, skills, skipped };
 }
 
 export async function readPeople(clone: string): Promise<Person[]> {
@@ -165,8 +238,13 @@ export async function readPeople(clone: string): Promise<Person[]> {
   return Promise.all(files.map(async (file) => parseJson(personSchema, await readFile(join(clone, 'people', file), 'utf8'), `people/${file}`)));
 }
 
-/** §9 generic-git fallback: derive the README from safeWrite's in-memory tree before it is guarded. */
-export async function regenerateReadmeInTree(tree: MutableTree, remote: string, runner: Runner, clone: string, latestBySkill?: ReadonlyMap<string, string>): Promise<void> {
+/**
+ * §9 generic-git fallback: derive the README from safeWrite's in-memory tree before it is guarded.
+ * D69: resolves to the refusal reason when the render may not be applied — README.md is then left
+ * out of the tree entirely (never even set to its own bytes, and never created empty) — and to
+ * undefined when it was applied or was already current.
+ */
+export async function regenerateReadmeInTree(tree: MutableTree, remote: string): Promise<string | undefined> {
   const source = tree.after('team.json');
   if (source === undefined) throw new Error('Cannot generate README without team.json.');
   const team = parseJson(teamSchema, asText(source), 'team.json');
@@ -175,45 +253,74 @@ export async function regenerateReadmeInTree(tree: MutableTree, remote: string, 
     if (value === undefined) throw new Error(`Cannot generate README: ${path} was removed from the tree.`);
     return parseJson(personSchema, asText(value), path);
   });
-  const names = tree.paths().filter((path) => /^skills\/[^/]+\/SKILL\.md$/.test(path)).map((path) => path.split('/')[1]!).sort();
+  // §4.1(d): the name -> highest v<N> map comes from the in-memory post-image, so the generator adds
+  // no git call inside the loop and sees exactly the tree that is about to be committed.
+  const paths = tree.paths('skills/');
+  const names = [...new Set(paths.filter((path) => /^skills\/[^/]+\/v[1-9][0-9]*\/SKILL\.md$/.test(path)).map((path) => path.split('/')[1]!))].sort();
+  // D69: every `skills/<name>/` folder in the post-image (a path with something under it — the
+  // `skills/.gitkeep` file has no folder) that the selector above did not catalogue.
+  const skipped = [...new Set(paths.map((path) => path.split('/')).filter((parts) => parts.length >= 3).map((parts) => parts[1]!))].filter((name) => !names.includes(name)).sort();
   const skills: ReadmeSkill[] = [];
   for (const name of names) {
-    const source = tree.after(`skills/${name}/SKILL.md`);
-    if (source === undefined) throw new Error(`Cannot generate README: skills/${name}/SKILL.md was removed from the tree.`);
-    const parsed = parseSkillFrontmatter(asText(source));
-    if (!parsed.ok) throw new Error(`Invalid skills/${name}/SKILL.md: ${parsed.error}`);
-    const latest = latestBySkill === undefined ? await latestTree(runner, clone, name) : latestBySkill.get(name);
+    const latest = versionsInTree(tree, name)[0];
     if (latest === undefined) throw new Error(`Cannot generate README: skills/${name} is absent from the written tree.`);
-    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest, eval: latestReceiptVerdictInTree(tree, parsed.data.metadata.id, latest) });
+    const source = tree.after(`skills/${name}/${latest.folder}/SKILL.md`);
+    if (source === undefined) throw new Error(`Cannot generate README: skills/${name}/${latest.folder}/SKILL.md was removed from the tree.`);
+    const parsed = parseSkillFrontmatter(asText(source));
+    if (!parsed.ok) throw new Error(`Invalid skills/${name}/${latest.folder}/SKILL.md: ${parsed.error}`);
+    skills.push({ id: parsed.data.metadata.id, name, description: parsed.data.description, category: parsed.data.metadata['terum-category'], author: parsed.data.metadata.author, latest: latest.folder, eval: latestReceiptVerdictInTree(tree, parsed.data.metadata.id, versionsInTree(tree, name)) });
   }
-  tree.set('README.md', applyReadme(asText(tree.after('README.md') ?? ''), generateReadme({ team: { name: team.name, remote, global: team.global, projects: team.projects, archived: team.archived }, people, skills })));
+  const applied = applyReadmeWithReason(asText(tree.after('README.md') ?? ''), generateReadme({ team: { name: team.name, remote, projects: team.projects, archived: team.archived }, people, skills, skipped }), { skipped });
+  if (applied.refusal !== undefined) return applied.refusal;
+  tree.set('README.md', applied.text);
+  return undefined;
 }
 
-/** §5.4 / §12: display only the lexicographically newest valid receipt for this exact version. */
-async function latestReceiptVerdict(clone: string, id: string, version: string): Promise<string | undefined> {
-  const directory = join(clone, 'evals', id, version);
-  let names: string[];
-  try { names = await readdir(directory); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
-  const newest = names.filter((name) => name.endsWith('.json')).sort().at(-1);
-  if (newest === undefined) return undefined;
-  const source = await readFile(join(directory, newest), 'utf8');
-  return receiptVerdict(source, id, version);
+/**
+ * §4.1(e): walk the skill's versions newest-first and show the newest that carries a usable receipt,
+ * annotating it with the version it came from when that is not the latest — the README's form of
+ * §8.1's fallback and §8.2's mandatory disclosure. A stale score presented bare would be a claim
+ * about bytes the reader will not receive when they install.
+ */
+async function latestReceiptVerdict(clone: string, id: string, versions: readonly SkillVersion[]): Promise<string | undefined> {
+  for (const version of versions) {
+    const directory = join(clone, 'evals', id, version.folder);
+    let names: string[];
+    try { names = await readdir(directory); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
+    const newest = names.filter((name) => name.endsWith('.json')).sort().at(-1);
+    if (newest === undefined) continue;
+    const verdict = receiptVerdict(await readFile(join(directory, newest), 'utf8'), id, version.folder);
+    // A schema-invalid or misfiled newest receipt fails closed FOR THAT VERSION ONLY and the walk
+    // continues — one corrupt file must not blank a skill with three good older evals (§8.1).
+    if (verdict !== undefined) return annotate(verdict, version, versions);
+  }
+  return undefined;
 }
 
 /** The safeWrite fallback must derive README exclusively from the in-memory post-image. */
-function latestReceiptVerdictInTree(tree: MutableTree, id: string, version: string): string | undefined {
-  const prefix = `evals/${id}/${version}/`;
-  const newest = tree.paths(prefix).filter((path) => path.endsWith('.json')).sort().at(-1);
-  if (newest === undefined) return undefined;
-  const source = tree.after(newest);
-  return source === undefined ? undefined : receiptVerdict(asText(source), id, version);
+function latestReceiptVerdictInTree(tree: MutableTree, id: string, versions: readonly SkillVersion[]): string | undefined {
+  for (const version of versions) {
+    const newest = tree.paths(`evals/${id}/${version.folder}/`).filter((path) => path.endsWith('.json')).sort().at(-1);
+    if (newest === undefined) continue;
+    const source = tree.after(newest);
+    if (source === undefined) continue;
+    const verdict = receiptVerdict(asText(source), id, version.folder);
+    if (verdict !== undefined) return annotate(verdict, version, versions);
+  }
+  return undefined;
+}
+
+/** `PASS` at parity; `PASS (Version 3)` when the newest usable receipt is older than the latest version. */
+function annotate(verdict: string, from: SkillVersion, versions: readonly SkillVersion[]): string {
+  return from.n === versions[0]?.n ? verdict : `${verdict} (${versionLabel(from.n)})`;
 }
 
 function receiptVerdict(source: string, id: string, version: string): string | undefined {
   try {
     const receipt = receiptSchema.safeParse(JSON.parse(source));
-    if (!receipt.success || receipt.data.skill_id.toLowerCase() !== id.toLowerCase() || receipt.data.version !== version) return undefined;
+    // A null skill_id means a local run that was never attached; it is not this skill's testimony.
+    if (!receipt.success || receipt.data.skill_id?.toLowerCase() !== id.toLowerCase() || receipt.data.version !== version) return undefined;
     // §5.4: a partial receipt is never silently promoted to a full verdict.
     return receipt.data.execution_status === 'partial'
       ? `${receipt.data.verdict} — partial (${receipt.data.scored_rows}/${receipt.data.expected_rows} scored)`
@@ -243,6 +350,12 @@ function noLinkLabel(value: string): string { return value.replace(/[[\]]/g, '\\
 function cell(value: string): string { return noLinkLabel(oneLine(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|')); }
 
 export function shortHash(value: string): string { return value === '—' ? value : value.slice(0, 8); }
+
+/** The README's `Latest` column. `versionLabel` is the ONLY UI form of a version (D1). */
+function latestLabel(latest: string): string {
+  const n = parseVersionFolder(latest);
+  return n === null ? latest : versionLabel(n);
+}
 
 function installRepository(remote: string): string | null { return githubOwnerRepo(remote); }
 function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }

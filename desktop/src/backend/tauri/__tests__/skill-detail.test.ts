@@ -6,11 +6,11 @@ it('serves the recorded detail metadata without invented file or grant data', as
   const backend = createTauriBackend(detailReplay().bridge);
   const result = await backend.skill({ref:'deploy-check'});
   expect(result).toMatchObject({ok:true,value:{
-    repo:'acme/team',repoPath:'skills/deploy-check',version:'43bf7396d9ed',
-    version_full:'43bf7396d9edbdcfba751bc63dbe1c74055125ae',
+    repo:'acme/team',repoPath:'skills/deploy-check',version:'Version 1',
+    version_full:'v1',
     // Six lines: the fixture's seventh split element is the ignored trailing newline.
     lines:6,files:null,grants:[],normalizedGrants:'none',author:{name:'Mira Chen',handle:'mira',role:''},
-    shareCommand:'npx -y terum-skills@latest install acme/team/deploy-check@43bf7396d9ed',
+    shareCommand:'npx -y terum-skills@latest install acme/team/deploy-check',
     hygieneStatus:'pass',hygieneWhen:null,hygieneCaption:null,path:'/Users/teddy/.claude/skills/deploy-check',
   }});
   expect(result.value?.users[0]?.[2]).toBe('Global · since 2026-08-20');
@@ -19,9 +19,10 @@ it('serves the recorded detail metadata without invented file or grant data', as
 
 it('uses the full team version for an unplaced skill and excludes absent project roots', async () => {
   expect(await createTauriBackend(detailReplay().bridge).skill({ref:'tdd'})).toMatchObject({ok:true,value:{
-    version:'db604968dcc6',version_full:expect.stringMatching(/^[a-f0-9]{40}$/),path:null,pathLabel:'—',
+    // D1: the version is a label, never a hash — and never sliced to look like one.
+    version:'Version 1',version_full:'v1',path:null,pathLabel:'—',
     installScopes:[['Global','every session · ~/.claude/skills']],
-    shareCommand:'npx -y terum-skills@latest install acme/team/tdd@db604968dcc6',
+    shareCommand:'npx -y terum-skills@latest install acme/team/tdd',
   }});
 });
 
@@ -68,7 +69,7 @@ it('passes the removal destination before the ref', async () => {
 
 it('falls back to ls latest when eval-report cannot be read', async () => {
   const f=detailReplay((name,_value,frame)=>{if(name==='eval-report-tdd'){frame.ok=false;frame.error='No report.';delete frame.value;}});
-  expect(await createTauriBackend(f.bridge).skill({ref:'tdd'})).toMatchObject({ok:true,value:{version:'db604968',version_full:'db604968',evalReportError:'No report.',shareCommand:'npx -y terum-skills@latest install acme/team/tdd@db604968'}});
+  expect(await createTauriBackend(f.bridge).skill({ref:'tdd'})).toMatchObject({ok:true,value:{version:'Version 1',version_full:'v1',evalReportError:'No report.',shareCommand:'npx -y terum-skills@latest install acme/team/tdd'}});
 });
 it.each([undefined,'',null])('omits the since clause when the date is %s', async since => {
   const f=detailReplay((name,value)=>{

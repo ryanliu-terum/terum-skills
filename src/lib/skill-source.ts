@@ -3,6 +3,7 @@ import { lstat, readFile, readdir, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import YAML from 'yaml';
 import { allowedTools, describeRaw, FRONTMATTER, isSkillName, skillIdSchema } from './schema.js';
+import { ignoredByDigest } from './skills.js';
 import { isManagedFrontmatter } from './wrapper.js';
 
 export { FRONTMATTER } from './schema.js';
@@ -80,6 +81,9 @@ export async function sourceFiles(root: string): Promise<{ files: Map<string, Bu
   async function walk(current: string, relative = ''): Promise<void> {
     for (const entry of await readdir(current, { withFileTypes: true })) {
       const next = join(current, entry.name); const key = relative ? `${relative}/${entry.name}` : entry.name;
+      // The same D2 predicate `canonicalDigest`'s walker uses: two walkers over one folder must not
+      // produce two digests, or publish could never recognise a byte-identical republish (§3.3).
+      if (ignoredByDigest(key)) continue;
       if (entry.isDirectory()) await walk(next, key);
       else if (entry.isFile()) {
         files.set(key, await readFile(next));
