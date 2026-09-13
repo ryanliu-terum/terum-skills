@@ -315,7 +315,7 @@ function twoCopies(globalPath='/home/.claude/skills/a',projectRoot='/work/ops'){
 it('resolves a name the team does not share against the folder on this machine',async()=>{
   const local=unsharedLocal([{root:'/home/.claude/skills',scope:'global',rows:[unsharedRow('diagnose','/home/.claude/skills/diagnose')],notOffered:[],problems:[]}]);
   const f=inventoryBridge({local});
-  expect(await createTauriBackend(f.bridge).skill({ref:'diagnose',team:'acme'})).toMatchObject({ok:true,value:{name:'diagnose',team:null,path:'/home/.claude/skills/diagnose',skillRef:'local:/home/.claude/skills/diagnose',project:'Global',teamed:false,placed:false,onDiskOnly:true,installs:'0 installs',flags:['local']}});
+  expect(await createTauriBackend(f.bridge).skill({ref:'diagnose',team:'acme'})).toMatchObject({ok:true,value:{name:'diagnose',team:null,path:'/home/.claude/skills/diagnose',skillRef:'local:/home/.claude/skills/diagnose',project:'Global',teamed:false,placed:false,onDiskOnly:true,installs:'—',flags:['local']}});
   // No validate or eval-report: there is no team skill to validate, and asking would be a lie.
   expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--local'],['ls','--team','acme']]);
 });
@@ -416,7 +416,7 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   expect(catalog.value.bulkInstall).toEqual({ terum: { total: 1, asking: 0 } });
   expect(catalog.value.verdictCounts).toEqual({ PASS: 0, NEUTRAL: 0, FAIL: 0, 'Not evaluated': 3 });
   expect(JSON.stringify(catalog)).not.toMatch(/Teddy|SSM|MRF|founder/);
-  // §8.4: two processes, regardless of team size. The per-member fan-out is deleted, so a roster of
+  // §8.4: three processes, regardless of team size. The per-member fan-out is deleted, so a roster of
   // fifty costs what a roster of three does.
   expect(f.spawns.some(spawn => spawn.args[1] === 'member')).toBe(false);
   // The roster() call earlier in this test spends its own status+ls; the CATALOG read adds one more
@@ -447,6 +447,7 @@ it('S7b tolerates absent metadata but rejects malformed values and failed member
       const value = frame.value as { teams: { members: Record<string, unknown>[] }[] };
       for (const member of value.teams[0]!.members) { delete member.role; delete member.projects; }
     }
+    if (name === 'ls') for (const person of (frame.value as {people:Record<string,unknown>[]}).people) { delete person.role; delete person.projects; }
   }).bridge);
   expect((await backend.roster()).value?.members[0]).toMatchObject({ role: null, projects: [] });
   // §8.4: there is no per-member read left to fail. What can go wrong instead is a roster entry the
@@ -459,6 +460,17 @@ it('S7b tolerates absent metadata but rejects malformed values and failed member
     }
   }).bridge);
   expect(await missing.catalog()).toMatchObject({ ok: false, error: expect.stringContaining('No member data for ravi.') });
+  // The Roster screen fails the same way: a member `status` names and `ls` does not is never drawn as absent.
+  expect(await missing.roster()).toMatchObject({ ok: false, error: expect.stringContaining('No member data for ravi.') });
+  // And the reverse: a people file `team remove` left behind is not a teammate — `status` is the membership.
+  const departed = createTauriBackend(peopleReplay((frame, name) => {
+    if (frame.t === 'result' && name === 'ls') {
+      const value = frame.value as { people: Record<string, unknown>[] };
+      value.people = [...value.people, { ...value.people[0]!, handle: 'ghost', display_name: 'Ghost', authored: [], installed: [], profile: [] }];
+    }
+  }).bridge);
+  expect((await departed.roster()).value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
+  expect((await departed.catalog()).value?.people.map(person => person.handle)).toEqual(['mira', 'ravi', 'seed']);
   // A CLI too old to report the roster in one read is named, never drawn as a team with no members.
   const stale = createTauriBackend(peopleReplay((frame, name) => {
     if (frame.t === 'result' && name === 'ls') delete (frame.value as { people?: unknown }).people;
@@ -740,14 +752,14 @@ it('fills a local card from the row the CLI now supplies, and estimates tokens w
  const local={roster:[],skills:[],problems:[],local:[{root:'/repo/.claude/skills',repoRoot:'/repo',scope:'project',label:'app',registered:true,counts:{skillFolders:1,connectable:1},rows:[row],problems:[],notOffered:[]}]};
  const result=await createTauriBackend(inventoryBridge({local,teams:[]}).bridge).library({scope:{kind:'checkout',root:'/repo'}});
  // 7116 characters / 4 = 1779 tokens. The tilde says it is an estimate, not a measurement.
- expect(result.value?.skills).toMatchObject([{name:'diagnose',project:'app',desc:'Disciplined diagnosis loop for hard bugs.',size:'~1.8k tokens',installs:'0 installs',installsN:0}]);
+ expect(result.value?.skills).toMatchObject([{name:'diagnose',project:'app',desc:'Disciplined diagnosis loop for hard bugs.',size:'~1.8k tokens',installs:'—',installsN:0}]);
 });
 
 it('degrades to a dash when the CLI predates the character count',async()=>{
  const row={name:'old',path:'/repo/.claude/skills/old',state:'untracked locally',tracked:false,placement:null,health:'untracked'};
  const local={roster:[],skills:[],problems:[],local:[{root:'/repo/.claude/skills',repoRoot:'/repo',scope:'project',label:'app',rows:[row],problems:[],notOffered:[]}]};
  const result=await createTauriBackend(inventoryBridge({local,teams:[]}).bridge).library({scope:{kind:'checkout',root:'/repo'}});
- expect(result.value?.skills).toMatchObject([{name:'old',size:'—',tokensK:0,desc:'',installs:'0 installs'}]);
+ expect(result.value?.skills).toMatchObject([{name:'old',size:'—',tokensK:0,desc:'',installs:'—'}]);
 });
 
 it.each(['rows','notOffered'] as const)('B2 renders known, null and older CLI categories from %s',async source=>{
@@ -921,14 +933,14 @@ function catalogBurst(size:number,behavior:(index:number,attempt:number)=>Promis
  });return {...f,handles,attempts,peak:()=>peak};
 }
 describe('§8.4 catalog reads',()=>{
- it('spawns two processes for a twelve-member team, and returns roster order',async()=>{
+ it.each([5,12])('spawns exactly three CLI children for a %i-member team, and returns roster order',async size=>{
   // The number this suite used to pin was a CONCURRENCY cap on the fan-out. The number that matters
-  // now is that there is no fan-out: twelve members, two processes, roster order preserved.
-  const f=catalogBurst(12);const result=await createTauriBackend(f.bridge).catalog();
+  // now is that there is no fan-out: any team size, three processes, roster order preserved.
+  const f=catalogBurst(size);const result=await createTauriBackend(f.bridge).catalog();
   expect(result.ok).toBe(true);
   expect(result.value?.people.map(p=>p.handle)).toEqual(f.handles);
   expect(f.spawns.filter(s=>s.args[1]==='member')).toEqual([]);
-  expect(f.spawns.map(s=>s.args[0])).toEqual(['status','ls','ls']);
+  expect(f.spawns.map(s=>s.args)).toEqual([['status'],['ls','--team','acme'],['ls','--local']]);
  });
  it('only roster asks status for permissions',async()=>{
   const f=catalogBurst(1);const backend=createTauriBackend(f.bridge);await backend.roster();await backend.catalog();expect(f.spawns.filter(s=>s.args[0]==='status').map(s=>s.args)).toEqual([['status','--permissions'],['status']]);
@@ -1013,4 +1025,45 @@ it('leaves a card without a receipt at null rather than drawing a zero', async (
 it('keeps the card null when the receipt carries no candidate-vs-baseline comparison', async () => {
   // A receipt with no baseline comparison has no lift to show; provenance alone is not a number.
   expect((await cardWith({ ...cardReceipt, comparisons: {} })).summary).toBeNull();
+});
+
+function versionedCatalog(versions: (string|null)[] = ['v2']) {
+ return detailReplay((name, value) => {
+  if (name === 'ls') {
+   const skills = value.skills as Record<string,unknown>[];
+   Object.assign(skills[0]!, { latest: 'v10', latestVersion: 'v10', versionCount: 10, evalVersion: 3, latestEvalState: 'invalid', receipt: cardReceipt });
+   const people = value.people as Record<string,unknown>[];
+   Object.assign(people[0]!, { display_name: 'Profile reader', role: 'Maintainer', projects: ['Global'], local_skills: 17,
+    profile: [{ id: skills[0]!.id, name: skills[0]!.name, version: 'v2', added: '2026-09-12', via: 'publish' }] });
+  }
+  if (name === 'status') {
+   const ledger = value.ledger as { placements: Record<string,unknown>[] };
+   ledger.placements = versions.map((version, index) => ({ ...ledger.placements[0], version, path: '/root-' + index + '/.claude/skills/deploy-check' }));
+  }
+ });
+}
+it('maps stale eval and ledger version overlays without changing catalogue counts or ordering', async () => {
+ const withCopy = await createTauriBackend(versionedCatalog().bridge).catalog();
+ const withoutCopy = await createTauriBackend(versionedCatalog([]).bridge).catalog();
+ if (!withCopy.ok || !withoutCopy.ok) throw new Error('catalog failed');
+ expect(withCopy.value.skills[0]).toMatchObject({ latestVersion:'v10', installedVersion:'v2', evalVersion:3, evalStale:true, latestEvalState:'invalid', localEval:null, localEvalStale:false, profileVersion:null });
+ expect(withoutCopy.value.skills[0]?.installedVersion).toBeNull();
+ for (const key of ['topRated','categorySkills','categories','catalogN','filterCount','verdictCounts','peopleByAdoption'] as const) expect(withCopy.value[key]).toEqual(withoutCopy.value[key]);
+ expect(withCopy.value.scanned).toEqual(withoutCopy.value.scanned);
+ expect(withCopy.value.scanned?.length).toBeGreaterThan(0);
+});
+it.each([['v2','v3'],['v2',null],[null]])('does not invent a single installed version from ambiguous ledger entries %j', async (...versions) => {
+ const result = await createTauriBackend(versionedCatalog(versions).bridge).catalog();
+ expect(result.ok).toBe(true);
+ expect(result.value?.skills[0]?.installedVersion).toBeNull();
+});
+it('reads profile versions separately from automatic installs and gets roster facts from people[]', async () => {
+ const result = await createTauriBackend(versionedCatalog().bridge).catalog();
+ if (!result.ok) throw new Error(result.error);
+ expect(result.value.people[0]).toMatchObject({ name:'Profile reader',role:'Maintainer',projects:['Global'],profileVersions:{'deploy-check':'v2'},buckets:[['On their profile',['deploy-check']],['Installed',['deploy-check','tdd']]] });
+});
+it('keeps B4 marketplace annotations neutral on Library cards pending B5', async () => {
+ const result = await createTauriBackend(versionedCatalog().bridge).library({scope:{kind:'global'}});
+ if (!result.ok) throw new Error(result.error);
+ for (const card of result.value.skills) expect(card).toMatchObject({ installedVersion:null, latestVersion:null, evalVersion:null, evalStale:false, latestEvalState:null, profileVersion:null });
 });

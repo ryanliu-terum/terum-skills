@@ -20,7 +20,8 @@ function withParams(base:string,params:string[]):string {
 export function cardActions(skill:SkillCard,{origin='',runEvalInApp=false}:{origin?:string;runEvalInApp?:boolean}={}):CardAction[] {
  const base=detailPath(skill),ridesOrigin=skill.teamed||!skill.path,at=(...params:string[])=>withParams(base,[...params,ridesOrigin?origin:'']);
  const actions:CardAction[]=[{key:'open',label:'Open',to:at(),reason:null}];
- if(runEvalInApp)actions.push({key:'run-eval',label:'Run eval',to:at('tab=evals','dialog=run-eval'),reason:null});
+ // §11.4: evals run against the copy on this machine, so the row stays and says why when there is none.
+ if(runEvalInApp)actions.push({key:'run-eval',label:'Run eval',to:skill.path?at('tab=evals','dialog=run-eval'):null,reason:skill.path?null:'Install it first — evals run against the copy on your machine.'});
  actions.push(moveAction(skill,at),placeAction(skill,at),publishAction(skill,at));
  return actions;
 }
@@ -44,12 +45,10 @@ function placeAction(skill:SkillCard,at:At):CardAction {
  if(skill.installed==='recorded')return {key:'place',label:'Reinstall…',to:at('dialog=install'),reason:'Installed · not on this machine.'};
  return {key:'place',label:'Install…',to:at('dialog=install'),reason:null};
 }
-/** Publish endorses the skill into team.json; it throws on anything the team repo does not hold,
- *  so those states are disabled with the reason rather than hidden. */
+/** §11.4: the gate is the local folder alone. A skill the team already holds IS publishable — that is
+ *  how its next version ships (§5.1 step 9 mints highest+1; identical bytes mint nothing). The
+ *  endorsement-era `teamState` branches went with §12. */
 function publishAction(skill:SkillCard,at:At):CardAction {
- const reason=skill.teamState==='shared'?null
-  :skill.teamState==='endorsed'?'Already published to the team.'
-  :skill.teamState==='unshared'?'Not shared with the team yet. Sync auto-shares global skills; a project checkout is shared with connect.'
-  :'Terum could not read this team, so it cannot tell whether this skill is published.';
+ const reason=skill.path?null:'This skill is not on this machine, so there is nothing to publish.';
  return {key:'publish',label:'Publish to team…',to:reason?null:at('dialog=publish'),reason};
 }

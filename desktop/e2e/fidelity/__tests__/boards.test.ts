@@ -6,7 +6,7 @@ import { TOLERANCE, PIXELMATCH_OPTIONS } from '../tolerance';
 import { oraclePath, resolveDesignDir } from '../design-dir';
 const design = resolveDesignDir();
 describe('board manifest',()=>{
- it('matches all 90 fidelity rows in both directions',()=>{expect(BOARDS).toHaveLength(90);expect(new Set(BOARDS.map(b=>b.name)).size).toBe(90);expect([...readFidelity().keys()].sort()).toEqual(BOARDS.map(b=>b.name).sort());});
+ it('matches all 91 fidelity rows in both directions',()=>{expect(BOARDS).toHaveLength(91);expect(new Set(BOARDS.map(b=>b.name)).size).toBe(91);expect([...readFidelity().keys()].sort()).toEqual(BOARDS.map(b=>b.name).sort());});
  it('has hash routes and immutable class tolerances',()=>{expect(BOARDS.every(b=>b.route.startsWith('#/'))).toBe(true);expect(TOLERANCE).toEqual({screen:.0030,dialog:.0035,state:.0020,full:.0025});expect(PIXELMATCH_OPTIONS).toEqual({threshold:0.1,includeAA:true});for(const name of ['Main','Light'])expect(BOARDS.find(board=>board.name===name)?.exact).toBe(true);});
 });
 describe.skipIf(design === undefined)('read-only oracles (TERUM_DESIGN_DIR)',()=>{

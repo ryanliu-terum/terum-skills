@@ -47,10 +47,19 @@ it('shows no join date and no skill total when the CLI reports neither', async (
 });
 it('renders the join date and the skill total the CLI reports', async () => {
   open('#/share', (frame, name) => {
-    if (name !== 'status' || frame.t !== 'result') return;
-    const value = frame.value as { teams: { members: { handle: string; joined?: string; skillsTotal?: number }[] }[] };
-    const mira = value.teams[0]?.members.find(member => member.handle === 'mira');
-    if (mira) { mira.joined = '2026-06-12'; mira.skillsTotal = 96; }
+    if (frame.t !== 'result') return;
+    // §8.4 splits these two: `joined` still comes from status's roster, but the skill total is now
+    // `people[].local_skills` from `ls` — one source for a fact the CLI already resolved.
+    if (name === 'status') {
+      const value = frame.value as { teams: { members: { handle: string; joined?: string }[] }[] };
+      const mira = value.teams[0]?.members.find(member => member.handle === 'mira');
+      if (mira) mira.joined = '2026-06-12';
+    }
+    if (name === 'ls') {
+      const value = frame.value as { people?: { handle: string; local_skills?: number }[] };
+      const mira = value.people?.find(person => person.handle === 'mira');
+      if (mira) mira.local_skills = 96;
+    }
   });
   const cells = within(await screen.findByTestId('member-row-0')).getAllByRole('cell');
   expect(cells[2]).toHaveTextContent('2026-06-12');
@@ -76,10 +85,19 @@ it('does not repeat the handle when the display name is just the handle', async 
 });
 it('renders a person heading without a duplicate handle or a dangling role separator', async () => {
   open('#/marketplace/people/ravi', (frame, name) => {
-    if (name !== 'status' || frame.t !== 'result') return;
-    const value = frame.value as { teams: { members: { handle: string; displayName: string }[] }[] };
-    const ravi = value.teams[0]?.members.find(member => member.handle === 'ravi');
-    if (ravi) ravi.displayName = 'ravi';
+    if (frame.t !== 'result') return;
+    if (name === 'status') {
+      const value = frame.value as { teams: { members: { handle: string; displayName: string }[] }[] };
+      const ravi = value.teams[0]?.members.find(member => member.handle === 'ravi');
+      if (ravi) ravi.displayName = 'ravi';
+    }
+    // §8.4: the heading's display name now comes from `ls`'s people[] limb, not status's roster,
+    // so the name-equals-handle case this test exists to cover must be constructed there too.
+    if (name === 'ls') {
+      const value = frame.value as { people?: { handle: string; display_name: string }[] };
+      const ravi = value.people?.find(person => person.handle === 'ravi');
+      if (ravi) ravi.display_name = 'ravi';
+    }
   });
   await screen.findByRole('heading', { name: 'ravi' });
   const heading = document.querySelector('.market-person-heading') as HTMLElement;
