@@ -97,16 +97,23 @@ export function migrateTree(tree: MutableTree): MigrationCounts {
   for (const source of paths.filter(path => path.startsWith('evals/') && path !== 'evals/.gitkeep')) {
     const match = /^evals\/([0-9a-fA-F-]{36})\/([0-9a-f]{40})\/(\d{8}T\d{6}Z)\.json$/.exec(source);
     if (!match) throw new Error(`Migration refused: unexpected receipt path ${source}; resolve it before retrying.`);
-    const id = match[1]!; const hash = match[2]!; const runId = match[3]!;
+    // The folder is the one identity here that no schema normalizes: `z.uuid()` lower-cases the
+    // frontmatter id the `hashes` map is keyed by, so a raw upper-case capture would miss it and send
+    // the CURRENT receipt to the archive silently. Compare the way guard.ts does, lower-cased -- but
+    // keep the folder's recorded spelling for the destination: safeWrite applies the mutation through
+    // the working tree and stages by literal path, so a case-only rename of the folder cannot be
+    // committed from a case-insensitive volume (macOS, Windows). Normalizing the folder is a separate
+    // step, not this verb's.
+    const folder = match[1]!; const id = folder.toLowerCase(); const hash = match[2]!; const runId = match[3]!;
     const bytes = required(tree, source);
     if (hashes.get(id) === hash) {
       const receipt = parseJson(receiptSchema, treeText(bytes), source);
       if (receipt.skill_id !== id || receipt.version !== hash || receipt.run_id !== runId) throw new Error(`Migration refused: misfiled receipt ${source}.`);
       if (receipt.version_tree !== undefined && receipt.version_tree !== hash) throw new Error(`Migration refused: conflicting version_tree in ${source}.`);
-      move(source, `evals/${id}/${v1}/${runId}.json`, json({ ...receipt, version: v1, version_tree: hash }));
+      move(source, `evals/${folder}/${v1}/${runId}.json`, json({ ...receipt, version: v1, version_tree: hash }));
       counts.rekeyedReceipts++;
     } else {
-      move(source, `evals/${id}/archive/${hash}/${runId}.json`, bytes);
+      move(source, `evals/${folder}/archive/${hash}/${runId}.json`, bytes);
       counts.archivedReceipts++;
     }
   }
