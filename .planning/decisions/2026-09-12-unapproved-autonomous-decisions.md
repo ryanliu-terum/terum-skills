@@ -855,3 +855,24 @@ nothing fails); B7's SKILL.md:59 still shows the retired `install <ref>[@<versio
 Alternative rejected: fixing the two data-loss-adjacent mediums (`pending` row, swap-or-restore)
 in this commit. Both are real; both are medium by a 3-0 panel; the bar is critical/high, and each
 would have widened the confirmation pass. Reversal cost of any fix above: one commit each.
+
+## A28 — B6's confirmation pass: two mediums in the new prepare step, deferred; one A27 claim corrected
+
+**Pass `wf_85f9369d-1c5` (base `6965a4d`, 42 agents): 0 critical, 0 high, 2 medium, 1 contested → #189
+merged as `52f776b` (20:35 UTC).** Both mediums sit in the scope-less install prepare step A27's
+seventh bullet added (`desktop/src/backend/tauri/index.ts:812-826`):
+- When the pre-flight `ls --local` fails, the item's reported scope falls back to the literal `Global` —
+  the guess the fix set out to remove. A27 recorded "a failed read degrades only the report" as a
+  call; the panel is right that "unknown" and "Global" are different answers. Fix: a nullable or
+  `'unknown'` scope on the returned item plus a `run.test.ts` case that fails the read for a scope-less
+  install — which also settles the contested 2-1 "the documented failure fallback has no test".
+- The pre-flight read spawns a fresh CLI instead of riding the 60 s shared-read cache that
+  `status()` warmed moments earlier (`cached(['ls','--local'], …)`, as `readModels` does): one serial
+  spawn added to a hot path; `sections` is not needed before the install spawn in that branch.
+- **Correction to A27's "also owed":** B7's `SKILL.md` does not carry the retired
+  `install <ref>[@<version>]` grammar or an install `--force` sentence. The copy agent read B6's copy of
+  the file, which B7 rewrites; on B7 line 59 is `app-update --check`'s live `--force`. Nothing owed.
+- Report (untracked): `terum-codex/refactor-b6/.planning/reviews/refactor-b6-fix.hybrid.r2.review.md`.
+
+Alternative rejected: a third pass to fix the two mediums before merging. The bar is critical/high
+(D53); each is one commit later, and B7 is the only batch still open.
