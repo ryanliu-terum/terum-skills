@@ -459,3 +459,51 @@ Every finding in all three was in code written this session.
 
 **Gates:** root lint, typecheck, **vitest 1701/1701**; desktop lint, typecheck, **vitest 1981 passed**
 (the 4 failures are the pre-existing missing-oracle boards on `main`).
+
+---
+
+## A15 — B8's first review, and a finding I could NOT reproduce, so I shipped nothing
+
+**What.** I gave **PR #184 (B8) its first-ever review** — it had never had one, and D53 requires one
+before it can merge. Runner: `.claude/workflows/ultrareview.b8.local.js`, a copy of the B3 one with
+the worktree path swapped. B8 was re-rebased onto B3's final tip (`5918973`) first, again with **no
+conflicts**, gates green (typecheck, lint, **root vitest 1713/1713**).
+
+**Result: 0 critical, 0 high, 2 medium, 0 contested — no blockers.** Notably, **neither finding was in
+my A8 rebase resolution**, which is the reassurance I wanted about that write-path merge.
+
+### The finding I could not reproduce — and therefore did not fix
+
+`teamMigrate.ts` compares skill uuids case-sensitively at three capture points, where `guard.ts:111/117`
+lower-cases for the same comparison. Claimed impact: a case difference silently ARCHIVES a current
+receipt instead of re-keying it, and silently nulls a member's installed version.
+
+I wrote the fix (`.toLowerCase()` at each point, matching `guard.ts`) and then could not make a test
+fail without it. Two attempts:
+
+1. **Upper-cased the declared `metadata.id`.** Passed pre-fix — because **`z.uuid()` in this zod
+   version NORMALIZES to lower case.** Verified directly: `z.uuid().safeParse(UPPERCASE)` returns
+   `success: true` with the **lower-cased** value. That silently undercuts two of the reviewer's three
+   capture points: the frontmatter id and a person's `installed[].id` both arrive already normalized.
+2. **Upper-cased the `evals/<uuid>/` folder name** — the one identity no schema touches, captured raw
+   by a regex that admits `[0-9a-fA-F-]{36}`. **Also passed pre-fix.** I ran out of budget before
+   establishing why.
+
+**So I reverted the fix and the test. B8 is back at exactly the reviewed commit.** The repo's rule is
+that every fix carries a test proven to fail on the pre-fix tree; I could not meet it, and a change I
+cannot demonstrate the need for — to a **data-moving migration verb**, in a batch that has had one
+review and no human sign-off, made unsupervised — is not one to ship on a hunch.
+
+**For whoever picks this up:** the fix is three `.toLowerCase()` calls plus one on `receipt.skill_id`
+(needed so the tightened compare does not turn a case difference into a NEW refusal). The open
+question is only whether the folder-name path is reachable — start by checking whether the uppercase
+directory actually survives into the git index on this filesystem.
+
+### The second medium, also not fixed
+
+`teamRepo.ts:195`'s new migrate-only refusal (a non-regular file — symlink mode `120000`, gitlink
+`160000` — under `skills/`/`evals/`/`people/`/`team.json`) **has zero test coverage**, and the review
+noted a sibling untested throw at `:206`. Both are real coverage gaps in new control flow. I left them
+because the same budget went into the finding above; they are small and worth closing.
+
+**B8 remains UNPUSHED**, as under A8.
