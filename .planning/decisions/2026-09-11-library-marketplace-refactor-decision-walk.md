@@ -698,9 +698,12 @@ rather than stopping to ask. Every one is a fork the spec left open or did not a
 | 49 | `guardRawPush`'s `author` parameter after D15 deleted the ownership row | **LOCK — delete it** | Nothing reads it. A parameter that is passed, typed and ignored is the same "declared and never enforced" shape as a receipt field with no refinement, and it kept a `login` remedy alive in a guard that can no longer produce it |
 
 **Left deliberately, and stated rather than hidden.** `uninstall` still appends to a people file's
-`declined[]` for an endorsed skill. §12 deleted the auto-install that list existed to suppress, so
-nothing reads it any more — vestigial, not wrong, and removing it changes user-visible preview copy
-that no §-of this spec governs. Filed here rather than done quietly. Likewise §6.3's miss message
+`declined[]` for an endorsed skill. §12 deleted the auto-install that list existed to suppress, but it
+is **not** unread: `uninstall.ts:145` filters against it, `install.ts:170` clears the installed id from
+it, and `ls.ts:220` emits it on `ls member` (verified 2026-09-13; an earlier revision of this paragraph
+claimed nothing reads it, which was false — D62). §16.1 assigns §9.1's deletion of the list and its
+three readers to **B6**; that hand-off is declared in the 2026-09-13 walk's `deferred:` block. Removing
+it here would change user-visible preview copy in the keystone batch, so it is filed, not done. Likewise §6.3's miss message
 still points at a `--path` flag that does not exist; the text is spec-pinned, so it is recorded here
 instead of edited.
 
