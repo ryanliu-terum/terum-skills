@@ -235,8 +235,12 @@ of their skill. To keep them separate, rename yours first: terum-skills skill re
 Recorded 2 installs. Published 1 skill.
 ```
 
-`--list` prints the same summary and writes the two groups as the verb's result (§4.4); it asks nothing and
-writes nothing. In frame mode `setup` uses `--list` behaviour (§5 M2.3). Folders that are already in the
+`--list` prints the same summary, then one line per row (`  {name} — matches Version {K} ({path})` for identical,
+`  {name} — differs from the team's Version {K} ({path})` for differing — a terminal reader sees only what is
+printed; the result object travels over frames), and writes the two groups as the verb's result (§4.4); it asks
+nothing and writes nothing. In interactive mode each row is named by its question and a row that is declined,
+refused or fails is printed and skipped — the next row is still offered, and the close line counts what was done
+(spec "Done means": every folder the person said yes to). Only a closed channel ends the dialogue. In frame mode `setup` uses `--list` behaviour (§5 M2.3). Folders that are already in the
 placements ledger are never listed. A folder whose bytes equal a team version under a **different name** is
 reported in a third group, `renamed`, and offered nothing (deferred, ledger D3).
 
@@ -335,15 +339,21 @@ reconcile one project from the terminal promotes `root` to a documented `--root 
 **Grammar (D7):** terminal `install [ref] [value] --adopt <path>` — exactly one of a skill reference or an adopt
 path. Refusals, each its own error line (§7): both given; neither given; `--into` or any destination flag with
 `--adopt` (adopt copies nothing, so it has no destination); a path outside every Library root (the existing
-`{path} is not a folder in your Library.`). Team from `--team` or the single configured team, as today. Scope is
-derived from the folder: `global` under the global Library, that project under a registered project root.
-`run()` routes `--adopt` before `parseRef`.
+`{path} is not a folder in your Library.`). Team from `--team` or the single configured team, as today.
+**Scope (build correction, 2026-09-14, code-wins rule):** `installed[].scope` and `placements[].scope` name a
+**team** project (`install project <name>`), never the Library root a copy sits in — `install <ref> --into <checkout>`
+records `global` too. Adopt therefore records `scope: { kind: 'global' }` for a folder under either root kind; the
+root it sits in is the `destination` on the pending note. Rev 2's earlier "that project under a registered project
+root" (and review walk D7's same phrase) conflated the two meanings and is superseded here. `run()` routes
+`--adopt` before `parseRef`.
 
 **Preconditions**, each its own error line: the path is a directory directly under a Library root (global or a
 registered project; `resolveLibrarySkill`); its `canonicalDigest` equals exactly one `versionDigests` entry
 of the selected team; the folder basename equals that entry's `name` (else
 `"<path> holds the bytes of <name> Version K under a different folder name; rename it to <name> first."`);
-the path is not already in `config.placements`.
+the path is not already in `config.placements`. When the digest equals several entries (possible only across
+skills — publish refuses an identical republish within one), the folder name picks the entry, newest first, exactly
+as `reconcile` classifies it; there is no separate ambiguity refusal.
 
 **Effects, in this order (D5):** `ensureConsent` for the skill's `allowed-tools`; `pending` entry
 `{ op:'install', destination, version:'v<K>' }`; `safeWrite` of `people/<handle>.json` `installed[]` (and
@@ -355,6 +365,12 @@ adopt has no `place()` step, so writing the machine's record **last** means an i
 pending row and a people-file entry, never an untracked placement — the folder stays visible to the reconcile
 scan, the cards still read true from the bytes (D1), and re-running adopt finishes the job through the existing
 pending self-drain (`install.ts:121`), the people-file write being idempotent. Do not "fix" the order back.
+**Re-run on a recorded path (build correction, 2026-09-14):** a path already in `config.placements` is a finished
+job and is **refused** with `{path} is already recorded as installed.` — never a second success (that would be the
+resumable adopt D5 rejected). Before refusing, when the ledger row matches (id, team, version) **and** a matching
+pending note is still present — adopt's own, or a placing install's that died at its people-file write — adopt
+replays the idempotent `installed[]` write and clears the note, so the machine never keeps a stale note or an
+unrecorded team row.
 D11 receipt seeding is skipped (the overlay shows the score). Result: `InstalledResult & { adopted: true }`.
 
 ### 4.6 Setup step
@@ -447,7 +463,9 @@ says so and offers no Publish, the check wraps with the words, and card strings 
 records reflecting what is on the machine — for every folder the person said yes to — and nothing else.
 
 1. `src/commands/reconcile.ts` — scan via `createLibraryScan(home, config.projects, stateRoot)` over global +
-   registered roots (or the one `root`, §4.4); candidate rows only; digest each; classify per §4.4 against every
+   registered roots (or the one `root`, §4.4); candidate rows, plus rows rejected **only** for a name mismatch so a
+   folder-only rename can reach the `renamed` group (`adoptableEntry` in `src/lib/local-skills.ts`, shared with
+   adopt; such a row never reaches `differing`); digest each; classify per §4.4 against every
    configured team (`skillRecords` + `versionDigests`); skip ledgered paths. Interactive: the §3.4 dialogue, then
    `installOne({ adopt })` and `publish.run({ ref: path })` per yes. `--list`: no asks, no writes. `--team`
    honoured. Registered in `src/cli.ts` as `reconcile` with `--list`, `--team` (no `--root`); in `FRAME_VERBS`.
@@ -459,9 +477,10 @@ records reflecting what is on the machine — for every folder the person said y
    else `section('existing')`, print the start line, run reconcile in interactive mode when
    `io.channel !== 'frames'`, else `--list` mode and `steps.existing = 'printed'`. `SetupArgs.existing?: boolean`;
    CLI flag `--no-existing`. Errors are non-fatal, as the projects step's are.
-4. `src/commands/project.ts` `add` — after `addLibraryProject` returns `added: true`, run reconcile with
-   `root` = the root just registered (§4.4; `added: false` runs no scan), interactive when
-   `io.channel !== 'frames'`, else emit the `--list` result on the verb's result as `reconcile?: ReconcileResult`.
+4. `src/commands/project.ts` `add` — after `addLibraryProject` returns `added: true` and a team is configured, run
+   reconcile with `root` = the root just registered (§4.4; `added: false` runs no scan), interactive when
+   `io.channel !== 'frames'` and the terminal is interactive, else `--list` (a piped `project add` must not ask);
+   on frames emit the `--list` result on the verb's result as `reconcile?: ReconcileResult`.
    `cliProjectAdded` in the desktop declares it optional. **Desktop coordinator (D6):** the add-project handler
    that already receives `cliProjectAdded` is the one place that opens `ReconcileDialog`, when `reconcile` is
    present and non-empty.
@@ -520,7 +539,11 @@ other row is prose — terminal output, dialogs, README, `docs/frame-protocol.md
 | Reconcile close | `Recorded {a} install(s). Published {b} skill(s).` |
 | Adopt refusals (preconditions) | `{path} is not a folder in your Library.` · `{path} does not match any published version of a team skill byte for byte; publish it instead.` · `{path} holds the bytes of {name} Version {K} under a different folder name; rename it to {name} first.` · `{path} is already recorded as installed.` |
 | Adopt refusals (grammar, D7) | `Give a skill to install or --adopt <path>, not both.` · `Nothing to install: give a skill, or --adopt <path> for a folder you already have.` · `--adopt records a folder where it is; it takes no destination.` |
-| Reconcile `root` refusal (D6) | `{root} is not one of your registered projects.` |
+| Reconcile `root` refusal (D6) | `{root} is not one of your registered projects.` (`{root}` canonicalised) |
+| Reconcile `--list` row lines | `  {name} — matches Version {K} ({path})` · `  {name} — differs from the team's Version {K} ({path})` |
+| Reconcile non-fatal failures | `Could not check your library against the team: {error}` (setup) · `Could not check that project against the team: {error}` (`project add`) |
+| Setup section header | `Your skills` |
+| Desktop `ReconcileDialog` *(prose; board owed)* | title `Your skills` / `Check against the team` · `Choose which existing folders to record or publish. No folder is copied or replaced.` · groups `Matches the team exactly` / `Shares a name but differs` / `Same bytes, different name` · rows `{name} · Record as installed (Version {K})` / `{name} · Publish as Version {K+1}` · outcomes `Recorded {name}.` / `Published {name}.` · `Nothing to reconcile.` · buttons `Cancel` / `Confirm` / `Working…` / `Done` |
 | Library action | `Check against the team` |
 | Onboarding board title | `Your skills` |
 
@@ -541,14 +564,19 @@ CLI (`src/commands/__tests__/`, `src/lib/__tests__/`):
 - `version-digests.test.ts` — numeric ordering, missing folder → absent key, concurrency bound. *Landed.*
 - `reconcile.test.ts` — classification of identical / differing (`sameId` true and false) / renamed /
   ledgered-skip; `--list` writes nothing (config and clone byte-identical before and after); interactive
-  yes → one `installOne` adopt and one `publish` call; no → nothing written. **D6:** under `root`, global and
-  other-project rows are excluded; a non-registered `root` is refused; `added:false` runs no scan.
+  yes → one `installOne` adopt and one `publish` call; no → nothing written; a row whose adopt throws (declined
+  consent) or whose publish refuses is printed and the remaining rows are still offered; `--list` prints one line per
+  row; a name-mismatch folder appears in `renamed` at most and never in `differing`. **D6:** under `root`, global and
+  other-project rows are excluded; a non-registered `root` is refused; `added:false` runs no scan; a
+  non-interactive terminal `project add` lists and never asks.
 - `install-adopt.test.ts` — each §4.5 precondition refusal and each D7 grammar refusal (both, neither, `--into`
   with adopt); scope derivation for a global-Library folder and for a project-root folder; success writes ledger
   + people file and does **not** copy or move files (folder mtime and bytes unchanged, no `old-skills`).
   **D5, five interruption tests:** the process is killed after the pending write, after the people-file write,
   after the ledger write, and after pending clear; each re-run ends with exactly one placement, exactly one
-  `installed[]` row for the skill, and zero pending rows; and the people file never gains a second row on replay.
+  `installed[]` row for the skill, and zero pending rows; a replay after the ledger write or after the clear is the
+  `already recorded` refusal; and the people file never gains a second row on replay. A placing install's leftover
+  note (ledger row, no people row) is drained the same way: adopt refuses, and the people row exists afterwards.
 - `setup.test.ts` — step order `projects → existing → evals`; `--no-existing` and `quiet` skip;
   frames channel → `printed`; a failing reconcile never fails setup.
 - `project.test.ts` — `add` on a root holding a matching skill returns `reconcile.identical.length === 1`, and
@@ -578,7 +606,7 @@ Desktop (`desktop/src/**`):
   on class presence plus an e2e screenshot gate below).
 - `descriptions.test.ts` / `features.test.ts` — `reconcile` feature key has exactly one consumer.
 - `setup-driver`/`setup-session` tests — `SETUP_STEP_KEYS` includes `existing`, `printedSetupStep` and
-  `askedSetupStep` map the §7 prefixes.
+  `askedSetupStep` map the §7 prefixes; the `Your skills` dialog opens after a printed step and closes on Cancel.
 - `ReconcileDialog.test.tsx` — default checks (identical on, `sameId` on, name-only off with note), confirm
   drives adopt/publish per checked row; the `project add` handler opens the dialog only when
   `cliProjectAdded.reconcile` is non-empty.
