@@ -14,7 +14,7 @@ const comparison = z.object({ win:z.number(), loss:z.number(), tie:z.number(), n
 const efficiency = z.object({ turns:z.number().nullish(), duration_ms:z.number().nullish(), cost_usd:z.number().nullish() }).passthrough();
 const executionStatus = z.enum(['complete','partial','failed']);
 const verdict = z.enum(['PASS','NEUTRAL','FAIL']);
-const receipt = z.object({
+export const cliReceipt = z.object({
  path:z.string(), version:z.string().nullable(), run_id:z.string(), verdict, execution_status:executionStatus,
  expected_rows:z.number(), scored_rows:z.number(), attribution:z.string(),
  comparisons:z.record(z.string(),comparison), arm_scores:z.record(z.string(),z.number().nullable()),
@@ -22,6 +22,7 @@ const receipt = z.object({
  efficiency:z.record(z.string(),efficiency),
  provenance:z.object({timestamp:z.string(),runner_handle:z.string(),model:z.string(),judge_model:z.string(),cc_version:z.string(),engine_version:z.string(),engine_commit:z.string(),k:z.number(),cases:z.array(z.string())}).passthrough(),
 }).passthrough();
+const receipt = cliReceipt;
 export const cliEvalReport = z.object({
  versions:z.object({placed:z.string().nullable(),teamCurrent:z.string().nullable(),evaluated:z.string().nullable()}),
  latestState:z.enum(['ok','none','invalid']), latest:receipt.nullable(),

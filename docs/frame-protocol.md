@@ -157,7 +157,14 @@ False: `favorites`, `follow`, `lastSeen`, `inviteScoping`, `disablePerMachine`, 
 advertise their respective verbs. Read feature values rather than assuming a control is available.
 
 `localIdentity` covers `skillId` on local rows and rejected entries, and `placed` on rows.
-Local inventory is a scan of Global and explicitly registered project roots; it reads no clone.
+Local inventory is a scan of Global and explicitly registered project roots. It fetches nothing, but
+each row now carries five read-only keys joined from the configured clones by **content digest** (cross-mirror overlays spec §4.1): `matchedVersion` (the `v<N>` whose committed bytes equal
+the folder, else null), `matchedName` and `matchedTeam` (the skill and team that version belongs to),
+`teamEval` (the newest committed receipt whose `content_digest` equals the folder's, as a receipt
+plus its `path`, the team name, and `mine` — whether this machine's handle ran it), and `knownToTeam`
+(the folder's frontmatter uuid belongs to a team skill). A row from an older CLI omits all five; a shell
+that reads them must treat absence as unknown, never as "unpublished". Identical bytes in more than
+one team match nothing and add a `problems[]` entry unless a placement names the team.
 Team `ls` includes `people` with automatic `installed` records and curated `profile` entries.
 
 Each team skill's `latestVersion` is its highest `v<N>` folder; `versionCount` counts versions.

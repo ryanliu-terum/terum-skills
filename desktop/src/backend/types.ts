@@ -38,6 +38,10 @@ export interface SkillCard {
  localEval:(ReceiptSummary & {runnerHandle:string|null;version:string|null})|null;localEvalStale:boolean;
  /** Machine-local annotation from placements; never used for catalogue ordering or counts. */
  installedVersion:string|null;latestVersion:string|null;evalVersion:number|null;evalStale:boolean;latestEvalState:'ok'|'none'|'invalid'|null;profileVersion:string|null;
+ /** Cross-mirror overlays spec §4.3 — the byte-level join. Marketplace: an on-disk copy's bytes equal a published version ('identical'), equal none ('differs'), or there is no copy / the CLI predates the key (null). Library: the folder's bytes equal a version ('identical'), equal none though the team knows this skill or the ledger placed it ('differs'), relate to no team skill at all ('none'), or the CLI predates the key (null). Never an ordering or count input. */
+ localMatch:'identical'|'differs'|'none'|null;
+ /** The folder's frontmatter uuid belongs to a team skill. Marketplace cards are team skills by construction (true). */
+ knownToTeam:boolean;
 teamed:boolean;path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;/** The broken flag names a fault `skill fix` repairs (an `invalid-yaml` or `name-mismatch` folder); the detail page draws Fix beside it. */fixable?:boolean;enabled:boolean;installed:InstallState;placed:boolean;onDiskOnly:boolean;teamState:TeamState;paths:[string,string][];projectRoots?:string[];provenance?:CardProvenance|null;wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
 export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
