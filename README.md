@@ -375,7 +375,7 @@ Release notices appear last on stderr, at most once per release per day, and are
 | | `login` | Check `gh` and record your name, email, and handle |
 | | `team create` / `team join` / `team leave` / `team move <org>/<repo>` / `team remove <handle>` | Manage the repo and its roster; `move` follows a team whose repository was recreated elsewhere (leave, join, place the shared skills again) |
 | | `invite <github-user>…` | Grant repo access and print the join line |
-| | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
+| | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `ls skill <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |
 | | `project add [<path>]` / `project remove <path>` / `project list` | Add, forget, or list the projects in your library — the folders this machine reads local skills from. Nothing is added for you: setup offers one folder at first run (`--no-projects` / `--no-evals` skip the offers), and the Library adds the rest |
 | | `team workflow-update` | Print the current team workflow scaffold with `--print` for manual migration |
 | | `team migrate` | Convert a team repo to the versioned layout (one commit per repo). Run **once per team, from a terminal**, and only after the release carrying the new CLI has reached everyone — an un-upgraded teammate cannot read a migrated repo |

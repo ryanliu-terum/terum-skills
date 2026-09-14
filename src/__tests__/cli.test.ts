@@ -172,6 +172,8 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(await parse(['team', 'remove', 'cy', '--team', 't'])).toEqual([{ verb: 'team', kind: 'remove', handle: 'cy', team: 't' }]);
     expect(await parse(['ls', '--team', 't'])).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: 'all', team: 't' }]);
     expect(await parse(['ls', '--team', 't', 'member', 'amy'])).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: 'member', value: 'amy', team: 't' }]);
+    expect(await parse(['ls', 'skill', 'deploy'])).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: 'skill', value: 'deploy' }]);
+    expect(await parse(['ls', 'skill'])).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: 'skill' }]);
   });
 
   it('wires publish (bare and with every flag) and team leave, and routes their failing Results to execute', async () => {

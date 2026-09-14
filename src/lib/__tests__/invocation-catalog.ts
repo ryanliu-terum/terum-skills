@@ -1145,9 +1145,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 366,
+    "line": 378,
     "policy": "prose",
-    "pattern": "| | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |"
+    "pattern": "| | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `ls skill <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |"
   },
   {
     "file": "README.md",

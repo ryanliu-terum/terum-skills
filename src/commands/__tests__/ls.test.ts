@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises';
-import { chmod, mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
@@ -10,6 +10,7 @@ import { allowedTools } from '../../lib/schema.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { candidatesOf, localSkills } from '../../lib/local-skills.js';
 import { ghOnlyRunner } from '../../lib/__tests__/fixtures.js';
+import { RESOLVED_PREFIX } from '../../lib/resolve-ref.js';
 
 // Clone the ESM namespace so individual permission failures can be injected and restored.
 vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs/promises')>() }));
@@ -355,7 +356,7 @@ it('returns sorted passthrough projects including empty projects, no legacy decl
   for(const args of [{},{kind:'member' as const,value:'seed'},{kind:'project' as const,value:'A'}]) {
     const result=await run({config:store,...args},new ScriptedPrompter());if(!result.ok)throw new Error(result.error);
     expect(result.value.projects).toEqual([{name:'A',skills:[ID],remotes:['github.com/acme/a'],description:'Hand maintained'},{name:'z',skills:[],remotes:[]}]);
-    if(args.kind==='member')expect(result.value.member).toEqual({handle:'seed',role:null,projects:[],installed:[]});else expect(result.value).not.toHaveProperty('member');
+    if(args.kind==='member')expect(result.value.member).toEqual({handle:'seed',displayName:'seed',role:null,projects:[],installed:[],profile:[]});else expect(result.value).not.toHaveProperty('member');
   }
   const local=await run({config:store,local:true,home:root},new ScriptedPrompter());expect(local).toMatchObject({ok:true,value:{problems:[]}});expect(local.value).not.toHaveProperty('projects');
 });
@@ -639,4 +640,81 @@ it('marks an invalid frontmatter edit as edited without requiring a usable skill
  await writeFile(join(path,'SKILL.md'),'---\nname: [\n---\nMy edited content');
  const result=await run({local:true,home,config:store},new ScriptedPrompter());
  expect(result).toMatchObject({ok:true,value:{local:[{rows:[{edited:true,health:'local-changed',problem:expect.stringContaining('not valid YAML')}]}]}});
+});
+
+describe('ls skill (D10)', () => {
+  const ID2 = '44444444-4444-4444-8444-444444444444';
+  async function teamAndLibrary() {
+    const { store, clone, root } = await inventoryFixture();
+    const home = join(root, 'home');
+    await mkdir(join(clone, 'skills', 'deploy-check', 'v1'), { recursive: true });
+    await writeFile(join(clone, 'skills', 'deploy-check', 'v1', 'SKILL.md'), inventorySource('deploy-check').replace(ID, ID2));
+    await writeFile(join(clone, 'team.json'), JSON.stringify({ ...TEAM_JSON, projects: { Global: { remotes: [], skills: [ID2] }, app: { remotes: ['github.com/acme/app'], skills: [ID2] } } }));
+    await writeFile(join(clone, 'people', 'seed.json'), JSON.stringify(person('seed', { installed: [{ id: ID2, version: 'v1', scope: { kind: 'global' }, since: '2026-08-01' }] })));
+    await git(['add', '--all'], clone); await git(['commit', '-qm', 'detail'], clone);
+    // A placed copy of the team skill, and a Library-only folder.
+    const placed = join(home, '.claude', 'skills', 'deploy-check'); await cp(join(clone, 'skills', 'deploy-check', 'v1'), placed, { recursive: true });
+    await localSource(home, 'notes', '---\nname: notes\ndescription: Only here.\n---\n# Notes body\n');
+    return { store, clone, home, placed };
+  }
+  it('answers from the team record, filters projects to its lists, and carries the Library row of the placed copy', async () => {
+    const { store, home, placed } = await teamAndLibrary();
+    const io = new ScriptedPrompter();
+    const result = await run({ kind: 'skill', value: 'deploy-check', config: store, home, cwd: home }, io);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.selection).toEqual({ kind: 'skill', name: 'deploy-check', source: 'team' });
+    expect(result.value.viewer).toEqual({ handle: 'seed', team: 'team' });
+    expect(result.value.skills.map((skill) => skill.name)).toEqual(['deploy-check']);
+    expect(result.value.skills[0]!.installedBy).toEqual([{ handle: 'seed', displayName: 'seed', scope: { kind: 'global' }, since: '2026-08-01', version: 'v1' }]);
+    expect(result.value.projects?.map((project) => project.name)).toEqual(['Global', 'app']);
+    expect(result.value.local?.flatMap((section) => section.rows.map((row) => row.path))).toEqual([placed]);
+    expect(result.value.people).toBeUndefined();
+    expect(io.lines).toEqual([format(result.value.skills[0]!), 'A description with <tags> and  spaces', '# Real body']);
+  });
+  it('answers from the Library alone for a folder the team has never seen, and on a team-less machine', async () => {
+    const { store, home } = await teamAndLibrary();
+    const io = new ScriptedPrompter();
+    const result = await run({ kind: 'skill', value: 'notes', config: store, home, cwd: home }, io);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value.selection).toEqual({ kind: 'skill', name: 'notes', source: 'library' });
+    expect(result.value.skills).toEqual([]);
+    expect(result.value.local?.flatMap((section) => section.rows.map((row) => row.name))).toEqual(['notes']);
+    expect(io.lines).toEqual([`  notes — untracked locally; path: ${join(home, '.claude', 'skills', 'notes')}`, 'Only here.', '# Notes body']);
+    const teamless = createConfigStore(join(home, 'state2'));
+    const alone = await run({ kind: 'skill', value: 'notes', config: teamless, home, cwd: home }, new ScriptedPrompter());
+    expect(alone).toMatchObject({ ok: true, value: { selection: { kind: 'skill', name: 'notes', source: 'library' }, viewer: undefined, roster: [] } });
+  });
+  it('autofills through the ladder, prints the resolved line, and fails a miss with one sentence', async () => {
+    const { store, home } = await teamAndLibrary();
+    const io = new ScriptedPrompter();
+    expect(await run({ kind: 'skill', value: 'DEPLOY', config: store, home, cwd: home }, io)).toMatchObject({ ok: true, value: { selection: { name: 'deploy-check', source: 'team' } } });
+    expect(io.lines[0]).toBe(`${RESOLVED_PREFIX}"DEPLOY" → deploy-check (unique prefix)`);
+    expect(await run({ kind: 'skill', value: 'ghost', config: store, home, cwd: home }, new ScriptedPrompter())).toEqual({ ok: false, error: 'No skill named ghost.' });
+    const inside = join(home, '.claude', 'skills', 'notes');
+    expect(await run({ kind: 'skill', config: store, home, cwd: inside }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { selection: { name: 'notes' } } });
+    expect(await run({ kind: 'skill', config: store, home, cwd: home }, new ScriptedPrompter())).toEqual({ ok: false, error: 'Name a skill; the working directory is not inside a library skill folder.' });
+    expect(await run({ kind: 'skill', value: 'x', local: true, config: store, home, cwd: home }, new ScriptedPrompter())).toEqual({ ok: false, error: '--local cannot be combined with skill; ls skill reads both the team and your Library.' });
+  });
+  it('member and project reads name their selection, the viewer, and the member limb\'s display facts', async () => {
+    const { store, home } = await teamAndLibrary();
+    const member = await run({ kind: 'member', value: 'seed', config: store, home, cwd: home }, new ScriptedPrompter());
+    expect(member).toMatchObject({ ok: true, value: { selection: { kind: 'member', handle: 'seed' }, viewer: { handle: 'seed', team: 'team' }, member: { handle: 'seed', displayName: 'seed', installed: [{ id: ID2, name: 'deploy-check', version: 'v1', scope: { kind: 'global' }, since: '2026-08-01' }], profile: [] } } });
+    const project = await run({ kind: 'project', value: 'app', config: store, home, cwd: home }, new ScriptedPrompter());
+    expect(project).toMatchObject({ ok: true, value: { selection: { kind: 'project', name: 'app' }, viewer: { handle: 'seed', team: 'team' } } });
+    const all = await run({ config: store, home, cwd: home }, new ScriptedPrompter());
+    expect(all).toMatchObject({ ok: true, value: { viewer: { handle: 'seed', team: 'team' } } });
+    expect(all.value?.selection).toBeUndefined();
+  });
+  it('the Library read prints byte for byte what it printed before the collect/print split', async () => {
+    const { store, home } = await teamAndLibrary();
+    const io = new ScriptedPrompter();
+    const result = await run({ local: true, config: store, home }, io);
+    if (!result.ok) throw new Error(result.error);
+    expect(io.lines).toEqual([
+      `Local Claude Code skills (${join(home, '.claude', 'skills')}; global):`,
+      `  deploy-check — untracked locally; path: ${join(home, '.claude', 'skills', 'deploy-check')}`,
+      `  notes — untracked locally; path: ${join(home, '.claude', 'skills', 'notes')}`,
+      '  2 skill folders (2 connectable)',
+    ]);
+  });
 });
