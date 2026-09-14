@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { mkdir, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as platformModule from '../../lib/platform.js';
 import { createConfigStore } from '../../lib/config.js';
 import { ScriptedPrompter, ghOnlyRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
@@ -10,13 +10,23 @@ import { assetSuffix, detectPlatform } from '../../lib/platform.js';
 import type { CommandResult, Exec, RunOptions } from '../../lib/runner.js';
 import { APP_REPOSITORY, readAppState, run } from '../app.js';
 
+// Windows keeps a just-executed installer open for a moment, so the move into place is retried; the retry loop is
+// exercised by making the real rename/rm fail with the codes Windows reports (the tests run on Linux).
+vi.mock('node:fs/promises', async importOriginal => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...original, rename: vi.fn(original.rename), rm: vi.fn(original.rm) };
+});
+afterEach(() => { vi.mocked(rename).mockReset(); vi.mocked(rm).mockReset(); });
+const real = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+const held = () => Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' });
+
 const ok: CommandResult = { code: 0, stdout: '', stderr: '' };
 const V = '0.1.6';
 const ASSET = `terum-skills-desktop_${V}_aarch64.app.tar.gz`;
 const mac = { platform: 'darwin' as const, arch: 'arm64' };
 
 /** gh that answers `--version`, `auth status`, and `release download` (writing the asset into --dir); everything else is unexpected. */
-function fakeGhRelease(options: { authenticated?: boolean; download?: 'ok' | 'corrupt' | 'missing' | 'offline' | 'no-release' } = {}) {
+function fakeGhRelease(options: { authenticated?: boolean; download?: 'ok' | 'corrupt' | 'missing' | 'offline' | 'no-release' | 'spawn-error' | 'timeout' } = {}) {
   const authenticated = options.authenticated ?? true;
   return ghOnlyRunner(async (args) => {
     const key = args.join(' ');
@@ -26,6 +36,8 @@ function fakeGhRelease(options: { authenticated?: boolean; download?: 'ok' | 'co
       if (!authenticated) return { code: 1, stdout: '', stderr: 'HTTP 401: Requires authentication' };
       const mode = options.download ?? 'ok';
       if (mode === 'no-release') return { code: 1, stdout: '', stderr: 'release not found' };
+      if (mode === 'spawn-error') throw Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' });
+      if (mode === 'timeout') return { code: 124, stdout: '', stderr: 'terum-skills: gh release exceeded 600 s' };
       if (mode === 'offline') return { code: 1, stdout: '', stderr: 'error connecting to api.github.com: dial tcp: lookup api.github.com: no such host' };
       if (mode === 'missing') return ok;
       const dir = args[args.indexOf('--dir') + 1]!;
@@ -145,6 +157,9 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     expect(await at(fakeGhRelease({ download: 'offline' }))).toMatchObject({ ok: false, error: expect.stringContaining('offline or behind a proxy') });
     expect(await at(fakeGhRelease({ authenticated: false }))).toMatchObject({ ok: false, error: expect.stringContaining('gh auth login') });
     expect(await at(fakeGhRelease({ download: 'missing' }))).toMatchObject({ ok: false, error: expect.stringContaining('looked for') });
+    // A gh that cannot be started (absent from the PATH the app replays) and a download past its ten-minute deadline get a sentence each, never a raw rejection.
+    expect(await at(fakeGhRelease({ download: 'spawn-error' }))).toMatchObject({ ok: false, error: 'Could not download the desktop app: spawn gh ENOENT. Everything works from the terminal. Run `npx -y terum-skills@latest app` later to try again.' });
+    expect(await at(fakeGhRelease({ download: 'timeout' }))).toMatchObject({ ok: false, error: 'Downloading the desktop app took longer than 10 minutes and was stopped. Everything works from the terminal. Run `npx -y terum-skills@latest app` later to try again.' });
     for (const dir of await readdir(join(root, 'app'))) expect(dir).not.toMatch(/^\.download-/);
   });
 
@@ -169,6 +184,74 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     // The installer is awaited (it must finish); the app itself is a GUI process the CLI must not wait for.
     expect(calls[0]?.options?.detach).toBeUndefined();
     expect(calls[1]?.options).toMatchObject({ detach: true });
+  });
+
+  /** A Windows install: gh writes the NSIS installer into --dir, the installer "installs" the exe under %LOCALAPPDATA%. */
+  function windowsInstall(root: string) {
+    const localAppData = join(root, 'LocalAppData'), exe = join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe'), suffix = 'x64-setup.exe';
+    const calls: { command: string; args: readonly string[]; options?: RunOptions }[] = [];
+    const exec: Exec = async (command, args, options) => { calls.push({ command, args, options }); if (command.endsWith(suffix)) { await mkdir(join(localAppData, 'Terum Skills'), { recursive: true }); await writeFile(exe, ''); } return ok; };
+    const runner = ghOnlyRunner(async (args) => {
+      if (args[0] === '--version') return { code: 0, stdout: 'gh version 2.0.0', stderr: '' };
+      if (args.join(' ') === 'auth status') return ok;
+      const dir = args[args.indexOf('--dir') + 1]!; const name = `terum-skills-desktop_${V}_${suffix}`; const bytes = Buffer.from('nsis');
+      await writeFile(join(dir, name), bytes); await writeFile(join(dir, `${name}.sha256`), `${createHash('sha256').update(bytes).digest('hex')} *${name}\n`); return ok;
+    });
+    const sleeps: number[] = [];
+    const args = { config: createConfigStore(root), runner, exec, version: V, evidence: { platform: 'win32' as const, arch: 'x64' }, localAppData, sleep: async (ms: number) => { sleeps.push(ms); } };
+    return { args, calls, exe, sleeps };
+  }
+
+  it('Windows: retries the move into place while the just-run installer is still held (EPERM), so the install is never reported as failed', async () => {
+    const root = await temporaryDirectory(); const w = windowsInstall(root);
+    let refusals = 0;
+    vi.mocked(rename).mockImplementation(async (from, to) => { if (String(from).includes('.download-') && refusals++ < 2) throw held(); return real.rename(from, to); });
+    const io = new ScriptedPrompter();
+    expect(await run(w.args, io)).toMatchObject({ ok: true, value: { action: 'installed-and-launched', appPath: w.exe } });
+    expect(w.sleeps).toEqual([50, 100]);
+    expect(await readdir(join(root, 'app'))).toEqual([V]);
+    expect(JSON.parse(await readFile(join(root, 'app', V, 'installed.json'), 'utf8'))).toMatchObject({ schema: 1, version: V, platform: 'win32-x64', bundle: null });
+    expect(await readAppState(root)).toMatchObject({ version: V });
+    expect(w.calls.map(call => call.command)).toEqual([expect.stringContaining('-setup.exe'), w.exe]);
+    expect(io.lines).toEqual([`Downloading Terum Skills ${V} for win32-x64…`, `Installed and opened Terum Skills ${V}.`]);
+  });
+
+  it('Windows: a download folder that stays held after a successful install is reported, never fatal: the record still lands and the app opens', async () => {
+    const root = await temporaryDirectory(); const w = windowsInstall(root);
+    vi.mocked(rename).mockImplementation(async (from, to) => { if (String(from).includes('.download-')) throw held(); return real.rename(from, to); });
+    vi.mocked(rm).mockImplementation(async (path, options) => { if (basename(String(path)).startsWith('.download-')) throw held(); return real.rm(path, options); });
+    const io = new ScriptedPrompter();
+    expect(await run(w.args, io)).toMatchObject({ ok: true, value: { action: 'installed-and-launched', appPath: w.exe } });
+    expect(JSON.parse(await readFile(join(root, 'app', V, 'installed.json'), 'utf8'))).toMatchObject({ schema: 1, version: V, platform: 'win32-x64', bundle: null });
+    expect(await readAppState(root)).toMatchObject({ version: V });
+    expect(w.calls.map(call => call.command)).toEqual([expect.stringContaining('-setup.exe'), w.exe]);
+    const leftovers = (await readdir(join(root, 'app'))).filter(name => name.startsWith('.download-'));
+    expect(leftovers).toHaveLength(1);
+    expect(io.lines).toEqual([
+      `Downloading Terum Skills ${V} for win32-x64…`,
+      `The download folder ${join(root, 'app', leftovers[0]!)} is still in use (EPERM: operation not permitted, rename); the install is recorded without it.`,
+      `Could not remove the download folder ${join(root, 'app', leftovers[0]!)} (EPERM: operation not permitted, rename); it is removed on a later update check.`,
+      `Installed and opened Terum Skills ${V}.`,
+    ]);
+    // The retry budget is spent once on the move and once on the removal.
+    expect(w.sleeps).toHaveLength(18);
+  });
+
+  it('Windows: the previous version directory is removed through the same retry loop, and a genuine failure there is still reported', async () => {
+    const root = await temporaryDirectory(); const w = windowsInstall(root);
+    await mkdir(join(root, 'app', V), { recursive: true }); await writeFile(join(root, 'app', V, 'stale'), '');
+    vi.mocked(rm).mockImplementation(async (path, options) => { if (String(path) === join(root, 'app', V)) throw Object.assign(new Error('EACCES: permission denied, rmdir'), { code: 'EACCES' }); return real.rm(path, options); });
+    expect(await run({ ...w.args, sleep: async () => undefined }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('EACCES: permission denied, rmdir') });
+    expect(vi.mocked(rm).mock.calls.filter(([path]) => String(path) === join(root, 'app', V))).toHaveLength(10);
+  });
+
+  it('sweeps download folders older than an hour before downloading, and keeps recent ones (a killed sibling may still own them)', async () => {
+    const root = await temporaryDirectory(); const w = windowsInstall(root);
+    const old = join(root, 'app', '.download-old'), fresh = join(root, 'app', '.download-fresh');
+    await mkdir(old, { recursive: true }); await writeFile(join(old, 'terum-skills-desktop_0.1.5_x64-setup.exe'), 'nsis'); await mkdir(fresh);
+    const past = new Date(Date.now() - 2 * 3_600_000); await utimes(old, past, past);
+    expect(await run(w.args, new ScriptedPrompter())).toMatchObject({ ok: true, value: { action: 'installed-and-launched' } });
+    expect((await readdir(join(root, 'app'))).sort()).toEqual(['.download-fresh', V]);
   });
 });
 
@@ -196,6 +279,9 @@ describe('app host architecture (p-arch)', () => {
   it.each([
     ['x64', { PROCESSOR_ARCHITEW6432: 'ARM64' }, 'bare', 'win32-arm64-on-x64'],
     ['x64', { PROCESSOR_ARCHITEW6432: 'arm64' }, 'npx', 'win32-arm64-on-x64'],
+    // x64 Node under Prism on a Snapdragon box: no WOW64 hint, only the identifier names the silicon (Teddy's machine, 2026-09-13).
+    ['x64', { PROCESSOR_ARCHITECTURE: 'AMD64', PROCESSOR_IDENTIFIER: 'ARMv8 (64-bit) Family 8 Model 1 Revision 201, Qualcomm Technologies Inc' }, 'bare', 'win32-arm64-on-x64'],
+    ['arm64', { PROCESSOR_ARCHITECTURE: 'ARM64', PROCESSOR_IDENTIFIER: 'ARMv8 (64-bit) Family 8 Model 1 Revision 201, Qualcomm Technologies Inc' }, 'bare', null],
     ['arm64', {}, 'bare', null],
     ['x64', {}, 'bare', null],
   ] as const)('installs for host with process %s, hint %j and form %s; emulation=%s', async (arch, env, form, emulation) => {

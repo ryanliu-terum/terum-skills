@@ -95,8 +95,12 @@ export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResu
       notices.push('Updated your /terum-skills manual for this CLI.');
     }
     if (args.hook) io.print('{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}');
-    // A program reads `detail`; only a person needs the line, and a program's channel must stay result-only.
-    if (io.channel !== 'frames') for (const outcome of teams) if (outcome.state !== 'refreshed') io.print(`${outcome.team}: not refreshed (${outcome.state})${outcome.detail ? ` — ${outcome.detail}` : ''}`);
+    // A program reads `detail`; only a person needs the line, and a program's channel must stay result-only. In hook
+    // mode stdout carries the reload directive and nothing else (lib/execute.ts routes hook notices to stderr), so
+    // the lines travel as notices there: a multi-line git diagnostic after the directive would break the hook's JSON.
+    const lines = teams.filter((outcome) => outcome.state !== 'refreshed').map((outcome) => `${outcome.team}: not refreshed (${outcome.state})${outcome.detail ? ` — ${outcome.detail}` : ''}`);
+    if (args.hook) notices.push(...lines);
+    else if (io.channel !== 'frames') for (const line of lines) io.print(line);
     const result: SyncResult = { changed: teams.some((outcome) => outcome.changed), teams, notices };
     // This internal marker keeps the public DTO to its three declared fields while allowing the bin
     // to route hook notices to stderr. It is intentionally non-enumerable, so frames and JSON retain
