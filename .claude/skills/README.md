@@ -39,11 +39,22 @@ codex-spec triage stages, harden's apply wave) rates options on two numbers, nev
   as 1. The spec is the latest `.planning/specs/*.md` covering the area (its "North Star check"
   line counts); the North Star is the `north_star:` frontmatter of the newest
   `.planning/decisions/*-decision-walk.md` for that area.
-- **Depth (0-4)** — how much of the cause the fix removes (unchanged from the 2026-07-30 trial).
+- **Bug risk (0-4)** — how likely the change itself is to introduce a new defect; lower is better.
+  0 a constant, copy or config swap the existing tests pin exactly · 1 mechanical code with a
+  fallback to today's behaviour, so the worst failure is the old bug · 2 new logic on a tested
+  path, where a mistake is a wrong value or a red test · 3 a boundary the tests cannot exercise
+  (a native call, a second language, a startup path, a threading rule), where a mistake is a crash
+  or hang only a launched build reveals · 4 the write path, a migration or a shared invariant with
+  no fallback, where a mistake loses or corrupts user data. Name the concrete failure, not the
+  category. (Ryan, 2026-09-14. Until then the second axis was Depth, how much of the cause the fix
+  removes; cause-versus-symptom is now judged in Fit, since a symptom mask is not the behaviour
+  the spec describes.)
 - **Effort** — one line of fact per option (hours, files, migrations, revert path). Reported so the
-  reader knows what they are buying. It never decides: highest Fit wins, then highest Depth, and
-  only a tie on both lets effort break it, out loud. Until 2026-09-06 the second axis was Cost;
-  it let the model prefer the cheaper fix over the one the spec describes.
+  reader knows what they are buying. It never decides: highest Fit wins, then lowest Bug risk, and
+  only a tie on both lets effort break it, out loud. When the highest-Fit option sits at Bug risk 3
+  or 4 and a lower-Fit option at 0 or 1, that is a fork for the human, not a pick (2026-09-14: Ryan
+  took Fit 3 · risk 1 over Fit 4 · risk 3 for the Tahoe traffic-light spacer). Until 2026-09-06 the
+  second axis was Cost; it let the model prefer the cheaper fix over the one the spec describes.
 
 Review posture: the released tools are open source and there is no external-attacker model yet.
 Reviewers and spec auditors judge what a well-meaning user experiences — data loss, crashes,

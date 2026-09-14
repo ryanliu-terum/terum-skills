@@ -76,6 +76,7 @@ export function fakeBridge(script: (args: readonly string[], emit: (e: LineEvent
     async kill(id) { kills.push(id); sessions.delete(id); (listeners.get(id) ?? emit)?.({ kind: 'exit', code: null }); },
     async readAppState() { return state; },
     async hostPlatform() { return 'macos'; },
+    async hostOsVersion() { return '26.6.2'; },
     async homeDirectory() { return FAKE_HOME; },
   };
   return {

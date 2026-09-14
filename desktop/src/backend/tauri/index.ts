@@ -25,6 +25,7 @@ import { relativeTime } from '../../lib/relative-time';
 import { personPlaceNote, plural } from '../../screens/marketplace/market-data';
 import { SHORTCUTS } from '../../lib/shortcuts';
 import { abbreviateHome, stripRemote } from '../paths';
+import { macWindowControlsEnd } from '../window-controls';
 import { scannedRoots } from './scanned-roots';
 import { cliRefresh, createRefreshPolicy, createWorkflowGate } from './refresh';
 // §3.2: the version vocabulary exists once. This leaf imports nothing at all, which is the only
@@ -723,8 +724,9 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return Object.fromEntries(FEATURE_KEYS.map(key => [key, hello?.features[key] ?? false])) as Features;
     },
     async capabilities(): Promise<Capabilities> {
-      const [platform, features] = await Promise.all([bridge.hostPlatform().catch(() => 'unknown'), backend.features()]);
-      return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, openInEditor: true, clipboard: true };
+      const [platform, version, features] = await Promise.all([bridge.hostPlatform().catch(() => 'unknown'), bridge.hostOsVersion().catch(() => null), backend.features()]);
+      const windowChrome = platform === 'macos' ? 'mac-overlay' : 'native';
+      return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome, windowControlsEnd: windowChrome === 'mac-overlay' ? macWindowControlsEnd(version) : null, disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
       return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, libraryProjects:true, appUpdate:true };

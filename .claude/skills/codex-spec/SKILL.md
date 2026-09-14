@@ -118,7 +118,7 @@ command line → `triage: false`).
 **The Triage stage** (on by default, Ryan 2026-09-04) runs after verification, on Claude, one
 read-only agent per CONFIRMED finding: it reads the finding from `findingsPath` by index, reads
 the cited section *and every other place the spec states the same rule*, decides fix-vs-decline
-(with a citation), lists 1-3 resolution options with Fit/Depth/Wins-if (effort as a footnote), and rates the recommended
+(with a citation), lists 1-3 resolution options with Fit/Bug-risk/Wins-if (effort as a footnote), and rates the recommended
 one on the `/single-fix` scale with a spec twist — a rule stated in more than one place is
 `pattern`, never `isolated` (2026-09-03: a rule stated twice was fixed once and left superseded in
 the other place). The bucket is derived in code from the ratings, never chosen by the agent:
@@ -160,7 +160,7 @@ explicit **"Triage — NOTHING APPLIED YET"** heading, then:
   a patch match. After applying, grep the spec once more for each touched rule's key terms (the
   `scope: pattern` rating guards against the twice-stated-rule failure; this grep is the belt to
   that brace). Bump the spec's revision line if it carries one. One commit.
-- **Clear** — present each with its root cause, the recommended option (Fit/Depth/Wins-if) and
+- **Clear** — present each with its root cause, the recommended option (Fit/Bug-risk/Wins-if) and
   ratings, and the other places it is stated if `pattern`. Confirm one at a time; draft the text
   and show it before writing it.
 - **Forks** — do NOT resolve them. Offer

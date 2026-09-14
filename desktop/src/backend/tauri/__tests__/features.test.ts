@@ -39,5 +39,5 @@ it('delivers hello to the adapter callback but never to the seam frame stream',a
 });
 it.each(['windows','linux'])('uses native decorations on %s',async platform=>{
  const f=fakeBridge((_args,emit)=>emit({kind:'exit',code:1}));f.bridge.hostPlatform=async()=>platform;
- expect(await createTauriBackend(f.bridge).capabilities()).toMatchObject({windowChrome:'native'});
+ expect(await createTauriBackend(f.bridge).capabilities()).toMatchObject({windowChrome:'native',windowControlsEnd:null});
 });
