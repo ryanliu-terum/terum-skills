@@ -9,6 +9,8 @@ import { publishOutcomeText } from '../skill/publish-outcome';
 import { plural } from '../marketplace/market-data';
 import { rowText } from './bulk-publish';
 import type { BulkPublishSummary, BulkRow, BulkRowState } from './bulk-publish';
+import { PublishOptions } from '../skill/PublishOptions';
+import { GLOBAL_LIST, TARGET_ASK, publishFlags, usePublishDefaults } from '../skill/publish-defaults';
 
 /**
  * Bulk "Publish to team" for the Library's selection mode (`?select=1&dialog=publish`, batch E 2026-09-13).
@@ -23,6 +25,9 @@ export function BulkPublishDialog({ cards, onClose, onFinished }: { cards: reado
     return { key: card.path ?? card.name, card, state: reason === null ? { kind: 'ready' } : { kind: 'skipped', reason } };
   }));
   const [phase, setPhase] = useState<'idle' | 'running' | 'finished'>('idle');
+  // Settings ▸ Publishing ▸ Defaults: the target applies to every row; categories stay per skill (the model's, or SKILL.md's).
+  const defaults = usePublishDefaults(), [targetChoice, setTargetChoice] = useState<string | null>(null);
+  const target = targetChoice ?? (defaults.target === TARGET_ASK ? GLOBAL_LIST : defaults.target), flags = publishFlags(target, null);
   const [summary, setSummary] = useState<BulkPublishSummary | null>(null);
   // `busy` is a ref, not state, so two clicks in one frame cannot start two queues (the clone is write-locked).
   const busy = useRef(false), stop = useRef(false), activeRun = useRef<Run<PublishResult> | null>(null), mounted = useRef(true);
@@ -43,7 +48,7 @@ export function BulkPublishDialog({ cards, onClose, onFinished }: { cards: reado
       setRow(row.key, { kind: 'publishing', label: null });
       let result: Result<PublishResult>;
       try {
-        const run = backend.publish({ ref: localRef(row.card) });
+        const run = backend.publish({ ref: localRef(row.card), ...flags });
         activeRun.current = run;
         result = await driveRun<PublishResult>(run, {}, unexpected, print, frame => setRow(row.key, { kind: 'publishing', label: frame.label ?? null }));
       } catch (error) {
@@ -85,6 +90,7 @@ export function BulkPublishDialog({ cards, onClose, onFinished }: { cards: reado
     <DialogPopup aria-busy={phase === 'running'} data-testid="bulk-publish-dialog">
       <DialogTitle>{empty ? 'No skills selected.' : `Publish ${plural(cards.length, 'skill')} to the team?`}</DialogTitle>
       <DialogDescription>{empty ? 'Select skills in the Library first, then publish them together.' : 'Copies each folder into the team repository as its next immutable version, so teammates can install it. Existing versions are never changed; identical bytes mint nothing. Skills run one at a time.'}</DialogDescription>
+      {empty ? null : <PublishOptions bulk defaults={defaults} target={target} onTarget={setTargetChoice} category="" onCategory={() => {}} />}
       {empty ? null : <div className="bulk-publish-rows" role="list" aria-label="Skills to publish">
         {rows.map(row => <div key={row.key} role="listitem" className="bulk-publish-row" data-testid={'bulk-row-' + row.card.name}>
           <span>{row.card.name}</span>
@@ -92,7 +98,7 @@ export function BulkPublishDialog({ cards, onClose, onFinished }: { cards: reado
         </div>)}
       </div>}
       {first !== undefined ? <>
-        <TerminalHint command={`npx -y terum-skills@latest publish ${first.card.name}`} />
+        <TerminalHint command={`npx -y terum-skills@latest publish ${first.card.name}${flags.project ? ` --project ${flags.project}` : ''}`} />
         {sendable.length > 1 ? <Small>… and {plural(sendable.length - 1, 'more skill')} the same way, one after another.</Small> : null}
       </> : null}
       {summary !== null ? <div role="status" className="skill-dialog-progress">Published {summary.published} of {plural(summary.attempted, 'skill')}{summary.failed > 0 ? ` · ${summary.failed} failed` : ''}</div> : null}

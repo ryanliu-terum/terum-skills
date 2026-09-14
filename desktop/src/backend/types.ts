@@ -119,7 +119,7 @@ export interface InstalledResult {id:string;name:string;scope:Scope;path:string|
 export interface UninstallArgs {from?:string;team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
 export interface UninstalledResult {id:string;name:string}
 export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
-export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string}
+export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string;/** The skill's terum-category (`--category`): skips the CLI's model suggestion. A declared category in SKILL.md still wins. */category?:string}
 /**
  * §5.3. `version` is the `v<N>` this publish minted, or — when the bytes were byte-identical to a
  * version already in the repo — the one it matched, which `identicalTo` names. `created` is the

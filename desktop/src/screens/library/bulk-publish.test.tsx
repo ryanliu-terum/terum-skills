@@ -121,7 +121,7 @@ it('lists Ready and Skipped rows and never sends a skipped one', async () => {
   fireEvent.click(within(dialog).getByRole('button', { name: 'Publish 1 skill' }));
   await within(dialog).findByText('Published 1 of 1 skill');
   expect(publish).toHaveBeenCalledTimes(1);
-  expect(publish.mock.calls[0]?.[0]).toEqual({ ref: localRef(cards.find(card => card.name === 'deploy-check')!) });
+  expect(publish.mock.calls[0]?.[0]).toEqual({ ref: localRef(cards.find(card => card.name === 'deploy-check')!), project: 'Global' }); // Settings ▸ Publishing ▸ Defaults (2026-09-14): the dialog's target is always sent
   expect(rowState(broken.name)).toBe(`Skipped · ${localActionReason(broken, 'publish')}`);
 });
 

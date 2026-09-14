@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { useBackend } from '../../backend';
+import { useBackend, useHostStatus } from '../../backend';
 import type { Capabilities } from '../../backend/types';
 import type { IconName } from '../ui/icon-paths';
 import { revealLabel } from '../../lib/platform-labels';
@@ -88,9 +87,8 @@ export function useContextMenuFor<T>(build: (value: T) => ContextMenuItem[]): (v
 export function useHostReveal(): string {
   // Its own key rather than the Shell's `['status', mock]`: this hook also serves hosts rendered outside the
   // router (the removal dialog), where the URL state is not available. `affects()` still invalidates it by prefix.
-  const backend = useBackend();
-  const status = useQuery({ queryKey: ['status', 'host-os'], staleTime: Infinity, queryFn: ({ signal }) => backend.status(undefined, { signal }) });
-  return revealLabel(status.data?.ok ? status.data.value.machine.os : undefined);
+  const status = useHostStatus();
+  return revealLabel(status?.ok ? status.value.machine.os : undefined);
 }
 
 /** The app-wide clipboard: writes through the seam and reports "Copied <what>" or the seam's error in the toast. */
