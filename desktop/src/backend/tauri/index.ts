@@ -953,7 +953,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       ? run(teamArgv(args), cliTeamMove, (value): TeamResult => ({ name: value.to, kind: 'move', restored: value.restored, missing: value.missing, failed: value.failed }), ['config', 'clone', 'placed'])
       : run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
-    // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes") through the one producer in eval-flags.ts; an unset pref (or the k '—' sentinel) passes nothing and the CLI keeps no defaults of its own.
+    // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes") through the one producer in eval-flags.ts; an unset pref (or the k '—' sentinel) passes nothing and the CLI falls back to its own defaults (k = 1, model sonnet).
     eval: (args: EvalArgs) => run(['eval', ...evalPrefFlags(prefs), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']),
     // Several at once: the same receipts land locally, so the same boards move. A request the CLI would refuse throws here, before any spawn.
     evalMany: (args: EvalManyArgs) => run(evalManyArgv(args, prefs), cliEvalMany, mapEvalMany, ['config', 'placed']),
