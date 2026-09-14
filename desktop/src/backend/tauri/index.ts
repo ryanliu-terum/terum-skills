@@ -1,5 +1,7 @@
 import { registerEvalQueue } from '../eval-queue';
 import { createEvalQueue } from './eval-queue';
+import { evalPrefFlags } from './eval-flags';
+import { cliEvalMany, evalManyArgv, mapEvalMany } from './eval-many';
 import { z } from 'zod';
 import { createAppUpdate } from './app-update';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -12,7 +14,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
-import type { Root, LibraryScope,  IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
+import type { Root, LibraryScope,  IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, EvalArgs, EvalManyArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { createReadSession } from './session.js';
@@ -854,8 +856,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     invite: (args: InviteArgs) => run(['invite', ...(args.team ? ['--team', args.team] : []), ...(args.logins.length ? ['--', ...args.logins] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited], already: [...value.already], failed: value.failed.map(f => ({ login: f.login, error: f.error })) }), ['clone']),
     team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
-    // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes"); an unset pref (or the k '—' sentinel) passes nothing and the CLI keeps no defaults of its own.
-    eval: (args: EvalArgs) => { const k = prefs.get('eval:k', ''), model = prefs.get('eval:model', ''), judge = prefs.get('eval:judge', ''); return run(['eval', ...(k && k !== '—' ? ['--k', k] : []), ...(model ? ['--model', model] : []), ...(judge ? ['--judge-model', judge] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']); },
+    // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes") through the one producer in eval-flags.ts; an unset pref (or the k '—' sentinel) passes nothing and the CLI keeps no defaults of its own.
+    eval: (args: EvalArgs) => run(['eval', ...evalPrefFlags(prefs), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']),
+    // Several at once: the same receipts land locally, so the same boards move. A request the CLI would refuse throws here, before any spawn.
+    evalMany: (args: EvalManyArgs) => run(evalManyArgv(args, prefs), cliEvalMany, mapEvalMany, ['config', 'placed']),
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? cached<ValidateResult>(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, options).then(result) : fail('validate needs a skill name or a folder.'),
     update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
     appUpdate: createAppUpdate({ run, read, result, prefs, appVersion: import.meta.env.VITE_APP_VERSION }),
@@ -870,7 +874,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     prefs,
     subscribe(listener): Subscription { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };
-  registerEvalQueue(backend, createEvalQueue({ run, read, result }));
+  registerEvalQueue(backend, createEvalQueue({ run, read, result, prefs }));
   return backend;
 }
 

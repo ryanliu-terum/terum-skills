@@ -1,4 +1,5 @@
 import type { Design } from '../fixtures/schema';
+import type { EvalQueueItem } from './eval-queue';
 export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library'|'not-found'|'ambiguous-ref'|'unreadable'|'invalid-config';value?:T};
 export interface LaunchContext { writtenAt: string; target?: string; intent?: 'setup' }
 export class PromptCancelledError extends Error { readonly cancelled = true as const; }
@@ -139,6 +140,13 @@ export interface SetupResult {team:string;role:'creator'|'joiner';steps?:Partial
 export interface EvalArgs {team?:string;ref:string;cases?:number}
 /** §6.3: `team` and `id` are null for a folder that belongs to no team, which is now the common case. */
 export interface EvalResult {name:string;runDir:string;executionStatus:'complete'|'partial'|'failed';team:string|null;id:string|null;shareHint:boolean}
+/** Several skills in one CLI run — `eval <skill>… [--batch n] [--window w] [--pending]`: the wizard's Now / In batches /
+ *  Overnight choices, offered past setup. `pending` adds every shared skill with no receipt for its current version
+ *  (it needs a team); `batch` is required by, and only read under, mode 'batches'. */
+export interface EvalManyArgs {refs:string[];team?:string;mode:'now'|'batches'|'overnight'|'later';batch?:number;pending?:boolean}
+/** `queued` holds what the run put on the queue: every skill under a window, or the remainder after a declined
+ *  batch, in which case `stoppedAfter` says how many had been attempted. */
+export interface EvalManyResult {mode:'ran'|'queued';team:string|null;skills:string[];ok:number;failed:number;queued:EvalQueueItem[];stoppedAfter?:number}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
 export interface ValidateResult {name:string;findings:number;warnings:number}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}

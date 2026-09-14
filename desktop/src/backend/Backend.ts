@@ -1,5 +1,5 @@
 import type { SkillFileResult } from './types';
-import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   quit(): Promise<void>;
@@ -46,6 +46,8 @@ export interface Backend {
   team(args: TeamArgs): Run<TeamResult>;
   setup(args: SetupArgs): Run<SetupResult>;
   eval(args: EvalArgs): Run<EvalResult>;
+  /** Several skills at once, or every pending one: run now, in batches with a question between them, or queued for a window. */
+  evalMany(args: EvalManyArgs): Run<EvalManyResult>;
   validate(args: ValidateArgs, options?: ReadOptions): Promise<Result<ValidateResult>>;
   update(q?: undefined, options?: ReadOptions): Promise<Result<UpdateAdvice>>;
   /** The desktop app's own update channel. Rendered only where `surfaces().appUpdate` is true. */
