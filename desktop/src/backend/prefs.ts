@@ -3,8 +3,9 @@ import type { PrefStore } from './types';
 export const PREF_PREFIX = 'terum-skills-app:pref:';
 export const UI_KEY = 'terum-skills-app:ui';
 // The native record admits only chrome. The browser mock also simulates its existing action state.
-// The eval defaults are app-owned chrome too: the CLI keeps no defaults of its own, so Settings ▸ Evals
-// stores them here and the adapter passes them as flags on every eval run.
+// The eval defaults are app-owned chrome too: they override the CLI's own fallbacks (k = 1 in eval.ts,
+// DEFAULT_MODEL 'sonnet' in lib/evals/agent.ts), so Settings ▸ Evals stores them here and the adapter
+// passes them as flags on every eval run.
 export function isChromePreference(key: string): boolean {
  return ['ui','appearance:start','appearance:counts','appearance:machine','inbox:badge','inbox:seen','launch:consumedWrittenAt','onboardingSkipped','eval:k','eval:model','eval:judge','eval:commit','updates:app:policy','updates:app:lastShown','evals:overnight'].includes(key) || /^inbox:kind:(share|update|alert|eval|review|author|team)$/.test(key);
 }

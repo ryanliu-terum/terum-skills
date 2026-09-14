@@ -144,7 +144,7 @@ it.each([
  ['#/skill/deploy-check?menu=files','3 files'],
  ['#/skill/deploy-check?tab=evals&rail=closed&full=1','Coverage and provenance'],
 ])('reaches the real board content at %s',async(route,text)=>{open(route);expect(await screen.findByText(text)).toBeInTheDocument();expect(screen.queryByText(/S1b builds this/)).toBeNull();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));});
-it('can reopen persisted collapsed overview and rail',async()=>{useUiStore.setState({overviewHidden:true});open('#/library/global');await screen.findByText('15 skills');fireEvent.click(screen.getByRole('button',{name:'Show overview'}));expect(await screen.findByText('Team installs')).toBeInTheDocument();cleanup();useUiStore.setState({railOpen:false});open('#/skill/deploy-check');await screen.findByRole('heading',{name:'deploy-check'});fireEvent.click(screen.getByRole('button',{name:'Open details rail'}));expect(await screen.findByText('Status')).toBeInTheDocument();});
+it('can reopen persisted collapsed overview and rail',async()=>{useUiStore.setState({overviewHidden:true});open('#/library/global');await screen.findByText('15 skills');fireEvent.click(screen.getByRole('button',{name:'Show overview'}));expect(await screen.findByText('Unpublished',{selector:'.stat-label'})).toBeInTheDocument();cleanup();useUiStore.setState({railOpen:false});open('#/skill/deploy-check');await screen.findByRole('heading',{name:'deploy-check'});fireEvent.click(screen.getByRole('button',{name:'Open details rail'}));expect(await screen.findByText('Status')).toBeInTheDocument();});
 it('binds the inbox placeholder to the share selection and clears unknown ids',async()=>{const view=open('#/inbox');await waitFor(()=>expect(view.container.querySelector('[data-selected-id="share-secret-scan"]')).not.toBeNull());cleanup();const unknown=open('#/inbox/unknown');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(unknown.container.querySelector('[data-selected-id]')).toBeNull();});
 
 it('keeps the Library usable with no team',async()=>{open('#/library/global?__mock=no-team');expect(await screen.findByTestId('skill-card-deploy-check')).toBeVisible();expect(screen.queryByText('No team on this machine')).toBeNull();});
@@ -508,8 +508,10 @@ it.each([false,true])('shows local receipt attribution or the stale-score explan
  const card={...library.value.skills[0]!,name:'deploy-check',teamed:false,edited,summary:edited?null:detail.value.summary,localEval:edited?null:{...detail.value.summary,runnerHandle:'mira',version:'v4'},localEvalStale:edited};
  vi.spyOn(backend,'library').mockResolvedValue({ok:true,value:{...library.value,skills:[card]}});openWith('#/library/global',backend);
  const face=await screen.findByTestId('skill-card-deploy-check');
- expect(face).toHaveTextContent(edited?'Not evaluated · evaluated before your last edit':'run by mira · v4');
- if(edited)expect(within(face).getByText('Edited')).toBeVisible();
+ expect(face).toHaveTextContent(edited?'Evaluated before your last edit':'run by mira · v4');
+ // 2026-09-14: the stale note no longer opens with "Not evaluated" — it contradicted its own second half, and the
+ // lift figure's verdict is where "Not evaluated" belongs, so the words appear once on the card, not twice.
+ if(edited){expect(within(face).getByText('Edited')).toBeVisible();expect(within(face).queryAllByText('Not evaluated')).toHaveLength(1);expect(within(face).getByText('Not evaluated')).toHaveClass('no-verdict');}
 });
 it.each(['evals','run-eval','publish'])('excludes an inspected-invalid local folder from %s while keeping its reason visible',async entry=>{
  const backend=createMockBackend(),result=await backend.localSkill({path:'~/.claude/skills/deploy-check'});if(!result.ok)throw new Error(result.error);

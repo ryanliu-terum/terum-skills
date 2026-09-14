@@ -24,7 +24,7 @@ Our purpose is it make it quick and easy to determine best AI practices through 
   - Cost
   - Time
   - Quality of output
-- Compare comparable/overlapping skills against each other
+- Compare similar skills against each other (your developed skill vs public skill, 2 public skills, two versions of your skill)
 - Share skills with team members easily
 
 **Isn't it super easy to share skills by just pushing them to GitHub?**
@@ -224,7 +224,7 @@ You can evaluate a skill even when it does not include eval files. By default, `
 
 - if cases exist but `triggers.yaml` does not, only trigger prompts are generated; and
 
-- if neither exists, generation creates three execution cases, including at least one adversarial case, plus five positive and five negative trigger prompts.
+- if neither exists, generation creates between three and seven execution cases — the model sizes the set to the skill's complexity, one case per thing that can independently go wrong — including at least one adversarial case, plus five positive and five negative trigger prompts.
 
 Generation reads the complete local skill and a local catalog of sibling skills. Negative trigger prompts are based on nearby sibling skills, so they test realistic confusion rather than random unrelated requests.
 

@@ -8,7 +8,7 @@ import { cardOf, design } from '../../backend/mock/data';
 import type { SkillCard as Card } from '../../backend/types';
 import { SkillCard } from './SkillCard';
 import { cardVersionLabel } from '../../../../src/lib/versions.js';
-import { evalVersionLabel, installedVersionBehind, libraryVersionLabel, marketplaceVersionLabel } from './presentation';
+import { evalVersionLabel, installedVersionBehind, installsChip, libraryVersionLabel, localEvalNote, marketplaceVersionLabel } from './presentation';
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 const card = (over:Partial<Card> = {}):Card => ({...cardOf(design.CATALOG[0]!),latestVersion:'v10',installedVersion:'v2',evalVersion:3,evalStale:true,latestEvalState:'none',...over});
@@ -173,4 +173,37 @@ it('shows no Edited chip on a Library folder whose bytes equal a published versi
 it('writes the eval attribution line in card form', () => {
  show(libraryCard({installedVersion:'v3',localMatch:'identical',placed:false,localEval:{w:7,l:2,t:3,n:12,lift:42,verdict:'PASS',partial:null,signP:'0.090',runnerHandle:'ajayw36',version:'v3'}}));
  expect(screen.getByText('run by ajayw36 · v3')).toBeInTheDocument();
+});
+
+// The card footer says each true thing once (2026-09-14). The lift figure owns the verdict wherever `liftOnCards`
+// draws it, so the footer's note defers; a receipt older than the last edit states that alone, never prefixed by
+// "Not evaluated", which is the opposite claim.
+it.each([
+ [{teamed:true},true,null],
+ [{teamed:true,localEvalStale:true},true,null],
+ [{teamed:false,localEval:{w:1,l:0,t:0,n:1,lift:0.4,verdict:'PASS' as const,partial:null,signP:'0.03',runnerHandle:'mira',version:'v4'},localEvalStale:true},true,null],
+ [{teamed:false,localEval:null,localEvalStale:true},true,'Evaluated before your last edit'],
+ [{teamed:false,localEval:null,localEvalStale:true},false,'Evaluated before your last edit'],
+ [{teamed:false,localEval:null,localEvalStale:false},true,null],
+ [{teamed:false,localEval:null,localEvalStale:false},false,'Not evaluated'],
+] satisfies [Partial<Card>,boolean,string|null][])('writes the local eval note %j (verdict drawn: %s)',(over,verdictShown,note)=>{
+ expect(localEvalNote(card(over),verdictShown)).toBe(note);
+});
+// A Library card's installs is always the `—` sentinel (the adapter cannot count installs of a local folder), so
+// the chip drew a dash that said nothing; a real count, `0 installs` included, still draws.
+it.each([
+ ['—',null],
+ ['0 installs','0 installs'],
+ ['12 installs','12 installs'],
+] satisfies [string,string|null][])('draws the installs chip only with a count (%s)',(installs,label)=>{
+ expect(installsChip(card({installs}))).toBe(label);
+});
+it('drops the dash chip from a local card and keeps the count on a team card',()=>{
+ show(card({teamed:false,installs:'—',size:'~3.2k tokens'}));
+ const chips=[...document.querySelectorAll('.skill-card-bottom .chip')].map(chip=>chip.textContent);
+ expect(chips).toContain('~3.2k tokens');
+ expect(chips).not.toContain('—');
+ cleanup();
+ show(card({teamed:true,installs:'12 installs'}));
+ expect([...document.querySelectorAll('.skill-card-bottom .chip')].map(chip=>chip.textContent)).toContain('12 installs');
 });

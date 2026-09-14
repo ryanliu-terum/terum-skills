@@ -37,8 +37,43 @@ it.each(['joined','unreadable','unjoined'])('describes only a readable team join
 it('uses the designed empty eval copy without requesting per-skill reports (B1)',async()=>{
  const f=chromeLibraryReplay(),result=await createTauriBackend(f.bridge).library(global);
  expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
- expect(result.value.overview).toMatchObject({evaluated:'0',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:'Nothing evaluated yet',zero:overviewCopy});
+ // `total` is every skill, so the meter can spend its fourth segment on the unevaluated remainder;
+ // the caption stays the zero copy only because the count really is 0.
+ expect(result.value.overview).toMatchObject({evaluated:'0',meter:{pass_:0,neutral:0,fail:0,total:1},meter_text:'Nothing evaluated yet',zero:overviewCopy});
  expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['sync']]);expect(f.requests).toEqual([]);
+});
+
+/** A receipt in the shape `ls --local` records one, reduced to the fields a card summary reads. */
+const receipt=(verdict:'PASS'|'NEUTRAL'|'FAIL',run:string)=>({path:'evals/'+run+'.json',version:null,run_id:run,verdict,execution_status:'complete',expected_rows:3,scored_rows:3,attribution:'local',
+ comparisons:{'candidate-vs-baseline':{win:2,loss:0,tie:1,net_lift:0.22,sign_p:0.25}},arm_scores:{candidate:0.8,baseline:0.6},triggers:null,efficiency:{},
+ provenance:{timestamp:'2026-09-12T00:00:00Z',runner_handle:'ajay',model:'sonnet',judge_model:'opus',cc_version:'2.34.0',engine_version:'1',engine_commit:'abc',k:3,cases:['a']}});
+// The Evaluated tile used to draw its number from the receipts and its meter and caption from nothing
+// at all — a hard-zeroed meter and the zero copy — so two evaluated skills rendered "2" over
+// "Nothing evaluated yet". Number, meter and caption are one derivation over one set of receipts now.
+it('derives the eval meter and caption from the same receipts as the count (B1)',async()=>{
+ const f=chromeLibraryReplay({local:value=>{
+  const section=value.local[0]!,row=section.rows[0]!;
+  section.rows=[{...row,localEval:receipt('PASS','20260912T000000Z')},{...row,path:row.path+'-second',localEval:receipt('FAIL','20260912T000001Z')},{...row,path:row.path+'-third'}];
+ }});
+ const result=await createTauriBackend(f.bridge).library(global);
+ expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
+ expect(result.value.overview).toMatchObject({evaluated:'2',meter:{pass_:1,neutral:0,fail:1,total:3},meter_text:'1 pass · 0 neutral · 1 fail'});
+ expect(result.value.overview.meter_text).not.toBe(overviewCopy.evaluated);
+});
+// §4.3: 'none' is a folder tied to no team skill — never published. A CLI too old to report the
+// overlay leaves the count unknowable, and the tile takes a dash over a fabricated zero.
+it('counts never-published folders, and reports a dash when the overlay is absent (B1)',async()=>{
+ const withMatch=(matchedVersion:string|null,knownToTeam:boolean)=>({matchedVersion,knownToTeam,placement:null});
+ const f=chromeLibraryReplay({local:value=>{
+  const section=value.local[0]!,row=section.rows[0]!;
+  section.rows=[{...row,...withMatch(null,false)},{...row,path:row.path+'-second',...withMatch(null,false)},{...row,path:row.path+'-third',...withMatch('v1',true)}];
+ }});
+ const counted=await createTauriBackend(f.bridge).library(global);
+ expect(counted.ok).toBe(true);if(!counted.ok)throw new Error(counted.error);
+ expect(counted.value.overview).toMatchObject({unpublished:'2',unpublished_note:'never published to the marketplace'});
+ const unknown=await createTauriBackend(chromeLibraryReplay().bridge).library(global);
+ expect(unknown.ok).toBe(true);if(!unknown.ok)throw new Error(unknown.error);
+ expect(unknown.value.overview).toMatchObject({unpublished:'—',unpublished_note:''});
 });
 
 it('serves the recorded scan coverage abbreviated from the real roots, never a literal (L5)',async()=>{

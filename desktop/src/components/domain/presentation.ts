@@ -74,6 +74,23 @@ export function libraryVersionLabel(card: Pick<SkillCard, 'installedVersion' | '
  if (card.localMatch === 'none') return 'Unpublished';
  return null;
 }
+/** The Library card's local-eval note. The lift figure already draws the verdict — "Not evaluated" when a folder
+ *  has no receipt — wherever `liftOnCards` is on, so the footer must not say it a second time, and it must never
+ *  say both halves at once: until 2026-09-14 a folder whose only receipt predates its last edit read
+ *  "Not evaluated · evaluated before your last edit", which contradicts itself and took 239px of a ~347px footer
+ *  (the row then wrapped and the card spilled — see library.css). A stale receipt now says only the true half;
+ *  "Not evaluated" survives only where nothing else on the card says it. */
+export function localEvalNote(card: Pick<SkillCard, 'teamed' | 'localEval' | 'localEvalStale'>, verdictShown: boolean): string | null {
+ if (card.teamed || card.localEval !== null) return null;
+ if (card.localEvalStale) return 'Evaluated before your last edit';
+ return verdictShown ? null : 'Not evaluated';
+}
+/** The installs chip's text, or null when there is no count to show. Every Library card carries the `—` sentinel
+ *  (`localCard` in the Tauri adapter and the mock's `localProjection` both set it), so on a local card the chip
+ *  stated nothing while costing 29px of the footer; a real count — including a truthful `0 installs` — still draws. */
+export function installsChip(card: Pick<SkillCard, 'installs'>): string | null {
+ return card.installs === '—' ? null : card.installs;
+}
 export function profileVersionLabel(card: Pick<SkillCard, 'profileVersion'>): string | null {
  const n = card.profileVersion === null ? null : parseVersionFolder(card.profileVersion);
  return n === null ? null : `On profile · ${cardVersion(n)}`;

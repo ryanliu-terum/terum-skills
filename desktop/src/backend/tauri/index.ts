@@ -8,7 +8,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { nativePrefs } from './prefs';
 import { SETUP_STEP_KEYS, FEATURE_KEYS } from '../types';
-import type { Features } from '../types';
+import type { Features, SetupStep } from '../types';
 import type { CliFrame } from './frames';
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
@@ -33,6 +33,7 @@ import { cliRefresh, createRefreshPolicy, createWorkflowGate } from './refresh';
 // shape `cli-tree-imports.test.ts` admits across the tree boundary.
 import { recordedVersionLabel, parseVersionFolder } from '../../../../src/lib/versions.js';
 import { overviewCopy } from '../../lib/overview-copy';
+import { evaluatedOverview, unpublishedOverview } from '../../lib/overview-counts';
 import { bodyExcerpt } from '../../lib/body-excerpt';
 import { isUnderRoot, samePath } from '../../lib/skill-path';
 
@@ -58,7 +59,26 @@ export const cliPublish = z.object({ team: z.string(), id: z.string(), name: z.s
 const cliInvite = z.object({ team: z.string(), invited: z.array(z.string()), already: z.array(z.string()).default([]), failed: z.array(z.object({ login: z.string(), error: z.string() })).default([]) }).passthrough();
 const cliTeam = z.object({ team: z.string() }).passthrough();
 const cliTeamMove = z.object({ from: z.string(), to: z.string(), handle: z.string(), restored: z.array(z.string()), missing: z.array(z.string()), failed: z.array(z.object({ name: z.string(), error: z.string() })) }).passthrough();
-export const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(), steps: z.partialRecord(z.enum(SETUP_STEP_KEYS), z.enum(['done','skipped','printed','queued','batched'])).nullish().transform(value => value ?? null) });
+const SETUP_STEP_STATES = ['done','skipped','printed','queued','batched'] as const;
+type SetupStepState = typeof SETUP_STEP_STATES[number];
+const isSetupStep = (key: string): key is SetupStep => (SETUP_STEP_KEYS as readonly string[]).includes(key);
+const isSetupStepState = (state: string): state is SetupStepState => (SETUP_STEP_STATES as readonly string[]).includes(state);
+/**
+ * Steps are read permissively, like every `.passthrough()` result above it. The frame protocol evolves
+ * additively (docs/frame-protocol.md: "Protocol stays 1 because every change is additive") and the app
+ * runs whatever CLI the machine recorded, so a CLI newer than this app WILL report steps this app has
+ * never heard of. A closed key set made that fatal: 0.17.0 added `editHook`, and every finished setup run
+ * in the app died on "the desktop app could not read the result" with the CLI's work already on disk.
+ * Unknown keys and unknown states are dropped — the board draws only the steps it knows — and the rest
+ * of the result still lands.
+ */
+const cliSetupSteps = z.record(z.string(), z.string()).nullish().transform((value): Partial<Record<SetupStep, SetupStepState>> | null => {
+  if (value === null || value === undefined) return null;
+  const steps: Partial<Record<SetupStep, SetupStepState>> = {};
+  for (const [key, state] of Object.entries(value)) if (isSetupStep(key) && isSetupStepState(state)) steps[key] = state;
+  return steps;
+});
+export const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(), steps: cliSetupSteps });
 // §6.3: a local eval runs against a folder in the Library, which may belong to no team at all —
 // hence the nullable `team` and `id`. `shareHint` is the caller's cue to offer publishing.
 export const cliEval = z.object({ name:z.string(),runDir:z.string(),executionStatus:z.enum(['complete','partial','failed']),team:z.string().nullish().transform(v=>v??null),id:z.string().nullish().transform(v=>v??null),shareHint:z.literal(true).optional(),alreadyEvaluated:z.boolean().optional() }).passthrough();
@@ -183,15 +203,26 @@ function libraryMatch(row:LocalRow):SkillCard['localMatch'] {
   if(row.matchedVersion!==null)return 'identical';
   return row.placement!==null||row.knownToTeam===true?'differs':'none';
 }
+/** One sentence, shown on both surfaces: the card's chip reveals it on hover, the detail page draws it
+ *  under the description, and the disabled Run eval / Publish rows repeat it as their reason. */
+export const BUNDLED_NOTE='Bundled with terum-skills — placed by setup, not a team skill.';
 function localCard(row:LocalRow&{fixable?:boolean},section:LocalSection,home:string):SkillCard {
   const placed=row.placed??row.placement!==null,local=!placed;
   const shown=libraryEval(row),receipt=shown.receipt,summary=receiptSummary(receipt);
   // A local card makes no claim about team installs; the team fields stay neutral except the two
   // byte-level overlays (spec §2 §7.4): the version its bytes are, and the receipt for those bytes.
   // The identity line names the root the folder lives in, never the word 'local'.
-  return {edited:row.edited??row.health==='local-changed',localEval:shown.eval,localEvalStale:row.localEvalStale??false,localMatch:libraryMatch(row),knownToTeam:row.knownToTeam??false,installedVersion:libraryVersion(row),latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:false,path:row.path,name:row.name,desc:row.problem!==undefined?row.path+' · '+row.problem:cardSummary(row.body,row.description),project:labelOf(section),category:row.category??'—',installs:'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:'unknown',paths:[[abbreviateHome(row.path,home),section.scope]],projectRoots:section.repoRoot?[abbreviateHome(section.repoRoot,home)]:[],flags:row.problem!==undefined?['broken']:local?['local']:[],...(row.fixable?{fixable:true}:{}),flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:summary?[summary.w,summary.l,summary.t]:null,summary,provenance:receipt?{model:receipt.provenance.model,k:receipt.provenance.k,ccVersion:receipt.provenance.cc_version,runner:receipt.provenance.runner_handle,when:receipt.provenance.timestamp.slice(0,10)}:null,favorite:false,favorites:null,enabled:true,updated:row.updated ?? null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};}
+  return {edited:row.edited??row.health==='local-changed',localEval:shown.eval,localEvalStale:row.localEvalStale??false,localMatch:libraryMatch(row),knownToTeam:row.knownToTeam??false,installedVersion:libraryVersion(row),latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:false,path:row.path,name:row.name,desc:row.problem!==undefined?row.path+' · '+row.problem:cardSummary(row.body,row.description),project:labelOf(section),category:row.category??'—',installs:'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:'unknown',paths:[[abbreviateHome(row.path,home),section.scope]],projectRoots:section.repoRoot?[abbreviateHome(section.repoRoot,home)]:[],flags:row.problem!==undefined?['broken']:local?['local']:[],...(row.fixable?{fixable:true}:{}),flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:summary?[summary.w,summary.l,summary.t]:null,summary,provenance:receipt?{model:receipt.provenance.model,k:receipt.provenance.k,ccVersion:receipt.provenance.cc_version,runner:receipt.provenance.runner_handle,when:receipt.provenance.timestamp.slice(0,10)}:null,favorite:false,favorites:null,enabled:true,updated:row.updated ?? null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''},bundled:{icon:'box',token:'text3',text:BUNDLED_NOTE}}};}
+/** The bundled /terum-skills manual is the one `notOffered` folder that names no fault: setup placed it
+ *  and `connect` refuses it by its frontmatter marker, so it can never become a team skill. It keeps its
+ *  card (§7.4 D16) and its own description, and carries the neutral `bundled` flag instead of `broken` —
+ *  the same flag `localActionReason` reads, so Run eval and Publish stay disabled with a sentence that
+ *  describes the folder rather than accusing it (Ryan, 2026-09-14). Every other reason is a fault and
+ *  keeps the red flag, the path-and-reason body, and the attention count. */
 function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):SkillCard {
-  return localCard({name:entry.name,path:entry.path,state:'',tracked:false,placement:null,health:'unknown',category:entry.category,description:entry.description,characters:entry.characters,updated:null,problem:entry.detail??entry.reason,fixable:entry.reason==='invalid-yaml'||entry.reason==='name-mismatch'},section,home);
+  const bundled=entry.reason==='managed-wrapper';
+  const card=localCard({name:entry.name,path:entry.path,state:'',tracked:false,placement:null,health:'unknown',category:entry.category,description:entry.description,characters:entry.characters,updated:null,...(bundled?{}:{problem:entry.detail??entry.reason}),fixable:entry.reason==='invalid-yaml'||entry.reason==='name-mismatch'},section,home);
+  return bundled?{...card,flags:['bundled'],flagText:{bundled:BUNDLED_NOTE}}:card;
 }
 function localDetail(card:SkillCard,section:LocalSection,path:string,home:string):SkillDetail {
   const pathLabel=abbreviateHome(path,home);
@@ -272,7 +303,7 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
   const localMatch: SkillCard['localMatch'] = !present || !scanned ? null : matchedVersions.length > 0 ? 'identical' : 'differs';
   const latestVersion = row.latestVersion ?? (parseVersionFolder(row.latest) === null ? null : row.latest);
   const latestN = latestVersion === null ? null : parseVersionFolder(latestVersion);
-  return { edited:false, localEval:null, localEvalStale:false, localMatch, knownToTeam:true, installedVersion, latestVersion, evalVersion:row.evalVersion ?? null, evalStale:row.evalVersion != null && latestN !== null && row.evalVersion !== latestN, latestEvalState:row.latestEvalState ?? null, profileVersion:null, teamed:true, path:rows[0]?.path ?? null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), desc: cardSummary(row.body, row.description), grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: summary ? [summary.w, summary.l, summary.t] : null, summary, provenance, favorite: false, favorites: null, enabled: true, flags: problem ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The placed copy could not be inspected.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
+  return { edited:false, localEval:null, localEvalStale:false, localMatch, knownToTeam:true, installedVersion, latestVersion, evalVersion:row.evalVersion ?? null, evalStale:row.evalVersion != null && latestN !== null && row.evalVersion !== latestN, latestEvalState:row.latestEvalState ?? null, profileVersion:null, teamed:true, path:rows[0]?.path ?? null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), desc: cardSummary(row.body, row.description), grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: summary ? [summary.w, summary.l, summary.t] : null, summary, provenance, favorite: false, favorites: null, enabled: true, flags: problem ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The placed copy could not be inspected.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' }, bundled: { icon: 'box', token: 'text3', text: BUNDLED_NOTE } } };}
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
 /** `owner/repo` as the team remote spells it (case kept; any host); null when the team has no remote. */
 function repoSlug(remote: string | null | undefined): string | null {
@@ -780,7 +811,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       for (const entry of section.notOffered??[]) { if(seen.has(entry.path))continue;seen.add(entry.path);skills.push(notOfferedCard(entry,section,directory)); }
       const broken=skills.filter(card=>card.flags.includes('broken')).length;
       const value:Library={root,roots:(local.value.local??[]).map(section=>rootOf(section,directory)),scanned:scannedRoots(local.value,directory),skills,problems:section.problems.map(p=>({source:p.path,message:p.reason})),title:plural(skills.length,'skill'),
-        overview:{skills:String(skills.length),skills_note:'',evaluated:String(skills.filter(s=>s.localEval!==null).length),meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:overviewCopy.evaluated,installs:'—',installs_note:'',attention:String(broken),attention_lines:broken?[`${broken} need attention`]:[],attention_link:'',zero:overviewCopy}};
+        // The Evaluated tile's number, meter and caption come from one derivation over the same
+        // receipts (overview-counts.ts) — the meter was previously hard-zeroed and the caption
+        // hard-set to the zero copy, so a library with evaluated skills read "2 · Nothing evaluated yet".
+        overview:{skills:String(skills.length),skills_note:'',...evaluatedOverview(skills),...unpublishedOverview(skills),installs:'—',installs_note:'',attention:String(broken),attention_lines:broken?[`${broken} need attention`]:[],attention_link:'',zero:overviewCopy}};
       return {ok:true,value};
     },
     async localSkill({path},options) {
@@ -953,7 +987,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       ? run(teamArgv(args), cliTeamMove, (value): TeamResult => ({ name: value.to, kind: 'move', restored: value.restored, missing: value.missing, failed: value.failed }), ['config', 'clone', 'placed'])
       : run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
-    // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes") through the one producer in eval-flags.ts; an unset pref (or the k '—' sentinel) passes nothing and the CLI keeps no defaults of its own.
+    // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes") through the one producer in eval-flags.ts; an unset pref (or the k '—' sentinel) passes nothing and the CLI falls back to its own defaults (k = 1, model sonnet).
     eval: (args: EvalArgs) => run(['eval', ...evalPrefFlags(prefs), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']),
     // Several at once: the same receipts land locally, so the same boards move. A request the CLI would refuse throws here, before any spawn.
     evalMany: (args: EvalManyArgs) => run(evalManyArgv(args, prefs), cliEvalMany, mapEvalMany, ['config', 'placed']),

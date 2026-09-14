@@ -17,6 +17,7 @@ import { githubLoginSchema, GLOBAL_PROJECT, Person, PROJECT_NAME_RULE, projectNa
 import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, refreshClone, type SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { readRoster, RosterEntry } from '../lib/skills.js';
 import { teamForReference } from './install.js';
+import { SUCCESSOR_LOOKUP_DEADLINE_MS } from '../lib/successor.js';
 import { run as migrate, type MigrateArgs, type MigrateResult } from './teamMigrate.js';
 import { run as move, type MoveArgs, type MoveResult } from './teamMove.js';
 
@@ -506,6 +507,20 @@ export function credentialNotice(remote: string): string {
   return 'Ignored the credential embedded in the remote URL: terum-skills never stores one or passes one to git. Git access uses your configured Git credentials.';
 }
 
+/**
+ * Whether the account can already read `ownerRepo`. `user/repository_invitations` cannot answer this: an
+ * accepted invitation leaves that list, so a collaborator who joined weeks ago is indistinguishable there
+ * from someone who was never added. Bounded and non-throwing like every other read-only GitHub lookup in
+ * this codebase; anything but a clear answer naming the repository reads as "no", because only a positive
+ * answer may suppress the "ask the person who invited you" line.
+ */
+async function hasRepositoryAccess(runner: Runner, ownerRepo: string): Promise<boolean> {
+  try {
+    const probe = await runner.run('gh', ['api', `repos/${ownerRepo}`, '-q', '.full_name'], { deadlineMs: SUCCESSOR_LOOKUP_DEADLINE_MS });
+    return probe.code === 0 && probe.stdout.trim().toLowerCase() === ownerRepo.toLowerCase();
+  } catch { return false; } // no gh at all: not evidence of access
+}
+
 /** GitHub invitations: gh logged in → list then PATCH; empty list means already a collaborator. Without gh → print the URL and wait. */
 async function acceptOrDirect(ownerRepo: string, io: Prompter, runner: Runner, gh: GhState): Promise<void> {
   if (!gh.authenticated) {
@@ -519,7 +534,14 @@ async function acceptOrDirect(ownerRepo: string, io: Prompter, runner: Runner, g
   const invitation = list.find((item) => item.repository?.full_name?.toLowerCase() === ownerRepo.toLowerCase());
   // No pending invitation is normal for a collaborator who already accepted; for anyone else it is the one fact that
   // explains the "repository not found" the clone is about to hit, so say it before the clone rather than after (2026-09-08, D6).
-  if (!invitation) { io.print(`No pending GitHub invitation to ${ownerRepo} for your account. If the next step cannot reach the repository, the person who invited you has not added you on GitHub yet; ask them, then run this again.`); return; }
+  // Which of the two it is cannot be read off the invitation list, so ASK before telling someone they were never
+  // added: a joiner who had accepted weeks earlier was sent back to an owner who had already invited them
+  // (2026-09-14). Access is the question; a pending invitation is only one way to have it.
+  if (!invitation) {
+    if (await hasRepositoryAccess(runner, ownerRepo)) { io.print(`Your account already has access to ${ownerRepo}; there is no pending invitation to accept. Continuing.`); return; }
+    io.print(`No pending GitHub invitation to ${ownerRepo} for your account. Your account cannot read that repository either: if the next step cannot reach it, the person who invited you has not added you on GitHub yet; ask them, then run this again.`);
+    return;
+  }
   const accepted = await runner.run('gh', ['api', '--method', 'PATCH', `user/repository_invitations/${invitation.id}`]);
   if (accepted.code !== 0) throw new Error(`Could not accept the invitation: ${(accepted.stderr || accepted.stdout).trim()}`);
 }
