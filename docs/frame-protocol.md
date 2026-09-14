@@ -253,7 +253,9 @@ profileAdded, projectAdded }`; `version` is null on identical content and `ident
 
 `skill move <path> --to global|<project root>`, `skill copy <path> --to global|<project root>`,
 `skill rename <path> --to <new-name>`, and
-`skill delete <path>` are one-shot frame writes. Their `text` ask is `Type <name> to <operation> this folder`.
+`skill delete <path>` are one-shot frame writes. Only `skill delete` asks: its `text` ask is
+`Type <name> to delete this folder`. Move, copy and rename ask nothing — each is undone by running the
+verb the other way and none overwrites anything (Ryan, 2026-09-14).
 They require a direct child of a Library root and refuse symlinks. Move preserves local bytes;
 a destination collision is kept in that root's old-skills (an existing backup refuses). Copy is move
 without the removal: the source folder and its ledger row stay, the new folder carries the source's
