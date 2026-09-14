@@ -1,9 +1,9 @@
 import * as fs from 'node:fs/promises';
-import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import YAML from 'yaml';
-import { join } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { candidatesOf, createLibraryScan, librarySize, localSkillCounts, localSkills, localSkillRoots, nearestRepoRoot, resolveLibrarySkill, unusableSkillFolder } from '../local-skills.js';
+import { candidatesOf, createLibraryScan, expandRefPath, librarySize, localSkillCounts, localSkills, localSkillRoots, nearestRepoRoot, refIsPath, resolveLibrarySkill, unusableSkillFolder } from '../local-skills.js';
 import { emptyConfig } from '../schema.js';
 import { assertSkillSource } from '../skill-source.js';
 import { BUNDLED_SKILL_SOURCE, temporaryDirectory } from './fixtures.js';
@@ -456,6 +456,55 @@ describe('resolveLibrarySkill (D72)', () => {
     expect(await resolveLibrarySkill(home, config, join(home, '.state'), 'dup')).toMatchObject({ path: usable, libraryRoot: join(project, '.claude', 'skills'), inspection: { kind: 'candidate' } });
     // Only when no root offers a usable folder does the rejected one come back, with its detail.
     expect(await resolveLibrarySkill(home, emptyConfig(), join(home, '.state'), 'dup')).toMatchObject({ libraryRoot: join(home, '.claude', 'skills'), inspection: { kind: 'rejected', reason: 'description-missing' } });
+  });
+
+  // The desktop passes the Library card's PATH for a skill the team has never seen (SkillScreen,
+  // RunEvalDialog), and a name cannot tell two roots' same-named folders apart — so a ref may be a
+  // folder path. The roots stay the only place a ref can land.
+  it('resolves a folder path — absolute, ~-prefixed, relative, or through a realpath alias — to the entry it names', async () => {
+    const home = await temporaryDirectory();
+    const root = join(home, '.claude', 'skills');
+    const global = await candidate(root, 'dup');
+    const project = await temporaryDirectory();
+    const inProject = await candidate(join(project, '.claude', 'skills'), 'dup');
+    const config = { ...emptyConfig(), projects: [{ root: project, label: 'project' }] };
+    const state = join(home, '.state');
+    // By name the FIRST usable root wins and the project's copy is unreachable; by path each folder is
+    // reachable on its own — the ambiguity the path grammar exists to resolve.
+    expect(await resolveLibrarySkill(home, config, state, 'dup')).toMatchObject({ path: global });
+    expect(await resolveLibrarySkill(home, config, state, global)).toMatchObject({ name: 'dup', path: global, libraryRoot: root, inspection: { kind: 'candidate' } });
+    expect(await resolveLibrarySkill(home, config, state, inProject)).toMatchObject({ path: inProject, libraryRoot: join(project, '.claude', 'skills') });
+    // `~` expands to the Library's home, not the shell's, and a trailing slash is harmless.
+    expect(await resolveLibrarySkill(home, config, state, '~/.claude/skills/dup')).toMatchObject({ path: global });
+    expect(await resolveLibrarySkill(home, config, state, `${global}/`)).toMatchObject({ path: global });
+    // A relative path resolves against the process cwd.
+    expect(await resolveLibrarySkill(home, config, state, relative(process.cwd(), global))).toMatchObject({ path: global });
+    // The same folder through its realpath (macOS: /var → /private/var) or through a symlinked root.
+    const real = await realpath(global);
+    expect(await resolveLibrarySkill(home, config, state, real)).toMatchObject({ path: global });
+    const alias = join(await temporaryDirectory(), 'alias');
+    await symlink(root, alias, 'dir');
+    expect(await resolveLibrarySkill(home, config, state, join(alias, 'dup'))).toMatchObject({ path: global });
+    // A rejected folder named by path still comes back with the scan's verdict, never as a miss.
+    const broken = await candidate(root, 'broken', '---\nname: broken\n---\n');
+    expect(await resolveLibrarySkill(home, config, state, broken)).toMatchObject({ path: broken, inspection: { kind: 'rejected', reason: 'description-missing' } });
+  });
+
+  it('refuses a path outside every Library root, a path to a folder that does not exist, and the root itself', async () => {
+    const home = await temporaryDirectory();
+    const root = join(home, '.claude', 'skills');
+    await candidate(root, 'stock');
+    const elsewhere = await candidate(join(await temporaryDirectory(), 'skills'), 'stock');
+    const state = join(home, '.state');
+    expect(await resolveLibrarySkill(home, emptyConfig(), state, elsewhere)).toBeUndefined();
+    expect(await resolveLibrarySkill(home, emptyConfig(), state, join(root, 'ghost'))).toBeUndefined();
+    expect(await resolveLibrarySkill(home, emptyConfig(), state, root)).toBeUndefined();
+    expect(await resolveLibrarySkill(home, emptyConfig(), state, '~')).toBeUndefined();
+    // The two grammars never overlap: a legal skill name is never read as a path.
+    expect(refIsPath('stock')).toBe(false); expect(refIsPath('my-skill-2')).toBe(false);
+    for (const ref of ['~', '~/x', '/x', './x', 'a/b', `a${sep}b`]) expect(refIsPath(ref)).toBe(true);
+    expect(expandRefPath('~/.claude/skills/x', home)).toBe(join(home, '.claude', 'skills', 'x'));
+    expect(expandRefPath('~', home)).toBe(resolve(home));
   });
 });
 

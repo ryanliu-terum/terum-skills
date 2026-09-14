@@ -72,11 +72,13 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .option('--no-evals', 'do not offer to evaluate the shared skills that have no receipt')
     .action(async (target: string | undefined, options: { app?: boolean; projects?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, projects: options.projects, evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
-  const skill = program.command('skill').description('Move, rename, or delete a folder in your Library');
+  const skill = program.command('skill').description('Move, rename, delete, or fix a folder in your Library');
   for (const kind of ['move', 'rename'] as const) skill.command(`${kind} <path>`).requiredOption('--to <destination>', kind === 'move' ? 'global or a registered project root' : 'new skill name')
     .action(async (path: string, options: { to: string }) => execute(io => active.skill({ form: context.form, kind, path, to: options.to }, io), { verb: `skill ${kind}`, notices: true }));
   skill.command('delete <path>').description('Remove a Library folder after typing its name')
     .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'delete', path }, io), { verb: 'skill delete', notices: true }));
+  skill.command('fix <path>').description('Rewrite SKILL.md frontmatter that is not valid YAML by quoting the offending value; the text stays the same')
+    .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'fix', path }, io), { verb: 'skill fix', notices: true }));
 
   const project = program.command('project').description('Add, forget, or list the projects in your library — the folders this machine reads skills from');
   project.command('add [path]').description('Add a folder to your library')
@@ -113,6 +115,12 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .command('leave <name>')
     .description('Remove this team’s placed skills, its local clone, and its config entry from this machine (your membership is unchanged)')
     .action(async (name: string) => execute((io) => active.leave({ form: context.form, name }, io), { verb: 'team leave', notices: true }));
+  team
+    .command('move <target>')
+    .description('Follow a team whose repository moved: leave the configured team on this machine, join <org>/<repo> (or a git remote URL), and place again every skill the old team had placed here that the new one shares')
+    .addOption(new Option('--from <team>', 'the configured team to move away from (required when more than one exists)').hideHelp())
+    .option('--yes', 'skip the confirmation (a script, or a shell that already asked)')
+    .action(async (target: string, options: { from?: string; yes?: boolean }) => execute((io) => active.team({ form: context.form, kind: 'move', target, ...options }, io), { verb: 'team move', notices: true }));
   const teamProject = team.command('project').description('Team projects: the cards that group shared skills and name the repository they place into');
   teamProject.command('create [name]').description('Create a team project: a name, its repository, and the skills it places')
     .option('--remote <url>', "the project's repository; its skills place when a teammate installs inside that folder")

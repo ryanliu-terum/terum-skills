@@ -22,6 +22,7 @@ import { seedPending, pendingReceipt, pendingSkill, measuredReceipt } from './pe
 import { Prompter, PromptClosedError } from '../../lib/prompt.js';
 import type { EvalArgs } from '../eval.js';
 import { evalsQuestion, expandTilde, JOIN_CHOICE, PROJECTS_QUESTION, PROJECTS_WHERE_QUESTION, ROLE_QUESTION, run } from '../setup.js';
+import { run as runTeam } from '../team.js';
 import { APP_OFFER, APP_QUESTION } from '../app.js';
 
 const hookFor = (root: string) => ({ settingsFile: join(root, 'settings.json'), backupDir: join(root, 'backups') });
@@ -471,10 +472,13 @@ describe('setup (§6.1)', () => {
     // setup still delegates every DURABLE consent question to the real verb that performs the write. The only
     // confirms it owns are the two optional trailing steps, which belong to no verb: the project offer and
     // its folder question (D13 replaced the scan's three further prompts with one picker), and the eval
-    // mode, batch size and continuation questions (f-wizard D2). This list is exhaustive and ordered, so
-    // any further prompt added to setup.ts fails here and has to be argued for.
+    // mode, batch size and continuation questions (f-wizard D2), plus one at the very start: the offer to move
+    // this machine when the configured team's repository no longer exists and a new target was pasted
+    // (2026-09-13) — the durable work behind it is `team move`'s, which runs with --yes because this is its
+    // confirmation. This list is exhaustive and ordered, so any further prompt added to setup.ts fails here
+    // and has to be argued for.
     expect([...source.matchAll(/io\.(?:confirm|select|text)\(/g)].map((match) => match[0]))
-      .toEqual(['io.select(', 'io.text(', 'io.confirm(', 'io.text(', 'io.select(', 'io.text(', 'io.confirm(']);
+      .toEqual(['io.confirm(', 'io.select(', 'io.text(', 'io.confirm(', 'io.text(', 'io.select(', 'io.text(', 'io.confirm(']);
 
     const fixture = await bareTeam(); const root = join(fixture.root, 'real'); const home = join(root, 'home'); await skillUnder(home);
     const bare = join(fixture.root, 'empty.git'); await git(['init', '-q', '--bare', bare]);
@@ -741,7 +745,9 @@ it('refuses another setup target before app, prompts, gh or clone and preserves 
   const result = await run({ ...fixture.args, app: undefined, target: 'other/repo', verbs: { ...fixture.args.verbs, app: async () => { appCalls++; return failure('unexpected app'); } } }, io);
   expect(result).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine'), value: { role: 'joiner', steps: { welcome: 'printed' } } });
   expect(appCalls).toBe(0);
-  expect(fixture.runner.calls).toEqual([]);
+  // The one call allowed before the refusal: a read-only probe of the configured repository, so a team whose
+  // repository was recreated elsewhere is offered a move instead (2026-09-13). Here it still exists, so: refused.
+  expect(fixture.runner.calls.map((call) => call.args.slice(0, 2))).toEqual([['ls-remote', '--exit-code']]);
   expect(io.events.some(event => event.startsWith('ask:'))).toBe(false);
   expect(await exists(store.teamClone('repo'))).toBe(false);
   expect(await readFile(join(store.root, 'config.json'), 'utf8')).toBe(before);
@@ -1146,4 +1152,51 @@ it('keeps cumulative progress and one run-wide summary across batches, including
  expect(io.progress.mock.calls.map(([frame])=>frame)).toEqual([1,2,3,4].map(current=>({step:'evals',current,total:4})));
  expect(io.events.filter(line=>line.startsWith('print:Evaluated '))).toEqual(['print:Evaluated 3 of 4; 1 failed.']);expect(io.events.filter(line=>/^print:Evaluating .*…$/.test(line))).toEqual(['print:Evaluating 4 skills, 2 at a time…']);
  expect(io.events).toContain('print:Evaluating 4 skills, 2 at a time: about $8.00 and 2 min on this machine, from 3 earlier runs (median $2.00 · 1 min each).');expect(io.events).not.toContain('print:Evaluated in batches');
+});
+
+describe('setup handed a new target while the configured team\'s repository is gone (2026-09-13)', () => {
+  const moveResult = { ok: true as const, value: { from: 'team', fromRemote: 'https://github.com/alice/team.git', to: 'team-2', toRemote: 'github.com/alice/team-2', handle: 'alice', restored: ['starter'], missing: [], failed: [] } };
+  it('asks once and moves instead of refusing, then continues the wizard on the new team', async () => {
+    const fixture = await configuredCreator({});
+    const store = fixture.args.config;
+    const moves: unknown[] = [];
+    const io = optionalAnswers({ 'Move this machine from team to https://github.com/alice/team-2?': true });
+    // The stub answers only the move; the cast is what the overloaded team verb type needs for a single-kind stub.
+    const team = (async (args: unknown) => {
+      moves.push(args);
+      // The move rebinds the machine the way the real one does; the wizard must read that back, not its pre-move snapshot.
+      await store.update((config) => { delete config.teams.team; config.teams['team-2'] = { remote: 'github.com/alice/team-2', handle: 'alice' }; });
+      await cloneWithIdentity((await bareTeam()).bare, store.teamClone('team-2'));
+      return moveResult;
+    }) as unknown as typeof runTeam;
+    const result = await run({ ...fixture.args, target: 'alice/team-2', gone: async () => true, verbs: { ...fixture.args.verbs, offerWrapper: async () => 'present' as const, team } }, io);
+    expect(result).toMatchObject({ ok: true, value: { role: 'joiner', team: 'team-2', remote: 'github.com/alice/team-2', steps: { team: 'done' } } });
+    expect(moves).toEqual([expect.objectContaining({ kind: 'move', target: 'alice/team-2', from: 'team', yes: true })]);
+    expect(io.events).toContain("print:Team team's repository https://github.com/alice/team no longer exists on GitHub.");
+    expect(io.events).toContain('print:Moved from team to team-2.');
+    expect(io.events.filter((event) => event.startsWith('ask:Move this machine')).length).toBe(1);
+  });
+  it('a declined move keeps the one-team refusal; a repository that is merely unreachable is never offered a move', async () => {
+    const declined = await configuredCreator({});
+    const io = optionalAnswers({ 'Move this machine from team to https://github.com/alice/team-2?': false });
+    let moves = 0;
+    const result = await run({ ...declined.args, target: 'alice/team-2', gone: async () => true, verbs: { ...declined.args.verbs, team: (async () => { moves++; return moveResult; }) as unknown as typeof runTeam } }, io);
+    expect(result).toMatchObject({ ok: false, refused: true, error: expect.stringContaining('One team per machine') });
+    expect(moves).toBe(0);
+    expect(Object.keys((await declined.args.config.read()).teams)).toEqual(['team']);
+    const alive = await configuredCreator({});
+    const quiet = optionalAnswers();
+    const probed: string[] = [];
+    const refused = await run({ ...alive.args, target: 'alice/team-2', gone: async (_runner, remote) => { probed.push(remote); return false; }, verbs: { ...alive.args.verbs, team: (async () => { moves++; return moveResult; }) as unknown as typeof runTeam } }, quiet);
+    expect(refused).toMatchObject({ ok: false, refused: true });
+    expect(probed).toEqual(['https://github.com/alice/team.git']);
+    expect(quiet.events.some((event) => event.startsWith('ask:'))).toBe(false);
+    expect(moves).toBe(0);
+  });
+  it('never probes the repository when the target is the configured team or no team is configured', async () => {
+    const same = await configuredCreator({});
+    const probed: string[] = [];
+    await run({ ...same.args, target: 'alice/team', gone: async (_runner, remote) => { probed.push(remote); return true; }, verbs: { ...same.args.verbs, offerWrapper: async () => 'present' as const } }, optionalAnswers());
+    expect(probed).toEqual([]);
+  });
 });

@@ -27,11 +27,12 @@ function replay(value: unknown, ok = true, prints: string[] = []) {
 
 it('appends read diagnostics after the error and preserves a parsed partial value', async () => {
   const f = replay({ name: 'a', findings: 2, warnings: 1 }, false, ['First finding.', 'Second finding.']);
-  expect(await createTauriBackend(f.bridge).validate({ ref: 'a' })).toEqual({ ok: false, error: 'CLI failure.\nFirst finding.\nSecond finding.', value: { name: 'a', findings: 2, warnings: 1 } });
+  // A CLI that predates `skill fix` sends no `repairable`; the adapter reads 0 so the app draws no Fix.
+  expect(await createTauriBackend(f.bridge).validate({ ref: 'a' })).toEqual({ ok: false, error: 'CLI failure.\nFirst finding.\nSecond finding.', value: { name: 'a', findings: 2, warnings: 1, repairable: 0 } });
 });
 
 it('keeps successful reads unchanged despite print frames', async () => {
-  const value = { name: 'a', findings: 0, warnings: 1 };
+  const value = { name: 'a', findings: 0, warnings: 1, repairable: 0 };
   expect(await createTauriBackend(replay(value, true, ['Warning.']).bridge).validate({ ref: 'a' })).toEqual({ ok: true, value });
 });
 
@@ -1126,10 +1127,11 @@ it('summarizes a Library card from the body, falling back to frontmatter, as the
  expect(library.value?.skills.map(card=>[card.name,card.desc])).toEqual([['bodied','Use this when a deploy needs a checklist.'],['bare','frontmatter only'],['broken','/library/broken · SKILL.md name x does not equal folder broken']]);
  expect(await backend.localSkill({path:'/library/bodied'})).toMatchObject({ok:true,value:{desc_long:'Use this when a deploy needs a checklist.'}});
 });
-it.each(['move','rename','delete'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
- const value={kind,path:'/library/a',destination:kind==='delete'?null:'/library/b',quarantined:null,installed:false,notices:[]},f=replay(value),backend=createTauriBackend(f.bridge),changed=vi.fn();backend.subscribe(changed);
- const result=await (kind==='delete'?backend.skillFile.delete({path:value.path}):backend.skillFile[kind]({path:value.path,to:'b'})).done;
- expect(result).toEqual({ok:true,value});expect(f.spawns[0]?.args).toEqual(['skill',kind,...(kind==='delete'?[]:['--to','b']),'--',value.path]);expect(changed).toHaveBeenCalledWith('config');
+it.each(['move','rename','delete','fix'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
+ const bare=kind==='delete'||kind==='fix';
+ const value={kind,path:'/library/a',destination:bare?null:'/library/b',quarantined:null,installed:false,notices:[]},f=replay(value),backend=createTauriBackend(f.bridge),changed=vi.fn();backend.subscribe(changed);
+ const result=await (kind==='delete'||kind==='fix'?backend.skillFile[kind]({path:value.path}):backend.skillFile[kind]({path:value.path,to:'b'})).done;
+ expect(result).toEqual({ok:true,value});expect(f.spawns[0]?.args).toEqual(['skill',kind,...(bare?[]:['--to','b']),'--',value.path]);expect(changed).toHaveBeenCalledWith('config');
 });
 it('uses the shared legacy hash fallback on skill detail labels',async()=>{
  const hash='abcdef0123456789abcdef0123456789abcdef0123',local={...placedLocal,local:placedLocal.local.map(s=>({...s,rows:s.rows.map(r=>({...r,placement:{...r.placement,version:hash}}))}))};

@@ -18,6 +18,7 @@ import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, 
 import { readRoster, RosterEntry } from '../lib/skills.js';
 import { teamForReference } from './install.js';
 import { run as migrate, type MigrateArgs, type MigrateResult } from './teamMigrate.js';
+import { run as move, type MoveArgs, type MoveResult } from './teamMove.js';
 
 /**
  * §6 `team create` and `team join` (milestone M1). Both are `run(args, io)` over the Prompter.
@@ -25,7 +26,13 @@ import { run as migrate, type MigrateArgs, type MigrateResult } from './teamMigr
  */
 export interface TeamDependencies extends AuthDependencies { config?: ConfigStore; runner?: Runner; hook?: HookOptions; }
 export interface CreateArgs extends TeamDependencies { name?: string; org?: string; remote?: string; repo?: string; offerHook?: boolean; }
-export interface JoinArgs extends TeamDependencies { target: string; as?: string; offerHook?: boolean; }
+export interface JoinArgs extends TeamDependencies {
+  target: string;
+  as?: string;
+  offerHook?: boolean;
+  /** An identity this machine already proved (a `team move` keeping the handle it had): used as is, never confirmed again. A roster collision still re-asks the handle. */
+  identity?: Identity;
+}
 export interface RemoveArgs extends TeamDependencies { handle: string; team?: string; archiveOnly?: boolean; }
 export interface WorkflowUpdateArgs extends WithForm { print?: boolean; }
 /** §7.1: the team-project creator moved here from `project create`, which is now the Library's local registry. */
@@ -39,14 +46,15 @@ export interface ProjectCreateArgs extends WithForm {
   runner?: Runner;
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
 }
-export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs) | ({ kind: 'workflow-update' } & WorkflowUpdateArgs) | ({ kind: 'project-create' } & ProjectCreateArgs) | ({ kind: 'migrate' } & MigrateArgs);
+export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs) | ({ kind: 'workflow-update' } & WorkflowUpdateArgs) | ({ kind: 'project-create' } & ProjectCreateArgs) | ({ kind: 'migrate' } & MigrateArgs) | ({ kind: 'move' } & MoveArgs);
 export type CreateResult = { team: string; remote: string };
 export type JoinResult = { team: string; handle: string; rejoined: boolean; roster: RosterEntry[] };
 export type { RosterEntry } from '../lib/skills.js';
 export interface RemoveResult { team: string; handle: string; archiveOnly: boolean; }
 export interface WorkflowUpdateResult { workflow: string; }
 export interface ProjectCreated { team: string; name: string; remotes: string[]; skills: number; }
-export type TeamRunResult = CreateResult | JoinResult | RemoveResult | WorkflowUpdateResult | ProjectCreated | MigrateResult;
+export type TeamRunResult = CreateResult | JoinResult | RemoveResult | WorkflowUpdateResult | ProjectCreated | MigrateResult | MoveResult;
+export type { MoveArgs, MoveResult } from './teamMove.js';
 export type TeamCommand = (args: TeamArgs, io: Prompter) => Promise<Result<TeamRunResult>>;
 
 export class HandleCollisionError extends Error {
@@ -65,6 +73,7 @@ export function run(args: { kind: 'remove' } & RemoveArgs, io: Prompter): Promis
 export function run(args: { kind: 'workflow-update' } & WorkflowUpdateArgs, io: Prompter): Promise<Result<WorkflowUpdateResult>>;
 export function run(args: { kind: 'project-create' } & ProjectCreateArgs, io: Prompter): Promise<Result<ProjectCreated>>;
 export function run(args: { kind: 'migrate' } & MigrateArgs, io: Prompter): Promise<Result<MigrateResult>>;
+export function run(args: { kind: 'move' } & MoveArgs, io: Prompter): Promise<Result<MoveResult>>;
 export function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunResult>>;
 export async function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunResult>> {
   if (args.kind === 'create') return create(args, io);
@@ -72,6 +81,7 @@ export async function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunR
   if (args.kind === 'remove') return remove(args, io);
   if (args.kind === 'project-create') return projectCreate(args, io);
   if (args.kind === 'migrate') return migrate(args, io);
+  if (args.kind === 'move') return move(args, io);
   return workflowUpdate(args, io);
 }
 
@@ -340,7 +350,7 @@ export async function join(args: JoinArgs, io: Prompter): Promise<Result<JoinRes
     const clone = store.teamClone(team);
     await ensureClone(clone, target.remote, normalized, runner);
 
-    const { identity: suggested } = await identityForJoiner(io, { config: store, runner }, { fixedHandle: boundHandle, gh });
+    const { identity: suggested } = args.identity ? { identity: args.identity } : await identityForJoiner(io, { config: store, runner }, { fixedHandle: boundHandle, gh });
     await requireGitConfig(runner, clone, suggested);
     const repo = openTeamRepo(clone, target.remote, runner);
 

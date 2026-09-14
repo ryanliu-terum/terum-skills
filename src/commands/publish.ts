@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { canonicalLedger, localSkillRoots, localSkills, resolveLibrarySkill, unusableSkillFolder } from '../lib/local-skills.js';
+import { canonicalLedger, localSkillRoots, localSkills, refIsPath, resolveLibrarySkill, unusableSkillFolder } from '../lib/local-skills.js';
 import type { Config } from '../lib/schema.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
@@ -314,5 +314,8 @@ async function notFoundLocally(args: PublishArgs, config: Config, name: string, 
   const inventories = await Promise.all(discovery.roots.map((root) => localSkills(root.root, config, { scope: root.scope, stateRoot, ledger })));
   const unreadable = discovery.problems.length + inventories.reduce((count, inventory) => count + inventory.problems.length + inventory.entries.filter((entry) => entry.inspection.kind === 'failed').length, 0);
   const note = unreadable ? ` (${unreadable} local folder(s) under ${discovery.roots.map((root) => root.root).join(' or ')} could not be read.)` : '';
-  return `No local skill folder named ${name} in your library. Inspect it with \`${invocation(args.form, 'ls --local')}\`, or add the project holding it with \`${invocation(args.form, 'project add')}\`.${note}`;
+  // `name` is the ref as typed: a skill name, or a folder path (refIsPath) — the desktop passes the
+  // Library card's path for a skill the team has never seen. Say which grammar missed.
+  const missed = refIsPath(name) ? `No skill folder at ${name} in your library` : `No local skill folder named ${name} in your library`;
+  return `${missed}. Inspect it with \`${invocation(args.form, 'ls --local')}\`, or add the project holding it with \`${invocation(args.form, 'project add')}\`.${note}`;
 }

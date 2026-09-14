@@ -1,6 +1,6 @@
 /** Explicit Library file operations (§7.5). Team removal stays owned by uninstallMany. */
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import YAML from 'yaml';
@@ -12,14 +12,18 @@ import { isSkillsRoot } from '../lib/placer/agent-paths.js';
 import { projectPath } from '../lib/projects.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import type { Prompter } from '../lib/prompt.js';
-import { cancelled, fromError, success, type Result } from '../lib/result.js';
+import { cancelled, failure, fromError, success, type Result } from '../lib/result.js';
 import { systemRunner, type Runner } from '../lib/runner.js';
 import { FRONTMATTER, isSkillName, type Config } from '../lib/schema.js';
-import { scanSkillFolder } from '../lib/skill-source.js';
+import { planRepairs } from '../lib/skill-repair.js';
+import { assessHygiene, formatHygieneFindings, HygieneRefused } from '../lib/evals/hygiene.js';
+import { selectTeam } from '../lib/config.js';
+import { readTeam } from '../lib/skills.js';
+import { inspectSkillSource, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
 import type { WithForm } from '../lib/invocation.js';
 import { uninstallMany } from './uninstall.js';
 
-export interface SkillArgs extends WithForm { kind: 'move' | 'rename' | 'delete'; path: string; to?: string; config?: ConfigStore; home?: string; runner?: Runner }
+export interface SkillArgs extends WithForm { kind: 'move' | 'rename' | 'delete' | 'fix'; path: string; to?: string; config?: ConfigStore; home?: string; runner?: Runner }
 export interface SkillResult { kind: SkillArgs['kind']; path: string; destination: string | null; quarantined: string | null; installed: boolean; notices: string[] }
 interface Operation { source: string; ledgerPath?: string; destination: string | null; placement?: Config['placements'][string]; fingerprint: string | null; kept: string | null; destinationExisted: boolean; done: boolean; result?: SkillResult }
 
@@ -73,7 +77,48 @@ async function repairSibling(store: ConfigStore, oldPath: string, row: Config['p
   return path;
 }
 
+/**
+ * `skill fix <path>`: apply every repair `planRepairs` covers to one Library folder, then run the
+ * same inspection and hygiene gate `ls --local` and `validate` use and say what still needs the
+ * author. There is no name to type: nothing moves, the folder is the user's own, and each change is
+ * fixed by an authority outside the author's typing (YAML's grammar, the folder name, the team
+ * policy, HYG2's invisible set, a file mode). `installed` is read from the ledger as the other kinds
+ * report it; a placed folder's bytes now differ from the team's, which `ls` shows as edited.
+ */
+async function fix(args: SkillArgs, io: Prompter): Promise<Result<SkillResult>> {
+  const store = args.config ?? createConfigStore();
+  const source = resolve(args.path), name = basename(source);
+  await plainFolder(source);
+  const config = await store.read();
+  const installed = config.placements[source] !== undefined;
+  // The team's license is the only authority for `license:`; with no team there is none, and license stays.
+  let policyLicense: string | null = null;
+  try { policyLicense = (await readTeam(store.teamClone(selectTeam(config.teams, undefined, args.form)[0]))).policy.skill_license; } catch { /* No configured team: nothing to conform to. */ }
+  const result = (notices: string[]): SkillResult => ({ kind: 'fix', path: source, destination: null, quarantined: null, installed, notices });
+  // Hold the folder's lock across read and write so a concurrent rename cannot slip between them.
+  const release = await lockTarget(dirname(source), name);
+  try {
+    if (!(await present(join(source, 'SKILL.md')))) throw new Error(`${source} has no SKILL.md; nothing to fix.`);
+    const plan = planRepairs({ name, ...(await sourceFiles(source)), policyLicense });
+    for (const [path, bytes] of plan.writes) await writeFile(join(source, path), bytes);
+    for (const path of plan.clearExecutable) await chmod(join(source, path), (await stat(join(source, path))).mode & 0o7666);
+    const notices = [...plan.repaired];
+    // What the author still has to settle, from the two gates the folder must pass to be offered and published.
+    const after = await sourceFiles(source);
+    const inspection = inspectSkillSource(after.files.get('SKILL.md')!.toString('utf8'), name);
+    const remaining: string[] = inspection.ok ? [] : [inspection.detail];
+    try { assessHygiene(name, after, policyLicense, false, true); }
+    catch (error) { if (!(error instanceof HygieneRefused)) throw error; for (const line of formatHygieneFindings(error.assessment.errors).split('\n')) if (line && !remaining.includes(line)) remaining.push(line); }
+    if (remaining.length) notices.push(`Still needs you (${remaining.length}):`, ...remaining.map(line => `  ${line}`));
+    else notices.push(plan.repaired.length ? `${name}: hygiene passes.` : `${name}: nothing to fix; hygiene passes.`);
+    for (const line of notices) io.print(line);
+    if (!plan.repaired.length && remaining.length) return failure(`${name}: nothing here is a fault fix covers; ${remaining.length} finding${remaining.length === 1 ? '' : 's'} still need${remaining.length === 1 ? 's' : ''} you (listed above).`, result(notices));
+    return success(result(notices));
+  } finally { await release(); }
+}
+
 export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillResult>> {
+  if (args.kind === 'fix') return fix(args, io).catch(fromError);
   const releases: Array<() => Promise<void>> = [];
   const locked = new Set<string>();
   // One non-waiting lock per folder (retries: 0): a second acquire on a folder this run already holds would refuse itself.

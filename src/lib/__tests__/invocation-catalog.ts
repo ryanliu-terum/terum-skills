@@ -935,6 +935,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 56,
+    "policy": "fixed",
+    "pattern": "| `skill fix <abs-path>` | none; the folder is the user's own | show stdout; it applies the repairs with one right answer (quote a frontmatter value YAML refuses, `name` to the folder, `license` to team policy, strip invisible characters, clear an executable bit on a non-script) and prints `Still needs you` for the rest |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 109,
     "policy": "fixed",
     "pattern": "| `prune` | none; an empty quarantine simply returns | `npx -y terum-skills@latest prune` |"
@@ -956,6 +962,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 112,
     "policy": "prose",
     "pattern": "| `team leave <name>`, `team remove <handle>` | none | the same command with the supported npx prefix |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 113,
+    "policy": "fixed",
+    "pattern": "| `team move <org>/<repo> [--from <team>] [--yes]` | none; one confirmation, then leave + join + re-place | `npx -y terum-skills@latest team move <org>/<repo>` — when a team's repository was recreated elsewhere (`sync` reports it and offers this) |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
@@ -1105,7 +1117,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 364,
     "policy": "prose",
-    "pattern": "| | `team create` / `team join` / `team leave` / `team remove <handle>` | Manage the repo and its roster |"
+    "pattern": "| | `team create` / `team join` / `team leave` / `team move <org>/<repo>` / `team remove <handle>` | Manage the repo and its roster; `move` follows a team whose repository was recreated elsewhere (leave, join, place the shared skills again) |"
   },
   {
     "file": "README.md",
@@ -1163,9 +1175,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 374,
+    "line": 381,
     "policy": "prose",
-    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` | Move, rename, or delete a folder in your Library, after confirming by name. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
+    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` | Move, rename, delete, or fix a folder in your Library. Move, rename, and delete confirm by name; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
   },
   {
     "file": "README.md",
@@ -1177,7 +1189,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 376,
     "policy": "prose",
-    "pattern": "| | `publish <ref> [--project <name>] [--category <name>]` | Publish a local folder as an immutable version directly to main, or reuse identical bytes and attach matching evals. Select a team project (Global by default). Category precedence: declared frontmatter, flag, model suggestion, misc fallback; undeclared categories get a source disclosure. Managed frontmatter is written back locally; a profile offer follows publication |"
+    "pattern": "| | `publish <ref> [--project <name>] [--category <name>]` | Publish a local folder — named by its skill name or its folder path (\`~/…\` accepted) — as an immutable version directly to main, or reuse identical bytes and attach matching evals. Select a team project (Global by default). Category precedence: declared frontmatter, flag, model suggestion, misc fallback; undeclared categories get a source disclosure. Managed frontmatter is written back locally; a profile offer follows publication |"
   },
   {
     "file": "README.md",
@@ -1189,7 +1201,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 378,
     "policy": "prose",
-    "pattern": "| | `eval <skill>` | Evaluate the local skill with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). Publish to share matching receipts. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
+    "pattern": "| | `eval <skill>` | Evaluate the local skill, named by skill name or folder path, with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). Publish to share matching receipts. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
   },
   {
     "file": "README.md",
@@ -1466,6 +1478,36 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 227,
     "policy": "prose",
     "pattern": "`skill delete <path>` are one-shot frame writes. Their `text` ask is `Type <name> to <operation> this folder`."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 236,
+    "policy": "prose",
+    "pattern": "`skill fix <path>` is a one-shot frame write with no ask. It applies every repair whose outcome is"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 239,
+    "policy": "prose",
+    "pattern": "team policy, removing HYG2's invisible characters, and clearing an executable mode on a non-script."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 238,
+    "policy": "prose",
+    "pattern": "(the `ls --local` `invalid-yaml` reason), setting `name` to the folder name, setting `license` to the"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 240,
+    "policy": "prose",
+    "pattern": "It then runs the same inspection and hygiene gate as `ls --local` and `validate` and prints what still"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 244,
+    "policy": "prose",
+    "pattern": "three, and `validate`'s result carries `repairable`, the count of changes `skill fix` would make."
   },
   {
     "file": "docs/frame-protocol.md",

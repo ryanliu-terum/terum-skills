@@ -38,7 +38,7 @@ export interface SkillCard {
  localEval:(ReceiptSummary & {runnerHandle:string|null;version:string|null})|null;localEvalStale:boolean;
  /** Machine-local annotation from placements; never used for catalogue ordering or counts. */
  installedVersion:string|null;latestVersion:string|null;evalVersion:number|null;evalStale:boolean;latestEvalState:'ok'|'none'|'invalid'|null;profileVersion:string|null;
-teamed:boolean;path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:InstallState;placed:boolean;onDiskOnly:boolean;teamState:TeamState;paths:[string,string][];projectRoots?:string[];provenance?:CardProvenance|null;wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
+teamed:boolean;path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;/** The broken flag names a fault `skill fix` repairs (an `invalid-yaml` or `name-mismatch` folder); the detail page draws Fix beside it. */fixable?:boolean;enabled:boolean;installed:InstallState;placed:boolean;onDiskOnly:boolean;teamState:TeamState;paths:[string,string][];projectRoots?:string[];provenance?:CardProvenance|null;wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
 export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
 export interface ReportNumbers {holes:number;nRounds:number;triggerTotal:number;precisionObserved?:string}
@@ -125,13 +125,21 @@ export interface PublishResult {name:string;project:string;version:string|null;c
 export interface SyncArgs {team?:string}
 // The fetch-only sync result (§10). `detail` is the CLI's own reason for a state other than 'refreshed';
 // it is spelled the same here as in the CLI so the popup can render it.
-export interface SyncResult {notices:string[];changed:boolean;teams:{team:string;state:string;detail?:string}[]}
+/** Where a team whose repository no longer exists may have gone (CLI lib/successor.ts). */
+export interface SyncSuccessor {ownerRepo:string;source:'invitation'|'member';teamName:string|null;at:string|null}
+export interface SyncTeam {team:string;state:string;detail?:string;
+ /** The remote answered "repository not found"; `successors` are the replacements GitHub knows of, `summary` the CLI's one line about it. */
+ missing?:true;successors?:SyncSuccessor[];lookup?:string;summary?:string}
+export interface SyncResult {notices:string[];changed:boolean;teams:SyncTeam[]}
 // No `role`: GitHub's collaborator `permission` is "Only valid on organization-owned repositories" and
 // the CLI's invite verb takes only logins and --team, so an invitation cannot carry one (Ryan, 2026-09-10).
 export interface InviteArgs {team?:string;logins:string[];scope?:Scope}
 export interface InviteResult {invited:string[];already:string[];failed:{login:string;error:string}[]}
-export interface TeamArgs {kind:'create'|'join'|'remove'|'leave';name?:string;team?:string;remote?:string;handle?:string}
-export interface TeamResult {name:string;kind:TeamArgs['kind']}
+/** `move`: follow a team whose repository moved — `remote` is the new `<org>/<repo>`, `team` the configured team to leave; the dialog that offers it is the confirmation, so the CLI runs with --yes. */
+export interface TeamArgs {kind:'create'|'join'|'remove'|'leave'|'move';name?:string;team?:string;remote?:string;handle?:string}
+export interface TeamResult {name:string;kind:TeamArgs['kind'];
+ /** `move` only: what came back. */
+ restored?:string[];missing?:string[];failed?:{name:string;error:string}[]}
 export interface SetupArgs {target?:string}
 export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','projects','evals','community','hook','wrapper','done'] as const;
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
@@ -140,7 +148,8 @@ export interface EvalArgs {team?:string;ref:string;cases?:number}
 /** §6.3: `team` and `id` are null for a folder that belongs to no team, which is now the common case. */
 export interface EvalResult {name:string;runDir:string;executionStatus:'complete'|'partial'|'failed';team:string|null;id:string|null;shareHint:boolean}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
-export interface ValidateResult {name:string;findings:number;warnings:number}
+/** `repairable` counts the changes `skill fix` would make; a CLI that predates the verb omits it and the adapter reads 0, so the app draws no Fix. */
+export interface ValidateResult {name:string;findings:number;warnings:number;repairable:number}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
 export type AppUpdatePhase='waiting'|'installing'|'launched'|'failed';
 export type AppUpdateReason='on-close'|'overnight'|'manual';
@@ -158,4 +167,4 @@ HOOK:Design['HOOK']|null;QUARANTINE:Design['QUARANTINE']|null;CLI_LATEST:string|
 INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};
 
-export interface SkillFileResult {kind:'move'|'rename'|'delete';path:string;destination:string|null;quarantined:string|null;installed:boolean;notices:string[]}
+export interface SkillFileResult {kind:'move'|'rename'|'delete'|'fix';path:string;destination:string|null;quarantined:string|null;installed:boolean;notices:string[]}
