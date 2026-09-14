@@ -5,7 +5,15 @@ import { appUpdatePolicy, stagedAppUpdate, recordAppUpdateError, type AppUpdateE
 import type { AppUpdateStatus, Result } from '../backend/types';
 import { useOvernightWindow } from './overnightWindow';
 
-/** A single launch check fills the cache. Policy changes act on that observation, never check again. */
+/** A focus more than this long after the last check asks the CLI again; the CLI's own once-a-day cap makes most of those a cached read. */
+export const APP_UPDATE_RECHECK_MS = 60 * 60_000;
+
+/**
+ * The launch check fills the cache; policy changes act on that observation. It is not once-per-window: a window
+ * that stays open for days would otherwise never learn about a release tagged after launch, and a CLI whose hello
+ * came late (no `run/app.json` at that instant) would have disabled updates for the whole session. So a focus repeats
+ * the launch check while it has not succeeded, and after an hour re-reads the CLI's answer.
+ */
 export function useAppUpdateCheck(): void {
   const backend = useBackend(), client = useQueryClient();
   const policy = appUpdatePolicy(usePreference('updates:app:policy', 'on-close'));
@@ -19,21 +27,35 @@ export function useAppUpdateCheck(): void {
   useQuery<AppUpdateErrors>({ queryKey: ['app-update-policy-outcome'], enabled: false, queryFn: skipToken, gcTime: Infinity });
   const recordError = (error: unknown) => recordAppUpdateError(client, 'apply', error);
   useEffect(() => {
-    let disposed = false;
-    void (async () => {
+    let disposed = false, inFlight = false, succeeded = false, checkedAt = 0;
+    const launch = async () => {
+      if (inFlight || disposed) return;
+      inFlight = true;
       try {
         if (!(await backend.surfaces()).appUpdate || disposed) return;
         if (!(await backend.features()).appUpdate || disposed) return;
         await backend.prefs.ready;
         await client.ensureQueryData({ queryKey: ['app-update'], queryFn: () => backend.appUpdate.check(), staleTime: Infinity, gcTime: Infinity, retry: false });
+        checkedAt = Date.now(); succeeded = true;
         try { await backend.prefs.flush?.(); }
         catch (error) {
           recordAppUpdateError(client, 'preferences', `Could not save update preferences: ${String(error)}`);
         }
         if (!disposed) setReady(true);
       } catch (error) { recordAppUpdateError(client, 'launch', error); }
-    })();
-    return () => { disposed = true; };
+      finally { inFlight = false; }
+    };
+    const recheck = async () => {
+      if (inFlight || disposed) return;
+      inFlight = true;
+      try { await client.fetchQuery({ queryKey: ['app-update'], queryFn: () => backend.appUpdate.check(), staleTime: 0, gcTime: Infinity, retry: false }); checkedAt = Date.now(); }
+      catch (error) { recordAppUpdateError(client, 'launch', error); }
+      finally { inFlight = false; }
+    };
+    const focus = () => { if (!succeeded) void launch(); else if (Date.now() - checkedAt >= APP_UPDATE_RECHECK_MS) void recheck(); };
+    void launch();
+    window.addEventListener('focus', focus);
+    return () => { disposed = true; window.removeEventListener('focus', focus); };
   }, [backend, client]);
   useEffect(() => {
     if (!version || status?.installed.includes(version) || staged || policy === 'ask' || staging.data || attempted.current.has(version)) return;

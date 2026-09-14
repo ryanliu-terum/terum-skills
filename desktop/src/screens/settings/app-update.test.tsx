@@ -12,7 +12,7 @@ import { createRun } from '../../backend/mock/run';
 import type { AppUpdateStatus, Result } from '../../backend/types';
 
 const backend=createMockBackend();
-const status:AppUpdateStatus={appVersion:'0.1.10',supported:true,cliVersion:'0.1.10',latest:'0.1.12',latestAt:null,probe:'cached',probeError:null,staged:null,installed:[],lastApply:null,newer:true,ppid:42};
+const status:AppUpdateStatus={appVersion:'0.1.10',supported:true,cliVersion:'0.1.10',latest:'0.1.12',latestAt:null,probe:'cached',probeError:null,staged:null,installed:[],lastApply:null,newer:true,ppid:42,platform:'win32-x64'};
 let client:QueryClient;
 function Cache(){const value=useQueryClient();useEffect(()=>{client=value;},[value]);return null;}
 function open(route='#/settings/updates'){location.hash=route;return render(<Providers><Cache/><BackendContext value={backend}><MachineRemovalProvider><App/></MachineRemovalProvider></BackendContext></Providers>);}
@@ -30,14 +30,17 @@ it('renders the drawn literal untouched when the surface is off',async()=>{
 });
 const cases:{name:string;patch:Partial<AppUpdateStatus>;desc:string;button?:string;ok?:boolean}[]=[
  {name:'unsupported',patch:{supported:false},desc:'0.1.10 · there is no desktop build for this machine.'},
- {name:'apply failed',patch:{lastApply:{version:'0.1.12',phase:'failed',at:'2026-09-10T00:00:00Z',error:'boom'}},desc:'0.1.10 · installing 0.1.12 did not finish.',button:'Try again'},
+ {name:'apply failed',patch:{lastApply:{version:'0.1.12',phase:'failed',at:'2026-09-10T00:00:00Z',error:'boom'},newer:false},desc:'0.1.10 · installing 0.1.12 did not finish.',button:'Try again'},
+ // A stale marker never hides a newer release: the failure is said first and the download still offered.
+ {name:'apply failed with a newer release',patch:{lastApply:{version:'0.1.11',phase:'failed',at:'2026-09-10T00:00:00Z',error:'boom'}},desc:'Installing 0.1.11 did not finish: boom 0.1.10 · 0.1.12 available (win32-x64 build).',button:'Download'},
  {name:'probe skipped',patch:{probe:'skipped',latest:null,newer:false},desc:'0.1.10 · release advertisements are not checked on this machine.'},
  {name:'probe failed',patch:{probe:'failed',newer:false},desc:'0.1.10 · could not reach github.com to check for a newer app.',button:'Check again'},
  // An empty cache is not evidence of being up to date: nothing has been read from GitHub yet.
  {name:'never probed',patch:{latest:null,latestAt:null,newer:false},desc:'0.1.10 · no release advertisement has been read on this machine yet.',button:'Check again'},
- {name:'up to date',patch:{newer:false},desc:'0.1.10 · up to date',ok:true},
+ // "Up to date" is a claim about a cache, so the row always offers the probe that can disprove it.
+ {name:'up to date',patch:{newer:false},desc:'0.1.10 · up to date',ok:true,button:'Check again'},
  {name:'downloaded',patch:{staged:'0.1.12'},desc:'0.1.10 · 0.1.12 downloaded and verified.',button:'Install now'},
- {name:'newer available',patch:{},desc:'0.1.10 · 0.1.12 available.',button:'Download'},
+ {name:'newer available',patch:{},desc:'0.1.10 · 0.1.12 available (win32-x64 build).',button:'Download'},
 ];
 it.each(cases)('renders full mode $name',async({patch,desc,button,ok})=>{
  await configure('full',patch);open();await waitFor(()=>expect(group()).toHaveTextContent(desc));
@@ -95,7 +98,7 @@ it('persists all three policies and explains each choice before selection',async
 });
 it('streams download output and Cancel reaches the active Run',async()=>{
  await configure();const run=createRun(async ctx=>{ctx.print('Fetching the verified release…');await ctx.sleep(60_000);return {ok:true as const,value:{version:'0.1.12',staged:true,notPublished:false,alreadyStaged:false}};});const cancel=vi.spyOn(run,'cancel');vi.spyOn(backend.appUpdate,'stage').mockReturnValue(run);
- open();fireEvent.click(await screen.findByRole('button',{name:'Download'}));expect(await screen.findByRole('button',{name:'Downloading…'})).toBeDisabled();expect(group()).toHaveTextContent('0.1.10 · downloading 0.1.12…');expect(group()).toHaveTextContent('Fetching the verified release…');fireEvent.click(screen.getByRole('button',{name:'Cancel'}));await waitFor(()=>expect(cancel).toHaveBeenCalledOnce());
+ open();fireEvent.click(await screen.findByRole('button',{name:'Download'}));expect(await screen.findByRole('button',{name:'Downloading…'})).toBeDisabled();expect(group()).toHaveTextContent('0.1.10 · downloading 0.1.12 (win32-x64)…');expect(group()).toHaveTextContent('Fetching the verified release…');fireEvent.click(screen.getByRole('button',{name:'Cancel'}));await waitFor(()=>expect(cancel).toHaveBeenCalledOnce());
 });
 it.each([true,false])('renders a stage outcome with notPublished=%s',async notPublished=>{
  await configure();vi.spyOn(backend.appUpdate,'stage').mockImplementation(()=>createRun(async()=>notPublished?{ok:true,value:{version:'0.1.12',staged:false,notPublished:true,alreadyStaged:false}}:{ok:false,error:'checksum failed'}));open();fireEvent.click(await screen.findByRole('button',{name:'Download'}));

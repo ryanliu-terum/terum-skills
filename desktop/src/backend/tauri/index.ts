@@ -485,6 +485,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     onFailed: publish('stamp'),
   });
   const workflowGate = createWorkflowGate(() => { if (!retired) refreshPolicy.trigger(); });
+  // The launch file's write time this adapter last acted on; undefined until the first read.
+  let actedLaunchAt: string | null | undefined;
   const onWindowFocus = () => { markStale(); refreshPolicy.trigger(); };
   retireWindowListeners?.();
   let retired = false; let unlistenNativeFocus: (() => void) | undefined;
@@ -649,6 +651,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async setWindowBackground(color) { try { await getCurrentWindow().setBackgroundColor(color); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async launchContext() {
       const launch = await state();
+      actedLaunchAt = launch?.writtenAt ?? null;
       return launch ? { writtenAt: launch.writtenAt, ...(launch.target ? { target: launch.target } : {}), ...(launch.intent ? { intent: launch.intent } : {}) } : null;
     },
     async refreshLaunch() {
@@ -657,9 +660,13 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       if (hello === null) { featuresOnce = undefined; hello = null; }
       generation++;
       markStale();
-      // A relaunch is a terminal action landing: the throttle must not hide what it just changed.
-      refreshPolicy.reset();
-      return backend.launchContext();
+      const previous = actedLaunchAt;
+      const next = await backend.launchContext();
+      // A relaunch is a terminal action landing and must not hide behind the throttle. The coordinator calls this on
+      // every window focus too, and a focus that re-reads an unchanged launch file is not a relaunch: resetting there
+      // made the once-a-minute throttle a once-per-focus fetch. The evidence is the file's own write time.
+      if ((next?.writtenAt ?? null) !== previous) refreshPolicy.reset();
+      return next;
     },
     onLaunchRequest(listener) {
       let disposed = false;

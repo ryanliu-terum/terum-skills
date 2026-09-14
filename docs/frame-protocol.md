@@ -266,7 +266,9 @@ an ARM64 machine. The last two exist because Prism, the x64-on-ARM64 emulator, s
 `PROCESSOR_ARCHITEW6432` at all: an x64 Node there sees `PROCESSOR_ARCHITECTURE=AMD64` and only the identifier
 (`ARMv8 (64-bit) Family 8 …, Qualcomm …`) still names the silicon; until this was read, such a machine was
 served the x64 installer on every download. Both fields are plain strings and an unrecognised value passes
-through unchanged, so never switch on them exhaustively.
+through unchanged, so never switch on them exhaustively. The ladder cannot see everything: an ARM64 machine
+whose identifier does not start with `ARM` still reads as x64, and macOS under Rosetta 2 is not detected at all
+(p-arch A1), so `hostArch === processArch` is not proof of a native process.
 
 `app` reports the same condition as `emulation`, either `"win32-arm64-on-x64"` or `null`, and prints one
 line telling the person to install the ARM64 build of Node. It still installs the app: this is a warning,
@@ -396,14 +398,22 @@ as `no-clone` and skipped — because it runs unattended.
 
 The result is `{ changed, teams, notices }`. `notices` carries run-wide lines already phrased for a person — one concern per entry, no diagnostics — because a frame-driven caller may render them verbatim: the desktop app prints them under Settings ▸ Sync after an automatic fetch that did not refresh every team. Each attempted team reports `team`, its own `changed`,
 the `head` it ended on (or null when HEAD could not be read), a
-`state` of `refreshed` | `busy` | `unreachable` | `no-clone` | `error`, and a `detail` line for any
-state other than `refreshed`. Top-level `changed` is true when any team moved; a tracked tree that was
+`state` of `refreshed` | `fresh` | `busy` | `unreachable` | `no-clone` | `error`, and a `detail` line for any
+state other than `refreshed` or `fresh`. `fresh` is hook mode only: the clone was fetched within the hour, so the
+session-start hook left it alone (§8); a plain `sync` always fetches. Top-level `changed` is true when any team moved; a tracked tree that was
 dirty and got reset counts as moved, because the read verbs now see something different.
 
 A successful fetch writes a JSON `{head, at}` stamp, which means *this clone was fetched at this time*
 — never *these skills were reconciled*. A team whose HEAD could not be read is deliberately left
-unstamped. A fetch that outruns the deadline is killed, so a background
-caller never wedges, and Git terminal prompts are disabled for the whole run.
+unstamped. The stamp is bookkeeping, not the answer: a stamp that cannot be written leaves `state` and
+`changed` as the fetch decided them and adds one notice (`<team>: fetched, but the fetch stamp could not be
+written (…)`). A fetch that outruns the deadline is killed, so a background caller never wedges. A git lock
+file left behind by a killed git (`Unable to create '….lock': File exists`) that is older than ten minutes and
+lies inside the clone's own `.git` is removed and the step retried once, under the writer lock that proves no
+terum-skills process is writing the clone; a younger one is named in `detail` and never touched. Every prompt
+route is closed for the whole run: no terminal prompt, `GIT_ASKPASS` cleared (an inherited GUI askpass is the
+dialog a background verb must never raise), `SSH_ASKPASS_REQUIRE=never`, and `credential.interactive=false`
+appended after any `GIT_CONFIG_*` pairs the caller passed.
 
 `--hook` is the session-start entry and must never be driven over frames (rule 2). It is also the one
 carve-out from "nothing on this machine is changed": it may replace Terum's own bundled

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
@@ -6,7 +6,7 @@ import { stampedAt, stampIsFresh } from '../../lib/hook.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { systemRunner, type RunOptions } from '../../lib/runner.js';
 import { bareTeam, pushFromSeed, cloneWithIdentity, git, holdCloneLock, denyingRunner, fakeGh, ScriptedPrompter, clean, exists, wrapRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
-import { run, REFRESH_DEADLINE_MS, SUCCESSOR_CACHE_MS } from '../refresh.js';
+import { nonInteractiveGitEnv, run, REFRESH_DEADLINE_MS, SUCCESSOR_CACHE_MS } from '../refresh.js';
 import { run as evalReport } from '../evalReport.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -182,7 +182,8 @@ describe('refresh', () => {
     // §4.2 supplies the non-interactive env through refreshClone; local HEAD/status/origin probes do not contact credentials.
     const refreshCalls = calls.filter(c => c.args[0] === 'fetch' || c.args[0] === 'reset');
     expect(refreshCalls.map(c => c.args[0])).toEqual(['fetch', 'reset']);
-    for (const call of refreshCalls) expect(call.options?.env).toMatchObject({ GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.interactive', GIT_CONFIG_VALUE_0: 'false' });
+    // The pair index follows whatever GIT_CONFIG_* the test process itself carries, so the expectation is the producer's own answer plus the pair being present.
+    for (const call of refreshCalls) { expect(call.options?.env).toEqual(nonInteractiveGitEnv()); expect(Object.entries(call.options?.env ?? {}).filter(([key, value]) => key.startsWith('GIT_CONFIG_KEY_') && value === 'credential.interactive')).toHaveLength(1); }
   });
   it('reports an empty head as null rather than guessing', async () => {
     const { store } = await setup();
@@ -303,5 +304,46 @@ describe('refresh when the team repository no longer exists (2026-09-13: terum-s
     expect(deniedOutcome.value?.teams[0]?.missing).toBeUndefined();
     expect(asked).toEqual([]);
     void deniedRunner;
+  });
+
+  it('appends its credential pair after the GIT_CONFIG_* pairs the caller passed, and clears every askpass route', () => {
+    expect(nonInteractiveGitEnv({})).toEqual({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS_REQUIRE: 'never', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.interactive', GIT_CONFIG_VALUE_0: 'false' });
+    expect(nonInteractiveGitEnv({ GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'http.proxy', GIT_CONFIG_VALUE_0: 'http://proxy:3128', GIT_CONFIG_KEY_1: 'http.extraHeader', GIT_CONFIG_VALUE_1: 'X-A: b', GIT_ASKPASS: '/usr/bin/some-gui-askpass' }))
+      .toEqual({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS_REQUIRE: 'never', GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_2: 'credential.interactive', GIT_CONFIG_VALUE_2: 'false' });
+    // A count git itself would reject is treated as none, so the pair is still reachable.
+    for (const bogus of ['-1', '1.5', 'many', '']) expect(nonInteractiveGitEnv({ GIT_CONFIG_COUNT: bogus })).toMatchObject({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.interactive' });
+  });
+  it('removes a git lock file older than ten minutes and fetches; a young one is reported by path and never deleted', async () => {
+    const { store, clone, seed } = await setup(); await pushFromSeed(seed, 'update.txt', 'new');
+    const lock = join(clone, '.git', 'index.lock'); await writeFile(lock, ''); const old = new Date(Date.now() - 20 * 60_000); await utimes(lock, old, old);
+    expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { changed: true, teams: [{ team: 'team', state: 'refreshed', changed: true }] } });
+    expect(await exists(lock)).toBe(false);
+    await pushFromSeed(seed, 'update2.txt', 'newer'); await writeFile(lock, '');
+    const young = await run({ config: store }, new ScriptedPrompter());
+    expect(young).toMatchObject({ ok: true, value: { changed: false, teams: [{ team: 'team', state: 'error', changed: false, detail: expect.stringContaining(`The lock ${lock} is `) }] } });
+    expect(young.value?.teams[0]?.detail).toContain('delete it and sync again');
+    expect(await exists(lock)).toBe(true);
+  });
+  it('reports a fetch that landed as refreshed even when the stamp cannot be written, with a notice instead', async () => {
+    const { store, seed } = await setup(); await pushFromSeed(seed, 'update.txt', 'new');
+    const runDir = join(store.root, 'run'); await mkdir(runDir, { recursive: true }); await chmod(runDir, 0o500);
+    try {
+      const result = await run({ config: store }, new ScriptedPrompter());
+      expect(result).toMatchObject({ ok: true, value: { changed: true, teams: [{ team: 'team', state: 'refreshed', changed: true }] } });
+      expect(result.value?.notices).toEqual([expect.stringMatching(/^team: fetched, but the fetch stamp could not be written \(.+\); status may call the clone stale until the next sync\.$/)]);
+      expect(await stampedAt(store.root, 'team')).toBeNull();
+    } finally { await chmod(runDir, 0o700); }
+  });
+  it('--hook leaves a clone fetched within the hour alone and reports it as fresh; a plain sync still fetches', async () => {
+    const { store, clone, seed } = await setup();
+    expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { teams: [{ state: 'refreshed' }] } });
+    const head = (await git(['rev-parse', 'HEAD'], clone)).trim();
+    await pushFromSeed(seed, 'update.txt', 'new');
+    const hook = new ScriptedPrompter();
+    expect(await run({ config: store, hook: true }, hook)).toMatchObject({ ok: true, value: { changed: false, teams: [{ team: 'team', state: 'fresh', changed: false, head }] } });
+    expect(hook.lines).toEqual(['{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}']);
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).toBe(head);
+    expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { changed: true, teams: [{ state: 'refreshed', changed: true }] } });
+    expect((await git(['rev-parse', 'HEAD'], clone)).trim()).not.toBe(head);
   });
 });

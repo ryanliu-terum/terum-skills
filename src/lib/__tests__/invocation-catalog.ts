@@ -1746,4 +1746,22 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "policy": "prose",
     "pattern": "`eval <skill> <skill>… [--parallel n] [--batch n] [--window overnight|later] [--pending]` (past setup, 2026-09-13) runs the wizard's Now / In batches / Overnight choices as flags over any set of Library skills, or over `--pending`, the wizard's own candidate set (every shared skill with no receipt for its current version; needs a team). Several skills run as one batch after a single agent probe, `--parallel` deep (default four, never more than the batch). `--batch n` runs n at a time and asks `Continue with the next …?` before each further batch; a declined continuation queues the remainder for `later`, and a non-interactive caller runs every batch unasked. `--window` queues instead of running and never probes. The result is `{ mode: \"ran\" | \"queued\", team, skills, ok, failed, queued, stoppedAfter? }`; a run with failures is `ok:false` with that partial value, exactly like a drain. Print and `progress` frames name each skill and `progress.total` is the whole set. One skill with none of those flags is the ordinary single eval; the queue modes refuse skills, `--batch` and `--pending`."
   },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "session-start hook left it alone (§8); a plain `sync` always fetches. Top-level `changed` is true when any team moved; a tracked tree that was"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "terum-skills process is writing the clone; a younger one is named in `detail` and never touched. Every prompt"
+  },
+  {
+    "file": "src/lib/teamRepo.ts",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "// freeze on a working tree that never moves again. The writer lock held here proves no terum-skills process"
+  },
 ];

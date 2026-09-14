@@ -163,7 +163,7 @@ export type AppUpdatePhase='waiting'|'installing'|'launched'|'failed';
 export type AppUpdateReason='on-close'|'overnight'|'manual';
 export interface AppUpdateMarker {version:string;phase:AppUpdatePhase;at:string;error:string|null}
 /** The app's own update state. `newer` is computed in the adapter from `latest` vs the running build. */
-export interface AppUpdateStatus {acknowledgementError?:string;reason?:AppUpdateReason;appVersion:string;supported:boolean;cliVersion:string|null;latest:string|null;latestAt:string|null;probe:'ok'|'skipped'|'cached'|'failed';probeError:string|null;staged:string|null;installed:string[];lastApply:AppUpdateMarker|null;newer:boolean;ppid:number}
+export interface AppUpdateStatus {acknowledgementError?:string;reason?:AppUpdateReason;appVersion:string;/** The build the CLI resolved for this machine (`win32-arm64`, `darwin-x64`, `unsupported`…), so the row can say which build it downloads. */platform:string;supported:boolean;cliVersion:string|null;latest:string|null;latestAt:string|null;probe:'ok'|'skipped'|'cached'|'failed';probeError:string|null;staged:string|null;installed:string[];lastApply:AppUpdateMarker|null;newer:boolean;ppid:number}
 export interface AppUpdateStaged {version:string;staged:boolean;notPublished:boolean;alreadyStaged:boolean}
 export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void;readonly ready?:Promise<void>;flush?():Promise<void>;subscribe?(listener:()=>void):Subscription}
 export type Subscription=()=>void;

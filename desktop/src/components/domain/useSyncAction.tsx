@@ -6,6 +6,7 @@ import { Button } from '../ui/Button';
 import { WorkflowPopup } from './WorkflowPopup';
 import { MissingTeam } from './MissingTeam';
 import { useWorkflow } from './useWorkflow';
+import { describeRefreshState, syncSummary } from './refresh-state-copy';
 /** Manual sync fetches team clones; background refreshes use the same fetch-only path. */
 export function useSyncAction() {
  const backend=useBackend(),action=useWorkflow();
@@ -29,9 +30,9 @@ export function useSyncAction() {
  }
  const popup=open?<Dialog open onOpenChange={value=>{if(!action.busy)setOpen(value);}}><WorkflowPopup><DialogTitle>Sync now</DialogTitle>
   <div>Sync fetches each team clone and leaves your local Library unchanged.</div>
-  <div role="status">{action.busy?'Sync is running.':action.notice??(finished?'Sync finished.':'Ready to sync.')}</div>
+  <div role="status">{action.busy?'Sync is running.':action.notice??(finished?(outcome?syncSummary(outcome):'Sync finished.'):'Ready to sync.')}</div>
   {moved&&<div role="status">Moved to {moved.name}: {moved.restored?.length??0} skill(s) placed again{moved.missing?.length?`, ${moved.missing.length} not shared there (${moved.missing.join(', ')})`:''}{moved.failed?.length?`, ${moved.failed.length} could not be placed`:''}.</div>}
-  {outcome&&<>{outcome.notices.map((notice,index)=><div key={index}>{notice}</div>)}{outcome.teams.filter(team=>team.state!=='refreshed').map((team,index)=>team.missing?<MissingTeam key={index} team={team} busy={action.busy} onMove={ownerRepo=>{void move(team,ownerRepo);}}/>:<div key={index}>{team.team}: {team.state}{team.detail?' · '+team.detail:''}</div>)}</>}
+  {outcome&&<>{outcome.notices.map((notice,index)=><div key={index}>{notice}</div>)}{outcome.teams.filter(team=>team.state!=='refreshed').map((team,index)=>team.missing?<MissingTeam key={index} team={team} busy={action.busy} onMove={ownerRepo=>{void move(team,ownerRepo);}}/>:<div key={index} role="alert">{team.team}: {describeRefreshState(team.state)}{team.detail?' · '+team.detail:''}</div>)}</>}
   {action.lines.map((line,index)=><div key={index}>{line}</div>)}
   {action.error&&<div role="alert">{action.error}</div>}
   <Button disabled={action.busy} onClick={()=>setOpen(false)}>Close</Button>

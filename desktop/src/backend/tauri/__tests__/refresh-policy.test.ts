@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Result } from '../../types';
-import { createRefreshPolicy, REFRESH_MIN_INTERVAL_MS, type CliRefresh } from '../refresh';
+import { createRefreshPolicy, createWorkflowGate, REFRESH_MIN_INTERVAL_MS, type CliRefresh } from '../refresh';
 
 const value = (changed = false): CliRefresh => ({ changed, notices: [], teams: [{ team: 't', state: 'refreshed', changed, head: 'a'.repeat(40) }] });
 function setup(result: Result<CliRefresh> = { ok: true, value: value() }) {
@@ -128,5 +128,18 @@ describe('background refresh policy', () => {
     const { policy } = setup({ ok: false, error: 'Could not fetch team\nLong diagnostics', value: { changed: false, notices: ['Skipping acme: Permission denied (publickey).'], teams: [] } });
     policy.trigger(); await policy.settled();
     expect(policy.last()).toEqual({ at: 10_000_000, state: 'failed', detail: 'Could not fetch team\nLong diagnostics', notices: ['Skipping acme: Permission denied (publickey).'] });
+  });
+});
+
+describe('createWorkflowGate', () => {
+  it('counts write verbs only, ignores reads and the update check, and reports idle exactly once per busy period', () => {
+    const onIdle = vi.fn(); const gate = createWorkflowGate(onIdle);
+    expect(gate.busy()).toBe(false);
+    const install = gate.start(['install', 'x']), evaluate = gate.start(['eval', '--', 'y']); expect(gate.busy()).toBe(true);
+    const status = gate.start(['status']), check = gate.start(['app-update', '--check']); status(); check();
+    expect(gate.busy()).toBe(true); expect(onIdle).not.toHaveBeenCalled();
+    install(); install(); expect(gate.busy()).toBe(true); expect(onIdle).not.toHaveBeenCalled();
+    evaluate(); expect(gate.busy()).toBe(false); expect(onIdle).toHaveBeenCalledTimes(1); evaluate(); expect(onIdle).toHaveBeenCalledTimes(1);
+    gate.start(['app-update', '--stage', '--release', '1.0.0'])(); expect(onIdle).toHaveBeenCalledTimes(2); expect(gate.busy()).toBe(false);
   });
 });

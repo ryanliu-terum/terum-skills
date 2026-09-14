@@ -275,7 +275,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   validate:args=>read('library',()=>{const name=args.ref??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0,repairable:0}):fail(detail.error);}),
   update:()=>read('settings',()=>ok({running:design.CLI_VERSION,latest:design.CLI_LATEST,observation:'newer',launch:'npx',description:`${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`,advice:updateAdvice,lines:[`terum-skills ${design.CLI_VERSION}`,`Latest advertised release: ${design.CLI_LATEST}`,...updateAdvice]})),
   appUpdate:{
-   check:()=>read('settings',()=>ok({appVersion:design.APP_VERSION,supported:false,cliVersion:design.CLI_VERSION,latest:design.CLI_LATEST,latestAt:null,probe:'skipped' as const,probeError:null,staged:null,installed:[],lastApply:null,newer:false,ppid:0})),
+   check:()=>read('settings',()=>ok({appVersion:design.APP_VERSION,supported:false,cliVersion:design.CLI_VERSION,latest:design.CLI_LATEST,latestAt:null,probe:'skipped' as const,probeError:null,staged:null,installed:[],lastApply:null,newer:false,ppid:0,platform:'unsupported'})),
    stage:()=>long('settings',async()=>fail('The mock backend does not download or install anything.')),
    apply:async()=>fail('The mock backend does not download or install anything.'),
    armOnClose:async version=>{appUpdateCalls.push(['armOnClose',version]);return ok(undefined);},

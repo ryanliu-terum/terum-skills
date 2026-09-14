@@ -113,6 +113,12 @@ describe('adapter background refresh', () => {
     const b = fixture(); await launch(b); vi.setSystemTime(Date.now() + REFRESH_MIN_INTERVAL_MS + 1); focus();
     await vi.waitFor(() => expect(refreshes(b)).toHaveLength(2)); expect(refreshes(a)).toHaveLength(1); await drain();
   });
+  it('refreshLaunch clears the throttle only when the launch file changed: the coordinator re-reads it on every focus', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] }); const f = fixture(); const backend = await launch(f);
+    await backend.refreshLaunch(); await drain(); focus(); await vi.waitFor(() => expect(refreshes(f)).toHaveLength(2)); await drain();
+    await backend.refreshLaunch(); await drain(); focus(); await drain(); expect(refreshes(f)).toHaveLength(2);
+    vi.setSystemTime(Date.now() + REFRESH_MIN_INTERVAL_MS + 1); await backend.refreshLaunch(); await drain(); focus(); await vi.waitFor(() => expect(refreshes(f)).toHaveLength(3)); await drain();
+  });
   it('refreshLaunch clears the throttle so the next focus refreshes immediately', async () => {
     vi.useFakeTimers({ toFake: ['Date'] }); const f = fixture(); const backend = await launch(f);
     await backend.refreshLaunch(); await drain(); expect(refreshes(f)).toHaveLength(1); focus();

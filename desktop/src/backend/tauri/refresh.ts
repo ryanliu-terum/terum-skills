@@ -35,7 +35,7 @@ export const cliRefresh = z.object({
   notices: z.array(z.string()),
   teams: z.array(z.object({
     team: z.string(),
-    state: z.enum(['refreshed', 'busy', 'unreachable', 'no-clone', 'error']),
+    state: z.enum(['refreshed', 'fresh', 'busy', 'unreachable', 'no-clone', 'error']),
     changed: z.boolean(),
     head: z.string().nullable(),
     detail: z.string().optional(),

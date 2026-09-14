@@ -446,3 +446,18 @@ it('says nothing about a failure after an automatic fetch that refreshed every t
  expect(await screen.findByText(/Automatic: at launch and when you come back to the app/)).toBeVisible();
  expect(screen.queryByText(/Last automatic fetch failed/)).toBeNull();
 });
+
+it('Sync now says what happened, not that it finished: every unfetched team is an alert in words',async()=>{
+ vi.spyOn(backend,'sync').mockImplementation(()=>createRun(async ctx=>{ctx.print('Fetching team clones…');return {ok:true,value:{notices:['acme: not refreshed (unreachable) — boom'],changed:false,teams:[{team:'acme',state:'unreachable',detail:'boom'},{team:'beta',state:'busy'}]}};}));
+ open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));
+ const dialog=await screen.findByRole('dialog',{name:'Sync now'});
+ await within(dialog).findByText('Sync did not fetch any team.',{selector:'[role=status]'});
+ const alerts=within(dialog).getAllByRole('alert').map(alert=>alert.textContent);
+ expect(alerts).toEqual(['acme: could not reach the remote · boom','beta: another process holds this clone; try again in a moment']);
+ cleanup();
+ vi.spyOn(backend,'sync').mockImplementation(()=>createRun(async()=>({ok:true,value:{notices:[],changed:true,teams:[{team:'acme',state:'refreshed'},{team:'beta',state:'no-clone',detail:'no clone for this team on this machine'}]}})));
+ open('#/settings/sync');fireEvent.click(await screen.findByRole('button',{name:'Sync now'}));
+ const again=await screen.findByRole('dialog',{name:'Sync now'});
+ await within(again).findByText('Fetched 1 of 2 teams.',{selector:'[role=status]'});
+ expect(within(again).getByRole('alert')).toHaveTextContent('beta: no usable clone on this machine · no clone for this team on this machine');
+});
