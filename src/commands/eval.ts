@@ -24,7 +24,7 @@ import { type Runner, systemRunner } from '../lib/runner.js';
 import { inspectSkillSource, sourceFiles } from '../lib/skill-source.js';
 import { findSkill, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
 import { parseSkillFrontmatter } from '../lib/schema.js';
-import { resolveLibrarySkill, unusableSkillFolder } from '../lib/local-skills.js';
+import { refIsPath, resolveLibrarySkill, unusableSkillFolder } from '../lib/local-skills.js';
 import { parseVersionFolder, type SkillVersion } from '../lib/versions.js';
 import { refreshClone, lockWait, listVersions, skillVersions } from '../lib/teamRepo.js';
 
@@ -101,13 +101,20 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // §6.3: the bytes come from the Library, not the clone. The clone is still read for the incumbent
     // arm and the policy, but a folder that belongs to no team is evaluable.
     const local = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.ref);
-    if (!local) return failure(`No local skill folder named \`${args.ref}\` in your library; install it from the marketplace first, or pass \`--path\`.`);
+    // The ref is a name or a folder path (refIsPath): there is no separate --path flag, so the miss must
+    // not promise one. A path outside every Library root is refused like an unknown name — the roots are
+    // the only place a ref may land — and the sentence says which roots would have held it.
+    if (!local) return failure(refIsPath(args.ref)
+      ? `\`${args.ref}\` is not a skill folder in your library (~/.claude/skills or an added project's .claude/skills); add the project holding it with \`project add\`, or install it from the marketplace first.`
+      : `No local skill folder named \`${args.ref}\` in your library; install it from the marketplace first, or pass the folder's path.`);
     // D72: the folder is there but the scan rejected it or could not read it. Say so, with the
     // scan's own detail against the path — the miss above is reserved for a name no root holds.
     const unusable = unusableSkillFolder(local);
     if (unusable !== undefined) return failure(unusable);
     // Best-effort, never a gate: a folder the team has never seen is still evaluable (§6.3).
-    const record = clone === null || teamName === null ? undefined : await findSkill(clone, teamName, args.ref);
+    // By the FOLDER's name, not the ref: a path ref would never match a team skill, and the incumbent arm
+    // would then silently treat a published skill as one the team has never seen.
+    const record = clone === null || teamName === null ? undefined : await findSkill(clone, teamName, local.name);
 
     // Pin the evaluated version and materialize its immutable snapshot BEFORE anything reads
     // skill content: a concurrent sync can refresh the clone mid-run, and the receipt's tree

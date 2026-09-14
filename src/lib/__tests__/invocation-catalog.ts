@@ -1177,7 +1177,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 376,
     "policy": "prose",
-    "pattern": "| | `publish <ref> [--project <name>] [--category <name>]` | Publish a local folder as an immutable version directly to main, or reuse identical bytes and attach matching evals. Select a team project (Global by default). Category precedence: declared frontmatter, flag, model suggestion, misc fallback; undeclared categories get a source disclosure. Managed frontmatter is written back locally; a profile offer follows publication |"
+    "pattern": "| | `publish <ref> [--project <name>] [--category <name>]` | Publish a local folder — named by its skill name or its folder path (\`~/…\` accepted) — as an immutable version directly to main, or reuse identical bytes and attach matching evals. Select a team project (Global by default). Category precedence: declared frontmatter, flag, model suggestion, misc fallback; undeclared categories get a source disclosure. Managed frontmatter is written back locally; a profile offer follows publication |"
   },
   {
     "file": "README.md",
@@ -1189,7 +1189,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 378,
     "policy": "prose",
-    "pattern": "| | `eval <skill>` | Evaluate the local skill with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). Publish to share matching receipts. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
+    "pattern": "| | `eval <skill>` | Evaluate the local skill, named by skill name or folder path, with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). Publish to share matching receipts. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
   },
   {
     "file": "README.md",
