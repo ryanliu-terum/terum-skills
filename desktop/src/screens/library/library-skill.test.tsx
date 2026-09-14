@@ -340,8 +340,8 @@ it('resets a local action error when navigating to another path',async()=>{
  expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeVisible();expect(screen.queryByRole('alert')).toBeNull();
  expect(document.querySelector('.detail-repo')).toHaveTextContent('/second/deploy-check');
 });
-// The Library Connect CTA was removed on 2026-09-10 (ratified override, .planning/specs/
-// 2026-09-10-library-mirror-id-sync.md): global skills auto-share at sync by ID check, and the
+// The Library Connect CTA was removed on 2026-09-10 (ratified override): global skills
+// auto-share at sync by ID check, and the
 // empty state's primary is the manual project path — the sidebar's native Add project flow (#102).
 it('the empty library offers Add project as its primary and drives the chooser into project add',async()=>{
  const backend=createMockBackend();const pick=vi.spyOn(backend,'pickFolder');const add=vi.spyOn(backend.projects,'add');

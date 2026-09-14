@@ -1,1 +1,0 @@
-Invoke the `single-fix` skill to triage and conditionally fix a single bug. Pass through any arguments: $ARGUMENTS

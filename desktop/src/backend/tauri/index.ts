@@ -39,7 +39,7 @@ import { isUnderRoot, samePath } from '../../lib/skill-path';
 
 /**
  * The real adapter: every long verb is one `terum-skills --frames <verb>` process (run.ts). What the CLI has
- * no verb for yet is answered honestly with a failing Result that names GAPS.md, so the screens render their
+ * no verb for yet is answered honestly with a failing Result saying so, so the screens render their
  * drawn error states instead of fixture data pretending to be real. Mappings between the CLI's result shapes
  * (src/commands/*.ts) and the seam's DTOs (../types) are here and nowhere else.
  */
@@ -530,7 +530,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     return value.ok ? value : { ...value, error: abbreviateHome(value.error, await home()) };
   }
   const fail = (error: string) => result<never>({ ok: false, error });
-  const gap = (what: string) => fail(`${what} is not available from terum-skills yet: the CLI has no verb that returns it (desktop/GAPS.md). The terminal has everything the app shows here.`);
+  const gap = (what: string) => fail(`${what} is not available from terum-skills yet: the CLI has no verb that returns it. The terminal has everything the app shows here.`);
   const listeners = new Set<(source: ChangeSource) => void>();
   const reads = new Map<string, { promise: Promise<{ result: Result<unknown>; lines: string[] }>; at: number; stale: boolean; refreshing: boolean }>();
   // Every mutation evicts every cached read, and that is deliberate. A targeted map would have to know which
