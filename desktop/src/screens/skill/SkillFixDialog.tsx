@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useBackend } from '../../backend';
 import type { Result, SkillDetail, SkillFileResult, ValidateResult } from '../../backend/types';
 import type { useWorkflow } from '../../components/domain/useWorkflow';
@@ -18,7 +19,7 @@ function teamHoldsSkill(s:Pick<SkillDetail,'teamed'|'knownToTeam'|'teamState'>):
  *  the repaired folder in the same gesture. The workflow is the PAGE's (SkillScreen), as for the file
  *  dialogs, so an outcome outlives the dialog. A validation the Quality tab already holds is reused;
  *  the broken-flag button arrives without one and the dialog asks the CLI itself. */
-export function SkillFixDialog({skill,workflow,validation,publishing,progressLabel,onClose,onDone}:{skill:SkillDetail;workflow:ReturnType<typeof useWorkflow>;validation:Result<ValidateResult>|null;publishing:boolean;progressLabel:string|null;onClose:()=>void;onDone:(value:SkillFileResult,republish:boolean)=>void}) {
+export function SkillFixDialog({skill,workflow,validation,publishing,progressLabel,onClose,onDone,publishOptions}:{skill:SkillDetail;workflow:ReturnType<typeof useWorkflow>;validation:Result<ValidateResult>|null;publishing:boolean;progressLabel:string|null;onClose:()=>void;onDone:(value:SkillFileResult,republish:boolean)=>void;/** The page's publish options (target, category), drawn while republish is ticked so the fix dialog asks what the publish dialog asks. */publishOptions?:ReactNode}) {
  const backend=useBackend(),held=teamHoldsSkill(skill);
  const [plan,setPlan]=useState<Result<ValidateResult>|null>(validation?.value?validation:null),[republish,setRepublish]=useState(held),[result,setResult]=useState<SkillFileResult|null>(null);
  const path=skill.path;
@@ -43,6 +44,7 @@ export function SkillFixDialog({skill,workflow,validation,publishing,progressLab
   {plan!==null&&!plan.ok&&plan.value===undefined?<ErrorLine>{plan.error}</ErrorLine>:null}
   {findings!==null&&findings>0&&!nothing?<Small>{plural(findings,'finding')} reported · anything fix does not cover stays listed for you afterwards.</Small>:null}</div>
  <div className="board-column" style={{gap:2}}><Checkbox checked={republish} disabled={running||nothing} onCheckedChange={value=>setRepublish(value)} label={held?'Republish to the team after fixing':'Publish to the team after fixing'}/><Small>{held?"The team's copy carries the same faults; publishing mints the next version with the fix.":'The team does not hold this skill yet; publishing would share it for the first time.'}</Small></div>
+ {republish&&publishOptions?publishOptions:null}
  {workflow.error?<ErrorLine>{workflow.error}</ErrorLine>:null}{workflow.lines.map((line,i)=><p key={i}>{line}</p>)}
  <TerminalHint command={`npx -y terum-skills@latest skill fix ${path??skill.name}`}/>
  <div className="skill-dialog-actions"><Button disabled={running} onClick={onClose}>Cancel</Button><Button kind="primary" disabled={running||nothing||path===null} onClick={()=>void submit()}>{republish?held?'Fix and republish':'Fix and publish':'Fix'}</Button></div></>}</DialogPopup></Dialog>;

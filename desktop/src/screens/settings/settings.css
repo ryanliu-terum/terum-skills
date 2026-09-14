@@ -2,3 +2,6 @@
 
 /* These design helpers use content-box row heights, unlike setting_row. */
 .settings-loading-row,.placement-head,.placement-footer{box-sizing:content-box}
+
+/* A placement row opens its skill (2026-09-14); the hover tint it already had is the only visual cue, so nothing moves. */
+.placement-row{cursor:pointer}.placement-row:focus-visible{outline:2px solid var(--tk-accent);outline-offset:-2px}

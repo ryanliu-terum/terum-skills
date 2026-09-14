@@ -61,6 +61,7 @@ const teamCases: [string, (backend: Backend) => Promise<unknown>, string[], stri
   ['install project', b => b.install({ ref: '', kind: 'project', project: 'ops', team: 'acme' }).done, ['install', '--team', 'acme', '--', 'project', 'ops'], [LS_LOCAL]],
   ['uninstallSkill', b => b.uninstallSkill({ ref: 'a', team: 'acme' }).done, ['uninstall-skill', '--team', 'acme', '--', 'a']],
   ['publish', b => b.publish({ ref: 'a', team: 'acme' }).done, ['publish', '--team', 'acme', '--', 'a']],
+  ['publish --project --category', b => b.publish({ ref: 'a', project: 'Global', category: 'ops' }).done, ['publish', '--project', 'Global', '--category', 'ops', '--', 'a']],
   ['sync', b => b.sync({ team: 'acme' }).done, ['sync', '--team', 'acme']],
   ['prune', b => b.prune().done, ['prune']],
   ['invite', b => b.invite({ logins: ['mira', 'ravi'], team: 'acme' }).done, ['invite', '--team', 'acme', '--', 'mira', 'ravi']],

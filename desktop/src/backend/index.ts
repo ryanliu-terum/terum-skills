@@ -20,6 +20,8 @@ export function usePrompter(answers:Record<string,string|boolean>):ScriptedPromp
 
 export function useFeatures(){const backend=useBackend();return useQuery({queryKey:['features'],queryFn:()=>backend.features()}).data;}
 export function useCapabilities(){const backend=useBackend();return useQuery({queryKey:['capabilities'],queryFn:()=>backend.capabilities()}).data;}
+/** The machine's `status` for hooks that live outside a screen's own read (host labels, publish defaults): its own key, so it also serves components rendered outside the router; `affects()` invalidates it by the `status` prefix. */
+export function useHostStatus(){const backend=useBackend();return useQuery({queryKey:['status','host'],staleTime:Infinity,queryFn:({signal})=>backend.status(undefined,{signal})}).data;}
 
 export { githubUrl } from './paths';
 export { cloneStateCopy } from './mock/derive';

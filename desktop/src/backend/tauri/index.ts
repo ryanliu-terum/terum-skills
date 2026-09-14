@@ -5,6 +5,7 @@ import { cliEvalMany, evalManyArgv, mapEvalMany } from './eval-many';
 import { z } from 'zod';
 import { createAppUpdate } from './app-update';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { nativePrefs } from './prefs';
 import { SETUP_STEP_KEYS, FEATURE_KEYS } from '../types';
 import type { Features } from '../types';
@@ -727,6 +728,20 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       });
       return () => { disposed = true; unlisten?.(); };
     },
+    onFileDrop(listener) {
+      // The webview's own drag-drop stream (Tauri keeps `dragDropEnabled`, so the OS drop never reaches HTML5 handlers).
+      let disposed = false;
+      let unlisten: (() => void) | undefined;
+      try {
+        void getCurrentWebview().onDragDropEvent(({ payload }) => {
+          if (disposed) return;
+          if (payload.type === 'enter') listener({ kind: 'enter', paths: payload.paths });
+          else if (payload.type === 'leave') listener({ kind: 'leave' });
+          else if (payload.type === 'drop') listener({ kind: 'drop', paths: payload.paths });
+        }).then(stop => { if (disposed) stop(); else unlisten = stop; }, () => { /* Outside the Tauri shell (browser dev, vitest) there is no webview event stream; a drop then simply never arrives, which is the mock's job to serve. */ });
+      } catch { /* Same: getCurrentWebview() throws without the shell's IPC, and there is nothing to clean up. */ }
+      return () => { disposed = true; unlisten?.(); };
+    },
     async features(): Promise<Features> {
       if (!hello) await (featuresOnce ??= cached(['status'], z.unknown()).then(() => undefined));
       return Object.fromEntries(FEATURE_KEYS.map(key => [key, hello?.features[key] ?? false])) as Features;
@@ -929,7 +944,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     // profile writes the clone's people file and, for --name, config.display_name.
     profile: args => run(['profile', ...(args.name === undefined ? [] : ['--name', args.name]), ...(args.bio === undefined ? [] : ['--bio', args.bio]), ...(args.role === undefined ? [] : ['--role', args.role]), ...(args.projects ?? []).flatMap(project => ['--project', project])], cliProfile, value => value, args.name === undefined ? ['clone'] : ['config', 'clone']),
     // publish writes clone team.json/PR branches and registers the current checkout in config.
-    publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), ...(args.project ? ['--project', args.project] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, project: value.project, version: value.version, created: value.created, identicalTo: value.identicalTo, attachedEvals: value.attachedEvals, evalAssets: value.evalAssets, profileAdded: value.profileAdded, projectAdded: value.projectAdded }), ['config', 'clone']),
+    publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), ...(args.project ? ['--project', args.project] : []), ...(args.category ? ['--category', args.category] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, project: value.project, version: value.version, created: value.created, identicalTo: value.identicalTo, attachedEvals: value.attachedEvals, evalAssets: value.evalAssets, profileAdded: value.profileAdded, projectAdded: value.projectAdded }), ['config', 'clone']),
     // Sync fetches team clones; it never changes the local Library or places a skill.
     sync: (args: SyncArgs) => run(['sync', ...(args.team ? ['--team', args.team] : [])], cliRefresh, (value): SyncResult => ({ notices:value.notices,changed:value.changed,teams:value.teams.map(team=>({team:team.team,state:team.state,...(team.detail===undefined?{}:{detail:team.detail}),...(team.missing?{missing:true as const,successors:(team.successors??[]).map(entry=>({ownerRepo:entry.ownerRepo,source:entry.source,teamName:entry.teamName??null,at:entry.at??null})),...(team.lookup===undefined?{}:{lookup:team.lookup}),...(team.summary===undefined?{}:{summary:team.summary})}:{})})) }), ['marketplace', 'stamp']),
     prune: () => run(['prune'], z.unknown(), () => undefined, ['placed']),

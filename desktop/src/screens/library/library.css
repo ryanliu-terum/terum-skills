@@ -19,3 +19,6 @@
 .bulk-publish-row>span[data-state="failed"]{color:var(--tk-bad)}
 .bulk-publish-row>span[data-state="publishing"]{color:var(--tk-text1)}
 .bulk-publish-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+
+/* The OS-drag overlay (2026-09-14): shown only while a folder hovers the window, so no board draws it. */
+.library-drop{position:fixed;inset:12px;z-index:40;display:flex;align-items:center;justify-content:center;border:2px dashed var(--tk-accent);border-radius:10px;background:color-mix(in srgb,var(--tk-accent) 10%,var(--tk-chrome));color:var(--tk-text1);font-size:14px;font-weight:510;pointer-events:none}

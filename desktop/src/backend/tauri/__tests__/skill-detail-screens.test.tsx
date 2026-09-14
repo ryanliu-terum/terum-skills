@@ -275,11 +275,13 @@ it('offers Fix in Quality when a failed validation counts repairable findings; t
  expect(within(dialog).getByText('3 findings reported · anything fix does not cover stays listed for you afterwards.')).toBeVisible();
  expect(validate).toHaveBeenCalledTimes(1);
  expect(within(dialog).getByRole('checkbox',{name:'Republish to the team after fixing'})).toHaveAttribute('aria-checked','true');
+ // Republish asks what the publish dialog asks (desktop-qol): the target, starting on Global when the default is Ask each time.
+ await waitFor(()=>expect(within(dialog).getByRole('combobox',{name:'Publish to'})).toHaveTextContent('Global'));
  expect(fix).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByRole('button',{name:'Fix and republish'}));
  await waitFor(()=>expect(fix).toHaveBeenCalledWith({path:uncPath}));
  // The publish is by folder path, as the page's own Publish is for a folder the team route cannot name.
- await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:uncPath}));
+ await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:uncPath,project:'Global'}));
  expect(await screen.findByText('adopt-agent-tooling was published to acme as Version 2.')).toBeVisible();
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  await waitFor(()=>expect(validate).toHaveBeenCalledTimes(2));

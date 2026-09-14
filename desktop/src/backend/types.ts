@@ -122,7 +122,7 @@ export interface InstalledResult {id:string;name:string;scope:Scope;path:string|
 export interface UninstallArgs {from?:string;team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
 export interface UninstalledResult {id:string;name:string}
 export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
-export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string}
+export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string;/** The skill's terum-category (`--category`): skips the CLI's model suggestion. A declared category in SKILL.md still wins. */category?:string}
 /**
  * §5.3. `version` is the `v<N>` this publish minted, or — when the bytes were byte-identical to a
  * version already in the repo — the one it matched, which `identicalTo` names. `created` is the
@@ -174,6 +174,8 @@ export interface AppUpdateStatus {acknowledgementError?:string;reason?:AppUpdate
 export interface AppUpdateStaged {version:string;staged:boolean;notPublished:boolean;alreadyStaged:boolean}
 export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void;readonly ready?:Promise<void>;flush?():Promise<void>;subscribe?(listener:()=>void):Subscription}
 export type Subscription=()=>void;
+/** A folder dragged from the OS over the window: `enter`/`leave` bracket the hover, `drop` carries the paths (2026-09-14). */
+export type FileDropEvent={kind:'enter';paths:string[]}|{kind:'leave'}|{kind:'drop';paths:string[]};
 export type ChangeSource='config'|'clone'|'marketplace'|'placed'|'stamp';
 /** The last background fetch the app ran by itself: at launch and on window focus, at most once a minute.
  *  Structurally the adapter's own RefreshOutcome (backend/tauri/refresh.ts), restated here so the screens
