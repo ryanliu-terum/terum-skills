@@ -52,7 +52,7 @@ export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   libraryProjects: true, projects: true,
   memberRole: true, localIdentity: true, roles: true,
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
-  disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: false, progress: true,
+  disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: true, progress: true,
   refresh: true, appUpdate: true, reconcile: true,
   serve: true,
 });

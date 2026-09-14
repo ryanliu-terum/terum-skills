@@ -41,8 +41,8 @@ const cases:Case[]=[
  {key:'liftOnCards',route:'/library/global',selector:'[data-testid="skill-card-deploy-check"] .lift-figure',falseText:'—'},
  {key:'runEvalInApp',route:'/skill/deploy-check?tab=evals',selector:'.tab-head button'},
  {key:'runEvalInApp',route:'/skill/deploy-check?tab=evals&dialog=run-eval',selector:'[role="dialog"]'},
- {key:'perCaseEvalTables',cap:true,route:'/skill/deploy-check?tab=evals',selector:'.report-block:has(.report-caption) .board-table',falseText:'per-case'},
- {key:'perCaseEvalTables',cap:true,route:'/inbox/eval-deploy-check',selector:'.report-block:has(.report-caption) .board-table',falseText:'per-case'},
+ {key:'perCaseEvalTables',cap:true,route:'/skill/deploy-check?tab=evals',selector:'.report-block:has(.report-caption) .case-table',falseText:'per-case'},
+ {key:'perCaseEvalTables',cap:true,route:'/inbox/eval-deploy-check',selector:'.report-block:has(.report-caption) .case-table',falseText:'per-case'},
  {key:'offtargetKind',cap:true,route:'/inbox',selector:'[data-testid="inbox-row-alert-offtarget-deploy-check"]'},
  {key:'offtargetKind',cap:true,route:'/settings/inbox',selector:'[aria-label="Alert"]'},
  {key:'machineRegistry',cap:true,route:'/settings/machine',selector:'.settings-group:first-of-type .setting-row:nth-child(2)',absentText:'Other machines'},
@@ -57,7 +57,7 @@ it.each(cases)('$key: $route hides/degrades false and restores the true DOM',asy
  await waitFor(()=>{
   if(c.key==='perCaseEvalTables'){
    expect(screen.getByText('Per-case rows are not in the committed receipt.')).toBeVisible();
-   expect(screen.queryByText('Per-case check pass rate and round record, candidate vs baseline.',{exact:false})).toBeNull();
+   expect(screen.queryByText('Per-case results by arm',{exact:false})).toBeNull();
   }else if(c.key==='memberRole'){
    expect(html(c.selector)).not.toContain('founder');expect(html(c.selector)).not.toBe(before);
   }else if(c.falseText){
