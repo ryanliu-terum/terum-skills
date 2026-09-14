@@ -351,6 +351,9 @@ export async function dashboardTeam(options: { storeUnderHome?: boolean; localRe
   // A stamp three hours old: stale.
   await writeStamp(store.root, 'acme', { head: 'fixture', at: '2026-09-13T09:00:00Z' });
   const stampAt = new Date(DASHBOARD_NOW - 3 * 60 * 60_000); await utimes(join(store.root, 'run', 'acme.stamp'), stampAt, stampAt);
+  // pin every Library SKILL.md mtime so "updated" cells are stable across runs
+  const fixedMtime = new Date(DASHBOARD_NOW);
+  await Promise.all(Object.values(paths).map((folder) => utimes(join(folder, 'SKILL.md'), fixedMtime, fixedMtime)));
   return { root: team.root, home, store, clone, bare: team.bare, runner: mappedRunner(remote, team.bare), projectRoot, paths };
 }
 

@@ -170,3 +170,7 @@ Settings ▸ Evals with the onboarding prompt dialog (the overnight row, and sel
 description under each choice). The app is the reference for all three: the canvas is redrawn to match it, and
 none of them should be reverted to the drawn version. The affected boards stay `in-progress` only until that
 redraw lands; see the deliberate-deviation entries in FIDELITY.md for the per-board detail.
+
+## 2026-09-13 — the CLI renders boards; `policies.ts` is the desktop's twin
+
+- `src/lib/render/policies.ts` (a leaf: imports nothing) carries the verdict band, half-even lift, receipt summary, orderings and estimate rules the desktop keeps in `desktop/src/backend/mock/derive.ts`, `desktop/src/backend/receipt-summary.ts` and `desktop/src/backend/score-fractions.ts`, with the desktop's own examples as its tests. Follow-up: import it from the desktop and delete the copies, so a rule changes in one place.

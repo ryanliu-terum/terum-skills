@@ -1,12 +1,20 @@
-import { lstat, readFile } from 'node:fs/promises';
+import { lstat, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { run as ls } from '../../commands/ls.js';
 import { run as status } from '../../commands/status.js';
 import { run as evalReport } from '../../commands/evalReport.js';
-import { DASHBOARD_IDS, dashboardTeam, emptyMachine, redact, ScriptedPrompter } from './fixtures.js';
+import { DASHBOARD_IDS, DASHBOARD_NOW, dashboardTeam, emptyMachine, redact, ScriptedPrompter } from './fixtures.js';
 
 describe('dashboardTeam()', () => {
+  it('pins every Library SKILL.md mtime to DASHBOARD_NOW', async () => {
+    const f = await dashboardTeam();
+    expect(Object.keys(f.paths)).toHaveLength(4);
+    for (const folder of Object.values(f.paths)) {
+      expect((await stat(join(folder, 'SKILL.md'))).mtimeMs).toBe(DASHBOARD_NOW);
+    }
+  });
+
   it('builds a team the boards can show: three skills, three people, receipts at two versions, one invalid', async () => {
     const f = await dashboardTeam();
     const team = await ls({ config: f.store, runner: f.runner, home: f.home, cwd: f.home }, new ScriptedPrompter());

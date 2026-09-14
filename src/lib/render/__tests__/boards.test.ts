@@ -1,5 +1,3 @@
-import { utimes } from 'node:fs/promises';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { run as ls } from '../../../commands/ls.js';
 import { run as search } from '../../../commands/search.js';
@@ -54,8 +52,6 @@ const snapshot = (name: string, backend: string): string => `./__snapshots__/${n
 let team: DashboardFixture | undefined;
 const fixture = async (): Promise<DashboardFixture> => {
   const value = team ??= await dashboardTeam();
-  const fixedMtime = new Date(DASHBOARD_NOW);
-  await Promise.all(Object.values(value.paths).map((folder) => utimes(join(folder, 'SKILL.md'), fixedMtime, fixedMtime)));
   return value;
 };
 afterEach(() => { team = undefined; });

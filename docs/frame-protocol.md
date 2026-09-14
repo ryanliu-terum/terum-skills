@@ -20,6 +20,8 @@ One per line, in this order: `hello` once, then any number of `print` and `ask`,
 
 The process exit code matches `result.exitCode`. The failure line is also written to stderr, exactly as without the flag, so a shell that only watches the exit code and stderr still works.
 
+`--format` (the Markdown / terminal / JSON boards of `README.md`) and `--frames` are exclusive: a run given both ends in one `result` frame with the error `--frames is already a machine format; drop --format.` and exit 1. `serve` refuses `--format` on stderr too (`serve answers over --frames; drop --format.`). A usage error (unknown verb, missing argument, bad option value) under any `--format` writes nothing to stdout — one stderr message and exit 1, nothing runs; a reader that sees exit 1 with empty stdout reads stderr.
+
 ## Frames the shell writes (stdin)
 
 | Frame | Shape | Meaning |
@@ -173,6 +175,8 @@ viewer's own; a `localEval` without `mine` comes from an older CLI and should ke
 seeded copy carries a version and names its runner, an own run carries none).
 Team `ls` includes `people` with automatic `installed` records and curated `profile` entries.
 
+`ls` also carries `viewer: { handle, team }` on every team read and, on `ls member`, `ls project` and `ls skill`, a `selection` (`{ kind: 'member', handle }`, `{ kind: 'project', name }`, `{ kind: 'skill', name, source: 'team' | 'library' }`); `ls skill <name>` is the one-skill read — `skills` holds the team record (or nothing), `local` the Library row (or nothing), `projects` only the lists holding it. `member` gained `displayName`, per-install `name`/`version`, and `profile`; `installedBy` rows gained `version`. Additive; protocol stays 1.
+
 Each team skill's `latestVersion` is its highest `v<N>` folder; `versionCount` counts versions.
 The `receipt` limb contains one receipt's display facts — `{ run_id, verdict, execution_status,
 expected_rows, scored_rows, comparisons, arm_scores, provenance: { model, k, cc_version, timestamp,
@@ -318,6 +322,8 @@ These are additive result fields; protocol stays 1.
 - `latest`: the newest committed receipt for `teamCurrent`, verbatim with an absolute `path`, or null; `latestState` is `ok`, `none`, or `invalid`. When the current version has no receipt, history can supply one and `fallbackFrom` names its version. An invalid newest receipt produces a warning and blocks this report’s fallback, unlike the team-list card reader.
 - `history`: schema-valid committed receipts across version directories, sorted by numeric version descending, then `run_id` descending, as `{ version, run_id, verdict, execution_status, model, cc_version, runner_handle, timestamp, comparison, committed: true }` rows. `runner_handle` and `timestamp` come verbatim from provenance; `comparison` is the receipt's `candidate-vs-baseline` comparison (`win`, `loss`, `tie`, `net_lift`, `sign_p`), or null.
 - `localRuns`: merged from the current local folder’s digest-keyed store and legacy per-team run trees; only directories containing `run.jsonl` are included, newest first, as `{ run_id, run_dir, execution_status, committed, receipt }` rows. `run_dir` is absolute; `receipt` is the schema-valid local `receipt.json` with an absolute `path`, or null. Status comes from that receipt or is `unknown`; `committed` indicates a matching run ID in history. No statistics are derived from the log.
+
+`eval`'s own result (`EvalResult`) gained `report: { aggregate, triggers }` — the numbers `renderReport` prints, as data — and `receiptPath` on a completed run; `eval --drain` gained `outcomes: { skill, team?, ok, error? }[]`, one per attempted item in queue order. `validate` gained `directory`, the folder it checked. Additive; protocol stays 1.
 
 `sync [--team <team>]` fetches and resets the disposable clone under its writer lock and records
 a fetch stamp. It neither places skills nor replays pending work. See `f-sync` for the result

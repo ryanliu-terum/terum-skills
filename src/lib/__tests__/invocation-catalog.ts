@@ -1982,4 +1982,28 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "policy": "fixed",
     "pattern": "return item.skill === undefined ? `${sigil}terum-skills ${item.verb}${tail}` : `${sigil}${item.skill}${tail}`;"
   },
+  {
+    file: 'README.md',
+    line: 0,
+    policy: 'prose',
+    pattern: '**Boards.** Every command above takes `--format <plain|md|pretty|json|auto>` (default `plain`, the output the tables describe). `--format md` renders the result as a Markdown board — the form the shipped Claude Code and Codex skills ask for — `pretty` draws box tables with colour for a terminal, `json` writes one document (`{ verb, ok, exitCode, error?, value?, lines }`), and `auto` picks `pretty` on a TTY and `md` otherwise. `--rows <n|all>` caps table rows (default 25), `--width <n>` sets a pretty board\'s width, `--host <claude|codex|terminal>` phrases the board\'s **Next** line, `--no-color` drops ANSI. The flags go anywhere before `--`; they are refused with `--frames`, `serve`, and `sync --hook`, whose stdout is spoken for. `ls skill <name>` shows one skill whole, and `ls skill`, `eval-report` and `validate` accept a unique prefix; `eval` takes an exact or case-insensitive name; each of the four, run inside a skill folder, needs no name at all. A usage error (unknown verb, missing argument, bad option value) under any `--format` writes nothing to stdout — one stderr message and exit 1, nothing runs; a reader that sees exit 1 with empty stdout reads stderr.',
+  },
+  {
+    file: 'docs/frame-protocol.md',
+    line: 0,
+    policy: 'prose',
+    pattern: '`--format` (the Markdown / terminal / JSON boards of `README.md`) and `--frames` are exclusive: a run given both ends in one `result` frame with the error `--frames is already a machine format; drop --format.` and exit 1. `serve` refuses `--format` on stderr too (`serve answers over --frames; drop --format.`). A usage error (unknown verb, missing argument, bad option value) under any `--format` writes nothing to stdout — one stderr message and exit 1, nothing runs; a reader that sees exit 1 with empty stdout reads stderr.',
+  },
+  {
+    file: 'docs/frame-protocol.md',
+    line: 0,
+    policy: 'prose',
+    pattern: '`ls` also carries `viewer: { handle, team }` on every team read and, on `ls member`, `ls project` and `ls skill`, a `selection` (`{ kind: \'member\', handle }`, `{ kind: \'project\', name }`, `{ kind: \'skill\', name, source: \'team\' | \'library\' }`); `ls skill <name>` is the one-skill read — `skills` holds the team record (or nothing), `local` the Library row (or nothing), `projects` only the lists holding it. `member` gained `displayName`, per-install `name`/`version`, and `profile`; `installedBy` rows gained `version`. Additive; protocol stays 1.',
+  },
+  {
+    file: 'docs/frame-protocol.md',
+    line: 0,
+    policy: 'prose',
+    pattern: '`eval`\'s own result (`EvalResult`) gained `report: { aggregate, triggers }` — the numbers `renderReport` prints, as data — and `receiptPath` on a completed run; `eval --drain` gained `outcomes: { skill, team?, ok, error? }[]`, one per attempted item in queue order. `validate` gained `directory`, the folder it checked. Additive; protocol stays 1.',
+  },
 ];
