@@ -6,7 +6,7 @@ import { driveRun } from './drive';
 // CLI keys map to the six drawn tour steps; print-only keys are copy, never placement counters.
 export const SETUP_STEP_TO_BOARD = {
  welcome:'Welcome', app:'Style', role:'Team', github:'Team', team:'Team',
- invite:'Team', projects:'Done', existing:'Your skills', evals:'Done', community:'Feedback', hook:'Done', wrapper:'Done', done:'Done',
+ invite:'Team', projects:'Done', existing:'Your skills', evals:'Done', community:'Feedback', hook:'Done', wrapper:'Done', editHook:'Done', done:'Done',
 } as const satisfies Record<SetupStep, string>;
 export function printedSetupStep(line:string):SetupStep|null {
  if(line.startsWith('Welcome to terum-skills.')||line.startsWith("Your team's skills")||line.startsWith('This wizard'))return 'welcome';

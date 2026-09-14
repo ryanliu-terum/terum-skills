@@ -430,6 +430,38 @@ it.each([false, true])('preserves invitation handling without gh authentication 
   expect(runner.calls.some((call) => call.args.includes('setup-git') || call.args.includes('ls-remote'))).toBe(false);
 });
 
+// An accepted invitation leaves `user/repository_invitations`, so a collaborator who joined weeks ago and
+// someone who was never added look identical there. Telling the second story to the first person sent a
+// joiner back to an owner who had already invited them (2026-09-14): access is probed before anything is
+// said about it.
+it('tells a member who already has access that there is nothing to accept', async () => {
+  const { fixture, store } = await setup();
+  const remote = 'https://github.com/acme/team.git';
+  const runner = mappedRunner(remote, fixture.bare, fakeGh('me', {
+    'api user/repository_invitations': { code: 0, stdout: '[]', stderr: '' },
+    'api repos/acme/team -q .full_name': { code: 0, stdout: 'acme/team\n', stderr: '' },
+  }));
+  const io = new ScriptedPrompter(['', 'me', 'Me', 'me@example.com']);
+  expect(await join({ target: 'acme/team', config: store, runner }, io)).toMatchObject({ ok: true });
+  expect(io.lines).toContain('Your account already has access to acme/team; there is no pending invitation to accept. Continuing.');
+  expect(io.lines.some((line) => line.includes('has not added you on GitHub yet'))).toBe(false);
+  expect(runner.calls.some((call) => call.command === 'gh' && call.args.includes('PATCH'))).toBe(false);
+});
+
+// The other half of the same fork: no invitation AND no access is the one fact that explains the
+// "repository not found" the clone is about to hit, so it is still said before the clone (D6, 2026-09-08).
+it('still names the missing invitation when the account cannot read the repository either', async () => {
+  const { fixture, store } = await setup();
+  const remote = 'https://github.com/acme/team.git';
+  const runner = mappedRunner(remote, fixture.bare, fakeGh('me', {
+    'api user/repository_invitations': { code: 0, stdout: '[]', stderr: '' },
+    'api repos/acme/team -q .full_name': { code: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' },
+  }));
+  const io = new ScriptedPrompter(['', 'me', 'Me', 'me@example.com']);
+  expect(await join({ target: 'acme/team', config: store, runner }, io)).toMatchObject({ ok: true });
+  expect(io.lines.some((line) => line.startsWith('No pending GitHub invitation to acme/team for your account.') && line.includes('has not added you on GitHub yet'))).toBe(true);
+});
+
 it('reclaim preserves owner role and projects while refreshing identity', async () => {
   const { fixture, store, runner } = await setup({ people: { me: person('me', { role: 'Platform', projects: ['terum'], bio: 'Owner bio' }) } });
   expect(await join({ target: REMOTE, config: store, runner }, new ScriptedPrompter(answers()))).toMatchObject({ ok: true });
