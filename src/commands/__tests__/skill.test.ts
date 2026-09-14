@@ -21,6 +21,52 @@ async function fixture(placed=true){
  const invoke=(kind:SkillArgs['kind'],to?:string)=>run({kind,path,...(to?{to}:{}),home,config:store},new ScriptedPrompter(['alpha']));
  return {home,store,root,path,project,fingerprint,invoke};
 }
+describe('skill fix',()=>{
+ const broken=`---\nname: alpha\ndescription: Audits a spec. Ends in a triage: every finding sorted. Args: <path>\nmetadata:\n  terum-category: testing # kept\n---\nBody: stays\n`;
+ const fix=(f:Awaited<ReturnType<typeof fixture>>,path=f.path)=>run({kind:'fix',path,home:f.home,config:f.store},new ScriptedPrompter([]));
+ it('quotes the offending line, keeps every other byte, and is inert on a second run',async()=>{
+  const f=await fixture(false);await fs.writeFile(join(f.path,'SKILL.md'),broken);
+  expect(await fix(f)).toMatchObject({ok:true,value:{kind:'fix',path:f.path,destination:null,quarantined:null,installed:false,notices:['Quoted `description` in SKILL.md so the frontmatter parses; the text is unchanged.','alpha: hygiene passes.']}});
+  const after=await fs.readFile(join(f.path,'SKILL.md'),'utf8');
+  expect(YAML.parse(after.split('---')[1]!)).toEqual({name:'alpha',description:'Audits a spec. Ends in a triage: every finding sorted. Args: <path>',metadata:{'terum-category':'testing'}});
+  expect(after).toContain('  terum-category: testing # kept\n');expect(after.endsWith('---\nBody: stays\n')).toBe(true);
+  expect(await fix(f)).toMatchObject({ok:true,value:{notices:['alpha: nothing to fix; hygiene passes.']}});
+  expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toBe(after);
+ });
+ it('applies every covered repair in one pass and lists what still needs the author',async()=>{
+  const f=await fixture(false);
+  await fs.writeFile(join(f.path,'SKILL.md'),`---\nname: other\ndescription: Ends in a triage: every finding\n---\nSee\u200B notes. token ghp_abcdefghijklmnopqrstuvwxyz0123456789\n`);
+  await fs.writeFile(join(f.path,'notes.txt'),'plain');await fs.chmod(join(f.path,'notes.txt'),0o755);
+  const result=await fix(f);
+  expect(result).toMatchObject({ok:true,value:{notices:[
+   'Quoted `description` in SKILL.md so the frontmatter parses; the text is unchanged.',
+   'Set name to `alpha` to match the folder (was `other`).',
+   'Removed 1 invisible character from SKILL.md.',
+   'Cleared the executable mode on notes.txt.',
+   'Still needs you (1):',
+   expect.stringMatching(/^ {2}HYG3 SKILL\.md.*credential-shaped/),
+  ]}});
+  expect((await fs.stat(join(f.path,'notes.txt'))).mode&0o111).toBe(0);
+  const after=await fs.readFile(join(f.path,'SKILL.md'),'utf8');
+  expect(YAML.parse(after.split('---')[1]!)).toEqual({name:'alpha',description:'Ends in a triage: every finding'});
+  expect(after).toContain('See notes.');
+ });
+ it('reports a placement as installed and the ledger keeps its fingerprint, so ls shows the edit',async()=>{
+  const f=await fixture(true);await fs.writeFile(join(f.path,'SKILL.md'),broken);
+  expect(await fix(f)).toMatchObject({ok:true,value:{installed:true}});
+  expect((await f.store.read()).placements[f.path]).toMatchObject({fingerprint:f.fingerprint});
+ });
+ it('fails without writing when nothing here is a fault it covers, and refuses a missing SKILL.md or a symlinked folder',async()=>{
+  const f=await fixture(false);
+  await fs.writeFile(join(f.path,'SKILL.md'),'---\nname: [\ndescription: x\n---\n');
+  expect(await fix(f)).toMatchObject({ok:false,error:expect.stringMatching(/^alpha: nothing here is a fault fix covers; \d+ findings? still needs? you \(listed above\)\.$/),value:{notices:expect.arrayContaining([expect.stringMatching(/^Still needs you \(\d+\):$/),expect.stringMatching(/not valid YAML/)])}});
+  expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toBe('---\nname: [\ndescription: x\n---\n');
+  await fs.rm(join(f.path,'SKILL.md'));
+  expect(await fix(f)).toMatchObject({ok:false,error:`${f.path} has no SKILL.md; nothing to fix.`});
+  const link=join(f.root,'linked');await fs.symlink(f.path,link);
+  expect(await fix(f,link)).toMatchObject({ok:false,error:expect.stringContaining('not a plain folder')});
+ });
+});
 describe('D6 Library file operations',()=>{
  it.each(['move','rename'] as const)('%s retains edited local bytes and rekeys the placement without team I/O',async kind=>{
   const f=await fixture();await fs.appendFile(join(f.path,'SKILL.md'),'user edit\n');

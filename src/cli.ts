@@ -72,11 +72,13 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .option('--no-evals', 'do not offer to evaluate the shared skills that have no receipt')
     .action(async (target: string | undefined, options: { app?: boolean; projects?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, projects: options.projects, evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
-  const skill = program.command('skill').description('Move, rename, or delete a folder in your Library');
+  const skill = program.command('skill').description('Move, rename, delete, or fix a folder in your Library');
   for (const kind of ['move', 'rename'] as const) skill.command(`${kind} <path>`).requiredOption('--to <destination>', kind === 'move' ? 'global or a registered project root' : 'new skill name')
     .action(async (path: string, options: { to: string }) => execute(io => active.skill({ form: context.form, kind, path, to: options.to }, io), { verb: `skill ${kind}`, notices: true }));
   skill.command('delete <path>').description('Remove a Library folder after typing its name')
     .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'delete', path }, io), { verb: 'skill delete', notices: true }));
+  skill.command('fix <path>').description('Rewrite SKILL.md frontmatter that is not valid YAML by quoting the offending value; the text stays the same')
+    .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'fix', path }, io), { verb: 'skill fix', notices: true }));
 
   const project = program.command('project').description('Add, forget, or list the projects in your library — the folders this machine reads skills from');
   project.command('add [path]').description('Add a folder to your library')

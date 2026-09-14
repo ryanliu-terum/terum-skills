@@ -137,7 +137,7 @@ hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verb
 `src/lib/frames.ts` now advertises this complete verb list:
 
 ```json
-["skill move","skill rename","skill delete","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
+["skill move","skill rename","skill delete","skill fix","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
 ```
 
 `team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the
@@ -232,6 +232,16 @@ rewrites readable frontmatter to match the new folder name; publishing under a n
 a new lineage. Delete removes an unmodified placement outright, quarantines an edited placement,
 and quarantines a folder not tracked as a placement. Placement deletion also updates install records.
 The result is `{ kind, path, destination, quarantined, installed, notices }`.
+
+`skill fix <path>` is a one-shot frame write with no ask. It applies every repair whose outcome is
+fixed by an authority other than the author's typing: quoting a bare frontmatter value that holds `: `
+(the `ls --local` `invalid-yaml` reason), setting `name` to the folder name, setting `license` to the
+team policy, removing HYG2's invisible characters, and clearing an executable mode on a non-script.
+It then runs the same inspection and hygiene gate as `ls --local` and `validate` and prints what still
+needs a person under `Still needs you (N):`. When it repaired nothing and findings remain, the run
+fails with that list; when nothing remains it says hygiene passes. The result is the same
+`{ kind: 'fix', path, destination: null, quarantined: null, installed, notices }` shape as the other
+three, and `validate`'s result carries `repairable`, the count of changes `skill fix` would make.
 
 `prune` lists quarantine paths and asks `Delete <n> quarantined item(s)?`; empty quarantine asks
 nothing. Its result is `{ deleted, declined }`. It does not clean old-skills.
