@@ -14,7 +14,7 @@ import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/ev
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
 import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
-import { receiptPath, buildReceipt } from '../lib/evals/receipt.js';
+import { receiptPath, buildReceipt, NO_TEAM_RUNNER_HANDLE } from '../lib/evals/receipt.js';
 import { aggregate, renderReport, runIdFrom, writeRunTree } from '../lib/evals/results.js';
 import { packageVersion } from '../lib/package.js';
 import { parseTriggers, runTriggerEvals, type TriggerSummary } from '../lib/evals/triggers.js';
@@ -321,7 +321,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         cases: caseNames,
         arm_skill_lists: armSkillLists,
         timestamp: runAt.toISOString(),
-        runner_handle: handle ?? 'local',
+        runner_handle: handle ?? NO_TEAM_RUNNER_HANDLE,
       },
     });
     if (!receipt.ok) return failure(receipt.error);

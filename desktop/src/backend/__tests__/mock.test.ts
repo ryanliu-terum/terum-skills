@@ -201,3 +201,21 @@ it('updates the stale-eval installedVersion after a mid-session install and remo
  expect(await answerAll(b.uninstallSkill({ref:'deploy-check'}),()=>true)).toMatchObject({ok:true});
  expect(await versionOf('deploy-check')).toEqual([null,'v5',false]);
 });
+// Cross-mirror overlays spec §5 M1.7: `?__mock=overlays` puts the first five Library cards into §3.1 states 1–5 by
+// position and the Marketplace's placed cards into states 3 / 3b / 2; `on-disk-only` is the Marketplace's state 4.
+it('produces every overlay card state under __mock=overlays and state 4 under __mock=on-disk-only',async()=>{
+ const b=createMockBackend();location.hash='#/library/global?__mock=overlays';
+ const library=await b.library({scope:{kind:'global'}});if(!library.ok)throw new Error(library.error);
+ expect(library.value.skills.slice(0,5).map(s=>[s.installedVersion,s.localMatch,s.placed,s.edited,s.knownToTeam])).toEqual([
+  ['v3','identical',true,false,true],['v3','differs',true,true,true],[null,'differs',true,true,true],[null,'differs',false,false,true],[null,'none',false,false,false],
+ ]);
+ expect(library.value.skills[0]?.localEval).toMatchObject({runnerHandle:'ajayw36',version:'v3'});
+ location.hash='#/marketplace?__mock=overlays';
+ const catalog=await b.catalog();if(!catalog.ok)throw new Error(catalog.error);
+ const placed=catalog.value.skills.filter(s=>s.placed),absent=catalog.value.skills.filter(s=>!s.placed);
+ expect(placed.slice(0,3).map(s=>[s.latestVersion,s.installedVersion,s.localMatch])).toEqual([['v5','v2','differs'],['v5','v5','identical'],['v5','v2','identical']]);
+ expect(absent.length).toBeGreaterThan(0);for(const s of absent)expect([s.latestVersion,s.installedVersion,s.localMatch]).toEqual(['v5',null,null]);
+ location.hash='#/marketplace?__mock=on-disk-only';
+ const onDisk=await b.catalog();if(!onDisk.ok)throw new Error(onDisk.error);
+ expect(onDisk.value.skills.find(s=>s.name==='deploy-check')).toMatchObject({installed:'placed',placed:false,onDiskOnly:true,latestVersion:'v5',installedVersion:null,localMatch:'differs',path:'~/.claude/skills/deploy-check'});
+});

@@ -456,7 +456,7 @@ it.each([false,true])('shows local receipt attribution or the stale-score explan
  const card={...library.value.skills[0]!,name:'deploy-check',teamed:false,edited,summary:edited?null:detail.value.summary,localEval:edited?null:{...detail.value.summary,runnerHandle:'mira',version:'v4'},localEvalStale:edited};
  vi.spyOn(backend,'library').mockResolvedValue({ok:true,value:{...library.value,skills:[card]}});openWith('#/library/global',backend);
  const face=await screen.findByTestId('skill-card-deploy-check');
- expect(face).toHaveTextContent(edited?'Not evaluated · evaluated before your last edit':'run by mira · Version 4');
+ expect(face).toHaveTextContent(edited?'Not evaluated · evaluated before your last edit':'run by mira · v4');
  if(edited)expect(within(face).getByText('Edited')).toBeVisible();
 });
 it.each(['evals','run-eval','publish'])('excludes an inspected-invalid local folder from %s while keeping its reason visible',async entry=>{

@@ -13,7 +13,7 @@ import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
 import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, skillEndorsement } from '../lib/readme.js';
 import { parseVersionFolder, versionFolderName, versionLabel } from '../lib/versions.js';
-import { receiptSchema, type Receipt } from '../lib/evals/receipt.js';
+import { NO_TEAM_RUNNER_HANDLE, receiptSchema, type Receipt } from '../lib/evals/receipt.js';
 import { localReceiptsFor, receiptFiles, selectCardEval } from '../lib/evals/receipt-store.js';
 import { versionDigests, type VersionDigest } from '../lib/version-digests.js';
 import { fromError, Result, success } from '../lib/result.js';
@@ -63,7 +63,7 @@ export interface LsSkill {
 export type LocalHealth = 'local-changed' | 'unknown';
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
-export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; edited: boolean; localEval: (Receipt & { path: string }) | null; localEvalStale: boolean; teamEval: TeamEval | null; matchedVersion: string | null; matchedName: string | null; matchedTeam: string | null; knownToTeam: boolean; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem | 'failed'; detail: string; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; edited: boolean; localEval: (Receipt & { path: string; mine: boolean }) | null; localEvalStale: boolean; teamEval: TeamEval | null; matchedVersion: string | null; matchedName: string | null; matchedTeam: string | null; knownToTeam: boolean; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem | 'failed'; detail: string; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
 /**
  * §8.4 — one member, whole, from the team read that already parsed `people/<handle>.json`.
  *
@@ -266,6 +266,21 @@ function describedBy(inspection: LocalEntry['inspection']): string | null {
  */
 export type TeamEval = Receipt & { path: string; team: string; mine: boolean };
 
+/**
+ * Cross-mirror overlays spec §4.1, review walk D3 — `mine`, defined once for BOTH receipts a row can carry:
+ * the receipt's runner is one of the handles given. A team receipt is checked against that team's binding;
+ * an own-store receipt names no team, so it is checked against every binding this machine holds, plus the
+ * placeholder `eval` stamps when the machine holds none (`NO_TEAM_RUNNER_HANDLE`) — that run was this
+ * machine's too, and the card must never read "run by local". Computed here and nowhere else — the desktop
+ * names a runner exactly when the shown receipt's `mine` is false.
+ */
+function ranHere(receipt: Receipt, handles: readonly string[]): boolean {
+  return handles.includes(receipt.provenance.runner_handle);
+}
+function ranHereWithoutTeam(receipt: Receipt, handles: readonly string[]): boolean {
+  return ranHere(receipt, handles) || receipt.provenance.runner_handle === NO_TEAM_RUNNER_HANDLE;
+}
+
 interface TeamIndex {
   /** Every uuid any configured team publishes — `knownToTeam` on a row. */
   ids: Set<string>;
@@ -314,7 +329,7 @@ async function teamIndex(store: ConfigStore, config: Config, io: Prompter): Prom
           const parsed = receiptSchema.safeParse(raw);
           if (!parsed.success) { io.print(`${team}/${record.name}: schema-invalid receipt ${folder}/${file}; not considered.`); continue; }
           if (!parsed.data.content_digest) continue;
-          receipts.push({ id: record.id, entry: { ...parsed.data, path, team, mine: parsed.data.provenance.runner_handle === binding.handle } });
+          receipts.push({ id: record.id, entry: { ...parsed.data, path, team, mine: ranHere(parsed.data, [binding.handle]) } });
         }
       }
       return receipts;
@@ -401,7 +416,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
       if (version.ambiguous) ambiguous.add(entry.path);
       // Stale means: no score for THESE bytes anywhere, but some store scored this skill at another digest.
       const evaluatedElsewhere = entry.skillId !== null && (receipts.some(r => r.skill_id === entry.skillId && r.content_digest !== digest) || [...(team.digestsBySkill.get(entry.skillId) ?? [])].some(d => d !== digest));
-      return { localEval: receipt ? { ...receipt, path: join(evalRoot, digest.slice(7), receipt.run_id, 'receipt.json') } : null,
+      return { localEval: receipt ? { ...receipt, path: join(evalRoot, digest.slice(7), receipt.run_id, 'receipt.json'), mine: ranHereWithoutTeam(receipt, Object.values(config.teams).map((binding) => binding.handle)) } : null,
         localEvalStale: !receipt && !teamEval && evaluatedElsewhere,
         teamEval, matchedVersion: version.match?.folder ?? null, matchedName: version.match?.name ?? null, matchedTeam: version.match?.team ?? null, knownToTeam };
     } catch { return none; }

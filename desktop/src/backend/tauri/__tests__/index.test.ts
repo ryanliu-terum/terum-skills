@@ -1184,11 +1184,29 @@ it('a team receipt this machine ran carries no attribution, and the newer of own
 it.each([
   [{ matchedVersion: null, knownToTeam: true }, 'differs', null],
   [{ matchedVersion: null, knownToTeam: true, placement: { id: 'id-a', team: 'acme', version: 'v2' }, tracked: true, placed: true }, 'differs', 'v2'],
+  // Review walk D1: the bytes decide — a folder placed as v2 whose bytes are exactly v1 IS v1, and is not "edited".
+  [{ matchedVersion: 'v1', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, placement: { id: 'id-a', team: 'acme', version: 'v2' }, tracked: true, placed: true, edited: true, health: 'local-changed' }, 'identical', 'v1'],
   [{ matchedVersion: null, knownToTeam: false, skillId: null }, 'none', null],
   [{}, null, null],
 ] as [Record<string, unknown>, 'identical' | 'differs' | 'none' | null, string | null][])('classifies a Library folder by its byte match %j', async (row, localMatch, installedVersion) => {
   const { card } = await overlayCard({ teamEval: null, localEval: null, ...row });
   expect(card).toMatchObject({ localMatch, installedVersion });
+});
+// Review walk D3: install seeds the own store with a copy of the committed receipt, so the same run_id exists twice.
+// The team receipt wins that tie, and a runner is named exactly when the shown receipt's `mine` is false — the
+// card can never say "run by <your own handle>", and an own-store receipt from a pre-M1.1 CLI (no `mine`) keeps
+// D11's reading: a seeded copy (version set) names its runner, an own run (version null) does not.
+it('breaks a same-run tie toward the team receipt and names the runner only when the shown receipt is not mine', async () => {
+  // The own twin is given a different W so the assertion proves WHICH receipt won the tie, not just the attribution.
+  const twin = { ...teamReceipt, path: '/state/evals/local/abc/20260102T000000Z/receipt.json', comparisons: { 'candidate-vs-baseline': { win: 9, loss: 1, tie: 2, net_lift: 0.3, sign_p: 0.05 } } };
+  const seeded = await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: { ...teamReceipt, team: 'acme', mine: false }, localEval: { ...twin, mine: false } });
+  expect(seeded.card.localEval).toMatchObject({ w: 7, runnerHandle: 'mira', version: 'v3' });
+  const ranByMe = await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: { ...teamReceipt, team: 'acme', mine: true }, localEval: { ...twin, mine: true } });
+  expect(ranByMe.card.localEval).toMatchObject({ runnerHandle: null, version: 'v3' });
+  const ownNewer = { ...teamReceipt, path: '/state/evals/local/abc/20260109T000000Z/receipt.json', run_id: '20260109T000000Z', version: null };
+  expect((await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: { ...teamReceipt, team: 'acme', mine: false }, localEval: { ...ownNewer, mine: true } })).card.localEval).toMatchObject({ runnerHandle: null });
+  expect((await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: null, localEval: { ...ownNewer, mine: false, provenance: { ...ownNewer.provenance, runner_handle: 'zed' } } })).card.localEval).toMatchObject({ runnerHandle: 'zed' });
+  expect((await overlayCard({ matchedVersion: null, knownToTeam: true, teamEval: null, localEval: ownNewer })).card.localEval).toMatchObject({ runnerHandle: null });
 });
 // §3.2 — a Marketplace card sees a folder whose BYTES equal one of its versions even with no ledger row and no
 // uuid; a uuid match with no byte match is this skill, edited; a match belonging to another team is nothing.
@@ -1212,4 +1230,15 @@ it.each([
   const catalog = await createTauriBackend(byteMatchedCatalog(row).bridge).catalog();
   if (!catalog.ok) throw new Error(catalog.error);
   expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject(expected);
+});
+// Review walk D1, the Marketplace twin: the ledger says v2, the bytes are exactly v1 — the card says v1.
+it('prefers the byte match over the ledger version on the Marketplace card', async () => {
+  const f = detailReplay((name, value) => {
+    if (name === 'ls') Object.assign((value.skills as Record<string, unknown>[])[0]!, { latest: 'v10', latestVersion: 'v10', versionCount: 10 });
+    if (name === 'ls-local') Object.assign((value.local as { rows: Record<string, unknown>[] }[])[0]!.rows[0]!, { matchedTeam: 'acme', matchedName: 'deploy-check', matchedVersion: 'v1', teamEval: null });
+    if (name === 'status') { const ledger = value.ledger as { placements: Record<string, unknown>[] }; ledger.placements = [{ ...ledger.placements[0], version: 'v2' }]; }
+  });
+  const catalog = await createTauriBackend(f.bridge).catalog();
+  if (!catalog.ok) throw new Error(catalog.error);
+  expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject({ installed: 'placed', placed: true, installedVersion: 'v1', localMatch: 'identical' });
 });
