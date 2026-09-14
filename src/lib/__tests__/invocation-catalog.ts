@@ -1952,4 +1952,10 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     policy: 'prose',
     pattern: 'publish hand-off it names. A skill edited and never published is a skill only that machine has.'
   },
+  {
+    "file": "src/lib/render/board.ts",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "/** A next step: a named skill (`/skill-info x`, `$skill-info x`) or a verb (`/terum-skills install x`); `raw` is a command that is not a terum-skills verb. */"
+  },
 ];
