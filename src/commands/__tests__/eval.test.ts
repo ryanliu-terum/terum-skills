@@ -221,6 +221,46 @@ describe('eval (§6 / IE2)', () => {
     expect(await readFile(join(folder, 'evals', 'triggers.yaml'), 'utf8')).toContain('should_trigger');
   });
 
+  it('refuses to write generated assets that fail hygiene, instead of planting a later failure', async () => {
+    // The folder gate runs before these bytes exist, so an unchecked write-back used to leave the
+    // folder failing HYG3 while the run itself exited clean — the failure surfaced on the NEXT
+    // command. Reproduces the real defect: eval-gen wrote `git config user.email test@...`.
+    const { store, home, folder } = await evalFixture();
+    const leaky = {
+      cases: [
+        { name: 'happy-path', task: 'Deploy.', setup: 'git config user.email real.person@company.com', checks: [{ transcript_mentions: 'deployed' }], bucket: 'explicit' },
+        { name: 'safe-command', task: 'Prepare the deployment.', checks: [{ no_command_matching: 'deploy --force' }], bucket: 'negative' },
+        { name: 'unsafe-request', task: 'Handle an unsafe request.', checks: [{ file_absent: '.env.leaked' }], bucket: 'adversarial' },
+      ],
+    };
+    const agent: AgentApi = {
+      runAgent: async (_task, cwd) => transcript(existsSync(join(cwd, '.claude', 'skills', 'sample')) ? ['sample'] : []),
+      askJson: async (prompt) => (prompt.includes('Generate exactly three') ? leaky : prompt.includes('Generate trigger evaluation') ? generatedTriggers : { selected: ['sample'] }),
+    };
+    const result = await run(args(store, home, { agent, k: 1 }), new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('HYG3') });
+    if (result.ok) return;
+    expect(result.error).toContain('real.person@company.com');
+    expect(result.error).toContain('evals/cases/happy-path.yaml');
+    // A defect in OUR generator must not read as a defect in the user's skill.
+    expect(result.error).toContain('defect in generation, not in your skill');
+    // The whole point: the folder is left exactly as it was found.
+    expect(existsSync(join(folder, 'evals', 'cases'))).toBe(false);
+    expect(existsSync(join(folder, 'evals', 'triggers.yaml'))).toBe(false);
+  });
+
+  it('tells the generator to use reserved domains, so the refusal above is the rare path', async () => {
+    const { store, home } = await evalFixture();
+    const prompts: string[] = [];
+    await run(args(store, home, { agent: generationAgent(prompts), k: 1 }), new ScriptedPrompter());
+    const generation = prompts.filter((prompt) => prompt.includes('Generate '));
+    expect(generation).toHaveLength(2);
+    for (const prompt of generation) {
+      expect(prompt).toContain('reserved domain');
+      expect(prompt).toContain('never a real or real-looking one');
+    }
+  });
+
   it('§6.1/D9: a generating run stays attachable — the receipt digests the folder as the run LEFT it', async () => {
     // The defect: the run was keyed on the digest taken BEFORE the write-back, while `evals/` is
     // inside `skillContentDigest` by D9 — so every generating run named a folder state that no
