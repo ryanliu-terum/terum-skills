@@ -189,6 +189,7 @@ describe('read-only calls preserve spawn rejection', () => {
       kill: vi.fn<Bridge['kill']>(),
       readAppState: async () => ({ schema: 1, node: '/usr/local/bin/node', entry: '/cli/index.js', version: '0.1.6', writtenAt: '2026-09-08T00:00:00Z' }),
       hostPlatform: async () => 'macos',
+      hostOsVersion: async () => '26.6.2',
       homeDirectory: async () => '/Users/teddy',
     };
     const backend = createTauriBackend(bridge);

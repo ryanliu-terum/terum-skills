@@ -3,7 +3,7 @@
 Nothing else in `src/` may import `@tauri-apps/*`; this directory is the whole native surface.
 
 - `detect.ts`: `isNativeShell()`, the one probe `src/backend/index.ts` uses to pick this adapter over the mock. No Tauri import.
-- `bridge.ts`: the shell's five commands (`cli_spawn`, `cli_write`, `cli_kill`, `read_app_state`, `host_platform`, all in `src-tauri/src/lib.rs`) behind a `Bridge` interface, so the adapter is unit-tested with a fake.
+- `bridge.ts`: the shell's six commands (`cli_spawn`, `cli_write`, `cli_kill`, `read_app_state`, `host_platform`, `host_os_version`, all in `src-tauri/src/lib.rs`) behind a `Bridge` interface, so the adapter is unit-tested with a fake.
 - `frames.ts`: the CLI's frame protocol as read here (`terum-skills docs/frame-protocol.md`, protocol 1). The CLI owns its wire shapes; the seam owns `../types`; `run.ts` maps one to the other.
 - `run.ts`: one `terum-skills --frames <verb>` process as a seam `Run<T>`: buffered frames, answers forwarded to stdin, `done` settled from the `result` frame, cancel = cancel frame then kill.
 - `refresh.ts`: the background clone fetch (W-08, f-auto-sync). `createRefreshPolicy()` runs the CLI's fetch-only `sync` verb once at launch and on window focus, throttled to one run a minute, single-flight, and held back while `createWorkflowGate()` reports a foreground write verb running — that gate's idle callback triggers the deferred fetch. Every completed run invalidates the stamp-driven reads through `notify('stamp')`, and a run that moved a clone adds `notify('marketplace')`; the last outcome is read back as `Settings.lastAutomatic`. No timer, no seam method, no mock counterpart.
