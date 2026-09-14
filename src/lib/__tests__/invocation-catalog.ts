@@ -1189,7 +1189,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 381,
     "policy": "prose",
-    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` | Move, rename, delete, or fix a folder in your Library. Move, rename, and delete confirm by name; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
+    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill copy <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` | Move, copy, rename, delete, or fix a folder in your Library. Copy leaves the source where it is, so one local skill can sit in two roots at once; the new folder keeps the source's `metadata.id` and is a plain Library folder with no install record of its own. Move, copy, rename, and delete confirm by name; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
   },
   {
     "file": "README.md",
@@ -1478,7 +1478,27 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 226,
     "policy": "prose",
-    "pattern": "`skill move <path> --to global|<project root>`, `skill rename <path> --to <new-name>`, and"
+    "pattern": "`skill move <path> --to global|<project root>`, `skill copy <path> --to global|<project root>`,"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 227,
+    "policy": "prose",
+    "pattern": "`skill rename <path> --to <new-name>`, and"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 108,
+    "policy": "routed",
+    "pattern": "| `skill copy <abs-path> --to global\\|<project root>` | none | `npx -y terum-skills@latest skill copy <abs-path> --to <destination>` \u2014 the source folder stays where it is |"
+  },
+  {
+    // `copy` became a command name with `skill copy`, so this wrapped prose line now starts with a
+    // verb the tripwire scans for. It is a sentence about install's kept copy, not an invocation.
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 82,
+    "policy": "not-a-hint",
+    "pattern": "copy stays under that project. If the kept-copy path already exists, the command refuses; move"
   },
   {
     "file": "docs/frame-protocol.md",

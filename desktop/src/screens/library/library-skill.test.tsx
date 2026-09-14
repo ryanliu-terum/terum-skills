@@ -32,6 +32,23 @@ it('moves the local folder through skillFile.move without install or uninstall',
  await within(dialog).findByRole('button',{name:'Done'});
  expect(move).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/ssm'});expect(install).not.toHaveBeenCalled();expect(uninstall).not.toHaveBeenCalled();
 });
+it('copies the local folder into the other root through skillFile.copy, leaves the source listed, and lands on the copy',async()=>{
+ const backend=createMockBackend(),copy=vi.spyOn(backend.skillFile,'copy'),install=vi.spyOn(backend,'install'),uninstall=vi.spyOn(backend,'uninstallSkill');
+ openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-copy',backend);
+ const dialog=await screen.findByRole('dialog',{name:'Copy deploy-check'});
+ await within(dialog).findByRole('option',{name:'SSM'});
+ fireEvent.change(within(dialog).getByLabelText('Copy to'),{target:{value:'/Users/you/code/ssm'}});
+ fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});
+ fireEvent.click(within(dialog).getByRole('button',{name:'Copy'}));
+ expect(await within(dialog).findByText('Copied ~/.claude/skills/deploy-check to /Users/you/code/ssm/.claude/skills/deploy-check.')).toBeVisible();
+ expect(copy).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/ssm'});
+ expect(install).not.toHaveBeenCalled();expect(uninstall).not.toHaveBeenCalled();
+ fireEvent.click(within(dialog).getByRole('button',{name:'Done'}));
+ await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
+ // The source is still a card in the root it was copied from: a copy takes nothing away.
+ cleanup();openWith('#/library/global',backend);
+ expect(await screen.findByTestId('skill-card-deploy-check')).toBeInTheDocument();
+});
 it('shows a failed local move without running install or uninstall',async()=>{
  const backend=createMockBackend();vi.spyOn(backend.skillFile,'move').mockImplementation(()=>createRun(async()=>({ok:false,error:'Destination unavailable.'})));
  const uninstall=vi.spyOn(backend,'uninstallSkill'),dialog=await openMove(backend);fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
@@ -191,15 +208,16 @@ it('requires a checkout root before calling library',async()=>{
 // nothing about team membership, so these fixtures keep a realistic root label: a card that
 // routes by path only because the test typed the word 'local' into `project` would pass even
 // after the adapter stopped emitting it, which is how the route broke in the first place.
-it('opens a local card and its Open menu by folder path',async()=>{
+it('opens a local card by folder path — the title link, with no Open row left in the menu',async()=>{
  const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
  const path='/a folder/.claude/skills/deploy-check';result.value.skills=[{...result.value.skills[0]!,name:'deploy-check',project:'Global',teamed:false,path}];
  vi.spyOn(backend,'library').mockResolvedValue(result);openWith('#/library/global',backend);
  const card=await screen.findByTestId('skill-card-deploy-check');expect(within(card).getByRole('link')).toHaveAttribute('href','#/skill/local?path='+encodeURIComponent(path));
- fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));fireEvent.click(await screen.findByRole('menuitem',{name:'Open'}));
- await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent(path)));
+ fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));
+ expect(await screen.findByRole('menuitem',{name:'Move to…'})).toBeInTheDocument();
+ expect(screen.queryByRole('menuitem',{name:'Open'})).toBeNull();
 });
-it.each([['Run eval','&tab=evals&dialog=run-eval'],['Delete…','&dialog=file-delete'],['Move to…','&dialog=file-move']])('routes %s on a local card by path, not by name',async(item,query)=>{
+it.each([['Run eval','&tab=evals&dialog=run-eval'],['Delete…','&dialog=file-delete'],['Move to…','&dialog=file-move'],['Copy to…','&dialog=file-copy']])('routes %s on a local card by path, not by name',async(item,query)=>{
  const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
  const path='/a folder/.claude/skills/deploy-check';
  result.value.skills=[{...result.value.skills[0]!,name:'deploy-check',project:'Global',teamed:false,placed:true,path}];
@@ -322,7 +340,7 @@ it('preserves the mock breadcrumb and fixture hygiene caption',async()=>{
 });
 
 const terumOrigin='root=%2FUsers%2Fyou%2Fcode%2Fterum';
-it.each([['Open',''],['Run eval','tab=evals&dialog=run-eval'],['Delete…','dialog=file-delete'],['Move to…','dialog=file-move']])('carries the checkout root from a project card into its %s menu row',async(label,query)=>{
+it.each([['Run eval','tab=evals&dialog=run-eval'],['Delete…','dialog=file-delete'],['Move to…','dialog=file-move'],['Copy to…','dialog=file-copy']])('carries the checkout root from a project card into its %s menu row',async(label,query)=>{
  open('#/library/checkout?'+terumOrigin);
  const card=await screen.findByTestId('skill-card-deploy-check');
  expect(within(card).getAllByRole('link')).toHaveLength(1);

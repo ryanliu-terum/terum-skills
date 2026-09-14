@@ -22,11 +22,11 @@ async function open(search=''){
  return backend;
 }
 
-it('opens the card’s full action menu from the rail, minus the Open that leads back here',async()=>{
+it('opens the card’s full action menu from the rail; no Open row leads back here',async()=>{
  await open();
  fireEvent.click(await screen.findByRole('button',{name:'Manage with Terum…'}));
  const rows=await screen.findAllByRole('menuitem');
- expect(rows.map(row=>row.textContent)).toEqual(['Run eval','Move to…','Rename…','Delete…','Publish to team…']);
+ expect(rows.map(row=>row.textContent)).toEqual(['Run eval','Move to…','Copy to…','Rename…','Delete…','Publish to team…']);
  expect(screen.queryByRole('menuitem',{name:'Open'})).toBeNull();
 });
 
