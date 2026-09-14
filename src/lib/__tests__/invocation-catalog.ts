@@ -1195,7 +1195,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 381,
     "policy": "prose",
-    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill copy <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` | Move, copy, rename, delete, or fix a folder in your Library. Copy leaves the source where it is, so one local skill can sit in two roots at once; the new folder keeps the source's `metadata.id` and is a plain Library folder with no install record of its own. Move, copy, rename, and delete confirm by name; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
+    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill copy <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` | Move, copy, rename, delete, or fix a folder in your Library. Copy leaves the source where it is, so one local skill can sit in two roots at once; the new folder keeps the source's `metadata.id` and is a plain Library folder with no install record of its own. Delete confirms by name; move, copy and rename ask nothing, because each is undone by running the verb the other way and none overwrites anything; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
   },
   {
     "file": "README.md",
@@ -1510,7 +1510,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 227,
     "policy": "prose",
-    "pattern": "`skill delete <path>` are one-shot frame writes. Their `text` ask is `Type <name> to <operation> this folder`."
+    "pattern": "`skill delete <path>` are one-shot frame writes. Only `skill delete` asks: its `text` ask is"
   },
   {
     "file": "docs/frame-protocol.md",

@@ -23,7 +23,8 @@ async function openMove(backend:Backend,path='~/.claude/skills/deploy-check'){
  const dialog=await screen.findByRole('dialog',{name:'Move deploy-check'});
  await within(dialog).findByRole('option',{name:'SSM'});
  fireEvent.change(within(dialog).getByLabelText('Move to'),{target:{value:'/Users/you/code/ssm'}});
- fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});
+ // No typed confirmation on move/copy/rename since 2026-09-14 — the picker alone arms the action.
+ expect(within(dialog).queryByLabelText('Skill name to confirm')).toBeNull();
  return dialog;
 }
 it('moves the local folder through skillFile.move without install or uninstall',async()=>{
@@ -32,13 +33,43 @@ it('moves the local folder through skillFile.move without install or uninstall',
  await within(dialog).findByRole('button',{name:'Done'});
  expect(move).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/ssm'});expect(install).not.toHaveBeenCalled();expect(uninstall).not.toHaveBeenCalled();
 });
+// The picker opens on a destination, never on a "Choose destination" row, and never offers the root the
+// folder is already in — the CLI refuses that one as the same folder (Ryan, 2026-09-14).
+it('opens the move picker on the first other root, omits the root the folder sits in, and moves without a second choice',async()=>{
+ const backend=createMockBackend(),move=vi.spyOn(backend.skillFile,'move');
+ openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-move',backend);
+ const dialog=await screen.findByRole('dialog',{name:'Move deploy-check'});
+ await within(dialog).findByRole('option',{name:'SSM'});
+ const picker=within(dialog).getByLabelText<HTMLSelectElement>('Move to');
+ expect([...picker.options].map(option=>option.text)).toEqual(['Terum','SSM','MRF']);
+ expect(picker.value).toBe('/Users/you/code/terum');
+ const action=within(dialog).getByRole('button',{name:'Move'});expect(action).toBeEnabled();
+ fireEvent.click(action);await within(dialog).findByRole('button',{name:'Done'});
+ expect(move).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/terum'});
+});
+it('offers Global to a folder that sits in a checkout',async()=>{
+ const backend=createMockBackend(),path='/Users/you/code/ssm/.claude/skills/';
+ const card=(await backend.library({scope:{kind:'checkout',root:'/Users/you/code/ssm'}})).value!.skills[0]!.name;
+ openWith('#/skill/local?path='+encodeURIComponent(path+card)+'&dialog=file-copy',backend);
+ const dialog=await screen.findByRole('dialog',{name:'Copy '+card});
+ const picker=await within(dialog).findByLabelText<HTMLSelectElement>('Copy to');
+ expect([...picker.options].map(option=>option.text)).toEqual(['Global','Terum','MRF']);
+ expect(picker.value).toBe('global');
+});
+it('says there is nowhere to move a folder when Global is the only root, and keeps Move disabled',async()=>{
+ openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-move&__mock=no-projects',createMockBackend());
+ const dialog=await screen.findByRole('dialog',{name:'Move deploy-check'});
+ expect(await within(dialog).findByText(/Global is the only Library root on this machine/)).toBeVisible();
+ expect(within(dialog).queryByLabelText('Move to')).toBeNull();
+ expect(within(dialog).getByRole('button',{name:'Move'})).toBeDisabled();
+});
 it('copies the local folder into the other root through skillFile.copy, leaves the source listed, and lands on the copy',async()=>{
  const backend=createMockBackend(),copy=vi.spyOn(backend.skillFile,'copy'),install=vi.spyOn(backend,'install'),uninstall=vi.spyOn(backend,'uninstallSkill');
  openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-copy',backend);
  const dialog=await screen.findByRole('dialog',{name:'Copy deploy-check'});
  await within(dialog).findByRole('option',{name:'SSM'});
  fireEvent.change(within(dialog).getByLabelText('Copy to'),{target:{value:'/Users/you/code/ssm'}});
- fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});
+ expect(within(dialog).queryByLabelText('Skill name to confirm')).toBeNull();
  fireEvent.click(within(dialog).getByRole('button',{name:'Copy'}));
  expect(await within(dialog).findByText('Copied ~/.claude/skills/deploy-check to /Users/you/code/ssm/.claude/skills/deploy-check.')).toBeVisible();
  expect(copy).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/ssm'});
@@ -460,12 +491,15 @@ it.each(['report','empty'] as const)('keeps the Evals %s Run eval control disabl
  vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...result.value,path:null,...(state==='empty'?{receipt:null,summary:null}:{} )}});
  openWith('#/skill/deploy-check?tab=evals',backend);const button=await screen.findByRole('button',{name:'Run eval'});expect(button).toBeDisabled();expect(screen.getByText('Install it first — evals run against the copy on your machine.')).toBeVisible();
 });
-it.each(['rename','delete'] as const)('the file %s dialog explains consequences, requires the name, and calls only its seam',async kind=>{
+// Rename asks for the new name and nothing else; delete keeps the CLI's typed-name confirmation, which
+// is the one D6 mode that is not undone by running the same verb again (Ryan, 2026-09-14).
+it.each(['rename','delete'] as const)('the file %s dialog explains consequences, arms on its own field, and calls only its seam',async kind=>{
  const backend=createMockBackend(),method=vi.spyOn(backend.skillFile,kind);
  openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-'+kind,backend);
  const dialog=await screen.findByRole('dialog'),action=within(dialog).getByRole('button',{name:kind==='rename'?'Rename':'Delete'});expect(action).toBeDisabled();
- if(kind==='rename'){expect(dialog).toHaveTextContent('invocation name');expect(dialog).toHaveTextContent('Version 1');fireEvent.change(within(dialog).getByLabelText('New name'),{target:{value:'new-name'}});}else expect(dialog).toHaveTextContent('removes it from your installs');
- fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});fireEvent.click(action);await within(dialog).findByRole('button',{name:'Done'});expect(method).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',...(kind==='rename'?{to:'new-name'}:{})});
+ if(kind==='rename'){expect(dialog).toHaveTextContent('invocation name');expect(dialog).toHaveTextContent('Version 1');expect(within(dialog).queryByLabelText('Skill name to confirm')).toBeNull();fireEvent.change(within(dialog).getByLabelText('New name'),{target:{value:'new-name'}});}
+ else {expect(dialog).toHaveTextContent('removes it from your installs');fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});}
+ expect(action).toBeEnabled();fireEvent.click(action);await within(dialog).findByRole('button',{name:'Done'});expect(method).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',...(kind==='rename'?{to:'new-name'}:{})});
 });
 
 it.each([false,true])('shows local receipt attribution or the stale-score explanation on the card (edited %s)',async edited=>{

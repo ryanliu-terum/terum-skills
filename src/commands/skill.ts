@@ -152,7 +152,13 @@ export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillRe
     if (destination === source) throw new Error('The source and destination are the same folder.');
     if (await present(source)) await plainFolder(source);
     if (destination && await present(destination) && !(args.kind === 'rename' && await present(source) && await sameFolder(source, destination))) await plainFolder(destination);
-    if (await io.text(`Type ${name} to ${args.kind} this folder`) !== name) return cancelled('The name did not match; nothing changed.');
+    // Only `delete` asks (Ryan, 2026-09-14, superseding §7.5's "the user must confirm by typing the
+    // skill's name" for the other three). Move, copy and rename are reversible by a second run of this
+    // same verb and nothing is ever overwritten — a displaced folder is kept in `old-skills` — so the
+    // typed name bought friction, not safety. Deletion is the one that ends in quarantine or in the
+    // team's copy being the only copy, and it keeps the ask. The remaining rails are unchanged: a
+    // direct child of a registered Library root, no symlinks, and an explicit `--to`.
+    if (args.kind === 'delete' && await io.text(`Type ${name} to ${args.kind} this folder`) !== name) return cancelled('The name did not match; nothing changed.');
     // Lock in deterministic order. uninstallMany owns the delete lock itself.
     if (args.kind !== 'delete') for (const path of [...new Set([source, destination!])].sort()) await lock(path);
     const journal = join(store.root, 'run', 'skill-files', createHash('sha256').update(JSON.stringify([args.kind, source, destination])).digest('hex') + '.json');

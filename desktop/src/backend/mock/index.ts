@@ -111,7 +111,9 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
  function localProjection<T extends SkillCard>(card:T):T {return {...card,teamed:false,installs:'—',installsN:0,teamState:'unknown',latestVersion:null,installedVersion:null,localMatch:card.flags.includes('local')?'none':null,knownToTeam:!card.flags.includes('local'),evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,edited:card.flags.includes('local'),flags:card.flags.filter(flag=>flag!=='update'),localEval:card.summary?{...card.summary,runnerHandle:null,version:null}:null};}
  function fileRun(kind:'move'|'copy'|'rename'|'delete',path:string,to?:string){return long('library',async ctx=>{
   const name=path.split('/').at(-1)!;
-  if(await ctx.ask('text',`Type ${name} to ${kind} this folder`)!==name)return cancelled('The name did not match; nothing changed.');
+  // Only `delete` asks, as the CLI does since 2026-09-14 (src/commands/skill.ts): the other three are
+  // reversible by a second run and the typed name bought friction, not safety.
+  if(kind==='delete'&&await ctx.ask('text',`Type ${name} to ${kind} this folder`)!==name)return cancelled('The name did not match; nothing changed.');
   const destination=kind==='delete'?null:kind==='rename'?path.slice(0,path.lastIndexOf('/')+1)+to:(to==='global'?'~':to)+'/.claude/skills/'+name;
   const notices:string[]=[];
   // §7.5 / §9.1.1 (hybrid review r1, high): this used to evict whatever card already sat at the destination,
