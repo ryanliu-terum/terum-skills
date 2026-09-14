@@ -22,6 +22,7 @@
     "test": "vitest run",
     "export": "python3 tools/export-design.py",
     "export:check": "python3 tools/export-design.py --check",
+    "icon": "node tools/render-app-icon.mjs",
     "e2e:routes": "playwright test e2e/routes",
     "e2e:fidelity": "playwright test e2e/fidelity",
     "check": "npm run typecheck && npm run typecheck:mirrors && npm run lint && npm run test && npm run e2e:routes",
