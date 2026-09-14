@@ -110,10 +110,6 @@ it('renders a missing project as Not found with a way back', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Back to marketplace' }));
   await waitFor(() => expect(location.hash).toBe('#/marketplace'));
 });
-it('renders the actual unevaluated card count in filters', async () => {
-  open('#/marketplace/skills?filters=open', true);
-  expect(await screen.findByTestId('verdict-count-Not evaluated')).toHaveTextContent('Not evaluated3');
-});
 it('shows no fake tool grants in the real project install preview', async () => {
   open('#/marketplace/projects/terum?dialog=install', true);
   const dialog = await screen.findByRole('dialog');

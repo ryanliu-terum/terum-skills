@@ -85,15 +85,9 @@ it('Select all takes every drawn card, Clear empties the set, and the count foll
   expect(screen.getByRole('button', { name: 'Publish to team…' })).toBeDisabled();
 });
 
-it('Escape leaves selection mode, but yields to the open filter popover and to a field', async () => {
+it('Escape leaves selection mode, but yields to a field the person is typing in', async () => {
   const backend = createMockBackend();
   await enterSelection(backend);
-  fireEvent.click(screen.getByRole('button', { name: /^Filter/ }));
-  const popover = await screen.findByRole('region', { name: 'Library filters' });
-  expect(document.activeElement).toBe(popover);
-  fireEvent.keyDown(popover, { key: 'Escape' });
-  await waitFor(() => expect(screen.queryByRole('region', { name: 'Library filters' })).toBeNull());
-  expect(search().get('select')).toBe('1');
   const field = screen.getByRole('textbox', { name: /^Search/ });
   field.focus();
   fireEvent.keyDown(field, { key: 'Escape' });
@@ -332,24 +326,6 @@ it("StrictMode's effect replay does not freeze the queue after its first row", a
   await within(dialog).findByText('Published 2 of 2 skills');
   for (const card of pick) expect(rowState(card.name)).toBe(`${card.name} was published to Global as Version 3.`);
   expect(within(dialog).getByRole('button', { name: 'Done' })).toBeInTheDocument();
-});
-
-it('the count follows a committed facet, and the hidden cards come back when it is cleared', async () => {
-  const backend = createMockBackend();
-  await enterSelection(backend);
-  fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
-  await screen.findByText('15 of 15 selected');
-  fireEvent.click(screen.getByRole('button', { name: /^Filter/ }));
-  const popover = await screen.findByRole('region', { name: 'Library filters' });
-  fireEvent.click(within(popover).getByTestId('library-verdict-PASS').querySelector('input')!);
-  fireEvent.click(await within(popover).findByRole('button', { name: 'Show 7 skills' }));
-  await waitFor(() => expect(screen.queryByRole('region', { name: 'Library filters' })).toBeNull());
-  expect(search().get('verdicts')).toBe('PASS');
-  await screen.findByText('7 of 7 selected');
-  expect(screen.getByRole('button', { name: 'Publish 7 skills to team…' })).toBeEnabled();
-  // The facet hid the other eight without dropping them.
-  act(() => { location.hash = '#/library/global?select=1'; });
-  await screen.findByText('15 of 15 selected');
 });
 
 it('Clear empties a selection the query is hiding', async () => {

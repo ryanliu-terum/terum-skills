@@ -24,6 +24,9 @@
 
 ## B — Library filter, sort, search (library-facets.ts, library-sort.ts, LibraryFilters.tsx, LibraryScreen.tsx, Primitives.tsx SearchRow, market-filters.css; CLI local-skills.ts, ls.ts, tauri/index.ts)
 
+> **Superseded in part, 2026-09-14.** #212 (Ryan: every facet out of the search rows) landed on main while this branch's PR was open; the Library facet popover (`LibraryFilters.tsx`, `library-facets.ts`, `?filters=open`, `?verdicts=`/`?category=`/`?state=`/`active=`) and the Filter button were removed before merge. Sort (`library-sort.ts`), live search and `libraryQueryMatches` (now `library-query.ts`) stand.
+
+
 - `SearchRow` gains `sortOptions/sortValue/onSort` (a base-ui Menu of `menuitemradio`), `filterOpen` (aria-pressed, Escape from the trigger, focus restore on close), `onClear`, and `trailing`/`children` slots; `.board-search-row{position:relative}` anchors the popover.
 - Facets in the URL: `?verdicts=` (PASS, NEUTRAL, FAIL, Not evaluated), `?category=`, `?state=` (edited, attention) and `active=N`; `libraryFacetMatches`, `libraryQueryMatches` (one predicate for the grid and the popover's "Show N skills"), `libraryCategories`, `libraryVerdictCounts`. The Filter badge counts the groups actually applied, never the URL's `active`. Deliberate deviation from the brief: no "Shared with team" / "Local only" chips — every Library card is `teamed:false` on both adapters (`localCard`/`notOfferedCard`, `localProjection`), so one chip could only empty the grid and the other could only be a no-op; a stale `state=shared` link degrades to neutral.
 - Popover: the marketplace's `Filters` markup and rules moved byte-for-byte into `market-filters.css`, imported by both screens; the Library's copy focuses itself on mount so Escape closes it from a click or a deep link; `.board-search-row>.market-filters{right:20px}` aligns it with the grid's edge.
@@ -33,6 +36,9 @@
 - Tests: library-facets.test.ts, library-sort.test.ts, library-toolbar.test.tsx (Escape from the real focus, history replace vs push, badge, AND of two groups, empty state with N filters on), library-replay.test.ts §7.4, CLI local-skills.test.ts + ls.test.ts. All 10 Library boards byte-identical (measured).
 
 ## C — Marketplace filter entry and live search (market-components.tsx, MarketplaceScreen.tsx, marketplace.css, marketplace.test.tsx)
+
+> **Superseded in part, 2026-09-14.** #212 deleted `market-filters.tsx`, `market-facets.ts` and the drawer's CSS; the `FilterButton` and its badge, the popover focus hand-off and `market-filters.css` were removed from this branch before merge. Live search in `MarketSearch` (debounce, replace-while-typing, push on Enter/✕, the stale-params guard) stands.
+
 
 - `FilterButton` (ghost, icon `filter`, `aria-pressed`, `Filter` / `Filter · N` from `activeFacets`) beside the field — before Sort in `.market-list-tools`, right of the field in the hero row and `.market-page-search`; toggles `?filters=open` with `replace` (Back does not re-open it); Escape closes from the button or the popover; focus moves into the popover on open and back to the trigger on close; `min-width` + `tabular-nums` reserve the badge's width so the centred hero row does not shift (measured: field left edge 425.5 both states).
 - `MarketSearch`: 250 ms debounce armed from an effect (react-router's `setSearchParams` is memoised per render) commits `q` with `replace`; Enter and ✕ cancel the timer and commit with a push.

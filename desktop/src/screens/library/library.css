@@ -1,9 +1,4 @@
 .library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 20px 16px;flex-grow:1;min-height:0;align-content:start;overflow:auto;scrollbar-width:none}
-/* The filter popover anchors to the whole search row (Primitives.css gives the row position:relative),
-   whose padding box is 20px wider on each side than anything drawn inside it. Inset by exactly that
-   padding so the popover's right edge lines up with the Sort button and the card grid. Two class
-   selectors beat market-filters.css's own right:0 on specificity, so import order cannot flip it. */
-.board-search-row>.market-filters{right:20px}
 /* Selection mode (batch E, 2026-09-13): the bar sits between the search row and the grid, on the grid's own
    20px gutters, and only renders while `?select=1`, so no board draws it. The notice under the header is the
    Library's one status line (`role="status"`), the shape SkillScreen's own notice uses. */
