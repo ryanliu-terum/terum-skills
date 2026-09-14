@@ -62,6 +62,20 @@ it('tells the user to pick a team when the machine is configured for two',async(
 });
 it('renders thirteen skeletons with settled loading readiness and hidden counts',async()=>{open('#/share?__mock=loading');expect(screen.getAllByTestId('member-skeleton')).toHaveLength(13);await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(document.querySelectorAll('.nav-count')).toHaveLength(0);});
 it('searches members without changing roster indices',async()=>{open('#/share');await screen.findByTestId('member-row-5');const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');fireEvent.change(screen.getByRole('textbox',{name:'Find members'}),{target:{value:member.handle}});expect(await screen.findByTestId('member-row-5')).toHaveTextContent(member.name);expect(screen.getAllByTestId(/^member-row-/)).toHaveLength(1);});
+// A reader who finds a teammate in the roster wants what that teammate has published; the marketplace
+// profile is that page, and the roster is where they are standing. The link is on the name only, and an
+// invitation — who has no people file, so no profile — keeps a plain name.
+it('opens a member profile from their name and leaves invitations unlinked',async()=>{
+ const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');
+ open('#/share');await screen.findByTestId('member-row-5');
+ const link=within(screen.getByTestId('member-row-5')).getByRole('link',{name:member.name});
+ expect(link).toHaveAttribute('href','#/marketplace/people/'+member.handle);
+ expect(within(screen.getByTestId('invited-row')).queryByRole('link')).toBeNull();
+ fireEvent.click(link);
+ await waitFor(()=>expect(location.hash).toBe('#/marketplace/people/'+member.handle));
+ expect(await screen.findByText(member.name)).toBeInTheDocument();
+ expect(screen.queryByText('No teammate named '+member.handle+'.')).toBeNull();
+});
 it('renders read-only permission chips from roster status, never from prefs',async()=>{const member=design.ROSTER[5];if(!member)throw new Error('Missing sixth member');backend.prefs.set('role:'+member.handle,design.MEMBER[member.handle]?.[0]==='admin'?'member':'admin');open('#/share');await screen.findByTestId('member-row-5');const row=screen.getByTestId('member-row-5');const chip=row.querySelector('.member-role');expect(chip).toHaveTextContent(design.MEMBER[member.handle]?.[0]==='admin'?'Admin':'Member');expect(chip).toHaveClass(design.MEMBER[member.handle]?.[0]==='admin'?'admin':'member');expect(chip?.tagName).toBe('SPAN');expect(screen.queryByRole('button',{name:'Role for '+member.handle})).toBeNull();expect(screen.queryByRole('menuitem')).toBeNull();});
 // The removal control was drawn but inert: `team remove` asks for confirmation, and the mock backend
 // neither asks nor mutates the roster, so the X did nothing a user could see. It stays out until the

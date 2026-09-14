@@ -79,7 +79,7 @@ export const cliPerson = z.object({ handle: z.string(), display_name: z.string()
 export const cliProject = z.object({ name: z.string(), skills: z.array(z.string()), remotes: z.array(z.string()), description: z.string().optional() }).catchall(z.unknown());
 // S7g: every `ls --local` row carries typed provenance and a read-only health; the prose `state` is never parsed.
 const cliLocalHealth = z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']);
-export const cliLocalRow = z.object({ body: z.string().nullish(), frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().nullable() }).nullable(), health: cliLocalHealth, edited:z.boolean().optional(), localEval:cliEvalReport.shape.latest.optional(), localEvalStale:z.boolean().optional(), teamEval:cliReceipt.extend({team:z.string(),mine:z.boolean()}).nullable().optional(), matchedVersion:z.string().nullable().optional(), matchedName:z.string().nullable().optional(), matchedTeam:z.string().nullable().optional(), knownToTeam:z.boolean().optional(), category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), updated: z.string().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional() }).strict();
+export const cliLocalRow = z.object({ body: z.string().nullish(), frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().nullable() }).nullable(), health: cliLocalHealth, edited:z.boolean().optional(), localEval:cliReceipt.extend({mine:z.boolean().optional()}).nullable().optional(), localEvalStale:z.boolean().optional(), teamEval:cliReceipt.extend({team:z.string(),mine:z.boolean()}).nullable().optional(), matchedVersion:z.string().nullable().optional(), matchedName:z.string().nullable().optional(), matchedTeam:z.string().nullable().optional(), knownToTeam:z.boolean().optional(), category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), updated: z.string().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional() }).strict();
 export const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), remote:z.object({url:z.string(),slug:z.string().nullable()}).nullish(), registered:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({body:z.string().nullish(),frontmatter:z.string().nullish(),skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),category:z.string().nullish().transform(v=>v??null),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null)})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
 export const cliSkillFile=z.object({kind:z.enum(['move','rename','delete','fix']),path:z.string(),destination:z.string().nullable(),quarantined:z.string().nullable(),installed:z.boolean(),notices:z.array(z.string())});
 export const cliProjectAdded = z.object({path:z.string(),label:z.string(),added:z.boolean()});
@@ -147,19 +147,25 @@ function restrictLocal(local:Inventory,section:LocalSection):Inventory{return {.
 function cardSummary(body:string|null|undefined,description:string|null|undefined):string{return bodyExcerpt(body??null)??description??'';}
 /** Cross-mirror overlays spec §3.3: the card shows ONE receipt for the folder's exact bytes — the newer of this
  *  machine's own run and the team's committed run (run ids are UTC timestamps, so lexical order is chronological).
- *  Attribution: a team receipt names its runner unless this machine's handle ran it; an own-store receipt keeps
- *  the D11 rule (a seeded copy carries a version, an own run does not). */
+ *  On an equal run_id the TEAM receipt wins (review walk D3): install seeds the own store with a copy of the
+ *  committed receipt, so the same run exists twice and the twin must not shadow the team's flag. Attribution: a
+ *  runner is named iff the shown receipt's `mine` is false — the CLI stamps `mine` on both receipts, so the card
+ *  can never say "run by <your own handle>". An own-store receipt from a CLI that predates the flag keeps the D11
+ *  reading: a seeded copy (version set) names its runner, an own run (version null) does not. */
 function libraryEval(row:LocalRow):{eval:SkillCard['localEval'];receipt:NonNullable<LocalRow['localEval']>|NonNullable<LocalRow['teamEval']>|null} {
   const own=row.localEval??null,team=row.teamEval??null;
-  const pick=own&&team?(team.run_id>own.run_id?team:own):own??team;
+  const pick=own&&team?(team.run_id>=own.run_id?team:own):own??team;
   if(!pick)return {eval:null,receipt:null};
   const summary=receiptSummary(pick);
-  const runnerHandle=pick===team&&team?(team.mine?null:team.provenance.runner_handle):pick.version?pick.provenance.runner_handle:null;
+  const named=pick.mine===undefined?Boolean(pick.version):!pick.mine;
+  const runnerHandle=named?pick.provenance.runner_handle:null;
   return {eval:summary?{...summary,runnerHandle,version:pick.version??null}:null,receipt:pick};
 }
-/** §3.1's precedence for the Library version slot's number: the ledger's version, else the byte match. */
+/** §3.1's precedence for the Library version slot's number: the BYTE MATCH, else the ledger's version (review
+ *  walk D1; `inventoryCard` applies the same rule to the Marketplace card over every on-disk copy — flip both or neither). A folder installed as v2 whose bytes later became exactly v1 IS v1 — the ledger remembers what was
+ *  copied, the digest says what is there now, and the card describes what is there now. */
 function libraryVersion(row:LocalRow):string|null {
-  return row.placement?.version??row.matchedVersion??null;
+  return row.matchedVersion??row.placement?.version??null;
 }
 /** §4.3: identical when the bytes equal a published version; differs when they equal none but the team knows this skill or the ledger placed it; none when nothing ties the folder to a team; null when the CLI predates the key. */
 function libraryMatch(row:LocalRow):SkillCard['localMatch'] {
@@ -247,10 +253,11 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
   const recordedVersions = ledger.filter(p => p.id === row.id && p.team === team).map(p => p.version ?? null);
   const ledgerVersion = recordedVersions.length > 0 && recordedVersions.every(v => v === recordedVersions[0])
     && recordedVersions[0] != null && parseVersionFolder(recordedVersions[0]) !== null ? recordedVersions[0] : null;
-  // §3.2: the ledger's version first; else the one version the on-disk copies' bytes all are. Two copies at
-  // different versions have no single truthful version, so the slot stays null and the copy reads as present.
+  // §3.2 (review walk D1): the bytes first — the one version every on-disk copy's bytes are; else the ledger's
+  // version. Two copies at different matched versions have no single truthful version, so the slot stays null and
+  // the copy reads as present.
   const matchedVersions = [...new Set(rows.flatMap(r => r.matchedTeam === team && r.matchedVersion ? [r.matchedVersion] : []))];
-  const installedVersion = ledgerVersion ?? (matchedVersions.length === 1 ? matchedVersions[0]! : null);
+  const installedVersion = matchedVersions.length === 0 ? ledgerVersion : matchedVersions.length === 1 ? matchedVersions[0]! : null;
   const scanned = rows.some(r => r.matchedVersion !== undefined);
   const localMatch: SkillCard['localMatch'] = !present || !scanned ? null : matchedVersions.length > 0 ? 'identical' : 'differs';
   const latestVersion = row.latestVersion ?? (parseVersionFolder(row.latest) === null ? null : row.latest);

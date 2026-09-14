@@ -34,7 +34,7 @@ it('renders profile and installed buckets separately, with the curated version o
  vi.spyOn(backend,'catalog').mockResolvedValue({...result,value:{...result.value,people:result.value.people.map(person=>person.handle==='ryan'?{...person,buckets:[['On their profile',['deploy-check']],['Installed',['test-writer']]],profileVersions:{'deploy-check':'v2'}}:person)}});
  open('#/marketplace/people/ryan'); await screen.findByRole('heading', { name: 'Ryan Liu' });
  expect(screen.getAllByRole('region').map(el => el.getAttribute('aria-label'))).toEqual(['On their profile','Installed']);
- expect(within(screen.getByRole('region',{name:'On their profile'})).getByTestId('skill-card-deploy-check')).toHaveTextContent('On profile · Version 2');
+ expect(within(screen.getByRole('region',{name:'On their profile'})).getByTestId('skill-card-deploy-check')).toHaveTextContent('On profile · v2');
  expect(within(screen.getByRole('region',{name:'Installed'})).getByTestId('skill-card-test-writer')).not.toHaveTextContent('On profile');
 });
 it('renders Lena placement note', async () => { open('#/marketplace/people/lena'); expect(await screen.findByText('Placed when you sync in Docs')).toBeInTheDocument(); });
