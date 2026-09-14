@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { PropsWithChildren, ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useBackend, useFeatures, githubUrl } from '../../backend';
@@ -35,12 +35,38 @@ export function CategoryRow({ category: [key, , n], catalog }: { category: Catal
 export function Section({ title, subtitle, path, action, children }: PropsWithChildren<{ title: string; subtitle: string; path: string; action?: ReactNode }>) { const navigate = useNavigate(); return <section className="market-section" aria-label={title}><div className="market-section-head"><div><h2>{title}</h2><span>{subtitle}</span></div><div className="market-section-actions">{action}<Button icon="chevron-right" iconOnly aria-label={'View all ' + title} onClick={() => navigate('/marketplace/' + path)}/></div></div>{children}</section>; }
 
 
+const SEARCH_DEBOUNCE_MS = 250;
 export function MarketSearch({ placeholder = 'Search skills, people and projects', hero = false }: { placeholder?: string; hero?: boolean }) {
   const [params, setParams] = useSearchParams(), q = params.get('q') ?? '', [draft, setDraft] = useState(q), [lastQ, setLastQ] = useState(q);
   if (lastQ !== q) { setLastQ(q); setDraft(q); }
-  // Search only: the facet drawer and every facet URL param were removed (Ryan, 2026-09-13), finishing the button removal of 2026-09-10. A marketplace list is narrowed by the query alone.
+  // Search only: the facet drawer and every facet URL param were removed (#212, 2026-09-14), finishing the button removal of
+  // 2026-09-10. A marketplace list is narrowed by the query alone; this field's only URL write is `q`.
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancel = useCallback(() => { if (pending.current !== null) { clearTimeout(pending.current); pending.current = null; } }, []);
+  /**
+   * Typing commits 250 ms after the last keystroke, replacing the entry so a sentence typed one letter at a time leaves one step to
+   * go back over; Enter and the clear cross cancel the timer and commit at once, pushing. The timer is armed from an effect rather
+   * than from the keystroke handler so that it always closes over the newest render's params: `setSearchParams` is memoised per
+   * render and its updater form hands back that render's params too, so a timer armed mid-word and fired after another URL write
+   * (a sort change, a dialog opening) wrote `q` on top of the params from before it and dropped that write (measured in a browser
+   * against the mock on 2026-09-13, not reasoned about). A keystroke, a committed `q`, or any other URL write re-runs this effect; its cleanup clears
+   * the timer it replaces, which also covers unmount. `draft === q` — mount, an externally cleared query, a just-committed one —
+   * arms nothing, so the render-phase sync above can replace the draft without a keystroke in flight putting the old text back.
+   */
+  useEffect(() => {
+    if (draft === q) return;
+    pending.current = setTimeout(() => {
+      pending.current = null;
+      const next = new URLSearchParams(params);
+      if (draft) next.set('q', draft); else next.delete('q');
+      setParams(next, { replace: true });
+    }, SEARCH_DEBOUNCE_MS);
+    return cancel;
+  }, [draft, q, params, setParams, cancel]);
+  // A committed query — Enter, the clear cross — is a navigation, so it pushes; only the debounce above replaces.
   function change(key: string, value?: string) { const next = new URLSearchParams(params); if (value) next.set(key, value); else next.delete(key); setParams(next); }
-  return <div className={'market-search' + (hero ? ' hero' : '')}><Icon name="search" size={16} color={token('text3')}/><input aria-label={placeholder} placeholder={placeholder} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') change('q', draft); }}/>{q && <IconButton icon="x" size={20} iconSize={14} label="Clear search field" onClick={() => change('q')}/>}</div>;
+  function commit(value: string) { cancel(); change('q', value); }
+  return <div className={'market-search' + (hero ? ' hero' : '')}><Icon name="search" size={16} color={token('text3')}/><input aria-label={placeholder} placeholder={placeholder} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') commit(draft); }}/>{q && <IconButton icon="x" size={20} iconSize={14} label="Clear search field" onClick={() => commit('')}/>}</div>;
 }
 export function Crumbs({ parts, railOpen, onToggle }: { parts: string[]; railOpen?: boolean; onToggle?: () => void }) { const navigate = useNavigate(); return <div className="market-crumbs" data-rail-open={railOpen}><div><IconButton icon="arrow-left" size={28} label="Back to marketplace" onClick={() => navigate('/marketplace')}/><div>{parts.map((part, i) => <Fragment key={i}>{i > 0 && <span className="market-crumb-separator">/</span>}<span className={i === parts.length - 1 ? 'current' : ''}>{part}</span></Fragment>)}</div></div>{onToggle && <IconButton icon="panel-right" size={28} label={railOpen ? 'Close details rail' : 'Open details rail'} onClick={onToggle}/>}</div>; }
 

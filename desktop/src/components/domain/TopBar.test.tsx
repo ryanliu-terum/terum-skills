@@ -22,6 +22,15 @@ it.each([['cosmetic',null,76],['mac-overlay',null,76],['mac-overlay',68,76],['ma
  expect(container.querySelector('.window-controls')).toBeNull();
  expect(before).toHaveLength(mode==='native'?0:1);
 });
+// The ⌘ the bar prints follows the seam's window chrome, not a platform probe: Linux and Windows have no
+// ⌘ key at all, so 'native' says Ctrl. The mock reports 'cosmetic', which is what every board is captured
+// on, so the drawn label stays ⌘K and no board moves.
+it.each([['cosmetic','\u2318K'],['mac-overlay','\u2318K'],['native','Ctrl+K']] as const)('%s prints the search shortcut as %s',(mode:Capabilities['windowChrome'],label)=>{
+ const {container}=render(<TopBar mode={mode}/>);
+ const box=container.querySelector('.search-box')!;
+ expect(box.querySelector('.kbd')).toHaveTextContent(label);
+ expect(box).toHaveAttribute('href','#/search');
+});
 it('routes drag and double click through the seam only on empty native regions',()=>{
  const backend=createMockBackend(),action=vi.spyOn(backend,'windowAction');const {container,rerender}=render(<BackendContext value={backend}><TopBar mode="mac-overlay"/></BackendContext>);
  const empty=container.querySelector('.topbar-right')!;

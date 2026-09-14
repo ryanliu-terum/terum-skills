@@ -10,6 +10,10 @@ export interface CardAction { key:'open'|'run-eval'|'move'|'place'|'publish'|'re
 export function detailPath(skill:Pick<SkillCard,'teamed'|'path'|'name'>):string {
  return !skill.teamed&&skill.path?'/skill/local?path='+encodeURIComponent(skill.path):'/skill/'+encodeURIComponent(skill.name);
 }
+/** The ref every write verb sends for a card or a detail: the folder's path when the team has never seen it
+ *  (the CLI accepts a path ref since #193), the team skill's name otherwise. `publish`, `eval` and both bulk
+ *  dialogs share this one rule, so no two of them can ever address the same folder differently. */
+export function localRef(skill:Pick<SkillCard,'teamed'|'path'|'name'>):string { return !skill.teamed&&skill.path?skill.path:skill.name; }
 function withParams(base:string,params:string[]):string {
  const query=params.filter(Boolean).join('&');
  return query?base+(base.includes('?')?'&':'?')+query:base;

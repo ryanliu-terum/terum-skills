@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
@@ -58,11 +58,106 @@ it('hides project Edit when no checkout path is recorded instead of opening a gu
   expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
 });
 it('keeps the home populated for the empty scenario', async () => { open('#/marketplace?__mock=empty'); await screen.findByRole('region', { name: 'Top rated' }); expect(names('skill-card-')).toEqual(design.DERIVED.topRated.slice(0, 3)); expect(await screen.findByRole('link', { name: 'Global 15' })).toBeInTheDocument(); for (const name of ['Pushes 3', 'Updates 3', 'Alerts 8']) expect(screen.getByRole('link', { name })).toBeInTheDocument(); });
-it('applies hero search only on Enter and preserves URL state', async () => { open('#/marketplace?theme=light'); const input = await screen.findByRole('textbox', { name: 'Search skills, people and projects' }); fireEvent.change(input, { target: { value: 'deploy prod' } }); expect(location.hash).toBe('#/marketplace?theme=light'); fireEvent.keyDown(input, { key: 'Enter' }); expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument(); expect(location.hash).toContain('theme=light'); expect(location.hash).toContain('q=deploy+prod'); });
+// Batch C, 2026-09-13 (Teddy: "filters, sort and search do not function"): the field committed `q` only on Enter, so typing
+// showed nothing and read as broken. It now commits 250 ms after the last keystroke, replacing the entry so one typed sentence
+// leaves one history step; Enter still commits at once and pushes. Renamed from 'applies hero search only on Enter ...'.
+it('applies hero search as you type (debounced) and immediately on Enter', async () => {
+  open('#/marketplace?theme=light');
+  const input = await screen.findByRole('textbox', { name: 'Search skills, people and projects' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.change(input, { target: { value: 'deploy' } });
+    act(() => { vi.advanceTimersByTime(249); });
+    expect(location.hash).toBe('#/marketplace?theme=light');
+    // Each keystroke restarts the clock, so a fast typist commits once, not once per letter.
+    fireEvent.change(input, { target: { value: 'deploy prod' } });
+    act(() => { vi.advanceTimersByTime(249); });
+    expect(location.hash).toBe('#/marketplace?theme=light');
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(location.hash).toBe('#/marketplace?theme=light&q=deploy+prod');
+    fireEvent.change(input, { target: { value: 'deploy' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(location.hash).toBe('#/marketplace?theme=light&q=deploy');
+    // Enter cancelled the keystroke's own timer: nothing lands behind it.
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(location.hash).toBe('#/marketplace?theme=light&q=deploy');
+  } finally { vi.useRealTimers(); }
+  fireEvent.change(input, { target: { value: 'deploy prod' } });
+  expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument();
+  expect(location.hash).toContain('theme=light');
+  expect(location.hash).toContain('q=deploy+prod');
+});
 it('applies project search and preserves rail state', async () => { open('#/marketplace/projects/terum?rail=closed'); const input = await screen.findByRole('textbox', { name: "Search Terum's 8 skills" }); fireEvent.change(input, { target: { value: 'deploy-check' } }); fireEvent.keyDown(input, { key: 'Enter' }); await waitFor(() => expect(names('skill-card-')).toEqual(['deploy-check'])); expect(screen.getByTestId('skill-card-deploy-check').closest('.market-grid')).toHaveAttribute('data-columns', '3'); });
 it('renders no filter affordance on the marketplace search bar', async () => { open('#/marketplace'); await screen.findByRole('region', { name: 'Top rated' }); expect(screen.queryByRole('button', { name: 'Filter marketplace' })).toBeNull(); expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull(); });
 // Filtering was deleted (Ryan, 2026-09-13): a URL still carrying the old facet params opens no drawer and narrows nothing.
 it('ignores leftover facet URL params', async () => { open('#/marketplace/skills?filters=open&installs=12&active=4'); await screen.findByRole('heading', { name: 'Top rated' }); expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull(); expect(names('skill-card-')).toEqual(design.DERIVED.topRated); });
+// Live search (2026-09-13): typing commits after a pause with `replace`; Enter and the clear cross commit at once and push.
+it('replaces the history entry while typing and pushes when Enter commits', async () => {
+  open('#/marketplace');
+  const input = await screen.findByRole('textbox', { name: 'Search skills, people and projects' });
+  vi.useFakeTimers();
+  try {
+    const push = vi.spyOn(window.history, 'pushState'), replace = vi.spyOn(window.history, 'replaceState');
+    fireEvent.change(input, { target: { value: 'dep' } });
+    fireEvent.change(input, { target: { value: 'depl' } });
+    act(() => { vi.advanceTimersByTime(250); });
+    expect(location.hash).toBe('#/marketplace?q=depl');
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(push).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: 'deploy' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(location.hash).toBe('#/marketplace?q=deploy');
+    expect(push).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(replace).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+it('drops a keystroke still in flight when the query is cleared from the no-results state', async () => {
+  open('#/marketplace?q=deploy%20prod');
+  expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument();
+  const input = screen.getByRole('textbox', { name: 'Search skills, people and projects' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.change(input, { target: { value: 'deploy prod x' } });
+    act(() => { vi.advanceTimersByTime(100); });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(location.hash).toBe('#/marketplace');
+  } finally { vi.useRealTimers(); }
+  expect(screen.getByRole('textbox', { name: 'Search skills, people and projects' })).toHaveValue('');
+});
+// A keystroke still in flight lands on the URL as it stands when it fires, not as it stood when it was typed: the first cut armed
+// the timer from the change handler, and `setSearchParams` (updater form included) hands back the params of the render that made it,
+// so another URL write mid-word was undone 250 ms later. Caught in a browser against the mock, kept here as the regression guard.
+it('lands a pending keystroke on top of a URL change made after it', async () => {
+  open('#/marketplace');
+  const input = await screen.findByRole('textbox', { name: 'Search skills, people and projects' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.change(input, { target: { value: 'dep' } });
+    act(() => { vi.advanceTimersByTime(100); });
+    // Another URL write lands while the keystroke is still in flight: a hash change from outside the router (a
+    // deep link, Back) stands in for any of them. The router listens for popstate, which jsdom queues on a task
+    // the fake timers do not own, so the event is dispatched by hand.
+    act(() => { location.hash = '#/marketplace?theme=light'; window.dispatchEvent(new PopStateEvent('popstate')); });
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(location.hash).toContain('theme=light');
+    expect(location.hash).toContain('q=dep');
+  } finally { vi.useRealTimers(); }
+});
+it('clears the query at once from the field and cancels the keystroke behind it', async () => {
+  open('#/marketplace?q=deploy%20prod');
+  expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument();
+  const input = screen.getByRole('textbox', { name: 'Search skills, people and projects' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.change(input, { target: { value: 'deploy prod x' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search field' }));
+    expect(location.hash).toBe('#/marketplace');
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(location.hash).toBe('#/marketplace');
+  } finally { vi.useRealTimers(); }
+});
 it.each([['Top rated', 'skills'], ['Teams / Projects', 'projects'], ['People', 'people'], ['Browse by category', 'categories']])('navigates %s pager to the expanded list', async (title, path) => { open('#/marketplace'); fireEvent.click(await screen.findByRole('button', { name: 'View all ' + title })); await waitFor(() => expect(location.hash).toBe('#/marketplace/' + path)); });
 it('creates a team project from the Add button and lands on its card', async () => {
   const create = vi.spyOn(pickBackend().teamProjects, 'create');
