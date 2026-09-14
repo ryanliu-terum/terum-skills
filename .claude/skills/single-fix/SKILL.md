@@ -479,13 +479,6 @@ call look measured.
 
 #### Two numbers. NEVER summed.
 
-**Depth (0-4)** — how much of the problem the fix actually removes:
-- `0` — masks the symptom; the broken mechanism is untouched
-- `1` — buys headroom (bigger cap, longer timeout, more retries); the same bug recurs later
-- `2` — removes the coupling at this call-site
-- `3` — removes the coupling here AND sweeps the known sibling call-sites
-- `4` — makes the class of bug unrepresentable (lint rule, CI gate, type, schema constraint, shared wrapper)
-
 **Fit (0-4)** — how exactly the fixed behaviour is the behaviour the governing spec describes and
 the ratified North Star asks for:
 - `0` — contradicts a sentence in the spec or the North Star (cite it)
@@ -501,13 +494,29 @@ Cite section and sentence. **A Fit without a citation is a guess and reads as `1
 silent, say so once — every option then caps at `2`, and options that differ in user-visible
 behaviour are a fork for Ryan, not a pick.
 
+**Bug risk (0-4)** — how likely the change itself is to introduce a new defect. Lower is better:
+- `0` — a constant, copy or config swap; the existing tests pin the result exactly
+- `1` — mechanical code with a fallback to today's behaviour; the worst failure is the old bug
+- `2` — new logic on a tested path; a mistake is a wrong value or a red test, not a crash
+- `3` — crosses a boundary the tests cannot exercise (a native call, a second language, a startup
+  path, a threading rule); a mistake is a plausible crash or hang that only a launched build reveals
+- `4` — the write path, a migration or a shared invariant with no fallback; a mistake loses or
+  corrupts user data
+
+Name the concrete failure that earns the number ("an off-main-thread AppKit call is an assertion
+crash"), not the category. Cause-versus-symptom is judged in Fit, not here: a fix that masks the
+symptom does not produce the behaviour the spec describes and reads Fit `1` at most, unless the
+spec literally asks for the mask.
+
 **Effort (one line per option, never a score)** — hours, files, migration or multi-repo
 coordination, revert path. It is reported so Ryan knows what he is buying. It never chooses:
-highest Fit wins, then highest Depth, and only a tie on both lets effort break it, out loud.
+highest Fit wins, then lowest Bug risk, and only a tie on both lets effort break it, out loud.
+When the highest-Fit option sits at Bug risk `3` or `4` and a lower-Fit option at `0` or `1`, that
+is a fork for Ryan, not a pick: the spec's exact behaviour against the chance of a new defect.
 *Ryan, 2026-09-06: implementation time and rework surface area are not reasons to prefer a less
 correct fix.* (Until that date this axis was **Cost 0-4**; see the amendment below.)
 
-**Do NOT add, average, subtract, or otherwise combine Fit and Depth.** They are different
+**Do NOT add, average, subtract, or otherwise combine Fit and Bug risk.** They are different
 currencies and a single figure cannot carry both. Report them as a pair.
 
 *Why score at all, and why unsummed. A 44-run trial (2026-07-30) scored fixed option sets from
@@ -565,6 +574,13 @@ cheaper fix over the one the spec describes, so Cost was replaced by **Fit** and
 Effort footnote. The 9/10 figure has not been re-measured with the Fit·Depth pair — re-run the
 trial before quoting it for the new pair.*
 
+*Amendment 2026-09-14 (Ryan). **Depth** was replaced by **Bug risk** — how likely the change
+itself is to introduce a new defect. The walk that prompted it (the macOS 26 traffic-light spacer)
+rated a runtime AppKit measurement Fit 4 and a version lookup Fit 3; nothing in the Fit·Depth pair
+said that only the first could crash the app at startup, and that was the fact the pick turned on.
+The cause-versus-symptom question Depth existed to force now lives in Fit: a symptom mask is not
+the behaviour the spec describes. Neither trial above has been re-run with the Fit·Bug-risk pair.*
+
 **The conformance sentence (required).** Because there is no total, you must state in one line
 what the recommended option is correct *against*, in this form: **"Option N implements {spec §X:
 'quoted sentence'} — or: the spec is silent and {North Star: 'quoted'} implies it — and beats
@@ -572,24 +588,24 @@ Option M because ___"**. This sentence is where the actual judgment lives — a 
 making this same call silently at a rate someone guessed in advance.
 
 **Anti-strawman floor.** Every listed option must be one a competent engineer might
-actually pick. If an option is Depth `0` AND you cannot state its **Wins if** line, delete
+actually pick. If an option is Fit `0` or `1` AND you cannot state its **Wins if** line, delete
 it — do not pad the list to three. One option is a legitimate answer.
 
 #### Output — the pair table first, then detail
 
-| Option | Fit | Depth | Hinges on |
+| Option | Fit | Bug risk | Hinges on |
 |---|---|---|---|
 | 1. {name} | {0-4} ({spec §X} / silent) | {0-4} | {U1, U3 — or "nothing; right in every world"} |
 | 2. {name} | … | … | … |
 
 {Then, for each option:}
 
-**Option {N}: {name} — Fit {f}/4 · Depth {d}/4**
+**Option {N}: {name} — Fit {f}/4 · Bug risk {r}/4**
 - What it does (plain English): {what the fix actually does and how that removes the symptom — same register as "What's broken" above, naming the mechanism and the resulting behavior, NOT just the files. e.g. "saves the new assignment before erasing the old one, so a crash can never leave the conversation with no project."}
 - What to change: {specific files and what changes}
 - Fit rests on: {section + quoted sentence, or "silent"}
 - Effort (not a score): {hours, files, migrations, revert path}
-- Risk: {what could go wrong}
+- Bug risk rests on: {the concrete failure that earns the number, and what would reveal it}
 - **Wins if**: {the specific condition under which THIS option beats the one you're
   recommending — a fact about the world, not a restatement of its trade-off. Wherever
   possible tie it to a numbered uncertainty: "Wins if U1 is true." Good: "the SPA deploy
@@ -599,9 +615,10 @@ it — do not pad the list to three. One option is a legitimate answer.
   a strawman: delete it per the floor rule.}
 
 End with the **conformance sentence** and a one-line **Recommendation** naming the option, its
-Fit·Depth pair, and the single deciding reason. Highest Fit wins; equal Fit → highest Depth;
-equal both → say so and let effort break the tie out loud. Never pick the shallower or
-less-conformant option because it is cheaper.
+Fit·Bug-risk pair, and the single deciding reason. Highest Fit wins; equal Fit → lowest Bug risk;
+equal both → say so and let effort break the tie out loud; highest Fit at risk `3`-`4` against a
+lower Fit at risk `0`-`1` → a fork, not a pick. Never pick the less-conformant option because it
+is cheaper, and never pick the riskier one because it is more thorough.
 
 **If a cheap observation would resolve an uncertainty that flips the recommendation, say
 that INSTEAD of picking.** "Run this query first; if U1 is false the answer is Option 3,
