@@ -13,6 +13,12 @@ export const TEMP_DIRS: string[] = [];
 
 /** The one canonical /terum-skills skill (what `npm run build` bundles); from src/ the built copy does not exist, so tests point at this. */
 export const BUNDLED_SKILL_SOURCE = fileURLToPath(new URL('../../../.claude/skills/terum-skills/SKILL.md', import.meta.url));
+/** The canonical edit-hook script, for the same reason: from src/ the bundled copy under dist/ does not exist. */
+export const BUNDLED_EDIT_HOOK_SOURCE = fileURLToPath(new URL('../../../assets/claude/hooks/terum-skills-edit.mjs', import.meta.url));
+/** Edit-hook options rooted in a test state root, pointed at a settings file that is never the real ~/.claude/settings.json. */
+export function editHookFor(storeRoot: string, settingsFile: string): { storeRoot: string; source: string; settingsFile: string; backupDir: string } {
+  return { storeRoot, source: BUNDLED_EDIT_HOOK_SOURCE, settingsFile, backupDir: join(storeRoot, 'backups') };
+}
 /** Wrapper options that place under a test home's global Claude Code skills root — never the real ~/.claude. */
 export function wrapperFor(home: string): { skillsRoot: string; source: string } {
   return { skillsRoot: join(home, '.claude', 'skills'), source: BUNDLED_SKILL_SOURCE };

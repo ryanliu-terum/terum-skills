@@ -8,6 +8,7 @@ import { checkoutRootOf } from '../lib/placer/agent-paths.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { HookOptions } from '../lib/hook.js';
 import type { WrapperOptions } from '../lib/wrapper.js';
+import type { EditHookOptions } from '../lib/editHook.js';
 import { inspect, lockTarget, moveDirectory, place, appendExclude, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { refuseSecondTeam, teamByRemote } from '../lib/auth.js';
@@ -39,6 +40,7 @@ export interface InstallArgs extends WithForm {
   hook?: HookOptions;
   /** Where that bootstrap offers the bundled /terum-skills Claude Code skill (test knob). */
   wrapper?: WrapperOptions;
+  editHook?: Partial<EditHookOptions>;
   /** Injectable retry clock for deterministic recovery tests; authorization remains command-owned. */
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
 }
@@ -82,7 +84,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       // built on team, which is built on this module.
       if (!(error instanceof NotJoinedError) || Object.keys(config.teams).length > 0) throw error;
       const { run: setup } = await import('./setup.js');
-      const bootstrapped = await setup({ form: args.form, target: error.remote.replace(/^github\.com\//, ''), quiet: true, config: store, runner, home: args.home, hook: args.hook, wrapper: args.wrapper }, io);
+      const bootstrapped = await setup({ form: args.form, target: error.remote.replace(/^github\.com\//, ''), quiet: true, config: store, runner, home: args.home, hook: args.hook, wrapper: args.wrapper, editHook: args.editHook }, io);
       if (!bootstrapped.ok) {
         if (bootstrapped.refused) throw new RefusedError(bootstrapped.error);
         if (bootstrapped.cancelled) throw new CancelledError(bootstrapped.error);
