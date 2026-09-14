@@ -17,7 +17,7 @@ import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { createReadSession } from './session.js';
 import { prepareRun } from './prepare-run';
-import { cliEvalReport, mapEvalReport } from './eval-report';
+import { cliEvalReport, mapEvalReport, cliReceipt } from './eval-report';
 import { receiptSummary } from '../receipt-summary';
 import { relativeTime } from '../../lib/relative-time';
 import { personPlaceNote, plural } from '../../screens/marketplace/market-data';
@@ -77,7 +77,7 @@ export const cliPerson = z.object({ handle: z.string(), display_name: z.string()
 export const cliProject = z.object({ name: z.string(), skills: z.array(z.string()), remotes: z.array(z.string()), description: z.string().optional() }).catchall(z.unknown());
 // S7g: every `ls --local` row carries typed provenance and a read-only health; the prose `state` is never parsed.
 const cliLocalHealth = z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']);
-export const cliLocalRow = z.object({ body: z.string().nullish(), frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().nullable() }).nullable(), health: cliLocalHealth, edited:z.boolean().optional(), localEval:cliEvalReport.shape.latest.optional(), localEvalStale:z.boolean().optional(), category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional() }).strict();
+export const cliLocalRow = z.object({ body: z.string().nullish(), frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().nullable() }).nullable(), health: cliLocalHealth, edited:z.boolean().optional(), localEval:cliEvalReport.shape.latest.optional(), localEvalStale:z.boolean().optional(), teamEval:cliReceipt.extend({team:z.string(),mine:z.boolean()}).nullable().optional(), matchedVersion:z.string().nullable().optional(), matchedName:z.string().nullable().optional(), matchedTeam:z.string().nullable().optional(), knownToTeam:z.boolean().optional(), category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional() }).strict();
 export const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), remote:z.object({url:z.string(),slug:z.string().nullable()}).nullish(), registered:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({body:z.string().nullish(),frontmatter:z.string().nullish(),skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),category:z.string().nullish().transform(v=>v??null),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null)})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
 export const cliSkillFile=z.object({kind:z.enum(['move','rename','delete','fix']),path:z.string(),destination:z.string().nullable(),quarantined:z.string().nullable(),installed:z.boolean(),notices:z.array(z.string())});
 export const cliProjectAdded = z.object({path:z.string(),label:z.string(),added:z.boolean()});
@@ -143,12 +143,35 @@ function restrictLocal(local:Inventory,section:LocalSection):Inventory{return {.
  *  and the Marketplace (hybrid review r1, high — localCard skipped it): the body's first paragraph, else the
  *  frontmatter `description`, else blank. */
 function cardSummary(body:string|null|undefined,description:string|null|undefined):string{return bodyExcerpt(body??null)??description??'';}
+/** Cross-mirror overlays spec §3.3: the card shows ONE receipt for the folder's exact bytes — the newer of this
+ *  machine's own run and the team's committed run (run ids are UTC timestamps, so lexical order is chronological).
+ *  Attribution: a team receipt names its runner unless this machine's handle ran it; an own-store receipt keeps
+ *  the D11 rule (a seeded copy carries a version, an own run does not). */
+function libraryEval(row:LocalRow):{eval:SkillCard['localEval'];receipt:NonNullable<LocalRow['localEval']>|NonNullable<LocalRow['teamEval']>|null} {
+  const own=row.localEval??null,team=row.teamEval??null;
+  const pick=own&&team?(team.run_id>own.run_id?team:own):own??team;
+  if(!pick)return {eval:null,receipt:null};
+  const summary=receiptSummary(pick);
+  const runnerHandle=pick===team&&team?(team.mine?null:team.provenance.runner_handle):pick.version?pick.provenance.runner_handle:null;
+  return {eval:summary?{...summary,runnerHandle,version:pick.version??null}:null,receipt:pick};
+}
+/** §3.1's precedence for the Library version slot's number: the ledger's version, else the byte match. */
+function libraryVersion(row:LocalRow):string|null {
+  return row.placement?.version??row.matchedVersion??null;
+}
+/** §4.3: identical when the bytes equal a published version; differs when they equal none but the team knows this skill or the ledger placed it; none when nothing ties the folder to a team; null when the CLI predates the key. */
+function libraryMatch(row:LocalRow):SkillCard['localMatch'] {
+  if(row.matchedVersion===undefined)return null;
+  if(row.matchedVersion!==null)return 'identical';
+  return row.placement!==null||row.knownToTeam===true?'differs':'none';
+}
 function localCard(row:LocalRow&{fixable?:boolean},section:LocalSection,home:string):SkillCard {
   const placed=row.placed??row.placement!==null,local=!placed;
-  const summary=receiptSummary(row.localEval??null);
-  // A local card makes no claim about team installs; all new team fields are neutral.
+  const shown=libraryEval(row),receipt=shown.receipt,summary=receiptSummary(receipt);
+  // A local card makes no claim about team installs; the team fields stay neutral except the two
+  // byte-level overlays (spec §2 §7.4): the version its bytes are, and the receipt for those bytes.
   // The identity line names the root the folder lives in, never the word 'local'.
-  return {edited:row.edited??row.health==='local-changed',localEval:summary?{...summary,runnerHandle:row.localEval?.version?row.localEval.provenance.runner_handle:null,version:row.localEval?.version??null}:null,localEvalStale:row.localEvalStale??false,installedVersion:null,latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:false,path:row.path,name:row.name,desc:row.problem!==undefined?row.path+' · '+row.problem:cardSummary(row.body,row.description),project:labelOf(section),category:row.category??'—',installs:'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:'unknown',paths:[[abbreviateHome(row.path,home),section.scope]],projectRoots:section.repoRoot?[abbreviateHome(section.repoRoot,home)]:[],flags:row.problem!==undefined?['broken']:local?['local']:[],...(row.fixable?{fixable:true}:{}),flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:summary?[summary.w,summary.l,summary.t]:null,summary,provenance:row.localEval?{model:row.localEval.provenance.model,k:row.localEval.provenance.k,ccVersion:row.localEval.provenance.cc_version,runner:row.localEval.provenance.runner_handle,when:row.localEval.provenance.timestamp.slice(0,10)}:null,favorite:false,favorites:null,enabled:true,updated:null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};}
+  return {edited:row.edited??row.health==='local-changed',localEval:shown.eval,localEvalStale:row.localEvalStale??false,localMatch:libraryMatch(row),knownToTeam:row.knownToTeam??false,installedVersion:libraryVersion(row),latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:false,path:row.path,name:row.name,desc:row.problem!==undefined?row.path+' · '+row.problem:cardSummary(row.body,row.description),project:labelOf(section),category:row.category??'—',installs:'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:'unknown',paths:[[abbreviateHome(row.path,home),section.scope]],projectRoots:section.repoRoot?[abbreviateHome(section.repoRoot,home)]:[],flags:row.problem!==undefined?['broken']:local?['local']:[],...(row.fixable?{fixable:true}:{}),flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:summary?[summary.w,summary.l,summary.t]:null,summary,provenance:receipt?{model:receipt.provenance.model,k:receipt.provenance.k,ccVersion:receipt.provenance.cc_version,runner:receipt.provenance.runner_handle,when:receipt.provenance.timestamp.slice(0,10)}:null,favorite:false,favorites:null,enabled:true,updated:null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};}
 function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):SkillCard {
   return localCard({name:entry.name,path:entry.path,state:'',tracked:false,placement:null,health:'unknown',category:entry.category,description:entry.description,characters:entry.characters,problem:entry.detail??entry.reason,fixable:entry.reason==='invalid-yaml'||entry.reason==='name-mismatch'},section,home);
 }
@@ -198,8 +221,14 @@ function unidentifiedLocal(local: Inventory, name: string, features: Pick<Featur
 // never visits), then this user's people-file record. When the scan does cover the skill its richer
 // verdict (placed / connected / on-disk-only, or the old-CLI unidentified ambiguity) wins over the
 // ledger. 'recorded' = the people file says this user installed it, but nothing is on this machine.
+/** Cross-mirror overlays spec §3.2: a folder whose BYTES equal one of this skill's published versions is a
+ *  copy of it even with no ledger row and no uuid in its frontmatter (the digest ignores the managed fields). */
+function byteMatched(local: Inventory, team: string, name: string) {
+  return localRows(local).filter(row => row.matchedVersion != null && row.matchedTeam === team && row.matchedName === name);
+}
 function inventoryCard(row: InventorySkill, local: Inventory, team: string, features: Pick<Features, 'localIdentity'>, home: string, handle: string, ledger: LedgerPlacements): SkillCard {
-  const rows = onDisk(local, team, row.id, features);
+  const identified = onDisk(local, team, row.id, features);
+  const rows = [...identified, ...byteMatched(local, team, row.name).filter(candidate => !identified.some(known => known.path === candidate.path))];
   const placements = rows.filter(r => r.placement?.id === row.id && r.placement.team === team);
   const present = rows.length > 0;
   const ledgerPlaced = !present && ledger.some(placement => placement.id === row.id && placement.team === team);
@@ -214,11 +243,17 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
   // Only ledger versions may annotate the catalogue. Multiple differing placements have no
   // single truthful version; keep the annotation null until a per-root display is specified.
   const recordedVersions = ledger.filter(p => p.id === row.id && p.team === team).map(p => p.version ?? null);
-  const installedVersion = recordedVersions.length > 0 && recordedVersions.every(v => v === recordedVersions[0])
+  const ledgerVersion = recordedVersions.length > 0 && recordedVersions.every(v => v === recordedVersions[0])
     && recordedVersions[0] != null && parseVersionFolder(recordedVersions[0]) !== null ? recordedVersions[0] : null;
+  // §3.2: the ledger's version first; else the one version the on-disk copies' bytes all are. Two copies at
+  // different versions have no single truthful version, so the slot stays null and the copy reads as present.
+  const matchedVersions = [...new Set(rows.flatMap(r => r.matchedTeam === team && r.matchedVersion ? [r.matchedVersion] : []))];
+  const installedVersion = ledgerVersion ?? (matchedVersions.length === 1 ? matchedVersions[0]! : null);
+  const scanned = rows.some(r => r.matchedVersion !== undefined);
+  const localMatch: SkillCard['localMatch'] = !present || !scanned ? null : matchedVersions.length > 0 ? 'identical' : 'differs';
   const latestVersion = row.latestVersion ?? (parseVersionFolder(row.latest) === null ? null : row.latest);
   const latestN = latestVersion === null ? null : parseVersionFolder(latestVersion);
-  return { edited:false, localEval:null, localEvalStale:false, installedVersion, latestVersion, evalVersion:row.evalVersion ?? null, evalStale:row.evalVersion != null && latestN !== null && row.evalVersion !== latestN, latestEvalState:row.latestEvalState ?? null, profileVersion:null, teamed:true, path:rows[0]?.path ?? null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), desc: cardSummary(row.body, row.description), grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: summary ? [summary.w, summary.l, summary.t] : null, summary, provenance, favorite: false, favorites: null, enabled: true, flags: problem ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The placed copy could not be inspected.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
+  return { edited:false, localEval:null, localEvalStale:false, localMatch, knownToTeam:true, installedVersion, latestVersion, evalVersion:row.evalVersion ?? null, evalStale:row.evalVersion != null && latestN !== null && row.evalVersion !== latestN, latestEvalState:row.latestEvalState ?? null, profileVersion:null, teamed:true, path:rows[0]?.path ?? null, name: row.name, category: row.category, project: row.endorsement === 'global' ? 'Global' : row.endorsement.replace(/^project: /, ''), installs: `${row.installs} install${row.installs === 1 ? '' : 's'}`, installsN: row.installs, installed, placed, onDiskOnly: present && !placed, teamState: 'endorsed', paths: rows.map(r => [abbreviateHome(r.path, home), r.scope]), projectRoots: rows.flatMap(r => r.repoRoot ? [abbreviateHome(r.repoRoot, home)] : []), desc: cardSummary(row.body, row.description), grants: row.grants === null ? null : row.grants === 'none' ? [] : row.grants.split('\n'), normalizedGrants: row.grants ?? null, grantsHash: row.grantsHash ?? null, ...tokenLabel(row.characters), wlt: summary ? [summary.w, summary.l, summary.t] : null, summary, provenance, favorite: false, favorites: null, enabled: true, flags: problem ? ['broken'] : [], flagText: problem ? { broken: problem.problem ?? 'placed copy could not be inspected' } : {}, updated: row.updated === '—' ? null : row.updated ?? null, indicators: { broken: { icon: 'alert', token: 'bad', text: 'The placed copy could not be inspected.' }, update: { icon: 'arrow-up-circle', token: 'warn', text: '' }, local: { icon: 'pencil', token: 'text3', text: '' } } };}
 function initials(name: string): string { return name.split(/\s+/).filter(Boolean).map(part => part[0]).join('').slice(0, 2).toUpperCase(); }
 /** `owner/repo` as the team remote spells it (case kept; any host); null when the team has no remote. */
 function repoSlug(remote: string | null | undefined): string | null {
@@ -701,8 +736,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         if(!row&&!entry)continue;
         const card=row?localCard(row,section,directory):notOfferedCard(entry!,section,directory);
         const detail=localDetail(card,section,row?.path??entry!.path,directory);
-        const receipt=row?.localEval;
-        const report=receipt?mapEvalReport({versions:{placed:null,teamCurrent:null,evaluated:receipt.version},latestState:'none',latest:null,history:[],localRuns:[{run_id:receipt.run_id,run_dir:receipt.path.replace(/[/\\]receipt.json$/,''),execution_status:receipt.execution_status,committed:false,receipt}]}):{};
+        const shown=row?libraryEval(row).receipt:null,own=row?.localEval??null,team=row?.teamEval??null;
+        // §3.3: the same receipt the card shows. A team receipt is committed testimony (latest, 'ok'); an own run is an uncommitted local run.
+        const report=shown?mapEvalReport({versions:{placed:row?.placement?.version??null,teamCurrent:null,evaluated:shown.version},
+          latestState:shown===team?'ok':'none',latest:shown===team?team:null,
+          history:team?[{version:team.version??'—',run_id:team.run_id,timestamp:team.provenance.timestamp,runner_handle:team.provenance.runner_handle,comparison:team.comparisons['candidate-vs-baseline']??null,verdict:team.verdict,execution_status:team.execution_status}]:[],
+          localRuns:own?[{run_id:own.run_id,run_dir:own.path.replace(/[/\\]receipt.json$/,''),execution_status:own.execution_status,committed:false,receipt:own}]:[]}):{};
         return {ok:true,value:{...detail,...report}};
       }
       return {ok:false,error:abbreviateHome(path,directory)+' is not in any Library root (Global or a registered project).',reason:'not-in-library'};

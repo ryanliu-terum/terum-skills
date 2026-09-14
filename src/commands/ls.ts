@@ -13,11 +13,12 @@ import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
 import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, skillEndorsement } from '../lib/readme.js';
 import { parseVersionFolder, versionFolderName, versionLabel } from '../lib/versions.js';
-import type { Receipt } from '../lib/evals/receipt.js';
-import { localReceiptsFor, selectCardEval } from '../lib/evals/receipt-store.js';
+import { receiptSchema, type Receipt } from '../lib/evals/receipt.js';
+import { localReceiptsFor, receiptFiles, selectCardEval } from '../lib/evals/receipt-store.js';
+import { versionDigests, type VersionDigest } from '../lib/version-digests.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
+import { type Config, handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
 import { githubOwnerRepo, repositoryUrl } from '../lib/remote.js';
 
 import { skillVersions } from '../lib/teamRepo.js';
@@ -62,7 +63,7 @@ export interface LsSkill {
 export type LocalHealth = 'local-changed' | 'unknown';
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
-export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; edited: boolean; localEval: (Receipt & { path: string }) | null; localEvalStale: boolean; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem | 'failed'; detail: string; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; edited: boolean; localEval: (Receipt & { path: string }) | null; localEvalStale: boolean; teamEval: TeamEval | null; matchedVersion: string | null; matchedName: string | null; matchedTeam: string | null; knownToTeam: boolean; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem | 'failed'; detail: string; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
 /**
  * §8.4 — one member, whole, from the team read that already parsed `people/<handle>.json`.
  *
@@ -257,6 +258,100 @@ function describedBy(inspection: LocalEntry['inspection']): string | null {
   return inspection.kind === 'rejected' ? inspection.description ?? null : null;
 }
 
+/**
+ * Cross-mirror overlays spec §4.1 — the one team-side annotation a Library row may carry for its
+ * eval: the newest committed receipt whose `content_digest` equals the folder's digest. `team` names
+ * the clone it came from; `mine` is whether this machine's handle ran it (the card then omits the
+ * "run by" attribution). `path` is the receipt file inside the clone.
+ */
+export type TeamEval = Receipt & { path: string; team: string; mine: boolean };
+
+interface TeamIndex {
+  /** Every uuid any configured team publishes — `knownToTeam` on a row. */
+  ids: Set<string>;
+  /** Committed version folders by their content digest — the byte-level version match. */
+  byDigest: Map<string, (VersionDigest & { team: string })[]>;
+  /** Committed receipts by the digest they evaluated, newest run first. */
+  receiptsByDigest: Map<string, TeamEval[]>;
+  /** Per skill uuid, every digest a committed receipt describes — the "evaluated before your last edit" line. */
+  digestsBySkill: Map<string, Set<string>>;
+}
+
+/**
+ * The team-side facts the Library overlays onto its rows, read from every configured clone and
+ * nothing else: version-folder digests and committed receipts, both keyed by content digest so a
+ * folder joins by its bytes and never by its name (cross-mirror overlays spec §2 L-DECL). Fetch-free
+ * like every read verb. A missing or unreadable clone contributes nothing and prints one line: the
+ * Library is complete without a team, and a team it cannot read must not look like a team with no
+ * versions. Pre-migration receipts (no `content_digest`) cannot join and are skipped silently — they
+ * describe bytes nobody can identify.
+ */
+async function teamIndex(store: ConfigStore, config: Config, io: Prompter): Promise<TeamIndex> {
+  const index: TeamIndex = { ids: new Set(), byDigest: new Map(), receiptsByDigest: new Map(), digestsBySkill: new Map() };
+  for (const [team, binding] of Object.entries(config.teams)) {
+    const clone = store.teamClone(team);
+    let records;
+    try { records = await skillRecords(clone, team); }
+    catch (error) { io.print(`${team}: team versions and evals are not shown in the Library (${error instanceof Error ? error.message : String(error)}).`); continue; }
+    for (const record of records) index.ids.add(record.id);
+    for (const entry of (await versionDigests(clone, records.map((record) => record.name))).values()) {
+      const list = index.byDigest.get(entry.digest) ?? [];
+      list.push({ ...entry, team });
+      index.byDigest.set(entry.digest, list);
+    }
+    const found = await mapWithConcurrency(records, 8, async (record) => {
+      const root = join(clone, 'evals', record.id);
+      let folders: string[] = [];
+      try { folders = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && parseVersionFolder(entry.name) !== null).map((entry) => entry.name); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') io.print(`${team}/${record.name}: ${error instanceof Error ? error.message : String(error)}`); return []; }
+      const receipts: { id: string; entry: TeamEval }[] = [];
+      for (const folder of folders) {
+        for (const file of await receiptFiles(join(root, folder))) {
+          const path = join(root, folder, file);
+          let raw: unknown;
+          try { raw = JSON.parse(await readFile(path, 'utf8')); }
+          catch { io.print(`${team}/${record.name}: unreadable receipt ${folder}/${file}; not considered.`); continue; }
+          const parsed = receiptSchema.safeParse(raw);
+          if (!parsed.success) { io.print(`${team}/${record.name}: schema-invalid receipt ${folder}/${file}; not considered.`); continue; }
+          if (!parsed.data.content_digest) continue;
+          receipts.push({ id: record.id, entry: { ...parsed.data, path, team, mine: parsed.data.provenance.runner_handle === binding.handle } });
+        }
+      }
+      return receipts;
+    });
+    for (const { id, entry } of found.flat()) {
+      const digest = entry.content_digest!;
+      const list = index.receiptsByDigest.get(digest) ?? [];
+      list.push(entry);
+      index.receiptsByDigest.set(digest, list);
+      const digests = index.digestsBySkill.get(id) ?? new Set<string>();
+      digests.add(digest);
+      index.digestsBySkill.set(id, digests);
+    }
+  }
+  for (const list of index.receiptsByDigest.values()) list.sort((a, b) => b.run_id.localeCompare(a.run_id));
+  return index;
+}
+
+/**
+ * Which committed version a folder's bytes ARE. One team → the entry whose name equals the folder's,
+ * else the first name alphabetically, highest version within it. More than one team holding the same
+ * bytes → the placement's team decides; with no placement the match is refused and reported, because
+ * naming one team over another would be a guess (§4.1 ambiguity rule).
+ */
+function matchVersion(candidates: readonly (VersionDigest & { team: string })[], entry: LocalEntry): { match: (VersionDigest & { team: string }) | null; ambiguous: boolean } {
+  if (candidates.length === 0) return { match: null, ambiguous: false };
+  const teams = new Set(candidates.map((candidate) => candidate.team));
+  let pool = candidates;
+  if (teams.size > 1) {
+    const preferred = entry.placement?.team;
+    if (preferred === undefined || !teams.has(preferred)) return { match: null, ambiguous: true };
+    pool = candidates.filter((candidate) => candidate.team === preferred);
+  }
+  const sorted = [...pool].sort((a, b) => Number(b.name === entry.name) - Number(a.name === entry.name) || a.name.localeCompare(b.name) || b.n - a.n);
+  return { match: sorted[0]!, ambiguous: false };
+}
+
 /** Local discovery is independent of team selection, and only enriches ledger references. */
 async function showLocal(store: ConfigStore, home: string, io: Prompter, runner: Runner): Promise<Result<LsResult>> {
   const config = await store.read();
@@ -290,14 +385,26 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
     receipts.push(...(await localReceiptsFor(store.root, 'sha256:' + digest, line => io.print(line))).map(run => run.receipt).filter(receipt => receipt.content_digest === 'sha256:' + digest));
   }));
   receipts.sort((a, b) => b.run_id.localeCompare(a.run_id));
+  // Cross-mirror overlays spec §4.1: the team-side facts a row may carry, joined on the digest the
+  // row already computes. Every configured clone is read once per load; none is fetched.
+  const team = await teamIndex(store, config, io);
+  const ambiguous = new Set<string>();
   const evalOf = async (entry: LocalEntry) => {
-    if (entry.inspection.kind !== 'candidate') return { localEval: null, localEvalStale: false };
+    const knownToTeam = entry.skillId !== null && team.ids.has(entry.skillId);
+    const none = { localEval: null, localEvalStale: false, teamEval: null, matchedVersion: null, matchedName: null, matchedTeam: null, knownToTeam };
+    if (entry.inspection.kind !== 'candidate') return none;
     try {
       const digest = await canonicalDigest(entry.path);
       const receipt = receipts.find(r => r.content_digest === digest);
+      const teamEval = team.receiptsByDigest.get(digest)?.[0] ?? null;
+      const version = matchVersion(team.byDigest.get(digest) ?? [], entry);
+      if (version.ambiguous) ambiguous.add(entry.path);
+      // Stale means: no score for THESE bytes anywhere, but some store scored this skill at another digest.
+      const evaluatedElsewhere = entry.skillId !== null && (receipts.some(r => r.skill_id === entry.skillId && r.content_digest !== digest) || [...(team.digestsBySkill.get(entry.skillId) ?? [])].some(d => d !== digest));
       return { localEval: receipt ? { ...receipt, path: join(evalRoot, digest.slice(7), receipt.run_id, 'receipt.json') } : null,
-        localEvalStale: !receipt && entry.skillId !== null && receipts.some(r => r.skill_id === entry.skillId && r.content_digest !== digest) };
-    } catch { return { localEval: null, localEvalStale: false }; }
+        localEvalStale: !receipt && !teamEval && evaluatedElsewhere,
+        teamEval, matchedVersion: version.match?.folder ?? null, matchedName: version.match?.name ?? null, matchedTeam: version.match?.team ?? null, knownToTeam };
+    } catch { return none; }
   };
   // Probe origins in one wave before rendering the ordered sections.
   const remotes = await Promise.all(inventories.map((root) => originRemote(root.repoRoot, runner)));
@@ -322,6 +429,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
         if (tracked) local.problems.push({ path: entry.path, reason: 'placement recorded in the ledger but the path is not a folder' });
         continue;
       }
+      if (ambiguous.has(entry.path)) local.problems.push({ path: entry.path, reason: 'identical bytes exist in more than one team; no version is shown' });
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions' : undefined;
         local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, name: entry.name, path: entry.path, state: stateOf(entry), tracked, placement: entry.placement ?? null, health: healths.get(entry)!, edited: healths.get(entry) === 'local-changed', ...evals[entryIndex]!, description: describedBy(inspection), frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });

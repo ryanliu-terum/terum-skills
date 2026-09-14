@@ -69,7 +69,7 @@ Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/sk
 
 ## How it works
 
-**Your library are your local folders.** Kind of just like a file explorer but just explicitly for your own skills. This is a direct mirror of your own local system. 
+**Your library are your local folders.** Kind of just like a file explorer but just explicitly for your own skills. This is a direct mirror of your own local system. When a folder's bytes are identical to a version the team has published, its card also shows that version and the team's eval for those exact bytes, named after whoever ran it; a folder you have edited shows neither, because the score described the old bytes. 
 
 **Local-first, with shared skills in a team Github, created on setup** The team repo holds every skill and their unique versions in GitHub along with each skill's associated eval. Each individual has their own .json detailing their personal profile along with the skills they have published or have installed. 
 
