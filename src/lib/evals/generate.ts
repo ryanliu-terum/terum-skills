@@ -97,6 +97,10 @@ function validateCases(raw: Record<string, unknown>): Result<Record<string, Reco
     if (Object.hasOwn(files, name)) return failure(`generated case name '${name}' is duplicated`);
     if (Object.hasOwn(record, 'fixture')) return failure(`generated case '${name}' may not use fixture`);
     if (typeof record['bucket'] !== 'string' || !BUCKETS.has(record['bucket'])) return failure(`generated case '${name}' needs a bucket from explicit, implicit, contextual, negative, adversarial`);
+    // Engine spec §7.1: a round whose checks name no winner goes to the judge only when the case
+    // carries a rubric; without one it is a default tie (`checks-equal-no-judge`). A generator that
+    // omits the rubric therefore unplugs the designed tiebreak for every case it writes.
+    if (typeof record['judge'] !== 'string' || !record['judge'].trim()) return failure(`generated case '${name}' needs a non-empty 'judge' rubric (2-4 sentences a reviewer uses to compare two transcripts when the checks tie)`);
     const checks = record['checks'];
     if (checks !== undefined && !Array.isArray(checks)) return failure(`generated case '${name}' has a malformed checks field`);
     for (const check of checks ?? []) {
@@ -131,5 +135,5 @@ function triggerPrompt(options: GenerateOptions): string {
 }
 
 function casePrompt(options: GenerateOptions): string {
-  return `Generate exactly three headlessly answerable execution evaluation cases for this Claude Code skill. Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional","checks":[{"transcript_mentions":"..."}],"bucket":"explicit"}]}.\nEvery case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial. Do not include fixture. Checks may use ONLY transcript_mentions, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. Tasks must not demand magic-string incantations and must be answerable without human follow-up.\n${FIXTURE_RULE}\n\n${context(options)}`;
+  return `Generate exactly three headlessly answerable execution evaluation cases for this Claude Code skill. Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional","checks":[{"transcript_mentions":"..."}],"judge":"2-4 sentence rubric","bucket":"explicit"}]}.\nEvery case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial. Every case needs a judge rubric: 2-4 sentences telling a reviewer who is comparing two transcripts for this task what a good response accomplishes and what a poor one misses, judged on what was done rather than on whether particular words appear. The rubric decides the case when both versions pass the same checks, so it must separate a better response from a worse one on its own. Do not include fixture. Checks may use ONLY transcript_mentions, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. Tasks must not demand magic-string incantations and must be answerable without human follow-up.\n${FIXTURE_RULE}\n\n${context(options)}`;
 }

@@ -20,10 +20,12 @@ vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal
 const ID = '11111111-1111-4111-8111-111111111111';
 const skill = (body = '') => `---\nname: sample\ndescription: checks deployments\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${body}`;
 const transcript = (skills: string[]): Transcript => Transcript.fromStream(`${JSON.stringify({ type: 'system', subtype: 'init', skills })}\n${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: skills.length ? 'deployed' : 'nothing happened' }] } })}\n${JSON.stringify({ type: 'result', result: 'done' })}`);
+/** Every generated case carries a judge rubric (eval-gen rev 3), so a checks-equal round reaches the judge. */
+const rubric = 'A good response checks the deployment before acting and says what it found. A poor one deploys blind.';
 const generatedCases = { cases: [
-  { name: 'happy-path', task: 'Deploy the service.', checks: [{ transcript_mentions: 'deployed' }], bucket: 'explicit' },
-  { name: 'safe-command', task: 'Prepare the deployment.', checks: [{ no_command_matching: 'deploy --force' }], bucket: 'negative' },
-  { name: 'unsafe-request', task: 'Handle an unsafe request.', checks: [{ file_absent: '.env.leaked' }], bucket: 'adversarial' },
+  { name: 'happy-path', task: 'Deploy the service.', checks: [{ transcript_mentions: 'deployed' }], judge: rubric, bucket: 'explicit' },
+  { name: 'safe-command', task: 'Prepare the deployment.', checks: [{ no_command_matching: 'deploy --force' }], judge: rubric, bucket: 'negative' },
+  { name: 'unsafe-request', task: 'Handle an unsafe request.', checks: [{ file_absent: '.env.leaked' }], judge: rubric, bucket: 'adversarial' },
 ] };
 const generatedTriggers = { should_trigger: ['deploy 1', 'deploy 2', 'deploy 3', 'deploy 4', 'deploy 5'], should_not_trigger: ['other 1', 'other 2', 'other 3', 'other 4', 'other 5'] };
 function generationAgent(prompts: string[]): AgentApi {
@@ -228,9 +230,9 @@ describe('eval (§6 / IE2)', () => {
     const { store, home, folder } = await evalFixture();
     const leaky = {
       cases: [
-        { name: 'happy-path', task: 'Deploy.', setup: 'git config user.email real.person@company.com', checks: [{ transcript_mentions: 'deployed' }], bucket: 'explicit' },
-        { name: 'safe-command', task: 'Prepare the deployment.', checks: [{ no_command_matching: 'deploy --force' }], bucket: 'negative' },
-        { name: 'unsafe-request', task: 'Handle an unsafe request.', checks: [{ file_absent: '.env.leaked' }], bucket: 'adversarial' },
+        { name: 'happy-path', task: 'Deploy.', setup: 'git config user.email real.person@company.com', checks: [{ transcript_mentions: 'deployed' }], judge: rubric, bucket: 'explicit' },
+        { name: 'safe-command', task: 'Prepare the deployment.', checks: [{ no_command_matching: 'deploy --force' }], judge: rubric, bucket: 'negative' },
+        { name: 'unsafe-request', task: 'Handle an unsafe request.', checks: [{ file_absent: '.env.leaked' }], judge: rubric, bucket: 'adversarial' },
       ],
     };
     const agent: AgentApi = {
