@@ -39,6 +39,7 @@ export function AppUpdateRows({mode,appVersion,report}:{mode:'notice'|'full';app
  else if(s.lastApply?.phase==='launched'&&s.lastApply.version===appVersion&&!s.newer){desc=`Updated to ${s.lastApply.version}${s.reason==='on-close'?' when you quit':s.reason==='overnight'?' overnight':''}`;control=<StatusValue kind="ok">Up to date</StatusValue>;}
  else if(s.probe==='skipped'&&s.latest===null)desc=`${v} · release advertisements are not checked on this machine.`;
  else if(s.probe==='failed'&&!s.newer){desc=`${v} · could not reach github.com to check for a newer app.`;control=<Button icon="refresh" onClick={recheck}>Check again</Button>;}
+ else if(s.latest===null&&!s.newer){desc=`${v} · no release advertisement has been read on this machine yet.`;control=<Button icon="refresh" onClick={recheck}>Check again</Button>;}
  else if(!s.newer){desc=`${v} · up to date${s.latestAt!==null?` · checked ${relativeTime(s.latestAt)}`:''}`;control=<StatusValue kind="ok">Up to date</StatusValue>;}
  else if(action.busy||background){desc=`${v} · downloading ${s.latest}…`;control=<><Button disabled>Downloading…</Button>{action.busy?<Button onClick={()=>void action.stop()}>Cancel</Button>:null}</>;}
  else if(stagedAppUpdate(s)!==null){desc=`${v} · ${s.latest} downloaded and verified.`;control=<Button kind="primary" icon="refresh" onClick={()=>setRelaunch(s.latest)}>Install now</Button>;}

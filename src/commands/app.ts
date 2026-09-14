@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { explainGhFailure } from '../lib/auth.js';
 import { createConfigStore, type ConfigStore } from '../lib/config.js';
-import { exists, mkdirPrivate, writeJsonPrivate } from '../lib/fs.js';
+import { exists, mkdirPrivate, retryTransient, writeJsonPrivate, type TransientRetry } from '../lib/fs.js';
 import { invocation, type WithForm } from '../lib/invocation.js';
 import type { Launch } from '../lib/launch.js';
 import { packageVersion } from '../lib/package.js';
@@ -47,6 +47,9 @@ export interface AppArgs extends WithForm {
   open?: boolean;
   /** Test knob: where the Windows per-user install lands. */
   localAppData?: string;
+  /** Test knobs: the clock for the leftover-download sweep, and the wait between Windows retries. */
+  now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
 }
 
 export interface AppResult {
@@ -62,6 +65,10 @@ export interface AppResult {
 export interface AppState { schema: 1; node: string; entry: string; path: string | null; version: string; writtenAt: string; target?: string; intent?: 'setup'; }
 
 const tail = (form: WithForm['form']) => `Everything works from the terminal. Run \`${invocation(form, 'app')}\` later to try again.`;
+const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+/** Move and remove, retried on the Windows transient codes (see retryTransient); `rm -rf` semantics for the removal. */
+export const moveRetrying = (from: string, to: string, retry: TransientRetry): Promise<void> => retryTransient(() => rename(from, to), retry);
+export const removeRetrying = (path: string, retry: TransientRetry): Promise<void> => retryTransient(() => rm(path, { recursive: true, force: true }), retry);
 
 export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult>> {
   const version = args.version === undefined ? packageVersion() : args.version;
@@ -92,16 +99,20 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
   const appRoot = join(root, 'app');
   const versionDir = join(appRoot, version);
   const asset = `${APP_SLUG}_${version}_${suffix}`;
+  const retry: TransientRetry = { windows: platform.startsWith('win32'), ...(args.sleep === undefined ? {} : { sleep: args.sleep }) };
   let installedNow = false;
 
   try {
     await store.ensureRoot();
     await mkdirPrivate(appRoot);
     if (!(await exists(join(versionDir, 'installed.json')))) {
+      await sweepStaleDownloads(appRoot, args.now ?? Date.now);
       const staging = await mkdtemp(join(appRoot, '.download-'));
       try {
         io.print(`Downloading ${APP_PRODUCT} ${version} for ${platform}…`);
-        const download = await runner.run('gh', ['release', 'download', `v${version}`, '--repo', APP_REPOSITORY, '--pattern', asset, '--pattern', `${asset}.sha256`, '--dir', staging], { deadlineMs: 600_000 });
+        // A runner that cannot start gh rejects rather than resolving; it must reach the same per-cause wording (D7) as a non-zero exit.
+        const download = await runner.run('gh', ['release', 'download', `v${version}`, '--repo', APP_REPOSITORY, '--pattern', asset, '--pattern', `${asset}.sha256`, '--dir', staging], { deadlineMs: 600_000 }).catch((error: unknown) => ({ code: 1, stdout: '', stderr: message(error) }));
+        if (download.code === 124) return failure(`Downloading the desktop app took longer than 10 minutes and was stopped. ${tail(args.form)}`);
         if (download.code !== 0) return failure(await explainDownloadFailure(download.stderr || download.stdout, version, asset, runner, args.form));
         const file = join(staging, asset);
         if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return failure(`No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(args.form)}`);
@@ -109,24 +120,35 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
         const actual = createHash('sha256').update(await readFile(file)).digest('hex');
         if (!expected || expected !== actual) return failure(`The downloaded desktop app did not match its published checksum, so it was discarded (expected ${expected ?? 'nothing readable'}, got ${actual}). ${tail(args.form)}`);
         // Unpack or install into the staging directory, then move it into place in one rename so <version>/ only ever exists complete.
+        let bundle: string | null = null;
         if (platform.startsWith('darwin')) {
           const unpack = await exec('tar', ['-xzf', file, '-C', staging]);
           if (unpack.code !== 0) return failure(`Could not unpack the desktop app: ${(unpack.stderr || unpack.stdout).trim()} ${tail(args.form)}`);
           await rm(file, { force: true }); await rm(`${file}.sha256`, { force: true });
-          const bundle = (await readdir(staging)).find((name) => name.endsWith('.app'));
+          bundle = (await readdir(staging)).find((name) => name.endsWith('.app')) ?? null;
           if (!bundle) return failure(`The downloaded archive did not contain an application bundle. ${tail(args.form)}`);
-          await writeFile(join(staging, 'installed.json'), JSON.stringify({ schema: 1, version, platform, bundle, installedAt: new Date().toISOString() }, null, 2));
         } else {
           // Windows (x64 and ARM64): the asset is a per-user NSIS installer; /S installs silently under %LOCALAPPDATA% with no elevation (D8).
           const install = await exec(file, ['/S']);
           if (install.code !== 0) return failure(`The desktop app installer exited with code ${install.code}. ${(install.stderr || install.stdout).trim()} ${tail(args.form)}`.trim());
-          await writeFile(join(staging, 'installed.json'), JSON.stringify({ schema: 1, version, platform, bundle: null, installedAt: new Date().toISOString() }, null, 2));
         }
-        await rm(versionDir, { recursive: true, force: true });
-        await rename(staging, versionDir);
+        const record = JSON.stringify({ schema: 1, version, platform, bundle, installedAt: new Date().toISOString() }, null, 2);
+        await writeFile(join(staging, 'installed.json'), record);
+        // Windows still holds the installer it just ran for a moment (EPERM on the move; measured ~200 ms), hence the retries.
+        await removeRetrying(versionDir, retry);
+        try { await moveRetrying(staging, versionDir, retry); }
+        catch (error) {
+          // Windows only, and only once the installer has succeeded: the app is on the machine, so the version record
+          // lands on its own rather than turning a finished install into a failure. The held folder holds nothing the
+          // app needs (the installer copied everything under %LOCALAPPDATA%); the cleanup below and later sweeps remove it.
+          if (!platform.startsWith('win32')) throw error;
+          io.print(`The download folder ${staging} is still in use (${message(error)}); the install is recorded without it.`);
+          await mkdirPrivate(versionDir);
+          await writeFile(join(versionDir, 'installed.json'), record);
+        }
         installedNow = true;
       } finally {
-        await rm(staging, { recursive: true, force: true });
+        await removeStaging(staging, retry, io);
       }
     }
 
@@ -150,8 +172,32 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
     io.print(`${installedNow ? 'Installed and opened' : 'Opened'} ${APP_PRODUCT} ${version}.`);
     return success({ platform, version, action: installedNow ? 'installed-and-launched' : 'launched', appPath, statePath, emulation });
   } catch (error) {
-    return failure(`${error instanceof Error ? error.message : String(error)} ${tail(args.form)}`);
+    return failure(`${message(error)} ${tail(args.form)}`);
   }
+}
+
+/**
+ * Download folders older than an hour are leftovers (a killed frame child cannot run its finally; a held installer
+ * outlived its retries); a recent one may still belong to a sibling still downloading. One that still cannot be
+ * removed just waits for the next sweep: nothing here blocks the install that is about to start.
+ */
+export async function sweepStaleDownloads(appRoot: string, now: () => number): Promise<void> {
+  for (const name of await readdir(appRoot).catch(() => [] as string[])) {
+    if (!name.startsWith('.download-')) continue;
+    const path = join(appRoot, name);
+    try { if ((await stat(path)).mtimeMs < now() - 3_600_000) await rm(path, { recursive: true, force: true }); }
+    catch { /* Still held, or gone since readdir: the next sweep tries again. */ }
+  }
+}
+
+/**
+ * After a successful move into place the staging folder no longer exists and this is a no-op. A folder Windows
+ * still holds is reported and left for `sweepStaleDownloads`, never fatal: the install outcome decided above is
+ * what matters, and the folder contains only the download.
+ */
+export async function removeStaging(staging: string, retry: TransientRetry, io: Prompter): Promise<void> {
+  try { await removeRetrying(staging, retry); }
+  catch (error) { io.print(`Could not remove the download folder ${staging} (${message(error)}); it is removed on a later update check.`); }
 }
 
 export async function locateApp(platform: AppPlatform, versionDir: string, localAppData: string | undefined): Promise<string | null> {
