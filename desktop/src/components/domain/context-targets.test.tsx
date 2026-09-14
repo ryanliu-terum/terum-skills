@@ -24,14 +24,17 @@ it('a skill card offers its ⋯ actions, then copy, reveal and editor rows', asy
   open('#/library/global');
   fireEvent.contextMenu(await screen.findByTestId('skill-card-' + card.name), { clientX: 10, clientY: 10 });
   const rows = await names();
-  expect(rows[0]).toBe('Open');
+  // #213 dropped the ⋯ menu's Open row (the card title is already that link), so the menu leads with
+  // the card's own actions and this menu draws no Open row either.
+  expect(rows).not.toContain('Open');
+  expect(rows.slice(0, 2)).toEqual(['Run eval', 'Move to…']);
   expect(rows).toContain('Copy name'); expect(rows).toContain('Copy path'); expect(rows).toContain('Show in Finder'); expect(rows).toContain('Open in editor');
   const remove = within(await menu()).queryByRole('menuitem', { name: /^Delete…/ });
   if (remove) expect(remove).toHaveAttribute('data-danger');
   await act(async () => { fireEvent.click(await item('Copy path')); });
   expect(copy).toHaveBeenCalledWith(card.path);
   fireEvent.contextMenu(await screen.findByTestId('skill-card-' + card.name), { clientX: 10, clientY: 10 });
-  fireEvent.click(await item('Open'));
+  fireEvent.click(await item('Rename…'));
   expect(location.hash).toMatch(/^#\/skill\//);
 });
 
