@@ -1051,7 +1051,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 133,
     "policy": "prose",
-    "pattern": "`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path and content change first. Only publish shares skill bytes and matching receipts."
+    "pattern": "`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path first. Only publish shares skill bytes; a receipt for bytes that are already a published version is shared by `eval` itself."
   },
   {
     "file": "README.md",
@@ -1079,9 +1079,15 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 303,
+    "line": 306,
     "policy": "prose",
-    "pattern": "`publish` shares matching receipts alongside the immutable version at:"
+    "pattern": "When the evaluated bytes are already a published version, `eval` publishes the receipt itself — that is"
+  },
+  {
+    "file": "README.md",
+    "line": 308,
+    "policy": "prose",
+    "pattern": "command. `--no-commit` keeps the run to yourself. Otherwise `publish` attaches matching receipts at:"
   },
   {
     "file": "README.md",

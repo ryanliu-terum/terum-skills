@@ -121,7 +121,7 @@ export interface PublishArgs {team?:string;ref:string;message?:string;/** Endors
  * honest "did anything new land" flag, and it is deliberately not the same question as "did
  * anything change": a publish can add the skill to a project without minting a version.
  */
-export interface PublishResult {name:string;project:string;version:string|null;created:boolean;identicalTo:string|null;attachedEvals:number;profileAdded:boolean;projectAdded:boolean}
+export interface PublishResult {name:string;project:string;version:string|null;created:boolean;identicalTo:string|null;attachedEvals:number;evalAssets:number;profileAdded:boolean;projectAdded:boolean}
 export interface SyncArgs {team?:string}
 // The fetch-only sync result (§10). `detail` is the CLI's own reason for a state other than 'refreshed';
 // it is spelled the same here as in the CLI so the popup can render it.

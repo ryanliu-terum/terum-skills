@@ -136,7 +136,7 @@ Hygiene checks are deterministic and free. Use `validate` for a free check. `pub
 | `HYG7` | At publish, a category outside the team list produces a warning. Eval and validate do not supply that list. |
 
 #### Execution
-`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path and content change first. Only publish shares skill bytes and matching receipts.
+`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path first. Only publish shares skill bytes; a receipt for bytes that are already a published version is shared by `eval` itself.
 
 ### Writing evals
 Eval files live inside the skill folder and travel with the skill.
@@ -305,15 +305,21 @@ The report also includes:
 
 ### Receipts
 `eval` writes a local receipt under `~/.terum/skills/evals/local/<digest>/<run-id>/`.
-Its content digest identifies the evaluated bytes; its version is null until publish attaches a copy.
-`publish` shares matching receipts alongside the immutable version at:
+Its content digest identifies the evaluated bytes; its version is null until it is attached to one.
+When the evaluated bytes are already a published version, `eval` publishes the receipt itself — that is
+how a teammate's skill you installed and evaluated gets a score the team can see, with no second
+command. `--no-commit` keeps the run to yourself. Otherwise `publish` attaches matching receipts at:
 
 ```text
 evals/<skill-id>/v<N>/<run-id>.json
 ```
 
 Identical bytes reuse the existing version and can receive additional matching receipts.
-Eval cases are part of the skill's content: generating or editing them changes the digest.
+Eval cases travel with the skill but are **not** part of its version identity: they live beside the
+version folders at `skills/<name>/evals/`, so generating or editing a case never mints a version and
+never blanks an existing score. A publish whose only change is an eval asset mints nothing — it
+updates the dataset and attaches any matching receipts to the version that already holds those bytes.
+Installed copies carry the skill, not its dataset.
 
 Anyone can evaluate a local skill, including a copy installed from a teammate. A receipt records:
 
