@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
@@ -73,9 +73,268 @@ it('hides project Edit when no checkout path is recorded instead of opening a gu
   expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
 });
 it('keeps the home populated for the empty scenario', async () => { open('#/marketplace?__mock=empty'); await screen.findByRole('region', { name: 'Top rated' }); expect(names('skill-card-')).toEqual(design.DERIVED.topRated.slice(0, 3)); expect(await screen.findByRole('link', { name: 'Global 15' })).toBeInTheDocument(); for (const name of ['Pushes 3', 'Updates 3', 'Alerts 8']) expect(screen.getByRole('link', { name })).toBeInTheDocument(); });
-it('applies hero search only on Enter and preserves URL state', async () => { open('#/marketplace?theme=light'); const input = await screen.findByRole('textbox', { name: 'Search skills, people and projects' }); fireEvent.change(input, { target: { value: 'deploy prod' } }); expect(location.hash).toBe('#/marketplace?theme=light'); fireEvent.keyDown(input, { key: 'Enter' }); expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument(); expect(location.hash).toContain('theme=light'); expect(location.hash).toContain('q=deploy+prod'); });
+// Batch C, 2026-09-13 (Teddy: "filters, sort and search do not function"): the field committed `q` only on Enter, so typing
+// showed nothing and read as broken. It now commits 250 ms after the last keystroke, replacing the entry so one typed sentence
+// leaves one history step; Enter still commits at once and pushes. Renamed from 'applies hero search only on Enter ...'.
+it('applies hero search as you type (debounced) and immediately on Enter', async () => {
+  open('#/marketplace?theme=light');
+  const input = await screen.findByRole('textbox', { name: 'Search skills, people and projects' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.change(input, { target: { value: 'deploy' } });
+    act(() => { vi.advanceTimersByTime(249); });
+    expect(location.hash).toBe('#/marketplace?theme=light');
+    // Each keystroke restarts the clock, so a fast typist commits once, not once per letter.
+    fireEvent.change(input, { target: { value: 'deploy prod' } });
+    act(() => { vi.advanceTimersByTime(249); });
+    expect(location.hash).toBe('#/marketplace?theme=light');
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(location.hash).toBe('#/marketplace?theme=light&q=deploy+prod');
+    fireEvent.change(input, { target: { value: 'deploy' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(location.hash).toBe('#/marketplace?theme=light&q=deploy');
+    // Enter cancelled the keystroke's own timer: nothing lands behind it.
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(location.hash).toBe('#/marketplace?theme=light&q=deploy');
+  } finally { vi.useRealTimers(); }
+  fireEvent.change(input, { target: { value: 'deploy prod' } });
+  expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument();
+  expect(location.hash).toContain('theme=light');
+  expect(location.hash).toContain('q=deploy+prod');
+});
 it('applies project search and preserves rail state', async () => { open('#/marketplace/projects/terum?rail=closed'); const input = await screen.findByRole('textbox', { name: "Search Terum's 8 skills" }); fireEvent.change(input, { target: { value: 'deploy-check' } }); fireEvent.keyDown(input, { key: 'Enter' }); await waitFor(() => expect(names('skill-card-')).toEqual(['deploy-check'])); expect(screen.getByTestId('skill-card-deploy-check').closest('.market-grid')).toHaveAttribute('data-columns', '3'); });
-it('renders no filter button on the marketplace search bar', async () => { open('#/marketplace'); await screen.findByRole('region', { name: 'Top rated' }); expect(screen.queryByRole('button', { name: 'Filter marketplace' })).toBeNull(); expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull(); });
+// Batch C, 2026-09-13: the 2026-09-10 removal of the in-field icon button took the facet stack's only entry point with it. The
+// button is back BESIDE the field and never inside it, so this test asserts the new contract in place of the old absence.
+// Renamed from 'renders no filter button on the marketplace search bar'.
+it('opens the marketplace filters from a Filter button beside the search field, never from inside it', async () => {
+  open('#/marketplace');
+  await screen.findByRole('region', { name: 'Top rated' });
+  const field = document.querySelector<HTMLElement>('.market-search');
+  if (!field) throw new Error('The marketplace hero drew no search field.');
+  expect(within(field).queryByRole('button')).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull();
+  const filter = screen.getByRole('button', { name: 'Filter' });
+  expect(filter.parentElement).toBe(field.parentElement);
+  expect(filter).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(filter);
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  expect(location.hash).toContain('filters=open');
+  // Open, the popover is the only thing inside the field carrying a button; the entry point itself stays outside it.
+  for (const button of within(field).getAllByRole('button')) expect(button.closest('.market-filters')).not.toBeNull();
+  // Nothing is committed yet, so the badge reads the drawn default selection's four facets.
+  expect(screen.getByRole('button', { name: 'Filter · 4' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.keyDown(filters, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
+  expect(location.hash).not.toContain('filters=open');
+  // Opening leaves focus on the button, outside the popover, so Escape has to close from there as well.
+  fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+  await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Filter · 4' }), { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+  await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.click(screen.getByRole('button', { name: 'Filter · 4' }));
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
+});
+it('puts the Filter button before Sort in the list tools row and commits a selection from there', async () => {
+  open('#/marketplace/skills');
+  await screen.findByRole('heading', { name: 'Top rated' });
+  const tools = document.querySelector<HTMLElement>('.market-list-tools');
+  if (!tools) throw new Error('The skills list drew no tools row.');
+  expect(within(tools).getAllByRole('button').map(button => button.textContent)).toEqual(['Filter', 'Most installed']);
+  fireEvent.click(within(tools).getByRole('button', { name: 'Filter' }));
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.change(within(filters).getByLabelText('Installed by · at least'), { target: { value: '12' } });
+  fireEvent.click(within(filters).getByRole('button', { name: 'Show 1 skill' }));
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
+  await waitFor(() => expect(names('skill-card-')).toEqual(['deploy-check']));
+  // The badge is activeFacets over the committed `active`, the same count the no-results line uses.
+  expect(screen.getByRole('button', { name: 'Filter · 4' })).toHaveAttribute('aria-pressed', 'false');
+});
+it('draws the Filter button beside the detail search and badges the committed facet count', async () => {
+  open('#/marketplace/projects/terum?active=2');
+  await screen.findByRole('heading', { name: 'Terum' });
+  const row = document.querySelector<HTMLElement>('.market-page-search');
+  if (!row) throw new Error('The project page drew no search row.');
+  const filter = within(row).getByRole('button', { name: 'Filter · 2' });
+  expect(filter.previousElementSibling).toHaveClass('market-search');
+  fireEvent.click(filter);
+  await screen.findByRole('region', { name: 'Marketplace filters' });
+  expect(location.hash).toContain('filters=open');
+});
+// The error board reads a catalog that failed: there is nothing to derive facets from and MarketSearch has no popover to
+// render, so the entry point is absent rather than drawn dead (AGENTS invariant 7, Teddy's data-honesty rule).
+it('draws no Filter button when the catalog could not be read', async () => {
+  open('#/marketplace?__mock=error');
+  expect(await screen.findByText("Couldn't read the marketplace")).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Filter/ })).toBeNull();
+  expect(screen.getByRole('textbox', { name: 'Search skills, people and projects' })).toBeInTheDocument();
+});
+// Review C1/C6, 2026-09-13: the open-popover badge fell back to the literal 4 — the MOCK's drawn default selection
+// (PASS · lift >= 20 · <= 5k tokens · installs >= 3). The real adapter serves an all-neutral filterDefault, so on a real
+// machine the popover opened with nothing checked and every slider at its neutral stop while the button beside it read
+// "Filter · 4", and the no-results line claimed "with 4 filters on" over an unfiltered catalog. Both counts now come from
+// the selection the popover actually seeds itself with, so the mock still reads 4 (asserted above) and this reads none.
+it("badges nothing when the catalog's own default selection constrains nothing", async () => {
+  const backend = pickBackend(); const before = await backend.catalog(); if (!before.ok) throw new Error(before.error);
+  // The real adapter's filterDefault, verbatim from src/backend/tauri/index.ts.
+  vi.spyOn(backend, 'catalog').mockResolvedValue({ ...before, value: { ...before.value, filterDefault: { verdicts: [], lift_min: 0, tokens_max: 0, installs_min: 0 } } });
+  open('#/marketplace?filters=open');
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  expect(within(filters).getByRole('checkbox', { name: /PASS/ })).not.toBeChecked();
+  expect(screen.getByRole('button', { name: 'Filter' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.queryByRole('button', { name: /^Filter · / })).toBeNull();
+});
+it("keeps the no-results line free of filters the catalog's default does not apply", async () => {
+  const backend = pickBackend(); const before = await backend.catalog(); if (!before.ok) throw new Error(before.error);
+  vi.spyOn(backend, 'catalog').mockResolvedValue({ ...before, value: { ...before.value, filterDefault: { verdicts: [], lift_min: 0, tokens_max: 0, installs_min: 0 } } });
+  open('#/marketplace?q=deploy%20prod&filters=open');
+  expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument();
+  expect(screen.queryByText(/with .* filters on/)).toBeNull();
+});
+it('still counts the mock default four in the no-results line with the popover open', async () => {
+  open('#/marketplace?q=deploy%20prod&filters=open');
+  expect(await screen.findByText('No skills match “deploy prod” with 4 filters on')).toBeInTheDocument();
+});
+// Review C2: the popover renders INSIDE the field (it is anchored to it) while the trigger is the field's next sibling, so the
+// trigger is the last tab stop of the group — a keyboard user who opened the drawer and pressed Tab walked past every filter
+// control and left it open behind them, taking the trigger's Escape handler with them.
+it('moves focus into the filter popover when it opens and back to the trigger when it closes', async () => {
+  open('#/marketplace');
+  await screen.findByRole('region', { name: 'Top rated' });
+  fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  expect(filters).toHaveAttribute('tabindex', '-1');
+  expect(document.activeElement).toBe(filters);
+  // Forward Tab now walks the filters: the first control after the region is inside it, not the trigger beyond it.
+  const focusable = filters.querySelectorAll('button, input, select');
+  expect(focusable.length).toBeGreaterThan(0);
+  fireEvent.keyDown(filters, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Filter' }));
+});
+it('moves focus into the popover from the list tools row too, and restores it when a selection is committed', async () => {
+  open('#/marketplace/skills');
+  await screen.findByRole('heading', { name: 'Top rated' });
+  fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  expect(document.activeElement).toBe(filters);
+  fireEvent.click(within(filters).getByRole('button', { name: /^Show / }));
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Filter · 4' }));
+});
+// A board is captured at its URL with nothing clicked: opening the popover from the URL must not focus anything, or the
+// MarketplaceFilters board would draw a focus ring the design never had.
+it('leaves focus alone when the popover is opened straight from the URL', async () => {
+  open('#/marketplace?filters=open');
+  await screen.findByRole('region', { name: 'Marketplace filters' });
+  expect(document.activeElement).toBe(document.body);
+});
+// Review C4/C7: the badge widened the trigger by 19.4 px the instant the popover opened, sliding the centred hero field — and
+// the popover anchored under it — 9.7 px left under the pointer, and shrinking the flex-grown list/detail field by the full
+// 19.4 px. The trigger reserves the badge's slot instead. The literal is the browser measurement (Chromium 1280x800: 73.38 px
+// as "Filter", 92.72 px as "Filter · 9" with tabular digits), deliberately not imported, so deleting the style fails here.
+it('reserves the badge width so opening the filters cannot resize the trigger', async () => {
+  open('#/marketplace');
+  await screen.findByRole('region', { name: 'Top rated' });
+  const filter = screen.getByRole('button', { name: 'Filter' });
+  expect(filter.style.minWidth).toBe('93px');
+  fireEvent.click(filter);
+  await screen.findByRole('region', { name: 'Marketplace filters' });
+  expect(screen.getByRole('button', { name: 'Filter · 4' }).style.minWidth).toBe('93px');
+});
+// Review C3: nothing pinned `{replace:true}` on the debounced commit — location.hash reads the same under push and replace, so
+// deleting the option left every test in this file green while a typed sentence became one Back press per keystroke. Spied the
+// way src/screens/search/search.test.tsx pins the same contract for the search screen's own field.
+it('replaces the history entry while typing and pushes when Enter commits', async () => {
+  open('#/marketplace');
+  const input = await screen.findByRole('textbox', { name: 'Search skills, people and projects' });
+  vi.useFakeTimers();
+  try {
+    const push = vi.spyOn(window.history, 'pushState'), replace = vi.spyOn(window.history, 'replaceState');
+    fireEvent.change(input, { target: { value: 'dep' } });
+    fireEvent.change(input, { target: { value: 'depl' } });
+    act(() => { vi.advanceTimersByTime(250); });
+    expect(location.hash).toBe('#/marketplace?q=depl');
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(push).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: 'deploy' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(location.hash).toBe('#/marketplace?q=deploy');
+    expect(push).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(replace).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+// Review C5: opening the drawer pushed a history entry and closing it pushed another, so Back after closing put the drawer
+// back on screen instead of leaving the page (this app has a real Back affordance: TopBar and Cmd+[). Committing a selection
+// still pushes — that one IS a state to come back to.
+it('opens and closes the filters without pushing history, and pushes only the committed selection', async () => {
+  open('#/marketplace/skills');
+  await screen.findByRole('heading', { name: 'Top rated' });
+  const push = vi.spyOn(window.history, 'pushState'), replace = vi.spyOn(window.history, 'replaceState');
+  fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+  await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.click(screen.getByRole('button', { name: 'Filter · 4' }));
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
+  expect(replace).toHaveBeenCalledTimes(2);
+  expect(push).not.toHaveBeenCalled();
+  // Escape from inside the popover is the same non-navigation as the second click.
+  fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.keyDown(filters, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
+  expect(push).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+  const again = await screen.findByRole('region', { name: 'Marketplace filters' });
+  fireEvent.click(within(again).getByRole('button', { name: /^Show / }));
+  await waitFor(() => expect(location.hash).toContain('active='));
+  expect(push).toHaveBeenCalledTimes(1);
+});
+// Clear search writes `q` from outside the field; a keystroke still inside its 250 ms window must not put the old text back.
+it('drops a keystroke still in flight when the query is cleared from the no-results state', async () => {
+  open('#/marketplace?q=deploy%20prod');
+  expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument();
+  const input = screen.getByRole('textbox', { name: 'Search skills, people and projects' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.change(input, { target: { value: 'deploy prod x' } });
+    act(() => { vi.advanceTimersByTime(100); });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(location.hash).toBe('#/marketplace');
+  } finally { vi.useRealTimers(); }
+  expect(screen.getByRole('textbox', { name: 'Search skills, people and projects' })).toHaveValue('');
+});
+// A keystroke still in flight lands on the URL as it stands when it fires, not as it stood when it was typed: the first cut armed
+// the timer from the change handler, and `setSearchParams` (updater form included) hands back the params of the render that made it,
+// so opening the popover mid-word was undone 250 ms later. Caught in a browser against the mock, kept here as the regression guard.
+it('lands a pending keystroke on top of a URL change made after it', async () => {
+  open('#/marketplace');
+  const input = await screen.findByRole('textbox', { name: 'Search skills, people and projects' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.change(input, { target: { value: 'dep' } });
+    act(() => { vi.advanceTimersByTime(100); });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(location.hash).toContain('filters=open');
+    expect(location.hash).toContain('q=dep');
+  } finally { vi.useRealTimers(); }
+});
+it('clears the query at once from the field and cancels the keystroke behind it', async () => {
+  open('#/marketplace?q=deploy%20prod');
+  expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument();
+  const input = screen.getByRole('textbox', { name: 'Search skills, people and projects' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.change(input, { target: { value: 'deploy prod x' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search field' }));
+    expect(location.hash).toBe('#/marketplace');
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(location.hash).toBe('#/marketplace');
+  } finally { vi.useRealTimers(); }
+});
 it.each([['Top rated', 'skills'], ['Teams / Projects', 'projects'], ['People', 'people'], ['Browse by category', 'categories']])('navigates %s pager to the expanded list', async (title, path) => { open('#/marketplace'); fireEvent.click(await screen.findByRole('button', { name: 'View all ' + title })); await waitFor(() => expect(location.hash).toBe('#/marketplace/' + path)); });
 it('creates a team project from the Add button and lands on its card', async () => {
   const create = vi.spyOn(pickBackend().teamProjects, 'create');

@@ -8,6 +8,7 @@ import { Icon } from '../../components/ui/Icon';
 import { Switch } from '../../components/ui/Switch';
 import type { Facets } from './market-facets';
 import { clearedFacets, defaultFacets, facetMatches, parseFacets, serializeFacets, stripFacets, TOKENS_CAP } from './market-facets';
+import './market-filters.css';
 function Group({ label, children }: PropsWithChildren<{ label: string }>) { return <div className="market-filter-group"><span>{label}</span>{children}</div>; }
 function Slider({ label, value, max, format, onChange }: { label: string; value: number; max: number; format: (n: number) => string; onChange: (n: number) => void }) { return <div className="market-slider"><div><span>{label}</span><span>{format(value)}</span></div><input aria-label={label} type="range" min={0} max={max} step={1} value={value} onChange={e => onChange(Number(e.target.value))} style={{ background: `linear-gradient(to right,var(--tk-brand) ${Math.min(1, value / max) * 100}%,var(--tk-bg4) ${Math.min(1, value / max) * 100}%)` }}/></div>; }
 function Chips({ labels, selected, onChange }: { labels: string[]; selected: string[]; onChange: (next: string[]) => void }) { return <div className="market-filter-chips">{labels.map(label => <button type="button" key={label} aria-pressed={selected.includes(label)} onClick={() => onChange(selected.includes(label) ? selected.filter(x => x !== label) : [...selected, label])}>{selected.includes(label) && <Icon name="check" size={12} stroke="2.5"/>}{label}</button>)}</div>; }

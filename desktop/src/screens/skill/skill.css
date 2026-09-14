@@ -4,7 +4,6 @@
 
 .skill-install-scopes{display:flex;flex-direction:column;gap:1px}
 
-.detail-body:not(.full) .skill-md-tab,.detail-body:not(.full) .skill-md-blocks,.detail-body:not(.full) .evals-tab,.detail-body:not(.full) .evals-body,.detail-body:not(.full) .quality-tab,.detail-body:not(.full) .activity-tab{overflow:visible}
 /* ── Real-adapter Markdown (the CLI's SKILL.md body) ───────────────────────────────────────────────
    `.md-doc` exists only on the real adapter — the mock feeds pre-parsed blocks and never mounts
    <ReactMarkdown> (SkillScreen.tsx:41 guards on `skillMd.markdown`), so nothing below can reach a locked
@@ -67,3 +66,64 @@
 /* remark-gfm's footnote section labels itself with Tailwind's `sr-only`, which this bundle does not emit
    (the utility appears in no source file), so the rule has to exist here or a stray heading shows. */
 .md-doc .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+
+/* ── Tab-body scrolling (spec A, 2026-09-13; supersedes the column scroll of
+   .planning/specs/desktop-scroll-panes.md) ──────────────────────────────────────────────────
+   The detail column no longer scrolls as one piece. `.detail-head`, the ScoreRow, `.skill-tabs` and each
+   tab's head row (`.tab-head`, `.skill-md-meta`) stay pinned because their constraining boxes
+   (`.skill-md-tab`, `.evals-tab`, `.evals-body`) keep the `overflow:hidden` of the base rules at the top of
+   this file — the `:not(.full)` override that forced them visible for the column-scroll design is deleted
+   with this block. Only the tab BODY scrolls, with the repo's hidden scrollbars, and it ends 28px short of
+   its own bottom edge — the number `.detail-body.full .detail-main` already uses — so the last line never
+   sits on the clipped edge (as padding, except on SKILL.md, where padding would resize a pinned row: see the
+   second block below). `.detail-main` keeps its own `overflow:auto` as the fallback for a window too short for
+   the pinned parts plus the floor two blocks below; at 1440x900 the constrained bodies leave it no overflow. */
+.detail-body:not(.full) .skill-md-blocks,.detail-body:not(.full) .evals-main{overflow:auto;scrollbar-width:none;min-height:0}
+/* Quality and Activity hold no inner body — the tab IS the pane — so they take the short-window floor of the
+   block below in place of `min-height:0`. A floor still lets a flex item shrink; it just stops at 240px. */
+.detail-body:not(.full) .quality-tab,.detail-body:not(.full) .activity-tab{overflow:auto;scrollbar-width:none;min-height:240px}
+.detail-body:not(.full) .evals-main,.detail-body:not(.full) .quality-tab,.detail-body:not(.full) .activity-tab{padding-bottom:28px}
+/* SKILL.md takes the same 28px as scrollable overflow instead of as padding, and it has to. A pane's padding
+   counts in its outer hypothetical size, so `padding-bottom` there raises the flex deficit inside
+   `.skill-md-tab` by 28px — and `.skill-md-meta` is the one pinned head row in the app that can still shrink
+   (on `?__mock=not-installed` it carries no 24px button, so it squeezes to its 21.4px min-content). Measured
+   on the dev server: padding moved `.skill-md-meta` from 22.625px to 21.375px and the whole body up 1.25px on
+   SkillDetailNotInstalled / SkillDetailInstall / SkillDetailInstallLight (25k-36k pixels). An out-of-flow box
+   under the last block changes no intrinsic size, no flex base size and no deficit, and still extends the
+   scrollable overflow region (CSS Overflow 3 §3.1: a scroll container's scrollable overflow includes the
+   border boxes of out-of-flow descendants it contains), so the last line stops 28px above the pane's edge. */
+.detail-body:not(.full) .skill-md-blocks>:last-child{position:relative}
+.detail-body:not(.full) .skill-md-blocks>:last-child::after{content:"";position:absolute;top:100%;left:0;width:1px;height:28px;pointer-events:none}
+/* ── The floor under every tab box (review fix, 2026-09-13) ────────────────────────────────────────
+   Every other child of `.detail-main` is `flex-shrink:0`, so without a floor the tab box absorbs the ENTIRE
+   deficit of a short window and `.detail-main` never develops the overflow the block above relies on as its
+   fallback. Measured at 960x600 — the app's own minimum window (src-tauri/tauri.conf.json) — the Evals body
+   fell to 39px while `.detail-main` reported scrollHeight === clientHeight: a 5300px report shown through a
+   39px slot with nothing to scroll. A floor pushes the deficit back into `.detail-main`, which then scrolls
+   the column exactly as the spec describes. 240px is a content-derived floor: it holds the whole action stack
+   of the two CenteredState bodies below (199px at 1440px wide, 177px at the 960px minimum) plus this batch's
+   28px of clearance, and it leaves the Evals report pane 188px — 160px of report above its own clearance. It
+   binds only in a short window: the tab box is 531px at the default 1440x900, and the column starts scrolling
+   below a 609px window at 1440px wide, 629px at 1280, 709px at 1024 and 749px at 960 (measured 2026-09-13;
+   the exact height depends on how far the skill's description wraps, so it shifts on the real adapter). At the
+   shell's 600px minimum that is 9px of column scroll at 1440px wide and 149px at 960px. */
+.detail-body:not(.full) .skill-md-tab,.detail-body:not(.full) .evals-tab{min-height:240px}
+/* ── The Evals body when it holds no report (review fix, 2026-09-13) ───────────────────────────────
+   Two states render `.evals-body` with a CenteredState and NO `.evals-main` inside (SkillScreen.tsx: a newest
+   receipt that cannot be parsed, and a version with no receipt of its own but older runs in History). There is
+   no report pane to scroll then, so the body itself has to be the scroller and to carry the floor, or the
+   state is clipped with no scroll container anywhere in the subtree. `.centered-state` centres with
+   `justify-content:center`, and centred content that outgrows its box overflows BOTH ways — the leading half
+   is then unreachable, because scrollTop cannot go negative — so the centring is re-expressed as auto margins,
+   which resolve to 0 when the free space is negative: identical geometry while it fits (measured 2026-09-13:
+   every box identical at 1440x900 and 1440x1900), start-aligned and wholly scrollable when it does not. The
+   last row hangs the same out-of-flow 28px of clearance as SKILL.md above, for the same reason — padding here
+   would resize the centred box and move it while it still fits. */
+.detail-body:not(.full) .evals-body:not(:has(.evals-main)){overflow:auto;scrollbar-width:none;min-height:240px}
+.detail-body:not(.full) .evals-body>.centered-state{justify-content:flex-start}
+.detail-body:not(.full) .evals-body>.centered-state>:first-child{margin-top:auto}
+.detail-body:not(.full) .evals-body>.centered-state>:last-child{margin-bottom:auto;position:relative}
+.detail-body:not(.full) .evals-body>.centered-state>:last-child::after{content:"";position:absolute;top:100%;left:0;width:1px;height:28px;pointer-events:none}
+/* `?full=1` (the stretched SkillDetailEvalsReport family) renders the whole document in one piece: every
+   pane stays visible and adds no bottom padding — `.detail-body.full .detail-main` owns the 28px there. */
+.detail-body.full .evals-main,.detail-body.full .skill-md-blocks,.detail-body.full .quality-tab,.detail-body.full .activity-tab{overflow:visible}

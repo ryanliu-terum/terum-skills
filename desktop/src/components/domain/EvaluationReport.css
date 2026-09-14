@@ -3,3 +3,16 @@
 .report-run{align-items:baseline;column-gap:8px;row-gap:2px;font-size:12px;line-height:18px;max-width:640px}.report-run>span{white-space:nowrap}.report-dot{margin-right:0}
 
 .record-segments>span:not(.record-holes):has(+ .record-holes){border-radius:0 4px 4px 0}.record-segments>span:first-child:has(+ .record-holes){border-radius:4px}.report-abstract{box-sizing:content-box}
+
+/* ── History rail scrolling (spec A, 2026-09-13) ───────────────────────────────────────────────
+   The rail is pinned beside the report (`.evals-body` is the height-constraining box) and scrolls on its own
+   once it holds more runs than fit, with the repo's hidden scrollbars. `min-height:0` lets it shrink inside
+   that box instead of pushing the body taller. `?full=1` renders every run in one piece instead.
+   The 28px is the clearance every other pane of this batch carries (review fix, 2026-09-13): without it the
+   rail's last line — the "One row per committed run…" caption — sits exactly on the panel's clipped, rounded
+   edge as soon as the rail overflows (measured at 1440x600, the app's minimum window height: last line bottom
+   591, scrollport bottom 591). Padding cannot move this box: the rail is `box-sizing:content-box` and stretches
+   to the body's height, so its border box is unchanged (measured: no box moves at 1440x900 or 1440x1900) and
+   only the scrollable overflow region grows. */
+.detail-body:not(.full) .history-rail{overflow:auto;scrollbar-width:none;min-height:0;padding-bottom:28px}
+.detail-body.full .history-rail{overflow:visible}

@@ -8,7 +8,7 @@ function recorded(name:string){return readFileSync(resolve('../.planning/codex-r
 const addResult=JSON.parse(recorded('project-add').at(-1)!) as {value:{path:string;label:string;added:boolean}};
 const path=addResult.value.path;
 const home=path.slice(0,path.lastIndexOf('/repo/app'))+'/home';
-function replay(name='ls-local') {
+function replay(name='ls-local',rewrite:(line:string)=>string=line=>line) {
  const f=fakeBridge((args,emit)=>{
   // The re-recorded hello advertises `serve` and `refresh`: the fake shell plays the read session itself
   // (fake-bridge.ts), and the background refresh the first hello triggers (index.ts onHello) is answered
@@ -16,7 +16,7 @@ function replay(name='ls-local') {
   if(args[0]==='sync') {emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'sync',ok:true,exitCode:0,value:{changed:false,notices:[],teams:[]}})});return;}
   if(args[0]==='status') {emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'status',ok:true,exitCode:0,value:{version:'0.1.7',teams:[],identity:null,ledger:{placements:[],approvals:[],},tools:{git:true,gh:true}}})});return;}
   const file=args[0]==='project'?'project-'+args[1]:name;
-  for(const line of recorded(file))emit({kind:'stdout',line});
+  for(const line of recorded(file))emit({kind:'stdout',line:file===name?rewrite(line):line});
  });
  f.bridge.homeDirectory=async()=>home;
  return {...f,backend:createTauriBackend(f.bridge)};
@@ -34,6 +34,31 @@ it('replays roots and authoritative skill-folder counts, including a name mismat
  const checkout=await backend.library({scope:{kind:'checkout',root:path}});
  expect(checkout.value?.skills.map(s=>s.name)).toEqual(['delta','gamma']);
  expect(checkout.value?.skills.every(s=>!s.placed)).toBe(true);
+});
+// RM-38: `ls --local` rows now carry SKILL.md's mtime. The field is declared optional in the adapter
+// before the CLI emits it (invariant 2), so BOTH recordings have to work: the captures above predate it
+// and map to `updated: null`, and a row that carries one maps that instant straight onto the card —
+// never a substitute value, never `now()`. notOffered entries have no mtime to report and stay null.
+function stampRows(instant:string){
+ return (line:string):string=>{
+  const frame:unknown=JSON.parse(line);
+  const sections=(frame as {value?:{local?:unknown}}).value?.local;
+  if(!Array.isArray(sections))return line;
+  for(const section of sections){
+   const rows=(section as {rows?:unknown}).rows;
+   if(Array.isArray(rows))for(const row of rows)if(typeof row==='object'&&row!==null)Object.assign(row,{updated:instant});
+  }
+  return JSON.stringify(frame);
+ };
+}
+it('maps a local row\'s updated straight onto the card, and null when the CLI does not send one',async()=>{
+ const plain=await replay().backend.library({scope:{kind:'global'}});
+ expect(plain.value?.skills.map(s=>[s.name,s.updated])).toEqual([['alpha',null],['beta',null]]);
+ const stamped=await replay('ls-local',stampRows('2026-09-11T08:09:10.000Z')).backend.library({scope:{kind:'global'}});
+ // alpha is a row (localCard); beta is a notOffered entry (notOfferedCard), which has no stamp to carry.
+ expect(stamped.value?.skills.map(s=>[s.name,s.updated])).toEqual([['alpha','2026-09-11T08:09:10.000Z'],['beta',null]]);
+ const checkout=await replay('ls-local',stampRows('2026-09-11T08:09:10.000Z')).backend.library({scope:{kind:'checkout',root:path}});
+ expect(checkout.value?.skills.every(s=>s.updated==='2026-09-11T08:09:10.000Z')).toBe(true);
 });
 // §7.2 deleted the cwd-detected root, so `ls --local` can no longer report a detected, unregistered
 // root at all — the capture that showed one described a state the product no longer has, and went with it.
