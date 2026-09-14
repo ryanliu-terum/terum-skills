@@ -1812,7 +1812,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 0,
     "policy": "prose",
-    "pattern": "advertise their respective verbs. `reconcile` gates the Library's Check against the team action."
+    "pattern": "advertise their respective verbs. `reconcile` gates the Library's Sync action, which runs the fetch-only `sync` and then `reconcile --list`."
   },
   {
     "file": "docs/frame-protocol.md",

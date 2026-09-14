@@ -154,7 +154,7 @@ False: `favorites`, `follow`, `lastSeen`, `inviteScoping`, `disablePerMachine`, 
 `projects` is team grouping (`team project create`). `memberRole` is the owner-written job label;
 `roles` supports GitHub Admin/Member permissions from `status --permissions` (otherwise unknown).
 `installScope` supports destinations and destination-aware removal. `appUpdate` and `serve`
-advertise their respective verbs. `reconcile` gates the Library's Check against the team action.
+advertise their respective verbs. `reconcile` gates the Library's Sync action, which runs the fetch-only `sync` and then `reconcile --list`.
 Read feature values rather than assuming a control is available.
 
 `localIdentity` covers `skillId` on local rows and rejected entries, and `placed` on rows.
