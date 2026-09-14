@@ -2,6 +2,7 @@ import { utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { run as ls } from '../../../commands/ls.js';
+import { run as status } from '../../../commands/status.js';
 import { createExecute } from '../../execute.js';
 import type { ResultOutcome } from '../../frames.js';
 import type { Prompter } from '../../prompt.js';
@@ -140,4 +141,70 @@ describe('ls boards', () => {
       await expect(text).toMatchFileSnapshot(snapshot('empty.library', backend));
     });
   }
+});
+
+describe('status, update, sync boards', () => {
+  for (const backend of Object.keys(BACKENDS)) {
+    it(`team.status (${backend})`, async () => {
+      const f = await fixture();
+      const text = await boardOf('status', ['status'], backend, async (io) => {
+        // the printed banner carries the live package version; pin it like value.version so a release bump cannot redden the snapshot
+        const pinned: Prompter = { ...io, print: (line) => io.print(line.replace(/^terum-skills \d+\.\d+\.\d+\S*/, 'terum-skills 0.16.0')) };
+        const result = await status({ config: f.store, runner: f.runner, now: () => DASHBOARD_NOW }, pinned);
+        // Machine facts are overwritten so the snapshot is stable across hosts (§13).
+        return result.value === undefined ? result : { ...result, value: { ...result.value, version: '0.16.0', hostArch: 'arm64', processArch: 'x64', tools: { git: true, gh: false } } };
+      }, f);
+      await expect(text).toMatchFileSnapshot(snapshot('team.status', backend));
+    });
+    it(`empty.status (${backend})`, async () => {
+      const m = await emptyMachine();
+      const text = await boardOf('status', ['status'], backend, async (io) => {
+        // the printed banner carries the live package version; pin it like value.version so a release bump cannot redden the snapshot
+        const pinned: Prompter = { ...io, print: (line) => io.print(line.replace(/^terum-skills \d+\.\d+\.\d+\S*/, 'terum-skills 0.16.0')) };
+        const result = await status({ config: m.store, runner: { run: async (command) => (command === 'git' ? { code: 0, stdout: 'git version 2.45.0', stderr: '' } : Promise.reject(Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }))) } }, pinned);
+        return result.value === undefined ? result : { ...result, value: { ...result.value, version: '0.16.0', hostArch: 'x64', processArch: 'x64' } };
+      }, { root: m.store.root, home: m.home });
+      await expect(text).toMatchFileSnapshot(snapshot('empty.status', backend));
+    });
+    it(`typed.update (${backend})`, async () => {
+      const value = { running: '0.16.0', latest: '0.17.0', observation: 'older', launch: 'npx', description: 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', advice: ['Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'], lines: ['terum-skills 0.16.0', 'This copy: /home/seed/.npm/_npx/abc/node_modules/terum-skills', 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', 'Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'] };
+      await expect(await typed('update', ['update'], backend, { ok: true, value, exitCode: 0 }, value.lines)).toMatchFileSnapshot(snapshot('typed.update', backend));
+    });
+    it(`typed.sync (${backend})`, async () => {
+      const value = { changed: true, teams: [{ team: 'acme', state: 'refreshed', changed: true, head: 'a1b2c3d4e5f6' }, { team: 'old', state: 'unreachable', changed: false, head: null, detail: 'repository not found', missing: true, successors: [{ ownerRepo: 'acme/team-2', source: 'member' }], summary: 'old: the repository is gone; GitHub knows acme/team-2 (renamed).' }], notices: ['Updated your terum-skills skills for this CLI.'] };
+      await expect(await typed('sync', ['sync'], backend, { ok: true, value, exitCode: 0 }, ['old: not refreshed (unreachable) — repository not found', 'old: the repository is gone; GitHub knows acme/team-2 (renamed).', 'To follow it, run `npx -y terum-skills@latest team move acme/team-2`.'])).toMatchFileSnapshot(snapshot('typed.sync', backend));
+    });
+  }
+
+  it('update board hides "How to update" and the Next step when the advice was not printed', async () => {
+    const value = { running: '0.16.0', latest: '0.16.0', observation: 'same', launch: 'global', description: 'This copy matches the release advertisement. npm availability was not checked.', advice: ['If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'], lines: ['terum-skills 0.16.0', 'This copy matches the release advertisement. npm availability was not checked.'] };
+    const text = await typed('update', ['update'], 'md', { ok: true, value, exitCode: 0 }, value.lines);
+    expect(text).not.toContain('How to update');
+    expect(text).not.toContain('**Next:**');
+  });
+
+  it('update board shows "How to update" and the Next step when the advice was printed', async () => {
+    const value = { running: '0.15.0', latest: '0.16.0', observation: 'older', launch: 'global', description: 'Latest advertised release: 0.16.0 (observed 2026-09-13T08:00:00Z)', advice: ['If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'], lines: ['terum-skills 0.15.0', 'This copy: /opt/homebrew/lib/node_modules/terum-skills', 'Latest advertised release: 0.16.0 (observed 2026-09-13T08:00:00Z)', 'If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'] };
+    const text = await typed('update', ['update'], 'md', { ok: true, value, exitCode: 0 }, value.lines);
+    expect(text).toContain('### How to update');
+    expect(text).toContain('**Next:** `npm install -g terum-skills@latest`');
+  });
+
+  it('status board keeps the clone-repair instruction as a note, not a covered line', async () => {
+    const value = {
+      version: '0.16.0',
+      teams: [{ team: 'acme', handle: 'seed', repository: 'https://github.com/acme/team', clone: { state: 'absent' }, clonePath: '/home/seed/.terum/skills/acme', membership: null, policy: null, categories: null, members: [], pending: [], syncedAt: null, stale: false }],
+      ledger: { placements: [], approvals: [] }, identity: null, tools: { git: false, gh: false }, hostArch: 'x64', processArch: 'x64',
+    };
+    const lines = [
+      'terum-skills 0.16.0',
+      'Team acme (configured handle @seed)',
+      '  Repository: https://github.com/acme/team',
+      '  Clone: /home/seed/.terum/skills/acme is missing.',
+      '  Restore it: npx -y terum-skills@latest team join https://github.com/acme/team',
+    ];
+    const text = await typed('status', ['status'], 'md', { ok: true, value, exitCode: 0 }, lines);
+    expect(text).toContain('**Notes**');
+    expect(text).toContain('-   Restore it: npx -y terum-skills@latest team join https://github.com/acme/team');
+  });
 });

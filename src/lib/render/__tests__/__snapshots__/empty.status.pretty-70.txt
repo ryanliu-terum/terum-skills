@@ -1,0 +1,12 @@
+terum-skills 0.16.0
+No team on this machine yet.
+
+  No team is configured on this machine.
+    Create a team: npx -y terum-skills@latest setup
+    Join a team:   npx -y terum-skills@latest setup <org>/<repo>
+
+Tools
+  git: ✓ installed
+  gh:  ✗ not found
+
+Next: /terum-skills setup · /list-skills --local

@@ -1,0 +1,50 @@
+## terum-skills 0.16.0
+
+### Team acme — you are @seed
+
+- **repository:** https://github.com/acme/team
+- **clone:** ✓ ok
+- **synced:** ⚠ today stale
+- **membership:** active
+- **policy license:** UNLICENSED
+- **categories:** ops, engineering, debugging
+
+### Members (3)
+
+| Handle | Name | Role | Joined |
+|---|---|---|---|
+| @mira | Mira Chen | — | 12d ago |
+| @ravi | Ravi Patel | Debugging | 12d ago |
+| @seed (you) | Seed | Platform | 2026-09-14 |
+
+### Pending
+
+| Op | Skill id | Scope | Version | Started |
+|---|---|---|---|---|
+| install | 33333333 | global | — | 1d ago |
+
+### Placements
+
+| Path | Team | Version | Scope | Placed |
+|---|---|---|---|---|
+| `~/.claude/skills/deploy-check` | acme | Version 1 | global | 24d ago |
+| `~/.claude/skills/tdd` | acme | Version 1 | global | 23d ago |
+
+### Identity
+
+- **handle:** seed
+- **name:** Seed
+- **email:** seed@example.com
+- **github:** seed
+
+### Tools
+
+- **git:** ✓ installed
+- **gh:** ✗ not found
+
+### Architecture
+
+- **host:** arm64
+- **node:** x64
+
+**Next:** `/terum-skills install 33333333-3333-4333-8333-333333333333` · `/sync-skills`

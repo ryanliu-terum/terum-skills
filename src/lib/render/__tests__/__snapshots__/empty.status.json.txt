@@ -1,0 +1,26 @@
+{
+  "verb": "status",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "version": "0.16.0",
+    "teams": [],
+    "ledger": {
+      "placements": [],
+      "approvals": []
+    },
+    "identity": null,
+    "tools": {
+      "git": true,
+      "gh": false
+    },
+    "hostArch": "x64",
+    "processArch": "x64"
+  },
+  "lines": [
+    "terum-skills 0.16.0",
+    "No team is configured on this machine.",
+    "  Create a team: npx -y terum-skills@latest setup",
+    "  Join a team:   npx -y terum-skills@latest setup <org>/<repo>"
+  ]
+}

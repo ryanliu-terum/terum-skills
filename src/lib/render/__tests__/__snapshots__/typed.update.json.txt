@@ -1,0 +1,36 @@
+{
+  "verb": "update",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "running": "0.16.0",
+    "latest": "0.17.0",
+    "observation": "older",
+    "launch": "npx",
+    "description": "Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)",
+    "advice": [
+      "Cache request recorded as: terum-skills@latest",
+      "To request the registry's latest release, run:",
+      "  npx -y terum-skills@latest <command>",
+      "This does not update other local or global installations."
+    ],
+    "lines": [
+      "terum-skills 0.16.0",
+      "This copy: <HOME>/.npm/_npx/abc/node_modules/terum-skills",
+      "Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)",
+      "Cache request recorded as: terum-skills@latest",
+      "To request the registry's latest release, run:",
+      "  npx -y terum-skills@latest <command>",
+      "This does not update other local or global installations."
+    ]
+  },
+  "lines": [
+    "terum-skills 0.16.0",
+    "This copy: <HOME>/.npm/_npx/abc/node_modules/terum-skills",
+    "Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)",
+    "Cache request recorded as: terum-skills@latest",
+    "To request the registry's latest release, run:",
+    "  npx -y terum-skills@latest <command>",
+    "This does not update other local or global installations."
+  ]
+}

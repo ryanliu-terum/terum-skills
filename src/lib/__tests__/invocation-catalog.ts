@@ -124,6 +124,18 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "io.print(version === null ? 'terum-skills (version unknown)' : `terum-skills ${version}`);"
   },
   {
+    "file": "src/lib/render/verbs/status.ts",
+    "line": 20,
+    "policy": "not-a-hint",
+    "pattern": "const b = board(version === null ? 'terum-skills (version unknown)' : `terum-skills ${version}`);"
+  },
+  {
+    "file": "src/lib/render/verbs/status.ts",
+    "line": 55,
+    "policy": "not-a-hint",
+    "pattern": "/^terum-skills /, /^Team .+ \\((you are|configured handle) @/, /^  Repository: /, /^  Clone: /, /^  From the local clone; GitHub access is not checked\\.$/,"
+  },
+  {
     "file": "src/commands/team.ts",
     "line": 81,
     "policy": "not-a-hint",
@@ -296,6 +308,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 26,
     "policy": "not-a-hint",
     "pattern": "const lines = [`terum-skills ${running ?? 'version unknown'}`, `This copy: ${path}`];"
+  },
+  {
+    "file": "src/lib/render/verbs/update.ts",
+    "line": 7,
+    "policy": "not-a-hint",
+    "pattern": "const b = board(`terum-skills ${running ?? 'version unknown'}`);"
   },
   {
     "file": "src/commands/update.ts",

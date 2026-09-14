@@ -1,0 +1,16 @@
+Sync
+The read verbs see new commits.
+
+╭──────┬───────────────┬─────────┬──────────────────────╮
+│ Team │ State         │ Changed │ Detail               │
+├──────┼───────────────┼─────────┼──────────────────────┤
+│ acme │ ✓ refreshed   │ yes     │ —                    │
+│ old  │ ✗ unreachable │ no      │ repository not found │
+╰──────┴───────────────┴─────────┴──────────────────────╯
+(columns not shown at this width: HEAD)
+
+Notes
+  • Updated your terum-skills skills for this CLI.
+  • old: the repository is gone; GitHub knows acme/team-2 (renamed).
+
+Next: /terum-skills team move acme/team-2

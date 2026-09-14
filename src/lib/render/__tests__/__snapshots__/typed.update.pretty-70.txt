@@ -1,0 +1,17 @@
+terum-skills 0.16.0
+A newer release is advertised: 0.17.0
+
+  latest:      ⚠ 0.17.0
+  observation: older
+  launch:      npx
+
+Release check
+  Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)
+
+How to update
+  Cache request recorded as: terum-skills@latest
+  To request the registry's latest release, run:
+    npx -y terum-skills@latest <command>
+  This does not update other local or global installations.
+
+Next: npx -y terum-skills@latest <command>
