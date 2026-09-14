@@ -3,7 +3,14 @@
  *
  * `installed[]` is automatic and means *a copy is on a machine*; `profile[]` is curated and means
  * *I stand behind this*. D5 splits them deliberately, so publishing never writes `installed[]` and
- * this prompt is the only people-file write publish makes.
+ * this entry is the only people-file write publish makes.
+ *
+ * D77 (Ryan, 2026-09-14): **publish writes the entry with no question.** Typing `publish` IS the
+ * endorsement — the publisher chose the skill, the team and the project by hand — so a second
+ * "Add <name> to your profile?" asked for consent that was already given, and its default-no
+ * meant the ordinary path left the publisher's own profile empty. `install` still asks: installing
+ * someone else's skill is a copy onto a machine, not a statement about the skill. Either entry is
+ * reversible with `profile --remove`.
  */
 import { Prompter } from './prompt.js';
 import { parseJson, personSchema, type Person } from './schema.js';
@@ -23,18 +30,19 @@ export interface ProfileEntryRequest {
   /** The `v<N>` the skill now sits at — the minted one, or the identical one. Never null. */
   version: string;
   via: 'publish' | 'install';
-  /** Pre-answers the prompt for the desktop and for tests. */
+  /** Pre-answers `install`'s prompt for the desktop and for tests; `publish` never asks (D77). */
   preAnswered?: boolean;
   localSkills?: number | null;
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
 }
 
 /**
- * Asks once, default NO, and writes only on a yes. One entry per id: a re-add updates `version` and
- * `added` in place rather than appending a duplicate.
+ * Writes the entry: unconditionally for `publish` (D77), and for `install` after asking once,
+ * default NO — a non-interactive install declines rather than throwing on a question it cannot ask.
+ * One entry per id: a re-add updates `version` and `added` in place rather than appending a duplicate.
  */
-export async function offerProfileEntry(request: ProfileEntryRequest, io: Prompter): Promise<boolean> {
-  const yes = request.preAnswered ?? (request.via === 'install' && !io.interactive ? false : await io.confirm(`Add ${request.name} to your profile?`));
+export async function recordProfileEntry(request: ProfileEntryRequest, io: Prompter): Promise<boolean> {
+  const yes = request.via === 'publish' || (request.preAnswered ?? (io.interactive ? await io.confirm(`Add ${request.name} to your profile?`) : false));
   if (!yes) return false;
   const added = new Date().toISOString().slice(0, 10);
   await openTeamRepo(request.clone, request.remote, request.runner).safeWrite((tree) => {

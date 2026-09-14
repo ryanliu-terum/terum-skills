@@ -234,8 +234,9 @@ injected frontmatter, writes it back locally, and publishes directly to main as 
 Identical bytes reuse the existing version and can still attach receipts or add project membership.
 A local FAIL receipt can trigger a confirm; multiple projects without `--project` trigger a
 `Which project?` select defaulting to Global. There is no unconditional publish confirmation.
-The profile offer follows the team write. A failed team write can leave injected local frontmatter;
-a failed profile offer does not undo publication.
+The profile entry follows the team write, with no question: publish records the skill on the
+publisher's profile and prints `Your profile now lists <name> at <label>.` (D77). A failed team
+write can leave injected local frontmatter; a failed profile write does not undo publication.
 
 Category precedence is declared frontmatter, `--category`, model suggestion, then `misc`.
 A declared category makes no model call and emits no line. Otherwise a `print` frame precedes
