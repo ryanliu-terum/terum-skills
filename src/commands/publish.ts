@@ -11,7 +11,7 @@ import { Prompter } from '../lib/prompt.js';
 import { fromError, CancelledError, Result, success } from '../lib/result.js';
 import { GLOBAL_PROJECT, parseJson, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { declaredCategory, declaredSkillId, injectManagedFields, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
+import { declaredCategory, declaredSkillId, injectManagedFields, isEvalAsset, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
 import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { teamForReference } from './install.js';
 import { assertNotInsideStateRoot, assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
@@ -49,6 +49,8 @@ export interface PublishResult {
   /** `'v2'` when this publish was refused as identical. */
   identicalTo: string | null;
   attachedEvals: number;
+  /** Eval asset files this publish wrote to `skills/<name>/evals/` (add or modify). */
+  evalAssets: number;
   profileAdded: boolean;
   /** This publish appended the uuid to `projects[project].skills`. */
   projectAdded: boolean;
@@ -178,7 +180,8 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     await writeFile(join(found.path, 'SKILL.md'), injected);
 
     const repo = openTeamRepo(clone, binding.remote, runner);
-    let outcome: { version: string | null; identicalTo: string | null; attached: number; projectAdded: boolean } = { version: null, identicalTo: null, attached: 0, projectAdded: false };
+    let outcome: { version: string | null; identicalTo: string | null; attached: number; projectAdded: boolean; assets: number } = { version: null, identicalTo: null, attached: 0, projectAdded: false, assets: 0 };
+    let assetsWritten = 0;
     const written = await repo.safeWrite((tree) => {
       const teamSource = tree.before('team.json');
       if (teamSource === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');
@@ -204,6 +207,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
           throw new Error(`${found.name} is no longer in the repository as ${id.slice(0, 8)}; run sync and retry.`);
         }
       }
+      assetsWritten = 0; // safeWrite may replay the mutation; this is a fresh count each attempt.
       let identical: string | null = null;
       for (const version of existing) {
         const prefix = `skills/${found.name}/${version.folder}/`;
@@ -222,10 +226,27 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       // §4.5/D10: carry the mode across with the bytes. `sourceFiles` already detects it
       // (`skill-source.ts`'s `lstat(next).mode & 0o111`); before this the set was read for hygiene
       // and then dropped, so every published `scripts/*.sh` arrived 0644 and would not run.
+      //
+      // Eval assets are filtered out here (`isEvalAsset`): they are not version bytes, and a version
+      // folder is immutable, so a case committed into `v3/` could never be corrected without minting
+      // `v4`. They go to the mutable `skills/<name>/evals/` below instead.
       if (identical === null) for (const [key, contents] of files) {
+        if (isEvalAsset(key)) continue;
         const path = `skills/${found.name}/${target}/${key}`;
         tree.set(path, contents);
         if (executable.has(key)) tree.setExecutable(path, true);
+      }
+
+      // 8a. The eval assets, written on EVERY publish — including one that minted nothing, which is
+      //     exactly how an eval-only change reaches the team now. Add-or-modify, never remove
+      //     (guard row a″), so a folder that happens to be missing a case cannot delete the team's.
+      for (const [key, contents] of files) {
+        if (!isEvalAsset(key)) continue;
+        const path = `skills/${found.name}/${key}`;
+        if (sameBytes(tree.before(path), contents)) continue;
+        tree.set(path, contents);
+        if (executable.has(key)) tree.setExecutable(path, true);
+        assetsWritten += 1;
       }
 
       // 9. Attach every local receipt taken of these exact bytes, as a COPY stamped with the publish
@@ -245,7 +266,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       const projectAdded = !list.includes(id);
       if (projectAdded) { list.push(id); tree.set('team.json', `${JSON.stringify(fresh, null, 2)}\n`); }
 
-      outcome = { version: identical === null ? target : null, identicalTo: identical, attached, projectAdded };
+      outcome = { version: identical === null ? target : null, identicalTo: identical, attached, projectAdded, assets: assetsWritten };
       return assessment;
     }, {
       action: 'publish',
@@ -257,14 +278,24 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     void written;
 
     const at = outcome.version ?? outcome.identicalTo!;
+    const label = versionLabel(Number(at.slice(1)));
+    // A publish that mints nothing is now a real, useful outcome rather than a no-op: it is how an
+    // eval run and an edited case reach the team. "Nothing to publish" must therefore be reserved
+    // for a run that genuinely moved nothing at all.
+    const also = [
+      outcome.attached > 0 ? `attached ${outcome.attached} eval run(s)` : null,
+      outcome.assets > 0 ? `updated ${outcome.assets} eval asset file(s)` : null,
+    ].filter((part): part is string => part !== null);
     if (outcome.version !== null) {
-      io.print(`Published ${found.name} as ${versionLabel(Number(at.slice(1)))} in ${project}. Attached ${outcome.attached} eval run(s).`);
+      io.print(`Published ${found.name} as ${label} in ${project}. Attached ${outcome.attached} eval run(s).`);
+      if (outcome.assets > 0) io.print(`Updated ${outcome.assets} eval asset file(s) for ${found.name}.`);
     } else if (outcome.projectAdded) {
-      io.print(`Added ${found.name} to ${project}. It is identical to ${versionLabel(Number(at.slice(1)))} of the skill already in the team repository.`);
-    } else if (outcome.attached === 0) {
-      io.print(`Nothing to publish: ${found.name} is identical to ${versionLabel(Number(at.slice(1)))} and already in ${project}.`);
+      io.print(`Added ${found.name} to ${project}. It is identical to ${label} of the skill already in the team repository.`);
+      if (also.length) io.print(`Also ${also.join(' and ')}.`);
+    } else if (also.length === 0) {
+      io.print(`Nothing to publish: ${found.name} is identical to ${label} and already in ${project}.`);
     } else {
-      io.print(`The skill you tried to publish is identical to ${versionLabel(Number(at.slice(1)))} of the skill already in the team repository.`);
+      io.print(`${found.name} is identical to ${label}, so no new version was minted; ${also.join(' and ')}.`);
     }
     const unmatched = local.length - outcome.attached;
     if (outcome.version !== null && unmatched > 0) io.print(`${unmatched} local eval run(s) were not attached — they evaluated this folder before its first publish.`);
@@ -282,7 +313,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       io.print(`Published ${found.name}, but could not add it to your profile: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    return success({ team, id, name: found.name, project, version: outcome.version, created: outcome.version !== null, identicalTo: outcome.identicalTo, attachedEvals: outcome.attached, profileAdded, projectAdded: outcome.projectAdded });
+    return success({ team, id, name: found.name, project, version: outcome.version, created: outcome.version !== null, identicalTo: outcome.identicalTo, attachedEvals: outcome.attached, evalAssets: outcome.assets, profileAdded, projectAdded: outcome.projectAdded });
   } catch (error) {
     if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment);
     return fromError(error);
@@ -318,4 +349,13 @@ async function notFoundLocally(args: PublishArgs, config: Config, name: string, 
   // Library card's path for a skill the team has never seen. Say which grammar missed.
   const missed = refIsPath(name) ? `No skill folder at ${name} in your library` : `No local skill folder named ${name} in your library`;
   return `${missed}. Inspect it with \`${invocation(args.form, 'ls --local')}\`, or add the project holding it with \`${invocation(args.form, 'project add')}\`.${note}`;
+}
+
+/**
+ * Whether a tree slot already holds exactly these bytes, so an unchanged eval asset is not rewritten
+ * on every publish — an unchanged file in the staged diff is noise the guard and the commit both see.
+ */
+function sameBytes(before: string | Buffer | undefined, contents: Buffer): boolean {
+  if (before === undefined) return false;
+  return (Buffer.isBuffer(before) ? before : Buffer.from(before)).equals(contents);
 }

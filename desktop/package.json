@@ -1,7 +1,7 @@
 {
   "name": "terum-skills-desktop",
   "private": true,
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "terum-skills desktop frontend (Vite + React, mock backend, pixel-faithful to the design boards)",
   "license": "Apache-2.0",
   "repository": {
@@ -22,6 +22,7 @@
     "test": "vitest run",
     "export": "python3 tools/export-design.py",
     "export:check": "python3 tools/export-design.py --check",
+    "icon": "node tools/render-app-icon.mjs",
     "e2e:routes": "playwright test e2e/routes",
     "e2e:fidelity": "playwright test e2e/fidelity",
     "check": "npm run typecheck && npm run typecheck:mirrors && npm run lint && npm run test && npm run e2e:routes",

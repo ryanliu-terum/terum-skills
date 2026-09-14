@@ -26,7 +26,7 @@ const cardNames = () => screen.getAllByTestId(/^skill-card-/).map(el => el.getAt
 async function globalCards(backend: Backend): Promise<SkillCard[]> { const result = await backend.library({ scope: { kind: 'global' } }); if (!result.ok) throw new Error(result.error); return result.value.skills; }
 const sendable = (cards: SkillCard[]) => cards.filter(card => localActionReason(card, 'publish') === null);
 async function enterSelection(backend: Backend) { openWith('#/library/global', backend); await screen.findByText('15 skills'); fireEvent.click(modeButton()); await screen.findByText('0 of 15 selected'); }
-function published(ref: string): Result<PublishResult> { return { ok: true, value: { name: ref.split('/').at(-1) ?? ref, project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 0, profileAdded: false, projectAdded: false } }; }
+function published(ref: string): Result<PublishResult> { return { ok: true, value: { name: ref.split('/').at(-1) ?? ref, project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 0, evalAssets: 0, profileAdded: false, projectAdded: false } }; }
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 async function openDialog(count: number) { fireEvent.click(screen.getByRole('button', { name: `Publish ${count} skills to team…` })); const dialog = await screen.findByRole('dialog'); expect(search().get('dialog')).toBe('publish'); return dialog; }
 const rowState = (name: string) => within(screen.getByTestId('bulk-row-' + name)).getAllByText(/./).at(-1)?.textContent ?? '';

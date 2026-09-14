@@ -44,6 +44,8 @@ const VERSION_PATH = /^skills\/([^/]+)\/v[1-9][0-9]*\/.+$/;
 const VERSION_PREFIX = /^skills\/[^/]+\/v[1-9][0-9]*\//;
 /** The SKILL.md of some version, used by row g to resolve a receipt uuid against a skill's metadata. */
 const VERSION_SKILL_MD = /^skills\/[^/]+\/v[1-9][0-9]*\/SKILL\.md$/;
+/** Row a″: a skill's eval assets, beside its version folders rather than inside one. */
+const EVAL_ASSET_PATH = /^skills\/([^/]+)\/evals\/.+$/;
 // Skill uuids are case-tolerant (z.uuid() admits both; callers pass metadata.id verbatim). The version
 // segment is now the `v<N>` folder name (§3.4), not the old 40-char tree hash.
 const RECEIPT_PATH = /^evals\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/(v[1-9][0-9]*)\/(\d{8}T\d{6}Z)\.json$/;
@@ -56,6 +58,7 @@ export function guard(tree: GuardTree, rawContext: GuardContext): void {
     // claims team.json and would refuse a migrate diff before this clause ever ran.
     if (context.action === 'migrate' && permitsMigration(tree, path)) continue; // row j
     if (context.action === 'publish' && permitsVersionFolder(tree, path)) continue; // row a′
+    if (context.action === 'publish' && permitsEvalAssets(tree, path)) continue; // row a″
     if (context.action === 'publish' && permitsReceipt(tree, path)) continue; // row g
     if (path === 'README.md') continue; // row f: generated, regenerated not hand-edited
     if (path === `people/${context.handle}.json` && PEOPLE_ACTIONS.includes(context.action)) continue; // row b
@@ -74,8 +77,10 @@ export function guard(tree: GuardTree, rawContext: GuardContext): void {
  * it always mints a NEW folder, so there is no committed author to compare against — which is why
  * row a, `ownsSkill`, `authorOf` and `canonicalSkillDigest` are all deleted (D15).
  *
- * Eval cases land here too (D9): `v<N>/evals/triggers.yaml` and `v<N>/evals/cases/*.yaml` are
- * ordinary version bytes, admitted by this row like every other file. Row h is gone, not re-pointed.
+ * Eval assets no longer land here (Ajay, 2026-09-13, overriding D9): they are not version bytes and
+ * live beside the version folders, under row a″. A legacy `v<N>/evals/**` path from before that
+ * override is still ordinary version content and still admitted by this row — those versions are
+ * committed and immutable, so nothing rewrites them.
  */
 function permitsVersionFolder(tree: GuardTree, path: string): boolean {
   if (!VERSION_PATH.test(path)) return false;
@@ -90,6 +95,25 @@ function permitsVersionFolder(tree: GuardTree, path: string): boolean {
   if (prefix === undefined) return false;
   if (tree.paths === undefined) return false; // fail CLOSED without the accessor, exactly as row g does
   return !tree.paths(prefix).some((sibling) => tree.before(sibling) !== undefined);
+}
+
+/**
+ * Row a″: a skill's eval assets, at `skills/<name>/evals/**` — beside the `v<N>/` folders, never
+ * inside one. This is the row that makes them **mutable**, and it is the whole point of the override:
+ * a case you edit or add must be able to reach the team without minting a version, which row a′
+ * structurally cannot allow (it refuses any write into a committed version prefix).
+ *
+ * Add and modify are both permitted; **removal is not**. Deleting a case is destructive and shared —
+ * one member's local folder missing a file would otherwise silently delete a case the team relies on —
+ * so publish only ever writes the assets it has. A case is retired by editing it, or by a human
+ * removing it from the repository directly.
+ *
+ * Like row a′, ownership is not consulted: publish already proved the lineage is this skill's before
+ * it writes (§5.1 step 7a). The last publisher's assets win, which is the ordinary shared-file rule.
+ */
+function permitsEvalAssets(tree: GuardTree, path: string): boolean {
+  if (!EVAL_ASSET_PATH.test(path)) return false;
+  return tree.after(path) !== undefined;
 }
 
 /**

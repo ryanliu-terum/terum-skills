@@ -107,6 +107,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/setup.ts",
+    "line": 138,
+    "policy": "prose",
+    "pattern": "`Setup stopped here, so the project, eval, session hook and /terum-skills steps were not offered \u2014 run \\`${invocation(form, 'setup')}\\` again to finish.`,"
+  },
+  {
+    "file": "src/commands/setup.ts",
     "line": 425,
     "policy": "prose",
     "pattern": "// The /terum-skills Claude Code skill ships inside this package, and setup is the one onboarding"
@@ -1051,7 +1057,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 133,
     "policy": "prose",
-    "pattern": "`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path and content change first. Only publish shares skill bytes and matching receipts."
+    "pattern": "`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path first. Only publish shares skill bytes; a receipt for bytes that are already a published version is shared by `eval` itself."
   },
   {
     "file": "README.md",
@@ -1079,9 +1085,15 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 303,
+    "line": 306,
     "policy": "prose",
-    "pattern": "`publish` shares matching receipts alongside the immutable version at:"
+    "pattern": "When the evaluated bytes are already a published version, `eval` publishes the receipt itself — that is"
+  },
+  {
+    "file": "README.md",
+    "line": 308,
+    "policy": "prose",
+    "pattern": "command. `--no-commit` keeps the run to yourself. Otherwise `publish` attaches matching receipts at:"
   },
   {
     "file": "README.md",
@@ -1567,7 +1579,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 278,
     "policy": "prose",
-    "pattern": "`app-update --check` (the default) reads the cached release advertisement and local staged/installed versions without network calls or writes. `--check --force` probes release tags under the same GitHub-team policy as `update`. Checks always succeed, reporting probe failures as data."
+    "pattern": "`app-update --check` (the default) reads the cached release advertisement and local staged/installed versions, and keeps that advertisement fresh by itself: when the last probe is missing or a day old it probes release tags under the same GitHub-team policy and 10 s deadline as `update` (`probe: 'ok' | 'failed'`, at most once a day), otherwise it serves the cache (`probe: 'cached'`, or `'failed'` while the day's attempt failed). `--check --force` probes regardless of the cap. A check never touches the app or the CLI; its only write is the CLI's own release state in `run/latest-version.json` (the advertisement, the attempt, and the running observation every `sync` used to record). Checks always succeed, reporting probe failures as data. Until 0.15.0 the check was read-only and the advertisement was filled by the old sync; after the fetch-only sync collapse (§10) nothing on the app's path probed, so the app could never learn about a newer version by itself — the check owns the probe now."
   },
   {
     "file": "docs/frame-protocol.md",

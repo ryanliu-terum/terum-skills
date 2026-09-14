@@ -27,13 +27,41 @@ describe('host architecture (p-arch A1)', () => {
     ['empty hint', { PROCESSOR_ARCHITEW6432: '' }],
     ['unknown hint', { PROCESSOR_ARCHITEW6432: 'RISCV64' }],
     ['whitespace hint', { PROCESSOR_ARCHITEW6432: ' ARM64 ' }],
-    ['unrelated key', { PROCESSOR_ARCHITECTURE: 'ARM64' }],
+    ['native x64 keys', { PROCESSOR_ARCHITECTURE: 'AMD64', PROCESSOR_IDENTIFIER: 'Intel64 Family 6 Model 158 Stepping 10, GenuineIntel' }],
+    ['native AMD keys', { PROCESSOR_ARCHITECTURE: 'AMD64', PROCESSOR_IDENTIFIER: 'AMD64 Family 25 Model 33 Stepping 0, AuthenticAMD' }],
+    ['empty identifier', { PROCESSOR_IDENTIFIER: '' }],
   ] as const)('preserves the process architecture for %s', (_label, env) => {
     for (const arch of ['x64', 'arm64', 'ia32', 'future-arch']) {
       const evidence: PlatformEvidence = { platform: 'win32', arch, env };
       expect(hostArch(evidence)).toBe(arch);
       expect(detectPlatform(evidence)).toBe(arch === 'x64' ? 'win32-x64' : arch === 'arm64' ? 'win32-arm64' : 'unsupported');
     }
+  });
+
+  // Windows on ARM64 runs x64 code through Prism, which (unlike WOW64) does not set PROCESSOR_ARCHITEW6432: the
+  // emulated process sees PROCESSOR_ARCHITECTURE=AMD64 and nothing else, except that PROCESSOR_IDENTIFIER still
+  // names the real silicon. Measured on a Snapdragon X box, 2026-09-13.
+  const PRISM = { PROCESSOR_ARCHITECTURE: 'AMD64', PROCESSOR_IDENTIFIER: 'ARMv8 (64-bit) Family 8 Model 1 Revision 201, Qualcomm Technologies Inc' };
+  it('recognises an ARM64 host from the processor identifier when the WOW64 hint is absent (Prism)', () => {
+    const evidence: PlatformEvidence = { platform: 'win32', arch: 'x64', env: PRISM };
+    expect(hostArch(evidence)).toBe('arm64');
+    expect(detectPlatform(evidence)).toBe('win32-arm64');
+    expect(assetSuffix(detectPlatform(evidence))).toBe('arm64-setup.exe');
+  });
+  it.each(['ARMv8 (64-bit) Family 8 Model D4B Revision 0, Microsoft Corporation', 'armv8 (64-bit) Family 8 Model 1 Revision 201, Qualcomm Technologies Inc', 'ARMv9 (64-bit) Family 9 Model 0 Revision 0, Qualcomm Technologies Inc'])('reads any ARM identifier as an ARM64 host: %s', identifier => {
+    expect(hostArch({ platform: 'win32', arch: 'x64', env: { PROCESSOR_ARCHITECTURE: 'AMD64', PROCESSOR_IDENTIFIER: identifier } })).toBe('arm64');
+  });
+  it('recognises an ARM64 host from a native PROCESSOR_ARCHITECTURE too', () => {
+    expect(hostArch({ platform: 'win32', arch: 'x64', env: { PROCESSOR_ARCHITECTURE: 'ARM64' } })).toBe('arm64');
+    expect(hostArch({ platform: 'win32', arch: 'arm64', env: { PROCESSOR_ARCHITECTURE: 'ARM64', PROCESSOR_IDENTIFIER: PRISM.PROCESSOR_IDENTIFIER } })).toBe('arm64');
+  });
+  it('lets the explicit WOW64 hint win over the identifier', () => {
+    expect(hostArch({ platform: 'win32', arch: 'ia32', env: { ...PRISM, PROCESSOR_ARCHITEW6432: 'AMD64' } })).toBe('x64');
+    expect(hostArch({ platform: 'win32', arch: 'ia32', env: { ...PRISM, PROCESSOR_ARCHITEW6432: 'ARM64' } })).toBe('arm64');
+  });
+  it('still reads nothing but the platform off Windows when ARM keys are present', () => {
+    expect(hostArch({ platform: 'darwin', arch: 'x64', env: PRISM })).toBe('x64');
+    expect(hostArch({ platform: 'linux', arch: 'x64', env: PRISM })).toBe('x64');
   });
 
   it('selects the ARM64 installer for an x64 process on an ARM64 Windows host', () => {

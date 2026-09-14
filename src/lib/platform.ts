@@ -16,17 +16,24 @@ export interface PlatformEvidence {
 
 /**
  * The CPU the machine actually has, as distinct from the architecture the current process reports.
- * A 32- or 64-bit x86 process running under Windows emulation (WOW64 on x64, Prism on ARM64) sees its own
- * emulated architecture in `process.arch`; Windows records the real one in PROCESSOR_ARCHITEW6432, which is
- * set only inside such a process. Off Windows, and in a native Windows process, there is nothing to correct.
+ * A 32- or 64-bit x86 process running under Windows emulation sees its own emulated architecture in
+ * `process.arch`. WOW64 (32-bit code on x64 or ARM64) records the real one in PROCESSOR_ARCHITEW6432, set only
+ * inside such a process. Prism (x64 code on Windows on ARM64) sets no such hint: the emulated process sees
+ * PROCESSOR_ARCHITECTURE=AMD64 and only PROCESSOR_IDENTIFIER ("ARMv8 (64-bit) Family 8 …, Qualcomm …") still
+ * names the silicon (measured on a Snapdragon X box, 2026-09-13, where the x64 installer had been chosen for
+ * every download). A native ARM64 process reports PROCESSOR_ARCHITECTURE=ARM64 outright. Off Windows there is
+ * nothing to correct and the environment is never read.
  */
 export function hostArch(evidence: PlatformEvidence): string {
   if (evidence.platform !== 'win32') return evidence.arch;
-  switch (evidence.env?.PROCESSOR_ARCHITEW6432?.toUpperCase()) {
+  const env = evidence.env ?? {};
+  switch (env.PROCESSOR_ARCHITEW6432?.toUpperCase()) {
     case 'ARM64': return 'arm64';
     case 'AMD64': return 'x64';
-    default: return evidence.arch;
+    default: break;
   }
+  if (env.PROCESSOR_ARCHITECTURE?.toUpperCase() === 'ARM64' || /^\s*ARM/i.test(env.PROCESSOR_IDENTIFIER ?? '')) return 'arm64';
+  return evidence.arch;
 }
 
 export function detectPlatform(evidence: PlatformEvidence): AppPlatform {

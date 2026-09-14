@@ -132,7 +132,7 @@ A second-team binding refused before any side effect:
 
 ## Versioning
 
-The current package reports version `0.15.0`, protocol `1`. The re-recorded 0.14.0
+The current package reports version `0.16.0`, protocol `1`. The re-recorded 0.14.0
 hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verbs;
 `src/lib/frames.ts` now advertises this complete verb list:
 
@@ -157,7 +157,14 @@ False: `favorites`, `follow`, `lastSeen`, `inviteScoping`, `disablePerMachine`, 
 advertise their respective verbs. Read feature values rather than assuming a control is available.
 
 `localIdentity` covers `skillId` on local rows and rejected entries, and `placed` on rows.
-Local inventory is a scan of Global and explicitly registered project roots; it reads no clone.
+Local inventory is a scan of Global and explicitly registered project roots. It fetches nothing, but
+each row now carries five read-only keys joined from the configured clones by **content digest** (cross-mirror overlays spec §4.1): `matchedVersion` (the `v<N>` whose committed bytes equal
+the folder, else null), `matchedName` and `matchedTeam` (the skill and team that version belongs to),
+`teamEval` (the newest committed receipt whose `content_digest` equals the folder's, as a receipt
+plus its `path`, the team name, and `mine` — whether this machine's handle ran it), and `knownToTeam`
+(the folder's frontmatter uuid belongs to a team skill). A row from an older CLI omits all five; a shell
+that reads them must treat absence as unknown, never as "unpublished". Identical bytes in more than
+one team match nothing and add a `problems[]` entry unless a placement names the team.
 Team `ls` includes `people` with automatic `installed` records and curated `profile` entries.
 
 Each team skill's `latestVersion` is its highest `v<N>` folder; `versionCount` counts versions.
@@ -259,8 +266,13 @@ even `project list` needs its own process. The six accepted read verbs are uncha
 They differ only under emulation. A `processArch` of `x64` with a `hostArch` of `arm64` means an x64 build
 of Node is running on an ARM64 machine through Windows emulation, so the CLI, the desktop app it installs,
 and every child that app spawns all pay the emulation tax. A shell should surface that rather than hide it.
-Off Windows the two are always equal: the only signal read is `PROCESSOR_ARCHITEW6432`, which Windows sets
-inside an emulated process and nowhere else. Both fields are plain strings and an unrecognised value passes
+Off Windows the two are always equal and the environment is not read. On Windows three signals are read, in
+this order: `PROCESSOR_ARCHITEW6432` (set by WOW64 inside a 32-bit emulated process, and trusted first), then a
+`PROCESSOR_ARCHITECTURE` of `ARM64` or a `PROCESSOR_IDENTIFIER` that starts with `ARM`, either of which names
+an ARM64 machine. The last two exist because Prism, the x64-on-ARM64 emulator, sets no
+`PROCESSOR_ARCHITEW6432` at all: an x64 Node there sees `PROCESSOR_ARCHITECTURE=AMD64` and only the identifier
+(`ARMv8 (64-bit) Family 8 …, Qualcomm …`) still names the silicon; until this was read, such a machine was
+served the x64 installer on every download. Both fields are plain strings and an unrecognised value passes
 through unchanged, so never switch on them exhaustively.
 
 `app` reports the same condition as `emulation`, either `"win32-arm64-on-x64"` or `null`, and prints one
@@ -286,7 +298,7 @@ shape and per-team failures. Over frames it emits hello and result; there is no 
 
 ### App updates
 
-`app-update --check` (the default) reads the cached release advertisement and local staged/installed versions without network calls or writes. `--check --force` probes release tags under the same GitHub-team policy as `update`. Checks always succeed, reporting probe failures as data.
+`app-update --check` (the default) reads the cached release advertisement and local staged/installed versions, and keeps that advertisement fresh by itself: when the last probe is missing or a day old it probes release tags under the same GitHub-team policy and 10 s deadline as `update` (`probe: 'ok' | 'failed'`, at most once a day), otherwise it serves the cache (`probe: 'cached'`, or `'failed'` while the day's attempt failed). `--check --force` probes regardless of the cap. A check never touches the app or the CLI; its only write is the CLI's own release state in `run/latest-version.json` (the advertisement, the attempt, and the running observation every `sync` used to record). Checks always succeed, reporting probe failures as data. Until 0.15.0 the check was read-only and the advertisement was filled by the old sync; after the fetch-only sync collapse (§10) nothing on the app's path probed, so the app could never learn about a newer version by itself — the check owns the probe now.
 
 `app-update --stage [--release <version>]` downloads the selected release through `gh`, verifies its published SHA-256, and stages it without installing. The default release is this CLI's version. An advertised tag with missing release assets returns `ok: true, notPublished: true, staged: false`; the shell stays quiet and retries on the next launch.
 
@@ -321,7 +333,7 @@ On macOS, quit the running app before applying from a terminal: `open` without `
 
 `app-update --reason on-close|overnight|manual` records the install reason in every apply marker and forwards it from `--apply` to `--apply-now`. Omission remains compatible with old callers and displays the manual wording. No CLI verb or feature key is added.
 
-The desktop checks once at launch and displays the cached advertised version in its top-bar update chip. Settings ▸ Updates uses `updates:app:policy`: `ask` (manual download/install), `on-close` (the default), or `overnight` (01:00–05:00 local after 30 idle minutes). The old boolean migrates once: false → ask, true → on-close. Successful install markers display “Updated to {version}”, adding “when you quit” or “overnight”; `updates:app:lastShown` acknowledges the marker across launches while the current session retains it. Failure markers remain visible.
+The desktop checks once at launch; that check refreshes the advertisement at most once a day (App updates above) and displays the advertised version in its top-bar update chip. Settings ▸ Updates uses `updates:app:policy`: `ask` (manual download/install), `on-close` (the default), or `overnight` (01:00–05:00 local after 30 idle minutes). The old boolean migrates once: false → ask, true → on-close. Successful install markers display “Updated to {version}”, adding “when you quit” or “overnight”; `updates:app:lastShown` acknowledges the marker across launches while the current session retains it. Failure markers remain visible.
 
 Native-command amendment: `app_update_on_close({ version: string | null })` arms or disarms one detached installer. This additional command is necessary because the installer must outlive the WebView. The base actually has six commands including `quit`, so this is its seventh (the original decision's “five” count predates `quit`). On the last window's CloseRequested or ExitRequested, the shell consumes the arm once and invokes the recorded Node/CLI with `app-update --apply-now --release <version> --reason on-close`, plus `--await-pid <shell-pid>` to preserve the CLI's Windows wait. It uses a new process group on macOS and CREATE_NO_WINDOW | DETACHED_PROCESS on Windows and stays outside the bridge's child cleanup. The command follows the existing application-command registration, without a separate app ACL permission. Before spawning, the shell writes a waiting marker; a spawn failure replaces it with a failed marker. A child that dies before executing the CLI leaves the waiting marker visible as an unfinished install on the next launch. An unwritable marker is logged without preventing close. A manual or overnight handoff first disarms the close action to prevent two installers; a failed handoff restores the previous arm unless the policy changed in the meantime.
 

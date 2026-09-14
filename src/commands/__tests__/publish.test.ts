@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentRunError, systemAgent, type AgentApi } from '../../lib/evals/agent.js';
@@ -140,7 +140,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v3' } });
   });
 
-  it('publishes the folder whole — eval assets are ordinary version bytes (D9), not a separate row', async () => {
+  it('publishes ordinary files into the version and eval assets beside it, never inside (overrides D9)', async () => {
     const { fixture, store, home } = await prepared();
     const folder = await librarySkill(home);
     await mkdir(join(folder, 'evals', 'cases'), { recursive: true });
@@ -148,10 +148,33 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     await writeFile(join(folder, 'evals', 'triggers.yaml'), 'should_trigger: []\n');
     await mkdir(join(folder, 'references'), { recursive: true });
     await writeFile(join(folder, 'references', 'a.md'), 'aux\n');
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1' } });
-    expect(await show(fixture.bare, 'skills/sample/v1/evals/cases/happy.yaml')).toBe('task: t\n');
-    expect(await show(fixture.bare, 'skills/sample/v1/evals/triggers.yaml')).toBe('should_trigger: []\n');
+    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1', evalAssets: 2 } });
+    // Everything that is the skill goes into the immutable version folder…
     expect(await show(fixture.bare, 'skills/sample/v1/references/a.md')).toBe('aux\n');
+    // …and the eval dataset goes beside it, where a later publish can correct it without minting.
+    expect(await show(fixture.bare, 'skills/sample/evals/cases/happy.yaml')).toBe('task: t\n');
+    expect(await show(fixture.bare, 'skills/sample/evals/triggers.yaml')).toBe('should_trigger: []\n');
+    await expect(show(fixture.bare, 'skills/sample/v1/evals/cases/happy.yaml')).rejects.toThrow();
+  });
+
+  it('shares an edited eval case without minting a version, and never deletes one', async () => {
+    const { fixture, store, home } = await prepared();
+    const folder = await librarySkill(home);
+    await mkdir(join(folder, 'evals', 'cases'), { recursive: true });
+    await writeFile(join(folder, 'evals', 'cases', 'happy.yaml'), 'task: t\n');
+    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1' } });
+
+    // The whole point: the skill did not change, so no version is minted — but the case still lands.
+    await writeFile(join(folder, 'evals', 'cases', 'happy.yaml'), 'task: t2\n');
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: null, identicalTo: 'v1', evalAssets: 1 } });
+    expect(await show(fixture.bare, 'skills/sample/evals/cases/happy.yaml')).toBe('task: t2\n');
+    expect(io.lines.join('\n')).toContain('no new version was minted');
+
+    // A folder that has lost a case never deletes the team's copy (guard row a″ admits no removal).
+    await rm(join(folder, 'evals', 'cases', 'happy.yaml'));
+    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: null, evalAssets: 0 } });
+    expect(await show(fixture.bare, 'skills/sample/evals/cases/happy.yaml')).toBe('task: t2\n');
   });
 
   it('attaches every local receipt of these exact bytes as a stamped COPY, and reports the ones it could not', async () => {
