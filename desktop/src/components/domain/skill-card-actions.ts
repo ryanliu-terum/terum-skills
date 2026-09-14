@@ -72,5 +72,11 @@ function publishAction(skill:SkillCard,at:At):CardAction {
 
 /** Shared path/inspection gate for the menu, detail buttons and pasted dialog URLs. */
 export function localActionReason(skill:Pick<SkillCard,'path'|'teamed'|'flags'|'flagText'>,action:'eval'|'publish'):string|null {
- return !skill.path?(action==='eval'?'Install it first — evals run against the copy on your machine.':'This skill is not on this machine, so there is nothing to publish.'):!skill.teamed&&skill.flags.includes('broken')?skill.flagText.broken??'This folder is not a usable skill.':null;
+ if(!skill.path)return action==='eval'?'Install it first — evals run against the copy on your machine.':'This skill is not on this machine, so there is nothing to publish.';
+ if(skill.teamed)return null;
+ // Two flags close these rows, for opposite reasons: `broken` is a fault in the folder, `bundled` is
+ // this tool's own manual, which `connect` refuses by marker. Both say why in the row itself.
+ if(skill.flags.includes('broken'))return skill.flagText.broken??'This folder is not a usable skill.';
+ if(skill.flags.includes('bundled'))return skill.flagText.bundled??'Bundled with terum-skills — placed by setup, not a team skill.';
+ return null;
 }

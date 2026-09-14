@@ -22,7 +22,10 @@ export interface ReadOptions {signal?:AbortSignal}
 export type Theme='dark'|'light'|'system';
 export type Scope=string;
 export type TokenKey=keyof Design['TOKENS'];
-export type IndicatorKey='update'|'local'|'broken';
+/** `bundled` marks a folder this tool placed itself — the /terum-skills manual setup writes to the
+ *  global skills root. It is a neutral fact, not a fault: it draws a muted chip rather than the
+ *  `broken` alert, and it gates eval and publish the same way (Ryan, 2026-09-14). */
+export type IndicatorKey='update'|'local'|'broken'|'bundled';
 export interface ReceiptSummary {w:number;l:number;t:number;n:number;lift:number;verdict:'PASS'|'NEUTRAL'|'FAIL';partial:[number,number]|null;signP:string}
 /** The provenance a card must keep reachable from any receipt number it draws (frame-protocol.md). */
 export interface CardProvenance {model:string;k:number;ccVersion:string;runner:string;when:string}

@@ -4,7 +4,7 @@ import { version as releaseVersion } from '../../../../../package.json' with { t
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Bridge } from '../bridge';
 import type { Backend } from '../../Backend';
-import { createTauriBackend } from '../index';
+import { BUNDLED_NOTE, createTauriBackend } from '../index';
 import { createMockBackend } from '../../mock';
 import { fakeBridge } from './fake-bridge';
 import { installedReplay } from './installed-fixture';
@@ -801,18 +801,19 @@ it('returns an empty Global only for an empty scan, even with a team inventory',
 it('deduplicates by path and includes only the D2 countable frontmatter reasons',async()=>{
  const drawn=['no-frontmatter','invalid-yaml','illegal-name','name-mismatch','description-missing','unsupported-field','malformed-allowed-tools'];
  const entry=(reason:string)=>({name:reason,path:'/skills/'+reason,reason});
- // The bundled /terum-skills wrapper is a folder the CLI counts and the Library never draws.
+ // The bundled /terum-skills wrapper draws a card like any other folder (§7.4 D16); what it does not
+ // draw is the red flag — see the `bundled` test below.
  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:12,connectable:0},rows:[],problems:[],notOffered:[...drawn.map(entry),entry('managed-wrapper'),entry('invalid-yaml'),...['symlink','inside-state-root','unreadable','other'].map(entry)]}]};
  const backend=createTauriBackend(inventoryBridge({local,teams:[]}).bridge);
  const result=await backend.library({scope:{kind:'global'}});
  expect(result.value?.skills.map(s=>s.name)).toEqual([...drawn,'managed-wrapper','symlink','inside-state-root','unreadable','other']);
- // Eight folders on disk, seven cards: every number follows the grid, not the CLI's folder count.
+ // Every number follows the grid, which draws every folder the scan returned.
  expect(result.value?.title).toBe('12 skills');
  expect(result.value?.root.count).toBe('12');
  expect(result.value?.overview.skills).toBe('12');
 });
 
-it('keeps the sidebar Global count in step with the grid when a managed wrapper is hidden',async()=>{
+it('keeps the sidebar Global count in step with the grid, wrapper included',async()=>{
  const entry=(reason:string)=>({name:reason,path:'/skills/'+reason,reason});
  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:3,connectable:1},rows:[{name:'handoff',path:'/skills/handoff',state:'untracked locally',tracked:false,placement:null,health:'untracked'}],problems:[],notOffered:[entry('name-mismatch'),entry('managed-wrapper')]}]};
  const f=fakeBridge((args,emit)=>{
@@ -827,6 +828,24 @@ it('keeps the sidebar Global count in step with the grid when a managed wrapper 
  expect(library.value?.skills.map(s=>s.name)).toEqual(['handoff','name-mismatch','managed-wrapper']);
  expect(library.value?.title).toBe('3 skills');
  expect(library.value?.overview.skills).toBe('3');
+});
+
+it('draws the bundled wrapper as a neutral card, and a real fault as a broken one',async()=>{
+ const wrapper={name:'terum-skills',path:'/skills/terum-skills',reason:'managed-wrapper',detail:'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill',description:'Run a terum-skills CLI verb from inside the session.'};
+ const fault={name:'half-written',path:'/skills/half-written',reason:'invalid-yaml',detail:'SKILL.md frontmatter is not valid YAML',description:null};
+ const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:2,connectable:0},rows:[],problems:[],notOffered:[wrapper,fault]}]};
+ const backend=createTauriBackend(inventoryBridge({local,teams:[]}).bridge);
+ const result=await backend.library({scope:{kind:'global'}});
+ const [bundled,broken]=result.value!.skills;
+ // The wrapper is not a fault: its own description survives, the chip is the muted `bundled` one, and
+ // the card stays out of the attention tile. Its sentence is the one the disabled rows repeat.
+ expect(bundled).toMatchObject({name:'terum-skills',flags:['bundled'],desc:'Run a terum-skills CLI verb from inside the session.'});
+ expect(bundled!.flagText.bundled).toBe(BUNDLED_NOTE);
+ expect(bundled!.indicators.bundled).toEqual({icon:'box',token:'text3',text:BUNDLED_NOTE});
+ // Every other reason keeps the red flag, the path-and-reason body and its place in the count.
+ expect(broken).toMatchObject({name:'half-written',flags:['broken']});
+ expect(broken!.desc).toBe('/skills/half-written · SKILL.md frontmatter is not valid YAML');
+ expect(result.value?.overview.attention).toBe('1');
 });
 
 it('fills a local card from the row the CLI now supplies, and estimates tokens with a tilde',async()=>{
