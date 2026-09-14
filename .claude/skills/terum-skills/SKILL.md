@@ -110,6 +110,7 @@ the CLI will ask you questions the session cannot answer.*
 | `uninstall-skill <ref> [--from global\|<project root>]` | none; the CLI previews before confirming | `npx -y terum-skills@latest uninstall-skill <ref> --from <destination>` — `member <h>` and `project <n>` selectors also exist |
 | `uninstall` | none | `npx -y terum-skills@latest uninstall` — machine teardown, preserving recovery data and printing the package-manager step |
 | `team leave <name>`, `team remove <handle>` | none | the same command with the supported npx prefix |
+| `team move <org>/<repo> [--from <team>] [--yes]` | none; one confirmation, then leave + join + re-place | `npx -y terum-skills@latest team move <org>/<repo>` — when a team's repository was recreated elsewhere (`sync` reports it and offers this) |
 | `team project create [name] [--remote <url>]` | none | `npx -y terum-skills@latest team project create <name> --remote <url>` |
 | `team migrate [--team <name>]` | none | `npx -y terum-skills@latest team migrate` — once per team, from a terminal, only after the release carrying the new CLI has reached every teammate (an un-upgraded teammate cannot read a migrated repo); refuses under `--frames` |
 | `setup [target]`, `team create`, `team join <target>`, `login` | none; setup/join can clone before asking | `npx -y terum-skills@latest setup` / `setup <org>/<repo>` / `team create` / `team join <target>` / `login` with the same npx prefix |

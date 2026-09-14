@@ -961,6 +961,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 113,
     "policy": "fixed",
+    "pattern": "| `team move <org>/<repo> [--from <team>] [--yes]` | none; one confirmation, then leave + join + re-place | `npx -y terum-skills@latest team move <org>/<repo>` — when a team's repository was recreated elsewhere (`sync` reports it and offers this) |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 113,
+    "policy": "fixed",
     "pattern": "| `team project create [name] [--remote <url>]` | none | `npx -y terum-skills@latest team project create <name> --remote <url>` |"
   },
   {
@@ -1105,7 +1111,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 364,
     "policy": "prose",
-    "pattern": "| | `team create` / `team join` / `team leave` / `team remove <handle>` | Manage the repo and its roster |"
+    "pattern": "| | `team create` / `team join` / `team leave` / `team move <org>/<repo>` / `team remove <handle>` | Manage the repo and its roster; `move` follows a team whose repository was recreated elsewhere (leave, join, place the shared skills again) |"
   },
   {
     "file": "README.md",

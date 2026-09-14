@@ -52,6 +52,7 @@ export const cliMachine = z.object({ teams: z.array(z.string()), removedPlacemen
 export const cliPublish = z.object({ team: z.string(), id: z.string(), name: z.string(), project: z.string(), version: z.string().nullable(), created: z.boolean(), identicalTo: z.string().nullable(), attachedEvals: z.number(), profileAdded: z.boolean(), projectAdded: z.boolean() }).passthrough();
 const cliInvite = z.object({ team: z.string(), invited: z.array(z.string()), already: z.array(z.string()).default([]), failed: z.array(z.object({ login: z.string(), error: z.string() })).default([]) }).passthrough();
 const cliTeam = z.object({ team: z.string() }).passthrough();
+const cliTeamMove = z.object({ from: z.string(), to: z.string(), handle: z.string(), restored: z.array(z.string()), missing: z.array(z.string()), failed: z.array(z.object({ name: z.string(), error: z.string() })) }).passthrough();
 export const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(), steps: z.partialRecord(z.enum(SETUP_STEP_KEYS), z.enum(['done','skipped','printed','queued','batched'])).nullish().transform(value => value ?? null) });
 // §6.3: a local eval runs against a folder in the Library, which may belong to no team at all —
 // hence the nullable `team` and `id`. `shareHint` is the caller's cue to offer publishing.
@@ -833,10 +834,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     // publish writes clone team.json/PR branches and registers the current checkout in config.
     publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), ...(args.project ? ['--project', args.project] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, project: value.project, version: value.version, created: value.created, identicalTo: value.identicalTo, attachedEvals: value.attachedEvals, profileAdded: value.profileAdded, projectAdded: value.projectAdded }), ['config', 'clone']),
     // Sync fetches team clones; it never changes the local Library or places a skill.
-    sync: (args: SyncArgs) => run(['sync', ...(args.team ? ['--team', args.team] : [])], cliRefresh, (value): SyncResult => ({ notices:value.notices,changed:value.changed,teams:value.teams.map(team=>({team:team.team,state:team.state,...(team.detail===undefined?{}:{detail:team.detail})})) }), ['marketplace', 'stamp']),
+    sync: (args: SyncArgs) => run(['sync', ...(args.team ? ['--team', args.team] : [])], cliRefresh, (value): SyncResult => ({ notices:value.notices,changed:value.changed,teams:value.teams.map(team=>({team:team.team,state:team.state,...(team.detail===undefined?{}:{detail:team.detail}),...(team.missing?{missing:true as const,successors:(team.successors??[]).map(entry=>({ownerRepo:entry.ownerRepo,source:entry.source,teamName:entry.teamName??null,at:entry.at??null})),...(team.lookup===undefined?{}:{lookup:team.lookup}),...(team.summary===undefined?{}:{summary:team.summary})}:{})})) }), ['marketplace', 'stamp']),
     prune: () => run(['prune'], z.unknown(), () => undefined, ['placed']),
     invite: (args: InviteArgs) => run(['invite', ...(args.team ? ['--team', args.team] : []), ...(args.logins.length ? ['--', ...args.logins] : [])], cliInvite, (value): InviteResult => ({ invited: [...value.invited], already: [...value.already], failed: value.failed.map(f => ({ login: f.login, error: f.error })) }), ['clone']),
-    team: (args: TeamArgs) => run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
+    team: (args: TeamArgs) => args.kind === 'move'
+      ? run(teamArgv(args), cliTeamMove, (value): TeamResult => ({ name: value.to, kind: 'move', restored: value.restored, missing: value.missing, failed: value.failed }), ['config', 'clone', 'placed'])
+      : run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
     // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes"); an unset pref (or the k '—' sentinel) passes nothing and the CLI keeps no defaults of its own.
     eval: (args: EvalArgs) => { const k = prefs.get('eval:k', ''), model = prefs.get('eval:model', ''), judge = prefs.get('eval:judge', ''); return run(['eval', ...(k && k !== '—' ? ['--k', k] : []), ...(model ? ['--model', model] : []), ...(judge ? ['--judge-model', judge] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']); },
@@ -864,6 +867,7 @@ function teamArgv(args: TeamArgs): string[] {
     case 'join': return ['team', 'join', ...(args.remote && args.name ? ['--as', args.name] : []), '--', args.remote ?? args.name ?? ''];
     case 'remove': return ['team', 'remove', ...(args.team ? ['--team', args.team] : []), '--', args.handle ?? ''];
     case 'leave': return ['team', 'leave', '--', args.name ?? args.team ?? ''];
+    case 'move': return ['team', 'move', ...(args.team ? ['--from', args.team] : []), '--yes', '--', args.remote ?? ''];
   }
 }
 

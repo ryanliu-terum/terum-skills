@@ -137,7 +137,7 @@ hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verb
 `src/lib/frames.ts` now advertises this complete verb list:
 
 ```json
-["skill move","skill rename","skill delete","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team workflow-update","team project create","invite","ls","status","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
+["skill move","skill rename","skill delete","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
 ```
 
 `team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the

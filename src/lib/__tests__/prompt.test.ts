@@ -235,3 +235,97 @@ it('decorated prompts accept chunked input, omit a no-default hint, and tolerate
   await expect(io.select('Choose',['One'],'missing',{decorated:true})).rejects.toThrow('Select default must be one of the choices.');expect(printed).not.toContain('choose 0.');
  }finally{vi.restoreAllMocks();vi.unstubAllEnvs();}
 });
+
+describe('cursor-driven select (arrow keys)', () => {
+  /** A fake terminal that can enter raw mode; `keys` are written one chunk at a time after each redraw. */
+  const cursorChannel = (env: NodeJS.ProcessEnv = {}, columns = 80) => {
+    const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: vi.fn((mode: boolean) => void mode) });
+    const output = Object.assign(new PassThrough(), { isTTY: true, columns });
+    let written = '';
+    output.on('data', (chunk: Buffer) => { written += chunk.toString(); });
+    const io = terminalPrompter({ input, output, interactive: true, env: { TERM: 'xterm', ...env } });
+    const press = async (...keys: string[]) => { for (const key of keys) { input.write(key); await new Promise((done) => setTimeout(done, 5)); } };
+    return { io, input, out: () => written, plain: () => stripVTControlCharacters(written), press, raw: input.setRawMode };
+  };
+
+  it('moves with the arrow keys, wraps, chooses on Enter, and leaves a two-line transcript in place of the list', async () => {
+    const { io, out, plain, press, raw } = cursorChannel();
+    const pending = io.select('Pick one', ['alpha', 'beta', 'gamma'], 'beta', { descriptions: ['A', 'B', 'C'] });
+    await press('\x1b[B', '\x1b[B', '\x1b[B', '\r');
+    expect(await pending).toBe('beta');
+    expect(raw).toHaveBeenNthCalledWith(1, true);
+    expect(raw).toHaveBeenLastCalledWith(false);
+    expect(out()).toContain('\x1b[?25l'); expect(out().endsWith('\x1b[?25h')).toBe(true);
+    // First frame: cursor on the default; the hint names the keys; the erase-and-redraw sequence ran once per move.
+    expect(plain()).toContain('Pick one\n  1. alpha\n     A\n› 2. beta\n     B\n  3. gamma\n     C\n↑/↓ to move, Enter to choose, or type a number.\n');
+    expect(out().split('\x1b[8A\x1b[0J').length - 1).toBe(4);
+    expect(plain().endsWith('Pick one\n› beta\n')).toBe(true);
+  });
+
+  it('accepts a digit as an immediate choice, and j/k, Home, End, Tab as movement', async () => {
+    const { io, press } = cursorChannel();
+    const one = io.select('Pick', ['a', 'b', 'c'], undefined); await press('3'); expect(await one).toBe('c');
+    const two = io.select('Pick', ['a', 'b', 'c'], undefined); await press('j', 'j', 'k', '\r'); expect(await two).toBe('b');
+    const three = io.select('Pick', ['a', 'b', 'c'], undefined); await press('\x1b[F', '\r'); expect(await three).toBe('c');
+    const four = io.select('Pick', ['a', 'b', 'c'], 'c'); await press('\x1b[H', '\t', '\r'); expect(await four).toBe('b');
+    // A digit past the end is ignored, not an error.
+    const five = io.select('Pick', ['a', 'b'], undefined); await press('7', '\r'); expect(await five).toBe('a');
+  });
+
+  it('Esc and Ctrl-C cancel as a typed decline; Ctrl-D and the input ending close; raw mode is always undone', async () => {
+    const { io, press, raw, plain } = cursorChannel();
+    // Each expectation is attached before the key is pressed: the rejection lands during the wait, and a promise
+    // rejected with nobody subscribed yet is an unhandled rejection to Node, whatever the test does afterwards.
+    // A bare Esc is only known to be Esc once readline's escape-sequence timeout (500 ms) passes without a follow-up byte.
+    const escaped = expect(io.select('Pick', ['a', 'b'], undefined)).rejects.toMatchObject({ cancelled: true, message: 'Selection was cancelled.' });
+    await press('\x1b'); await new Promise((done) => setTimeout(done, 600)); await escaped;
+    expect(plain().endsWith('Pick\n(cancelled)\n')).toBe(true);
+    const interrupted = expect(io.select('Pick', ['a', 'b'], undefined)).rejects.toMatchObject({ cancelled: true });
+    await press('\x03'); await interrupted;
+    const closed = expect(io.select('Pick', ['a', 'b'], undefined)).rejects.toBeInstanceOf(PromptClosedError);
+    await press('\x04'); await closed;
+    const { io: second, input } = cursorChannel();
+    const ended = expect(second.select('Pick', ['a', 'b'], undefined)).rejects.toBeInstanceOf(PromptClosedError);
+    input.end(); await ended;
+    expect(raw.mock.calls.filter(([mode]) => mode === true).length).toBe(raw.mock.calls.filter(([mode]) => mode === false).length);
+  });
+
+  it('counts wrapped rows so a narrow terminal is redrawn from the right line', async () => {
+    const { io, out, press } = cursorChannel({}, 10);
+    const pending = io.select('Q', ['a very long choice label', 'b'], undefined);
+    await press('\x1b[B', '\r');
+    expect(await pending).toBe('b');
+    // "Q" (1 row) + "  1. a very long choice label" (28 chars → 3 rows) + "  2. b" (1) + hint (48 chars → 5 rows) = 10 rows.
+    expect(out()).toContain('\x1b[10A\x1b[0J');
+  });
+
+  it('falls back to the numbered line prompt when raw mode, a TTY, or the terminal type is missing, or when plain prompts are requested', async () => {
+    const line = (input: PassThrough & { isTTY?: boolean; setRawMode?: (mode: boolean) => unknown }, output: PassThrough & { isTTY?: boolean }, env: NodeJS.ProcessEnv = { TERM: 'xterm' }) => {
+      let written = ''; output.on('data', (chunk: Buffer) => { written += chunk.toString(); });
+      const io = terminalPrompter({ input, output, interactive: true, env });
+      const pending = io.select('Pick', ['a', 'b'], 'a');
+      setTimeout(() => input.write('2\n'), 5);
+      return pending.then((answer) => ({ answer, written }));
+    };
+    const noRaw = await line(Object.assign(new PassThrough(), { isTTY: true }), Object.assign(new PassThrough(), { isTTY: true }));
+    expect(noRaw).toMatchObject({ answer: 'b' }); expect(noRaw.written).not.toContain('\x1b[?25l'); expect(noRaw.written).toContain('1. a\n2. b\n> ');
+    const noTTYOut = await line(Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => undefined }), new PassThrough());
+    expect(noTTYOut.written).not.toContain('\x1b[?25l');
+    const dumb = await line(Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => undefined }), Object.assign(new PassThrough(), { isTTY: true }), { TERM: 'dumb' });
+    expect(dumb.written).not.toContain('\x1b[?25l');
+    const plain = await line(Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => undefined }), Object.assign(new PassThrough(), { isTTY: true }), { TERM: 'xterm', TERUM_SKILLS_PLAIN_PROMPTS: '1' });
+    expect(plain.written).not.toContain('\x1b[?25l');
+  });
+
+  it('prints select detail once before the list, keeps the decorated indent, and refuses an empty choice list', async () => {
+    vi.spyOn(tty, 'terminalOutputIsTTY').mockReturnValue(true); vi.stubEnv('TERM', 'xterm'); vi.stubEnv('NO_COLOR', undefined);
+    try {
+      const { io, plain, press } = cursorChannel();
+      const pending = io.select('Pick', ['a', 'b'], undefined, { detail: ['You are me <me@example.com>'], decorated: true });
+      await press('\r');
+      expect(await pending).toBe('a');
+      expect(plain()).toContain('  You are me <me@example.com>\n  Pick\n  › 1. a\n    2. b\n');
+      await expect(io.select('Pick', [], undefined)).rejects.toThrow('Select needs at least one choice.');
+    } finally { vi.restoreAllMocks(); vi.unstubAllEnvs(); }
+  });
+});

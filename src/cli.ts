@@ -113,6 +113,12 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .command('leave <name>')
     .description('Remove this team’s placed skills, its local clone, and its config entry from this machine (your membership is unchanged)')
     .action(async (name: string) => execute((io) => active.leave({ form: context.form, name }, io), { verb: 'team leave', notices: true }));
+  team
+    .command('move <target>')
+    .description('Follow a team whose repository moved: leave the configured team on this machine, join <org>/<repo> (or a git remote URL), and place again every skill the old team had placed here that the new one shares')
+    .addOption(new Option('--from <team>', 'the configured team to move away from (required when more than one exists)').hideHelp())
+    .option('--yes', 'skip the confirmation (a script, or a shell that already asked)')
+    .action(async (target: string, options: { from?: string; yes?: boolean }) => execute((io) => active.team({ form: context.form, kind: 'move', target, ...options }, io), { verb: 'team move', notices: true }));
   const teamProject = team.command('project').description('Team projects: the cards that group shared skills and name the repository they place into');
   teamProject.command('create [name]').description('Create a team project: a name, its repository, and the skills it places')
     .option('--remote <url>', "the project's repository; its skills place when a teammate installs inside that folder")
