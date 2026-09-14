@@ -273,7 +273,9 @@ an ARM64 machine. The last two exist because Prism, the x64-on-ARM64 emulator, s
 `PROCESSOR_ARCHITEW6432` at all: an x64 Node there sees `PROCESSOR_ARCHITECTURE=AMD64` and only the identifier
 (`ARMv8 (64-bit) Family 8 …, Qualcomm …`) still names the silicon; until this was read, such a machine was
 served the x64 installer on every download. Both fields are plain strings and an unrecognised value passes
-through unchanged, so never switch on them exhaustively.
+through unchanged, so never switch on them exhaustively. The ladder cannot see everything: an ARM64 machine
+whose identifier does not start with `ARM` still reads as x64, and macOS under Rosetta 2 is not detected at all
+(p-arch A1), so `hostArch === processArch` is not proof of a native process.
 
 `app` reports the same condition as `emulation`, either `"win32-arm64-on-x64"` or `null`, and prints one
 line telling the person to install the ARM64 build of Node. It still installs the app: this is a warning,
@@ -356,6 +358,8 @@ the queued digest satisfies the item before paid work. A failing result retains 
 Generation only fills missing local assets and prints its disclosure before writing.
 Print and `progress` frames identify the current eval; no new verb or feature key is added.
 
+`eval <skill> <skill>… [--parallel n] [--batch n] [--window overnight|later] [--pending]` (past setup, 2026-09-13) runs the wizard's Now / In batches / Overnight choices as flags over any set of Library skills, or over `--pending`, the wizard's own candidate set (every shared skill with no receipt for its current version; needs a team). Several skills run as one batch after a single agent probe, `--parallel` deep (default four, never more than the batch). `--batch n` runs n at a time and asks `Continue with the next …?` before each further batch; a declined continuation queues the remainder for `later`, and a non-interactive caller runs every batch unasked. `--window` queues instead of running and never probes. The result is `{ mode: "ran" | "queued", team, skills, ok, failed, queued, stoppedAfter? }`; a run with failures is `ok:false` with that partial value, exactly like a drain. Print and `progress` frames name each skill and `progress.total` is the whole set. One skill with none of those flags is the ordinary single eval; the queue modes refuse skills, `--batch` and `--pending`.
+
 Setup keeps the existing eval question string and uses a select with `Now`, `In batches`, `Overnight`, `Skip`
 (default `Skip`). The cost line precedes that question and uses measured totals reconstructed from the current
 team clone: sum each arm mean multiplied by `provenance.cases.length * provenance.k`, for both cost and duration. Receipts with null arm measurements do not qualify. With fewer than three eligible receipts,
@@ -399,16 +403,24 @@ under the clone lock. **Nothing on this machine is changed by it: no placement, 
 a local skill.** It never repairs and never re-clones — a clone that is missing or foreign is reported
 as `no-clone` and skipped — because it runs unattended.
 
-The result is `{ changed, teams, notices }`. Each attempted team reports `team`, its own `changed`,
+The result is `{ changed, teams, notices }`. `notices` carries run-wide lines already phrased for a person — one concern per entry, no diagnostics — because a frame-driven caller may render them verbatim: the desktop app prints them under Settings ▸ Sync after an automatic fetch that did not refresh every team. Each attempted team reports `team`, its own `changed`,
 the `head` it ended on (or null when HEAD could not be read), a
-`state` of `refreshed` | `busy` | `unreachable` | `no-clone` | `error`, and a `detail` line for any
-state other than `refreshed`. Top-level `changed` is true when any team moved; a tracked tree that was
+`state` of `refreshed` | `fresh` | `busy` | `unreachable` | `no-clone` | `error`, and a `detail` line for any
+state other than `refreshed` or `fresh`. `fresh` is hook mode only: the clone was fetched within the hour, so the
+session-start hook left it alone (§8); a plain `sync` always fetches. Top-level `changed` is true when any team moved; a tracked tree that was
 dirty and got reset counts as moved, because the read verbs now see something different.
 
 A successful fetch writes a JSON `{head, at}` stamp, which means *this clone was fetched at this time*
 — never *these skills were reconciled*. A team whose HEAD could not be read is deliberately left
-unstamped. A fetch that outruns the deadline is killed, so a background
-caller never wedges, and Git terminal prompts are disabled for the whole run.
+unstamped. The stamp is bookkeeping, not the answer: a stamp that cannot be written leaves `state` and
+`changed` as the fetch decided them and adds one notice (`<team>: fetched, but the fetch stamp could not be
+written (…)`). A fetch that outruns the deadline is killed, so a background caller never wedges. A git lock
+file left behind by a killed git (`Unable to create '….lock': File exists`) that is older than ten minutes and
+lies inside the clone's own `.git` is removed and the step retried once, under the writer lock that proves no
+terum-skills process is writing the clone; a younger one is named in `detail` and never touched. Every prompt
+route is closed for the whole run: no terminal prompt, `GIT_ASKPASS` cleared (an inherited GUI askpass is the
+dialog a background verb must never raise), `SSH_ASKPASS_REQUIRE=never`, and `credential.interactive=false`
+appended after any `GIT_CONFIG_*` pairs the caller passed.
 
 `--hook` is the session-start entry and must never be driven over frames (rule 2). It is also the one
 carve-out from "nothing on this machine is changed": it may replace Terum's own bundled
@@ -416,3 +428,5 @@ carve-out from "nothing on this machine is changed": it may replace Terum's own 
 
 Work recorded in `pending` is drained by re-running the matching `install` or `uninstall-skill`, never
 by `sync`.
+
+The desktop app is an unattended caller: it spawns plain `sync` at the first hello whose `features.refresh` is true and again whenever its window regains focus, at most once a minute, one at a time, and never while a foreground write verb of its own is running. It drives the run read-only and kills it rather than answer, so `sync` must never ask a question; it keeps only `changed`, each team's `state`/`detail`, and `notices`, so anything a person needs to act on has to be in those fields rather than in printed prose. Every completed automatic fetch refreshes the stamp-driven boards (Status, Settings ▸ Sync, Inbox); one that moved a clone also refreshes the Marketplace boards.

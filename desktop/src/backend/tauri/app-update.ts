@@ -42,6 +42,10 @@ export function createAppUpdate(deps: AppUpdateDeps): {
     check: async (q, options) => {
       await deps.prefs.ready;
       const checked: Result<AppUpdateStatus> = await deps.read(deps.run(['app-update', '--check', ...(q?.force ? ['--force'] : [])], cliAppUpdateCheck, value => ({ ...value, appVersion: deps.appVersion, ...(value.lastApply?.reason === undefined ? {} : { reason: value.lastApply.reason }), newer: isNewer(value.latest, deps.appVersion), lastApply: value.lastApply === null ? null : { version: value.lastApply.version, phase: value.lastApply.phase, at: value.lastApply.at, error: value.lastApply.error } }), []), options);
+      // The running binary is proof: a marker for this very version that never reached 'launched' (the bookkeeping after
+      // the installer failed; the CLI's apply has a commit point for exactly this) describes an update that happened, so
+      // it is read as launched and acknowledged once like any other instead of standing in front of every later update.
+      if (checked.ok && checked.value.lastApply && checked.value.lastApply.version === deps.appVersion && checked.value.lastApply.phase !== 'launched') checked.value = { ...checked.value, lastApply: { ...checked.value.lastApply, phase: 'launched', error: null } };
       if (checked.ok && checked.value.lastApply?.phase === 'launched' && checked.value.lastApply.version === deps.appVersion) {
         const token = `${checked.value.lastApply.version}:${checked.value.lastApply.at}`;
         if (!shown.has(token)) {

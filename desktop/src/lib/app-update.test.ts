@@ -2,7 +2,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { expect, it } from 'vitest';
 import type { AppUpdateStatus } from '../backend/types';
 import { recordAppUpdateError, stagedAppUpdate } from './app-update';
-const ready:AppUpdateStatus={appVersion:'0.12.1',supported:true,cliVersion:'0.12.1',latest:'0.12.2',latestAt:null,probe:'cached',probeError:null,staged:'0.12.2',installed:[],lastApply:null,newer:true,ppid:42};
+const ready:AppUpdateStatus={appVersion:'0.12.1',supported:true,cliVersion:'0.12.1',latest:'0.12.2',latestAt:null,probe:'cached',probeError:null,staged:'0.12.2',installed:[],lastApply:null,newer:true,ppid:42,platform:'win32-x64'};
 it.each([null,{...ready,supported:false},{...ready,newer:false},{...ready,latest:null},{...ready,staged:null},{...ready,installed:['0.12.2']}])('rejects an ineligible staged observation: %j',status=>{
  expect(stagedAppUpdate(status)).toBeNull();
 });

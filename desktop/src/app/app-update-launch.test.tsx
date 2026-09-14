@@ -8,7 +8,7 @@ import { createRun } from '../backend/mock/run';
 import type { AppUpdateStatus, Result } from '../backend/types';
 import { useAppUpdateCheck } from './useAppUpdateCheck';
 
-const status:AppUpdateStatus={appVersion:'0.1.10',supported:true,cliVersion:'0.1.10',latest:'0.1.12',latestAt:null,probe:'cached',probeError:null,staged:null,installed:[],lastApply:null,newer:true,ppid:42};
+const status:AppUpdateStatus={appVersion:'0.1.10',supported:true,cliVersion:'0.1.10',latest:'0.1.12',latestAt:null,probe:'cached',probeError:null,staged:null,installed:[],lastApply:null,newer:true,ppid:42,platform:'win32-x64'};
 const clients:QueryClient[]=[];
 afterEach(()=>{cleanup();for(const client of clients)client.clear();clients.length=0;localStorage.clear();vi.restoreAllMocks();});
 function Probe(){useAppUpdateCheck();return <span>App remains usable</span>;}

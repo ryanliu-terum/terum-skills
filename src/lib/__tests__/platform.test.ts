@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { assetSuffix, detectPlatform, hostArch, type PlatformEvidence } from '../platform.js';
 
@@ -75,4 +76,10 @@ describe('host architecture (p-arch A1)', () => {
     expect(hostArch(evidence)).toBe(arch);
     expect(detectPlatform(evidence)).toBe(arch === 'x64' ? 'darwin-x64' : arch === 'arm64' ? 'darwin-arm64' : 'unsupported');
   });
+});
+
+it('names exactly the asset suffixes release.yml publishes, so a renamed artifact fails here and not on a download', async () => {
+  const workflow = await readFile(new URL('../../../.github/workflows/release.yml', import.meta.url), 'utf8');
+  for (const platform of ['darwin-arm64', 'darwin-x64', 'win32-arm64', 'win32-x64'] as const) expect(workflow).toContain(`suffix: ${assetSuffix(platform)}`);
+  expect(workflow.match(/^\s+suffix: \S+$/gm)).toHaveLength(4);
 });

@@ -243,10 +243,12 @@ it.each([false,true])('serves recorded status and settings with real team data (
  expect(status.value?.tools).toEqual(settings.value?.tools);
  expect(status.value?.tools.git).toBe(true);
  if(failed){expect(status).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});expect(settings).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});}
- // Reads are shared across status and settings (read cache); a failed status is not kept, so it is retried once. A single-team settings read adds `ls --team` whenever status yielded a value, partial or not.
  // The re-recorded hello advertises `refresh` and `serve`: the first hello is followed by one background `sync`, and every read after it is a request over one `serve` child (session.ts), not a spawn.
  expect(f.spawns.map(s=>s.args)).toEqual([['status'],['ls','--local'],['sync'],['serve']]);
- expect(f.requests.map(r=>r.argv)).toEqual(failed?[['status'],['ls','--team','acme']]:[['ls','--team','acme']]);
+ // That background fetch writes a fresh stamp, so it ends in notify('stamp') and empties the read cache: the settings read
+ // behind it re-reads status and `ls --local` rather than serving a board whose "Last fetched" is already stale, and adds
+ // `ls --team` because exactly one team is configured. Partial failure costs nothing extra — an unreadable status was never cached.
+ expect(f.requests.map(r=>r.argv)).toEqual([['status'],['ls','--local'],['ls','--team','acme']]);
  expect(f.writes.filter(line=>(JSON.parse(line) as {t:string}).t!=='request')).toEqual([]);
 });
 it.each([null,'old','current'])('only displays approvals joined to current grants (hash=%s)',async hash=>{
@@ -432,9 +434,11 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   expect(f.spawns.some(spawn => spawn.args[1] === 'member')).toBe(false);
   // The roster() call earlier in this test spends its own status+ls; the CATALOG read adds one more
   // of each, and nothing per member. Only the first read is a process: its hello advertises `serve`,
-  // so the rest are requests over one session child (and `refresh` adds one background `sync`).
+  // so the rest are requests over one session child (and `refresh` adds one background `sync`). That
+  // fetch stamps every clone and ends in notify('stamp'), which empties the read cache once, so the
+  // catalog spends one extra `ls --team` rather than drawing a board fetched-at time has moved past.
   expect(f.spawns.map(spawn => spawn.args)).toEqual([['status', '--permissions'], ['sync'], ['serve']]);
-  expect(f.requests.map(request => request.argv)).toEqual([['ls', '--team', 'acme'], ['status'], ['ls', '--local']]);
+  expect(f.requests.map(request => request.argv)).toEqual([['ls', '--team', 'acme'], ['status'], ['ls', '--team', 'acme'], ['ls', '--local']]);
 });
 it('maps per-member admin to the permission status: true → admin, false → member, absent → unknown', async () => {
   const backend = createTauriBackend(peopleReplay((frame, name) => {

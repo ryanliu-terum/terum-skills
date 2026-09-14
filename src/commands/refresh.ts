@@ -20,7 +20,7 @@ import { CloneBusy, type CloneState, describeClone, refreshClone, RemoteAccessEr
 import { invocation } from '../lib/invocation.js';
 import { run as move, type MoveResult } from './teamMove.js';
 import { defaultWrapperOptions, installWrapper, wrapperState } from '../lib/wrapper.js';
-import { writeStamp } from '../lib/hook.js';
+import { stampIsFresh, writeStamp } from '../lib/hook.js';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -40,7 +40,8 @@ export interface SyncArgs extends WithForm {
   /** Test knob: the clock the successor cache is judged by. */
   now?: () => number;
 }
-export type RefreshState = 'refreshed' | 'busy' | 'unreachable' | 'no-clone' | 'error';
+/** `fresh` is hook mode only: the clone was fetched within the hour (§8), so the session-start hook left it alone. */
+export type RefreshState = 'refreshed' | 'fresh' | 'busy' | 'unreachable' | 'no-clone' | 'error';
 export interface RefreshTeam {
   team: string;
   state: RefreshState;
@@ -81,11 +82,22 @@ export const REFRESH_DEADLINE_MS = 20_000;
  */
 export const SUCCESSOR_CACHE_MS = 10 * 60_000;
 /**
- * git already runs without a terminal prompt for piped runs (lib/runner.ts), but Git Credential Manager can raise
- * a GUI dialog on Windows for an expired credential, which a silent background verb must never do. Passed as
+ * git already runs without a terminal prompt for piped runs (lib/runner.ts), but three other routes can still raise a
+ * dialog, which a silent background verb must never do: Git Credential Manager on Windows for an expired credential,
+ * an inherited GIT_ASKPASS (VS Code and the desktop shells set one), and ssh's own askpass for a passphrase. Passed as
  * config through the environment so refreshClone's argument list is untouched; git ignores keys it does not know.
+ * An empty GIT_ASKPASS is "no askpass program" to git (prompt.c runs one only for a non-empty value, and an empty
+ * variable also stops the fall-through to core.askPass and SSH_ASKPASS), SSH_ASKPASS_REQUIRE=never keeps OpenSSH
+ * 8.4+ from starting one by itself, and with no terminal on the fetch's stdin a passphrase then fails fast instead
+ * of waiting on a prompt nobody sees. The `credential.interactive=false` pair is appended after any GIT_CONFIG_*
+ * pairs the caller already passed, so a proxy or extra header handed down the same way survives the fetch.
  */
-const NON_INTERACTIVE_GIT: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.interactive', GIT_CONFIG_VALUE_0: 'false' };
+export function nonInteractiveGitEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const declared = Number(env.GIT_CONFIG_COUNT);
+  // git itself rejects a count that is not a whole number; treating one as zero keeps the pair below reachable.
+  const count = Number.isSafeInteger(declared) && declared >= 0 ? declared : 0;
+  return { GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS_REQUIRE: 'never', GIT_CONFIG_COUNT: String(count + 1), [`GIT_CONFIG_KEY_${count}`]: 'credential.interactive', [`GIT_CONFIG_VALUE_${count}`]: 'false' };
+}
 
 export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResult>> {
   try {
@@ -97,28 +109,32 @@ export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResu
     // fails the whole run, exactly as every other verb behaves.
     const names = args.team === undefined ? Object.keys(config.teams) : [selectTeam(config.teams, args.team, args.form)[0]];
     const teams: RefreshTeam[] = [];
+    const notices: string[] = [];
+    const gitEnv = nonInteractiveGitEnv();
     for (const team of names) {
       const binding = config.teams[team]!;
       const clone = store.teamClone(team);
       const described = await describeClone(clone, normalizeRemote(binding.remote), runner);
       // Never repair and never re-clone: `sync` and `team join` own repair, and this verb runs unattended.
       if (described.state !== 'ok') { teams.push({ team, state: 'no-clone', changed: false, head: null, detail: cloneDetail(described) }); continue; }
+      // §8: the session-start hook runs at every Claude Code session start, so a clone fetched within the hour is
+      // reported as `fresh` and left alone; a person at a terminal or the app asking for a fetch always gets one.
+      // Concurrent hooks on one clone are serialised by the clone's own writer lock inside refreshClone.
+      if (args.hook && await stampIsFresh(store.root, team, args.now)) { teams.push({ team, state: 'fresh', changed: false, head: await headOf(runner, clone) }); continue; }
       const before = await headOf(runner, clone);
       const wasDirty = await hasTrackedChanges(runner, clone);
+      let outcome: RefreshTeam;
       try {
-        await refreshClone(runner, clone, { label: team, env: NON_INTERACTIVE_GIT, lockStale: args.lockStale, deadlineMs });
+        await refreshClone(runner, clone, { label: team, env: gitEnv, lockStale: args.lockStale, deadlineMs });
         const after = await headOf(runner, clone);
-        // A successful refresh records exactly the clone state that read verbs will now observe. A runner that
-        // cannot report HEAD has no truthful stamp value, so it is deliberately left unstamped for retry.
-        if (after !== null) await writeStamp(store.root, team, { head: after, at: new Date().toISOString() });
-        teams.push({ team, state: 'refreshed', changed: wasDirty || before !== after, head: after });
+        outcome = { team, state: 'refreshed', changed: wasDirty || before !== after, head: after };
       } catch (error) {
         // A background caller must never surface an error board for one team, and the clone it failed on is
         // still readable: report what happened and keep going. Re-read HEAD so the report is not a guess.
         const head = await headOf(runner, clone);
-        if (error instanceof CloneBusy) teams.push({ team, state: 'busy', changed: false, head, detail: error.message });
+        if (error instanceof CloneBusy) outcome = { team, state: 'busy', changed: false, head, detail: error.message };
         else if (error instanceof RemoteAccessError) {
-          const outcome: RefreshTeam = { team, state: 'unreachable', changed: false, head, detail: [error.stderr, error.explanation].filter(Boolean).join('\n') };
+          outcome = { team, state: 'unreachable', changed: false, head, detail: [error.stderr, error.explanation].filter(Boolean).join('\n') };
           // A repository that is gone is the one unreachable state a person can act on, so say where it went. The hook
           // is exempt: it runs at every session start with nobody reading, and the lookup is a network round trip.
           const ownerRepo = githubOwnerRepo(binding.remote);
@@ -129,12 +145,19 @@ export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResu
             if (search.reason) outcome.lookup = search.reason;
             outcome.summary = successorSummary(team, ownerRepo, search);
           }
-          teams.push(outcome);
         }
-        else teams.push({ team, state: 'error', changed: false, head, detail: error instanceof Error ? error.message : String(error) });
+        else outcome = { team, state: 'error', changed: false, head, detail: error instanceof Error ? error.message : String(error) };
+      }
+      teams.push(outcome);
+      // The stamp is bookkeeping about the clone, not the clone: `state` and `changed` were decided above, and a stamp
+      // that cannot be written (a full disk, an unwritable run/, a scanner holding the temp file on Windows) costs one
+      // notice and a `status` that errs toward "sync", never a report that the fetch failed. A runner that cannot
+      // report HEAD has no truthful stamp value, so that clone is deliberately left unstamped for retry.
+      if (outcome.state === 'refreshed' && outcome.head !== null) {
+        try { await writeStamp(store.root, team, { head: outcome.head, at: new Date().toISOString() }); }
+        catch (error) { notices.push(`${team}: fetched, but the fetch stamp could not be written (${error instanceof Error ? error.message : String(error)}); status may call the clone stale until the next sync.`); }
       }
     }
-    const notices: string[] = [];
     if (args.hook && await wrapperState(defaultWrapperOptions()) === 'outdated') {
       await installWrapper(defaultWrapperOptions());
       notices.push('Updated your /terum-skills manual for this CLI.');
@@ -143,7 +166,7 @@ export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResu
     // A program reads `detail`; only a person needs the line, and a program's channel must stay result-only. In hook
     // mode stdout carries the reload directive and nothing else (lib/execute.ts routes hook notices to stderr), so
     // the lines travel as notices there: a multi-line git diagnostic after the directive would break the hook's JSON.
-    const lines = teams.filter((outcome) => outcome.state !== 'refreshed').map((outcome) => `${outcome.team}: not refreshed (${outcome.state})${outcome.detail ? ` — ${outcome.detail}` : ''}`);
+    const lines = teams.filter((outcome) => outcome.state !== 'refreshed' && outcome.state !== 'fresh').map((outcome) => `${outcome.team}: not refreshed (${outcome.state})${outcome.detail ? ` — ${outcome.detail}` : ''}`);
     if (args.hook) notices.push(...lines);
     else if (io.channel !== 'frames') for (const line of lines) io.print(line);
     const result: SyncResult = { changed: teams.some((outcome) => outcome.changed), teams, notices };

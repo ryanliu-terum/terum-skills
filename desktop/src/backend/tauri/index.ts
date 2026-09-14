@@ -1,5 +1,7 @@
 import { registerEvalQueue } from '../eval-queue';
 import { createEvalQueue } from './eval-queue';
+import { evalPrefFlags } from './eval-flags';
+import { cliEvalMany, evalManyArgv, mapEvalMany } from './eval-many';
 import { z } from 'zod';
 import { createAppUpdate } from './app-update';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -12,7 +14,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
-import type { Root, LibraryScope,  IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, EvalArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
+import type { Root, LibraryScope,  IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, EvalArgs, EvalManyArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { createReadSession } from './session.js';
@@ -495,15 +497,31 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const broadcast = (...sources: ChangeSource[]) => { for (const source of sources) for (const listener of listeners) listener(source); };
   const notify = (...sources: ChangeSource[]) => { if (sources.length === 0) return; clearReads(); broadcast(...sources); };
   // W-08: reads never fetch (src/cli.ts eval-report, docs/frame-protocol.md), so a teammate's committed receipt
-  // reaches this machine only when something runs the fetch-only `sync` (§10; the separate `refresh` verb is gone). Reads are invalidated only when a clone moved, and
-  // only after the reads already in flight have settled: notify('clone') re-spawns seven query prefixes and the
-  // shell caps concurrent CLI children at eight (src-tauri/src/lib.rs).
+  // reaches this machine only when something runs the fetch-only `sync` (§10; the separate `refresh` verb is gone).
+  // Reads are invalidated only after the reads already in flight have settled: a notify re-spawns up to seven
+  // query prefixes and the shell caps concurrent CLI children at eight (src-tauri/src/lib.rs).
+  //
+  // Every completed attempt ends in notify('stamp') — the same source the manual Sync now publishes alongside
+  // 'marketplace'. A successful fetch wrote run/<team>.stamp, so Settings ▸ Sync's "Last fetched", the Status
+  // board and the Inbox are stale; a failed one has a new `lastAutomatic` for Settings ▸ Sync to render, and
+  // waiting for the next fetch to show it would be a minute of silence. 'marketplace' is added only when a clone
+  // actually moved, because nothing in the catalog can have changed otherwise.
+  const settleReads = () => Promise.allSettled([...reads.values()].map(entry => entry.promise));
+  const publish = (...sources: ChangeSource[]) => async () => { await settleReads(); notify(...sources); };
   const refreshPolicy = createRefreshPolicy({
     supported: () => hello?.features.refresh === true,
+    // `workflowGate` is declared just below and needs this policy in its own idle callback, so exactly one of the
+    // two references has to be late-bound. Reading it through a closure is safe: the earliest trigger is the
+    // microtask scheduled by the first hello, long after this function body has run.
+    busy: () => workflowGate.busy(),
     run: () => read(run(['sync'], cliRefresh, value => value, [])),
-    onChanged: async () => { await Promise.allSettled([...reads.values()].map(entry => entry.promise)); notify('marketplace'); },
+    onChanged: publish('marketplace'),
+    onRefreshed: publish('stamp'),
+    onFailed: publish('stamp'),
   });
   const workflowGate = createWorkflowGate(() => { if (!retired) refreshPolicy.trigger(); });
+  // The launch file's write time this adapter last acted on; undefined until the first read.
+  let actedLaunchAt: string | null | undefined;
   const onWindowFocus = () => { markStale(); refreshPolicy.trigger(); };
   retireWindowListeners?.();
   let retired = false; let unlistenNativeFocus: (() => void) | undefined;
@@ -668,6 +686,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async setWindowBackground(color) { try { await getCurrentWindow().setBackgroundColor(color); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async launchContext() {
       const launch = await state();
+      actedLaunchAt = launch?.writtenAt ?? null;
       return launch ? { writtenAt: launch.writtenAt, ...(launch.target ? { target: launch.target } : {}), ...(launch.intent ? { intent: launch.intent } : {}) } : null;
     },
     async refreshLaunch() {
@@ -676,9 +695,13 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       if (hello === null) { featuresOnce = undefined; hello = null; }
       generation++;
       markStale();
-      // A relaunch is a terminal action landing: the throttle must not hide what it just changed.
-      refreshPolicy.reset();
-      return backend.launchContext();
+      const previous = actedLaunchAt;
+      const next = await backend.launchContext();
+      // A relaunch is a terminal action landing and must not hide behind the throttle. The coordinator calls this on
+      // every window focus too, and a focus that re-reads an unchanged launch file is not a relaunch: resetting there
+      // made the once-a-minute throttle a once-per-focus fetch. The evidence is the file's own write time.
+      if ((next?.writtenAt ?? null) !== previous) refreshPolicy.reset();
+      return next;
     },
     onLaunchRequest(listener) {
       let disposed = false;
@@ -703,6 +726,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     status: (_, options) => readModels(options, (value, local, platform, home) => statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }, home)),
     async settings(_, options) {
       const models = await readModels(options, (value, local, platform, home) => settingsModel(value, local, statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }, home), home));
+      // The background fetch has no board of its own; Settings ▸ Sync is where its last outcome is admitted to.
+      if (models.value) models.value.lastAutomatic = refreshPolicy.last();
       const team = models.value?.TEAMS.length === 1 ? models.value.TEAMS[0] : undefined;
       if (!team || !models.value) return models;
       const inventory = await cached(['ls', '--team', team.key], cliLs, options);
@@ -881,8 +906,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       ? run(teamArgv(args), cliTeamMove, (value): TeamResult => ({ name: value.to, kind: 'move', restored: value.restored, missing: value.missing, failed: value.failed }), ['config', 'clone', 'placed'])
       : run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
-    // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes"); an unset pref (or the k '—' sentinel) passes nothing and the CLI keeps no defaults of its own.
-    eval: (args: EvalArgs) => { const k = prefs.get('eval:k', ''), model = prefs.get('eval:model', ''), judge = prefs.get('eval:judge', ''); return run(['eval', ...(k && k !== '—' ? ['--k', k] : []), ...(model ? ['--model', model] : []), ...(judge ? ['--judge-model', judge] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']); },
+    // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes") through the one producer in eval-flags.ts; an unset pref (or the k '—' sentinel) passes nothing and the CLI keeps no defaults of its own.
+    eval: (args: EvalArgs) => run(['eval', ...evalPrefFlags(prefs), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']),
+    // Several at once: the same receipts land locally, so the same boards move. A request the CLI would refuse throws here, before any spawn.
+    evalMany: (args: EvalManyArgs) => run(evalManyArgv(args, prefs), cliEvalMany, mapEvalMany, ['config', 'placed']),
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? cached<ValidateResult>(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, options).then(result) : fail('validate needs a skill name or a folder.'),
     update: (_args, options) => read(run(['update'], cliUpdate, (value): UpdateAdvice => ({ ...value, running: value.running ?? null, latest: value.latest ?? null }), []), options).then(result),
     appUpdate: createAppUpdate({ run, read, result, prefs, appVersion: import.meta.env.VITE_APP_VERSION }),
@@ -897,7 +924,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     prefs,
     subscribe(listener): Subscription { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };
-  registerEvalQueue(backend, createEvalQueue({ run, read, result }));
+  registerEvalQueue(backend, createEvalQueue({ run, read, result, prefs }));
   return backend;
 }
 
