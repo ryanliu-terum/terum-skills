@@ -1424,7 +1424,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 149,
     "policy": "prose",
-    "pattern": "`liftOnCards`, `runEvalInApp`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`."
+    "pattern": "`liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`."
   },
   {
     "file": "docs/frame-protocol.md",
