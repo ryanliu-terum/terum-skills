@@ -230,7 +230,9 @@ describe('?full=1 renders the whole document in one piece', () => {
     expect(declarations(SKILL_CSS, `${FULL} ${body}`)).toMatch(declares('overflow', 'visible'));
   });
 
-  it.each(['.evals-tab', '.evals-body'])('%s keeps visible overflow in full mode', box => {
+  it.each(['.evals-tab', '.evals-body', '.skill-md-tab'])('%s keeps visible overflow in full mode', box => {
+    // `.skill-md-tab` joined the list in batch F (2026-09-13): `?full=1&tab=skill` clipped at the tab box while
+    // its blocks were already visible, so the tab printed in one piece only on the Evals boards.
     expect(declarations(SKILL_CSS, `${FULL} ${box}`)).toMatch(declares('overflow', 'visible'));
   });
 
@@ -255,6 +257,34 @@ describe('?full=1 renders the whole document in one piece', () => {
       expect(hasSelector(path, `${WINDOWED} ${body}`), `${body} has no windowed rule`).toBe(true);
       expect(hasSelector(path, `${FULL} ${body}`), `${body} has no full-mode rule`).toBe(true);
     }
+  });
+});
+
+// Batch F (2026-09-13): the tab bodies are scroll containers with no focusable content of their own, so
+// keyboard scrolling survived only through Chromium's keyboard-focusable-scroller heuristic and not on
+// WKWebView. SkillScreen.tsx / EvaluationReport.tsx give each pane `tabIndex={0}` and a name (pinned in
+// pane-focus.test.tsx); the ring is drawn INSIDE the box because the pane's parent clips it.
+describe('a keyboard user can reach every pane', () => {
+  it.each(BODIES)('%s shows the app’s focus ring inside its own box, on :focus-visible only', body => {
+    const rule = declarations(SKILL_CSS, `${body}:focus-visible`);
+    expect(rule).toMatch(declares('outline', '2px solid var(--tk-accent)'));
+    expect(rule).toMatch(declares('outline-offset', '-2px'));
+    // `:focus` would paint the ring on a mouse click too; only the keyboard-driven pseudo-class may.
+    expect(hasSelector(SKILL_CSS, `${body}:focus`)).toBe(false);
+  });
+
+  it('rings the History rail from the file that owns the class', () => {
+    const rule = declarations(REPORT_CSS, '.history-rail:focus-visible');
+    expect(rule).toMatch(declares('outline', '2px solid var(--tk-accent)'));
+    expect(rule).toMatch(declares('outline-offset', '-2px'));
+    expect(hasSelector(SKILL_CSS, '.history-rail:focus-visible')).toBe(false);
+  });
+
+  it('lets Quality and Activity rows overflow into the pane instead of squashing', () => {
+    // The rows are flex items of a `.board-column` inside a scrolling pane; without this a tab with more
+    // rows than fit compressed them toward their min-content height and nothing scrolled.
+    expect(declarations(SKILL_CSS, '.hygiene-row')).toMatch(declares('flex-shrink', '0'));
+    expect(declarations(SKILL_CSS, '.activity-row')).toMatch(declares('flex-shrink', '0'));
   });
 });
 

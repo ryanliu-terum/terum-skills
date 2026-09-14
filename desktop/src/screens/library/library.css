@@ -4,3 +4,20 @@
    padding so the popover's right edge lines up with the Sort button and the card grid. Two class
    selectors beat market-filters.css's own right:0 on specificity, so import order cannot flip it. */
 .board-search-row>.market-filters{right:20px}
+/* Selection mode (batch E, 2026-09-13): the bar sits between the search row and the grid, on the grid's own
+   20px gutters, and only renders while `?select=1`, so no board draws it. The notice under the header is the
+   Library's one status line (`role="status"`), the shape SkillScreen's own notice uses. */
+.library-selection-bar{display:flex;align-items:center;gap:8px;padding:0 20px 12px;flex-shrink:0}
+.library-selection-count{font-size:13px;color:var(--tk-text2);font-variant-numeric:tabular-nums;margin-right:auto}
+.library-notice{padding:0 20px 12px;font-size:13px;color:var(--tk-text2)}
+/* The bulk publish dialog (BulkPublishDialog.tsx): the shared 440px popup; only the row list scrolls, with the
+   repo's hidden scrollbar, so a long selection never grows the dialog past the window. */
+.bulk-publish-rows{display:flex;flex-direction:column;max-height:240px;overflow:auto;scrollbar-width:none;border:1px solid var(--tk-border1);border-radius:6px}
+.bulk-publish-row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:32px;padding:0 10px;font-size:13px;color:var(--tk-text1)}
+.bulk-publish-row+.bulk-publish-row{border-top:1px solid var(--tk-border1)}
+.bulk-publish-row>span:first-child{font-weight:510;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;max-width:45%}
+.bulk-publish-row>span:last-child{font-size:12px;color:var(--tk-text3);text-align:right;min-width:0;overflow-wrap:anywhere}
+.bulk-publish-row>span[data-state="done"]{color:var(--tk-text2)}
+.bulk-publish-row>span[data-state="failed"]{color:var(--tk-bad)}
+.bulk-publish-row>span[data-state="publishing"]{color:var(--tk-text1)}
+.bulk-publish-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}

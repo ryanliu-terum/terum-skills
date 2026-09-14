@@ -25,7 +25,7 @@ it.each([['cosmetic',76],['mac-overlay',76],['native',16]] as const)('%s keeps t
 // The ⌘ the bar prints follows the seam's window chrome, not a platform probe: Linux and Windows have no
 // ⌘ key at all, so 'native' says Ctrl. The mock reports 'cosmetic', which is what every board is captured
 // on, so the drawn label stays ⌘K and no board moves.
-it.each([['cosmetic','\u2318K'],['mac-overlay','\u2318K'],['native','Ctrl K']] as const)('%s prints the search shortcut as %s',(mode:Capabilities['windowChrome'],label)=>{
+it.each([['cosmetic','\u2318K'],['mac-overlay','\u2318K'],['native','Ctrl+K']] as const)('%s prints the search shortcut as %s',(mode:Capabilities['windowChrome'],label)=>{
  const {container}=render(<TopBar mode={mode}/>);
  const box=container.querySelector('.search-box')!;
  expect(box.querySelector('.kbd')).toHaveTextContent(label);

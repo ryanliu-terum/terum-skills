@@ -224,7 +224,13 @@ test('the smallest window scrolls the column instead of collapsing the report',a
  expect(await main.evaluate(element=>element.scrollHeight)).toBeGreaterThan(await main.evaluate(element=>element.clientHeight));
  await scrollColumnToEnd(page);
  await wheelPane(page,report,true);
- await expect(last).toBeInViewport({ratio:1});
+ // At 960px the report pane is ~250px wide and the provenance line wraps to 208px — taller than the 160px of
+ // content the floored pane shows (measured 2026-09-13) — so no scroll position can show that whole element.
+ // What the floor guarantees is the pane's END: the element's last line sits inside the pane, above the
+ // clearance, and is on screen.
+ await expect(last).toBeInViewport();
+ const paneBox=await boxOf(report),lastBox=await boxOf(last);
+ expect(lastBox.y+lastBox.height).toBeLessThanOrEqual(paneBox.y+paneBox.height);
  expect(await clearanceUnder(report,last)).toBeGreaterThanOrEqual(CLEARANCE);
  expect(errors).toEqual([]);
 });
@@ -295,5 +301,99 @@ test('full Evals retains visible overflow and the complete report height',async(
  expect(contentHeight).toBeGreaterThan(900);
  expect(lastBox.y+lastBox.height).toBeGreaterThan(900);
  expect(contentHeight).toBeGreaterThanOrEqual(Math.floor(lastBox.y+lastBox.height-mainBox.y));
+ expect(errors).toEqual([]);
+});
+
+// Batch F (2026-09-13): each pane is a focusable, named region, so a keyboard user can scroll it on a
+// WebView with no keyboard-focusable-scroller heuristic (WKWebView). The ring is the app's, drawn inside
+// the box, and only for keyboard focus.
+async function tabTo(page:Page,pane:Locator,from:Locator){
+ await from.focus();
+ for(let i=0;i<8;i++){
+  await page.keyboard.press('Tab');
+  if(await pane.evaluate(element=>element===document.activeElement))return i+1;
+ }
+ throw new Error('Tab never reached the pane.');
+}
+
+for(const {tab,klass,name,key} of [
+ {tab:'skill',klass:'.skill-md-blocks',name:'SKILL.md',key:'PageDown'},
+ {tab:'evals',klass:'.evals-main',name:'Evaluation report',key:'PageDown'},
+]){
+ test(`the keyboard reaches the ${name} pane from the tab strip and scrolls it`,async({page})=>{
+  const errors=await openPane(page,'#/skill/deploy-check?tab='+tab);
+  const pane=page.getByRole('region',{name});
+  await expect(pane).toHaveClass(new RegExp(klass.slice(1)));
+  await expect(pane).toHaveAttribute('tabindex','0');
+  expect(await pane.evaluate(element=>element.scrollHeight>element.clientHeight)).toBe(true);
+  const selected=page.locator('.skill-tabs [role="tab"][aria-selected="true"]');
+  // From the SKILL.md tab the sequence is the three other tabs, then the tab's own head control ('Open in
+  // editor'), then the pane — six presses; from Evals it is two tabs, 'Run eval', the pane. The pane always comes
+  // right after its tab's head row and before the rail's Enable switch, never after it.
+  const presses=await tabTo(page,pane,selected);
+  expect(presses).toBeLessThanOrEqual(6);
+  // Keyboard focus paints the app's ring inside the pane's own box.
+  await expect(pane).toHaveCSS('outline-style','solid');
+  await expect(pane).toHaveCSS('outline-offset','-2px');
+  await page.keyboard.press(key);
+  await expect.poll(()=>pane.evaluate(element=>element.scrollTop)).toBeGreaterThan(0);
+  await columnIsPinned(page);
+  // A mouse click focuses the pane too, but must not paint the ring. `:focus-visible` is decided when focus
+  // MOVES, so the pane is blurred first: clicking an element that already holds keyboard focus keeps the ring.
+  await page.keyboard.press('Home');
+  await expect.poll(()=>pane.evaluate(element=>element.scrollTop)).toBe(0);
+  await pane.evaluate(element=>{(element as HTMLElement).blur();});
+  expect(await pane.evaluate(element=>element===document.activeElement)).toBe(false);
+  const box=await boxOf(pane);
+  await page.mouse.click(box.x+box.width/2,box.y+8);
+  expect(await pane.evaluate(element=>element===document.activeElement)).toBe(true);
+  await expect(pane).toHaveCSS('outline-style','none');
+  expect(errors).toEqual([]);
+ });
+}
+
+for(const {tab,name} of [{tab:'quality',name:'Quality'},{tab:'activity',name:'Activity'}]){
+ test(`the ${name} tab is a focusable region even while it fits`,async({page})=>{
+  const errors=await openPane(page,'#/skill/deploy-check?tab='+tab);
+  const pane=page.getByRole('region',{name});
+  await expect(pane).toHaveClass(new RegExp(tab+'-tab'));
+  await expect(pane).toHaveAttribute('tabindex','0');
+  await pane.focus();
+  expect(await pane.evaluate(element=>element===document.activeElement)).toBe(true);
+  // On the mock both tabs fit, so PageDown has nothing to move; a longer real-adapter tab scrolls here.
+  const fits=await pane.evaluate(element=>element.scrollHeight===element.clientHeight);
+  await page.keyboard.press('PageDown');
+  if(fits)expect(await pane.evaluate(element=>element.scrollTop)).toBe(0);
+  else await expect.poll(()=>pane.evaluate(element=>element.scrollTop)).toBeGreaterThan(0);
+  await columnIsPinned(page);
+  expect(errors).toEqual([]);
+ });
+}
+
+test('the keyboard scrolls the squeezed History rail',async({page})=>{
+ const errors=await openPane(page,'#/skill/deploy-check?tab=evals',{width:1440,height:600});
+ const history=page.getByRole('complementary',{name:'Run history'});
+ await expect(history).toHaveClass(/history-rail/);
+ await expect(history).toHaveAttribute('tabindex','0');
+ await scrollColumnToEnd(page);
+ expect(await history.evaluate(element=>element.scrollHeight>element.clientHeight)).toBe(true);
+ await history.focus();
+ await page.keyboard.press('ArrowDown');
+ await page.keyboard.press('ArrowDown');
+ await expect.poll(()=>history.evaluate(element=>element.scrollTop)).toBeGreaterThan(0);
+ expect(errors).toEqual([]);
+});
+
+test('full SKILL.md renders in one piece like the full Evals report',async({page})=>{
+ const errors=await openPane(page,'#/skill/deploy-check?rail=closed&full=1',{width:1440,height:1900});
+ const tab=page.locator('.detail-body.full .skill-md-tab'),blocks=page.locator('.skill-md-blocks');
+ const last=page.locator('.skill-md-blocks > :last-child');
+ // Batch A left `.skill-md-tab` clipping in full mode while its blocks were visible: the document printed
+ // in one piece only on the Evals boards.
+ await expect(tab).toHaveCSS('overflow-y','visible');
+ await expect(blocks).toHaveCSS('overflow-y','visible');
+ await expect(blocks).toHaveCSS('padding-bottom','0px');
+ await expect(last).toBeInViewport({ratio:1});
+ expect(await tab.evaluate(element=>element.scrollHeight)).toBe(await tab.evaluate(element=>element.clientHeight));
  expect(errors).toEqual([]);
 });

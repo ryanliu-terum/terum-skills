@@ -13,7 +13,9 @@ export const SHORTCUTS: [string, string][] = [['Search', '⌘K'], ['Settings', '
 export function ctrlIsShortcutModifier(chrome: Capabilities['windowChrome'] | undefined): boolean {
   return chrome === 'native' || chrome === 'cosmetic';
 }
-/** The label for the search shortcut, on the top bar and in the search page's own field. */
+/** The label for the search shortcut, on the top bar and in the search page's own field. `⌘K` is the mock's
+ * and macOS's spelling; Windows and Linux spell a chord with `+` (`Ctrl+K`), so the chip reads the way those
+ * platforms' own menus do. */
 export function searchShortcutLabel(chrome: Capabilities['windowChrome'] | undefined): string {
-  return chrome === 'native' ? 'Ctrl K' : '⌘K';
+  return chrome === 'native' ? 'Ctrl+K' : '⌘K';
 }
