@@ -14,7 +14,7 @@ export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,va
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';windowControlsEnd:number|null;disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
 // §7.1: the local key is `libraryProjects`, not `projects` — `projects` is already the marketplace's
 // team-projects screen, and desktop/AGENTS.md invariant 2 forbids one flag meaning two things.
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','serve'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {libraryProjects:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
@@ -88,7 +88,9 @@ export interface RootRemote {url:string;slug:string|null}
 /** §7.2 removed `detected`: every project root is here because the user added it. */
 export interface Root {id:string;kind:'global'|'checkout';label:string;root:string;rootState?:'scanned'|'absent'|'unreadable'|undefined;registered:boolean;count?:string|undefined;remote?:RootRemote|null|undefined}
 export type LibraryScope={kind:'global'}|{kind:'checkout';root:string};
-export interface ProjectAdded {path:string;label:string;added:boolean}
+export interface ReconcileRow {path:string;name:string;team:string;skillId:string|null}
+export interface ReconcileResult {identical:(ReconcileRow&{version:string})[];differing:(ReconcileRow&{teamVersion:string;nextVersion:string;sameId:boolean;teamAuthor:string})[];renamed:(ReconcileRow&{version:string;teamName:string})[];adopted:string[];published:string[]}
+export interface ProjectAdded {path:string;label:string;added:boolean;reconcile?:ReconcileResult}
 /** `project create`: the team project as team.json now holds it. A new project is always born with no skills. */
 export interface ProjectCreated {team:string;name:string;remotes:string[];skills:number}
 export interface ProjectRemoved {path:string;placementsRemaining:number}
@@ -115,7 +117,7 @@ export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project
 export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null}
 export interface IdentityArgs {name?:string;email?:string;defaultHandle?:string}
 export interface IdentityWrite {updated:{key:string;value:string}[];notice:string|null}
-export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;yesProfile?:boolean}
+export interface InstallArgs {team?:string;ref?:string;adopt?:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;yesProfile?:boolean}
 export interface InstalledResult {id:string;name:string;scope:Scope;path:string|null;version:string|null;profiled:boolean}
 export interface UninstallArgs {from?:string;team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
 export interface UninstalledResult {id:string;name:string}
@@ -147,7 +149,7 @@ export interface TeamResult {name:string;kind:TeamArgs['kind'];
  /** `move` only: what came back. */
  restored?:string[];missing?:string[];failed?:{name:string;error:string}[]}
 export interface SetupArgs {target?:string}
-export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','projects','evals','community','hook','wrapper','done'] as const;
+export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','projects','existing','evals','community','hook','wrapper','done'] as const;
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
 export interface SetupResult {team:string;role:'creator'|'joiner';steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'|'queued'|'batched'>>|null}
 export interface EvalArgs {team?:string;ref:string;cases?:number}

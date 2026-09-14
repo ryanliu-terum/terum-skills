@@ -104,6 +104,11 @@ export interface LsResult { local?: LocalSection[]; roster: readonly { handle: s
   /** §8.4: emitted on the `kind:'all'` team read only; `member?` still serves the single-member view. */
   people?: readonly LsPerson[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; role: string | null; projects: readonly string[] }; }
 
+/** One byline join for every caller that attributes a skill's managed author to a team handle. */
+export function authorBylines(people: readonly Pick<Person, 'display_name' | 'email' | 'handle'>[]): Map<string, string> {
+  return new Map(people.map((person) => [normalizeAuthor(`${person.display_name} <${person.email}>`), person.handle]));
+}
+
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
 export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>> {
   try {
@@ -122,7 +127,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived), role: person.role ?? null, projects: person.projects ?? [] }));
     // §8.4: built from the same parsed people the roster and the install counts come from — no extra
     // read, no second process, and one shape every marketplace reader shares.
-    const bylines = new Map(people.map((person) => [normalizeAuthor(`${person.display_name} <${person.email}>`), person.handle]));
+    const bylines = authorBylines(people);
     const personRows: LsPerson[] = people.map((person) => ({
       handle: person.handle,
       display_name: person.display_name,

@@ -77,6 +77,16 @@ export async function localSkillRoots(home: string, projects: readonly LibraryPr
 }
 
 /** §7.1: the label the user chose the project by. `basename` remains the fallback for a root with no stored label. */
+/**
+ * Cross-mirror overlays spec §5 M2.1 / §4.5 — the folders `reconcile` classifies and `install --adopt` accepts: every
+ * candidate row, plus a folder rejected ONLY for a name mismatch, so a copy whose bytes are a team version under another
+ * folder name can be reported (the `renamed` group) or refused with the exact rename line. Nothing else is admitted;
+ * a name-mismatch folder never reaches the `differing` group, whose one action (publish) would refuse it.
+ */
+export function adoptableEntry(entry: Pick<LocalEntry, 'inspection'>): boolean {
+  return entry.inspection.kind === 'candidate' || (entry.inspection.kind === 'rejected' && entry.inspection.reason === 'name-mismatch');
+}
+
 export function localRootLabel(root: LocalRoot): string { return root.repoRoot === undefined ? 'Global' : root.label ?? basename(root.repoRoot); }
 
 export async function canonicalLedger(config: Pick<Config, 'placements'>) {
@@ -272,8 +282,8 @@ export function refIsPath(ref: string): boolean {
 }
 
 /** A path ref as an absolute path: `~` expands to `home` (the shell never sees a ref the desktop passes, so the CLI expands it), a relative one resolves against the process cwd. */
-export function expandRefPath(ref: string, home: string): string {
-  return resolve(ref === '~' ? home : ref.startsWith('~/') ? join(home, ref.slice(2)) : ref);
+export function expandRefPath(ref: string, home: string, cwd = process.cwd()): string {
+  return resolve(cwd, ref === '~' ? home : ref.startsWith('~/') ? join(home, ref.slice(2)) : ref);
 }
 
 /**

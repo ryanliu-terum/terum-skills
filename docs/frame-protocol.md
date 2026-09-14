@@ -137,24 +137,25 @@ hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verb
 `src/lib/frames.ts` now advertises this complete verb list:
 
 ```json
-["skill move","skill copy","skill rename","skill delete","skill fix","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
+["skill move","skill copy","skill rename","skill delete","skill fix","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","reconcile","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
 ```
 
 `team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the
 caller to run it from a terminal (D24). The refresh feature is true, but there is no standalone refresh
 command: use `sync`. Neither belongs in the advertised verb list.
 
-`hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, and `serve`.
+`hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, and `serve`.
 
 True: `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `installScope`,
-`liftOnCards`, `runEvalInApp`, `progress`, `refresh`, `appUpdate`, `serve`.
+`liftOnCards`, `runEvalInApp`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`.
 False: `favorites`, `follow`, `lastSeen`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `perCase`.
 
 `libraryProjects` is the explicit local registry (`project add`, `project remove`, `project list`);
 `projects` is team grouping (`team project create`). `memberRole` is the owner-written job label;
 `roles` supports GitHub Admin/Member permissions from `status --permissions` (otherwise unknown).
 `installScope` supports destinations and destination-aware removal. `appUpdate` and `serve`
-advertise their respective verbs. Read feature values rather than assuming a control is available.
+advertise their respective verbs. `reconcile` gates the Library's Check against the team action.
+Read feature values rather than assuming a control is available.
 
 `localIdentity` covers `skillId` on local rows and rejected entries, and `placed` on rows.
 Local inventory is a scan of Global and explicitly registered project roots. It fetches nothing, but
@@ -213,6 +214,20 @@ pre-answers only that offer. Install seeds receipts under their own `content_dig
 runner attribution. A receipt lacking a digest is skipped with `Skipped <runId>: no content digest (pre-migration receipt).`
 Pending intent may already exist when replacement is declined; retry the matching install to drain it.
 The result is an array of `{ id, team, path, version, profiled }`.
+
+`install --adopt <path> [--team <team>]` records a direct child of the Global Library or a registered
+project as installed when its bytes equal exactly one published version in the selected team and its folder
+name equals the team skill name. It copies and moves nothing, derives scope from the Library root, asks any
+tool-grant consent, updates the people file, and writes the machine placement last. Exactly one of a skill
+reference or `--adopt` is required; adopt refuses `--into` and every other destination flag. Its result is the
+ordinary installed row plus `{ adopted: true }`.
+
+`reconcile --list [--team <team>]` scans unrecorded Library folders once and returns
+`{ identical, differing, renamed, adopted: [], published: [] }` without asking or writing. Identical rows carry
+the matched `version`; differing same-name rows carry `teamVersion`, `nextVersion`, `sameId`, and `teamAuthor`;
+renamed rows carry `version` and `teamName` and are reported only. Running `reconcile` without `--list` asks
+once per identical or differing row and returns the acted-on paths in `adopted` and `published`. There is no
+frame `root` argument; project addition supplies its one-root restriction in-process.
 
 `publish <ref> [--project <name>] [--category <name>]` resolves a local Library folder, checks
 injected frontmatter, writes it back locally, and publishes directly to main as an immutable version.
@@ -305,7 +320,7 @@ These are additive result fields; protocol stays 1.
 a fetch stamp. It neither places skills nor replays pending work. See `f-sync` for the result
 shape and per-team failures. Over frames it emits hello and result; there is no separate refresh verb.
 
-`project add [path]` · `project remove <path>` · `project list` are the Library's local project registry. `add` asks `Which folder?` as a `path` ask when no argument is given (default: the nearest git repository above the cwd) and returns `{ path, label, added }`; `remove` returns `{ path, placementsRemaining }` and forgets the path only — nothing on disk changes; `list` returns `{ projects: { path, label, rootState, skillFolders }[] }`. A project is added only by an explicit act: no verb registers one as a side effect, and `install --into <path>` refuses a path that is not already a project rather than adding it.
+`project add [path]` · `project remove <path>` · `project list` are the Library's local project registry. `add` asks `Which folder?` as a `path` ask when no argument is given (default: the nearest git repository above the cwd) and returns `{ path, label, added, reconcile? }`; after a newly added project it scans only that project, and frame mode carries the non-writing reconcile result so the shell can open a dialog only when it is non-empty. `remove` returns `{ path, placementsRemaining }` and forgets the path only — nothing on disk changes; `list` returns `{ projects: { path, label, rootState, skillFolders }[] }`. A project is added only by an explicit act: no verb registers one as a side effect, and `install --into <path>` refuses a path that is not already a project rather than adding it.
 
 ### App updates
 
@@ -368,6 +383,10 @@ Generation only fills missing local assets and prints its disclosure before writ
 Print and `progress` frames identify the current eval; no new verb or feature key is added.
 
 `eval <skill> <skill>… [--parallel n] [--batch n] [--window overnight|later] [--pending]` (past setup, 2026-09-13) runs the wizard's Now / In batches / Overnight choices as flags over any set of Library skills, or over `--pending`, the wizard's own candidate set (every shared skill with no receipt for its current version; needs a team). Several skills run as one batch after a single agent probe, `--parallel` deep (default four, never more than the batch). `--batch n` runs n at a time and asks `Continue with the next …?` before each further batch; a declined continuation queues the remainder for `later`, and a non-interactive caller runs every batch unasked. `--window` queues instead of running and never probes. The result is `{ mode: "ran" | "queued", team, skills, ok, failed, queued, stoppedAfter? }`; a run with failures is `ok:false` with that partial value, exactly like a drain. Print and `progress` frames name each skill and `progress.total` is the whole set. One skill with none of those flags is the ordinary single eval; the queue modes refuse skills, `--batch` and `--pending`.
+
+Setup records `steps.existing` between `steps.projects` and `steps.evals`. On frames it prints the reconcile
+summary and marks the step `printed`; the shell owns the choices by calling `reconcile --list` and then
+`install --adopt` or `publish`. `--no-existing`, quiet and non-interactive setup mark it `skipped`.
 
 Setup keeps the existing eval question string and uses a select with `Now`, `In batches`, `Overnight`, `Skip`
 (default `Skip`). The cost line precedes that question and uses measured totals reconstructed from the current

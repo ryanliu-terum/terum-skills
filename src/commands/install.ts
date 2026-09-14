@@ -1,9 +1,9 @@
 import { invocation, type InvocationForm } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { readFile, stat, mkdir, copyFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { projectPath } from '../lib/projects.js';
-import { canonicalParentPath, librarySize } from '../lib/local-skills.js';
+import { adoptableEntry, canonicalParentPath, expandRefPath, librarySize, localSkillRoots, resolveLibrarySkill } from '../lib/local-skills.js';
 import { checkoutRootOf } from '../lib/placer/agent-paths.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { HookOptions } from '../lib/hook.js';
@@ -16,17 +16,20 @@ import { normalizeRemote } from '../lib/remote.js';
 import { fromError, CancelledError, RefusedError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { Config, Destination, Team, describeRaw, handleSchema, parseOrExplain, parseSkillFrontmatter, sameScope } from '../lib/schema.js';
-import { findSkill, readPerson, readTeam, SkillRecord } from '../lib/skills.js';
+import { canonicalDigest, findSkill, readPerson, readTeam, skillRecords, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, lockWait } from '../lib/teamRepo.js';
 import { offerProfileEntry, writePersonFile } from '../lib/profile-entry.js';
 import { receiptFiles } from '../lib/evals/receipt-store.js';
 import { receiptSchema, type Receipt } from '../lib/evals/receipt.js';
 import { versionLabel } from '../lib/versions.js';
 import { listVersions } from '../lib/teamRepo.js';
+import { versionDigests } from '../lib/version-digests.js';
+import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 
 export interface InstallArgs extends WithForm {
   into?: string;
   ref?: string;
+  adopt?: string;
   kind?: 'skill' | 'member' | 'project';
   member?: string;
   project?: string;
@@ -43,14 +46,26 @@ export interface InstallArgs extends WithForm {
   editHook?: Partial<EditHookOptions>;
   /** Injectable retry clock for deterministic recovery tests; authorization remains command-owned. */
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
+  /** Test-only process-interruption seam; each stage follows a durable boundary. */
+  afterAdoptStage?: (stage: AdoptStage) => void | Promise<void>;
 }
 export interface InstalledResult { id: string; team: string; path: string; version: string; profiled: boolean; }
+export interface AdoptedResult extends InstalledResult { adopted: true }
+export type AdoptStage = 'consent' | 'pending' | 'people' | 'ledger' | 'cleared';
 
-export async function run(args: InstallArgs, io: Prompter): Promise<Result<InstalledResult[]>> {
+export async function run(args: InstallArgs, io: Prompter): Promise<Result<InstalledResult[] | AdoptedResult>> {
   try {
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
+    const hasSelector = args.ref !== undefined || args.member !== undefined || args.project !== undefined || args.kind === 'member' || args.kind === 'project';
+    if (args.adopt !== undefined && hasSelector) throw new Error('Give a skill to install or --adopt <path>, not both.');
+    if (args.adopt === undefined && !hasSelector) throw new Error('Nothing to install: give a skill, or --adopt <path> for a folder you already have.');
+    if (args.adopt !== undefined && args.into !== undefined) throw new Error('--adopt records a folder where it is; it takes no destination.');
+    if (args.adopt !== undefined) {
+      const [team] = selectTeam(config.teams, args.team, args.form);
+      return success(await installOne({ team, adopt: args.adopt, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite, afterAdoptStage: args.afterAdoptStage }, io));
+    }
     const operation = parseOperation(args);
     const destinationFor = async (team: string, project?: string) => resolveDestination(store, await readTeam(store.teamClone(team)), project, io, io.interactive, { into: args.into, cwd: args.cwd, runner, home: args.home ?? placementHome(store), form: args.form });
     if (operation.kind === 'member') {
@@ -105,8 +120,34 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
   } catch (error) { return fromError(error); }
 }
 
-/** One explicit install/consent/placement path for single and bulk installs. */
-export async function installOne(input: { team: string; destination: Destination; reference?: string; id?: string; project?: string; scope?: { kind: 'global' } | { kind: 'project'; project: string }; yesProfile?: boolean; store: ConfigStore; runner: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'> }, io: Prompter): Promise<InstalledResult> {
+interface InstallOneCommon {
+  team: string;
+  store: ConfigStore;
+  runner: Runner;
+  cwd?: string;
+  home?: string;
+  safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
+}
+export interface PlacingInstallInput extends InstallOneCommon {
+  destination: Destination;
+  adopt?: never;
+  reference?: string;
+  id?: string;
+  project?: string;
+  scope?: { kind: 'global' } | { kind: 'project'; project: string };
+  yesProfile?: boolean;
+}
+export interface AdoptInstallInput extends InstallOneCommon {
+  adopt: string;
+  destination?: never;
+  afterAdoptStage?: (stage: AdoptStage) => void | Promise<void>;
+}
+
+/** One explicit install/consent path; adoption branches before any placement operation. */
+export function installOne(input: AdoptInstallInput, io: Prompter): Promise<AdoptedResult>;
+export function installOne(input: PlacingInstallInput, io: Prompter): Promise<InstalledResult>;
+export async function installOne(input: AdoptInstallInput | PlacingInstallInput, io: Prompter): Promise<AdoptedResult | InstalledResult> {
+  if (input.adopt !== undefined) return adoptOne(input, io);
   const config = await input.store.read();
   const binding = config.teams[input.team];
   if (!binding?.handle) throw new Error(`Team ${input.team} has no joined handle.`);
@@ -197,6 +238,109 @@ export async function installOne(input: { team: string; destination: Destination
     id: skill.id, name: skill.name, version: latest, via: 'install', preAnswered: input.yesProfile, localSkills, safeWrite: input.safeWrite }, io);
   return { id: skill.id, team: input.team, path: placed.path, version: latest, profiled };
 
+}
+
+/** Record an existing Library folder without copying a byte. Machine provenance is deliberately last. */
+async function adoptOne(input: AdoptInstallInput, io: Prompter): Promise<AdoptedResult> {
+  const home = input.home ?? placementHome(input.store);
+  const config = await input.store.read();
+  const binding = config.teams[input.team];
+  if (!binding?.handle) throw new Error(`Team ${input.team} has no joined handle.`);
+  // `--adopt` is a path grammar, not the name-or-path grammar used by publish/eval. Resolve it
+  // before the shared Library lookup so a bare relative path cannot select a same-named folder in
+  // some other root merely because the process happened to run elsewhere.
+  const found = await resolveLibrarySkill(home, config, input.store.root, expandRefPath(input.adopt, home, input.cwd));
+  if (!found || !adoptableEntry(found)) throw new Error(`${input.adopt} is not a folder in your Library.`);
+
+  const roots = await localSkillRoots(home, config.projects ?? []);
+  const libraryRoot = roots.roots.find((root) => root.root === found.libraryRoot);
+  if (!libraryRoot || (libraryRoot.scope === 'project' && (!libraryRoot.registered || !libraryRoot.repoRoot))) throw new Error(`${input.adopt} is not a folder in your Library.`);
+  // `installed[].scope` and the placements ledger name a TEAM project (`install project <name>`), never the Library
+  // root a copy sits in — `install <ref> --into <checkout>` records `global` too (installOne above). Adopt follows the
+  // code (spec §4.5, code-wins rule); the root it sits in is the destination on the pending note.
+  const scope = { kind: 'global' as const };
+  const destination: Destination = libraryRoot.scope === 'global'
+    ? { kind: 'global' }
+    : { kind: 'checkout', root: await projectPath(libraryRoot.repoRoot!) };
+
+  const clone = input.store.teamClone(input.team);
+  const records = await skillRecords(clone, input.team);
+  const digests = await versionDigests(clone, records.map((record) => record.name));
+  const digest = await canonicalDigest(found.path);
+  const matches = [...digests.values()].filter((entry) => entry.digest === digest).sort((a, b) => b.n - a.n);
+  if (matches.length === 0) throw new Error(`${found.path} does not match any published version of a team skill byte for byte; publish it instead.`);
+  // Several versions can share these bytes only across skills (publish refuses an identical republish within one), so
+  // the folder name picks the skill, exactly as `reconcile` classifies it; newest first covers a hand-built repo.
+  const matched = matches.find((entry) => entry.name === basename(found.path)) ?? matches[0]!;
+  if (basename(found.path) !== matched.name) throw new Error(`${found.path} holds the bytes of ${matched.name} ${versionLabel(matched.n)} under a different folder name; rename it to ${matched.name} first.`);
+  const record = records.find((candidate) => candidate.name === matched.name);
+  if (!record) throw new Error(`No skill ${matched.name} in team ${input.team}.`);
+
+  const pending = { op: 'install' as const, id: record.id, team: input.team, scope, destination, version: matched.folder, started: new Date().toISOString() };
+  const since = new Date().toISOString().slice(0, 10);
+  const clearPending = () => input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
+  // The team's record of this install: filter-then-push, so replaying it is a no-op (install.ts's own order above).
+  const writeInstalledRow = async () => {
+    const localSkills = await librarySize(home, await input.store.read(), input.store.root);
+    const repo = openTeamRepo(clone, binding.remote, input.runner);
+    await repo.safeWrite((tree) => writePersonFile(tree, binding.handle!, person => {
+      person.installed = person.installed.filter((entry) => !(entry.id === record.id && sameScope(entry.scope, scope)));
+      person.installed.push({ id: record.id, version: matched.folder, scope, since });
+      if (localSkills !== null) person.local_skills = localSkills;
+    }), { action: 'install', handle: binding.handle, message: `${binding.handle}: install ${record.name}`, ...input.safeWrite, ...lockWait(io) });
+  };
+  const placementKey = await recordedPlacementKey(config, found.path);
+  if (placementKey !== undefined) {
+    // Review walk D5: the ledger row is adopt's LAST write, so a recorded path is a finished job and is refused (§7).
+    // The one thing a crash can leave behind is the pending note between that write and its clearing — adopt's own, or
+    // a placing install's that died at its people-file write. Drain it here (the idempotent team write, then the
+    // clear) and still refuse: a success result would be the "resumable adopt" the walk rejected.
+    const placement = config.placements[placementKey]!;
+    const stale = placement.id === record.id && placement.team === input.team && placement.version === matched.folder
+      && config.pending.some((entry) => samePending(entry, pending) && pendingVersion(entry) === matched.folder);
+    if (stale) {
+      await writeInstalledRow();
+      await clearPending();
+      await input.afterAdoptStage?.('cleared');
+    }
+    throw new Error(`${found.path} is already recorded as installed.`);
+  }
+
+  const source = join(clone, 'skills', matched.name, matched.folder);
+  const sourceSkill = await skillAtSource(source, record);
+  await ensureConsent(input.store, sourceSkill, io);
+  await input.afterAdoptStage?.('consent');
+  await input.store.update((fresh) => {
+    fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending));
+    fresh.pending.push(pending);
+  });
+  await input.afterAdoptStage?.('pending');
+
+  await writeInstalledRow();
+  await input.afterAdoptStage?.('people');
+
+  const snapshot = await snapshotSkillDirectory(found.path);
+  await input.store.update((fresh) => {
+    fresh.placements[found.path] = { id: record.id, team: input.team, version: matched.folder, scope, placed_at: since, fingerprint: snapshot.fingerprint };
+  });
+  await input.afterAdoptStage?.('ledger');
+  await clearPending();
+  await input.afterAdoptStage?.('cleared');
+  return { id: record.id, team: input.team, path: found.path, version: matched.folder, profiled: false, adopted: true };
+}
+
+function pendingVersion(entry: Config['pending'][number]): string | undefined {
+  const version = (entry as Config['pending'][number] & { version?: unknown }).version;
+  return typeof version === 'string' ? version : undefined;
+}
+
+async function recordedPlacementKey(config: Config, path: string): Promise<string | undefined> {
+  const wanted = await canonicalParentPath(path);
+  for (const key of Object.keys(config.placements)) {
+    if (resolve(key) === resolve(path)) return key;
+    if (wanted !== undefined && await canonicalParentPath(key) === wanted) return key;
+  }
+  return undefined;
 }
 
 async function ensureConsent(store: ConfigStore, skill: SkillRecord, io: Prompter): Promise<void> {

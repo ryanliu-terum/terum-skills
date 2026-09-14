@@ -224,3 +224,12 @@ it('produces every overlay card state under __mock=overlays and state 4 under __
  const onDisk=await b.catalog();if(!onDisk.ok)throw new Error(onDisk.error);
  expect(onDisk.value.skills.find(s=>s.name==='deploy-check')).toMatchObject({installed:'placed',placed:false,onDiskOnly:true,latestVersion:'v5',installedVersion:null,localMatch:'differs',path:'~/.claude/skills/deploy-check'});
 });
+
+it('models reconcile listing, project-add reconciliation, and install adoption',async()=>{
+ const b=createMockBackend();const listed=await b.reconcile.list();
+ expect(listed).toMatchObject({ok:true,value:{identical:[{name:'deploy-check',version:'v5'}],differing:[{name:'release-notes',sameId:true},{name:'pr-review',sameId:false}],adopted:[],published:[]}});
+ const added=await b.projects.add('/Users/you/code/new-project').done;
+ expect(added).toMatchObject({ok:true,value:{added:true,reconcile:{identical:[{name:'deploy-check'}]}}});
+ const adopted=await answerAll(b.install({team:'terum',adopt:'~/.claude/skills/deploy-check'}),()=>true);
+ expect(adopted).toMatchObject({ok:true,value:[{name:'deploy-check',scope:'Global',path:'~/.claude/skills/deploy-check'}]});
+});
