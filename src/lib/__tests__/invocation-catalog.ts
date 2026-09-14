@@ -1514,7 +1514,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 244,
     "policy": "prose",
-    "pattern": "three, and `validate`'s result carries `repairable`, the count of changes `skill fix` would make."
+    "pattern": "three, and `validate`'s result carries `repairs`, one sentence per change `skill fix` would make, and"
   },
   {
     "file": "docs/frame-protocol.md",

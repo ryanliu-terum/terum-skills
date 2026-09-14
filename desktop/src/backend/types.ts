@@ -160,8 +160,8 @@ export interface EvalManyArgs {refs:string[];team?:string;mode:'now'|'batches'|'
  *  batch, in which case `stoppedAfter` says how many had been attempted. */
 export interface EvalManyResult {mode:'ran'|'queued';team:string|null;skills:string[];ok:number;failed:number;queued:EvalQueueItem[];stoppedAfter?:number}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
-/** `repairable` counts the changes `skill fix` would make; a CLI that predates the verb omits it and the adapter reads 0, so the app draws no Fix. */
-export interface ValidateResult {name:string;findings:number;warnings:number;repairable:number}
+/** `repairs` lists, one sentence each, the changes `skill fix` would make and `repairable` counts them; a CLI that predates the verb omits both and the adapter reads 0 and [], so the app draws no Fix. A CLI with the count but no list draws Fix and the dialog names the count alone. */
+export interface ValidateResult {name:string;findings:number;warnings:number;repairable:number;repairs:string[]}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
 export type AppUpdatePhase='waiting'|'installing'|'launched'|'failed';
 export type AppUpdateReason='on-close'|'overnight'|'manual';
