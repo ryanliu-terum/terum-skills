@@ -18,7 +18,7 @@ import { assertNotInsideStateRoot, assertSkillDirectory, sourceFiles } from '../
 import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { versionFolderName, versionLabel, versionsInTree } from '../lib/versions.js';
 import { localReceiptsFor } from '../lib/evals/receipt-store.js';
-import { offerProfileEntry } from '../lib/profile-entry.js';
+import { recordProfileEntry } from '../lib/profile-entry.js';
 import { suggestCategory, teamCategory, type CategorySuggestion } from '../lib/categorize.js';
 import type { AgentApi } from '../lib/evals/agent.js';
 
@@ -31,8 +31,6 @@ export interface PublishArgs extends WithForm {
   agent?: AgentApi;
   /** Pre-answers §5.1 step 6a's regression question, for the desktop and for scripts. */
   allowRegression?: boolean;
-  /** Pre-answers the profile prompt, for the desktop and for tests. */
-  yesProfile?: boolean;
   /** The home the local skills root is derived from (tests); defaults to homedir(). */
   home?: string;
   cwd?: string;
@@ -300,15 +298,18 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const unmatched = local.length - outcome.attached;
     if (outcome.version !== null && unmatched > 0) io.print(`${unmatched} local eval run(s) were not attached — they evaluated this folder before its first publish.`);
 
-    // 10. Publishing is not installing (D5). The only people-file write here is the profile prompt.
-    //     It is a SECOND, independent safeWrite that runs after the version is committed and pushed,
-    //     so its failure must not be reported as a failed publish: the version is durable in the
-    //     shared repo and the success lines are already on screen. Before this, a missing people
-    //     file, a lock timeout or a network blip returned a failure Result carrying no
-    //     PublishResult, for a publish that fully succeeded.
+    // 10. Publishing is not installing (D5). The only people-file write here is the profile entry,
+    //     which D77 writes with no question: publishing is itself the endorsement, so nothing is
+    //     asked and nothing is skipped when no human is on the other end. It is a SECOND,
+    //     independent safeWrite that runs after the version is committed and pushed, so its failure
+    //     must not be reported as a failed publish: the version is durable in the shared repo and
+    //     the success lines are already on screen. Before this, a missing people file, a lock
+    //     timeout or a network blip returned a failure Result carrying no PublishResult, for a
+    //     publish that fully succeeded.
     let profileAdded = false;
     try {
-      profileAdded = await offerProfileEntry({ store, clone, team, handle: binding.handle, remote: binding.remote, runner, id, name: found.name, version: at, via: 'publish', preAnswered: args.yesProfile }, io);
+      profileAdded = await recordProfileEntry({ store, clone, team, handle: binding.handle, remote: binding.remote, runner, id, name: found.name, version: at, via: 'publish' }, io);
+      if (profileAdded) io.print(`Your profile now lists ${found.name} at ${label}.`);
     } catch (error) {
       io.print(`Published ${found.name}, but could not add it to your profile: ${error instanceof Error ? error.message : String(error)}`);
     }

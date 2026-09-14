@@ -69,7 +69,7 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 | `sync --hook` | do not run by hand; this is the SessionStart entry | stdout is the reload directive, notices go to stderr; only Terum's managed manual may be refreshed |
 | `install <ref> [--into global\|<project root>]`, `install member <h> [--into global\|<project root>]`, `install project <n> [--into global\|<project root>]` | confirm the skill/list and destination: this places files and writes install records. Use an explicitly chosen `--into`; an unregistered project path refuses and needs `project add` first | installs the highest numbered version in the clone. A tool-grant question or replace question needs a terminal; report any completed work before handing off |
 | `invite <github-login…>` | confirm with the user: sends GitHub collaborator invitations | show stdout and the teammate join block |
-| `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` | confirm the profile changes; project membership names team projects | show stdout |
+| `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]… [--remove <skill>]` | confirm the profile changes; project membership names team projects; `--remove` takes one skill off the profile list | show stdout |
 | `login --set <key=value>` | confirm the identity change; keys are `name`, `email`, `default-handle`; repeat the flag for multiple fields | show the identity notice; published versions keep their recorded author |
 | `team workflow-update --print` | nothing | show the workflow scaffold and its manual migration instruction; this does not migrate the team's skill layout |
 | `eval <skill> [--k <n>] [--triggers-only] [--execution-only] [--case <stem>] [--model <m>] [--judge-model <m>] [--no-gen]` | see the eval section | see the eval section |
@@ -99,7 +99,7 @@ Output handling for every verb in Table A:
 - Show stdout in a fenced code block, verbatim, subject to the inventory summarising rule above.
 - Quote stderr failures and explain them in one sentence. Hook notices also use stderr.
 - Exit 1 is a failed operation, not a broken wrapper. Do not automatically retry it, and do not
-  claim earlier steps were rolled back. Publish can succeed even if its later profile offer fails.
+  claim earlier steps were rolled back. Publish can succeed even if its later profile write fails.
 - No update-notice tail appears when stderr has no TTY.
 
 ## Table B: verbs that are handed to the user
@@ -131,7 +131,8 @@ main and attaches matching local eval receipts. Identical bytes reuse the existi
 Publish resolves category from the declared frontmatter first, then `--category`, then a model
 suggestion, falling back to `misc`. A declared category makes no model call and prints no category
 line. Otherwise the CLI discloses the source before writing. It writes managed frontmatter back
-locally after its refusal-capable checks, then publishes, then asks about adding to your profile.
+locally after its refusal-capable checks, then publishes, then records the skill on your profile
+without asking — publishing is the endorsement (`profile --remove <name>` takes it back).
 A failed team write can leave that frontmatter on disk. Do not treat publish as a dry run.
 
 The three `skill` operations require a direct child of Global or an added project's skills root
