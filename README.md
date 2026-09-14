@@ -24,7 +24,7 @@ Our purpose is it make it quick and easy to determine best AI practices through 
   - Cost
   - Time
   - Quality of output
-- Compare comparable/overlapping skills against each other
+- Compare similar skills against each other (your developed skill vs public skill, 2 public skills, two versions of your skill)
 - Share skills with team members easily
 
 **Isn't it super easy to share skills by just pushing them to GitHub?**
