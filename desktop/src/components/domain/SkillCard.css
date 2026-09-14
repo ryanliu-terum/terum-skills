@@ -8,7 +8,11 @@
 .card-reinstall{border:0;background:none;padding:0;color:var(--tk-accent);font:inherit;font-size:12px;cursor:pointer}
 /* Library selection mode (batch E, 2026-09-13). The checkbox sits before ⋯ in the top-right button row and stays
    visible (the ⋯ itself only shows on hover); a selected card takes the accent frame the keyboard focus ring
-   already uses. Nothing here applies unless the card is `selectable`, so no board moves. */
-.skill-card[data-selectable] .skill-card-buttons>.checkbox{margin-right:6px;position:relative;z-index:1;cursor:pointer}
+   already uses. Nothing here applies unless the card is `selectable`, so no board moves.
+   NO z-index here (2026-09-14): `.skill-card-buttons` is already positioned and comes after `.skill-card-ident`,
+   so the box paints and hit-tests above the card's `>a::after` cover on DOM order alone — exactly as the ⋯ does.
+   A z-index would leave the card: no ancestor up to `.shell` opens a stacking context, so the box would join the
+   root one and paint over the portalled dialogs (the bulk-publish question draws right on top of the grid). */
+.skill-card[data-selectable] .skill-card-buttons>.checkbox{margin-right:6px;position:relative;cursor:pointer}
 .skill-card[data-selectable] .skill-card-ident>a{cursor:default}
 .skill-card[data-selected]{border-color:var(--tk-accent);box-shadow:0 0 0 1px var(--tk-accent)}
