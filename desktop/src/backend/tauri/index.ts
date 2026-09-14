@@ -868,12 +868,16 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         const authoredIds = new Set(detail.authored);
         const authored = inventory.skills.filter(skill => authoredIds.has(skill.id));
         const names = authored.map(skill => skill.name);
-        const installedIds = new Set(detail.installed.map(item => item.id));
-        const installable = inventory.skills.filter(skill => installedIds.has(skill.id));
+        // §8.5 (amended 2026-09-13): the person page is one list — `profile[]`, what they stand behind
+        // — so `installable` is that list too. It drives the count, the Install button's label and
+        // `install member`, which reads the same field (`src/commands/install.ts`): one number, one
+        // promise. `installed[]` is still read by the roster, just no longer drawn as a second bucket.
+        const profileIds = new Set(detail.profile.map(entry => entry.id));
+        const installable = inventory.skills.filter(skill => profileIds.has(skill.id));
         const latest = newestUpdated(authored);
         const lastPublish = latest ? `${relativeTime(latest.updated)} · ${latest.name}` : '—';
         const disk: Person['onDisk'] = [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length];
-        people.push({ ...member, joined: member.joined ?? '—', role: detail.role, lastPublish, last_publish: lastPublish, organization: null, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: [['On their profile', detail.profile.map(entry => entry.name)], ['Installed', installable.map(skill => skill.name)]], profileVersions: Object.fromEntries(detail.profile.map(entry => [entry.name, entry.version])), placeNote: personPlaceNote(disk), onDisk: disk });
+        people.push({ ...member, joined: member.joined ?? '—', role: detail.role, lastPublish, last_publish: lastPublish, organization: null, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: [['On their profile', installable.map(skill => skill.name)]], profileVersions: Object.fromEntries(detail.profile.map(entry => [entry.name, entry.version])), placeNote: personPlaceNote(disk), onDisk: disk });
       }
       return { ok: true, value: catalogModel(team, inventory, local.value, placements, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
     },

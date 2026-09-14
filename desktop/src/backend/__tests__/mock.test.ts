@@ -180,14 +180,19 @@ it("returns exactly the PublishResult keys on a project publish and mints no PR 
 // D64 (2026-09-13 ledger, option A): spec §8.5's two person buckets are distinct on the demo backend — "On their
 // profile" is what the person authored, "Installed" the subset the fixture marks on this machine — and
 // `installable` stays the full authored list the bulk Install/Remove button and marketplace.test pin.
-it('fills a person\'s profile bucket with their authored skills and Installed with the on-disk subset',async()=>{
+// §8.5 (amended 2026-09-13): ONE bucket. The second — "Installed", the on-disk subset — is gone with the
+// spec that asked for it, and the surviving list is what `installable` and the header count both read,
+// so a person can no longer be described by two lists that disagree.
+it('fills a person\'s single profile bucket with their authored skills',async()=>{
  const catalog=await createMockBackend().catalog();if(!catalog.ok)throw new Error(catalog.error);
  const authors:Record<string,string>=design.AUTHOR_OF,authored=(handle:string)=>design.CATALOG.filter(s=>authors[s.name]===handle).map(s=>s.name);
  const ajay=catalog.value.people.find(p=>p.handle==='ajay'),lena=catalog.value.people.find(p=>p.handle==='lena');
  if(!ajay||!lena)throw new Error('Fixture roster is missing ajay or lena.');
- // ajay authored two placed skills and one (secret-scan, installed:false) not on this machine, so his buckets differ; none of lena's three is placed.
- expect(ajay.buckets).toEqual([['On their profile',['deploy-check','env-audit','secret-scan']],['Installed',['deploy-check','env-audit']]]);
- expect(lena.buckets).toEqual([['On their profile',['a11y-audit','storybook-sync','bundle-budget']],['Installed',[]]]);
+ // ajay authored two placed skills and one (secret-scan, installed:false) not on this machine; none of
+ // lena's three is placed. Neither fact splits the page any more — placement shows on the cards.
+ expect(ajay.buckets).toEqual([['On their profile',['deploy-check','env-audit','secret-scan']]]);
+ expect(lena.buckets).toEqual([['On their profile',['a11y-audit','storybook-sync','bundle-budget']]]);
+ for(const person of [ajay,lena])expect(person.buckets[0]?.[1]).toEqual(person.installable);
  for(const person of [ajay,lena])expect(person.installable).toEqual(authored(person.handle));
 });
 // D65 (2026-09-13 ledger): under __mock=stale-eval, "you have Version 2" follows this session's installs and removals, not the page-load fixture flag.

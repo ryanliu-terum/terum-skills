@@ -47,6 +47,9 @@ describe('uninstall (§6 pending)', () => {
     await pushFromSeed(fixture.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [
       { id: first, version: null, scope: { kind: 'global' }, since: '2026-09-04' },
       { id: second, version: null, scope: { kind: 'global' }, since: '2026-09-04' },
+    ], profile: [
+      { id: first, name: 'first', version: 'v1', added: '2026-09-04', via: 'install' },
+      { id: second, name: 'second', version: 'v1', added: '2026-09-04', via: 'install' },
     ] }), null, 2)}\n`);
     const store = createConfigStore(join(fixture.root, 'state'));
     const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -59,7 +62,7 @@ describe('uninstall (§6 pending)', () => {
     const commitsBefore = Number((await git(['rev-list', '--count', 'main'], fixture.bare)).trim());
     const io = new ScriptedPrompter([], [true]);
     const result = await run({ kind: 'member', member: 'seed', team: 'team', config: store, home }, io);
-    expect(io.asked).toEqual(['Remove everything you installed (2 skills)?']);
+    expect(io.asked).toEqual(['Remove the 2 skills on your profile from this machine?']);
     expect(result).toMatchObject({ ok: true, value: [{ id: first }, { id: second }] });
     expect(JSON.parse(await readFile(join(clone, 'people', 'seed.json'), 'utf8')).installed).toEqual([]);
     // One write for the whole member, not one push per skill (M2 review 4b, D9 sweep).
@@ -334,11 +337,11 @@ it('fails closed at the non-interactive confirm before any project write', async
   for (const path of Object.keys(f.before.placements)) await expect(access(path)).resolves.toBeUndefined();
 });
 
-it('removes a member installed list and leaves authored-only skills untouched', async () => {
+it('removes a member profile list and leaves authored-only skills untouched', async () => {
   const fixture = await bareTeam();
   const authored = '93939393-9393-4393-8393-939393939393', installed = '94949494-9494-4494-8494-949494949494';
   for (const [name, id, author] of [['authored', authored, 'Member <member@example.com>'], ['used', installed, 'Seed <seed@example.com>']]) await pushFromSeed(fixture.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${name}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: ${author}\n  terum-category: testing\n---\n`);
-  await pushFromSeed(fixture.seed, 'people/member.json', JSON.stringify(person('member', { installed: [{ id: installed, scope: { kind: 'global' }, version: null, since: '2026-09-04' }] })));
+  await pushFromSeed(fixture.seed, 'people/member.json', JSON.stringify(person('member', { installed: [{ id: installed, scope: { kind: 'global' }, version: null, since: '2026-09-04' }], profile: [{ id: installed, name: 'used', version: 'v1', added: '2026-09-04', via: 'install' }] })));
   const store = createConfigStore(join(fixture.root, 'state')), home = join(fixture.root, 'home');
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update(config => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
@@ -346,7 +349,7 @@ it('removes a member installed list and leaves authored-only skills untouched', 
   const io = new ScriptedPrompter([], [true]), title = "Remove member's 1 skills from this machine?";
   expect(await run({ kind: 'member', member: 'member', config: store }, io)).toMatchObject({ ok: true, value: [{ id: installed, removed: 1 }] });
   expect(io.asked).toEqual([title]);
-  expect(io.details[title]).toEqual(['Folders removed (1):', `  ${join(home, '.claude/skills/used')}  ·  Global`, `Local changes are moved to ${join(store.root, 'quarantine')}, never deleted.`, 'Install records dropped from your people file (1): used', 'Your profile is unchanged.', "Targets are member's current installed list, not what you installed from them."]);
+  expect(io.details[title]).toEqual(['Folders removed (1):', `  ${join(home, '.claude/skills/used')}  ·  Global`, `Local changes are moved to ${join(store.root, 'quarantine')}, never deleted.`, 'Install records dropped from your people file (1): used', 'Your profile is unchanged.', "Targets are member's current profile list, not what you installed from them."]);
   await expect(access(join(home, '.claude/skills/authored'))).resolves.toBeUndefined();
   await expect(access(join(home, '.claude/skills/used'))).rejects.toMatchObject({ code: 'ENOENT' });
   expect(JSON.parse(await readFile(join(clone, 'people/seed.json'), 'utf8')).installed).toEqual([expect.objectContaining({ id: authored })]);

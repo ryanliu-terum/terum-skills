@@ -15,6 +15,9 @@ export function rawGrants(skill: Card): string[] {
 }
 
 export function personStatus(person: Person): [string, string] {
- if (person.onDisk[1] === 0) return ['Nothing to install', `${person.handle} has no recorded installs to copy`];
+ // §8.5 (amended 2026-09-13): the page and `install member` read `profile[]`, so an empty page means an
+ // empty PROFILE — not an empty install record. Saying "no recorded installs" of someone whose machine is
+ // full of skills they never added to their profile is the same mislabel this amendment set out to remove.
+ if (person.onDisk[1] === 0) return ['Nothing to install', `${person.handle} has nothing on their profile yet`];
  return person.onDisk[0] === person.onDisk[1] ? ['Installed', `${person.onDisk[0]} of ${person.onDisk[1]} skills on this machine`] : ['Not installed', person.placeNote];
 }
