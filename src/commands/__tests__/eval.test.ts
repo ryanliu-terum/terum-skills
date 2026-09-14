@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore, type ConfigStore } from '../../lib/config.js';
 import { type AgentApi, Transcript } from '../../lib/evals/agent.js';
 import { success } from '../../lib/result.js';
-import { bareTeam, cloneWithIdentity, holdCloneLock, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, holdCloneLock, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { skillContentDigest } from '../../lib/skills.js';
 import { sourceFiles } from '../../lib/skill-source.js';
@@ -233,6 +233,49 @@ describe('eval (§6 / IE2)', () => {
     // …and the consequence the digest exists for: §5.1 resolves it and attaches the run to v1.
     const published = await publishRun({ ref: 'sample', home, config: store }, new ScriptedPrompter([], [false]));
     expect(published).toMatchObject({ ok: true, value: { version: 'v1', attachedEvals: 1 } });
+  });
+
+  it('publishes its receipt to the team when these exact bytes are already a published version', async () => {
+    const { store, home, folder } = await evalFixture();
+    await store.update((config) => { config.display_name = 'Seed'; config.email = 'seed@example.com'; });
+    // Publish FIRST, so the folder's bytes are v1 — the installed-a-teammate's-skill case.
+    expect(await publishRun({ ref: 'sample', home, config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: true, value: { version: 'v1' } });
+    const digest = skillContentDigest((await sourceFiles(folder)).files);
+
+    const io = new ScriptedPrompter();
+    const result = await run(args(store, home, { agent: generationAgent([]), k: 1, now: () => new Date('2026-09-13T12:34:56Z') }), io);
+    expect(result).toMatchObject({ ok: true, value: { publishedTo: 'v1' } });
+    if (!result.ok) return;
+    expect(result.value.shareHint).toBeUndefined();
+    const clone = store.teamClone('team');
+    const committed = receiptSchema.parse(JSON.parse(await readFile(join(clone, 'evals', ID, 'v1', '20260913T123456Z.json'), 'utf8')));
+    // The local receipt has no version (§6.1); the copy the team sees is stamped with the one it resolved to.
+    expect(committed).toMatchObject({ skill_id: ID, version: 'v1', content_digest: digest });
+    expect(io.lines.join('\n')).toContain('Published this receipt to team for Version 1 of sample');
+    // No version was minted and no skill byte moved: the only path this commit adds is the receipt
+    // (README.md rides along because safeWrite regenerates it for a generic remote, as on any write).
+    const touched = (await git(['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'], clone)).trim().split('\n');
+    expect(touched.filter((path) => path !== 'README.md')).toEqual([`evals/${ID}/v1/20260913T123456Z.json`]);
+  });
+
+  it('keeps an edited folder local: an unpublished state has no version to name', async () => {
+    const { store, home, folder } = await evalFixture();
+    await store.update((config) => { config.display_name = 'Seed'; config.email = 'seed@example.com'; });
+    expect(await publishRun({ ref: 'sample', home, config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: true, value: { version: 'v1' } });
+    await writeFile(join(folder, 'extra.md'), 'edited after publishing\n');
+    const result = await run(args(store, home, { agent: generationAgent([]), k: 1 }), new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { shareHint: true } });
+    if (result.ok) expect(result.value.publishedTo).toBeUndefined();
+  });
+
+  it('--no-commit keeps a matching run on this machine', async () => {
+    const { store, home } = await evalFixture();
+    await store.update((config) => { config.display_name = 'Seed'; config.email = 'seed@example.com'; });
+    expect(await publishRun({ ref: 'sample', home, config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: true, value: { version: 'v1' } });
+    const before = (await git(['rev-parse', 'HEAD'], store.teamClone('team'))).trim();
+    const result = await run(args(store, home, { agent: generationAgent([]), k: 1, commit: false }), new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { shareHint: true } });
+    expect((await git(['rev-parse', 'HEAD'], store.teamClone('team'))).trim()).toBe(before);
   });
 
   it('D61: a generated asset never lands on an authored file, whatever the volume spells it', async () => {

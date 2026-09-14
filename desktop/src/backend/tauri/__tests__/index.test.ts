@@ -88,11 +88,11 @@ it('passes the stored eval defaults as flags and omits the unset or sentinel one
 });
 
 
-const publishFrame = (over: Record<string, unknown> = {}) => ({ team: 't', id: 'id-a', name: 'a', project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 0, profileAdded: false, projectAdded: true, ...over });
+const publishFrame = (over: Record<string, unknown> = {}) => ({ team: 't', id: 'id-a', name: 'a', project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 0, evalAssets: 0, profileAdded: false, projectAdded: true, ...over });
 
 it('maps a minted version, never inventing one', async () => {
   const f = replay(publishFrame());
-  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 2 - 2, profileAdded: false, projectAdded: true } });
+  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 2 - 2, evalAssets: 0, profileAdded: false, projectAdded: true } });
 });
 
 it('§5.3: an identical republish carries version NULL through — the match is `identicalTo`', async () => {
@@ -103,7 +103,7 @@ it('§5.3: an identical republish carries version NULL through — the match is 
   // `version` names what was MINTED and `identicalTo` what was MATCHED — leaving `created` as the
   // sole way to tell a fresh v2 from a republish of it.
   const f = replay(publishFrame({ version: null, created: false, identicalTo: 'v2', projectAdded: false }));
-  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: null, created: false, identicalTo: 'v2', attachedEvals: 0, profileAdded: false, projectAdded: false } });
+  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: null, created: false, identicalTo: 'v2', attachedEvals: 0, evalAssets: 0, profileAdded: false, projectAdded: false } });
 });
 
 it('carries the attached-eval count and the profile answer through', async () => {
