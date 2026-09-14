@@ -11,21 +11,6 @@ function names(prefix: string) { return screen.getAllByTestId(new RegExp('^' + p
 beforeEach(() => { localStorage.clear(); useUiStore.setState({ railOpen: true, overviewHidden: false, theme: 'dark' }); });
 afterEach(() => { cleanup(); location.hash = ''; vi.restoreAllMocks(); });
 it('renders all four home sections and the first three top-rated skills in DTO order', async () => { open('#/marketplace'); await screen.findByRole('region', { name: 'Top rated' }); for (const title of ['Top rated', 'Teams / Projects', 'People', 'Browse by category']) expect(screen.getByRole('region', { name: title })).toBeInTheDocument(); expect(names('skill-card-')).toEqual(design.DERIVED.topRated.slice(0, 3)); });
-// Review r1 HIGH: the List chips prepended a literal 'Global' to the catalog's project names. Under layout 3 Global is an ordinary
-// team.json project and the real adapter serves it as one (mock-vs-real's re-recorded ls.jsonl lists {name:'Global'} beside terum),
-// so any account with one globally-placed skill drew two identical 'Global' chips under one React key.
-it('renders one Global chip when the catalog itself carries a Global project', async () => {
-  const backend = pickBackend(); const before = await backend.catalog(); if (!before.ok) throw new Error(before.error);
-  const terum = before.value.projects.find(p => p.key === 'terum')!;
-  vi.spyOn(backend, 'catalog').mockResolvedValue({ ...before, value: { ...before.value, projects: [{ ...terum, key: 'Global', name: 'Global' }, ...before.value.projects] } });
-  open('#/marketplace?filters=open');
-  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
-  expect(within(filters).getAllByRole('button', { name: 'Global' })).toHaveLength(1);
-  expect(within(filters).getAllByRole('button', { name: 'Terum' })).toHaveLength(1);
-});
-it('renders filter verdict counts and the supplied matching count', async () => { open('#/marketplace?filters=open'); const filters = await screen.findByRole('region', { name: 'Marketplace filters' }); for (const [verdict, count] of Object.entries(design.DERIVED.verdictCounts)) expect(within(filters).getByTestId('verdict-count-' + verdict)).toHaveTextContent(verdict + count); expect(within(filters).getByRole('button', { name: `Show ${design.DERIVED.filterCount} skills` })).toBeInTheDocument(); expect(within(filters).getByRole('checkbox', { name: /PASS/ })).toBeChecked(); });
-it('renders the no-results query and both active filters', async () => { open('#/marketplace?q=deploy%20prod&active=2'); expect(await screen.findByText('No skills match “deploy prod” with 2 filters on')).toBeInTheDocument(); expect(screen.getByRole('textbox', { name: 'Search skills, people and projects' })).toHaveValue('deploy prod'); });
-it('keeps a single active filter singular in the no-results title', async () => { open('#/marketplace?q=deploy%20prod&active=1'); expect(await screen.findByText('No skills match “deploy prod” with 1 filter on')).toBeInTheDocument(); });
 it('renders Terum counts and the two-column project grid', async () => { open('#/marketplace/projects/terum'); expect(await screen.findByText('8 skills placed in ~/Projects/terum')).toBeInTheDocument(); expect(screen.getByRole('button', { name: '♡ 11' })).toBeInTheDocument(); expect(screen.getAllByTestId(/^skill-card-/)[0]?.closest('.market-grid')).toHaveAttribute('data-columns', '2'); expect(names('skill-card-')).toEqual(design.DERIVED.skillsIn.Terum); });
 it('renders the Docs placement note', async () => { open('#/marketplace/projects/docs'); expect(await screen.findByText('Placed by install project, inside a checkout of this repo')).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Install 3 skills' })).toBeInTheDocument(); });
 it('renders the Docs asking count and exact raw grants', async () => { open('#/marketplace/projects/docs?dialog=install'); const dialog = await screen.findByRole('dialog'); expect(dialog).toHaveTextContent(`${design.DERIVED.bulkInstall.docs.asking} of 3 ask`); expect(within(dialog).getByText('a11y-audit')).toBeInTheDocument(); expect(within(dialog).getByText('bundle-budget')).toBeInTheDocument(); expect(within(dialog).getAllByText('Read')).toHaveLength(2); expect(within(dialog).getByText('Bash')).toBeInTheDocument(); });
@@ -75,7 +60,9 @@ it('hides project Edit when no checkout path is recorded instead of opening a gu
 it('keeps the home populated for the empty scenario', async () => { open('#/marketplace?__mock=empty'); await screen.findByRole('region', { name: 'Top rated' }); expect(names('skill-card-')).toEqual(design.DERIVED.topRated.slice(0, 3)); expect(await screen.findByRole('link', { name: 'Global 15' })).toBeInTheDocument(); for (const name of ['Pushes 3', 'Updates 3', 'Alerts 8']) expect(screen.getByRole('link', { name })).toBeInTheDocument(); });
 it('applies hero search only on Enter and preserves URL state', async () => { open('#/marketplace?theme=light'); const input = await screen.findByRole('textbox', { name: 'Search skills, people and projects' }); fireEvent.change(input, { target: { value: 'deploy prod' } }); expect(location.hash).toBe('#/marketplace?theme=light'); fireEvent.keyDown(input, { key: 'Enter' }); expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument(); expect(location.hash).toContain('theme=light'); expect(location.hash).toContain('q=deploy+prod'); });
 it('applies project search and preserves rail state', async () => { open('#/marketplace/projects/terum?rail=closed'); const input = await screen.findByRole('textbox', { name: "Search Terum's 8 skills" }); fireEvent.change(input, { target: { value: 'deploy-check' } }); fireEvent.keyDown(input, { key: 'Enter' }); await waitFor(() => expect(names('skill-card-')).toEqual(['deploy-check'])); expect(screen.getByTestId('skill-card-deploy-check').closest('.market-grid')).toHaveAttribute('data-columns', '3'); });
-it('renders no filter button on the marketplace search bar', async () => { open('#/marketplace'); await screen.findByRole('region', { name: 'Top rated' }); expect(screen.queryByRole('button', { name: 'Filter marketplace' })).toBeNull(); expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull(); });
+it('renders no filter affordance on the marketplace search bar', async () => { open('#/marketplace'); await screen.findByRole('region', { name: 'Top rated' }); expect(screen.queryByRole('button', { name: 'Filter marketplace' })).toBeNull(); expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull(); });
+// Filtering was deleted (Ryan, 2026-09-13): a URL still carrying the old facet params opens no drawer and narrows nothing.
+it('ignores leftover facet URL params', async () => { open('#/marketplace/skills?filters=open&installs=12&active=4'); await screen.findByRole('heading', { name: 'Top rated' }); expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull(); expect(names('skill-card-')).toEqual(design.DERIVED.topRated); });
 it.each([['Top rated', 'skills'], ['Teams / Projects', 'projects'], ['People', 'people'], ['Browse by category', 'categories']])('navigates %s pager to the expanded list', async (title, path) => { open('#/marketplace'); fireEvent.click(await screen.findByRole('button', { name: 'View all ' + title })); await waitFor(() => expect(location.hash).toBe('#/marketplace/' + path)); });
 it('creates a team project from the Add button and lands on its card', async () => {
   const create = vi.spyOn(pickBackend().teamProjects, 'create');
@@ -210,52 +197,6 @@ it('asks once per project run, writes nothing before Yes, and keeps No silent', 
   off();
 });
 it('shows failures from install in the centered error layout', async () => { vi.spyOn(pickBackend(), 'install').mockImplementation(() => { throw new Error('Cannot install project.'); }); open('#/marketplace/projects/docs?dialog=install'); const dialog = await screen.findByRole('dialog'); await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Install 3 skills' })).toBeEnabled()); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); expect(await screen.findByRole('alert')).toHaveTextContent('Cannot install project.'); });
-
-it.each(['-1', 'abc', '9'.repeat(400)])('treats invalid active facet count %s as zero', async active => { open('#/marketplace?q=deploy%20prod&active=' + active); expect(await screen.findByText('No skills match “deploy prod”')).toBeInTheDocument(); expect(screen.queryByText(/with .* filters on/)).toBeNull(); });
-
-it('commits a changed facet selection and shrinks the list to the CTA count', async () => {
-  open('#/marketplace/skills?filters=open');
-  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
-  fireEvent.change(within(filters).getByLabelText('Installed by · at least'), { target: { value: '12' } });
-  fireEvent.click(within(filters).getByRole('button', { name: 'Show 1 skill' }));
-  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
-  await waitFor(() => expect(names('skill-card-')).toEqual(['deploy-check']));
-  expect(location.hash).toContain('installs=12');
-  expect(location.hash).toContain('active=4');
-});
-
-it('keeps the list unchanged when the untouched default selection is committed', async () => {
-  open('#/marketplace/skills?filters=open');
-  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
-  fireEvent.click(within(filters).getByRole('button', { name: `Show ${design.DERIVED.filterCount} skills` }));
-  await waitFor(() => expect(screen.queryByRole('region', { name: 'Marketplace filters' })).toBeNull());
-  expect(location.hash).toContain('active=4');
-  expect(names('skill-card-')).toEqual(design.DERIVED.topRated);
-});
-
-it('clears committed facets and restores the full list', async () => {
-  open('#/marketplace/skills?filters=open');
-  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
-  fireEvent.change(within(filters).getByLabelText('Installed by · at least'), { target: { value: '12' } });
-  fireEvent.click(within(filters).getByRole('button', { name: 'Show 1 skill' }));
-  await waitFor(() => expect(names('skill-card-')).toEqual(['deploy-check']));
-  cleanup();
-  open(location.hash.replace('#/marketplace/skills?', '#/marketplace/skills?filters=open&'));
-  const reopened = await screen.findByRole('region', { name: 'Marketplace filters' });
-  fireEvent.click(within(reopened).getByRole('button', { name: 'Clear' }));
-  await waitFor(() => expect(names('skill-card-')).toEqual(design.DERIVED.topRated));
-  expect(within(reopened).getByRole('button', { name: `Show ${design.CATALOG.length} skills` })).toBeInTheDocument();
-  expect(location.hash).toContain('active=0');
-  expect(location.hash).not.toContain('installs=');
-});
-
-it('hides installed skills when committed with the hide switch on', async () => {
-  open('#/marketplace/skills?filters=open');
-  const filters = await screen.findByRole('region', { name: 'Marketplace filters' });
-  fireEvent.click(within(filters).getByRole('switch'));
-  fireEvent.click(within(filters).getByRole('button', { name: 'Show 2 skills' }));
-  await waitFor(() => expect(names('skill-card-')).toEqual(['a11y-audit', 'secret-scan']));
-});
 
 it('installs from a marketplace card via the install dialog without entering a mock scenario', async () => {
   open('#/marketplace/skills');
